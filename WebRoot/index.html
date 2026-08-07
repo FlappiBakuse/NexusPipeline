@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NexusPipeline 枢链</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="system">
+<canvas id="ambient-particles" data-testid="ambient-particles" aria-hidden="true"></canvas>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar" aria-label="主导航">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">N</div>
+      <div class="brand-copy"><strong>NexusPipeline</strong><span>枢链</span></div>
+      <button class="icon-button sidebar-close" type="button" data-action="close-nav" aria-label="关闭导航">×</button>
+    </div>
+    <div class="nav-caption">工作台</div>
+    <nav class="main-nav">
+      <a href="#/dashboard" data-page="dashboard" data-testid="nav-dashboard"><span class="nav-icon" aria-hidden="true">⌂</span><span>仪表盘</span></a>
+      <a href="#/scripts" data-page="scripts" data-testid="nav-scripts"><span class="nav-icon" aria-hidden="true">▣</span><span>脚本实例</span></a>
+      <a href="#/queues" data-page="queues" data-testid="nav-queues"><span class="nav-icon" aria-hidden="true">≡</span><span>调度队列</span></a>
+      <a href="#/dispatch" data-page="dispatch" data-testid="nav-dispatch"><span class="nav-icon" aria-hidden="true">▶</span><span>调度中心</span></a>
+      <a href="#/history" data-page="history" data-testid="nav-history"><span class="nav-icon" aria-hidden="true">◷</span><span>历史记录</span></a>
+      <a href="#/plugins" data-page="plugins" data-testid="nav-plugins"><span class="nav-icon" aria-hidden="true">✦</span><span>插件</span></a>
+    </nav>
+    <div class="nav-caption nav-caption-bottom">系统</div>
+    <nav class="main-nav">
+      <a href="#/settings" data-page="settings" data-testid="nav-settings"><span class="nav-icon" aria-hidden="true">⚙</span><span>设置</span></a>
+    </nav>
+    <div class="sidebar-foot"><span>本地服务 · 127.0.0.1</span><button class="icon-button" type="button" data-action="toggle-theme" aria-label="切换主题"><span data-theme-icon aria-hidden="true">◐</span></button></div>
+  </aside>
+  <div class="nav-backdrop" data-action="close-nav" aria-hidden="true"></div>
+  <div class="page-shell">
+    <header class="topbar">
+      <button class="icon-button menu-button" type="button" data-action="open-nav" aria-label="打开导航">☰</button>
+      <div class="topbar-context"><span class="eyebrow">NEXUS PIPELINE</span><strong id="topbar-title">仪表盘</strong></div>
+      <div class="topbar-actions">
+        <button class="icon-button" type="button" data-action="toggle-theme" aria-label="切换主题"><span id="theme-icon" aria-hidden="true">◐</span></button>
+      </div>
+    </header>
+    <main id="view" tabindex="-1">
+      <div class="loading-state"><span class="spinner" aria-hidden="true"></span><span>正在连接本地服务...</span></div>
+    </main>
+  </div>
+</div>
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

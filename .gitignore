@@ -1,0 +1,16 @@
+bin/
+obj/
+release/
+dist/
+*.user
+.vs/
+config/
+settings.json
+scripts.json
+queues.json
+history/
+outputs/
+logs/
+uitest/node_modules/
+uitest/runtime/
+uitest/browsers/
