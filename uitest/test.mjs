@@ -292,7 +292,8 @@ async function testQueueCrud(page) {
   await page.fill("#qm-name", "测试队列A-改");
   await page.click(".modal button:has-text('保存')");
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
-  assert((await page.textContent("body")).includes("测试队列A-改"), "编辑后队列名称已更新");
+  await page.waitForFunction(() => document.body.textContent.includes("测试队列A-改"), null, { timeout: 5000 });
+  assert(true, "编辑后队列名称已更新");
 
   page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-queue"]');
