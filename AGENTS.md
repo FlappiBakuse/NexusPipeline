@@ -70,7 +70,7 @@ node uitest\test.mjs           # 160 项用例；先跑 build.cmd，否则 setup
 - 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 路由表注册一行；新菜单：`src/Cli/` 对应菜单类；新服务：核心域 + RuntimeContext 持有。
 - 插件只能通过 `PluginContext` 与宿主交互；通知能力实现 `INotifyChannel`（`DispatchCenter` 经 `PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发，无静态委托）。
 
-## 前端开发强约束（v0.2.1+）
+## 前端开发强约束（v0.2.0+）
 
 - wwwroot 必须保持零构建、零 CDN 依赖；使用原生 ES modules，浏览器直接加载 `.js` 文件，不引入需要打包步骤的框架或工具链。
 - 模块边界固定为：`app.js`（启动/路由/注册表分发）、`core/api.js`（请求）、`core/state.js`（生命周期与跨域缓存）、`core/ui.js`（页面/Toast/主题）、`core/modal.js`（弹窗）、`core/forms.js`（表单模板）、`core/dom.js`（查询）、`core/format.js`（格式化）、`views/`（页面，一域一文件）、`effects/`（独立视觉效果）。业务视图不得修改另一个视图的 DOM；新增交互 = 视图导出函数 + 加入该视图 `actions` 注册表（不再往 app.js 加 case）。
