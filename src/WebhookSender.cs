@@ -55,12 +55,12 @@ public static class WebhookSender
         string template = settings.WebhookTemplate;
         if (string.IsNullOrWhiteSpace(webhookUrl))
         {
-            Logger.Log("[错误] 未配置 Webhook 地址，无法发送。");
+            Logger.Error("[错误] 未配置 Webhook 地址，无法发送。");
             return false;
         }
         if (type == "generic" && string.IsNullOrWhiteSpace(template))
         {
-            Logger.Log("[错误] webhook_type=generic 但未配置 webhook_template，无法发送。");
+            Logger.Error("[错误] webhook_type=generic 但未配置 webhook_template，无法发送。");
             return false;
         }
         int timeout = settings.WebhookTimeout < 1 ? 30 : settings.WebhookTimeout;
@@ -79,17 +79,17 @@ public static class WebhookSender
                 : response.IsSuccessStatusCode;
             if (ok)
             {
-                Logger.Log($"{TypeDisplay(type)} Webhook 发送成功。");
+                Logger.Info($"{TypeDisplay(type)} Webhook 发送成功。");
             }
             else
             {
-                Logger.Log($"[警告] Webhook 返回异常：HTTP {(int)response.StatusCode} {responseText}");
+                Logger.Warn($"[警告] Webhook 返回异常：HTTP {(int)response.StatusCode} {responseText}");
             }
             return ok;
         }
         catch (Exception ex)
         {
-            Logger.Log($"[错误] Webhook 发送失败：{ex.Message}");
+            Logger.Error($"[错误] Webhook 发送失败：{ex.Message}");
             return false;
         }
     }

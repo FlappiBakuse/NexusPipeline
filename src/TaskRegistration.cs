@@ -30,7 +30,7 @@ public static class TaskRegistration
             string exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
             if (string.IsNullOrWhiteSpace(exePath))
             {
-                Logger.Log("[错误] 无法确定主程序路径。");
+                Logger.Error("[错误] 无法确定主程序路径。");
                 return;
             }
             using RegistryKey key = Registry.CurrentUser.CreateSubKey(RunKeyPath);
@@ -39,7 +39,7 @@ public static class TaskRegistration
         }
         catch (Exception ex)
         {
-            Logger.Log($"[错误] 注册开机自启动失败：{ex.Message}");
+            Logger.Error($"[错误] 注册开机自启动失败：{ex.Message}");
         }
     }
 
@@ -55,12 +55,12 @@ public static class TaskRegistration
             }
             else
             {
-                Logger.Log("[提示] 未注册开机自启动。");
+                Logger.Info("[提示] 未注册开机自启动。");
             }
         }
         catch (Exception ex)
         {
-            Logger.Log($"[错误] 取消开机自启动失败：{ex.Message}");
+            Logger.Error($"[错误] 取消开机自启动失败：{ex.Message}");
         }
     }
 

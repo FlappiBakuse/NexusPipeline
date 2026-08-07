@@ -49,7 +49,7 @@ public class TrayApp : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 打开浏览器失败：{ex.Message}");
+            Logger.Warn($"[警告] 打开浏览器失败：{ex.Message}");
         }
     }
 
@@ -65,7 +65,7 @@ public class TrayApp : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 打开命令行窗口失败：{ex.Message}");
+            Logger.Warn($"[警告] 打开命令行窗口失败：{ex.Message}");
         }
     }
 

@@ -14,6 +14,8 @@ public class AppSettings
 
     public int WebPort { get; set; } = 58731;
 
+    public string LogLevel { get; set; } = "info";
+
     public string SendStrategy { get; set; } = "parallel";
 
     public bool WebhookEnabled { get; set; } = true;

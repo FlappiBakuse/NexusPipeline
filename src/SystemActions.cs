@@ -108,13 +108,18 @@ public static class SystemActions
                 CreateNoWindow = true,
             });
             process?.WaitForExit(10000);
-            Logger.Log(process is not null && process.ExitCode == 0
-                ? $"已清理进程树（PID {pid}）。"
-                : $"[警告] 进程树清理返回码 {process?.ExitCode}（PID {pid}）。");
+            if (process is not null && process.ExitCode == 0)
+            {
+                Logger.Info($"已清理进程树（PID {pid}）。");
+            }
+            else
+            {
+                Logger.Warn($"[警告] 进程树清理返回码 {process?.ExitCode}（PID {pid}）。");
+            }
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}");
+            Logger.Warn($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}");
         }
     }
 
@@ -130,7 +135,7 @@ public static class SystemActions
             Process[] processes = Process.GetProcessesByName(baseName);
             if (processes.Length == 0)
             {
-                Logger.Log($"[提示] 未发现需要关闭的{display}进程（{baseName}）。");
+                Logger.Info($"[提示] 未发现需要关闭的{display}进程（{baseName}）。");
                 return;
             }
             foreach (Process process in processes)
@@ -141,14 +146,14 @@ public static class SystemActions
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log($"[警告] 关闭{display}进程失败（PID {process.Id}）：{ex.Message}");
+                    Logger.Warn($"[警告] 关闭{display}进程失败（PID {process.Id}）：{ex.Message}");
                 }
             }
-            Logger.Log($"已强制关闭{display}（{baseName}，共 {processes.Length} 个进程）。");
+            Logger.Info($"已强制关闭{display}（{baseName}，共 {processes.Length} 个进程）。");
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 按名称关闭{display}进程失败：{ex.Message}");
+            Logger.Warn($"[警告] 按名称关闭{display}进程失败：{ex.Message}");
         }
     }
 
@@ -169,20 +174,20 @@ public static class SystemActions
 
     public static void ExitApp()
     {
-        Logger.Log("调度队列完成操作：退出软件。");
+        Logger.Info("调度队列完成操作：退出软件。");
         try
         {
             System.Windows.Forms.Application.Exit();
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 退出软件失败：{ex.Message}");
+            Logger.Warn($"[警告] 退出软件失败：{ex.Message}");
         }
     }
 
     private static void Run(string file, string args)
     {
-        Logger.Log($"执行系统操作：{file} {args}");
+        Logger.Info($"执行系统操作：{file} {args}");
         try
         {
             using var process = Process.Start(new ProcessStartInfo(file, args)
@@ -191,13 +196,18 @@ public static class SystemActions
                 CreateNoWindow = true,
             });
             process?.WaitForExit(10000);
-            Logger.Log(process is not null && process.ExitCode == 0
-                ? "系统操作命令已提交。"
-                : $"[警告] 系统操作命令返回码 {process?.ExitCode}");
+            if (process is not null && process.ExitCode == 0)
+            {
+                Logger.Info("系统操作命令已提交。");
+            }
+            else
+            {
+                Logger.Warn($"[警告] 系统操作命令返回码 {process?.ExitCode}");
+            }
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 系统操作命令执行失败：{ex.Message}");
+            Logger.Warn($"[警告] 系统操作命令执行失败：{ex.Message}");
         }
     }
 }

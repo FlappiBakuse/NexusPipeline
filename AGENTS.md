@@ -10,10 +10,10 @@ build.cmd                      # 源码在 src/，运行物在 release/
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 149 项用例；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs           # 160 项用例；先跑 build.cmd，否则 setupRuntime 直接中止
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+WebRoot+plugins），**不得污染项目根**；断言数字 149（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+WebRoot+plugins），**不得污染项目根**；断言数字 160（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
@@ -37,6 +37,14 @@ node uitest\test.mjs           # 149 项用例；先跑 build.cmd，否则 setup
 - `FinalStatus`：success / partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled。
 - `plugins/` 必须有占位文件（git 不跟踪空目录）——删除时保留 `plugins/.gitkeep`。
 
+## 日志级别（v0.1.1+）
+
+- 管理器日志（`logs/nexus-pipeline-YYYYMMDD.log`）带级别：`[HH:mm:ss] [LEVEL] 消息`，LEVEL 为 DEBUG/INFO/WARN/ERROR/FATAL。
+- **禁止使用 `Logger.Log(msg)`**：一律显式调用 `Logger.Debug/Info/Warn/Error/Fatal(msg)`（审计行 `Audit.Log` 为 INFO，跟随阈值不过滤豁免）。
+- 阈值取自 `settings.json` 的 `LogLevel`（debug/info/warn/error/fatal，默认 info），**即时生效**；`ConfigStore.Normalize` 校验非法值回退 info。
+- DEBUG 级 Web 请求记录在 `WebServer.HandleAsync`，`GET /api/status` 轮询豁免不记录。
+- 控制台按级别着色（WARN 黄 / ERROR 红 / FATAL 红底白字），仅在 `Console.IsOutputRedirected == false` 时启用；`logs/YYYY-MM-DD.log`（脚本控制台输出，ConsoleLog）不参与级别过滤。
+
 ## 环境陷阱（Windows PowerShell 5.1）
 
 - `Set-Content` 会破坏 UTF-8 中文：写文件用编辑工具或 `[System.IO.File]::WriteAllText(..., [Text.Encoding]::UTF8)`。
@@ -53,7 +61,7 @@ node uitest\test.mjs           # 149 项用例；先跑 build.cmd，否则 setup
 - `src/WebRoot/`（根目录，非 src 下）：前端 `app.js` 用 `window.__scripts/__queues` 缓存 + `data-action` 事件委托。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知复选框同行（启动游戏｜强制关闭｜发送通知，强制关闭独立于启动游戏）；**无系统选择按钮**（用户手填路径）。
 - CI：`.github/workflows/ci.yml`（windows-latest，build.cmd + npm ci + e2e）。
 
-## 前端开发强约束（v0.1.0+）
+## 前端开发强约束（v0.1.1+）
 
 - WebRoot 必须保持零构建、零 CDN 依赖；使用原生 ES modules，浏览器直接加载 `.js` 文件，不引入需要打包步骤的框架或工具链。
 - 模块边界固定为：`app.js`（启动/路由/事件委托）、`core/api.js`（请求与格式化）、`core/state.js`（单一状态与生命周期）、`core/ui.js`（通用 UI）、`views/`（页面）、`effects/`（独立视觉效果）。业务视图不得修改另一个视图的 DOM。

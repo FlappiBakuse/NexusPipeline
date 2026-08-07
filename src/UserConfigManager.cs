@@ -109,7 +109,7 @@ public sealed class ConfigSessionMark
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 读取配置会话标记失败（{file}）：{ex.Message}");
+            Logger.Warn($"[警告] 读取配置会话标记失败（{file}）：{ex.Message}");
             return null;
         }
     }
@@ -362,7 +362,7 @@ public static class UserConfigManager
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
-        Logger.Log($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
+        Logger.Info($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
         DoRestore(scriptId, userName, mark);
         Audit.Log(Audit.System, "恢复配置交换", $"{mark.ConfigPath}（用户 {userName}）");
     }
@@ -393,7 +393,7 @@ public static class UserConfigManager
                         ConfigSessionMark.Clear(scriptId, userName);
                         continue;
                     }
-                    Logger.Log($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
+                    Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
                     try
                     {
                         DoRestore(scriptId, userName, mark);
@@ -408,7 +408,7 @@ public static class UserConfigManager
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 扫描未完成配置交换失败：{ex.Message}");
+            Logger.Warn($"[警告] 扫描未完成配置交换失败：{ex.Message}");
         }
     }
 
@@ -521,7 +521,7 @@ public static class UserConfigManager
             }
             catch (Exception rollback)
             {
-                Logger.Log($"[错误] 配置准备失败且回滚异常：{rollback.Message}");
+                Logger.Error($"[错误] 配置准备失败且回滚异常：{rollback.Message}");
             }
             return false;
         }
@@ -630,7 +630,7 @@ public static class UserConfigManager
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 清理脚本数据目录失败（{dir}）：{ex.Message}");
+            Logger.Warn($"[警告] 清理脚本数据目录失败（{dir}）：{ex.Message}");
         }
     }
 
@@ -647,7 +647,7 @@ public static class UserConfigManager
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 清理用户数据目录失败（{dir}）：{ex.Message}");
+            Logger.Warn($"[警告] 清理用户数据目录失败（{dir}）：{ex.Message}");
         }
     }
 
@@ -673,7 +673,7 @@ public static class UserConfigManager
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 用户数据目录迁移失败（{oldDir} → {newDir}）：{ex.Message}");
+            Logger.Warn($"[警告] 用户数据目录迁移失败（{oldDir} → {newDir}）：{ex.Message}");
         }
     }
 }

@@ -27,16 +27,16 @@ public class PluginManager
                 try
                 {
                     plugin.Initialize(new PluginContext());
-                    Logger.Log($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
+                    Logger.Info($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
                 }
                 catch (Exception ex)
                 {
-                    Logger.Log($"[插件] 插件「{plugin.DisplayName}」初始化失败：{ex.Message}");
+                    Logger.Warn($"[插件] 插件「{plugin.DisplayName}」初始化失败：{ex.Message}");
                 }
             }
             else
             {
-                Logger.Log($"[插件] 已禁用：{plugin.DisplayName}");
+                Logger.Info($"[插件] 已禁用：{plugin.DisplayName}");
             }
         }
     }
@@ -50,7 +50,7 @@ public class PluginManager
         if (settings.EnabledPlugins.Count != before)
         {
             ConfigStore.Save(settings);
-            Logger.Log("[插件] 已清理设置中不存在的插件名。");
+            Logger.Info("[插件] 已清理设置中不存在的插件名。");
         }
     }
 
@@ -87,7 +87,7 @@ public class PluginManager
         }
         ConfigStore.Save(settings);
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
-        Logger.Log($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
+        Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
     }
 
     private static List<IPlugin> DiscoverBuiltIn()
@@ -124,7 +124,7 @@ public class PluginManager
             }
             catch (Exception ex)
             {
-                Logger.Log($"[插件] 加载 {Path.GetFileName(dll)} 失败：{ex.Message}");
+                Logger.Warn($"[插件] 加载 {Path.GetFileName(dll)} 失败：{ex.Message}");
             }
         }
         return list;

@@ -82,6 +82,7 @@ export function showModal(content, wide = false) {
   });
   document.body.appendChild(mask);
   requestAnimationFrame(() => {
+    if (modal.contains(document.activeElement)) return;
     const first = $("input, select, textarea", modal) || $("button, a[href]", modal);
     if (first) first.focus();
   });

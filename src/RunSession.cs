@@ -139,7 +139,7 @@ public class RunSession
                 record.FinalStatus = "failed";
                 record.EndTime = DateTime.Now;
                 record.ResultDetail = $"用户配置加载失败：{prepError}";
-                Logger.Log($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
+                Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
                 return record;
             }
             configPrepared = true;
@@ -163,7 +163,7 @@ public class RunSession
                 attempt.OutputFile = ConsoleLog.FileFor(DateTime.Now);
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
 
-                Logger.Log($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
+                Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
                 if (user is not null && !string.IsNullOrWhiteSpace(user.PreRunScript)
                     && (attemptNo == 1 || !user.PreRunOnceOnly))
@@ -192,7 +192,7 @@ public class RunSession
                 attempt.Reason = result.Reason;
                 record.Attempts = attemptNo;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 结束：{result.Status}（{result.Reason}） =====");
-                Logger.Log($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
+                Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
 
                 if (result.Status == "success")
                 {
@@ -241,7 +241,7 @@ public class RunSession
                 {
                     string msg = $"（警告：配置还原失败，现场已保留，详见日志）";
                     record.ResultDetail += msg;
-                    Logger.Log($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置还原失败：{restoreError}");
+                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置还原失败：{restoreError}");
                 }
             }
         }
@@ -272,7 +272,7 @@ public class RunSession
             return RunAttemptResult.Failed($"{role}脚本启动失败：未能创建进程");
         }
         _statusChanged?.Invoke($"{role}脚本已启动（PID {process.Id}）");
-        Logger.Log($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
+        Logger.Info($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
         ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出开始（PID {process.Id}）");
 
         void OnConsoleData(string? data)
@@ -342,7 +342,7 @@ public class RunSession
                     gamePsi.UseShellExecute = true;
                 }
                 _ = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
-                Logger.Log($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒）。");
+                Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒）。");
             }
             catch (Exception ex)
             {
@@ -382,7 +382,7 @@ public class RunSession
             return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
         }
         _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
-        Logger.Log($"[{modeText}运行] 脚本「{_script.Name}」已启动：{_script.MainExe}（PID {process.Id}）");
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{_script.MainExe}（PID {process.Id}）");
         ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
 
         var outputTail = new StringBuilder();
@@ -435,7 +435,7 @@ public class RunSession
                     if (resolved is not null)
                     {
                         monitor = new LogMonitor(resolved, readFromStart: logDidNotExistBeforeStart);
-                        Logger.Log($"[{modeText}运行] 脚本「{_script.Name}」开始监控日志：{resolved}");
+                        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」开始监控日志：{resolved}");
                     }
                 }
 
@@ -459,7 +459,7 @@ public class RunSession
                         {
                             markerSeenAt = DateTime.Now;
                             _statusChanged?.Invoke("已检测到完成标志，等待脚本退出...");
-                            Logger.Log($"[{modeText}运行] 脚本「{_script.Name}」日志出现完成标志。");
+                            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现完成标志。");
                         }
                     }
                 }
@@ -512,7 +512,7 @@ public class RunSession
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 脚本「{_script.Name}」监控异常：{ex.Message}");
+            Logger.Warn($"[警告] 脚本「{_script.Name}」监控异常：{ex.Message}");
             result = RunAttemptResult.Failed($"监控异常：{ex.Message}");
         }
 
@@ -531,7 +531,7 @@ public class RunSession
         {
             SystemActions.KillByName(_script.GameExe, "游戏");
         }
-        Logger.Log($"[{modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
         return result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
     }
 }

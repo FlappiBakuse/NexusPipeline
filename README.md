@@ -24,7 +24,7 @@
 - **插件设置**：内置「通知推送」（默认启用）；`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` 接口）会自动加载。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
 - **仪表盘**：脚本实例数、调度队列数、下一调度队列（倒计时）、当前版本；正在运行的任务；插件卡片。
 - **历史记录**：每个脚本实例/调度队列的完整运行日志（每次尝试的原因、日志尾部、控制台输出），按保留天数清理（默认 3 天）。
-- **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、Web 端口。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
+- **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、日志级别（DEBUG/INFO/WARN/ERROR/FATAL，控制台按级别着色，即时生效）、Web 端口。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
 
 ## 运行要求
 
@@ -109,7 +109,7 @@ release/
 | `history/YYYY-MM-DD/HH-mm-ss.json` | 每次脚本运行的完成状态（启动/结束时间、手动/自动、重试次数、最终状态：成功/部分失败/失败/已取消、每次尝试详情） |
 | `history/YYYY-MM-DD/HH-mm-ss.log` | 同一次运行的脚本日志全文（脚本 LogPath 监控内容，与 `.json` 同名配对） |
 | `logs/YYYY-MM-DD.log` | 脚本控制台输出（stdout/stderr 捕获，按日期汇总，与脚本日志分离） |
-| `logs/nexus-pipeline-YYYYMMDD.log` | 管理器运行日志（含操作审计：`[审计] 来源 \| 操作（详情）`，来源分 web/manage/cli/scheduler/system） |
+| `logs/nexus-pipeline-YYYYMMDD.log` | 管理器运行日志（含级别标记：DEBUG/INFO/WARN/ERROR/FATAL；审计行 `[审计] 来源 \| 操作（详情）`，来源分 web/manage/cli/scheduler/system） |
 
 > 说明：脚本日志（history）与控制台输出（logs）互不包含；`outputs/` 为历史遗留目录，新版本不再写入。
 

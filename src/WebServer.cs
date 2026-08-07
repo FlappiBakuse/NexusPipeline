@@ -27,7 +27,7 @@ public class WebServer : IDisposable
         _cts = new CancellationTokenSource();
         _listener.Start();
         _loop = Task.Run(() => LoopAsync(_cts.Token));
-        Logger.Log($"Web 服务已启动：{prefix}");
+        Logger.Info($"Web 服务已启动：{prefix}");
     }
 
     public void Stop()
@@ -40,7 +40,7 @@ public class WebServer : IDisposable
         catch
         {
         }
-        Logger.Log("Web 服务已停止。");
+        Logger.Info("Web 服务已停止。");
     }
 
     public void Dispose()
@@ -71,6 +71,10 @@ public class WebServer : IDisposable
         {
             string path = context.Request.Url?.AbsolutePath ?? "/";
             string method = context.Request.HttpMethod;
+            if (!(method == "GET" && path == "/api/status"))
+            {
+                Logger.Debug($"[Web] {method} {path}");
+            }
             if (path == "/" || path == "/index.html")
             {
                 ServeFile(context, Path.Combine(AppPaths.WebRootDir, "index.html"));
@@ -86,7 +90,7 @@ public class WebServer : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Log($"[Web] 请求处理异常：{ex.Message}");
+            Logger.Error($"[Web] 请求处理异常：{ex.Message}");
             try
             {
                 context.Response.StatusCode = 500;
@@ -401,7 +405,7 @@ public class WebServer : IDisposable
                 Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 if (snapError is not null)
                 {
-                    Logger.Log($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
+                    Logger.Warn($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
                 }
                 await WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
@@ -927,6 +931,14 @@ public class WebServer : IDisposable
                     current.SmtpTimeout = timeout;
                 }
             }
+            if (node.Get("logLevel") is not null)
+            {
+                string level = node.Get("logLevel").Str().Trim().ToLowerInvariant();
+                if (LogLevelUtil.IsValid(level))
+                {
+                    current.LogLevel = level;
+                }
+            }
             ConfigStore.Save(current);
             TaskRegistration.SyncWithSettings(current);
             string secretDetail = "";
@@ -992,6 +1004,7 @@ public class WebServer : IDisposable
             settings.SmtpTo,
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
+            settings.LogLevel,
         };
     }
 

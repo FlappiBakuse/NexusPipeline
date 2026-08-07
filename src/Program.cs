@@ -12,6 +12,8 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Fatal($"未处理异常：{e.ExceptionObject}");
+        Application.ThreadException += (_, e) => Logger.Fatal($"UI 线程异常：{e.Exception}");
         bool stdoutRedirected = Console.IsOutputRedirected;
         if (args.Length > 0 && !stdoutRedirected)
         {
@@ -103,7 +105,7 @@ public static class Program
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 迁移旧配置文件失败：{ex.Message}");
+            Logger.Warn($"[警告] 迁移旧配置文件失败：{ex.Message}");
         }
     }
 
@@ -112,7 +114,7 @@ public static class Program
         using var mutex = new Mutex(true, "NexusPipeline.SingleInstance", out bool createdNew);
         if (!createdNew)
         {
-            Logger.Log("NexusPipeline 已在运行，打开管理页面。");
+            Logger.Info("NexusPipeline 已在运行，打开管理页面。");
             TrayApp.OpenWeb();
             return;
         }
@@ -141,13 +143,13 @@ public static class Program
                 }
                 catch (HttpListenerException)
                 {
-                    Logger.Log($"[提示] 端口 {port} 被占用，尝试 {port + 1}。");
+                    Logger.Warn($"[提示] 端口 {port} 被占用，尝试 {port + 1}。");
                     port++;
                 }
             }
             if (!started)
             {
-                Logger.Log("[错误] 无法启动 Web 服务（端口均被占用）。");
+                Logger.Error("[错误] 无法启动 Web 服务（端口均被占用）。");
             }
             else if (ctx.Settings.AutoOpenBrowser)
             {
@@ -156,7 +158,7 @@ public static class Program
         }
         else
         {
-            Logger.Log("轻量运行模式：不启动 Web 服务与浏览器，仅命令行操作。");
+            Logger.Info("轻量运行模式：不启动 Web 服务与浏览器，仅命令行操作。");
         }
 
         Application.EnableVisualStyles();
@@ -166,7 +168,7 @@ public static class Program
         ctx.Scheduler.Stop();
         web?.Stop();
         ctx.Plugins.ShutdownAll();
-        Logger.Log("NexusPipeline 已退出。");
+        Logger.Info("NexusPipeline 已退出。");
     }
 
     private static int RunWebOnly(string[] args)

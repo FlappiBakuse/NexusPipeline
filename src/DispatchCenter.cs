@@ -233,7 +233,7 @@ public class DispatchCenter
             exec.DoneTasks = 1;
             exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
             exec.Status = record.Status == "cancelled" ? "cancelled" : "done";
-            Logger.Log($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{script.Name}」最终结果：{record.Status}（{record.ResultDetail}）");
+            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{script.Name}」最终结果：{record.Status}（{record.ResultDetail}）");
 
             RuntimeContext.Instance.History.Save(record, session.ScriptLog);
             if (script.NotifyEnabled && NotifyRouter.ScriptNotify is not null)
@@ -244,7 +244,7 @@ public class DispatchCenter
         catch (Exception ex)
         {
             exec.Status = "error";
-            Logger.Log($"[错误] 脚本「{script.Name}」运行异常：{ex}");
+            Logger.Error($"[错误] 脚本「{script.Name}」运行异常：{ex}");
         }
         finally
         {
@@ -264,7 +264,7 @@ public class DispatchCenter
                 if (exec.Cts.IsCancellationRequested)
                 {
                     exec.Status = "cancelled";
-                    Logger.Log($"调度队列「{queue.Name}」已被取消，后续任务不再执行。");
+                    Logger.Info($"调度队列「{queue.Name}」已被取消，后续任务不再执行。");
                     break;
                 }
                 QueueTask task = tasks[i];
@@ -287,7 +287,7 @@ public class DispatchCenter
                     exec.Records.Add(missing);
                     exec.DoneTasks++;
                     RuntimeContext.Instance.History.Save(missing, "");
-                    Logger.Log($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
+                    Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
                     continue;
                 }
 
@@ -305,7 +305,7 @@ public class DispatchCenter
                     if (exec.Cts.IsCancellationRequested)
                     {
                         exec.Status = "cancelled";
-                        Logger.Log($"调度队列「{queue.Name}」已被取消，后续执行不再进行。");
+                        Logger.Info($"调度队列「{queue.Name}」已被取消，后续执行不再进行。");
                         break;
                     }
                     string displayName = runUser is null ? script.Name : $"{script.Name}（{runUser}）";
@@ -320,7 +320,7 @@ public class DispatchCenter
                     catch (OperationCanceledException)
                     {
                         exec.Status = "cancelled";
-                        Logger.Log($"调度队列「{queue.Name}」已在等待脚本「{displayName}」期间被取消。");
+                        Logger.Info($"调度队列「{queue.Name}」已在等待脚本「{displayName}」期间被取消。");
                         break;
                     }
                     try
@@ -341,7 +341,7 @@ public class DispatchCenter
                         exec.Records.Add(record);
                         exec.DoneTasks++;
                         exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
-                        Logger.Log($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 队列「{queue.Name}」第 {i + 1}/{tasks.Count} 项「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
+                        Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 队列「{queue.Name}」第 {i + 1}/{tasks.Count} 项「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
                         RuntimeContext.Instance.History.Save(record, session.ScriptLog);
                     }
                     finally
@@ -378,7 +378,7 @@ public class DispatchCenter
 
             if (!anyCancelled)
             {
-                Logger.Log($"调度队列「{queue.Name}」全部任务执行完毕，执行完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)}。");
+                Logger.Info($"调度队列「{queue.Name}」全部任务执行完毕，执行完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)}。");
                 switch (queue.CompletionAction)
                 {
                     case "exit":
@@ -397,13 +397,13 @@ public class DispatchCenter
             }
             else
             {
-                Logger.Log($"调度队列「{queue.Name}」未全部完成（有任务被取消），跳过完成操作。");
+                Logger.Warn($"调度队列「{queue.Name}」未全部完成（有任务被取消），跳过完成操作。");
             }
         }
         catch (Exception ex)
         {
             exec.Status = "error";
-            Logger.Log($"[错误] 调度队列「{queue.Name}」运行异常：{ex}");
+            Logger.Error($"[错误] 调度队列「{queue.Name}」运行异常：{ex}");
         }
         finally
         {

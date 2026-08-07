@@ -22,7 +22,7 @@ public class Scheduler : IDisposable
         }
         _cts = new CancellationTokenSource();
         _loop = Task.Run(() => LoopAsync(_cts.Token));
-        Logger.Log("调度器已启动。");
+        Logger.Info("调度器已启动。");
     }
 
     public void Stop()
@@ -80,7 +80,7 @@ public class Scheduler : IDisposable
             }
             catch (Exception ex)
             {
-                Logger.Log($"[警告] 调度器异常：{ex.Message}");
+                Logger.Warn($"[警告] 调度器异常：{ex.Message}");
             }
             try
             {
@@ -134,7 +134,7 @@ public class Scheduler : IDisposable
         {
             if (_runningQueueIds.Contains(queue.Id))
             {
-                Logger.Log($"[提示] 调度队列「{queue.Name}」正在运行，跳过本次触发。");
+                Logger.Info($"[提示] 调度队列「{queue.Name}」正在运行，跳过本次触发。");
                 return;
             }
             _runningQueueIds.Add(queue.Id);
@@ -149,7 +149,7 @@ public class Scheduler : IDisposable
             }
             catch (Exception ex)
             {
-                Logger.Log($"[错误] 自动运行队列「{queue.Name}」触发失败：{ex.Message}");
+                Logger.Error($"[错误] 自动运行队列「{queue.Name}」触发失败：{ex.Message}");
             }
             finally
             {

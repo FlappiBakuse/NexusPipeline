@@ -43,7 +43,7 @@ public static class SmtpSender
             .ToList();
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(password) || toList.Count == 0)
         {
-            Logger.Log("[错误] SMTP 配置不完整（host/user/授权码/收件人），无法发送。");
+            Logger.Error("[错误] SMTP 配置不完整（host/user/授权码/收件人），无法发送。");
             return false;
         }
         int port = settings.SmtpPort is >= 1 and <= 65535 ? settings.SmtpPort : 465;
@@ -75,12 +75,12 @@ public static class SmtpSender
             await client.AuthenticateAsync(user, password).ConfigureAwait(false);
             await client.SendAsync(message).ConfigureAwait(false);
             await client.DisconnectAsync(true).ConfigureAwait(false);
-            Logger.Log("邮件发送成功。");
+            Logger.Info("邮件发送成功。");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Log($"[错误] 邮件发送失败：{ex.Message}");
+            Logger.Error($"[错误] 邮件发送失败：{ex.Message}");
             return false;
         }
     }
@@ -118,14 +118,14 @@ public static class NotifySender
         }
         if (tasks.Count == 0)
         {
-            Logger.Log("[错误] 未启用任何通知渠道（Webhook / SMTP 开关均关闭）。");
+            Logger.Error("[错误] 未启用任何通知渠道（Webhook / SMTP 开关均关闭）。");
             return false;
         }
         bool[] results = await Task.WhenAll(tasks).ConfigureAwait(false);
         bool allOk = results.All(ok => ok);
         if (!allOk)
         {
-            Logger.Log("[提示] 通知发送存在失败渠道（详见上方日志）。");
+            Logger.Warn("[提示] 通知发送存在失败渠道（详见上方日志）。");
         }
         return allOk;
     }

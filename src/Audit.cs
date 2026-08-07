@@ -17,6 +17,6 @@ public static class Audit
         string line = string.IsNullOrEmpty(detail)
             ? $"[审计] {source} | {action}"
             : $"[审计] {source} | {action}（{detail}）";
-        Logger.Log(line);
+        Logger.Info(line);
     }
 }

@@ -6,10 +6,26 @@ public static class Logger
 {
     private static readonly object Sync = new();
 
-    public static void Log(string message)
+    private static LogLevel Threshold => LogLevelUtil.Parse(RuntimeContext.Instance.Settings.LogLevel);
+
+    public static void Debug(string message) => Log(LogLevel.Debug, message);
+
+    public static void Info(string message) => Log(LogLevel.Info, message);
+
+    public static void Warn(string message) => Log(LogLevel.Warn, message);
+
+    public static void Error(string message) => Log(LogLevel.Error, message);
+
+    public static void Fatal(string message) => Log(LogLevel.Fatal, message);
+
+    public static void Log(LogLevel level, string message)
     {
-        string line = $"[{DateTime.Now:HH:mm:ss}] {message}";
-        Console.WriteLine(line);
+        if (level < Threshold)
+        {
+            return;
+        }
+        string line = $"[{DateTime.Now:HH:mm:ss}] [{level.ToString().ToUpperInvariant()}] {message}";
+        WriteConsole(line, level);
         lock (Sync)
         {
             try
@@ -20,6 +36,42 @@ public static class Logger
             catch
             {
             }
+        }
+    }
+
+    private static void WriteConsole(string line, LogLevel level)
+    {
+        try
+        {
+            if (Console.IsOutputRedirected)
+            {
+                Console.WriteLine(line);
+                return;
+            }
+            ConsoleColor prevForeground = Console.ForegroundColor;
+            ConsoleColor prevBackground = Console.BackgroundColor;
+            switch (level)
+            {
+                case LogLevel.Debug:
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    break;
+                case LogLevel.Warn:
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    break;
+                case LogLevel.Error:
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    break;
+                case LogLevel.Fatal:
+                    Console.ForegroundColor = ConsoleColor.White;
+                    Console.BackgroundColor = ConsoleColor.Red;
+                    break;
+            }
+            Console.WriteLine(line);
+            Console.ForegroundColor = prevForeground;
+            Console.BackgroundColor = prevBackground;
+        }
+        catch
+        {
         }
     }
 }

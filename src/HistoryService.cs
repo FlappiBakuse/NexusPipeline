@@ -27,7 +27,7 @@ public class HistoryService
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 保存运行历史失败：{ex.Message}");
+            Logger.Warn($"[警告] 保存运行历史失败：{ex.Message}");
         }
     }
 
@@ -145,7 +145,7 @@ public class HistoryService
         }
         catch (Exception ex)
         {
-            Logger.Log($"[警告] 读取脚本日志失败：{ex.Message}");
+            Logger.Warn($"[警告] 读取脚本日志失败：{ex.Message}");
             return null;
         }
     }
@@ -161,7 +161,7 @@ public class HistoryService
         {
             retentionDays = 3;
         }
-        Logger.Log($"======== 清理：仅保留最近 {retentionDays} 天历史 ========");
+        Logger.Info($"======== 清理：仅保留最近 {retentionDays} 天历史 ========");
         DateTime cutoff = DateTime.Today.AddDays(-(retentionDays - 1));
         int removed = 0;
 
@@ -180,7 +180,7 @@ public class HistoryService
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"[警告] 删除过期历史目录失败：{ex.Message}");
+                        Logger.Warn($"[警告] 删除过期历史目录失败：{ex.Message}");
                     }
                 }
             }
@@ -227,6 +227,6 @@ public class HistoryService
                 }
             }
         }
-        Logger.Log($"清理完成，共删除 {removed} 个过期项。");
+        Logger.Info($"清理完成，共删除 {removed} 个过期项。");
     }
 }

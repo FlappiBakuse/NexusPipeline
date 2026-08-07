@@ -786,8 +786,9 @@ public static class ManageMenu
                 $"3. 历史保留天数（当前：{s.HistoryRetentionDays} 天）",
                 $"4. Web 端口（当前：{s.WebPort}）",
                 $"5. 启动后自动打开浏览器（当前：{(s.AutoOpenBrowser ? "开" : "关")}）",
-                $"6. 通知渠道（Webhook：{webhookReason} | SMTP：{smtpReason} | 开关：Webhook {(s.WebhookEnabled ? "开" : "关")} / SMTP {(s.SmtpEnabled ? "开" : "关")}）",
-                "7. 清理过期历史与日志",
+                $"6. 日志级别（当前：{s.LogLevel}，即时生效）",
+                $"7. 通知渠道（Webhook：{webhookReason} | SMTP：{smtpReason} | 开关：Webhook {(s.WebhookEnabled ? "开" : "关")} / SMTP {(s.SmtpEnabled ? "开" : "关")}）",
+                "8. 清理过期历史与日志",
                 "0. 返回上级",
             };
             int width = options.Max(option => option.Length);
@@ -853,9 +854,21 @@ public static class ManageMenu
                     Console.WriteLine($"[完成] 自动打开浏览器已{(s.AutoOpenBrowser ? "开启" : "关闭")}。");
                     break;
                 case "6":
+                {
+                    (EditResult result, string value) = Ui.PromptEdit($"日志级别（当前：{s.LogLevel}，输入 debug/info/warn/error/fatal，回车=不变）：");
+                    if (result == EditResult.Entered && LogLevelUtil.IsValid(value.Trim().ToLowerInvariant()))
+                    {
+                        s.LogLevel = value.Trim().ToLowerInvariant();
+                        ConfigStore.Save(s);
+                        Audit.Log(Audit.Manage, "修改设置", $"日志级别→{s.LogLevel}");
+                        Console.WriteLine("[完成] 已保存（即时生效）。");
+                    }
+                    break;
+                }
+                case "7":
                     ChannelsMenu(ctx);
                     break;
-                case "7":
+                case "8":
                     ctx.History.Cleanup(s.HistoryRetentionDays);
                     Audit.Log(Audit.Manage, "清理过期历史", $"保留 {s.HistoryRetentionDays} 天");
                     break;
@@ -1118,6 +1131,7 @@ public static class ManageMenu
         Console.WriteLine($"脚本实例：{ctx.Scripts.Count} 个 | 调度队列：{ctx.Queues.Count} 个");
         Console.WriteLine($"开机自启动：{(TaskRegistration.IsRegistered() ? "已注册" : "未注册")} | 轻量模式：{(s.LightweightMode ? "开" : "关")}");
         Console.WriteLine($"Web 界面：http://127.0.0.1:{s.WebPort}/（未检测是否运行）");
+        Console.WriteLine($"日志级别：{s.LogLevel}");
         Console.WriteLine();
         List<RunningExecution> active = ctx.Center.Active.ToList();
         if (active.Count == 0)

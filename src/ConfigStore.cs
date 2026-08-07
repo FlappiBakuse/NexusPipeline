@@ -19,7 +19,7 @@ public static class ConfigStore
             }
             catch (Exception ex)
             {
-                Logger.Log($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}");
+                Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}");
             }
         }
         Normalize(settings);
@@ -42,6 +42,10 @@ public static class ConfigStore
         if (settings.WebPort < 1024 || settings.WebPort > 65535)
         {
             settings.WebPort = 58731;
+        }
+        if (!LogLevelUtil.IsValid(settings.LogLevel))
+        {
+            settings.LogLevel = "info";
         }
         if (settings.SendStrategy is not ("parallel" or "webhook_primary" or "email_primary" or "single"))
         {

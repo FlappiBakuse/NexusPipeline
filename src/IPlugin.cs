@@ -21,7 +21,7 @@ public class PluginContext
 {
     public void Log(string message)
     {
-        Logger.Log($"[插件] {message}");
+        Logger.Info($"[插件] {message}");
     }
 
     public void ReloadSettings()

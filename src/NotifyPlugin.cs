@@ -32,10 +32,10 @@ public class NotifyPlugin : IPlugin
         AppSettings settings = RuntimeContext.Instance.Settings;
         if (!HasChannel(settings))
         {
-            Logger.Log($"[通知] 脚本「{script.Name}」完成，但未配置通知渠道，跳过发送。");
+            Logger.Info($"[通知] 脚本「{script.Name}」完成，但未配置通知渠道，跳过发送。");
             return;
         }
-        Logger.Log($"======== 发送脚本运行状态通知：「{script.Name}」 ========");
+        Logger.Info($"======== 发送脚本运行状态通知：「{script.Name}」 ========");
         await NotifySender.SendAsync(settings, BuildScriptText(script, record)).ConfigureAwait(false);
     }
 
@@ -44,10 +44,10 @@ public class NotifyPlugin : IPlugin
         AppSettings settings = RuntimeContext.Instance.Settings;
         if (!HasChannel(settings))
         {
-            Logger.Log($"[通知] 调度队列「{queue.Name}」完成，但未配置通知渠道，跳过发送。");
+            Logger.Info($"[通知] 调度队列「{queue.Name}」完成，但未配置通知渠道，跳过发送。");
             return;
         }
-        Logger.Log($"======== 发送调度队列汇总通知：「{queue.Name}」 ========");
+        Logger.Info($"======== 发送调度队列汇总通知：「{queue.Name}」 ========");
         await NotifySender.SendAsync(settings, BuildQueueText(queue, records)).ConfigureAwait(false);
     }
 

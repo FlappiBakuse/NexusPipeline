@@ -104,7 +104,7 @@ public static class JsonStore
             }
             catch (Exception ex)
             {
-                Logger.Log($"[警告] 解析 {Path.GetFileName(path)} 失败：{ex.Message}");
+                Logger.Warn($"[警告] 解析 {Path.GetFileName(path)} 失败：{ex.Message}");
             }
         }
         return list;

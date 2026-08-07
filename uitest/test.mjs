@@ -86,7 +86,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.1.0"), "版本显示 0.1.0（x.x.x 不带 v）");
+  assert(body.includes("0.1.1"), "版本显示 0.1.1（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -467,6 +467,53 @@ async function testAudit(page) {
   assert(del.ok, "API 删除脚本");
   await sleep(400);
   assert(readLog().includes("[审计] web | 删除脚本实例（审计脚本改"), "删除脚本产生审计行");
+}
+
+async function testLogLevel(page) {
+  console.log("[用例] 日志级别：设置 UI / 落盘 / 阈值过滤 / DEBUG 请求记录");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const hdr = { "Content-Type": "application/json" };
+
+  await page.click('nav a[href="#/settings"]');
+  await page.waitForSelector("#st-loglevel");
+  const defaultLevel = await page.$eval("#st-loglevel", el => el.value);
+  assert(defaultLevel === "info", "设置页含「日志级别」下拉且默认 info");
+
+  let put = await fetch(baseUrl + "api/settings", { method: "PUT", headers: hdr, body: JSON.stringify({ logLevel: "warn" }) });
+  assert(put.ok, "PUT logLevel=warn 成功");
+  const got = await (await fetch(baseUrl + "api/settings")).json();
+  assert(got.settings.logLevel === "warn", "GET 返回 logLevel=warn");
+  const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").replace(/^\uFEFF/, ""));
+  assert(cfg.LogLevel === "warn", "settings.json 已落盘 LogLevel=warn");
+
+  const created = await fetch(baseUrl + "api/scripts", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({
+      name: "日志级别脚本", rootPath: "C:\\lg", mainExe: "C:\\lg\\run.bat",
+      configPath: "C:\\lg\\cfg", logPath: "C:\\lg\\log",
+      maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+    }),
+  });
+  assert(created.ok, "创建日志级别测试脚本（触发 INFO 审计）");
+  const sid = (await created.json()).id;
+  await sleep(400);
+  assert(!readLog().includes("[审计] web | 添加脚本实例（日志级别脚本"), "warn 阈值下 INFO 审计行被过滤");
+
+  put = await fetch(baseUrl + "api/settings", { method: "PUT", headers: hdr, body: JSON.stringify({ logLevel: "debug" }) });
+  assert(put.ok, "PUT logLevel=debug 成功");
+  await fetch(baseUrl + "api/scripts");
+  await sleep(400);
+  assert(readLog().includes("[DEBUG] [Web] GET /api/scripts"), "debug 级别记录 Web API 请求");
+  await fetch(baseUrl + "api/status");
+  await sleep(400);
+  assert(!readLog().includes("[Web] GET /api/status"), "GET /api/status 轮询豁免（不记录）");
+
+  put = await fetch(baseUrl + "api/settings", { method: "PUT", headers: hdr, body: JSON.stringify({ logLevel: "info" }) });
+  assert(put.ok, "恢复 logLevel=info 成功");
+  const del = await fetch(baseUrl + "api/scripts/" + sid, { method: "DELETE" });
+  assert(del.ok, "清理日志级别测试脚本");
 }
 
 async function testUserManagement(page) {
@@ -959,6 +1006,7 @@ async function main() {
       await testLogScroll(page);
       await testHistoryFiles();
       await testAudit(page);
+      await testLogLevel(page);
     } finally {
       await browser.close();
     }
