@@ -20,9 +20,9 @@ node uitest\test.mjs --quick   # 开发迭代快速模式：仅 14 个 UI 冒烟
 
 ## Git 协作规范（强制）
 
-- `main` 受 GitHub ruleset 保护（`current_user_can_bypass: never`）：**任何改动必须走 PR**，CI「构建 + e2e 测试」全绿后 **squash 合并**；禁止直接 push/force push main。
+- `main` 无分支保护（仓库无 ruleset，`current_user_can_bypass` 一说已过时）：v0.1.0 至今均为**直接 push main**，不走 PR；提交前先 `git pull` 避免分叉，**禁止 force push**。
 - 分支：`feat/`、`fix/`、`docs/`、`refactor/`、`test/`、`chore/` 前缀。
-- 提交与 PR 标题：Conventional Commits，type 英文 + 描述中文（如 `fix: 修复历史详情时区错位`）。
+- 提交标题：Conventional Commits，type 英文 + 描述中文（如 `fix: 修复历史详情时区错位`）。
 - 版本发布：tag `vX.Y.Z` + `gh release create --prerelease`，资产打包 `dist/`（exe+wwwroot+plugins+README+LICENSE，**排除 config/**），附 SHA256。
 
 ## 运行时数据（易混淆，勿改错）
