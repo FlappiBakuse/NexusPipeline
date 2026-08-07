@@ -1,4 +1,4 @@
-# NexusPipeline 架构说明
+﻿# NexusPipeline 架构说明
 
 本文件是开发者与大模型的导航地图：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
 
@@ -11,7 +11,7 @@ NexusPipeline/
 │   ├── Web/            HTTP 层（NexusPipeline.Web）
 │   ├── Cli/            命令行层（NexusPipeline.Cli）
 │   └── Plugins/        插件契约与内置插件（NexusPipeline.Plugins）
-├── WebRoot/            前端（零构建 ES modules，浏览器直接加载）
+├── wwwroot/            前端（零构建 ES modules，浏览器直接加载）
 │   ├── app.js          路由 + 事件委托（唯一入口）
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
@@ -65,7 +65,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 - 命令行菜单：在 `src/Cli/` 对应菜单类加 case。
 - 业务服务：核心域新增服务类，由 `RuntimeContext` 持有。
 
-## 前端分层（WebRoot/）
+## 前端分层（wwwroot/）
 
 ### 依赖方向
 
@@ -121,7 +121,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 脚本运行流程/重试/日志监控 | `src/RunSession.cs` |
 | 队列调度触发 | `src/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/WebhookSender.cs`、`src/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
-| 页面渲染/表单 | `WebRoot/views/` 对应域文件 |
+| 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
 | 配置读写/加密 | `src/ConfigStore.cs`、`src/SecretStore.cs` |
 | 历史记录格式 | `src/HistoryService.cs`、`src/RunRecord.cs` |

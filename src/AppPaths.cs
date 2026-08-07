@@ -18,7 +18,7 @@ internal static class AppPaths
 
     public static readonly string LogDir = Path.Combine(AppRoot, "logs");
 
-    public static readonly string WebRootDir = Path.Combine(AppRoot, "WebRoot");
+    public static readonly string WwwRootDir = Path.Combine(AppRoot, "wwwroot");
 
     public static readonly string PluginsDir = Path.Combine(AppRoot, "plugins");
 

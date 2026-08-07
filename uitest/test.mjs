@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+﻿import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -53,7 +53,7 @@ async function setupRuntime() {
     throw new Error("release/nexus-pipeline.exe 不存在，请先运行 build.cmd");
   }
   fs.copyFileSync(sourceExe, runtimeExe);
-  fs.cpSync(path.join(releaseDir, "WebRoot"), path.join(runtimeDir, "WebRoot"), { recursive: true });
+  fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
   if (fs.existsSync(path.join(releaseDir, "plugins"))) {
     fs.cpSync(path.join(releaseDir, "plugins"), path.join(runtimeDir, "plugins"), { recursive: true });
   } else {
@@ -86,7 +86,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.2.0"), "版本显示 0.2.0（x.x.x 不带 v）");
+  assert(body.includes("0.2.1"), "版本显示 0.2.1（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");

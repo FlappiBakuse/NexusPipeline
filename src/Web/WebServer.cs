@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text;
 
 namespace NexusPipeline.Web;
@@ -75,7 +75,7 @@ internal sealed class WebServer : IDisposable
             }
             if (path == "/" || path == "/index.html")
             {
-                HttpHelper.ServeFile(context, Path.Combine(AppPaths.WebRootDir, "index.html"));
+                HttpHelper.ServeFile(context, Path.Combine(AppPaths.WwwRootDir, "index.html"));
                 return;
             }
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
@@ -83,7 +83,7 @@ internal sealed class WebServer : IDisposable
                 await HandleApiAsync(context, method, path, token).ConfigureAwait(false);
                 return;
             }
-            string filePath = Path.Combine(AppPaths.WebRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+            string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
             HttpHelper.ServeFile(context, filePath);
         }
         catch (Exception ex)

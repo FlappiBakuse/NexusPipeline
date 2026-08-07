@@ -1,4 +1,4 @@
-# NexusPipeline（枢链）
+﻿# NexusPipeline（枢链）
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -80,7 +80,7 @@ nexus-pipeline.exe unregister         # 取消开机自启动
 ```
 release/
 ├── nexus-pipeline.exe      ← 主程序（单文件，框架依赖 .NET 8 运行时）
-├── WebRoot/                ← 网页管理界面
+├── wwwroot/                ← 网页管理界面
 ├── plugins/                ← 插件目录
 └── config/                 ← 配置文件（运行时生成）
 ```
@@ -92,7 +92,7 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`，再运行 `uitest\run-uitest.cmd`（或 `node uitest/test.mjs`）即可；
-- 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + WebRoot + plugins），不污染项目目录；
+- 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移。
 
 ## 文件结构
@@ -104,7 +104,7 @@ release/
 | `config/settings.json` | 设置（含加密通知密钥） |
 | `config/scripts.json` | 脚本实例列表 |
 | `config/queues.json` | 调度队列列表 |
-| `WebRoot/` | 网页管理界面（静态文件） |
+| `wwwroot/` | 网页管理界面（静态文件） |
 | `plugins/` | 插件目录 |
 | `history/YYYY-MM-DD/HH-mm-ss.json` | 每次脚本运行的完成状态（启动/结束时间、手动/自动、重试次数、最终状态：成功/部分失败/失败/已取消、每次尝试详情） |
 | `history/YYYY-MM-DD/HH-mm-ss.log` | 同一次运行的脚本日志全文（脚本 LogPath 监控内容，与 `.json` 同名配对） |
