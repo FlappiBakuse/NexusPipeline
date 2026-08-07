@@ -116,6 +116,7 @@ release/
 ## 参与开发
 
 - 所有改动通过 Pull Request 合入 `main`，流程与规范见 [CONTRIBUTING.md](CONTRIBUTING.md)；
+- 模块边界与功能定位指南见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)（后端分 Web/Cli/Plugins 分层，前端视图一域一文件）；
 - 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（用例随 CI 自动执行）。
 
 ## License
