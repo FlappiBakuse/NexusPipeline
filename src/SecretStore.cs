@@ -1,9 +1,9 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 
 namespace NexusPipeline;
 
-public static class SecretStore
+internal static class SecretStore
 {
     private const string Prefix = "enc:";
 

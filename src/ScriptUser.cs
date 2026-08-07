@@ -1,4 +1,4 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
 public class ScriptUser
 {
@@ -28,7 +28,7 @@ public class ScriptUser
     }
 }
 
-public static class ScriptUserRule
+internal static class ScriptUserRule
 {
     public static bool IsValidName(string name)
     {

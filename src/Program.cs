@@ -1,6 +1,8 @@
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text;
+using NexusPipeline.Cli;
+using NexusPipeline.Web;
 
 namespace NexusPipeline;
 
@@ -52,10 +54,10 @@ public static class Program
                 RunService();
                 return 0;
             case "manage":
-                ManageMenu.Show();
+                MainMenu.Show();
                 return 0;
             case "status":
-                ManageMenu.ShowStatus();
+                MainMenu.ShowStatus();
                 return 0;
             case "web":
                 return RunWebOnly(args.Skip(1).ToArray());
@@ -123,37 +125,15 @@ public static class Program
         ctx.ReloadSettings();
         ctx.ReloadData();
         TaskRegistration.SyncWithSettings(ctx.Settings);
-        ctx.Plugins.LoadAll();
-        ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
-        ctx.Scheduler.Start();
+        Bootstrap.StartServices();
 
         WebServer? web = null;
         if (!ctx.Settings.LightweightMode)
         {
-            web = new WebServer();
-            int port = ctx.Settings.WebPort;
-            bool started = false;
-            for (int attempt = 0; attempt < 20; attempt++)
+            web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
+            if (web is not null && ctx.Settings.AutoOpenBrowser)
             {
-                try
-                {
-                    web.Start(port);
-                    started = true;
-                    break;
-                }
-                catch (HttpListenerException)
-                {
-                    Logger.Warn($"[提示] 端口 {port} 被占用，尝试 {port + 1}。");
-                    port++;
-                }
-            }
-            if (!started)
-            {
-                Logger.Error("[错误] 无法启动 Web 服务（端口均被占用）。");
-            }
-            else if (ctx.Settings.AutoOpenBrowser)
-            {
-                TrayApp.OpenWeb(port);
+                TrayApp.OpenWeb(web.Port);
             }
         }
         else
@@ -165,36 +145,26 @@ public static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayApp());
 
-        ctx.Scheduler.Stop();
-        web?.Stop();
-        ctx.Plugins.ShutdownAll();
+        Bootstrap.Shutdown(web);
         Logger.Info("NexusPipeline 已退出。");
     }
 
     private static int RunWebOnly(string[] args)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        ctx.Plugins.LoadAll();
-        var web = new WebServer();
-        int port = ctx.Settings.WebPort;
-        for (int attempt = 0; attempt < 20; attempt++)
+        Bootstrap.StartServices();
+        WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
+        if (web is null)
         {
-            try
-            {
-                web.Start(port);
-                break;
-            }
-            catch (HttpListenerException)
-            {
-                port++;
-            }
+            Console.WriteLine("[错误] 无法启动 Web 服务（端口均被占用）。");
+            return 1;
         }
-        Console.WriteLine($"Web 界面：http://127.0.0.1:{port}/（按回车停止）");
+        Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
         if (ctx.Settings.AutoOpenBrowser)
         {
             try
             {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo($"http://127.0.0.1:{port}/")
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo($"http://127.0.0.1:{web.Port}/")
                 {
                     UseShellExecute = true,
                 });
@@ -217,8 +187,7 @@ public static class Program
             }
             Thread.Sleep(200);
         }
-        web.Stop();
-        ctx.Plugins.ShutdownAll();
+        Bootstrap.Shutdown(web);
         return 0;
     }
 

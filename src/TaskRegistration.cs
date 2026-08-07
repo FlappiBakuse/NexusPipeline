@@ -1,9 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.Win32;
 
 namespace NexusPipeline;
 
-public static class TaskRegistration
+internal static class TaskRegistration
 {
     private const string RunKeyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
 

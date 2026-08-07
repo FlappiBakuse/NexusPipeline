@@ -1,6 +1,6 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
-public static class AppPaths
+internal static class AppPaths
 {
     public static readonly string AppRoot = AppContext.BaseDirectory;
 

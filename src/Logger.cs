@@ -1,8 +1,8 @@
-using System.Text;
+﻿using System.Text;
 
 namespace NexusPipeline;
 
-public static class Logger
+internal static class Logger
 {
     private static readonly object Sync = new();
 

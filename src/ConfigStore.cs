@@ -1,8 +1,8 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace NexusPipeline;
 
-public static class ConfigStore
+internal static class ConfigStore
 {
     public static AppSettings Load()
     {

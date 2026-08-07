@@ -1,8 +1,8 @@
 using System.Text;
 
-namespace NexusPipeline;
+namespace NexusPipeline.Plugins;
 
-public class NotifyPlugin : IPlugin
+internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 {
     public string Name => "notify";
 
@@ -16,39 +16,35 @@ public class NotifyPlugin : IPlugin
 
     public void Initialize(PluginContext context)
     {
-        NotifyRouter.ScriptNotify = NotifyScriptAsync;
-        NotifyRouter.QueueNotify = NotifyQueueAsync;
         context.Log("通知推送已接管运行状态通知。");
     }
 
     public void Shutdown()
     {
-        NotifyRouter.ScriptNotify = null;
-        NotifyRouter.QueueNotify = null;
     }
 
-    public static async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
+    public Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
         if (!HasChannel(settings))
         {
             Logger.Info($"[通知] 脚本「{script.Name}」完成，但未配置通知渠道，跳过发送。");
-            return;
+            return Task.CompletedTask;
         }
         Logger.Info($"======== 发送脚本运行状态通知：「{script.Name}」 ========");
-        await NotifySender.SendAsync(settings, BuildScriptText(script, record)).ConfigureAwait(false);
+        return NotifySender.SendAsync(settings, BuildScriptText(script, record));
     }
 
-    public static async Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
+    public Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
         if (!HasChannel(settings))
         {
             Logger.Info($"[通知] 调度队列「{queue.Name}」完成，但未配置通知渠道，跳过发送。");
-            return;
+            return Task.CompletedTask;
         }
         Logger.Info($"======== 发送调度队列汇总通知：「{queue.Name}」 ========");
-        await NotifySender.SendAsync(settings, BuildQueueText(queue, records)).ConfigureAwait(false);
+        return NotifySender.SendAsync(settings, BuildQueueText(queue, records));
     }
 
     private static string BuildScriptText(ScriptInstance script, RunRecord record)

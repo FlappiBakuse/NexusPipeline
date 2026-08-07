@@ -1,10 +1,10 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace NexusPipeline;
 
-public static class JsonOpts
+internal static class JsonOpts
 {
     public static readonly JsonSerializerOptions Default = new()
     {
@@ -24,7 +24,7 @@ public static class JsonOpts
     };
 }
 
-public static class JsonUtil
+internal static class JsonUtil
 {
     public static void WriteAtomic(string path, string content)
     {
@@ -87,7 +87,7 @@ public static class JsonUtil
     }
 }
 
-public static class JsonStore
+internal static class JsonStore
 {
     public static List<T> LoadList<T>(string path) where T : new()
     {

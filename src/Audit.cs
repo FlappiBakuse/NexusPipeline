@@ -1,6 +1,6 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
-public static class Audit
+internal static class Audit
 {
     public const string Web = "web";
 

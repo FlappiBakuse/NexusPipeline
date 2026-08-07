@@ -1,15 +1,16 @@
-using System.Text;
+﻿using System.Text;
 
-namespace NexusPipeline;
+namespace NexusPipeline.Cli;
 
-public enum EditResult
+internal enum EditResult
 {
     Entered,
     Keep,
     Clear
 }
 
-public static class Ui
+/// <summary>命令行交互基础工具：提示、编辑、清屏、公共输入辅助。</summary>
+internal static class Ui
 {
     public static void Block(IEnumerable<string> lines)
     {
@@ -115,5 +116,26 @@ public static class Ui
         catch
         {
         }
+    }
+
+    /// <summary>带默认值/取消的文本编辑：Esc=取消（返回 null），回车空=保持当前值。</summary>
+    public static string? PromptText(string label, string current)
+    {
+        (EditResult result, string value) = PromptEdit($"{label}（当前：{(string.IsNullOrWhiteSpace(current) ? "空" : current)}，回车=不变，Esc=取消）：");
+        if (result == EditResult.Clear)
+        {
+            return null;
+        }
+        return result == EditResult.Keep ? current : value.Trim();
+    }
+
+    public static string DayDesc(List<int> days)
+    {
+        if (days.Count == 7)
+        {
+            return "每天";
+        }
+        string[] names = { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
+        return string.Join("/", days.OrderBy(day => day).Select(day => names[day]));
     }
 }

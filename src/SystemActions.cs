@@ -1,9 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 
 namespace NexusPipeline;
 
-public static class SystemActions
+internal static class SystemActions
 {
     public static bool IsCommandFile(string path)
     {

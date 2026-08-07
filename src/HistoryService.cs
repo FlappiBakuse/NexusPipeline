@@ -1,9 +1,9 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 
 namespace NexusPipeline;
 
-public class HistoryService
+internal class HistoryService
 {
     public void Save(RunRecord record, string scriptLog)
     {

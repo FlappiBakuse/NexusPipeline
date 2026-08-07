@@ -1,11 +1,11 @@
-using System.Text;
+﻿using System.Text;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
 
 namespace NexusPipeline;
 
-public static class SmtpSender
+internal static class SmtpSender
 {
     public static (bool Ok, string Reason) Status(AppSettings settings)
     {
@@ -102,7 +102,7 @@ public static class SmtpSender
     }
 }
 
-public static class NotifySender
+internal static class NotifySender
 {
     /// <summary>按启用开关并行发送启用渠道（Webhook / SMTP 各自独立开关，废弃原发送策略）。</summary>
     public static async Task<bool> SendAsync(AppSettings settings, string text)

@@ -1,13 +1,8 @@
+﻿using NexusPipeline.Plugins;
+
 namespace NexusPipeline;
 
-public static class NotifyRouter
-{
-    public static Func<ScriptInstance, RunRecord, Task>? ScriptNotify { get; set; }
-
-    public static Func<DispatchQueue, List<RunRecord>, Task>? QueueNotify { get; set; }
-}
-
-public class RunningExecution
+internal class RunningExecution
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
@@ -72,7 +67,7 @@ public class RunningExecution
     }
 }
 
-public class DispatchCenter
+internal class DispatchCenter
 {
     private readonly List<RunningExecution> _active = new();
 
@@ -236,9 +231,9 @@ public class DispatchCenter
             Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{script.Name}」最终结果：{record.Status}（{record.ResultDetail}）");
 
             RuntimeContext.Instance.History.Save(record, session.ScriptLog);
-            if (script.NotifyEnabled && NotifyRouter.ScriptNotify is not null)
+            if (script.NotifyEnabled)
             {
-                await NotifyRouter.ScriptNotify(script, record).ConfigureAwait(false);
+                await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
             }
         }
         catch (Exception ex)
@@ -360,18 +355,18 @@ public class DispatchCenter
             }
 
             bool anyCancelled = records.Any(record => record.Status == "cancelled");
-            if (queue.NotifyEnabled && NotifyRouter.QueueNotify is not null)
+            if (queue.NotifyEnabled)
             {
-                await NotifyRouter.QueueNotify(queue, records).ConfigureAwait(false);
+                await RuntimeContext.Instance.Plugins.NotifyQueueAsync(queue, records).ConfigureAwait(false);
             }
             else if (!queue.NotifyEnabled)
             {
                 foreach (RunRecord record in records)
                 {
                     ScriptInstance? script = RuntimeContext.Instance.FindScript(record.ScriptInstanceId);
-                    if (script is not null && script.NotifyEnabled && NotifyRouter.ScriptNotify is not null)
+                    if (script is not null && script.NotifyEnabled)
                     {
-                        await NotifyRouter.ScriptNotify(script, record).ConfigureAwait(false);
+                        await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
                     }
                 }
             }

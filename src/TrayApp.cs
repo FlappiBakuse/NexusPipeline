@@ -1,8 +1,8 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace NexusPipeline;
 
-public class TrayApp : ApplicationContext
+internal class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _icon;
 

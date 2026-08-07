@@ -1,12 +1,31 @@
 using System.Reflection;
 
-namespace NexusPipeline;
+namespace NexusPipeline.Plugins;
 
-public class PluginManager
+/// <summary>插件生命周期管理：发现（内置 + plugins/*.dll）、加载、启用开关、能力查询。</summary>
+internal sealed class PluginManager
 {
     private readonly List<IPlugin> _plugins = new();
 
     public IReadOnlyList<IPlugin> Plugins => _plugins;
+
+    public INotifyChannel? NotifyChannel => _plugins.OfType<INotifyChannel>().FirstOrDefault();
+
+    public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
+    {
+        if (NotifyChannel is { } channel)
+        {
+            await channel.NotifyScriptAsync(script, record).ConfigureAwait(false);
+        }
+    }
+
+    public async Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
+    {
+        if (NotifyChannel is { } channel)
+        {
+            await channel.NotifyQueueAsync(queue, records).ConfigureAwait(false);
+        }
+    }
 
     public void LoadAll()
     {

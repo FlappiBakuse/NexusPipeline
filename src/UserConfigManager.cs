@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
@@ -6,14 +6,14 @@ using System.Text.Json.Serialization;
 
 namespace NexusPipeline;
 
-public enum PathKind
+internal enum PathKind
 {
     Missing,
     File,
     Dir,
 }
 
-public static class PathKindUtil
+internal static class PathKindUtil
 {
     public static PathKind KindOf(string path)
     {
@@ -54,7 +54,7 @@ public static class PathKindUtil
 }
 
 /// <summary>脚本级配置交换门禁：同一脚本同一时刻只允许一个会话（运行或编辑配置），后续运行排队等待。</summary>
-public static class ScriptConfigGate
+internal static class ScriptConfigGate
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new();
 
@@ -65,7 +65,7 @@ public static class ScriptConfigGate
 }
 
 /// <summary>配置交换会话标记：交换开始写入、完成删除；崩溃后可据此恢复（安全优先：原配置必还原）。</summary>
-public sealed class ConfigSessionMark
+internal sealed class ConfigSessionMark
 {
     public string ScriptId { get; set; } = "";
 
@@ -127,7 +127,7 @@ public sealed class ConfigSessionMark
 }
 
 /// <summary>编辑配置会话（WebServer 持有的进程句柄与标记）。</summary>
-public sealed class EditSession
+internal sealed class EditSession
 {
     public required ScriptInstance Script { get; init; }
 
@@ -143,7 +143,7 @@ public sealed class EditSession
 /// 兜底分层：原语层（安全移动/原子替换/重试/跨进程互斥）、会话层（.session 标记/门禁/回滚/finally 还原）、
 /// 恢复层（操作前自愈 + 启动扫描恢复）。数据保全序：cache（原配置）&gt; config &gt; store（可重建）。
 /// </summary>
-public static class UserConfigManager
+internal static class UserConfigManager
 {
     public static readonly ConcurrentDictionary<string, EditSession> EditSessions = new();
 

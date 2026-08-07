@@ -1,8 +1,8 @@
-using System.Text;
+﻿using System.Text;
 
 namespace NexusPipeline;
 
-public class LogMonitor : IDisposable
+internal class LogMonitor : IDisposable
 {
     private readonly string _path;
 

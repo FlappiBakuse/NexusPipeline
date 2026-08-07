@@ -1,4 +1,4 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
 public class QueueTimeSet
 {
@@ -65,7 +65,7 @@ public class DispatchQueue
     }
 }
 
-public static class QueueRule
+internal static class QueueRule
 {
     public static bool IsValidAutoRunMode(string mode)
     {

@@ -1,8 +1,8 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 
 namespace NexusPipeline;
 
-public static class TextRules
+internal static class TextRules
 {
     public static readonly List<string> DefaultCompletionMarkers = new()
     {

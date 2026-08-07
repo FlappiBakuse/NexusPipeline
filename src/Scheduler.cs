@@ -1,6 +1,6 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
-public class Scheduler : IDisposable
+internal class Scheduler : IDisposable
 {
     private readonly object _sync = new();
 

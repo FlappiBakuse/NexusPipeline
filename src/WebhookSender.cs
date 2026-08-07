@@ -1,10 +1,10 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 
 namespace NexusPipeline;
 
-public static class WebhookSender
+internal static class WebhookSender
 {
     private static readonly HttpClient Http = new();
 

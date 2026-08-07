@@ -1,9 +1,9 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 
 namespace NexusPipeline;
 
-public class RunAttemptResult
+internal class RunAttemptResult
 {
     public string Status { get; set; } = "";
 
@@ -32,7 +32,7 @@ public class RunAttemptResult
     }
 }
 
-public class RunSession
+internal class RunSession
 {
     private const int ExitGraceSecondsAfterMarker = 60;
 

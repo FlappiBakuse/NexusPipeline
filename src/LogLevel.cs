@@ -1,6 +1,6 @@
-namespace NexusPipeline;
+﻿namespace NexusPipeline;
 
-public enum LogLevel
+internal enum LogLevel
 {
     Debug,
     Info,
@@ -9,7 +9,7 @@ public enum LogLevel
     Fatal,
 }
 
-public static class LogLevelUtil
+internal static class LogLevelUtil
 {
     public static string ToSetting(this LogLevel level)
     {

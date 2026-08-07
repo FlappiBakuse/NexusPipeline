@@ -1,8 +1,8 @@
-using System.Text;
+﻿using System.Text;
 
 namespace NexusPipeline;
 
-public static class ConsoleLog
+internal static class ConsoleLog
 {
     private static readonly object Sync = new();
 

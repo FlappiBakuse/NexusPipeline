@@ -1,6 +1,9 @@
+using NexusPipeline.Plugins;
+
 namespace NexusPipeline;
 
-public class RuntimeContext
+/// <summary>组合根：持有全部领域服务单例与共享数据。持久化见 <see cref="DataStore"/>。</summary>
+internal class RuntimeContext
 {
     public static RuntimeContext Instance { get; } = new();
 
@@ -25,18 +28,8 @@ public class RuntimeContext
 
     public void ReloadData()
     {
-        Scripts = JsonStore.LoadList<ScriptInstance>(AppPaths.ScriptsPath);
-        Queues = JsonStore.LoadList<DispatchQueue>(AppPaths.QueuesPath);
-    }
-
-    public void SaveScripts()
-    {
-        JsonStore.SaveList(AppPaths.ScriptsPath, Scripts);
-    }
-
-    public void SaveQueues()
-    {
-        JsonStore.SaveList(AppPaths.QueuesPath, Queues);
+        Scripts = DataStore.LoadScripts();
+        Queues = DataStore.LoadQueues();
     }
 
     public ScriptInstance? FindScript(string id)
@@ -47,15 +40,5 @@ public class RuntimeContext
     public DispatchQueue? FindQueue(string id)
     {
         return Queues.FirstOrDefault(q => q.Id == id);
-    }
-
-    public string ScriptName(string id)
-    {
-        return FindScript(id)?.Name ?? id;
-    }
-
-    public string QueueName(string id)
-    {
-        return FindQueue(id)?.Name ?? id;
     }
 }
