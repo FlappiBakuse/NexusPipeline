@@ -30,11 +30,7 @@ internal static class JsonUtil
     {
         string temp = path + ".tmp";
         File.WriteAllText(temp, content, new UTF8Encoding(true));
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
-        File.Move(temp, path);
+        File.Move(temp, path, overwrite: true);
     }
 
     public static JsonNode? Get(this JsonNode? node, string key)

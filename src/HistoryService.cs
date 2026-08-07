@@ -5,6 +5,8 @@ namespace NexusPipeline;
 
 internal class HistoryService
 {
+    private static readonly object Sync = new();
+
     public void Save(RunRecord record, string scriptLog)
     {
         if (record.StartTime == DateTime.MinValue)
@@ -13,22 +15,92 @@ internal class HistoryService
         }
         try
         {
-            string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
-            Directory.CreateDirectory(dayDir);
-            string baseName = record.StartTime.ToString("HH-mm-ss");
-            string jsonPath = FindFreePath(dayDir, baseName, ".json");
-            string logPath = Path.ChangeExtension(jsonPath, ".log");
-            record.LogFile = Path.GetFileName(jsonPath);
-            File.WriteAllText(jsonPath, JsonSerializer.Serialize(record, JsonOpts.Indented), new UTF8Encoding(true));
-            string logText = string.IsNullOrWhiteSpace(scriptLog)
-                ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
-                : scriptLog;
-            File.WriteAllText(logPath, logText, new UTF8Encoding(true));
+            lock (Sync)
+            {
+                string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
+                Directory.CreateDirectory(dayDir);
+                string baseName = record.StartTime.ToString("HH-mm-ss");
+                string jsonPath = FindFreePath(dayDir, baseName, ".json");
+                string logPath = Path.ChangeExtension(jsonPath, ".log");
+                record.LogFile = Path.GetFileName(jsonPath);
+                File.WriteAllText(jsonPath, JsonSerializer.Serialize(record, JsonOpts.Indented), new UTF8Encoding(true));
+                string logText = string.IsNullOrWhiteSpace(scriptLog)
+                    ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
+                    : scriptLog;
+                File.WriteAllText(logPath, logText, new UTF8Encoding(true));
+                AppendIndex(record.StartTime, record);
+            }
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 保存运行历史失败：{ex.Message}");
         }
+    }
+
+    private static string IndexPath(DateTime time)
+    {
+        return Path.Combine(AppPaths.HistoryDir, $"runs-{time:yyyy-MM-dd}.jsonl");
+    }
+
+    private static void AppendIndex(DateTime time, RunRecord record)
+    {
+        string index = IndexPath(time);
+        File.AppendAllText(index, JsonSerializer.Serialize(record, JsonOpts.Default) + Environment.NewLine, new UTF8Encoding(false));
+    }
+
+    /// <summary>读取某天的运行记录：优先顺序索引 runs-*.jsonl；旧数据无索引时扫描 .json 目录并重建索引。</summary>
+    private static List<RunRecord> ReadDayIndex(DateTime date)
+    {
+        string index = IndexPath(date);
+        if (File.Exists(index))
+        {
+            var records = new List<RunRecord>();
+            foreach (string line in File.ReadAllLines(index))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    continue;
+                }
+                try
+                {
+                    RunRecord? record = JsonSerializer.Deserialize<RunRecord>(line, JsonOpts.Default);
+                    if (record is not null)
+                    {
+                        records.Add(record);
+                    }
+                }
+                catch
+                {
+                }
+            }
+            return records;
+        }
+
+        string dayDir = Path.Combine(AppPaths.HistoryDir, date.ToString("yyyy-MM-dd"));
+        var rebuilt = new List<RunRecord>();
+        if (Directory.Exists(dayDir))
+        {
+            foreach (string file in Directory.GetFiles(dayDir, "*.json"))
+            {
+                try
+                {
+                    RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
+                    if (record is not null)
+                    {
+                        rebuilt.Add(record);
+                    }
+                }
+                catch
+                {
+                }
+            }
+            if (rebuilt.Count > 0)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(index) ?? AppPaths.HistoryDir);
+                File.WriteAllLines(index, rebuilt.Select(record => JsonSerializer.Serialize(record, JsonOpts.Default)), new UTF8Encoding(false));
+            }
+        }
+        return rebuilt;
     }
 
     private static string FindFreePath(string directory, string baseName, string extension)
@@ -52,54 +124,19 @@ internal class HistoryService
     public List<RunRecord> Query(DateTime start, DateTime end, string? scriptId = null, string? queueId = null)
     {
         var result = new List<RunRecord>();
-        for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
+        lock (Sync)
         {
-            string dayDir = Path.Combine(AppPaths.HistoryDir, date.ToString("yyyy-MM-dd"));
-            if (Directory.Exists(dayDir))
+            for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
             {
-                foreach (string file in Directory.GetFiles(dayDir, "*.json"))
+                foreach (RunRecord record in ReadDayIndex(date))
                 {
-                    try
-                    {
-                        RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
-                        if (record is null || record.StartTime < start || record.StartTime > end)
-                        {
-                            continue;
-                        }
-                        if (Matches(record, scriptId, queueId))
-                        {
-                            result.Add(record);
-                        }
-                    }
-                    catch
-                    {
-                    }
-                }
-            }
-
-            string legacy = Path.Combine(AppPaths.HistoryDir, $"runs-{date:yyyy-MM-dd}.jsonl");
-            if (File.Exists(legacy))
-            {
-                foreach (string line in File.ReadAllLines(legacy))
-                {
-                    if (string.IsNullOrWhiteSpace(line))
+                    if (record.StartTime < start || record.StartTime > end)
                     {
                         continue;
                     }
-                    try
+                    if (Matches(record, scriptId, queueId))
                     {
-                        RunRecord? record = JsonSerializer.Deserialize<RunRecord>(line, JsonOpts.Default);
-                        if (record is null || record.StartTime < start || record.StartTime > end)
-                        {
-                            continue;
-                        }
-                        if (Matches(record, scriptId, queueId))
-                        {
-                            result.Add(record);
-                        }
-                    }
-                    catch
-                    {
+                        result.Add(record);
                     }
                 }
             }
@@ -122,7 +159,21 @@ internal class HistoryService
 
     public RunRecord? FindById(string id, int days = 31)
     {
-        return Query(DateTime.Today.AddDays(-(days - 1)), DateTime.Now.AddMinutes(5)).FirstOrDefault(record => record.Id == id);
+        lock (Sync)
+        {
+            for (int offset = days - 1; offset >= 0; offset--)
+            {
+                DateTime date = DateTime.Today.AddDays(-offset);
+                foreach (RunRecord record in ReadDayIndex(date))
+                {
+                    if (record.Id == id)
+                    {
+                        return record;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record)
@@ -186,13 +237,25 @@ internal class HistoryService
             }
             foreach (string file in Directory.GetFiles(AppPaths.HistoryDir, "runs-*.jsonl"))
             {
+                DateTime fileDate;
                 try
                 {
-                    File.Delete(file);
-                    removed++;
+                    fileDate = File.GetLastWriteTime(file).Date;
                 }
                 catch
                 {
+                    continue;
+                }
+                if (fileDate < cutoff)
+                {
+                    try
+                    {
+                        File.Delete(file);
+                        removed++;
+                    }
+                    catch
+                    {
+                    }
                 }
             }
         }

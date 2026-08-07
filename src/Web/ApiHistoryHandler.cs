@@ -50,6 +50,15 @@ internal static class ApiHistoryHandler
             DateTime.Today.AddDays(-(days - 1)), DateTime.Now.AddMinutes(5),
             string.IsNullOrWhiteSpace(scriptId) ? null : scriptId,
             string.IsNullOrWhiteSpace(queueId) ? null : queueId);
+        bool paged = context.Request.QueryString["offset"] is not null || context.Request.QueryString["limit"] is not null;
+        if (paged)
+        {
+            int offset = int.TryParse(context.Request.QueryString["offset"], out int o) ? Math.Max(0, o) : 0;
+            int limit = int.TryParse(context.Request.QueryString["limit"], out int l) ? Math.Max(1, l) : 20;
+            Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{days} 天，分页 offset={offset} limit={limit}）");
+            await HttpHelper.WriteJsonAsync(context, new { total = records.Count, records = records.Skip(offset).Take(limit).ToList() }).ConfigureAwait(false);
+            return;
+        }
         Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{days} 天）");
         await HttpHelper.WriteJsonAsync(context, records).ConfigureAwait(false);
     }
