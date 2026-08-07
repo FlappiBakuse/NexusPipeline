@@ -86,7 +86,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.2.0"), "版本显示 0.2.0（x.x.x 不带 v）");
+  assert(body.includes("0.2.1"), "版本显示 0.2.1（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -978,6 +978,226 @@ async function testNextScheduleAndStats(page) {
   await fetch(baseUrl + "api/scripts/" + sid, { method: "DELETE" });
 }
 
+async function testLimitsApi(page) {
+  console.log("[用例] 约束体系：API 默认值 + 数量上限");
+  const hdr = { "Content-Type": "application/json" };
+  const limits = await (await fetch(baseUrl + "api/limits")).json();
+  assert(limits.limits.maxScripts === 25 && limits.limits.maxUsersPerScript === 10, "limits API 默认值（脚本 25 / 用户 10）");
+  assert(limits.limits.maxQueues === 10 && limits.limits.maxTimeSetsPerQueue === 10, "limits API 默认值（队列 10 / 定时 10）");
+  assert(limits.limits.maxAttempts === 10 && limits.limits.maxTotalMinutes === 720, "limits API 默认值（尝试 10 / 总时长 720）");
+  assert(limits.warnings.length === 0, "默认配置无警告");
+
+  const ids = [];
+  for (let i = 0; i < 25; i++) {
+    const r = await fetch(baseUrl + "api/scripts", {
+      method: "POST", headers: hdr,
+      body: JSON.stringify({ name: "约束脚本" + String(i).padStart(2, "0"), rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 }),
+    });
+    ids.push((await r.json()).id);
+  }
+  const r26 = await fetch(baseUrl + "api/scripts", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({ name: "超限脚本", rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 }),
+  });
+  assert(r26.status === 400, "第 26 个脚本被拒（400）");
+
+  for (let i = 0; i < 10; i++) {
+    await fetch(baseUrl + "api/scripts/" + ids[0] + "/users", { method: "POST", headers: hdr, body: JSON.stringify({ name: "用户" + i, enabled: true }) });
+  }
+  const r11 = await fetch(baseUrl + "api/scripts/" + ids[0] + "/users", { method: "POST", headers: hdr, body: JSON.stringify({ name: "用户11", enabled: true }) });
+  assert(r11.status === 400, "第 11 个用户被拒（400）");
+
+  const qids = [];
+  for (let i = 0; i < 10; i++) {
+    const r = await fetch(baseUrl + "api/queues", {
+      method: "POST", headers: hdr,
+      body: JSON.stringify({ name: "约束队列" + i, autoRunMode: "scheduled", completionAction: "none", timeSets: [{ id: "", enabled: true, days: [1], time: "23:59" }], tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] }),
+    });
+    qids.push((await r.json()).id);
+  }
+  const q11 = await fetch(baseUrl + "api/queues", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({ name: "超限队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] }),
+  });
+  assert(q11.status === 400, "第 11 个队列被拒（400）");
+
+  const t11 = await fetch(baseUrl + "api/queues/" + qids[0], {
+    method: "PUT", headers: hdr,
+    body: JSON.stringify({ name: "约束队列0", autoRunMode: "scheduled", completionAction: "none", timeSets: Array.from({ length: 11 }, (_, i) => ({ id: "", enabled: true, days: [1], time: "23:" + String(40 + i) })), tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] }),
+  });
+  assert(t11.status === 400, "第 11 个定时被拒（400）");
+
+  for (const qid of qids) await fetch(baseUrl + "api/queues/" + qid, { method: "DELETE" });
+  for (const id of ids) await fetch(baseUrl + "api/scripts/" + id, { method: "DELETE" });
+}
+
+async function testLimitsFields(page) {
+  console.log("[用例] 约束体系：名称字节 / 数值区间 / 任务总用户");
+  const hdr = { "Content-Type": "application/json" };
+  const base = { rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
+  const postScript = body => fetch(baseUrl + "api/scripts", { method: "POST", headers: hdr, body: JSON.stringify(body) });
+
+  const longName = await postScript({ ...base, name: "长".repeat(43) });
+  assert(longName.status === 400, "脚本名 129 字节被拒（400）");
+  const okName = await postScript({ ...base, name: "长".repeat(42) });
+  assert(okName.ok, "脚本名 126 字节通过");
+  const sid = (await okName.json()).id;
+
+  assert((await postScript({ ...base, name: "attempts11", maxAttempts: 11 })).status === 400, "attempts=11 被拒");
+  assert((await postScript({ ...base, name: "attempts0", maxAttempts: 0 })).status === 400, "attempts=0 被拒");
+  assert((await postScript({ ...base, name: "stall61", logStallTimeoutMinutes: 61 })).status === 400, "无更新超时 61 分钟被拒");
+  assert((await postScript({ ...base, name: "total4", totalTimeoutMinutes: 4 })).status === 400, "总时长 4 分钟被拒");
+  assert((await postScript({ ...base, name: "total721", totalTimeoutMinutes: 721 })).status === 400, "总时长 721 分钟被拒");
+
+  const qLong = await fetch(baseUrl + "api/queues", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({ name: "队".repeat(43), autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: sid }] }),
+  });
+  assert(qLong.status === 400, "队列名 129 字节被拒（400）");
+
+  for (let i = 0; i < 10; i++) {
+    await fetch(baseUrl + "api/scripts/" + sid + "/users", { method: "POST", headers: hdr, body: JSON.stringify({ name: "任务用户" + i, enabled: true }) });
+  }
+  const tasks5 = Array.from({ length: 5 }, (_, i) => ({ id: "", index: i, scriptInstanceId: sid }));
+  const q5 = await fetch(baseUrl + "api/queues", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({ name: "任务50队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: tasks5 }),
+  });
+  assert(q5.ok, "任务启用用户总和 50 通过");
+  const qid = (await q5.json()).id;
+  const q6 = await fetch(baseUrl + "api/queues", {
+    method: "POST", headers: hdr,
+    body: JSON.stringify({ name: "任务60队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [...tasks5, { id: "", index: 5, scriptInstanceId: sid }] }),
+  });
+  assert(q6.status === 400, "任务启用用户总和 60 被拒（400）");
+
+  await fetch(baseUrl + "api/queues/" + qid, { method: "DELETE" });
+  await fetch(baseUrl + "api/scripts/" + sid, { method: "DELETE" });
+}
+
+async function testPagination(page) {
+  console.log("[用例] 分页：脚本列表前端分页 + 达上限禁用 + 历史 API 分页");
+  const hdr = { "Content-Type": "application/json" };
+  const ids = [];
+  for (let i = 0; i < 25; i++) {
+    const r = await fetch(baseUrl + "api/scripts", {
+      method: "POST", headers: hdr,
+      body: JSON.stringify({ name: "分页脚本" + String(i).padStart(2, "0"), rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 }),
+    });
+    ids.push((await r.json()).id);
+  }
+  await page.click('nav a[href="#/scripts"]');
+  await page.waitForSelector("[data-testid='pager-scripts']", { timeout: 10000 });
+  const rows1 = await page.$$eval("#view table tbody tr", els => els.length);
+  assert(rows1 === 20, "脚本分页第一页 20 行（实际 " + rows1 + "）");
+  const info1 = await page.textContent("[data-testid='pager-scripts'] .pager-info");
+  assert(info1.includes("共 25 条"), "分页条显示共 25 条");
+  await page.click("[data-testid='pager-scripts'] [data-action='pager-next']");
+  await page.waitForFunction(() => document.querySelectorAll("#view table tbody tr").length === 5, null, { timeout: 5000 });
+  assert(true, "翻页后第二页 5 行");
+  const newBtn = await page.$eval("[data-testid='new-script']", el => el.disabled);
+  assert(newBtn === true, "脚本达上限新建按钮禁用");
+
+  const hp = await (await fetch(baseUrl + "api/history?days=7&offset=0&limit=5")).json();
+  assert(typeof hp.total === "number" && Array.isArray(hp.records) && hp.records.length <= 5, "历史 API 服务端分页返回 {total, records}");
+
+  for (const id of ids) await fetch(baseUrl + "api/scripts/" + id, { method: "DELETE" });
+}
+
+async function testLimitsWarnings(page) {
+  console.log("[用例] 约束警告：非法配置告警 + 前端卡片（知道了/不再提醒）");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const limitsFile = path.join(runtimeDir, "config", "limits.json");
+
+  fs.mkdirSync(path.dirname(limitsFile), { recursive: true });
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 30}');
+  await stopService();
+  await sleep(400);
+  startService();
+  await waitForService();
+  await sleep(500);
+  assert(readLog().includes("[警告] 约束配置 [MaxScripts"), "启动日志含约束警告");
+  const l = await (await fetch(baseUrl + "api/limits")).json();
+  assert(l.limits.maxScripts === 30, "警告级配置已生效（maxScripts=30）");
+  assert(l.warnings.length === 1, "limits API 返回 1 条警告");
+
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#limits-warning", { timeout: 10000 });
+  const cardText = await page.textContent("#limits-warning");
+  assert(cardText.includes("知道了") && cardText.includes("不再提醒"), "警告卡片含「知道了」「不再提醒」按钮");
+
+  await page.click('[data-action="limits-dismiss-once"]');
+  await page.waitForSelector("#limits-warning", { state: "detached", timeout: 5000 });
+  assert(true, "点击「知道了」卡片关闭");
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#limits-warning", { timeout: 10000 });
+  assert(true, "重载后警告卡片再次出现");
+
+  await page.click('[data-action="limits-dismiss-forever"]');
+  await page.waitForSelector("#limits-warning", { state: "detached", timeout: 5000 });
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(800);
+  assert(!(await page.$("#limits-warning")), "点击「不再提醒」后重载不再出现");
+  assert(readLog().includes("[警告] 约束配置 [MaxScripts"), "日志仍含约束警告（不受不再提醒影响）");
+
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 40}');
+  await stopService();
+  await sleep(400);
+  startService();
+  await waitForService();
+  await sleep(500);
+  await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#limits-warning", { timeout: 10000 });
+  assert(true, "警告内容变化后重新提醒");
+  await page.click('[data-action="limits-dismiss-forever"]');
+
+  fs.rmSync(limitsFile, { force: true });
+  await stopService();
+  await sleep(400);
+  startService();
+  await waitForService();
+  const l2 = await (await fetch(baseUrl + "api/limits")).json();
+  assert(l2.warnings.length === 0 && l2.limits.maxScripts === 25, "恢复默认配置后无警告");
+}
+
+async function testLimitsFatal() {
+  console.log("[用例] 约束 FATAL：致命配置拒绝启动");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const limitsFile = path.join(runtimeDir, "config", "limits.json");
+
+  fs.mkdirSync(path.dirname(limitsFile), { recursive: true });
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 60}');
+  await stopService();
+  await sleep(400);
+  startService();
+  let started = true;
+  try { await waitForService(8000); } catch { started = false; }
+  assert(!started, "超警告区间（MaxScripts=60）服务拒绝启动");
+  await sleep(500);
+  assert(readLog().includes("[FATAL] 约束配置 [MaxScripts"), "启动日志含 FATAL 约束记录");
+
+  fs.writeFileSync(limitsFile, '{"MinAttempts": 8, "MaxAttempts": 3}');
+  await stopService();
+  await sleep(400);
+  startService();
+  started = true;
+  try { await waitForService(8000); } catch { started = false; }
+  assert(!started, "Min>Max 区间矛盾配置服务拒绝启动");
+  await sleep(500);
+  assert(readLog().includes("[FATAL]") && readLog().includes("区间矛盾"), "日志含区间矛盾 FATAL");
+
+  fs.rmSync(limitsFile, { force: true });
+  await stopService();
+  await sleep(400);
+  startService();
+  await waitForService();
+  assert(true, "恢复默认配置后服务正常启动");
+}
+
 /* ---------------- 主流程 ---------------- */
 
 async function main() {
@@ -1007,6 +1227,11 @@ async function main() {
       await testHistoryFiles();
       await testAudit(page);
       await testLogLevel(page);
+      await testLimitsApi(page);
+      await testLimitsFields(page);
+      await testPagination(page);
+      await testLimitsWarnings(page);
+      await testLimitsFatal();
     } finally {
       await browser.close();
     }
