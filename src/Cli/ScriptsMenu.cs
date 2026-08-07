@@ -155,6 +155,17 @@ internal static class ScriptsMenu
             script.NotifyEnabled = notify == "1";
         }
 
+        string? limitError = current is null ? Limits.CheckScriptCount(ctx.Scripts.Count) : null;
+        limitError ??= Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称");
+        limitError ??= Limits.CheckAttempts(script.MaxAttempts);
+        limitError ??= Limits.CheckStallMinutes(script.LogStallTimeoutMinutes);
+        limitError ??= Limits.CheckTotalMinutes(script.TotalTimeoutMinutes);
+        if (limitError is not null)
+        {
+            Console.WriteLine($"[错误] {limitError}，未保存。");
+            return;
+        }
+
         if (current is null)
         {
             ctx.Scripts.Add(script);

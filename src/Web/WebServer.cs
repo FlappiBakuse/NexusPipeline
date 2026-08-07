@@ -164,6 +164,9 @@ internal sealed class WebServer : IDisposable
             case "logs":
                 await ApiLogsHandler.Handle(context, method).ConfigureAwait(false);
                 return;
+            case "limits":
+                await ApiLimitsHandler.Handle(context, method).ConfigureAwait(false);
+                return;
             case "fs":
                 await ApiFsHandler.Handle(context, method, seg).ConfigureAwait(false);
                 return;

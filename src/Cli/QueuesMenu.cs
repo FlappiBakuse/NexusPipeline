@@ -151,6 +151,16 @@ internal static class QueuesMenu
 
         EditTasks(ctx, queue);
 
+        string? limitError = current is null ? Limits.CheckQueueCount(ctx.Queues.Count) : null;
+        limitError ??= Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称");
+        limitError ??= Limits.CheckTimeSets(queue.TimeSets.Count);
+        limitError ??= Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue));
+        if (limitError is not null)
+        {
+            Console.WriteLine($"[错误] {limitError}，未保存。");
+            return;
+        }
+
         if (current is null)
         {
             ctx.Queues.Add(queue);
@@ -182,6 +192,12 @@ internal static class QueuesMenu
         }
         if (choice.Trim() == "1")
         {
+            string? timeLimit = Limits.CheckTimeSets(queue.TimeSets.Count + 1);
+            if (timeLimit is not null)
+            {
+                Console.WriteLine($"[错误] {timeLimit}");
+                return;
+            }
             var ts = new QueueTimeSet();
             string? days = Ui.Prompt("执行周期（周一~周日输入 1-7，多选逗号分隔，如 1,3,5）：");
             if (string.IsNullOrWhiteSpace(days))
@@ -270,10 +286,17 @@ internal static class QueuesMenu
                 string? number = Ui.Prompt("输入脚本编号：");
                 if (int.TryParse(number?.Trim(), out int scriptIndex) && scriptIndex >= 1 && scriptIndex <= ctx.Scripts.Count)
                 {
+                    ScriptInstance target = ctx.Scripts[scriptIndex - 1];
+                    int newTotal = Limits.QueueTotalUsers(ctx, queue) + Math.Max(1, target.Users.Count(user => user.Enabled));
+                    if (newTotal > Limits.Current.MaxQueueTotalUsers)
+                    {
+                        Console.WriteLine($"[错误] 任务列表的启用用户总数已达上限（{newTotal}/{Limits.Current.MaxQueueTotalUsers}）");
+                        continue;
+                    }
                     queue.Tasks.Add(new QueueTask
                     {
                         Index = queue.Tasks.Count,
-                        ScriptInstanceId = ctx.Scripts[scriptIndex - 1].Id,
+                        ScriptInstanceId = target.Id,
                     });
                     Console.WriteLine("[完成] 已添加任务。");
                 }

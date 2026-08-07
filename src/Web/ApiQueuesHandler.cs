@@ -21,6 +21,15 @@ internal static class ApiQueuesHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "队列名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
+            string? limitError = Limits.CheckQueueCount(ctx.Queues.Count)
+                ?? Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                ?? Limits.CheckTimeSets(queue.TimeSets.Count)
+                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue));
+            if (limitError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
+                return;
+            }
             if (string.IsNullOrWhiteSpace(queue.Id) || ctx.FindQueue(queue.Id) is null)
             {
                 queue.Id = Guid.NewGuid().ToString("N");
@@ -39,6 +48,14 @@ internal static class ApiQueuesHandler
             if (update is null || existing is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                ?? Limits.CheckTimeSets(update.TimeSets.Count)
+                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update));
+            if (limitError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
             update.Id = existing.Id;

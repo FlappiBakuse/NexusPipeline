@@ -40,6 +40,21 @@ public static class Program
         MigrateLegacyConfig();
         ctx.ReloadSettings();
         ctx.ReloadData();
+        Limits.Load();
+        if (Limits.Fatals.Count > 0)
+        {
+            foreach (string fatal in Limits.Fatals)
+            {
+                Logger.Fatal(fatal);
+                Console.Error.WriteLine(fatal);
+            }
+            Console.Error.WriteLine("约束配置存在致命错误，拒绝启动。请修正 config/limits.json 后重试。");
+            return 1;
+        }
+        foreach (string warning in Limits.Warnings)
+        {
+            Logger.Warn(warning);
+        }
         UserConfigManager.RecoverInterrupted();
 
         if (args.Length == 0)

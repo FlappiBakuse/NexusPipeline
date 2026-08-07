@@ -22,6 +22,16 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "脚本名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
+            string? limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
+                ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+                ?? Limits.CheckAttempts(script.MaxAttempts)
+                ?? Limits.CheckStallMinutes(script.LogStallTimeoutMinutes)
+                ?? Limits.CheckTotalMinutes(script.TotalTimeoutMinutes);
+            if (limitError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
+                return;
+            }
             if (string.IsNullOrWhiteSpace(script.Id) || ctx.FindScript(script.Id) is null)
             {
                 script.Id = Guid.NewGuid().ToString("N");
@@ -39,6 +49,15 @@ internal static class ApiScriptsHandler
             if (update is null || existing is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+                ?? Limits.CheckAttempts(update.MaxAttempts)
+                ?? Limits.CheckStallMinutes(update.LogStallTimeoutMinutes)
+                ?? Limits.CheckTotalMinutes(update.TotalTimeoutMinutes);
+            if (limitError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
             update.Id = existing.Id;
@@ -95,6 +114,12 @@ internal static class ApiScriptsHandler
                 if (user is null || !ScriptUserRule.IsValidName(user.Name))
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
+                    return;
+                }
+                string? userLimit = Limits.CheckUserCount(script.Users.Count);
+                if (userLimit is not null)
+                {
+                    await HttpHelper.WriteJsonAsync(context, new { error = userLimit }, 400).ConfigureAwait(false);
                     return;
                 }
                 if (script.Users.Any(existing => string.Equals(existing.Name, user.Name, StringComparison.OrdinalIgnoreCase)))
