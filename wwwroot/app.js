@@ -2,6 +2,8 @@ import { initParticles } from "./effects/particles.js";
 import { closeModal } from "./core/modal.js";
 import { cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
+import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./core/limits.js";
+import { pagerNavigate } from "./core/pager.js";
 import { pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";
 import { actions as usersActions, pageScriptUsers } from "./views/users.js";
@@ -16,6 +18,11 @@ const shellActions = {
   "close-nav": () => setNavOpen(false),
   "toggle-theme": () => cycleTheme(),
   "close-modal": () => closeModal(),
+  "limits-dismiss-once": () => dismissWarningOnce(),
+  "limits-dismiss-forever": () => dismissWarningForever(),
+  "pager-page": target => pagerNavigate(target.dataset.pager, "page", target),
+  "pager-prev": target => pagerNavigate(target.dataset.pager, "prev", target),
+  "pager-next": target => pagerNavigate(target.dataset.pager, "next", target),
 };
 
 const allActions = {
@@ -63,8 +70,10 @@ window.addEventListener("hashchange", route);
 window.addEventListener("resize", () => {
   if (window.innerWidth > 820) setNavOpen(false);
 });
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   initParticles();
+  await loadLimits();
+  showWarning();
   route();
 });

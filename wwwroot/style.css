@@ -170,7 +170,23 @@ textarea { min-height: 92px; padding: 11px 12px; resize: vertical; font-family: 
 .modal-body > .form-grid { margin-bottom: 20px; }
 .modal-body > .form-grid:last-of-type { margin-bottom: 0; }
 .modal-body > .form-grid + .subsection { margin-top: 4px; }
-.check input { flex: 0 0 auto; width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--accent); }
+.check input[type=checkbox] {
+  appearance: none; -webkit-appearance: none; flex: 0 0 auto;
+  width: 18px; height: 18px; margin: 2px 0 0;
+  border: 1.5px solid var(--border-strong); border-radius: 5px;
+  background: var(--panel-soft); cursor: pointer;
+  display: inline-grid; place-content: center;
+  transition: background .15s, border-color .15s, box-shadow .15s;
+}
+.check input[type=checkbox]::before {
+  content: ""; width: 10px; height: 10px; border-radius: 2px;
+  background: var(--accent); transform: scale(0); transition: transform .15s ease;
+  box-shadow: 0 1px 4px rgba(49, 129, 247, .4);
+}
+.check input[type=checkbox]:checked { background: var(--accent-soft); border-color: var(--accent); }
+.check input[type=checkbox]:checked::before { transform: scale(1); }
+.check input[type=checkbox]:focus-visible { outline: none; box-shadow: var(--focus); }
+.check input[type=checkbox]:disabled { cursor: not-allowed; opacity: .45; }
 .check label { margin: 0; color: inherit; font-weight: 500; }
 .chk-row { align-items: start; }
 .req { color: var(--bad); }
@@ -208,6 +224,17 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
 
 .plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.pager { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.pager .pager-info { margin-right: auto; color: var(--muted); font-size: 12px; }
+.pager button + button { margin-left: 0; }
+.pager button.pager-active { background: var(--accent-soft); border-color: var(--border-strong); color: var(--accent); }
+.pager button:disabled { cursor: not-allowed; opacity: .4; }
+.limits-warning { position: fixed; inset: 0; z-index: 150; display: flex; align-items: center; justify-content: center; padding: 14px; background: rgba(4, 10, 20, .72); backdrop-filter: blur(6px); }
+.limits-warning-card { width: min(560px, 100%); padding: 26px; border: 1px solid var(--warn); border-radius: var(--radius-lg); background: var(--panel-solid); box-shadow: var(--shadow); }
+.limits-warning-card .modal-title { color: var(--warn); }
+.limits-warning-copy { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.limits-warning-list { margin: 14px 0 0; padding-left: 20px; color: var(--text); font-size: 13px; line-height: 1.8; }
+.limits-warning-list li::marker { color: var(--warn); }
 .plugin-card { min-width: 0; padding: 16px; border: 1px solid var(--border); border-radius: 13px; background: var(--panel-soft); }
 .plugin-card .p-name { overflow: hidden; font-size: 14px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-card .p-ver { margin: 3px 0 12px; color: var(--muted); font-size: 11px; }

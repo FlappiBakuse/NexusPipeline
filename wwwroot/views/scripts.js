@@ -2,11 +2,14 @@ import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { valueField, pageHeader } from "../core/forms.js";
+import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let scriptDraft = null;
+let scriptPage = 1;
+const SCRIPT_PAGE_SIZE = 20;
 
 export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
@@ -21,11 +24,15 @@ export async function pageScripts(token) {
   }
   if (!isCurrent("scripts", token)) return;
   state.scripts = scripts;
-  const action = '<button type="button" data-action="open-script-modal" data-testid="new-script">新建脚本实例</button>';
+  const atLimit = !!(state.limits && scripts.length >= state.limits.maxScripts);
+  const action = `<button type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
+  const totalPages = Math.max(1, Math.ceil(scripts.length / SCRIPT_PAGE_SIZE));
+  if (scriptPage > totalPages) scriptPage = totalPages;
+  const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
     ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
     : `<section class="card"><div class="table-scroll"><table class="data-table"><thead><tr><th>名称</th><th>主程序</th><th>日志路径</th><th>游戏</th><th>重试</th><th>通知</th><th>操作</th></tr></thead><tbody>
-      ${scripts.map(script => `<tr>
+      ${pageItems.map(script => `<tr>
         <td><strong>${esc(script.name)}</strong></td>
         <td class="mono" title="${esc(script.mainExe)}">${esc(script.mainExe)}</td>
         <td class="mono" title="${esc(script.logPath)}">${esc(script.logPath) || "-"}</td>
@@ -34,8 +41,9 @@ export async function pageScripts(token) {
         <td>${script.notifyEnabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>'}</td>
         <td class="ops"><button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button><button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button><button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button></td>
       </tr>`).join("")}
-    </tbody></table></div></section>`;
+    </tbody></table></div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
   render(pageHeader("SCRIPT CATALOG", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
+  registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
 }
 
 export async function openScriptModal(id = "") {
@@ -60,6 +68,7 @@ export async function openScriptModal(id = "") {
     notifyEnabled: !!value.notifyEnabled,
   };
   const d = scriptDraft;
+  const l = state.limits || {};
   const body = `<div class="form-grid">
     ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
     ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
@@ -85,9 +94,9 @@ export async function openScriptModal(id = "") {
   </div>
   <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
     <div class="form-grid three">
-      ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", 'min="1"')}
-      ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", 'min="1"')}
-      ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", 'min="1"')}
+      ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
+      ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
+      ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
     </div>
     <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
   </div>`;
@@ -125,11 +134,25 @@ export async function saveScript() {
     }
     element.classList.remove("field-error");
   }
+  const l = state.limits || {};
+  const nameBytes = new TextEncoder().encode($dom("#sm-name").value.trim()).length;
+  if (l.maxScriptNameBytes && nameBytes > l.maxScriptNameBytes) {
+    toast(`脚本名称最多 ${l.maxScriptNameBytes} 字节`, "error");
+    return;
+  }
   const attempts = parseInt($dom("#sm-attempts")?.value, 10);
   const stall = parseInt($dom("#sm-stall")?.value, 10);
   const total = parseInt($dom("#sm-total")?.value, 10);
-  if (!(attempts >= 1) || !(stall >= 1) || !(total >= 1)) {
-    toast("运行设置中的次数和超时必须为正数", "error");
+  if (!(attempts >= (l.minAttempts ?? 1)) || !(attempts <= (l.maxAttempts ?? 10))) {
+    toast(`最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`, "error");
+    return;
+  }
+  if (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60))) {
+    toast(`日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`, "error");
+    return;
+  }
+  if (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720))) {
+    toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
     return;
   }
   const payload = {

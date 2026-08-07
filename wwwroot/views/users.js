@@ -2,6 +2,7 @@ import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
+import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
@@ -9,6 +10,8 @@ import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 let userModalScriptId = "";
 let userEditingName = null;
 let userDraft = null;
+let userPage = 1;
+const USER_PAGE_SIZE = 10;
 
 export async function pageScriptUsers(scriptId, token) {
   const page = "scripts/" + scriptId + "/users";
@@ -23,14 +26,20 @@ export async function pageScriptUsers(scriptId, token) {
   const script = scripts.find(item => item.id === scriptId);
   if (!script) { render('<div class="empty"><strong>脚本实例不存在</strong><a class="back-link" href="#/scripts">返回脚本实例</a></div>'); return; }
   const users = script.users || [];
-  const usersMarkup = users.length ? users.map(user => `<article class="card user-card">
+  const atLimit = !!(state.limits && users.length >= state.limits.maxUsersPerScript);
+  const action = `<button type="button" data-action="open-user-modal" data-id="${script.id}" ${atLimit ? "disabled" : ""}>添加用户${atLimit ? `（${users.length}/${state.limits.maxUsersPerScript}）` : ""}</button>`;
+  const totalPages = Math.max(1, Math.ceil(users.length / USER_PAGE_SIZE));
+  if (userPage > totalPages) userPage = totalPages;
+  const pageItems = users.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
+  const usersMarkup = users.length ? `${pageItems.map(user => `<article class="card user-card">
     <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div></div>
       <div class="action-row"><button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button><button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button><button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button></div>
     </div>
     <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
     <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
-  </article>`).join("") : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
-  render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", `<button type="button" data-action="open-user-modal" data-id="${script.id}">添加用户</button>`) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
+  </article>`).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
+  render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
+  registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
 }
 
 export function openUserModal(scriptId, userName = "") {
