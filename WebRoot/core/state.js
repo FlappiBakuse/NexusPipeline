@@ -4,11 +4,6 @@ export const state = {
   scripts: [],
   queues: [],
   settings: null,
-  scriptDraft: null,
-  queueDraft: null,
-  userModalScriptId: "",
-  userEditingName: null,
-  userDraft: null,
   timers: new Set(),
   controllers: new Set(),
 };

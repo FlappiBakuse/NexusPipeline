@@ -1,0 +1,163 @@
+import { api } from "../core/api.js";
+import { $ as $dom } from "../core/dom.js";
+import { esc } from "../core/format.js";
+import { valueField, pageHeader } from "../core/forms.js";
+import { isCurrent, state } from "../core/state.js";
+import { closeModal, modalShell, showModal } from "../core/modal.js";
+import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+
+let scriptDraft = null;
+
+export async function pageScripts(token) {
+  if (!isCurrent("scripts", token)) return;
+  navActive("scripts");
+  setTopbarTitle("脚本实例");
+  let scripts;
+  try {
+    scripts = await api("GET", "/api/scripts");
+  } catch (error) {
+    if (isCurrent("scripts", token)) render(`<div class="empty"><strong>加载脚本实例失败</strong>${esc(error.message)}</div>`);
+    return;
+  }
+  if (!isCurrent("scripts", token)) return;
+  state.scripts = scripts;
+  const action = '<button type="button" data-action="open-script-modal" data-testid="new-script">新建脚本实例</button>';
+  const content = scripts.length === 0
+    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
+    : `<section class="card"><div class="table-scroll"><table class="data-table"><thead><tr><th>名称</th><th>主程序</th><th>日志路径</th><th>游戏</th><th>重试</th><th>通知</th><th>操作</th></tr></thead><tbody>
+      ${scripts.map(script => `<tr>
+        <td><strong>${esc(script.name)}</strong></td>
+        <td class="mono" title="${esc(script.mainExe)}">${esc(script.mainExe)}</td>
+        <td class="mono" title="${esc(script.logPath)}">${esc(script.logPath) || "-"}</td>
+        <td>${script.launchGame ? esc(script.gameExe || "?") : '<span class="muted">不启动</span>'}</td>
+        <td>${script.maxAttempts}</td>
+        <td>${script.notifyEnabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>'}</td>
+        <td class="ops"><button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button><button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button><button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button></td>
+      </tr>`).join("")}
+    </tbody></table></div></section>`;
+  render(pageHeader("SCRIPT CATALOG", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
+}
+
+export async function openScriptModal(id = "") {
+  let script = id ? state.scripts.find(item => item.id === id) : null;
+  if (id && !script) {
+    try {
+      state.scripts = await api("GET", "/api/scripts");
+      script = state.scripts.find(item => item.id === id);
+    } catch (error) {
+      toast("加载脚本失败：" + error.message, "error");
+      return;
+    }
+  }
+  const value = script || {};
+  scriptDraft = {
+    id: value.id || "", name: value.name || "", rootPath: value.rootPath || "", mainExe: value.mainExe || "",
+    args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
+    launchGame: !!value.launchGame, gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
+    gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
+    maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
+    totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120, successMarkers: value.successMarkers || "",
+    notifyEnabled: !!value.notifyEnabled,
+  };
+  const d = scriptDraft;
+  const body = `<div class="form-grid">
+    ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
+    ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
+  </div>
+  <div class="form-grid">
+    ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
+    ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选"')}
+  </div>
+  <div class="form-grid">
+    ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
+    ${valueField("sm-log", "日志文件夹路径 <span class='req'>*</span>", d.logPath, "text", 'placeholder="请先填写脚本根目录"')}
+  </div>
+  <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
+    <div class="check-grid">
+      <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
+      <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
+      <label class="check"><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+    </div>
+    <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
+      <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
+      <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+    </div>
+  </div>
+  <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
+    <div class="form-grid three">
+      ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", 'min="1"')}
+      ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", 'min="1"')}
+      ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", 'min="1"')}
+    </div>
+    <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
+  </div>`;
+  const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
+  showModal(modalShell(id ? "编辑脚本实例" : "新建脚本实例", body, footer));
+  syncScriptGhostState();
+  $dom("#sm-launch")?.addEventListener("change", event => {
+    const box = $dom("#sm-game-box");
+    if (box) box.toggleAttribute("hidden", !event.target.checked);
+  });
+  const rootInput = $dom("#sm-root");
+  rootInput?.addEventListener("input", syncScriptGhostState);
+  rootInput?.addEventListener("change", syncScriptGhostState);
+  rootInput?.addEventListener("keyup", syncScriptGhostState);
+}
+
+export function syncScriptGhostState() {
+  const root = $dom("#sm-root");
+  const hasRoot = !!(root && root.value.trim());
+  ["sm-exe", "sm-args", "sm-config", "sm-log"].forEach(id => {
+    const element = $dom("#" + id);
+    if (element) element.disabled = !hasRoot;
+  });
+}
+
+export async function saveScript() {
+  const required = [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志文件夹路径"]];
+  for (const [id, label] of required) {
+    const element = $dom("#" + id);
+    if (!element?.value.trim()) {
+      toast("请填写" + label, "error");
+      element?.classList.add("field-error");
+      element?.focus();
+      return;
+    }
+    element.classList.remove("field-error");
+  }
+  const attempts = parseInt($dom("#sm-attempts")?.value, 10);
+  const stall = parseInt($dom("#sm-stall")?.value, 10);
+  const total = parseInt($dom("#sm-total")?.value, 10);
+  if (!(attempts >= 1) || !(stall >= 1) || !(total >= 1)) {
+    toast("运行设置中的次数和超时必须为正数", "error");
+    return;
+  }
+  const payload = {
+    id: scriptDraft.id, name: $dom("#sm-name").value.trim(), rootPath: $dom("#sm-root").value.trim(),
+    mainExe: $dom("#sm-exe").value.trim(), args: $dom("#sm-args").value.trim(), configPath: $dom("#sm-config").value.trim(), logPath: $dom("#sm-log").value.trim(),
+    launchGame: $dom("#sm-launch").checked, gameExe: $dom("#sm-game-exe")?.value.trim() || "", gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
+    forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
+    successMarkers: $dom("#sm-markers").value.trim(), notifyEnabled: $dom("#sm-notify").checked,
+  };
+  try {
+    if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);
+    else await api("POST", "/api/scripts", payload);
+    closeModal();
+    toast("脚本实例已保存");
+    const token = state.routeToken;
+    await pageScripts(token);
+  } catch (error) { toast(error.message, "error"); }
+}
+
+export async function deleteScript(id, name) {
+  if (!confirm("确定删除脚本实例「" + name + "」？")) return;
+  try { await api("DELETE", "/api/scripts/" + id); toast("脚本实例已删除"); await pageScripts(state.routeToken); }
+  catch (error) { toast(error.message, "error"); }
+}
+
+export const actions = {
+  "open-script-modal": target => openScriptModal(target.dataset.id || ""),
+  "edit-script": target => openScriptModal(target.dataset.id),
+  "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
+  "save-script": () => saveScript(),
+};

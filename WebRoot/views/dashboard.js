@@ -1,4 +1,5 @@
-import { api, esc, statusBadge } from "../core/api.js";
+import { api } from "../core/api.js";
+import { esc, statusBadge } from "../core/format.js";
 import { isCurrent, schedule } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startCountdown } from "../core/ui.js";
 
