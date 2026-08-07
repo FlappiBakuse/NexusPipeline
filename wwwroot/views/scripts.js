@@ -3,7 +3,7 @@ import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { valueField, pageHeader } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
-import { isCurrent, state } from "../core/state.js";
+import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
@@ -15,15 +15,17 @@ export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
   navActive("scripts");
   setTopbarTitle("脚本实例");
-  let scripts;
+  let scripts, status;
   try {
-    scripts = await api("GET", "/api/scripts");
+    [scripts, status] = await Promise.all([api("GET", "/api/scripts"), api("GET", "/api/status")]);
   } catch (error) {
     if (isCurrent("scripts", token)) render(`<div class="empty"><strong>加载脚本实例失败</strong>${esc(error.message)}</div>`);
     return;
   }
   if (!isCurrent("scripts", token)) return;
   state.scripts = scripts;
+  state.plugins = status.plugins || [];
+  const notifyOn = notifyAvailable();
   const atLimit = !!(state.limits && scripts.length >= state.limits.maxScripts);
   const action = `<button type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(scripts.length / SCRIPT_PAGE_SIZE));
@@ -38,7 +40,7 @@ export async function pageScripts(token) {
         <td class="mono" title="${esc(script.logPath)}">${esc(script.logPath) || "-"}</td>
         <td>${script.launchGame ? esc(script.gameExe || "?") : '<span class="muted">不启动</span>'}</td>
         <td>${script.maxAttempts}</td>
-        <td>${script.notifyEnabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>'}</td>
+        <td>${notifyOn ? (script.notifyEnabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>') : '<span class="muted">-</span>'}</td>
         <td class="ops"><button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button><button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button><button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button></td>
       </tr>`).join("")}
     </tbody></table></div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
@@ -85,7 +87,7 @@ export async function openScriptModal(id = "") {
     <div class="check-grid">
       <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
       <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
-      <label class="check"><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+      <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
     </div>
     <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
       <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
@@ -160,7 +162,7 @@ export async function saveScript() {
     mainExe: $dom("#sm-exe").value.trim(), args: $dom("#sm-args").value.trim(), configPath: $dom("#sm-config").value.trim(), logPath: $dom("#sm-log").value.trim(),
     launchGame: $dom("#sm-launch").checked, gameExe: $dom("#sm-game-exe")?.value.trim() || "", gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
-    successMarkers: $dom("#sm-markers").value.trim(), notifyEnabled: $dom("#sm-notify").checked,
+    successMarkers: $dom("#sm-markers").value.trim(), notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
   };
   try {
     if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);

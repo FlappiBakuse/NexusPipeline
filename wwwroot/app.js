@@ -66,6 +66,13 @@ document.addEventListener("input", event => {
   if (event.target?.id === "sm-root") syncScriptGhostState();
 });
 
+document.addEventListener("change", event => {
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+  const handler = allActions[target.dataset.action];
+  if (handler) handler(target, event);
+});
+
 window.addEventListener("hashchange", route);
 window.addEventListener("resize", () => {
   if (window.innerWidth > 820) setNavOpen(false);

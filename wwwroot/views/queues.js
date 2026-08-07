@@ -3,7 +3,7 @@ import { $, $$ } from "../core/dom.js";
 import { actionLabel, dayDesc, esc } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
-import { isCurrent, state } from "../core/state.js";
+import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
@@ -14,11 +14,11 @@ const QUEUE_PAGE_SIZE = 20;
 export async function pageQueues(token) {
   if (!isCurrent("queues", token)) return;
   navActive("queues"); setTopbarTitle("调度队列");
-  let queues, scripts;
-  try { [queues, scripts] = await Promise.all([api("GET", "/api/queues"), api("GET", "/api/scripts")]); }
+  let queues, scripts, status;
+  try { [queues, scripts, status] = await Promise.all([api("GET", "/api/queues"), api("GET", "/api/scripts"), api("GET", "/api/status")]); }
   catch (error) { render(`<div class="empty"><strong>加载队列失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("queues", token)) return;
-  state.queues = queues; state.scripts = scripts;
+  state.queues = queues; state.scripts = scripts; state.plugins = status.plugins || [];
   const atLimit = !!(state.limits && queues.length >= state.limits.maxQueues);
   const action = `<button type="button" data-action="open-queue-modal" ${atLimit ? "disabled" : ""}>新建调度队列${atLimit ? `（${queues.length}/${state.limits.maxQueues}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(queues.length / QUEUE_PAGE_SIZE));
@@ -76,7 +76,7 @@ export function renderQueueModal() {
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
   const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
     <div class="form-grid"><div><label class="field-label" for="qm-mode">自动运行方式</label><select id="qm-mode"><option value="scheduled" ${d.autoRunMode === "scheduled" ? "selected" : ""}>定时运行</option><option value="startup" ${d.autoRunMode === "startup" ? "selected" : ""}>启动时运行</option></select></div><div><label class="field-label" for="qm-action">运行完成操作</label><select id="qm-action"><option value="none" ${d.completionAction === "none" ? "selected" : ""}>无操作</option><option value="exit" ${d.completionAction === "exit" ? "selected" : ""}>退出软件</option><option value="sleep" ${d.completionAction === "sleep" ? "selected" : ""}>休眠</option><option value="reboot" ${d.completionAction === "reboot" ? "selected" : ""}>重启</option><option value="shutdown" ${d.completionAction === "shutdown" ? "selected" : ""}>关机</option></select></div></div>
-    <label class="check"><input id="qm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>队列级通知（统一发送所有脚本状态，覆盖实例级设置）</span></label>
+    <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="qm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>队列级通知（统一发送所有脚本状态，覆盖实例级设置）</span></label>
     <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">可添加多个触发时间</span></div><div id="qm-timesets">${d.timeSets.map((timeSet, index) => `<div class="card timeset-card compact-card"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-frame" role="group" aria-label="执行周期">${days.map((name, day) => `<label class="check days-option"><input type="checkbox" data-ts-days="${index}" data-day="${day}" ${timeSet.days.includes(day) ? "checked" : ""}><span>${name}</span></label>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><label class="check"><input type="checkbox" data-ts-enable="${index}" ${timeSet.enabled ? "checked" : ""}><span>启用</span></label><button class="sm danger" type="button" data-action="remove-time-set" data-index="${index}">删除该定时</button></div></div>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
     <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按序号先后执行</span></div><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row"><span class="muted task-number">${index + 1}.</span><select data-task-idx="${index}"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${script.id}" ${script.id === task.scriptInstanceId ? "selected" : ""}>${esc(script.name)}</option>`).join("")}</select><button class="sm" type="button" data-action="move-task-up" data-index="${index}" aria-label="任务上移">↑</button><button class="sm" type="button" data-action="move-task-down" data-index="${index}" aria-label="任务下移">↓</button><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div><button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
   showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body, '<button type="button" data-action="save-queue">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), true);

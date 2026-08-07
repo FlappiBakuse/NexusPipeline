@@ -3,6 +3,7 @@ export const state = {
   routeToken: 0,
   scripts: [],
   queues: [],
+  plugins: [],
   settings: null,
   timers: new Set(),
   controllers: new Set(),
@@ -40,6 +41,10 @@ export function trackController(controller) {
 
 export function releaseController(controller) {
   state.controllers.delete(controller);
+}
+
+export function notifyAvailable() {
+  return !!(state.plugins || []).find(plugin => plugin.name === "notify" && plugin.enabled);
 }
 
 export function disposePage() {

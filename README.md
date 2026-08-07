@@ -92,6 +92,7 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`，再运行 `uitest\run-uitest.cmd`（或 `node uitest/test.mjs`）即可；
+- 快速迭代时可加 `--quick` 参数（如 `node uitest/test.mjs --quick`）只跑 UI 冒烟子集，CI 仍跑全量；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移。
 

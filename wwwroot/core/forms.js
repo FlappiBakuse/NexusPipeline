@@ -8,6 +8,6 @@ export function valueField(id, label, value, type = "text", extra = "") {
   return `<div><label class="field-label" for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${extra}></div>`;
 }
 
-export function selectField(id, label, value, options) {
-  return `<div><label class="field-label" for="${id}">${label}</label><select id="${id}">${options.map(option => `<option value="${option}" ${option === value ? "selected" : ""}>${option}</option>`).join("")}</select></div>`;
+export function selectField(id, label, value, options, extra = "") {
+  return `<div><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${v}" ${v === value ? "selected" : ""}>${t}</option>`; }).join("")}</select></div>`;
 }
