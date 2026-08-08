@@ -1,50 +1,39 @@
 # 贡献指南
 
-感谢参与 NexusPipeline（枢链）开发。协作方式以 **v1.0.0 为界**：
+感谢参与 NexusPipeline（枢链）开发。**完整规范见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**（提交信息、版本号、Release 分发规则）。本文为快速入门索引。
 
-- **v1.0.0 之前（早期开发阶段）**：仓库 `main` 无分支保护（无 ruleset），v0.1.0 至今均为**直接推送 `main`**，不走 Pull Request；提交前先 `git pull` 避免分叉，**禁止 force push**；版本发布一律标记 **Pre-release**。
-- **v1.0.0 起（正式版本）**：所有改动**只能通过 Pull Request** 合入 `main`（CI 构建 + e2e 测试全绿后 squash 合并），禁止直接推送到 `main`。
-
-## 开发流程
+## 快速开始
 
 1. 同步最新代码：`git checkout main && git pull`；
-2. 在 `main` 上直接完成改动，按规范提交（小改动可一条提交，大改动建议分多条逻辑提交）；
-3. 推送前本地验证：`build.cmd` + `node uitest\test.mjs`（全量 e2e）通过；
-4. 推送：`git push origin main`；
-5. 如需发布：打 tag（`git tag vX.Y.Z` + `git push origin vX.Y.Z`）→ `gh release create`。
+2. 本地验证：`build.cmd` → `node uitest\test.mjs`（全量 e2e，303 项用例）全绿；
+3. 提交并推送（v1.0.0 之前直接 push `main`，禁止 force push；发布操作须先经用户同意）。
 
-## 分支命名
+## 协作模式（以 v1.0.0 为界）
 
-如确需开分支协作，按前缀命名：
+- **v1.0.0 之前**：`main` 无分支保护，直接 push main，不走 PR；版本发布一律 **Pre-release**。
+- **v1.0.0 起**：所有改动只能通过 Pull Request 合入 `main`（CI 构建 + e2e 全绿后 squash 合并）。
 
-| 前缀 | 用途 |
+## 提交信息规范（摘要）
+
+采用 **Conventional Commits**，type / scope 英文，描述中文：`<type>[<scope>][!]: <描述>`。
+
+| type | 用途 |
 |---|---|
-| `feat/` | 新功能（如 `feat/dispatch-center`） |
-| `fix/` | 缺陷修复（如 `fix/history-timezone`） |
-| `docs/` | 文档（如 `docs/readme-license`） |
-| `refactor/` | 重构（不改变行为） |
-| `test/` | 测试相关 |
-| `chore/` | 构建、依赖、杂务 |
+| `feat` | 新功能 |
+| `fix` | 缺陷修复 |
+| `docs` / `refactor` / `perf` / `test` | 文档 / 重构 / 优化 / 测试 |
+| `build` / `ci` / `chore` / `style` / `revert` | 构建 / CI / 杂务 / 样式 / 还原 |
 
-## 提交信息规范
+示例：
 
-采用 **Conventional Commits**，type 用英文规范词，描述用中文：
+- `feat(dispatch): 新增调度中心批量执行`
+- `fix(history): 修复历史详情时区错位`
+- `feat(plugins)!: 变更插件契约签名`（破坏性变更须标注）
 
-- `feat: 新增调度中心批量执行`
-- `fix: 修复历史详情弹窗时区错位`
-- `docs: 补充文件结构说明`
-- `refactor: 抽取运行会话状态机`
-- `test: 增加调度队列端到端用例`
-- `chore: 更新 build.cmd 发布脚本`
+## 发布流程（摘要）
 
-## 提交要求
+1. 构建与测试全绿；
+2. 打 tag `vX.Y.Z` → `gh release create --prerelease`（标题 `vX.Y.Z`，notes 参考 v0.3.1 分组格式）；
+3. 资产：`NexusPipeline-vX.Y.Z-win-x64.zip`（exe + wwwroot + plugins + README + LICENSE，排除 config/）+ 同名 `.sha256`（内容纯 hash，遵守 v0.2.1 及之前规则）。
 
-- 描述说明：变更内容、原因、测试结果（本地 e2e 通过数）；
-- 变更范围尽量聚焦单一目的，便于回滚；
-- 不提交任何运行产物与配置数据（`release/`、`config/`、`history/`、`logs/`、`uitest/runtime/` 等已被 .gitignore 排除）；
-- 不提交任何密钥或账号信息（通知密钥以 DPAPI 加密，加密值也请勿提交）。
-
-## 版本与发布
-
-- 版本号遵循 SemVer；发布走 GitHub Releases（预发布标记 Pre-release）；
-- 发布流程：提交代码 → 打 tag（如 `v0.2.0`）→ `gh release create` 上传打包产物（exe + wwwroot + plugins + README + LICENSE，不含用户配置），附 SHA256。
+详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
