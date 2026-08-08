@@ -325,41 +325,50 @@ internal class RunSession
     {
         string modeText = _mode == "auto" ? "自动" : "手动";
 
-        if (SystemActions.IsExeRunning(_script.MainExe))
-        {
-            return RunAttemptResult.Failed("检测到已打开的脚本，请先退出后再运行");
-        }
-
         if (_script.LaunchGame)
         {
-            if (!TextRules.IsExecutable(_script.GameExe))
+            if (string.IsNullOrWhiteSpace(_script.GameExe))
             {
-                return RunAttemptResult.Failed("游戏路径错误或不是可执行文件");
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」未填写游戏路径，跳过游戏启动。");
             }
-            _statusChanged?.Invoke("正在启动游戏...");
-            try
+            else
             {
-                string gameWork = Path.GetDirectoryName(_script.GameExe) ?? "";
-                bool commandFile = SystemActions.IsCommandFile(_script.GameExe);
-                ProcessStartInfo gamePsi = SystemActions.BuildScriptStartInfo(_script.GameExe, gameWork, TextRules.SplitArgs(_script.GameArgs), noWindow: false, redirect: commandFile);
-                if (!commandFile)
+                if (!TextRules.IsExecutable(_script.GameExe))
                 {
-                    gamePsi.UseShellExecute = true;
+                    return RunAttemptResult.Failed("游戏路径错误或不是可执行文件");
                 }
-                _ = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
-                Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒）。");
-            }
-            catch (Exception ex)
-            {
-                return RunAttemptResult.Failed($"游戏启动失败：{ex.Message}");
-            }
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, _script.GameWaitSeconds)), _token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                return RunAttemptResult.Cancelled("已取消（等待游戏启动期间）");
+                _statusChanged?.Invoke("正在启动游戏...");
+                try
+                {
+                    string gameWork = Path.GetDirectoryName(_script.GameExe) ?? "";
+                    bool commandFile = SystemActions.IsCommandFile(_script.GameExe);
+                    ProcessStartInfo gamePsi = SystemActions.BuildScriptStartInfo(_script.GameExe, gameWork, TextRules.SplitArgs(_script.GameArgs), noWindow: false, redirect: commandFile);
+                    if (!commandFile)
+                    {
+                        gamePsi.UseShellExecute = true;
+                    }
+                    _ = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
+                    Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
+                }
+                catch (Exception ex)
+                {
+                    return RunAttemptResult.Failed($"游戏启动失败：{ex.Message}");
+                }
+                bool gameConfirmed;
+                try
+                {
+                    gameConfirmed = await WaitForGameProcessAsync(TimeSpan.FromSeconds(Math.Max(0, _script.GameWaitSeconds))).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return RunAttemptResult.Cancelled("已取消（等待游戏启动期间）");
+                }
+                if (!gameConfirmed)
+                {
+                    return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后仍未检测到游戏进程，游戏可能启动失败");
+                }
+                _statusChanged?.Invoke("已确认游戏进程启动");
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认游戏进程启动，继续运行脚本。");
             }
         }
 
@@ -371,24 +380,46 @@ internal class RunSession
         string workingDir = string.IsNullOrWhiteSpace(_script.RootPath)
             ? Path.GetDirectoryName(_script.MainExe) ?? ""
             : _script.RootPath;
-        var psi = SystemActions.BuildScriptStartInfo(_script.MainExe, workingDir, TextRules.SplitArgs(_script.Args), noWindow: true, redirect: true);
 
-        Process? process;
-        try
+        Process? process = null;
+        void KillStartedScript()
         {
-            process = Process.Start(psi);
+            if (process is null)
+            {
+                return;
+            }
+            SystemActions.KillTree(process.Id);
+            if (SystemActions.IsExeRunning(_script.MainExe))
+            {
+                Logger.Info($"[提示] 脚本「{_script.Name}」主进程已退出但检测到同名进程仍在运行（自重启产物），按进程名强制结束。");
+                SystemActions.KillByName(_script.MainExe, "脚本");
+            }
         }
-        catch (Exception ex)
+
+        if (SystemActions.IsExeRunning(_script.MainExe))
         {
-            return RunAttemptResult.Failed($"脚本启动失败：{ex.Message}");
+            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」检测到已在运行，直接监控其日志（不重复启动）。");
+            _statusChanged?.Invoke("检测到脚本已在运行，直接监控其日志...");
         }
-        if (process is null)
+        else
         {
-            return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
+            var psi = SystemActions.BuildScriptStartInfo(_script.MainExe, workingDir, TextRules.SplitArgs(_script.Args), noWindow: true, redirect: true);
+            try
+            {
+                process = Process.Start(psi);
+            }
+            catch (Exception ex)
+            {
+                return RunAttemptResult.Failed($"脚本启动失败：{ex.Message}");
+            }
+            if (process is null)
+            {
+                return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
+            }
+            _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
+            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{_script.MainExe}（PID {process.Id}）");
+            ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
         }
-        _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{_script.MainExe}（PID {process.Id}）");
-        ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
 
         var outputTail = new StringBuilder();
 
@@ -407,10 +438,13 @@ internal class RunSession
             ConsoleLog.Write(data);
         }
 
-        process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
-        process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        if (process is not null)
+        {
+            process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
+            process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data);
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+        }
 
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
         LogMonitor? monitor = resolvedBeforeStart is null ? null : new LogMonitor(resolvedBeforeStart, readFromStart: false);
@@ -491,7 +525,10 @@ internal class RunSession
                     }
                 }
 
-                if (process.HasExited)
+                bool scriptExited = process is null
+                    ? !SystemActions.IsExeRunning(_script.MainExe)
+                    : process.HasExited && !SystemActions.IsExeRunning(_script.MainExe);
+                if (scriptExited)
                 {
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
@@ -546,7 +583,7 @@ internal class RunSession
                 if (markerSeenAt is not null
                     && (DateTime.Now - markerSeenAt.Value).TotalSeconds >= ExitGraceSecondsAfterMarker)
                 {
-                    SystemActions.KillTree(process.Id);
+                    KillStartedScript();
                     result = RunAttemptResult.Success("完成标志已出现，等待退出超时后已终止脚本，判定成功");
                     break;
                 }
@@ -570,11 +607,8 @@ internal class RunSession
         attempt.OutputTail = TextRules.TakeTail(outputTail.ToString(), 50);
         attempt.LogTail = new List<string>(logTail);
 
-        if (!process.HasExited)
-        {
-            SystemActions.KillTree(process.Id);
-        }
-        if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
+        KillStartedScript();
+        if (_script.ForceCloseGame && _script.LaunchGame && !string.IsNullOrWhiteSpace(_script.GameExe))
         {
             SystemActions.KillByName(_script.GameExe, "游戏");
         }
@@ -582,9 +616,34 @@ internal class RunSession
         return result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
     }
 
-    /// <summary>创建日志监控：文件在尝试启动后产生（新文件/轮换）→ 从头读；启动前已存在 → 从末尾读（忽略已有日志）。</summary>
-    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)
+    /// <summary>
+    /// 等待并确认游戏进程启动：每 1 秒轮询进程是否出现，上限为超时时间。
+    /// bat/cmd 启动器经 cmd.exe 包装无法按名检测（IsExeRunning 返回 false），直接按已启动放行并等待到超时结束（保持原有等待语义）。
+    /// </summary>
+    private async Task<bool> WaitForGameProcessAsync(TimeSpan timeout)
     {
+        if (SystemActions.IsCommandFile(_script.GameExe))
+        {
+            await Task.Delay(timeout, _token).ConfigureAwait(false);
+            return true;
+        }
+        DateTime deadline = DateTime.Now + timeout;
+        while (true)
+        {
+            if (SystemActions.IsExeRunning(_script.GameExe))
+            {
+                return true;
+            }
+            if (DateTime.Now >= deadline)
+            {
+                return false;
+            }
+            await Task.Delay(1000, _token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>创建日志监控：文件在尝试启动后产生（新文件/轮换）→ 从头读；启动前已存在 → 从末尾读（忽略已有日志）。</summary>
+    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)    {
         bool fresh;
         try
         {

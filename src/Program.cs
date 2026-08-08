@@ -271,6 +271,12 @@ public static class Program
             return 1;
         }
         RuntimeContext.Instance.Plugins.LoadAll();
+        string? blocked = DispatchCenter.QueueBlockedBy(queue);
+        if (blocked is not null)
+        {
+            Console.WriteLine($"[错误] 队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行。");
+            return 1;
+        }
         RunningExecution exec;
         try
         {

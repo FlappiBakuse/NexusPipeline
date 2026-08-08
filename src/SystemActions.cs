@@ -112,6 +112,10 @@ internal static class SystemActions
             {
                 Logger.Info($"已清理进程树（PID {pid}）。");
             }
+            else if (process is not null && process.ExitCode == 128)
+            {
+                Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
+            }
             else
             {
                 Logger.Warn($"[警告] 进程树清理返回码 {process?.ExitCode}（PID {pid}）。");

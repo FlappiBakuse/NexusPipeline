@@ -31,6 +31,16 @@ internal static class ApiDispatchHandler
             if (seg.Length >= 2 && seg[1].ToLowerInvariant() == "queue")
             {
                 string queueId = node.Get("queueId").Str();
+                DispatchQueue? queue = RuntimeContext.Instance.FindQueue(queueId);
+                if (queue is null)
+                {
+                    throw new InvalidOperationException($"调度队列不存在：{queueId}");
+                }
+                string? blocked = DispatchCenter.QueueBlockedBy(queue);
+                if (blocked is not null)
+                {
+                    throw new InvalidOperationException($"队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行");
+                }
                 RunningExecution exec = RuntimeContext.Instance.Center.StartQueue(queueId, mode, Audit.Web);
                 await HttpHelper.WriteJsonAsync(context, new { runId = exec.Id, ok = true }).ConfigureAwait(false);
                 return;

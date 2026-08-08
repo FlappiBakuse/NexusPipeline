@@ -99,6 +99,10 @@ internal class DispatchCenter
         {
             throw new InvalidOperationException($"脚本实例不存在：{scriptId}");
         }
+        if (IsScriptRunning(script))
+        {
+            throw new InvalidOperationException($"脚本「{script.Name}」正在运行，请先退出后再执行");
+        }
         if (!string.IsNullOrWhiteSpace(userName) && !string.IsNullOrWhiteSpace(script.ConfigPath)
             && UserConfigManager.FindEnabledUser(script, userName) is null)
         {
@@ -162,6 +166,26 @@ internal class DispatchCenter
         catch
         {
         }
+    }
+
+    /// <summary>脚本主程序是否已有进程在运行（按进程名检测）。</summary>
+    public static bool IsScriptRunning(ScriptInstance? script)
+    {
+        return script is not null && !string.IsNullOrWhiteSpace(script.MainExe) && SystemActions.IsExeRunning(script.MainExe);
+    }
+
+    /// <summary>队列是否被正在运行的脚本阻塞：返回第一个运行中的脚本名；无则 null。</summary>
+    public static string? QueueBlockedBy(DispatchQueue queue)
+    {
+        foreach (QueueTask task in queue.Tasks.OrderBy(task => task.Index))
+        {
+            ScriptInstance? script = RuntimeContext.Instance.FindScript(task.ScriptInstanceId);
+            if (IsScriptRunning(script))
+            {
+                return script!.Name;
+            }
+        }
+        return null;
     }
 
     private static string ExecKindText(RunningExecution exec)

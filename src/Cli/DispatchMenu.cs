@@ -74,9 +74,16 @@ internal static class DispatchMenu
                 string? number = Ui.Prompt("输入队列编号：");
                 if (int.TryParse(number?.Trim(), out int index) && index >= 1 && index <= ctx.Queues.Count)
                 {
+                    DispatchQueue queue = ctx.Queues[index - 1];
+                    string? blocked = DispatchCenter.QueueBlockedBy(queue);
+                    if (blocked is not null)
+                    {
+                        Console.WriteLine($"[错误] 队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行。");
+                        break;
+                    }
                     try
                     {
-                        ctx.Center.StartQueue(ctx.Queues[index - 1].Id, "manual", Audit.Manage);
+                        ctx.Center.StartQueue(queue.Id, "manual", Audit.Manage);
                         Console.WriteLine("[完成] 已开始执行，进度见运行日志。");
                     }
                     catch (Exception ex)

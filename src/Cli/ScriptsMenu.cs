@@ -128,6 +128,10 @@ internal static class ScriptsMenu
                 script.ForceCloseGame = force == "1";
             }
         }
+        else
+        {
+            script.ForceCloseGame = false;
+        }
 
         string? attempts = Ui.PromptText("最大尝试次数（含首次，默认 3）", script.MaxAttempts.ToString());
         if (attempts is not null && int.TryParse(attempts, out int maxAttempts) && maxAttempts >= 1)

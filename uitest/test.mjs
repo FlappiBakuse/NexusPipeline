@@ -19,7 +19,7 @@ const QUICK_SET = new Set([
   "testDispatchAndHistory", "testLogScroll", "testHistoryFiles", "testAudit", "testLogLevel",
   "testSpecializedScript",
 ]);
-const EXPECTED = 292;
+const EXPECTED = 303;
 
 let passed = 0;
 let failed = 0;
@@ -148,7 +148,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.3.0"), "版本显示 0.3.0（x.x.x 不带 v）");
+  assert(body.includes("0.3.1"), "版本显示 0.3.1（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -936,36 +936,79 @@ async function testBatchGameLaunch() {
   await api("DELETE", "/api/scripts/" + script.id);
 }
 
-async function testForceCloseIndependent() {
-  console.log("[用例] 强制关闭游戏独立于启动游戏（不启动游戏也执行关闭，任务正常结束）");
+async function testGameProcessConfirm() {
+  console.log("[用例] 游戏进程确认：空路径跳过 / 填写路径检测双启动");
   const exitBat = path.join(runtimeDir, "exit-ok.bat");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
-  const cfg = path.join(runtimeDir, "fc-cfg");
-  const log = path.join(runtimeDir, "fc-log");
-  const logFile = path.join(log, "run.log");
-  fs.rmSync(cfg, { recursive: true, force: true });
-  fs.rmSync(log, { recursive: true, force: true });
-  fs.mkdirSync(cfg, { recursive: true });
-  fs.mkdirSync(log, { recursive: true });
-  const runBat = path.join(runtimeDir, "fc-run.bat");
-  fs.writeFileSync(runBat, "@echo off\r\necho done >> " + logFile + "\r\nexit /b 0\r\n");
-  const create = await api("POST", "/api/scripts", {
-    name: "独立关闭脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: runBat.replace(/\\/g, "\\\\"),
-    configPath: cfg.replace(/\\/g, "\\\\"), logPath: log.replace(/\\/g, "\\\\"),
-    launchGame: false, gameExe: "C:\\nonexist\\game.exe", forceCloseGame: true,
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+
+  const a = await api("POST", "/api/scripts", {
+    name: "空游戏路径脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
+    configPath: "", logPath: "", launchGame: true, gameExe: "",
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
-  const sid = (await create.json()).id;
+  assert(a.ok, "创建空游戏路径脚本（launchGame=true / gameExe 为空）");
+  const aid = (await a.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
+  assert(await waitNoRunning(60000), "空游戏路径脚本运行结束");
+  const aHist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const aRec = aHist.filter(h => h.scriptInstanceId === aid).at(-1);
+  assert(aRec && aRec.finalStatus === "success", "未填游戏路径跳过游戏启动，运行成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + aid);
+
+  const ping = "C:\\Windows\\System32\\PING.EXE";
+  const b = await api("POST", "/api/scripts", {
+    name: "双启动确认脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
+    configPath: "", logPath: "", launchGame: true, gameExe: ping,
+    gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 10, forceCloseGame: true,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+  });
+  assert(b.ok, "创建双启动确认脚本（游戏=PING，等待 10 秒确认）");
+  const bid = (await b.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
+  const managerLog = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const seenConfirm = await waitFor(() => {
+    if (!fs.existsSync(managerLog)) return false;
+    return fs.readFileSync(managerLog, "utf8").includes("已确认游戏进程启动");
+  }, 30000, 500);
+  assert(seenConfirm, "运行期间确认游戏进程启动（管理器日志含「已确认游戏进程启动」）");
+  assert(await waitNoRunning(60000), "双启动确认脚本运行结束");
+  const bHist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const bRec = bHist.filter(h => h.scriptInstanceId === bid).at(-1);
+  assert(bRec && bRec.finalStatus === "success", "游戏进程确认后脚本运行成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + bid);
+}
+
+async function testForceCloseGating(page) {
+  console.log("[用例] 强制关闭游戏依赖启动游戏：后端归一化 + 前端联动禁用");
+  const exitBat = path.join(runtimeDir, "exit-ok.bat");
+  fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
+  const created = await api("POST", "/api/scripts", {
+    name: "强制关闭联动脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
+    configPath: "", logPath: "", launchGame: false, gameExe: "C:\\nonexist\\game.exe", forceCloseGame: true,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+  });
+  assert(created.ok, "API 提交 launchGame=false / forceCloseGame=true 成功");
+  const sid = (await created.json()).id;
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
-  assert(got && got.launchGame === false && got.forceCloseGame === true, "保存后字段独立（launchGame=false / forceCloseGame=true）");
-  await api("POST", "/api/dispatch/script", { scriptId: sid, mode: "manual" });
-  assert(await waitNoRunning(60000), "运行已正常结束（未启动游戏仍执行强制关闭，无游戏进程则跳过）");
-  const dayDir = path.join(runtimeDir, "history", latestHistoryDay());
-  const files = fs.readdirSync(dayDir).filter(f => f.endsWith(".json")).sort();
-  const rec = JSON.parse(fs.readFileSync(path.join(dayDir, files[files.length - 1]), "utf8").replace(/^\uFEFF/, ""));
-  assert(rec.FinalStatus === "success", "任务 FinalStatus=success（实际 " + rec.FinalStatus + "）");
+  assert(got && got.forceCloseGame === false, "后端归一化：LaunchGame=false 时 ForceCloseGame 强制为 false");
   await api("DELETE", "/api/scripts/" + sid);
+
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
+  await page.waitForSelector("#sm-name");
+  assert(await page.$eval("#sm-force", el => el.disabled), "未勾选「运行脚本前启动游戏」时强制关闭复选框禁用");
+  assert(!(await page.$eval("#sm-force", el => el.checked)), "未勾选启动游戏时强制关闭默认不勾选");
+  await page.click("#sm-launch");
+  assert(!(await page.$eval("#sm-force", el => el.disabled)), "勾选启动游戏后强制关闭启用");
+  await page.click("#sm-force");
+  assert(await page.$eval("#sm-force", el => el.checked), "启用后可勾选强制关闭");
+  await page.click("#sm-launch");
+  assert(await page.$eval("#sm-force", el => el.disabled && !el.checked), "取消启动游戏后强制关闭恢复禁用并取消勾选");
+  await page.click(".modal button:has-text('取消')");
 }
 
 async function testScriptEditPreservesUsers() {
@@ -990,7 +1033,7 @@ async function testScriptEditPreservesUsers() {
 }
 
 async function testExeOpenGuard() {
-  console.log("[用例] 检测脚本程序已打开：编辑配置 409 + 运行被拦截");
+  console.log("[用例] 脚本已打开：编辑配置 409 + 手动执行被禁止（400）");
   const ping = "C:\\Windows\\System32\\PING.EXE";
   const cfgDir = path.join(runtimeDir, "open-cfg");
   const logDir = path.join(runtimeDir, "open-log");
@@ -1016,12 +1059,9 @@ async function testExeOpenGuard() {
     assert(startBody.error.includes("检测到已打开的脚本"), "拒绝原因提示「检测到已打开的脚本，退出脚本后才能编辑配置。」");
 
     const dr = await api("POST", "/api/dispatch/script", { scriptId: sid, mode: "manual" });
-    assert(dr.ok, "调度已接受（运行尝试阶段拦截）");
-    assert(await waitNoRunning(30000), "运行已结束（被拦截）");
-    const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
-    const recs = hist.filter(h => h.scriptInstanceId === sid);
-    const rec = recs[recs.length - 1];
-    assert(rec && rec.finalStatus === "failed" && (rec.resultDetail || "").includes("检测到已打开的脚本"), "历史记录失败原因含「检测到已打开的脚本，请先退出后再运行」");
+    assert(dr.status === 400, "脚本已打开时手动执行被禁止（400）");
+    const drBody = await dr.json();
+    assert((drBody.error || "").includes("正在运行"), "拒绝原因含「正在运行，请先退出后再执行」");
   } finally {
     pinger.kill();
   }
@@ -1144,6 +1184,7 @@ async function testSpecializedScript(page) {
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
   assert(cfgGot && cfgGot.PluginType === "bettergi", "scripts.json 落盘 PluginType（PascalCase）");
+  assert(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").includes("专项脚本A"), "scripts.json 中文以原字符落盘（无 \\u 转义）");
 
   const bad = await api("POST", "/api/scripts", { name: "专项脚本B", rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(bad.status === 400, "根目录无法推导时创建被拒（400）");
@@ -1568,7 +1609,7 @@ async function main() {
       page.on("pageerror", error => console.error("[页面错误] " + error.message));
       const tests = [
         testDashboard, testResponsiveShell, testNavigation, testScriptCrud,
-        testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testForceCloseIndependent,
+        testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
         testV020Features, testSpecializedScript, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,

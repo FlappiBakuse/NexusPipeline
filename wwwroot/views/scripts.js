@@ -127,7 +127,7 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
       <div class="check-grid">
         <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
       <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
@@ -158,7 +158,7 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
       <div class="check-grid">
         <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
       <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
@@ -180,6 +180,11 @@ export async function openScriptModal(id = "", plugin = "") {
   $dom("#sm-launch")?.addEventListener("change", event => {
     const box = $dom("#sm-game-box");
     if (box) box.toggleAttribute("hidden", !event.target.checked);
+    const force = $dom("#sm-force");
+    if (force) {
+      force.disabled = !event.target.checked;
+      if (!event.target.checked) force.checked = false;
+    }
   });
   const rootInput = $dom("#sm-root");
   rootInput?.addEventListener("input", syncScriptGhostState);

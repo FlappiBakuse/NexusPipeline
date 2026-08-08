@@ -233,6 +233,10 @@ internal static class ApiScriptsHandler
         script.ConfigPath = StripPathQuotes(script.ConfigPath);
         script.LogPath = StripPathQuotes(script.LogPath);
         script.GameExe = StripPathQuotes(script.GameExe);
+        if (!script.LaunchGame)
+        {
+            script.ForceCloseGame = false;
+        }
     }
 
     /// <summary>去除成对首尾引号（"…" / '…'），保留路径内部的合法单引号（如 C:\O'Brien\）。</summary>
