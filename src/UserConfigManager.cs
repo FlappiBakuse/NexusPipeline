@@ -651,29 +651,39 @@ internal static class UserConfigManager
         }
     }
 
-    /// <summary>用户改名时迁移其数据目录。</summary>
-    public static void RenameUserData(string scriptId, string oldName, string newName)
+    /// <summary>用户改名时迁移其数据目录；失败返回错误信息（由调用方决定不落盘，名称与数据保持原样）。</summary>
+    public static string? RenameUserData(string scriptId, string oldName, string newName)
     {
         if (string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
         {
-            return;
+            return null;
         }
         string oldDir = UserDir(scriptId, oldName);
         string newDir = UserDir(scriptId, newName);
         try
         {
-            if (Directory.Exists(oldDir))
+            if (!Directory.Exists(oldDir))
             {
-                if (Directory.Exists(newDir))
-                {
-                    Directory.Delete(newDir, recursive: true);
-                }
+                return null;
+            }
+            if (Directory.Exists(newDir))
+            {
+                Directory.Delete(newDir, recursive: true);
+            }
+            try
+            {
                 Directory.Move(oldDir, newDir);
             }
+            catch (IOException)
+            {
+                MoveAs(oldDir, newDir, PathKind.Dir);
+            }
+            return null;
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 用户数据目录迁移失败（{oldDir} → {newDir}）：{ex.Message}");
+            return $"用户数据目录迁移失败：{ex.Message}";
         }
     }
 }

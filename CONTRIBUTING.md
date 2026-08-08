@@ -1,6 +1,9 @@
 # 贡献指南
 
-感谢参与 NexusPipeline（枢链）开发。仓库 `main` 无分支保护（无 ruleset），v0.1.0 至今均为**直接推送 `main`**，不走 Pull Request；提交前先 `git pull` 避免分叉，**禁止 force push**。
+感谢参与 NexusPipeline（枢链）开发。协作方式以 **v1.0.0 为界**：
+
+- **v1.0.0 之前（早期开发阶段）**：仓库 `main` 无分支保护（无 ruleset），v0.1.0 至今均为**直接推送 `main`**，不走 Pull Request；提交前先 `git pull` 避免分叉，**禁止 force push**；版本发布一律标记 **Pre-release**。
+- **v1.0.0 起（正式版本）**：所有改动**只能通过 Pull Request** 合入 `main`（CI 构建 + e2e 测试全绿后 squash 合并），禁止直接推送到 `main`。
 
 ## 开发流程
 

@@ -3,6 +3,9 @@ import { registerInterval } from "./state.js";
 
 const view = $("#view");
 let toastTimer = null;
+let lastToastMessage = null;
+let lastToastAt = 0;
+const SHAKE_WINDOW_MS = 2500;
 
 export function render(html) {
   view.innerHTML = html;
@@ -25,8 +28,16 @@ export function setTopbarTitle(title) {
 export function toast(message, kind = "info") {
   const element = $("#toast");
   if (!element) return;
+  const now = Date.now();
   element.textContent = message;
   element.classList.toggle("error", kind === "error");
+  if (message === lastToastMessage && now - lastToastAt < SHAKE_WINDOW_MS) {
+    element.classList.remove("shake");
+    void element.offsetWidth;
+    element.classList.add("shake");
+  }
+  lastToastMessage = message;
+  lastToastAt = now;
   element.classList.remove("hidden");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => element.classList.add("hidden"), 3200);

@@ -248,7 +248,7 @@ body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
 .days-frame .check { margin: 0; min-height: 28px; }
 .timeset-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .timeset-actions .check { margin: 0; }
-.dispatch-script-controls { grid-template-columns: minmax(0, 7fr) minmax(0, 7fr) minmax(88px, 2fr); }
+.dispatch-script-controls { grid-template-columns: minmax(0, 7fr) minmax(88px, 1fr); }
 .dispatch-queue-controls { grid-template-columns: minmax(0, 7fr) minmax(88px, 1fr); }
 .detail { font-size: 13px; line-height: 1.7; }
 .detail .kv { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
@@ -264,6 +264,8 @@ body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
 .stats-inline > div { display: flex; flex-direction: column; gap: 3px; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--panel-soft); }
 .stats-inline strong { color: var(--accent); font-size: 24px; }
 .stats-inline span { color: var(--muted); font-size: 12px; }
+.dispatch-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; margin-bottom: 18px; }
+.dispatch-cards .card { margin-bottom: 0; }
 .control-action { display: flex; align-items: flex-end; }
 .control-action button { width: 100%; }
 .modal-copy { max-width: 62ch; color: var(--muted); line-height: 1.8; }
@@ -282,8 +284,16 @@ body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
 .modal-close { margin: -5px -8px 0 0; }
 .modal-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
 .modal-footer button + button { margin-left: 0; }
-.toast { position: fixed; right: 20px; bottom: 22px; z-index: 200; max-width: min(380px, calc(100vw - 32px)); padding: 13px 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--panel-solid); box-shadow: var(--shadow); color: var(--text); font-size: 13px; }
+.toast { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 200; max-width: min(420px, calc(100vw - 32px)); padding: 13px 16px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--panel-solid); box-shadow: var(--shadow); color: var(--text); font-size: 13px; }
 .toast.error { border-color: rgba(255,114,123,.5); }
+@keyframes toast-shake {
+  0%, 100% { transform: translateX(-50%); }
+  20% { transform: translateX(calc(-50% - 8px)); }
+  40% { transform: translateX(calc(-50% + 8px)); }
+  60% { transform: translateX(calc(-50% - 5px)); }
+  80% { transform: translateX(calc(-50% + 5px)); }
+}
+.toast.shake { animation: toast-shake .45s ease; }
 
 @media (max-width: 1100px) {
   :root { --nav-width: 220px; }
@@ -322,6 +332,7 @@ body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
   .timeset-actions { align-items: center; flex-direction: row; justify-content: flex-end; }
   .timeset-actions .check { width: auto; margin: 0; }
   .timeset-actions button { width: auto; margin: 0; }
+  .dispatch-cards { grid-template-columns: minmax(0, 1fr); }
   .dispatch-script-controls, .dispatch-queue-controls { grid-template-columns: minmax(0, 1fr); }
   .list-item-head { align-items: stretch; flex-direction: column; }
   .list-item-head button { align-self: flex-start; }
@@ -332,7 +343,7 @@ body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
   .secret-row { align-items: stretch; flex-direction: column; }
   .secret-row button { width: 100%; }
   .detail .kv { grid-template-columns: 78px minmax(0, 1fr); }
-  .toast { right: 13px; bottom: 13px; left: 13px; max-width: none; }
+  .toast { left: 50%; right: auto; top: 12px; width: calc(100vw - 24px); max-width: 420px; transform: translateX(-50%); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }

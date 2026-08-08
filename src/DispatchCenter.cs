@@ -110,34 +110,12 @@ internal class DispatchCenter
             TargetId = script.Id,
             TargetName = script.Name,
             Mode = mode,
-            TotalTasks = 1,
+            TotalTasks = Math.Max(1, script.Users.Count(user => user.Enabled)),
             CurrentScriptName = script.Name,
         };
         Register(exec, source);
         exec.CurrentStatus = "排队等待中...";
-        Task task = Task.Run(async () =>
-        {
-            SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-            try
-            {
-                await gate.WaitAsync(exec.Cts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                exec.Status = "cancelled";
-                exec.FinishedAt = DateTime.Now;
-                Unregister(exec);
-                return;
-            }
-            try
-            {
-                await RunScriptAsync(exec, script, userName).ConfigureAwait(false);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        });
+        Task task = Task.Run(() => RunScriptAsync(exec, script, userName));
         exec.Completion = task;
         return exec;
     }
@@ -212,28 +190,34 @@ internal class DispatchCenter
     {
         try
         {
-            var session = new RunSession(
-                script, exec.Mode, "", "", userName,
-                exec.Cts.Token,
-                (attempt, max) =>
+            List<string?> runUsers;
+            if (!string.IsNullOrWhiteSpace(userName))
+            {
+                runUsers = new List<string?> { userName };
+            }
+            else
+            {
+                runUsers = script.Users.Where(user => user.Enabled).Select(user => user.Name).Cast<string?>().ToList();
+                if (runUsers.Count == 0)
                 {
-                    exec.CurrentAttempt = attempt;
-                    exec.CurrentMaxAttempts = max;
-                },
-                status => exec.CurrentStatus = status,
-                line => exec.AppendLog(line));
-
-            RunRecord record = await session.RunAsync().ConfigureAwait(false);
-            exec.Records.Add(record);
-            exec.DoneTasks = 1;
-            exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
-            exec.Status = record.Status == "cancelled" ? "cancelled" : "done";
-            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{script.Name}」最终结果：{record.Status}（{record.ResultDetail}）");
-
-            RuntimeContext.Instance.History.Save(record, session.ScriptLog);
+                    runUsers.Add(null);
+                }
+            }
+            List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
+            if (records.Count > 0 && records[^1].Status == "cancelled")
+            {
+                exec.Status = "cancelled";
+            }
+            else if (exec.Status != "cancelled")
+            {
+                exec.Status = "done";
+            }
             if (script.NotifyEnabled)
             {
-                await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                foreach (RunRecord record in records)
+                {
+                    await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                }
             }
         }
         catch (Exception ex)
@@ -246,6 +230,60 @@ internal class DispatchCenter
             exec.FinishedAt = DateTime.Now;
             Unregister(exec);
         }
+    }
+
+    /// <summary>按用户列表依次运行脚本：门禁等待 + 运行会话 + 历史落盘 + 进度更新；取消时中断并标记 cancelled。</summary>
+    private async Task<List<RunRecord>> RunUsersAsync(RunningExecution exec, ScriptInstance script, string queueId, string queueName, List<string?> users)
+    {
+        var records = new List<RunRecord>();
+        foreach (string? runUser in users)
+        {
+            if (exec.Cts.IsCancellationRequested)
+            {
+                exec.Status = "cancelled";
+                break;
+            }
+            string displayName = runUser is null ? script.Name : $"{script.Name}（{runUser}）";
+            exec.CurrentScriptName = displayName;
+            exec.CurrentStatus = "等待开始";
+
+            SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+            try
+            {
+                await gate.WaitAsync(exec.Cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                exec.Status = "cancelled";
+                break;
+            }
+            try
+            {
+                var session = new RunSession(
+                    script, exec.Mode, queueId, queueName, runUser,
+                    exec.Cts.Token,
+                    (attempt, max) =>
+                    {
+                        exec.CurrentAttempt = attempt;
+                        exec.CurrentMaxAttempts = max;
+                    },
+                    status => exec.CurrentStatus = status,
+                    line => exec.AppendLog(line));
+
+                RunRecord record = await session.RunAsync().ConfigureAwait(false);
+                records.Add(record);
+                exec.Records.Add(record);
+                exec.DoneTasks++;
+                exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
+                Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
+                RuntimeContext.Instance.History.Save(record, session.ScriptLog);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
+        return records;
     }
 
     private async Task RunQueueAsync(RunningExecution exec, DispatchQueue queue)
@@ -295,55 +333,7 @@ internal class DispatchCenter
                 {
                     runUsers.Add(null);
                 }
-                foreach (string? runUser in runUsers)
-                {
-                    if (exec.Cts.IsCancellationRequested)
-                    {
-                        exec.Status = "cancelled";
-                        Logger.Info($"调度队列「{queue.Name}」已被取消，后续执行不再进行。");
-                        break;
-                    }
-                    string displayName = runUser is null ? script.Name : $"{script.Name}（{runUser}）";
-                    exec.CurrentScriptName = displayName;
-                    exec.CurrentStatus = "等待开始";
-
-                    SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-                    try
-                    {
-                        await gate.WaitAsync(exec.Cts.Token).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        exec.Status = "cancelled";
-                        Logger.Info($"调度队列「{queue.Name}」已在等待脚本「{displayName}」期间被取消。");
-                        break;
-                    }
-                    try
-                    {
-                        var session = new RunSession(
-                            script, exec.Mode, queue.Id, queue.Name, runUser,
-                            exec.Cts.Token,
-                            (attempt, max) =>
-                            {
-                                exec.CurrentAttempt = attempt;
-                                exec.CurrentMaxAttempts = max;
-                            },
-                            status => exec.CurrentStatus = status,
-                            line => exec.AppendLog(line));
-
-                        RunRecord record = await session.RunAsync().ConfigureAwait(false);
-                        records.Add(record);
-                        exec.Records.Add(record);
-                        exec.DoneTasks++;
-                        exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
-                        Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 队列「{queue.Name}」第 {i + 1}/{tasks.Count} 项「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
-                        RuntimeContext.Instance.History.Save(record, session.ScriptLog);
-                    }
-                    finally
-                    {
-                        gate.Release();
-                    }
-                }
+                records.AddRange(await RunUsersAsync(exec, script, queue.Id, queue.Name, runUsers).ConfigureAwait(false));
                 if (exec.Status == "cancelled")
                 {
                     break;

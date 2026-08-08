@@ -39,10 +39,11 @@ export async function pageDispatch(token) {
   state.scripts = scripts; state.queues = queues;
   render(`<div class="page-head"><div><div class="eyebrow">RUN CONTROL</div><h2>调度中心</h2><p class="page-kicker">手动启动任务，观察实时输出并及时取消运行。</p></div></div>
     <section class="card" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div>${runningMarkup(status.running || [])}</section>
-    <section class="card"><div class="section-heading"><h3>手动执行脚本实例</h3><span class="muted">可选择用户配置</span></div><div class="form-grid dispatch-controls dispatch-script-controls"><div><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${script.id}">${esc(script.name)}</option>`).join("")}</select></div><div><label class="field-label" for="dc-user">用户配置</label><select id="dc-user"><option value="">（不使用用户配置）</option></select></div><div class="control-action"><button type="button" data-action="dispatch-script">执行</button></div></div></section>
-    <section class="card"><div class="section-heading"><h3>手动执行调度队列</h3><span class="muted">按队列内顺序运行</span></div><div class="form-grid dispatch-controls dispatch-queue-controls"><div><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${queue.id}">${esc(queue.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-queue">执行</button></div></div></section>`);
+    <div class="dispatch-cards">
+    <section class="card"><div class="section-heading"><h3>手动执行脚本实例</h3><span class="muted">启用用户将自动依次运行</span></div><div class="form-grid dispatch-controls dispatch-script-controls"><div><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${script.id}">${esc(script.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-script">执行</button></div></div></section>
+    <section class="card"><div class="section-heading"><h3>手动执行调度队列</h3><span class="muted">按队列内顺序运行</span></div><div class="form-grid dispatch-controls dispatch-queue-controls"><div><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${queue.id}">${esc(queue.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-queue">执行</button></div></div></section>
+    </div>`);
   applyProgress();
-  $("#dc-script")?.addEventListener("change", event => refreshUserSelect(event.target.value));
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }
 
@@ -53,17 +54,10 @@ async function refreshDispatch(token) {
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }
 
-function refreshUserSelect(scriptId) {
-  const select = $("#dc-user");
-  if (!select) return;
-  const script = state.scripts.find(item => item.id === scriptId);
-  select.innerHTML = '<option value="">（不使用用户配置）</option>' + ((script?.users || []).filter(user => user.enabled).map(user => `<option value="${esc(user.name)}">${esc(user.name)}</option>`).join(""));
-}
-
 export async function dispatchScript() {
   const id = $("#dc-script")?.value;
   if (!id) { toast("请选择脚本实例", "error"); return; }
-  try { await api("POST", "/api/dispatch/script", { scriptId: id, mode: "manual", userName: $("#dc-user")?.value || "" }); toast("已开始执行"); }
+  try { await api("POST", "/api/dispatch/script", { scriptId: id, mode: "manual" }); toast("已开始执行"); }
   catch (error) { toast(error.message, "error"); }
 }
 

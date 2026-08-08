@@ -109,11 +109,16 @@ internal static class QueuesMenu
         }
         queue.Name = name;
 
-        Console.WriteLine("自动运行方式：1=启动时运行 2=定时运行");
-        string? mode = Ui.PromptText("选择", queue.AutoRunMode == "startup" ? "1" : "2");
+        Console.WriteLine("自动运行方式：1=启动时运行 2=定时运行 3=不运行");
+        string? mode = Ui.PromptText("选择", queue.AutoRunMode switch
+        {
+            "startup" => "1",
+            "scheduled" => "2",
+            _ => "3",
+        });
         if (mode is not null)
         {
-            queue.AutoRunMode = mode switch { "1" => "startup", "2" => "scheduled", _ => queue.AutoRunMode };
+            queue.AutoRunMode = mode switch { "1" => "startup", "2" => "scheduled", "3" => "none", _ => queue.AutoRunMode };
         }
 
         Console.WriteLine("完成操作：1=无操作 2=退出软件 3=休眠 4=重启 5=关机");

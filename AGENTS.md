@@ -10,17 +10,18 @@ build.cmd                      # 源码在 src/，运行物在 release/
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 216 项用例；先跑 build.cmd，否则 setupRuntime 直接中止
-node uitest\test.mjs --quick   # 开发迭代快速模式：仅 14 个 UI 冒烟用例（约 130 项断言），CI 仍跑全量
+node uitest\test.mjs           # 241 项用例；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs --quick   # 开发迭代快速模式：仅 14 个 UI 冒烟用例（约 139 项断言），CI 仍跑全量
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 216（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 241（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
 ## Git 协作规范（强制）
 
-- `main` 无分支保护（仓库无 ruleset，`current_user_can_bypass` 一说已过时）：v0.1.0 至今均为**直接 push main**，不走 PR；提交前先 `git pull` 避免分叉，**禁止 force push**。
+- **v1.0.0 之前（早期开发阶段）**：`main` 无分支保护（仓库无 ruleset），**直接 push main**，不走 PR；提交前先 `git pull` 避免分叉，**禁止 force push**；版本发布一律 **Pre-release**。
+- **v1.0.0 起（正式版本）**：所有改动**只能通过 Pull Request** 合入 `main`（CI「构建 + e2e 测试」全绿后 squash 合并），禁止直接 push/force push main。
 - 分支：`feat/`、`fix/`、`docs/`、`refactor/`、`test/`、`chore/` 前缀。
 - 提交标题：Conventional Commits，type 英文 + 描述中文（如 `fix: 修复历史详情时区错位`）。
 - 版本发布：tag `vX.Y.Z` + `gh release create --prerelease`，资产打包 `dist/`（exe+wwwroot+plugins+README+LICENSE，**排除 config/**），附 SHA256。

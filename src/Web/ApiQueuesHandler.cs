@@ -83,7 +83,7 @@ internal static class ApiQueuesHandler
     {
         if (!QueueRule.IsValidAutoRunMode(queue.AutoRunMode))
         {
-            queue.AutoRunMode = "scheduled";
+            queue.AutoRunMode = "none";
         }
         if (!QueueRule.IsValidCompletionAction(queue.CompletionAction))
         {

@@ -18,7 +18,7 @@ const QUICK_SET = new Set([
   "testV020Features", "testPluginConfig", "testNotifyPluginGating", "testNextScheduleAndStats",
   "testDispatchAndHistory", "testLogScroll", "testHistoryFiles", "testAudit", "testLogLevel",
 ]);
-const EXPECTED = 216;
+const EXPECTED = 241;
 
 let passed = 0;
 let failed = 0;
@@ -147,7 +147,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.2.2"), "版本显示 0.2.2（x.x.x 不带 v）");
+  assert(body.includes("0.2.3"), "版本显示 0.2.3（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -223,7 +223,26 @@ async function testResponsiveShell(page) {
   await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#dc-script");
   const dispatchButtons = await page.evaluate(() => Array.from(document.querySelectorAll(".control-action button")).map(button => ({ width: button.getBoundingClientRect().width, card: button.closest(".card").getBoundingClientRect().width })));
-  assert(dispatchButtons.length === 2 && dispatchButtons.every(item => item.width / item.card <= 0.2), "调度中心执行按钮保持约 1/8 宽度");
+  assert(dispatchButtons.length === 2 && dispatchButtons.every(item => item.width / item.card <= 0.25), "调度中心执行按钮保持紧凑宽度");
+  const cardRow = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll(".dispatch-cards > .card"));
+    if (cards.length !== 2) return false;
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    return a.right <= b.left + 1 && Math.abs(a.top - b.top) <= 1;
+  });
+  assert(cardRow, "桌面端脚本/队列执行卡片同排");
+  await page.setViewportSize({ width: 360, height: 800 });
+  await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#dc-script");
+  const cardStack = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll(".dispatch-cards > .card"));
+    if (cards.length !== 2) return false;
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    return a.bottom <= b.top + 1 && Math.abs(a.left - b.left) <= 1;
+  });
+  assert(cardStack, "手机竖屏脚本/队列执行卡片保持堆叠");
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
@@ -267,6 +286,14 @@ async function testScriptCrud(page) {
   await page.click(".modal button:has-text('保存')");
   await page.waitForTimeout(400);
   assert(await page.$(".modal-mask"), "必填未填时无法保存（弹窗保留）");
+  const toastCenter = await page.evaluate(() => {
+    const rect = document.querySelector("#toast").getBoundingClientRect();
+    return Math.abs(rect.left + rect.width / 2 - window.innerWidth / 2);
+  });
+  assert(toastCenter <= 2, "提示元件水平居中偏上");
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForTimeout(200);
+  assert(await page.$eval("#toast", el => el.classList.contains("shake")), "重复同一错误操作提示元件抖动");
 
   await page.fill("#sm-name", "测试脚本A");
   await page.fill("#sm-root", "C:\\scripts\\a");
@@ -303,6 +330,10 @@ async function testQueueCrud(page) {
   await page.click("text=新建调度队列");
   await page.waitForSelector(".modal-mask");
   await page.fill("#qm-name", "测试队列A");
+  const modeVal = await page.$eval("#qm-mode", el => el.value);
+  assert(modeVal === "none", "新建队列默认自动运行方式为「不运行」");
+  const modeOpts = await page.$$eval("#qm-mode option", els => els.map(e => e.textContent));
+  assert(modeOpts.length === 3 && modeOpts[0] === "不运行", "自动运行方式含「不运行」选项且置顶");
 
   const dayState = await page.$eval(".timeset-days", el => {
     const frame = el.querySelector(".days-frame");
@@ -338,6 +369,15 @@ async function testQueueCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试队列A"), null, { timeout: 5000 });
   assert(true, "新建后卡片显示队列名称");
+  assert((await page.textContent("body")).includes("不运行"), "队列卡片显示「不运行」徽章");
+
+  const qm = await api("POST", "/api/queues", { name: "缺省模式队列", autoRunMode: "invalid", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
+  assert(qm.ok, "POST 非法 autoRunMode 成功（归一化）");
+  const qmId = (await qm.json()).id;
+  const qmList = await (await fetch(baseUrl + "api/queues")).json();
+  const qmGot = qmList.find(q => q.id === qmId);
+  assert(qmGot && qmGot.autoRunMode === "none", "非法 autoRunMode 归一为 none");
+  await api("DELETE", "/api/queues/" + qmId);
 
   await page.click('[data-action="edit-queue"]');
   await page.waitForSelector("#qm-name");
@@ -608,6 +648,7 @@ async function testUserManagement(page) {
   await page.click(".modal button:has-text('保存')");
   await page.waitForFunction(() => document.body.textContent.includes("甲改"), null, { timeout: 5000 });
   assert(fs.existsSync(path.join(dataDir, "甲改", "config", "configA.txt")), "改名后用户数据目录已迁移");
+  assert(!fs.existsSync(path.join(dataDir, "甲")), "改名后旧用户目录已不存在（重命名而非复制）");
   const user = "甲改";
   const userDir = path.join(dataDir, user);
 
@@ -638,9 +679,7 @@ async function testUserManagement(page) {
   await page.waitForSelector("#dc-script");
   await page.selectOption("#dc-script", { label: "用户测试脚本" });
   await page.waitForTimeout(300);
-  const userOpts = await page.$$eval("#dc-user option", opts => opts.map(o => o.value));
-  assert(userOpts.includes(user) && !userOpts.includes("甲"), "调度中心用户下拉仅含启用用户");
-  await page.selectOption("#dc-user", { label: user });
+  assert(!(await page.$("#dc-user")), "调度中心无用户选择下拉（启用用户依次运行）");
   await page.click("button:has-text('执行')");
   await waitFor(async () => (await runningCount()) > 0, 10000);
   assert(await waitNoRunning(20000), "运行任务已结束（含配置还原）");
@@ -648,6 +687,9 @@ async function testUserManagement(page) {
     try { return fs.readFileSync(cfgFile, "utf8") === "ORIGINAL"; } catch { return false; }
   }, 5000), "运行结束后原配置已还原（实际：" + fs.readFileSync(cfgFile, "utf8") + "）");
   assert(fs.readFileSync(path.join(userDir, "config", "configA.txt"), "utf8") === "NEWSETUP", "运行结束后用户配置保留");
+  const runHist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const manualRecs = runHist.filter(h => h.scriptInstanceId === sid && h.mode === "manual");
+  assert(manualRecs.length === 2, "手动执行按启用用户依次运行产生 2 条记录（实际 " + manualRecs.length + "）");
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForSelector("h2");
@@ -745,10 +787,10 @@ async function testGateRelease() {
   fs.rmSync(gateLog, { recursive: true, force: true });
   fs.mkdirSync(gateCfg, { recursive: true });
   fs.mkdirSync(gateLog, { recursive: true });
-  const ps = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+  const ping = "C:\\Windows\\System32\\PING.EXE";
   const create = await api("POST", "/api/scripts", {
-    name: "门禁测试脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: ps.replace(/\\/g, "\\\\"),
-    args: "-Command Start-Sleep 8", configPath: gateCfg.replace(/\\/g, "\\\\"), logPath: gateLog.replace(/\\/g, "\\\\"),
+    name: "门禁测试脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: ping,
+    args: "-n 8 127.0.0.1", configPath: gateCfg.replace(/\\/g, "\\\\"), logPath: gateLog.replace(/\\/g, "\\\\"),
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const sid = (await create.json()).id;
@@ -831,6 +873,83 @@ async function testForceCloseIndependent() {
   const files = fs.readdirSync(dayDir).filter(f => f.endsWith(".json")).sort();
   const rec = JSON.parse(fs.readFileSync(path.join(dayDir, files[files.length - 1]), "utf8").replace(/^\uFEFF/, ""));
   assert(rec.FinalStatus === "success", "任务 FinalStatus=success（实际 " + rec.FinalStatus + "）");
+  await api("DELETE", "/api/scripts/" + sid);
+}
+
+async function testScriptEditPreservesUsers() {
+  console.log("[用例] 编辑脚本保留用户（PUT 不含 users 不覆盖）");
+  const keepCfg = path.join(runtimeDir, "keep-cfg");
+  fs.rmSync(keepCfg, { recursive: true, force: true });
+  fs.mkdirSync(keepCfg, { recursive: true });
+  fs.writeFileSync(path.join(keepCfg, "cfg.txt"), "KEEP");
+  const created = await createScript({ name: "保留用户脚本", rootPath: "C:\\keep", mainExe: "C:\\keep\\run.bat", configPath: keepCfg, logPath: "C:\\keep\\log" });
+  assert(created.ok, "创建脚本");
+  const sid = created.id;
+  const ur = await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
+  assert(ur.ok, "添加用户甲");
+  assert(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "添加用户生成配置快照");
+  const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: "C:\\keep", mainExe: "C:\\keep\\run.bat", configPath: keepCfg, logPath: "C:\\keep\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  assert(put.ok, "PUT 改名（payload 不含 users，模拟前端）");
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  assert(got && (got.users || []).length === 1 && got.users[0].name === "甲", "改名后用户仍保留");
+  assert(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "改名后用户数据目录未被重建或丢失");
+  await api("DELETE", `/api/scripts/${sid}`);
+}
+
+async function testExeOpenGuard() {
+  console.log("[用例] 检测脚本程序已打开：编辑配置 409 + 运行被拦截");
+  const ping = "C:\\Windows\\System32\\PING.EXE";
+  const cfgDir = path.join(runtimeDir, "open-cfg");
+  const logDir = path.join(runtimeDir, "open-log");
+  fs.rmSync(cfgDir, { recursive: true, force: true });
+  fs.rmSync(logDir, { recursive: true, force: true });
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.mkdirSync(logDir, { recursive: true });
+  const created = await api("POST", "/api/scripts", {
+    name: "占用检测脚本", rootPath: runtimeDir, mainExe: ping,
+    configPath: cfgDir, logPath: logDir,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const sid = (await created.json()).id;
+  assert(created.ok, "创建占用检测脚本（mainExe=PING.EXE）");
+  await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
+
+  const pinger = spawn(ping, ["-n", "60", "127.0.0.1"], { stdio: "ignore" });
+  try {
+    await sleep(1200);
+    const start = await api("POST", `/api/scripts/${sid}/users/甲/edit-config`, { action: "start" });
+    assert(start.status === 409, "编辑配置被拒（409，脚本程序已打开）");
+    const startBody = await start.json();
+    assert(startBody.error.includes("检测到已打开的脚本"), "拒绝原因提示「检测到已打开的脚本，退出脚本后才能编辑配置。」");
+
+    const dr = await api("POST", "/api/dispatch/script", { scriptId: sid, mode: "manual" });
+    assert(dr.ok, "调度已接受（运行尝试阶段拦截）");
+    assert(await waitNoRunning(30000), "运行已结束（被拦截）");
+    const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+    const recs = hist.filter(h => h.scriptInstanceId === sid);
+    const rec = recs[recs.length - 1];
+    assert(rec && rec.finalStatus === "failed" && (rec.resultDetail || "").includes("检测到已打开的脚本"), "历史记录失败原因含「检测到已打开的脚本，请先退出后再运行」");
+  } finally {
+    pinger.kill();
+  }
+  await api("DELETE", `/api/scripts/${sid}`);
+}
+
+async function testPathQuoteNormalize() {
+  console.log("[用例] 脚本路径引号去除（成对首尾引号）");
+  const created = await api("POST", "/api/scripts", {
+    name: "引号路径脚本", rootPath: "\"C:\\Scripts\\Daily\"", mainExe: "'C:\\Scripts\\Daily\\run.bat'",
+    configPath: "\"C:\\Scripts\\Daily\\cfg\"", logPath: "'C:\\Scripts\\Daily\\logs'",
+    gameExe: "\"C:\\Games\\game.exe\"", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  assert(created.ok, "POST 带引号路径成功");
+  const sid = (await created.json()).id;
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  assert(got && got.rootPath === "C:\\Scripts\\Daily" && got.mainExe === "C:\\Scripts\\Daily\\run.bat"
+    && got.configPath === "C:\\Scripts\\Daily\\cfg" && got.logPath === "C:\\Scripts\\Daily\\logs"
+    && got.gameExe === "C:\\Games\\game.exe", "路径已去除成对引号");
   await api("DELETE", "/api/scripts/" + sid);
 }
 
@@ -1183,6 +1302,7 @@ async function main() {
       const tests = [
         testDashboard, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testForceCloseIndependent,
+        testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
         testV020Features, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,

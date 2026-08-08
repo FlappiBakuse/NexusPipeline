@@ -123,6 +123,32 @@ internal static class SystemActions
         }
     }
 
+    /// <summary>
+    /// 检测指定可执行程序是否已有进程在运行（编辑配置/运行前的防冲突检查）。
+    /// 按进程名（不含扩展名，不区分大小写）检测：覆盖程序从其他目录/副本或提升权限运行等全路径比对不可靠的场景；
+    /// 同名无关进程可能误报（可接受的权衡）；批处理等经 cmd 包装的脚本不产生同名进程，无法按名检测，保持放行。
+    /// </summary>
+    public static bool IsExeRunning(string exePath)
+    {
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            return false;
+        }
+        string baseName = Path.GetFileNameWithoutExtension(exePath);
+        if (baseName.Length == 0)
+        {
+            return false;
+        }
+        try
+        {
+            return Process.GetProcessesByName(baseName).Length > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static void KillByName(string exeName, string display)
     {
         if (string.IsNullOrWhiteSpace(exeName))

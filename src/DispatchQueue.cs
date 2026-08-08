@@ -28,7 +28,7 @@ public class DispatchQueue
 
     public string Name { get; set; } = "";
 
-    public string AutoRunMode { get; set; } = "scheduled";
+    public string AutoRunMode { get; set; } = "none";
 
     public string CompletionAction { get; set; } = "none";
 
@@ -69,7 +69,7 @@ internal static class QueueRule
 {
     public static bool IsValidAutoRunMode(string mode)
     {
-        return mode is "startup" or "scheduled";
+        return mode is "startup" or "scheduled" or "none";
     }
 
     public static bool IsValidCompletionAction(string action)
@@ -91,6 +91,11 @@ internal static class QueueRule
 
     public static string AutoRunModeDesc(string mode)
     {
-        return mode == "startup" ? "启动时运行" : "定时运行";
+        return mode switch
+        {
+            "startup" => "启动时运行",
+            "none" => "不运行",
+            _ => "定时运行",
+        };
     }
 }

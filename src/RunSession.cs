@@ -325,6 +325,11 @@ internal class RunSession
     {
         string modeText = _mode == "auto" ? "自动" : "手动";
 
+        if (SystemActions.IsExeRunning(_script.MainExe))
+        {
+            return RunAttemptResult.Failed("检测到已打开的脚本，请先退出后再运行");
+        }
+
         if (_script.LaunchGame)
         {
             if (!TextRules.IsExecutable(_script.GameExe))

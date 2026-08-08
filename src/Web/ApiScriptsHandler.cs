@@ -36,6 +36,7 @@ internal static class ApiScriptsHandler
             {
                 script.Id = Guid.NewGuid().ToString("N");
             }
+            NormalizePaths(script);
             ctx.Scripts.Add(script);
             DataStore.SaveScripts(ctx.Scripts);
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
@@ -61,6 +62,8 @@ internal static class ApiScriptsHandler
                 return;
             }
             update.Id = existing.Id;
+            update.Users = existing.Users;
+            NormalizePaths(update);
             int index = ctx.Scripts.IndexOf(existing);
             ctx.Scripts[index] = update;
             DataStore.SaveScripts(ctx.Scripts);
@@ -95,6 +98,35 @@ internal static class ApiScriptsHandler
             return;
         }
         await HandleScriptUsersAsync(context, method, seg, body).ConfigureAwait(false);
+    }
+
+    private static void NormalizePaths(ScriptInstance script)
+    {
+        script.RootPath = StripPathQuotes(script.RootPath);
+        script.MainExe = StripPathQuotes(script.MainExe);
+        script.ConfigPath = StripPathQuotes(script.ConfigPath);
+        script.LogPath = StripPathQuotes(script.LogPath);
+        script.GameExe = StripPathQuotes(script.GameExe);
+    }
+
+    /// <summary>去除成对首尾引号（"…" / '…'），保留路径内部的合法单引号（如 C:\O'Brien\）。</summary>
+    private static string StripPathQuotes(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+        string trimmed = value.Trim();
+        if (trimmed.Length >= 2)
+        {
+            char first = trimmed[0];
+            char last = trimmed[^1];
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\''))
+            {
+                return trimmed[1..^1].Trim();
+            }
+        }
+        return trimmed;
     }
 
     private static async Task HandleScriptUsersAsync(HttpListenerContext context, string method, string[] seg, string body)
@@ -165,7 +197,28 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名重复：该脚本已存在同名用户" }, 400).ConfigureAwait(false);
                     return;
                 }
-                string oldDataUser = existing.Name;
+                if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
+                    if (!gate.Wait(0))
+                    {
+                        await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法编辑用户" }, 409).ConfigureAwait(false);
+                        return;
+                    }
+                    try
+                    {
+                        string? renameError = UserConfigManager.RenameUserData(seg[1], oldName, update.Name);
+                        if (renameError is not null)
+                        {
+                            await HttpHelper.WriteJsonAsync(context, new { error = renameError }, 400).ConfigureAwait(false);
+                            return;
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }
                 existing.Name = update.Name;
                 existing.Enabled = update.Enabled;
                 existing.PreRunScript = update.PreRunScript;
@@ -173,11 +226,7 @@ internal static class ApiScriptsHandler
                 existing.PostRunScript = update.PostRunScript;
                 existing.PostRunOnFinalOnly = update.PostRunOnFinalOnly;
                 DataStore.SaveScripts(ctx.Scripts);
-                Audit.Log(Audit.Web, "编辑用户", $"{script.Name} / {oldDataUser} → {existing.Name}");
-                if (!string.Equals(oldDataUser, existing.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    UserConfigManager.RenameUserData(script.Id, oldDataUser, existing.Name);
-                }
+                Audit.Log(Audit.Web, "编辑用户", $"{script.Name} / {oldName} → {existing.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
             }
@@ -261,6 +310,11 @@ internal static class ApiScriptsHandler
                 if (!TextRules.IsExecutable(script.MainExe))
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "脚本主程序路径错误或不是可执行文件" }, 400).ConfigureAwait(false);
+                    return;
+                }
+                if (SystemActions.IsExeRunning(script.MainExe))
+                {
+                    await HttpHelper.WriteJsonAsync(context, new { error = "检测到已打开的脚本，退出脚本后才能编辑配置。" }, 409).ConfigureAwait(false);
                     return;
                 }
                 string? prepError = UserConfigManager.PrepareForEdit(script.Id, user.Name, script.ConfigPath);
