@@ -149,7 +149,7 @@ export async function openScriptModal(id = "", plugin = "") {
     </div>
     <div class="form-grid">
       ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
-      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选"')}
+      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选；如 ..\\March7th Assistant.exe?-x（路径后加 ? 传参数）"')}
     </div>
     <div class="form-grid">
       ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}

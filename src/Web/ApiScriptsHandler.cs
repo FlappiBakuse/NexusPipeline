@@ -226,6 +226,15 @@ internal static class ApiScriptsHandler
         }
     }
 
+    /// <summary>解析运行时启动目标（Args 首项显式路径 → 该程序；否则主程序），用于运行冲突检测。</summary>
+    private static string ResolveLaunchTargetExe(ScriptInstance script)
+    {
+        string workingDir = string.IsNullOrWhiteSpace(script.RootPath)
+            ? Path.GetDirectoryName(script.MainExe) ?? ""
+            : script.RootPath;
+        return SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
+    }
+
     private static void NormalizePaths(ScriptInstance script)
     {
         script.RootPath = StripPathQuotes(script.RootPath);
@@ -442,7 +451,8 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "脚本主程序路径错误或不是可执行文件" }, 400).ConfigureAwait(false);
                     return;
                 }
-                if (SystemActions.IsExeRunning(script.MainExe))
+                if (SystemActions.IsExeRunning(script.MainExe)
+                    || SystemActions.IsExeRunning(ResolveLaunchTargetExe(script)))
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "检测到已打开的脚本，退出脚本后才能编辑配置。" }, 409).ConfigureAwait(false);
                     return;

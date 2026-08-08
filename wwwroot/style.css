@@ -223,7 +223,8 @@ tbody tr:hover td { background: var(--accent-soft); }
 .badge.muted { background: rgba(146,168,196,.12); color: var(--muted); }
 .badge.blue { background: var(--accent-soft); color: var(--accent); }
 
-.new-script-chooser { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.new-script-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.new-script-chooser .chooser-card:first-child { grid-column: 1 / -1; }
 .chooser-card { display: block; width: 100%; min-height: 64px; margin-left: 0; padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-soft); color: var(--text); text-align: left; box-shadow: none; }
 .chooser-card:hover { border-color: var(--border-strong); background: var(--panel-hover); }
 .chooser-card strong { display: block; font-size: 14px; line-height: 1.4; }

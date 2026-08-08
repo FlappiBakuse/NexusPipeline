@@ -381,7 +381,10 @@ internal class RunSession
             ? Path.GetDirectoryName(_script.MainExe) ?? ""
             : _script.RootPath;
 
+        (string launchExe, List<string> launchArgs) = SystemActions.ResolveLaunchTarget(_script.MainExe, workingDir, _script.Args);
+
         Process? process = null;
+        bool stdoutAttached = false;
         void KillStartedScript()
         {
             if (process is null)
@@ -389,24 +392,42 @@ internal class RunSession
                 return;
             }
             SystemActions.KillTree(process.Id);
-            if (SystemActions.IsExeRunning(_script.MainExe))
+            if (SystemActions.IsExeRunning(launchExe))
             {
                 Logger.Info($"[提示] 脚本「{_script.Name}」主进程已退出但检测到同名进程仍在运行（自重启产物），按进程名强制结束。");
-                SystemActions.KillByName(_script.MainExe, "脚本");
+                SystemActions.KillByName(launchExe, "脚本");
             }
         }
 
-        if (SystemActions.IsExeRunning(_script.MainExe))
+        if (SystemActions.IsExeRunning(launchExe))
         {
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」检测到已在运行，直接监控其日志（不重复启动）。");
             _statusChanged?.Invoke("检测到脚本已在运行，直接监控其日志...");
         }
         else
         {
-            var psi = SystemActions.BuildScriptStartInfo(_script.MainExe, workingDir, TextRules.SplitArgs(_script.Args), noWindow: true, redirect: true);
+            var psi = SystemActions.BuildScriptStartInfo(launchExe, workingDir, launchArgs, noWindow: true, redirect: true);
             try
             {
                 process = Process.Start(psi);
+                stdoutAttached = true;
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (SystemActions.IsElevationRequired(ex))
+            {
+                _statusChanged?.Invoke("目标程序需要管理员权限，正在请求提权（UAC）...");
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」目标程序需要管理员权限，改用提升权限（runas）启动：{launchExe}");
+                try
+                {
+                    process = SystemActions.StartWithElevation(launchExe, workingDir, launchArgs);
+                }
+                catch (System.ComponentModel.Win32Exception ex2) when (ex2.NativeErrorCode == 1223)
+                {
+                    return RunAttemptResult.Failed("脚本启动失败：目标程序需要管理员权限，用户取消了提权确认");
+                }
+                catch (Exception ex2)
+                {
+                    return RunAttemptResult.Failed($"脚本启动失败：目标程序需要管理员权限，提权重试失败：{ex2.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -417,7 +438,7 @@ internal class RunSession
                 return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
             }
             _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
-            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{_script.MainExe}（PID {process.Id}）");
+            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
             ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
         }
 
@@ -438,7 +459,7 @@ internal class RunSession
             ConsoleLog.Write(data);
         }
 
-        if (process is not null)
+        if (process is not null && stdoutAttached)
         {
             process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
             process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data);
@@ -526,8 +547,8 @@ internal class RunSession
                 }
 
                 bool scriptExited = process is null
-                    ? !SystemActions.IsExeRunning(_script.MainExe)
-                    : process.HasExited && !SystemActions.IsExeRunning(_script.MainExe);
+                    ? !SystemActions.IsExeRunning(launchExe)
+                    : process.HasExited && !SystemActions.IsExeRunning(launchExe);
                 if (scriptExited)
                 {
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))

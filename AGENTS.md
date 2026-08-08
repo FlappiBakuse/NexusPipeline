@@ -6,11 +6,13 @@ NexusPipeline（枢链）：C#/.NET 8 (net8.0-windows) WinForms 托盘 + 纯静�
 
 ```powershell
 # 1. 构建（产物输出到 release/，不提交）
-build.cmd                      # 源码在 src/，运行物在 release/
+build.cmd                      # 提权版（requireAdministrator，正式发布用）
+build.cmd /test                # 无提权版（CI / e2e 用，避免 UAC 弹窗挂起）
+# 源码在 src/，运行物在 release/；正式版提权后所有形态均以管理员运行，开机自启为计划任务（onlogon + highest）
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 303 项用例；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs           # 338 项用例；先跑 build.cmd /test，否则 setupRuntime 直接中止
 node uitest\test.mjs --quick   # 开发迭代快速模式：仅 15 个 UI 冒烟用例（约 184 项断言），CI 仍跑全量
 ```
 
@@ -56,6 +58,12 @@ node uitest\test.mjs --quick   # 开发迭代快速模式：仅 15 个 UI 冒烟
 - `git mv` 不展开通配符：`Get-ChildItem -Filter "*.cs" | ForEach-Object { git mv $_.Name "src\$($_.Name)" }`。
 - `gh api --jq` 的复杂表达式（含逗号/引号）会被 PowerShell 拆参：用无空格表达式或输出 JSON 再本地处理；`gh pr create --body` 含引号/长文时改用 `--body-file`。
 - 运行进程残留会锁定 `release\nexus-pipeline.exe`，重构建前先 `Get-Process nexus-pipeline | Stop-Process`。
+- **gh/PowerShell 中文操作三坑（曾踩，修复 release 时中招）**：
+  1. `gh api ... --jq .body` 多行输出被 PowerShell 5.1 捕获为 `string[]`，`[IO.File]::WriteAllText(路径, 数组)` 会用空格连接、**换行全部丢失**；必须先 `[Console]::OutputEncoding = UTF8`，并用 `($body -join "`n")` 显式转字符串。
+  2. 未设 UTF8 输出编码时 gh 的 UTF-8 中文被 GBK 误读（mojibake），且经 GB18030 往返**有损不可逆**；含中文的 gh 写操作一律走文件：`gh release edit --notes-file`（UTF-8 无 BOM），命令内不写中文字面量。
+  3. **修改已发布 release（edit body / 资产）前，先 `gh api ... --jq .body` 把原正文备份到本地文件**，再动手。
+- 脚本自启动参数（Args）以显式路径开头（`X:\`、`\\`、`.\`、`..\`）时 =「运行时启动目标」（管理端/执行端分离）：整段到 `?` 为止为路径（路径段去尾随空格），相对脚本根目录标准语义解析，含空格无需引号；`?` 后为启动目标参数；**Args 一律禁止引号**（引号视为普通参数内容，不用于路径，避免歧义）；解析失败回退主程序并警告。其他路径字段（RootPath/MainExe/ConfigPath/LogPath/GameExe）保留去成对首尾引号功能。
+- 脚本启动 `Win32Exception 740`（ERROR_ELEVATION_REQUIRED）＝目标程序 manifest 要求管理员：自动改用 ShellExecute runas 提升启动（UAC 从不通知+管理员账户直接提权无弹窗；标准用户弹凭据；取消则明确中文错误）。提权路径无 stdout 重定向，运行判定依赖日志文件；`StartVisible`（编辑配置）同样支持。
 
 ## 主要入口
 

@@ -168,10 +168,18 @@ internal class DispatchCenter
         }
     }
 
-    /// <summary>脚本主程序是否已有进程在运行（按进程名检测）。</summary>
+    /// <summary>脚本是否已有进程在运行（按运行时启动目标进程名检测：Args 首项为显式路径时按它，否则主程序）。</summary>
     public static bool IsScriptRunning(ScriptInstance? script)
     {
-        return script is not null && !string.IsNullOrWhiteSpace(script.MainExe) && SystemActions.IsExeRunning(script.MainExe);
+        if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
+        {
+            return false;
+        }
+        string workingDir = string.IsNullOrWhiteSpace(script.RootPath)
+            ? Path.GetDirectoryName(script.MainExe) ?? ""
+            : script.RootPath;
+        (string launchExe, _) = SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args);
+        return SystemActions.IsExeRunning(launchExe);
     }
 
     /// <summary>队列是否被正在运行的脚本阻塞：返回第一个运行中的脚本名；无则 null。</summary>

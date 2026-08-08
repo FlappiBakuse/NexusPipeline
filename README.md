@@ -22,7 +22,7 @@
   - 定时列表：多条，每条可设置启用状态、一周七天多选、执行时间（hh:mm）；
   - 任务列表：按序号先后执行，引用已创建的脚本实例。
 - **调度中心**：手动执行任意脚本实例（启用用户将自动依次运行）或调度队列，可取消。
-- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI 专用插件，根据脚本根目录自动推导主程序、配置、日志路径与自启动参数）。`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` / `ISpecializedScriptPlugin` 接口）会自动加载，外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
+- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant 专用插件：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；**Args 禁止使用引号**，引号一律视为参数内容）。`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` / `ISpecializedScriptPlugin` 接口）会自动加载，外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
 - **仪表盘**：脚本实例数、调度队列数、下一调度队列（倒计时）、当前版本；正在运行的任务；插件卡片。
 - **历史记录**：每个脚本实例/调度队列的完整运行日志（每次尝试的原因、日志尾部、控制台输出），按保留天数清理（默认 3 天）。
 - **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、日志级别（DEBUG/INFO/WARN/ERROR/FATAL，控制台按级别着色，即时生效）、Web 端口。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
@@ -30,6 +30,7 @@
 ## 运行要求
 
 - Windows 10/11，已安装 .NET 8 运行时（或 SDK）。
+- **需以管理员身份运行**（正式版构建要求管理员权限，双击时确认 UAC；开机自启动注册为计划任务，登录时以最高权限静默启动）。若以普通权限运行，遇到需要管理员权限的脚本程序时会自动弹出 UAC 提权确认（UAC 从不通知且当前账户为管理员时直接提权，无弹窗）。
 - 便携部署：主程序、配置、历史、日志均从 exe 所在目录计算，项目目录可放在任意位置。
 
 ## 三种使用形态
@@ -51,7 +52,7 @@ nexus-pipeline.exe web                # 仅启动网页界面并打开浏览器
 nexus-pipeline.exe run-script <ID或名称> [-Auto|-Manual]   # 手动执行脚本并等待结果
 nexus-pipeline.exe run-queue  <ID或名称> [-Auto|-Manual]   # 手动执行队列并等待结果
 nexus-pipeline.exe cancel <运行ID>    # 取消正在运行的脚本或队列
-nexus-pipeline.exe register           # 注册开机自启动（当前用户）
+nexus-pipeline.exe register           # 注册开机自启动（计划任务，登录时以最高权限运行）
 nexus-pipeline.exe unregister         # 取消开机自启动
 ```
 
@@ -82,19 +83,20 @@ nexus-pipeline.exe unregister         # 取消开机自启动
 
 ```
 release/
-├── nexus-pipeline.exe      ← 主程序（单文件，框架依赖 .NET 8 运行时）
+├── nexus-pipeline.exe      ← 主程序（单文件，框架依赖 .NET 8 运行时；正式版为提权构建）
 ├── wwwroot/                ← 网页管理界面
 ├── plugins/                ← 插件目录
 └── config/                 ← 配置文件（运行时生成）
 ```
 
-部署：**整体拷贝 `release/` 文件夹**到任意位置即可（`config/`、`history/`、`logs/` 运行时自动生成）。旧版本（配置文件在 exe 同目录）启动时自动迁移到 `config/` 文件夹，无需手动处理。
+- `build.cmd` 默认产出**提权版**（管理员权限）；CI 与端到端测试用 `build.cmd /test` 产出无提权版（无法弹 UAC）。
+- 部署：**整体拷贝 `release/` 文件夹**到任意位置即可（`config/`、`history/`、`logs/` 运行时自动生成）。旧版本（配置文件在 exe 同目录）启动时自动迁移到 `config/` 文件夹，无需手动处理。
 
 ## 浏览器自动化测试
 
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
-- 先运行 `build.cmd` 生成 `release/`，再运行 `uitest\run-uitest.cmd`（或 `node uitest/test.mjs`）即可；
+- 先运行 `build.cmd /test` 生成 `release/`（无提权版，e2e 无法弹 UAC），再运行 `uitest\run-uitest.cmd`（或 `node uitest/test.mjs`）即可；
 - 快速迭代时可加 `--quick` 参数（如 `node uitest/test.mjs --quick`）只跑 UI 冒烟子集，CI 仍跑全量；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI 适配 / 简化弹窗 / 图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）、下拉选择器重绘。

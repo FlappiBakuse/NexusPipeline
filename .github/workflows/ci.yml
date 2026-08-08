@@ -32,8 +32,8 @@ jobs:
         working-directory: uitest
         run: npm ci
 
-      - name: 发布构建（build.cmd）
-        run: .\build.cmd
+      - name: 发布构建（build.cmd /test 无提权版，e2e 无法弹 UAC）
+        run: .\build.cmd /test
 
       - name: 运行 e2e 测试
         shell: cmd

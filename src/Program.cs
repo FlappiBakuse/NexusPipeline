@@ -132,6 +132,7 @@ public static class Program
         if (!createdNew)
         {
             Logger.Info("NexusPipeline 已在运行，打开管理页面。");
+            Logger.Info("[提示] 若需以管理员身份运行，请先退出当前 NexusPipeline 实例（托盘退出或任务管理器结束进程）。");
             TrayApp.OpenWeb();
             return;
         }

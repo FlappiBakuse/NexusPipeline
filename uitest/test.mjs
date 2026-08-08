@@ -19,7 +19,7 @@ const QUICK_SET = new Set([
   "testDispatchAndHistory", "testLogScroll", "testHistoryFiles", "testAudit", "testLogLevel",
   "testSpecializedScript",
 ]);
-const EXPECTED = 303;
+const EXPECTED = 338;
 
 let passed = 0;
 let failed = 0;
@@ -148,7 +148,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.3.1"), "版本显示 0.3.1（x.x.x 不带 v）");
+  assert(body.includes("0.3.2"), "版本显示 0.3.2（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -209,10 +209,11 @@ async function testResponsiveShell(page) {
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   const chooserStack = await page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll(".chooser-card"));
-    if (cards.length !== 2) return false;
+    if (cards.length !== 3) return false;
     const a = cards[0].getBoundingClientRect();
     const b = cards[1].getBoundingClientRect();
-    return b.top > a.bottom && Math.abs(a.left - b.left) <= 1;
+    const c = cards[2].getBoundingClientRect();
+    return b.top > a.bottom && c.top > b.bottom && Math.abs(a.left - b.left) <= 1 && Math.abs(b.left - c.left) <= 1;
   });
   assert(chooserStack, "手机端新建选择卡片堆叠");
   await page.click('[data-action="open-script-type"][data-plugin=""]');
@@ -309,15 +310,16 @@ async function testScriptCrud(page) {
   }
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
-  assert((await page.$$(".chooser-card")).length === 2, "选择卡片层含通用与专项两张卡片");
+  assert((await page.$$(".chooser-card")).length === 3, "选择卡片层含通用与专项三张卡片");
   const chooserRow = await page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll(".chooser-card"));
-    if (cards.length !== 2) return false;
+    if (cards.length !== 3) return false;
     const a = cards[0].getBoundingClientRect();
     const b = cards[1].getBoundingClientRect();
-    return a.right <= b.left + 1 && Math.abs(a.top - b.top) <= 1;
+    const c = cards[2].getBoundingClientRect();
+    return a.width > b.width * 1.5 && b.right <= c.left + 1 && Math.abs(b.top - c.top) <= 1;
   });
-  assert(chooserRow, "桌面端新建选择卡片左右对齐并排");
+  assert(chooserRow, "桌面端新建选择卡片：通用卡单独一行（全宽）、专项卡两个一行并排");
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal-mask");
   assert((await page.$$(".req")).length >= 7, "必填项红色 * 标记存在（≥7 个）");
@@ -1230,6 +1232,193 @@ async function testSpecializedScript(page) {
   await api("DELETE", "/api/scripts/" + sid);
 }
 
+function findHistoryRecord(scriptId) {
+  const historyRoot = path.join(runtimeDir, "history");
+  if (!fs.existsSync(historyRoot)) return null;
+  const dirs = fs.readdirSync(historyRoot).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
+  for (const dir of dirs) {
+    const files = fs.readdirSync(path.join(historyRoot, dir)).filter(f => f.endsWith(".json")).sort().reverse();
+    for (const f of files) {
+      const rec = JSON.parse(fs.readFileSync(path.join(historyRoot, dir, f), "utf8").replace(/^\uFEFF/, ""));
+      if (rec.ScriptInstanceId === scriptId) return rec;
+    }
+  }
+  return null;
+}
+
+async function testLaunchTargetArgs(page) {
+  console.log("[用例] 自启动参数显式路径：运行时启动目标（管理端/执行端分离）/ 普通参数不受影响 / 解析失败回退 / 编辑配置门禁");
+  const ltDir = path.join(runtimeDir, "lt-scripts");
+  fs.rmSync(ltDir, { recursive: true, force: true });
+  fs.mkdirSync(ltDir, { recursive: true });
+  const managerFlag = path.join(ltDir, "launcher-ran.flag");
+  const execFlag = path.join(ltDir, "exec-ran.flag");
+  const execArgsFlag = path.join(ltDir, "exec-args.flag");
+  const launcherBat = path.join(ltDir, "launcher.bat");
+  const execBat = path.join(ltDir, "exec target.bat");
+  const runLog = path.join(ltDir, "lt-run-" + localDate() + ".log");
+  fs.writeFileSync(launcherBat, [
+    "@echo off",
+    "echo LAUNCHER-RAN %1 >> \"" + managerFlag + "\"",
+  ].join("\r\n"), "ascii");
+  fs.writeFileSync(execBat, [
+    "@echo off",
+    "echo EXEC-RAN >> \"" + execFlag + "\"",
+    "echo ARGS %~1 %~2 >> \"" + execArgsFlag + "\"",
+    "echo done >> \"" + runLog + "\"",
+    "ping -n 3 127.0.0.1 >nul",
+  ].join("\r\n"), "ascii");
+  const logPattern = path.join(ltDir, "lt-run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\");
+
+  const s1 = await createScript({
+    name: "启动目标相对", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: ".\\exec target.bat ?-x marker",
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+  });
+  assert(s1.ok, "创建启动目标脚本（Args 显式相对路径，含空格无引号 + ? 前带空格）");
+  await api("POST", "/api/dispatch/script", { scriptId: s1.id, mode: "manual" });
+  assert(await waitNoRunning(30000), "相对路径场景运行结束");
+  assert(fs.existsSync(execFlag), "运行时启动目标为 Args 路径（exec target.bat 执行端被启动，含空格无需引号）");
+  assert(!fs.existsSync(managerFlag), "主程序（launcher.bat 管理端）未被启动");
+  assert(fs.existsSync(execArgsFlag) && fs.readFileSync(execArgsFlag, "utf8").includes("-x marker"), "? 之后的启动目标参数原样传入（-x marker）");
+  const rec1 = findHistoryRecord(s1.id);
+  assert(rec1 && rec1.Status === "success", "相对路径场景历史记录成功（日志完成标志判定）");
+  await api("DELETE", "/api/scripts/" + s1.id);
+
+  fs.rmSync(execFlag, { force: true });
+  const s2 = await createScript({
+    name: "启动目标绝对", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: execBat.replace(/\\/g, "\\\\"),
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+  });
+  await api("POST", "/api/dispatch/script", { scriptId: s2.id, mode: "manual" });
+  assert(await waitNoRunning(30000), "绝对路径场景运行结束");
+  assert(fs.existsSync(execFlag), "绝对路径（含空格无引号）同样作为运行时启动目标");
+  await api("DELETE", "/api/scripts/" + s2.id);
+
+  const s3 = await createScript({
+    name: "普通参数脚本", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: "-x marker",
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+  });
+  await api("POST", "/api/dispatch/script", { scriptId: s3.id, mode: "manual" });
+  assert(await waitNoRunning(30000), "普通参数场景运行结束");
+  const managerOut = fs.existsSync(managerFlag) ? fs.readFileSync(managerFlag, "utf8") : "";
+  assert(managerOut.includes("LAUNCHER-RAN") && managerOut.includes("-x"), "普通参数首项不视为路径，主程序被启动且参数原样传入");
+  await api("DELETE", "/api/scripts/" + s3.id);
+
+  fs.rmSync(execFlag, { force: true });
+  const sQ = await createScript({
+    name: "引号参数脚本", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: '".\\exec target.bat"',
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+  });
+  assert(sQ.ok, "创建引号包裹路径脚本");
+  await api("POST", "/api/dispatch/script", { scriptId: sQ.id, mode: "manual" });
+  assert(await waitNoRunning(30000), "引号场景运行结束");
+  assert(!fs.existsSync(execFlag), "Args 禁止引号：引号包裹路径不视为启动目标（exec 未被启动）");
+  const managerOut5 = fs.existsSync(managerFlag) ? fs.readFileSync(managerFlag, "utf8") : "";
+  assert(managerOut5.includes("exec target.bat"), "引号内容按普通参数原样传给主程序");
+  await api("DELETE", "/api/scripts/" + sQ.id);
+
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
+  const logBefore = readLog();
+  const s4 = await createScript({
+    name: "启动目标缺失", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: "..\\no-such-exec.bat",
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+  });
+  await api("POST", "/api/dispatch/script", { scriptId: s4.id, mode: "manual" });
+  assert(await waitNoRunning(30000), "解析失败场景运行结束");
+  assert(fs.existsSync(managerFlag) && fs.readFileSync(managerFlag, "utf8").split("LAUNCHER-RAN").length - 1 >= 2, "显式路径无法解析为可执行文件时回退主程序（launcher.bat 被启动）");
+  assert(await waitFor(() => readLog().includes("[警告] 脚本自启动参数含显式路径"), 5000), "回退时输出警告日志");
+  await api("DELETE", "/api/scripts/" + s4.id);
+
+  const cmdCopy = path.join(ltDir, "lt-exec.exe");
+  fs.copyFileSync("C:\\Windows\\System32\\cmd.exe", cmdCopy);
+  const s5 = await api("POST", "/api/scripts", {
+    name: "启动目标门禁", rootPath: ltDir.replace(/\\/g, "\\\\"),
+    mainExe: launcherBat.replace(/\\/g, "\\\\"), args: ".\\lt-exec.exe",
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const sid5 = (await s5.json()).id;
+  await api("POST", "/api/scripts/" + sid5 + "/users", { name: "甲", enabled: true });
+  const execProc = spawn(cmdCopy, ["/c", "ping -n 60 127.0.0.1"], { stdio: "ignore" });
+  await waitFor(async () => {
+    try { const p = await fetch(baseUrl + "api/status"); await p.json(); } catch { return false; }
+    return true;
+  }, 3000);
+  await sleep(800);
+  const during = await api("POST", `api/scripts/${sid5}/users/甲/edit-config`, { action: "start" });
+  assert(during.status === 409, "运行时启动目标在运行 → 编辑配置被拒绝（409）");
+  spawn("taskkill.exe", ["/PID", String(execProc.pid), "/T", "/F"], { stdio: "ignore" });
+  await sleep(800);
+  const after = await api("POST", `api/scripts/${sid5}/users/甲/edit-config`, { action: "start" });
+  assert(after.ok, "启动目标退出后可正常开始编辑配置");
+  const cancel = await api("POST", `api/scripts/${sid5}/users/甲/edit-config`, { action: "cancel" });
+  assert(cancel.ok, "取消编辑配置正常（会话关闭）");
+  await api("DELETE", "/api/scripts/" + sid5);
+}
+
+async function testMarch7thPlugin(page) {
+  console.log("[用例] 专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上级目录执行端");
+  const mRoot = path.join(runtimeDir, "sim-march7th");
+  fs.rmSync(mRoot, { recursive: true, force: true });
+  fs.mkdirSync(mRoot, { recursive: true });
+  fs.writeFileSync(path.join(mRoot, "March7th Launcher.exe"), "");
+  fs.writeFileSync(path.join(mRoot, "March7th Assistant.exe"), "");
+
+  const st = await (await fetch(baseUrl + "api/status")).json();
+  const m7 = (st.plugins || []).find(p => p.name === "march7th");
+  assert(m7 && m7.kind === "specialized" && m7.enabled, "March7thAssistant 专用插件已加载且启用（kind=specialized）");
+
+  const probeOk = await api("POST", "/api/scripts/probe", { rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th" });
+  assert(probeOk.ok, "march7th probe 成功");
+  const profile = (await probeOk.json()).profile;
+  assert(profile.mainExe.endsWith("March7th Launcher.exe"), "probe 主程序为 Launcher（编辑配置用）");
+  assert(profile.args === ".\\March7th Assistant.exe", "probe 启动目标为显式相对路径（.\\ 前缀，无引号）");
+  assert(profile.configPath.endsWith("config.yaml"), "probe 推导配置文件 config.yaml");
+  assert(profile.logPath.includes("{YYYY-MM-DD}.log"), "probe 推导日志路径 logs/{YYYY-MM-DD}.log");
+
+  const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-m7"), pluginType: "march7th" });
+  assert(probeBad.status === 400, "march7th probe 对无法推导的根目录返回 400");
+
+  const mUp = path.join(runtimeDir, "sim-m7-up");
+  fs.rmSync(mUp, { recursive: true, force: true });
+  fs.mkdirSync(mUp, { recursive: true });
+  fs.writeFileSync(path.join(mUp, "March7th Launcher.exe"), "");
+  fs.writeFileSync(path.join(runtimeDir, "March7th Assistant.exe"), "");
+  const probeUp = await api("POST", "/api/scripts/probe", { rootPath: mUp.replace(/\\/g, "\\\\"), pluginType: "march7th" });
+  assert(probeUp.ok, "执行端在上级目录时 probe 成功");
+  const upProfile = (await probeUp.json()).profile;
+  assert(upProfile.mainExe.endsWith("March7th Launcher.exe") && upProfile.args.startsWith("..\\"), "上级目录场景：主程序 Launcher + Args 为 ..\\ 显式相对路径");
+  fs.rmSync(path.join(runtimeDir, "March7th Assistant.exe"), { force: true });
+
+  const created = await api("POST", "/api/scripts", {
+    name: "专项M7脚本", rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th",
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  assert(created.ok, "API 创建 march7th 专项脚本实例成功");
+  const sid = (await created.json()).id;
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  assert(got && got.pluginType === "march7th", "专项实例保存 pluginType=march7th");
+  assert(got.mainExe.endsWith("March7th Launcher.exe"), "主程序由插件固化（Launcher）");
+  assert(got.args === ".\\March7th Assistant.exe", "Args 启动目标由插件固化（.\\ 显式相对路径，无引号）");
+  assert(got.configPath.endsWith("config.yaml") && got.logPath.includes("{YYYY-MM-DD}.log"), "配置/日志路径由插件固化");
+  await api("DELETE", "/api/scripts/" + sid);
+
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="new-script"]', { timeout: 5000 });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  const chooserText = await page.textContent(".new-script-chooser");
+  assert(chooserText.includes("新建March7thAssistant专项脚本实例"), "选择卡片层含「新建March7thAssistant专项脚本实例」卡片");
+  await page.click(".modal button:has-text('取消')");
+}
+
 async function testLogPattern(page) {
   console.log("[用例] 日志路径格式：严格匹配 / 无条目超时失败 / 已有日志忽略 / 通配轮换");
   const logRoot = path.join(runtimeDir, "lp-logs");
@@ -1611,7 +1800,7 @@ async function main() {
         testDashboard, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
-        testV020Features, testSpecializedScript, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
+        testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,
         testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,
