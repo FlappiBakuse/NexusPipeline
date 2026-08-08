@@ -6,7 +6,7 @@ internal class LogMonitor : IDisposable
 {
     private readonly string _path;
 
-    private readonly bool _readFromStart;
+    private bool _readFromStart;
 
     private FileStream? _stream;
 
@@ -23,7 +23,17 @@ internal class LogMonitor : IDisposable
 
     public string Path => _path;
 
+    /// <summary>打开时记录的文件创建时间（Ticks），用于检测同路径文件被删除重建（追加写不改变创建时间，不误判）。</summary>
+    public long FileStamp { get; private set; }
+
     public DateTime LastWrite { get; private set; } = DateTime.Now;
+
+    /// <summary>重新打开并从文件头读取（文件被重建/截断后使用）。</summary>
+    public void ReopenFromStart()
+    {
+        _readFromStart = true;
+        Open();
+    }
 
     public string ReadNew()
     {
@@ -75,6 +85,14 @@ internal class LogMonitor : IDisposable
         {
             _stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             _position = _readFromStart || _stream.Length == 0 ? 0 : _stream.Length;
+            try
+            {
+                FileStamp = File.GetCreationTimeUtc(_path).Ticks;
+            }
+            catch (Exception)
+            {
+                FileStamp = 0;
+            }
         }
         catch (Exception)
         {

@@ -17,8 +17,9 @@ const QUICK_SET = new Set([
   "testDashboard", "testResponsiveShell", "testNavigation", "testScriptCrud", "testQueueCrud",
   "testV020Features", "testPluginConfig", "testNotifyPluginGating", "testNextScheduleAndStats",
   "testDispatchAndHistory", "testLogScroll", "testHistoryFiles", "testAudit", "testLogLevel",
+  "testSpecializedScript",
 ]);
-const EXPECTED = 241;
+const EXPECTED = 292;
 
 let passed = 0;
 let failed = 0;
@@ -147,7 +148,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.2.3"), "版本显示 0.2.3（x.x.x 不带 v）");
+  assert(body.includes("0.3.0"), "版本显示 0.3.0（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -205,6 +206,16 @@ async function testResponsiveShell(page) {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("h2");
   await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  const chooserStack = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll(".chooser-card"));
+    if (cards.length !== 2) return false;
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    return b.top > a.bottom && Math.abs(a.left - b.left) <= 1;
+  });
+  assert(chooserStack, "手机端新建选择卡片堆叠");
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal");
   await page.waitForFunction(() => document.activeElement?.id === "sm-name", null, { timeout: 2000 });
   const modalMetrics = await page.evaluate(() => {
@@ -218,6 +229,23 @@ async function testResponsiveShell(page) {
   assert(modalMetrics.dialog, "弹窗包含可访问语义");
   assert(modalMetrics.focus, "弹窗打开后焦点进入第一个字段");
   await page.click('[data-action="close-modal"]');
+
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h2");
+  await page.click("button:has-text('新建调度队列')");
+  await page.waitForSelector("#qm-name");
+  await page.click("text=+ 添加任务");
+  await page.waitForSelector(".task-row");
+  const taskRowInline = await page.evaluate(() => {
+    const row = document.querySelector(".task-row");
+    if (!row) return false;
+    const parts = Array.from(row.querySelectorAll("select, button"));
+    if (parts.length < 4) return false;
+    const tops = parts.map(x => x.getBoundingClientRect().top);
+    return Math.max(...tops) - Math.min(...tops) <= 4;
+  });
+  assert(taskRowInline, "手机端任务列表选择器与上移/下移/删除按钮同一行");
+  await page.click(".modal button:has-text('取消')");
 
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
@@ -268,18 +296,29 @@ async function testNavigation(page) {
 }
 
 async function testScriptCrud(page) {
-  console.log("[用例] 脚本实例：空状态 / 按钮位置 / 必填校验 / 新建 / 编辑 / 删除");
+  console.log("[用例] 脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编辑 / 删除");
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("h2");
   assert((await page.textContent("body")).includes("暂无脚本实例"), "无脚本时显示空状态提示而非空卡片");
-  const newBtn = await page.$(".page-head button:has-text('新建脚本实例')");
-  assert(!!newBtn, "新建按钮位于右上角（page-head 内）");
+  const newBtn = await page.$('[data-testid="new-script"]');
+  assert(!!newBtn, "新建通用脚本实例按钮位于右上角（page-head 内）");
   if (newBtn) {
     const box = await newBtn.boundingBox();
     const vw = await page.evaluate(() => window.innerWidth);
     assert(box.x > vw / 2, "新建按钮位于视口右半侧（与卡片右侧对齐）");
   }
-  await page.click("text=新建脚本实例");
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  assert((await page.$$(".chooser-card")).length === 2, "选择卡片层含通用与专项两张卡片");
+  const chooserRow = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll(".chooser-card"));
+    if (cards.length !== 2) return false;
+    const a = cards[0].getBoundingClientRect();
+    const b = cards[1].getBoundingClientRect();
+    return a.right <= b.left + 1 && Math.abs(a.top - b.top) <= 1;
+  });
+  assert(chooserRow, "桌面端新建选择卡片左右对齐并排");
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal-mask");
   assert((await page.$$(".req")).length >= 7, "必填项红色 * 标记存在（≥7 个）");
 
@@ -304,6 +343,7 @@ async function testScriptCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A"), null, { timeout: 5000 });
   assert((await page.textContent("body")).includes("测试脚本A"), "新建后列表中显示脚本名称");
+  assert(!(await page.$eval("#toast", el => el.classList.contains("shake"))), "成功保存提示不抖动");
   assert(fs.existsSync(path.join(runtimeDir, "config", "scripts.json")), "配置文件写入 config 目录");
 
   await page.click('[data-action="edit-script"]');
@@ -314,6 +354,28 @@ async function testScriptCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A-改"), null, { timeout: 5000 });
   assert((await page.textContent("body")).includes("测试脚本A-改"), "编辑后名称已更新");
+  const opsLayout = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="script-card"]');
+    if (!card) return null;
+    const ico = card.querySelector(".script-ico");
+    const ops = card.querySelector(".script-ops");
+    const del = card.querySelector('[data-action="delete-script"]');
+    const users = card.querySelector('[data-action="manage-users"]');
+    const nameRow = card.querySelector(".script-name-row strong");
+    const badgeRow = card.querySelector(".script-name-row:nth-child(2)");
+    if (!ico || !ops || !del || !users || !nameRow || !badgeRow) return null;
+    const cardBox = card.getBoundingClientRect();
+    const leftGap = ico.getBoundingClientRect().left - cardBox.left;
+    const rightGap = cardBox.right - ops.getBoundingClientRect().right;
+    return {
+      vertical: del.getBoundingClientRect().top > users.getBoundingClientRect().bottom,
+      symmetric: Math.abs(leftGap - rightGap) <= 2,
+      badgesBelowName: badgeRow.getBoundingClientRect().top >= nameRow.getBoundingClientRect().bottom - 1,
+    };
+  });
+  assert(!!opsLayout && opsLayout.vertical, "删除按钮位于用户管理按钮下方（纵向排列）");
+  assert(!!opsLayout && opsLayout.symmetric, "图标左边距与按钮右边距一致（相对最右）");
+  assert(!!opsLayout && opsLayout.badgesBelowName, "通用/专项与通知徽章位于名称下一行");
 
   page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-script"]');
@@ -369,7 +431,7 @@ async function testQueueCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试队列A"), null, { timeout: 5000 });
   assert(true, "新建后卡片显示队列名称");
-  assert((await page.textContent("body")).includes("不运行"), "队列卡片显示「不运行」徽章");
+  assert(await page.$(".card .script-grid .queue-card"), "队列卡片位于外层大卡片网格内（与脚本卡片同构）");
 
   const qm = await api("POST", "/api/queues", { name: "缺省模式队列", autoRunMode: "invalid", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
   assert(qm.ok, "POST 非法 autoRunMode 成功（归一化）");
@@ -386,6 +448,36 @@ async function testQueueCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试队列A-改"), null, { timeout: 5000 });
   assert(true, "编辑后队列名称已更新");
+
+  const qCard = await page.$('[data-testid="queue-card"]');
+  assert(!!qCard && !!await qCard.$("img.script-ico"), "队列卡片左侧显示首个脚本实例图标");
+  const qBody = await page.textContent('[data-testid="queue-card"]');
+  assert(!qBody.includes("定时：") && !qBody.includes("任务："), "队列卡片移除定时与任务信息行");
+  assert(!qBody.includes("开始运行"), "不运行队列无运行时间提示");
+
+  const sq = await api("POST", "/api/queues", { name: "启动队列", autoRunMode: "startup", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
+  assert(sq.ok, "API 创建启动时运行队列");
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.body.textContent.includes("启动队列"), null, { timeout: 5000 });
+  assert((await page.textContent("body")).includes("将在下次启动开始运行"), "启动时运行队列显示「将在下次启动开始运行」");
+  const sqList = await (await fetch(baseUrl + "api/queues")).json();
+  const sqGot = sqList.find(q => q.name === "启动队列");
+  assert(sqGot && sqGot.nextTrigger === null, "启动时运行队列 nextTrigger 为 null");
+  await api("DELETE", "/api/queues/" + sqGot.id);
+
+  const tq = await api("POST", "/api/queues", { name: "定时倒计时队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [{ id: "", enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: "23:59" }], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
+  assert(tq.ok, "API 创建定时运行队列");
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.body.textContent.includes("定时倒计时队列"), null, { timeout: 5000 });
+  await page.waitForFunction(() => { const el = document.querySelector('[data-testid="queue-card"] .queue-next'); return el && /\d{2}:\d{2}:\d{2}后开始/.test(el.textContent); }, null, { timeout: 5000 });
+  assert(true, "定时运行队列显示倒计时（xx:xx:xx后开始）");
+  assert((await page.textContent('[data-testid="queue-card"] [data-testid="queue-notify"]')).includes("队列级通知：关"), "定时队列卡片显示「队列级通知：关」");
+  const tqList = await (await fetch(baseUrl + "api/queues")).json();
+  const tqGot = tqList.find(q => q.name === "定时倒计时队列");
+  assert(tqGot && tqGot.nextTrigger, "定时运行队列 API 返回 nextTrigger");
+  await api("DELETE", "/api/queues/" + tqGot.id);
 
   page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-queue"]');
@@ -957,7 +1049,9 @@ async function testV020Features(page) {
   console.log("[用例] v0.2.0：幽灵联动 / 字段改名 / fs 浏览 / 通知开关 / 时间选择器");
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("h2");
-  await page.click("text=新建脚本实例");
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-root");
   const exeDisabled = await page.$eval("#sm-exe", el => el.disabled);
   const argsDisabled = await page.$eval("#sm-args", el => el.disabled);
@@ -967,7 +1061,7 @@ async function testV020Features(page) {
   await page.waitForFunction(() => document.querySelector("#sm-exe") && !document.querySelector("#sm-exe").disabled, null, { timeout: 5000 });
   const exeEnabled = await page.$eval("#sm-exe", el => !el.disabled);
   assert(exeEnabled, "填写根目录后输入启用");
-  assert((await page.textContent("body")).includes("日志文件夹路径"), "日志字段已改名「日志文件夹路径」");
+  assert((await page.textContent("body")).includes("日志路径"), "日志字段已改名「日志路径（支持日期占位符与通配符）」");
   await page.click(".modal button:has-text('取消')");
 
   const fsList = await (await fetch(baseUrl + "api/fs/browse")).json();
@@ -988,6 +1082,8 @@ async function testV020Features(page) {
   const setBody = await page.textContent("body");
   assert(!setBody.includes("发送策略"), "设置页已无发送策略");
   assert(!setBody.includes("Webhook 通知"), "设置页不再包含通知配置（已移至插件配置）");
+  const selStyle = await page.$eval("#st-loglevel", el => ({ appearance: getComputedStyle(el).appearance, arrow: getComputedStyle(el).backgroundImage !== "none" }));
+  assert(selStyle.appearance === "none" && selStyle.arrow, "下拉选择器已重绘（移除原生外观 + 自定义箭头）");
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForSelector("h2");
@@ -1000,6 +1096,165 @@ async function testV020Features(page) {
   await page.waitForSelector("h2");
 }
 
+function scriptHistoryLog(scriptId) {
+  const historyRoot = path.join(runtimeDir, "history");
+  if (!fs.existsSync(historyRoot)) return "";
+  const dirs = fs.readdirSync(historyRoot).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort().reverse();
+  for (const dir of dirs) {
+    const files = fs.readdirSync(path.join(historyRoot, dir)).filter(f => f.endsWith(".json")).sort();
+    for (const f of files) {
+      const rec = JSON.parse(fs.readFileSync(path.join(historyRoot, dir, f), "utf8").replace(/^\uFEFF/, ""));
+      if (rec.ScriptInstanceId === scriptId) {
+        const logFile = path.join(historyRoot, dir, f.replace(".json", ".log"));
+        return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
+      }
+    }
+  }
+  return "";
+}
+
+async function testSpecializedScript(page) {
+  console.log("[用例] 专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图标");
+  const bgiRoot = path.join(runtimeDir, "sim-bettergi");
+  fs.rmSync(bgiRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(bgiRoot, "log"), { recursive: true });
+  fs.writeFileSync(path.join(bgiRoot, "BetterGI.exe"), "");
+
+  const st = await (await fetch(baseUrl + "api/status")).json();
+  const bgi = (st.plugins || []).find(p => p.name === "bettergi");
+  assert(bgi && bgi.kind === "specialized" && bgi.enabled, "BetterGI 专用插件已加载且启用（kind=specialized）");
+
+  const probeOk = await api("POST", "/api/scripts/probe", { rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi" });
+  const profile = (await probeOk.json()).profile;
+  assert(probeOk.ok && profile.mainExe.endsWith("BetterGI.exe"), "probe 推导出主程序路径");
+  assert(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon");
+  assert(profile.configPath.includes("默认配置.json"), "probe 推导出配置文件路径");
+  assert(profile.logPath.includes("{YYYYMMDD}"), "probe 推导出日志格式路径（better-genshin-impact{YYYYMMDD}.log）");
+  const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
+  assert(probeBad.status === 400, "probe 对无法推导的根目录返回 400");
+
+  const created = await api("POST", "/api/scripts", { name: "专项脚本A", rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  assert(created.ok, "API 创建专用脚本实例成功");
+  const sid = (await created.json()).id;
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  assert(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi");
+  assert(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化");
+  assert(got.configPath.includes("默认配置.json") && got.logPath.includes("{YYYYMMDD}"), "配置/日志路径由插件固化");
+  const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
+  const cfgGot = cfg.find(s => s.Id === sid);
+  assert(cfgGot && cfgGot.PluginType === "bettergi", "scripts.json 落盘 PluginType（PascalCase）");
+
+  const bad = await api("POST", "/api/scripts", { name: "专项脚本B", rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  assert(bad.status === 400, "根目录无法推导时创建被拒（400）");
+
+  const iconOk = await createScript({ name: "图标脚本", rootPath: runtimeDir, mainExe: runtimeExe.replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
+  assert(iconOk.ok, "创建图标测试脚本（mainExe 为真 exe）");
+  const iconRes = await fetch(baseUrl + "api/scripts/" + iconOk.id + "/icon");
+  assert(iconRes.status === 200 && (iconRes.headers.get("content-type") || "").includes("image/png"), "图标 API 返回 PNG");
+  await api("DELETE", "/api/scripts/" + iconOk.id);
+  const noIcon = await createScript({ name: "无图标脚本", rootPath: runtimeDir, mainExe: path.join(runtimeDir, "no-icon.exe").replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
+  const icon404 = await fetch(baseUrl + "api/scripts/" + noIcon.id + "/icon");
+  assert(icon404.status === 404, "主程序不存在时图标 API 返回 404");
+  await api("DELETE", "/api/scripts/" + noIcon.id);
+
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.body.textContent.includes("专项脚本A"), null, { timeout: 5000 });
+  const cardText = await page.textContent('[data-testid="script-card"]');
+  assert(cardText.includes("BetterGI专项"), "脚本卡片显示专项标识（BetterGI专项）");
+  assert(await page.$('[data-testid="script-card"] img.script-ico'), "脚本卡片含主程序图标（img）");
+
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  const chooserText = await page.textContent(".new-script-chooser");
+  assert(chooserText.includes("新建通用脚本实例") && chooserText.includes("新建BetterGI专项脚本实例"), "选择卡片层含「新建通用脚本实例」与「新建BetterGI专项脚本实例」两张卡片");
+  await page.click('[data-action="open-script-type"][data-plugin="bettergi"]');
+  await page.waitForSelector("#sm-name");
+  assert(!(await page.$("#sm-exe")) && !(await page.$("#sm-args")) && !(await page.$("#sm-config")) && !(await page.$("#sm-log")), "简化弹窗移除主程序/参数/配置/日志字段");
+  await page.fill("#sm-name", "专项UI脚本");
+  await page.fill("#sm-root", bgiRoot.replace(/\\/g, "\\\\"));
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForFunction(() => document.body.textContent.includes("专项UI脚本"), null, { timeout: 5000 });
+  assert(true, "简化弹窗保存成功（根目录 change 触发 probe 校验）");
+  await page.click('[data-action="edit-script"]');
+  await page.waitForSelector("#sm-name");
+  assert(!(await page.$("#sm-exe")), "编辑专用实例仍为简化弹窗（无主程序字段）");
+  await page.click(".modal button:has-text('取消')");
+
+  page.once("dialog", d => d.accept());
+  await page.click('[data-action="delete-script"][data-name="专项UI脚本"]');
+  await waitAbsent(page, "专项UI脚本");
+  assert(true, "删除专项 UI 脚本成功");
+  await api("DELETE", "/api/scripts/" + sid);
+}
+
+async function testLogPattern(page) {
+  console.log("[用例] 日志路径格式：严格匹配 / 无条目超时失败 / 已有日志忽略 / 通配轮换");
+  const logRoot = path.join(runtimeDir, "lp-logs");
+  fs.rmSync(logRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(logRoot, "b"), { recursive: true });
+  fs.mkdirSync(path.join(logRoot, "c"), { recursive: true });
+
+  const ping = "C:\\Windows\\System32\\PING.EXE";
+
+  const a = await api("POST", "/api/scripts", {
+    name: "无条目脚本", rootPath: runtimeDir, mainExe: ping, args: "-n 90 127.0.0.1",
+    configPath: runtimeDir, logPath: path.join(logRoot, "a", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"),
+    maxAttempts: 1, logStallTimeoutMinutes: 1, totalTimeoutMinutes: 10,
+  });
+  const aid = (await a.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
+  assert(await waitNoRunning(120000), "无条目脚本运行结束（约 1 分钟后无日志条目超时）");
+  const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const rec = hist.filter(h => h.scriptInstanceId === aid).at(-1);
+  assert(rec && rec.finalStatus === "failed" && (rec.resultDetail || "").includes("未产生日志条目"), "启动后无日志条目等待无更新超时后失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + aid);
+
+  const bLog = path.join(logRoot, "b", "run-" + localDate() + ".log");
+  fs.writeFileSync(bLog, "OLD-CONTENT-PREEXISTING\r\n");
+  const bBat = path.join(runtimeDir, "lp-b.bat");
+  fs.writeFileSync(bBat, "@echo off\r\necho [SCRIPT] NEW-ENTRY-BRANDNEW >> \"" + bLog + "\"\r\necho [SCRIPT] 任务完成 >> \"" + bLog + "\"\r\nexit /b 0\r\n", "ascii");
+  const b = await api("POST", "/api/scripts", {
+    name: "忽略旧日志脚本", rootPath: runtimeDir, mainExe: bBat.replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+  });
+  const bid = (await b.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
+  assert(await waitNoRunning(60000), "忽略旧日志脚本运行结束");
+  const sl = scriptHistoryLog(bid);
+  assert(sl.includes("NEW-ENTRY-BRANDNEW"), "历史日志含运行期间新条目");
+  assert(!sl.includes("OLD-CONTENT-PREEXISTING"), "历史日志忽略运行前已有内容");
+  await api("DELETE", "/api/scripts/" + bid);
+
+  const cDir = path.join(logRoot, "c");
+  const cOld = path.join(cDir, "run-" + localDate() + "-1.log");
+  fs.writeFileSync(cOld, "OLD-ROUND\r\n");
+  const cBat = path.join(runtimeDir, "lp-c.bat");
+  fs.writeFileSync(cBat, [
+    "@echo off",
+    "ping 127.0.0.1 -n 3 >nul",
+    "del /q \"" + cOld + "\" 2>nul",
+    "echo [SCRIPT] ROUND2-NEW >> \"" + path.join(cDir, "run-" + localDate() + "-2.log") + "\"",
+    "echo [SCRIPT] 任务完成 >> \"" + path.join(cDir, "run-" + localDate() + "-2.log") + "\"",
+    "ping 127.0.0.1 -n 2 >nul",
+    "exit /b 0",
+  ].join("\r\n"), "ascii");
+  const c = await api("POST", "/api/scripts", {
+    name: "通配轮换脚本", rootPath: runtimeDir, mainExe: cBat.replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+  });
+  const cid = (await c.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: cid, mode: "manual" });
+  assert(await waitNoRunning(60000), "通配轮换脚本运行结束");
+  const cl = scriptHistoryLog(cid);
+  assert(cl.includes("ROUND2-NEW") && !cl.includes("OLD-ROUND"), "通配格式跟踪到轮换后的新文件（忽略旧轮次内容）");
+  await api("DELETE", "/api/scripts/" + cid);
+  fs.rmSync(logRoot, { recursive: true, force: true });
+}
+
 async function testPluginConfig(page) {
   console.log("[用例] 插件配置二级页：布局 + 类型选择器 + generic 模板联动与样式");
   await page.click('nav a[href="#/plugins"]');
@@ -1007,6 +1262,13 @@ async function testPluginConfig(page) {
   await page.waitForFunction(() => document.body.textContent.includes("通知推送"), null, { timeout: 5000 });
   const cfgBtn = await page.$('[data-action="plugin-config"]');
   assert(!!cfgBtn, "通知推送插件有「配置」按钮");
+  const opsRow = await page.evaluate(() => {
+    const td = document.querySelector("table tbody tr .ops");
+    if (!td) return false;
+    const btns = Array.from(td.querySelectorAll("button")).map(b => b.getBoundingClientRect());
+    return btns.length >= 2 && Math.abs(btns[0].top - btns[1].top) <= 2;
+  });
+  assert(opsRow, "插件操作按钮同一行横向排列（不受宽度影响换行）");
   await page.click('[data-action="plugin-config"]');
   await page.waitForFunction(() => document.body.textContent.includes("· 配置"), null, { timeout: 5000 });
   const body = await page.textContent("body");
@@ -1014,6 +1276,7 @@ async function testPluginConfig(page) {
   assert(body.includes("Webhook 通知") && body.includes("SMTP 邮件通知"), "插件配置页含 Webhook/SMTP 折叠面板");
   assert(body.includes("配置信息") && body.includes("启用通知的脚本实例"), "插件配置页含配置信息（统计）");
   assert(body.includes("0 个"), "启用通知统计显示（脚本 0 / 队列 0）");
+  assert(await page.$eval(".modal-footer-inline.plain", el => getComputedStyle(el).borderTopWidth === "0px"), "配置页底部按钮上方无分隔横线");
 
   const typeOptions = await page.$$eval("#st-whtype option", els => els.map(e => e.textContent));
   assert(typeOptions.length === 6 && typeOptions[0] === "Feishu" && typeOptions[5] === "Generic", "Webhook 类型选项首字母大写（Feishu…Generic）");
@@ -1047,10 +1310,11 @@ async function testNotifyPluginGating(page) {
 
   await page.click('nav a[href="#/scripts"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
-  await page.waitForSelector(".data-table", { timeout: 5000 });
-  const notifyCell = await page.$eval("table tbody tr:first-child td:nth-child(6)", el => el.textContent.trim());
-  assert(notifyCell === "-", "插件禁用时脚本列表通知列显示 -（无徽章）");
+  await page.waitForSelector(".script-card", { timeout: 5000 });
+  assert(!(await page.$('[data-testid="script-card"] [data-testid="script-notify"]')), "插件禁用时脚本卡片隐藏通知徽章");
   await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
   assert(!(await page.isVisible("#sm-notify")), "插件禁用时脚本弹窗隐藏「发送运行状态通知」");
   await page.click('[data-action="close-modal"]');
@@ -1067,10 +1331,12 @@ async function testNotifyPluginGating(page) {
 
   await page.click('nav a[href="#/scripts"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
-  await page.waitForSelector(".data-table", { timeout: 5000 });
-  const notifyCell2 = await page.$eval("table tbody tr:first-child td:nth-child(6)", el => el.textContent.trim());
-  assert(notifyCell2 === "关", "插件启用后脚本列表通知列恢复徽章");
+  await page.waitForSelector(".script-card", { timeout: 5000 });
+  const notifyCell2 = await page.$eval('[data-testid="script-card"] [data-testid="script-notify"]', el => el.textContent.trim());
+  assert(notifyCell2 === "通知：关", "插件启用后脚本卡片通知徽章显示「通知：关」");
   await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
   assert(await page.isVisible("#sm-notify"), "插件启用后脚本弹窗恢复显示通知复选框");
   await page.click('[data-action="close-modal"]');
@@ -1104,9 +1370,10 @@ async function testNextScheduleAndStats(page) {
   const qid = (await qr.json()).id;
 
   await page.click('nav a[href="#/dashboard"]');
-  await page.waitForFunction(() => document.body.textContent.includes("统计队列"), null, { timeout: 10000 });
-  const cd = await page.textContent("#next-cd");
-  assert(/剩余 \d{2}:\d{2}:\d{2}/.test(cd), "下一调度队列显示倒计时（" + cd + "）");
+  await page.waitForFunction(() => { const el = document.querySelector("#next-q"); return el && /^\d{2}:\d{2}:\d{2}$/.test(el.textContent.trim()); }, null, { timeout: 10000 });
+  const cd = await page.textContent("#next-q");
+  assert(/^\d{2}:\d{2}:\d{2}$/.test(cd.trim()), "下一调度队列卡片上方显示倒计时（" + cd + "）");
+  assert(await page.evaluate(() => { const el = document.querySelector('[data-testid="stat-next"] .lbl'); return el && el.textContent === "下一调度队列"; }), "倒计时下方标签仍为「下一调度队列」");
   const body = await page.textContent("body");
   assert(body.includes("1 个脚本实例") && body.includes("1 个调度队列"), "通知统计显示 1 个脚本实例 / 1 个调度队列");
 
@@ -1194,13 +1461,13 @@ async function testPagination(page) {
   }
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("[data-testid='pager-scripts']", { timeout: 10000 });
-  const rows1 = await page.$$eval("#view table tbody tr", els => els.length);
-  assert(rows1 === 20, "脚本分页第一页 20 行（实际 " + rows1 + "）");
+  const rows1 = await page.$$eval("#view .script-card", els => els.length);
+  assert(rows1 === 20, "脚本分页第一页 20 张卡片（实际 " + rows1 + "）");
   const info1 = await page.textContent("[data-testid='pager-scripts'] .pager-info");
   assert(info1.includes("共 25 条"), "分页条显示共 25 条");
   await page.click("[data-testid='pager-scripts'] [data-action='pager-next']");
-  await page.waitForFunction(() => document.querySelectorAll("#view table tbody tr").length === 5, null, { timeout: 5000 });
-  assert(true, "翻页后第二页 5 行");
+  await page.waitForFunction(() => document.querySelectorAll("#view .script-card").length === 5, null, { timeout: 5000 });
+  assert(true, "翻页后第二页 5 张卡片");
   const newBtn = await page.$eval("[data-testid='new-script']", el => el.disabled);
   assert(newBtn === true, "脚本达上限新建按钮禁用");
 
@@ -1303,7 +1570,8 @@ async function main() {
         testDashboard, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testForceCloseIndependent,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
-        testV020Features, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
+        testV020Features, testSpecializedScript, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
+        testLogPattern,
         testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,
         testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testLimitsFatal,

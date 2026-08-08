@@ -16,7 +16,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，160 项断言）
+└── uitest/             Playwright 端到端测试（黑盒，292 项断言）
 ```
 
 ## 后端分层（src/）
@@ -33,7 +33,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 
 - **核心域不得引用 Web/Cli/Plugins**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
-- **Plugins 通过契约接口（IPlugin / INotifyChannel / PluginContext）与宿主交互**，不得反向引用宿主实现细节。
+- **Plugins 通过契约接口（IPlugin / ISpecializedScriptPlugin / INotifyChannel / PluginContext）与宿主交互**，不得反向引用宿主实现细节。
 
 ### 关键类职责
 
@@ -45,6 +45,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `DataStore` | src/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
 | `RunSession` | src/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换） |
+| `LogPattern` | src/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Scheduler.cs | 定时/启动时触发队列 |
 | `HistoryService` | src/HistoryService.cs | 历史记录读写与清理 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件、路由表（约 150 行） |
@@ -56,7 +57,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 
 ### public / internal 约定
 
-- 仅以下为 **public**（对外契约）：`Program`（入口）、`IPlugin`/`PluginContext`/`INotifyChannel`（插件契约）、领域模型 `AppSettings`/`ScriptInstance`/`ScriptUser`/`DispatchQueue`/`QueueTask`/`QueueTimeSet`/`RunRecord`/`RunAttempt`（插件接口签名需要）。
+- 仅以下为 **public**（对外契约）：`Program`（入口）、`IPlugin`/`ISpecializedScriptPlugin`/`ScriptProfile`/`PluginContext`/`INotifyChannel`（插件契约）、领域模型 `AppSettings`/`ScriptInstance`/`ScriptUser`/`DispatchQueue`/`QueueTask`/`QueueTimeSet`/`RunRecord`/`RunAttempt`（插件接口签名需要）。
 - 其余全部 `internal`：新增类型默认 internal，除非它属于契约清单。
 
 ### 新增 API 的落点
@@ -79,7 +80,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 模块 | 职责 |
 |---|---|
 | `app.js` | 路由表 + 各视图 `actions` 注册表合并分发 + 全局 input 委托。**不加业务逻辑** |
-| `views/scripts.js` | 脚本实例页 + 表单弹窗（草稿为模块变量） |
+| `views/scripts.js` | 脚本实例页（卡片列表 + 新建卡片组 + 通用/专用弹窗，草稿为模块变量） |
 | `views/users.js` | 用户管理二级页（`#/scripts/{id}/users`） |
 | `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
 | `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
@@ -103,14 +104,50 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ## 插件扩展指南
 
-外部插件 = `plugins/*.dll` 中实现 `NexusPipeline.Plugins.IPlugin`（public、无参构造）的类型，启动时自动加载。
+外部插件 = `plugins/*.dll` 中实现契约接口（public、无参构造）的类型，启动时自动加载。
 
-- 元数据 + 生命周期：实现 `IPlugin`。
-- 通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
+### 插件分类
+
+| 类别 | 接口 | 职责 | 启用语义 |
+|---|---|---|---|
+| 通用插件 | `IPlugin`（+ 能力接口如 `INotifyChannel`） | 为程序添加能力 | 内置插件白名单 `EnabledPlugins`（默认 notify）；外部插件默认启用 |
+| 专用插件 | `ISpecializedScriptPlugin : IPlugin` | 接管专项脚本实例配置：`Resolve(rootPath)` 推导主程序/参数/配置/日志 | 外部插件默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
+
+### 编写专用插件（示例：`extensions/BetterGIAdapter/`）
+
+```csharp
+public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
+{
+    public string Name => "bettergi";            // 脚本实例 PluginType 引用此名
+    public string DisplayName => "BetterGI";
+    public string Description => "...";
+    public string Version => "1.0.0";
+    public bool IsBuiltIn => false;
+    public void Initialize(PluginContext context) { }
+    public void Shutdown() { }
+
+    public ScriptProfile? Resolve(string rootPath)   // 无法推导返回 null（前端保存将被拒）
+    {
+        string exe = Path.Combine(rootPath, "BetterGI.exe");
+        if (!File.Exists(exe)) return null;
+        return new ScriptProfile
+        {
+            MainExe = exe,
+            Args = "--startOneDragon",
+            ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "默认配置.json"),
+            LogPath = Path.Combine(rootPath, "log", "better-genshin-impact{YYYYMMDD}.log"),
+        };
+    }
+}
+```
+
+- 专用插件工程通过 `ProjectReference` 引用 `src/NexusPipeline.csproj`（契约类为 public），构建产物 DLL 放入 `release/plugins/`（见 `build.cmd`）。
+- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
+- 元数据 + 生命周期：实现 `IPlugin`；通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
 - 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings），**不要**引用 `RuntimeContext`。
 - 内置插件 `NotifyPlugin` 在 `PluginManager.DiscoverBuiltIn` 注册；外部插件与内置插件同契约。
 
-> v0.2.0 起命名空间为 `NexusPipeline.Plugins`，v0.1.x 编译的外部插件需重新编译。
+> v0.2.0 起命名空间为 `NexusPipeline.Plugins`，v0.1.x 编译的外部插件需重新编译；v0.3.0 起新增 `ISpecializedScriptPlugin` / `ScriptProfile` 契约。
 
 ## 功能定位指南（找代码）
 
@@ -118,7 +155,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 |---|---|
 | 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（路由表见 `WebServer.RouteApiAsync`） |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
-| 脚本运行流程/重试/日志监控 | `src/RunSession.cs` |
+| 脚本运行流程/重试/日志监控 | `src/RunSession.cs`、`src/LogPattern.cs`（日志路径格式解析） |
 | 队列调度触发 | `src/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/WebhookSender.cs`、`src/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |

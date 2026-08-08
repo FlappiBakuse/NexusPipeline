@@ -1,15 +1,17 @@
 ﻿import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
-import { actionLabel, dayDesc, esc } from "../core/format.js";
+import { esc, scriptFallbackIcon } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
-import { isCurrent, notifyAvailable, state } from "../core/state.js";
+import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let queueDraft = null;
 let queuePage = 1;
+let nextTimer = null;
 const QUEUE_PAGE_SIZE = 20;
+const FALLBACK_ICON = scriptFallbackIcon;
 
 export async function pageQueues(token) {
   if (!isCurrent("queues", token)) return;
@@ -24,15 +26,68 @@ export async function pageQueues(token) {
   const totalPages = Math.max(1, Math.ceil(queues.length / QUEUE_PAGE_SIZE));
   if (queuePage > totalPages) queuePage = totalPages;
   const pageItems = queues.slice((queuePage - 1) * QUEUE_PAGE_SIZE, queuePage * QUEUE_PAGE_SIZE);
-  const content = queues.length ? `${pageItems.map(queue => `<article class="card queue-card">
-    <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(queue.name)}</strong><span class="badge blue">${queue.autoRunMode === "startup" ? "启动时运行" : queue.autoRunMode === "none" ? "不运行" : "定时运行"}</span><span class="badge muted">完成操作：${esc(actionLabel(queue.completionAction))}</span>${queue.notifyEnabled ? '<span class="badge ok">队列级通知</span>' : ""}</div></div>
-      <div class="action-row"><button class="sm" type="button" data-action="edit-queue" data-id="${queue.id}">编辑</button><button class="sm danger" type="button" data-action="delete-queue" data-id="${queue.id}" data-name="${esc(queue.name)}">删除</button></div>
-    </div>
-    <div class="qk-row">定时：${(queue.timeSets || []).filter(item => item.enabled).map(item => dayDesc(item.days) + " " + item.time).join("；") || '<span class="badge bad">无</span>'}</div>
-    <div class="qk-row">任务：${(queue.tasks || []).slice().sort((a, b) => a.index - b.index).map(item => { const script = scripts.find(value => value.id === item.scriptInstanceId); return esc(script ? script.name : "(缺失)"); }).join(" → ") || "无"}</div>
-  </article>`).join("")}${queues.length > QUEUE_PAGE_SIZE ? pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length) : ""}` : '<div class="empty"><strong>暂无调度队列</strong>点击右上角「新建调度队列」创建。</div>';
+  const content = queues.length ? `<section class="card"><div class="script-grid">
+    ${pageItems.map(queue => queueCardMarkup(queue, scripts)).join("")}
+    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : '<div class="empty"><strong>暂无调度队列</strong>点击右上角「新建调度队列」创建。</div>';
   render(pageHeader("SCHEDULER", "调度队列", "把多个脚本串成可重复执行的工作流。", action) + content);
   registerPager("queues", p => { queuePage = p; pageQueues(state.routeToken); });
+  tickQueueNext();
+  if (nextTimer) clearInterval(nextTimer);
+  nextTimer = setInterval(tickQueueNext, 1000);
+  registerInterval(nextTimer);
+  $domIcons();
+}
+
+function queueCardMarkup(queue, scripts) {
+  const firstTask = (queue.tasks || []).slice().sort((a, b) => a.index - b.index).find(item => scripts.some(script => script.id === item.scriptInstanceId));
+  const firstScript = firstTask ? scripts.find(script => script.id === firstTask.scriptInstanceId) : null;
+  const nextAt = queue.nextTrigger ? new Date(queue.nextTrigger).getTime() : 0;
+  const timeBadge = queue.autoRunMode === "scheduled"
+    ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? "正在计算倒计时" : "等待定时触发"}</span>`
+    : queue.autoRunMode === "startup"
+      ? '<span class="badge blue">将在下次启动开始运行</span>'
+      : "";
+  const notifyBadge = notifyAvailable()
+    ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">队列级通知：${queue.notifyEnabled ? "开" : "关"}</span>`
+    : "";
+  const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row">${timeBadge}${notifyBadge}</div>` : "";
+  return `<article class="card script-card queue-card" data-testid="queue-card">
+    <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
+    <div class="script-main">
+      <div class="script-name-row"><strong>${esc(queue.name)}</strong></div>
+      ${badgesRow}
+    </div>
+    <div class="queue-ops">
+      <button class="sm" type="button" data-action="edit-queue" data-id="${queue.id}">编辑队列</button>
+      <button class="sm danger" type="button" data-action="delete-queue" data-id="${queue.id}" data-name="${esc(queue.name)}">删除队列</button>
+    </div>
+  </article>`;
+}
+
+function tickQueueNext() {
+  const now = Date.now();
+  $$("#view .queue-next[data-next]").forEach(el => {
+    const target = +(el.dataset.next || 0);
+    if (!target) return;
+    const remain = target - now;
+    if (remain <= 0) {
+      el.textContent = "即将开始运行";
+      return;
+    }
+    const seconds = Math.floor(remain / 1000);
+    const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
+    const minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0");
+    const secs = String(seconds % 60).padStart(2, "0");
+    el.textContent = `${hours}:${minutes}:${secs}后开始`;
+  });
+}
+
+function $domIcons() {
+  $$("#view .script-ico").forEach(img => {
+    img.addEventListener("error", () => {
+      if (img.dataset.fallback && !img.src.startsWith("data:")) img.src = img.dataset.fallback;
+    }, { once: true });
+  });
 }
 
 export async function openQueueModal(id = "") {

@@ -6,6 +6,9 @@ public class ScriptInstance
 
     public string Name { get; set; } = "";
 
+    /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由专用插件在保存时固化。</summary>
+    public string PluginType { get; set; } = "";
+
     public string RootPath { get; set; } = "";
 
     public string MainExe { get; set; } = "";
@@ -44,6 +47,7 @@ public class ScriptInstance
         {
             Id = Id,
             Name = Name,
+            PluginType = PluginType,
             RootPath = RootPath,
             MainExe = MainExe,
             Args = Args,

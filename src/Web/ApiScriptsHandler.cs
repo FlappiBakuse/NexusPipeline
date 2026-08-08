@@ -1,10 +1,18 @@
 ﻿using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Imaging;
 using System.Net;
+using System.Text.Json.Nodes;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Web;
 
 internal static class ApiScriptsHandler
 {
+    private static readonly Dictionary<string, byte[]> IconCache = new();
+
+    private static readonly object IconSync = new();
+
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -12,6 +20,16 @@ internal static class ApiScriptsHandler
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
             await HttpHelper.WriteJsonAsync(context, ctx.Scripts).ConfigureAwait(false);
+            return;
+        }
+        if (method == "GET" && seg.Length == 3 && seg[2].Equals("icon", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleIconAsync(context, seg[1]).ConfigureAwait(false);
+            return;
+        }
+        if (method == "POST" && seg.Length == 2 && seg[1].Equals("probe", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleProbeAsync(context, body).ConfigureAwait(false);
             return;
         }
         if (method == "POST" && seg.Length == 1)
@@ -37,6 +55,12 @@ internal static class ApiScriptsHandler
                 script.Id = Guid.NewGuid().ToString("N");
             }
             NormalizePaths(script);
+            string? pluginError = string.IsNullOrWhiteSpace(script.PluginType) ? null : ApplyProfile(script);
+            if (pluginError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = pluginError }, 400).ConfigureAwait(false);
+                return;
+            }
             ctx.Scripts.Add(script);
             DataStore.SaveScripts(ctx.Scripts);
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
@@ -64,6 +88,16 @@ internal static class ApiScriptsHandler
             update.Id = existing.Id;
             update.Users = existing.Users;
             NormalizePaths(update);
+            string? pluginError = string.IsNullOrWhiteSpace(update.PluginType) ? null : ApplyProfile(update);
+            if (pluginError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = pluginError }, 400).ConfigureAwait(false);
+                return;
+            }
+            lock (IconSync)
+            {
+                IconCache.Remove(existing.Id);
+            }
             int index = ctx.Scripts.IndexOf(existing);
             ctx.Scripts[index] = update;
             DataStore.SaveScripts(ctx.Scripts);
@@ -92,12 +126,104 @@ internal static class ApiScriptsHandler
                 }
             }
             ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
+            lock (IconSync)
+            {
+                IconCache.Remove(seg[1]);
+            }
             DataStore.SaveScripts(ctx.Scripts);
             Audit.Log(Audit.Web, "删除脚本实例", removed is null ? $"id={seg[1]}（不存在）" : $"{removed.Name}（id={seg[1]}）");
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             return;
         }
         await HandleScriptUsersAsync(context, method, seg, body).ConfigureAwait(false);
+    }
+
+    /// <summary>专用脚本实例：由专用插件按根目录推导并固化主程序/参数/配置/日志快照；失败返回错误信息。</summary>
+    private static string? ApplyProfile(ScriptInstance script)
+    {
+        ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
+        if (profile is null)
+        {
+            return "专用插件无法从脚本根目录推导配置（请检查脚本根目录，并确认专用插件已启用）";
+        }
+        script.MainExe = profile.MainExe;
+        script.Args = profile.Args;
+        script.ConfigPath = profile.ConfigPath;
+        script.LogPath = profile.LogPath;
+        return null;
+    }
+
+    /// <summary>专用插件配置探测：前端简化弹窗在根目录填写后即时校验能否推导。</summary>
+    private static async Task HandleProbeAsync(HttpListenerContext context, string body)
+    {
+        JsonNode? node = HttpHelper.ParseBody(body);
+        string rootPath = node?["rootPath"]?.ToString() ?? "";
+        string pluginType = node?["pluginType"]?.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(pluginType))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "缺少专用插件标识" }, 400).ConfigureAwait(false);
+            return;
+        }
+        ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(pluginType, StripPathQuotes(rootPath));
+        if (profile is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "无法从脚本根目录推导专用插件配置（请检查根目录，并确认专用插件已启用）" }, 400).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, new { ok = true, profile }).ConfigureAwait(false);
+    }
+
+    /// <summary>脚本主程序图标（提取关联图标转 PNG，内存缓存；无图标/主程序无效返回 404，前端使用占位图）。</summary>
+    private static async Task HandleIconAsync(HttpListenerContext context, string scriptId)
+    {
+        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        byte[]? icon;
+        lock (IconSync)
+        {
+            if (!IconCache.TryGetValue(scriptId, out icon))
+            {
+                icon = ExtractIcon(script.MainExe);
+                if (icon is not null)
+                {
+                    IconCache[scriptId] = icon;
+                }
+            }
+        }
+        if (icon is null)
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "image/png";
+        context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.ContentLength64 = icon.Length;
+        await context.Response.OutputStream.WriteAsync(icon).ConfigureAwait(false);
+        context.Response.OutputStream.Close();
+    }
+
+    private static byte[]? ExtractIcon(string mainExe)
+    {
+        try
+        {
+            using Icon? icon = Icon.ExtractAssociatedIcon(mainExe);
+            if (icon is null)
+            {
+                return null;
+            }
+            using var ms = new MemoryStream();
+            icon.ToBitmap().Save(ms, ImageFormat.Png);
+            return ms.ToArray();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     private static void NormalizePaths(ScriptInstance script)

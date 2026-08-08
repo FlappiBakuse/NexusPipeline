@@ -45,11 +45,11 @@ export async function pageDashboard(token) {
   <section class="stat-grid" aria-label="运行概览">
     <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
     <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
-    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? esc(next.queueName) : "无"}</div><div class="lbl" id="next-cd">${next ? "正在计算倒计时" : "下一调度队列"}</div></div>
+    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl">下一调度队列</div></div>
     <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
   </section>
   <section class="card" data-testid="running-panel"><div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}</section>
   <section class="card"><div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid">${pluginMarkup(status, stats) || '<div class="empty">暂无已加载插件</div>'}</div></section>`);
-  if (next) startCountdown("next-cd", next.time);
+  if (next) startCountdown("next-q", next.time);
   schedule(() => pageDashboard(token), 3000, "dashboard", token);
 }

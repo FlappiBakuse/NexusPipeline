@@ -44,25 +44,46 @@ internal class Scheduler : IDisposable
         var candidates = new List<(string Name, DateTime Time)>();
         foreach (DispatchQueue queue in RuntimeContext.Instance.Queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
-            foreach (QueueTimeSet timeSet in queue.TimeSets.Where(timeSet => timeSet.Enabled))
+            DateTime? time = NextTriggerFor(queue, now);
+            if (time is not null)
             {
-                if (!TimeOnly.TryParseExact(timeSet.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
-                        System.Globalization.DateTimeStyles.None, out TimeOnly timeOnly))
-                {
-                    continue;
-                }
-                for (int offset = 0; offset < 7; offset++)
-                {
-                    DateTime candidate = now.Date.AddDays(offset).Add(timeOnly.ToTimeSpan());
-                    if (candidate > now && timeSet.Days.Contains((int)candidate.DayOfWeek))
-                    {
-                        candidates.Add((queue.Name, candidate));
-                        break;
-                    }
-                }
+                candidates.Add((queue.Name, time.Value));
             }
         }
         return candidates.OrderBy(candidate => candidate.Time).Cast<(string, DateTime)?>().FirstOrDefault();
+    }
+
+    /// <summary>计算单个调度队列的下一次定时触发时间（今天之后 7 天内的最近匹配）；非定时模式/无任务/无匹配返回 null。</summary>
+    public DateTime? NextTriggerFor(DispatchQueue queue)
+    {
+        return NextTriggerFor(queue, DateTime.Now);
+    }
+
+    private static DateTime? NextTriggerFor(DispatchQueue queue, DateTime now)
+    {
+        if (queue.AutoRunMode != "scheduled" || queue.Tasks.Count == 0)
+        {
+            return null;
+        }
+        var candidates = new List<DateTime>();
+        foreach (QueueTimeSet timeSet in queue.TimeSets.Where(timeSet => timeSet.Enabled))
+        {
+            if (!TimeOnly.TryParseExact(timeSet.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None, out TimeOnly timeOnly))
+            {
+                continue;
+            }
+            for (int offset = 0; offset < 7; offset++)
+            {
+                DateTime candidate = now.Date.AddDays(offset).Add(timeOnly.ToTimeSpan());
+                if (candidate > now && timeSet.Days.Contains((int)candidate.DayOfWeek))
+                {
+                    candidates.Add(candidate);
+                    break;
+                }
+            }
+        }
+        return candidates.Count == 0 ? null : candidates.Min();
     }
 
     public void Dispose()

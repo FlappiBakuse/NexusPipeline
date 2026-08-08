@@ -2,6 +2,7 @@ bin/
 obj/
 release/
 dist/
+build-tmp/
 *.user
 .vs/
 config/

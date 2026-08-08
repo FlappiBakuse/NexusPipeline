@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Web;
 
@@ -57,6 +58,7 @@ internal static class ApiStatusHandler
                 plugin.Description,
                 plugin.Version,
                 plugin.IsBuiltIn,
+                kind = plugin is ISpecializedScriptPlugin ? "specialized" : "general",
                 enabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),
         };

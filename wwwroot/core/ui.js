@@ -31,13 +31,15 @@ export function toast(message, kind = "info") {
   const now = Date.now();
   element.textContent = message;
   element.classList.toggle("error", kind === "error");
-  if (message === lastToastMessage && now - lastToastAt < SHAKE_WINDOW_MS) {
-    element.classList.remove("shake");
+  element.classList.remove("shake");
+  if (kind === "error" && message === lastToastMessage && now - lastToastAt < SHAKE_WINDOW_MS) {
     void element.offsetWidth;
     element.classList.add("shake");
   }
-  lastToastMessage = message;
-  lastToastAt = now;
+  if (kind === "error") {
+    lastToastMessage = message;
+    lastToastAt = now;
+  }
   element.classList.remove("hidden");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => element.classList.add("hidden"), 3200);
@@ -57,7 +59,7 @@ export function startCountdown(targetId, timeValue) {
     const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
     const minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0");
     const secs = String(seconds % 60).padStart(2, "0");
-    element.textContent = `剩余 ${hours}:${minutes}:${secs}`;
+    element.textContent = `${hours}:${minutes}:${secs}`;
   };
   update();
   registerInterval(setInterval(update, 1000));

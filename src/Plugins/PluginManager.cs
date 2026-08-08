@@ -11,6 +11,34 @@ internal sealed class PluginManager
 
     public INotifyChannel? NotifyChannel => _plugins.OfType<INotifyChannel>().FirstOrDefault();
 
+    /// <summary>已启用的专用插件（专项脚本实例的适配能力来源）。</summary>
+    public IReadOnlyList<ISpecializedScriptPlugin> SpecializedPlugins =>
+        _plugins.OfType<ISpecializedScriptPlugin>().Where(p => IsEnabled(p.Name)).ToList();
+
+    /// <summary>调用专用插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
+    public ScriptProfile? ResolveProfile(string pluginName, string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
+        {
+            return null;
+        }
+        ISpecializedScriptPlugin? plugin = _plugins.OfType<ISpecializedScriptPlugin>()
+            .FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        if (plugin is null || !IsEnabled(plugin.Name))
+        {
+            return null;
+        }
+        try
+        {
+            return plugin.Resolve(rootPath.Trim());
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件] 专用插件「{plugin.DisplayName}」解析「{rootPath}」失败：{ex.Message}");
+            return null;
+        }
+    }
+
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
     {
         if (NotifyChannel is { } channel)
@@ -40,7 +68,7 @@ internal sealed class PluginManager
         PruneUnknownPluginSettings();
         foreach (IPlugin plugin in _plugins)
         {
-            bool enabled = RuntimeContext.Instance.Settings.EnabledPlugins.Contains(plugin.Name, StringComparer.OrdinalIgnoreCase);
+            bool enabled = IsEnabled(plugin.Name);
             if (enabled)
             {
                 try
@@ -64,9 +92,10 @@ internal sealed class PluginManager
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
         var known = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-        int before = settings.EnabledPlugins.Count;
+        int before = settings.EnabledPlugins.Count + settings.DisabledPlugins.Count;
         settings.EnabledPlugins.RemoveAll(name => !known.Contains(name));
-        if (settings.EnabledPlugins.Count != before)
+        settings.DisabledPlugins.RemoveAll(name => !known.Contains(name));
+        if (settings.EnabledPlugins.Count + settings.DisabledPlugins.Count != before)
         {
             ConfigStore.Save(settings);
             Logger.Info("[插件] 已清理设置中不存在的插件名。");
@@ -89,7 +118,17 @@ internal sealed class PluginManager
 
     public bool IsEnabled(string name)
     {
-        return RuntimeContext.Instance.Settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
+        IPlugin? plugin = _plugins.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (plugin is null)
+        {
+            return false;
+        }
+        AppSettings settings = RuntimeContext.Instance.Settings;
+        if (plugin.IsBuiltIn)
+        {
+            return settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
+        }
+        return !settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
     public void SetEnabled(string name, bool enabled, string source = Audit.System)
@@ -103,6 +142,14 @@ internal sealed class PluginManager
         else if (!enabled && exists)
         {
             settings.EnabledPlugins.RemoveAll(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        }
+        if (enabled)
+        {
+            settings.DisabledPlugins.RemoveAll(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
+        }
+        else if (!settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase))
+        {
+            settings.DisabledPlugins.Add(name);
         }
         ConfigStore.Save(settings);
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);

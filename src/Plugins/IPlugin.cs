@@ -1,6 +1,6 @@
 namespace NexusPipeline.Plugins;
 
-/// <summary>插件契约：元数据 + 生命周期。能力通过接口扩展（如 <see cref="INotifyChannel"/>）。</summary>
+/// <summary>插件契约：元数据 + 生命周期。能力通过接口扩展（如 <see cref="INotifyChannel"/> / <see cref="ISpecializedScriptPlugin"/>）。</summary>
 public interface IPlugin
 {
     string Name { get; }
@@ -16,6 +16,25 @@ public interface IPlugin
     void Initialize(PluginContext context);
 
     void Shutdown();
+}
+
+/// <summary>专用插件：对专项脚本实例的配置进行接管（根据脚本根目录推导主程序/参数/配置/日志路径）。</summary>
+public interface ISpecializedScriptPlugin : IPlugin
+{
+    /// <summary>根据脚本根目录推导专项配置；无法推导（如目录结构不符、缺少主程序）时返回 null。</summary>
+    ScriptProfile? Resolve(string rootPath);
+}
+
+/// <summary>专用插件推导出的脚本配置快照（保存时固化到脚本实例字段）。</summary>
+public class ScriptProfile
+{
+    public string MainExe { get; set; } = "";
+
+    public string Args { get; set; } = "";
+
+    public string ConfigPath { get; set; } = "";
+
+    public string LogPath { get; set; } = "";
 }
 
 /// <summary>通知能力接口：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>

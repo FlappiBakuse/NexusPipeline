@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
-import { esc } from "../core/format.js";
+import { esc, scriptFallbackIcon } from "../core/format.js";
 import { valueField, pageHeader } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
@@ -10,6 +10,17 @@ import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 let scriptDraft = null;
 let scriptPage = 1;
 const SCRIPT_PAGE_SIZE = 20;
+
+const FALLBACK_ICON = scriptFallbackIcon;
+
+function specializedPlugins() {
+  return (state.plugins || []).filter(p => p.kind === "specialized" && p.enabled);
+}
+
+function pluginDisplay(name) {
+  const plugin = (state.plugins || []).find(p => p.name === name);
+  return plugin ? plugin.displayName : name;
+}
 
 export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
@@ -32,23 +43,54 @@ export async function pageScripts(token) {
   if (scriptPage > totalPages) scriptPage = totalPages;
   const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
-    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
-    : `<section class="card"><div class="table-scroll"><table class="data-table"><thead><tr><th>名称</th><th>主程序</th><th>日志路径</th><th>游戏</th><th>重试</th><th>通知</th><th>操作</th></tr></thead><tbody>
-      ${pageItems.map(script => `<tr>
-        <td><strong>${esc(script.name)}</strong></td>
-        <td class="mono" title="${esc(script.mainExe)}">${esc(script.mainExe)}</td>
-        <td class="mono" title="${esc(script.logPath)}">${esc(script.logPath) || "-"}</td>
-        <td>${script.launchGame ? esc(script.gameExe || "?") : '<span class="muted">不启动</span>'}</td>
-        <td>${script.maxAttempts}</td>
-        <td>${notifyOn ? (script.notifyEnabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>') : '<span class="muted">-</span>'}</td>
-        <td class="ops"><button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button><button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button><button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button></td>
-      </tr>`).join("")}
-    </tbody></table></div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
+    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建通用脚本实例」创建你的第一个脚本。</div>'
+    : `<section class="card"><div class="script-grid">
+      ${pageItems.map(script => `<article class="script-card" data-testid="script-card">
+        <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
+        <div class="script-main">
+          <div class="script-name-row"><strong>${esc(script.name)}</strong></div>
+          <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginDisplay(script.pluginType))}专项` : "通用"}</span>${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
+        </div>
+        <div class="script-ops">
+          <button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
+          <button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button>
+          <button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button>
+        </div>
+      </article>`).join("")}
+    </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
   render(pageHeader("SCRIPT CATALOG", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
+  wireScriptIcons();
 }
 
-export async function openScriptModal(id = "") {
+function wireScriptIcons() {
+  $dom("#view")?.querySelectorAll(".script-ico").forEach(img => {
+    img.addEventListener("error", () => {
+      if (img.dataset.fallback && !img.src.startsWith("data:")) img.src = img.dataset.fallback;
+    }, { once: true });
+  });
+}
+
+/** 新建入口：无专用插件时直接打开默认配置弹窗；有专用插件时先弹出选择卡片层。 */
+export function openNewScriptChooser() {
+  const specials = specializedPlugins();
+  if (specials.length === 0) {
+    openScriptModal();
+    return;
+  }
+  const body = `<div class="new-script-chooser">
+    <button type="button" class="chooser-card" data-action="open-script-type" data-plugin="">
+      <strong>新建通用脚本实例</strong><span class="muted">手动配置主程序、自启动参数、配置与日志路径</span>
+    </button>
+    ${specials.map(p => `<button type="button" class="chooser-card" data-action="open-script-type" data-plugin="${esc(p.name)}">
+      <strong>新建${esc(p.displayName)}专项脚本实例</strong><span class="muted">由专用插件自动适配配置</span>
+    </button>`).join("")}
+  </div>`;
+  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
+  showModal(modalShell("新建脚本实例", body, footer));
+}
+
+export async function openScriptModal(id = "", plugin = "") {
   let script = id ? state.scripts.find(item => item.id === id) : null;
   if (id && !script) {
     try {
@@ -60,9 +102,11 @@ export async function openScriptModal(id = "") {
     }
   }
   const value = script || {};
+  const pluginType = value.pluginType || plugin || "";
+  const isSpecial = !!pluginType;
   scriptDraft = {
-    id: value.id || "", name: value.name || "", rootPath: value.rootPath || "", mainExe: value.mainExe || "",
-    args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
+    id: value.id || "", pluginType, name: value.name || "", rootPath: value.rootPath || "",
+    mainExe: value.mainExe || "", args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
     launchGame: !!value.launchGame, gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
     gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
@@ -71,39 +115,67 @@ export async function openScriptModal(id = "") {
   };
   const d = scriptDraft;
   const l = state.limits || {};
-  const body = `<div class="form-grid">
-    ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-    ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
-  </div>
-  <div class="form-grid">
-    ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
-    ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选"')}
-  </div>
-  <div class="form-grid">
-    ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
-    ${valueField("sm-log", "日志文件夹路径 <span class='req'>*</span>", d.logPath, "text", 'placeholder="请先填写脚本根目录"')}
-  </div>
-  <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
-    <div class="check-grid">
-      <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-      <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
-      <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+  const title = isSpecial
+    ? (id ? `编辑${esc(pluginDisplay(pluginType))}专项脚本实例` : `新建${esc(pluginDisplay(pluginType))}专项脚本实例`)
+    : (id ? "编辑脚本实例" : "新建脚本实例");
+  const body = isSpecial
+    ? `<div class="form-grid">
+      ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
+      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\BetterGenshinImpact"')}
     </div>
-    <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
-      <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
-      <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+    <p class="muted helper-copy">由专用插件「${esc(pluginDisplay(pluginType))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
+    <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
+      <div class="check-grid">
+        <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+      </div>
+      <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
+        <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
+        <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+      </div>
     </div>
-  </div>
-  <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
-    <div class="form-grid three">
-      ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-      ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
-      ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+    <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
+      <div class="form-grid three">
+        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+      </div>
+      <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
+    </div>`
+    : `<div class="form-grid">
+      ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
+      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
     </div>
-    <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
-  </div>`;
+    <div class="form-grid">
+      ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
+      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选"')}
+    </div>
+    <div class="form-grid">
+      ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
+      ${valueField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "text", 'placeholder="例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt"')}
+    </div>
+    <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
+      <div class="check-grid">
+        <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+      </div>
+      <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
+        <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
+        <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+      </div>
+    </div>
+    <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
+      <div class="form-grid three">
+        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+      </div>
+      <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
+    </div>`;
   const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell(id ? "编辑脚本实例" : "新建脚本实例", body, footer));
+  showModal(modalShell(title, body, footer));
   syncScriptGhostState();
   $dom("#sm-launch")?.addEventListener("change", event => {
     const box = $dom("#sm-game-box");
@@ -111,8 +183,19 @@ export async function openScriptModal(id = "") {
   });
   const rootInput = $dom("#sm-root");
   rootInput?.addEventListener("input", syncScriptGhostState);
-  rootInput?.addEventListener("change", syncScriptGhostState);
+  rootInput?.addEventListener("change", event => {
+    syncScriptGhostState();
+    if (isSpecial && event.target.value.trim()) probeSpecialRoot(event.target.value.trim(), pluginType);
+  });
   rootInput?.addEventListener("keyup", syncScriptGhostState);
+}
+
+async function probeSpecialRoot(rootPath, pluginType) {
+  try {
+    await api("POST", "/api/scripts/probe", { rootPath, pluginType });
+  } catch (error) {
+    toast("无法从该根目录推导专项配置：" + error.message, "error");
+  }
 }
 
 export function syncScriptGhostState() {
@@ -125,7 +208,10 @@ export function syncScriptGhostState() {
 }
 
 export async function saveScript() {
-  const required = [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志文件夹路径"]];
+  const isSpecial = !!scriptDraft.pluginType;
+  const required = isSpecial
+    ? [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"]]
+    : [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志路径"]];
   for (const [id, label] of required) {
     const element = $dom("#" + id);
     if (!element?.value.trim()) {
@@ -158,8 +244,9 @@ export async function saveScript() {
     return;
   }
   const payload = {
-    id: scriptDraft.id, name: $dom("#sm-name").value.trim(), rootPath: $dom("#sm-root").value.trim(),
-    mainExe: $dom("#sm-exe").value.trim(), args: $dom("#sm-args").value.trim(), configPath: $dom("#sm-config").value.trim(), logPath: $dom("#sm-log").value.trim(),
+    id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: $dom("#sm-root").value.trim(),
+    mainExe: isSpecial ? "" : $dom("#sm-exe").value.trim(), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
+    configPath: isSpecial ? "" : $dom("#sm-config").value.trim(), logPath: isSpecial ? "" : $dom("#sm-log").value.trim(),
     launchGame: $dom("#sm-launch").checked, gameExe: $dom("#sm-game-exe")?.value.trim() || "", gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successMarkers: $dom("#sm-markers").value.trim(), notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
@@ -181,7 +268,8 @@ export async function deleteScript(id, name) {
 }
 
 export const actions = {
-  "open-script-modal": target => openScriptModal(target.dataset.id || ""),
+  "open-script-modal": () => openNewScriptChooser(),
+  "open-script-type": target => openScriptModal("", target.dataset.plugin || ""),
   "edit-script": target => openScriptModal(target.dataset.id),
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "save-script": () => saveScript(),

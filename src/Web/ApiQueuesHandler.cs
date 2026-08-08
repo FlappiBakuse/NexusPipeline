@@ -10,7 +10,18 @@ internal static class ApiQueuesHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询调度队列列表", $"{ctx.Queues.Count} 条");
-            await HttpHelper.WriteJsonAsync(context, ctx.Queues).ConfigureAwait(false);
+            var result = ctx.Queues.Select(queue => new
+            {
+                queue.Id,
+                queue.Name,
+                queue.AutoRunMode,
+                queue.CompletionAction,
+                queue.TimeSets,
+                queue.Tasks,
+                queue.NotifyEnabled,
+                nextTrigger = RuntimeContext.Instance.Scheduler.NextTriggerFor(queue),
+            }).ToList();
+            await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
             return;
         }
         if (method == "POST" && seg.Length == 1)

@@ -412,12 +412,12 @@ internal class RunSession
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogMonitor.ResolveFile(_script.LogPath);
-        bool logDidNotExistBeforeStart = resolvedBeforeStart is null;
+        string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
         LogMonitor? monitor = resolvedBeforeStart is null ? null : new LogMonitor(resolvedBeforeStart, readFromStart: false);
         List<string> markers = _script.MarkerList();
         var logTail = new List<string>();
         DateTime attemptStart = DateTime.Now;
+        DateTime? firstEntryAt = null;
         DateTime? markerSeenAt = null;
         RunAttemptResult? result = null;
 
@@ -434,19 +434,41 @@ internal class RunSession
                     break;
                 }
 
-                if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
+                if (!string.IsNullOrWhiteSpace(_script.LogPath))
                 {
-                    string? resolved = LogMonitor.ResolveFile(_script.LogPath);
+                    string? resolved = LogPattern.ResolveFile(_script.LogPath);
                     if (resolved is not null)
                     {
-                        monitor = new LogMonitor(resolved, readFromStart: logDidNotExistBeforeStart);
-                        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」开始监控日志：{resolved}");
+                        if (monitor is null)
+                        {
+                            monitor = NewMonitor(resolved, attemptStart, modeText);
+                        }
+                        else if (!string.Equals(resolved, monitor.Path, StringComparison.OrdinalIgnoreCase))
+                        {
+                            monitor.Dispose();
+                            monitor = NewMonitor(resolved, attemptStart, modeText, rotated: true);
+                        }
+                        else
+                        {
+                            try
+                            {
+                                if (File.GetCreationTimeUtc(resolved).Ticks != monitor.FileStamp)
+                                {
+                                    monitor.ReopenFromStart();
+                                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志文件被重建，已重新从头读取：{resolved}");
+                                }
+                            }
+                            catch (Exception)
+                            {
+                            }
+                        }
                     }
                 }
 
                 string newContent = monitor?.ReadNew() ?? "";
                 if (newContent.Length > 0)
                 {
+                    firstEntryAt ??= DateTime.Now;
                     foreach (string line in newContent.Split('\n').Select(l => l.TrimEnd('\r')))
                     {
                         if (line.Trim().Length == 0)
@@ -490,13 +512,34 @@ internal class RunSession
                     break;
                 }
 
-                if (monitor is not null && markerSeenAt is null)
+                if (markerSeenAt is null)
                 {
-                    double stallMinutes = (DateTime.Now - monitor.LastWrite).TotalMinutes;
-                    if (_script.LogStallTimeoutMinutes > 0 && stallMinutes >= _script.LogStallTimeoutMinutes)
+                    if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
-                        result = RunAttemptResult.Failed($"日志超过 {_script.LogStallTimeoutMinutes} 分钟无更新");
-                        break;
+                        double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
+                        if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
+                        {
+                            result = RunAttemptResult.Failed($"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件）");
+                            break;
+                        }
+                    }
+                    else if (monitor is not null && firstEntryAt is null)
+                    {
+                        double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
+                        if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
+                        {
+                            result = RunAttemptResult.Failed($"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目");
+                            break;
+                        }
+                    }
+                    else if (monitor is not null)
+                    {
+                        double stallMinutes = (DateTime.Now - monitor.LastWrite).TotalMinutes;
+                        if (_script.LogStallTimeoutMinutes > 0 && stallMinutes >= _script.LogStallTimeoutMinutes)
+                        {
+                            result = RunAttemptResult.Failed($"日志超过 {_script.LogStallTimeoutMinutes} 分钟无更新");
+                            break;
+                        }
                     }
                 }
 
@@ -524,7 +567,6 @@ internal class RunSession
         ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出结束：{result?.Status}（{result?.Reason}）");
         monitor?.Dispose();
         monitor = null;
-
         attempt.OutputTail = TextRules.TakeTail(outputTail.ToString(), 50);
         attempt.LogTail = new List<string>(logTail);
 
@@ -538,5 +580,22 @@ internal class RunSession
         }
         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
         return result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
+    }
+
+    /// <summary>创建日志监控：文件在尝试启动后产生（新文件/轮换）→ 从头读；启动前已存在 → 从末尾读（忽略已有日志）。</summary>
+    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)
+    {
+        bool fresh;
+        try
+        {
+            fresh = File.GetLastWriteTime(resolved) >= attemptStart.AddSeconds(-5);
+        }
+        catch (Exception)
+        {
+            fresh = false;
+        }
+        var monitor = new LogMonitor(resolved, readFromStart: fresh);
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(rotated ? "日志轮换，改监控" : "开始监控")}：{resolved}（{(fresh ? "从头" : "末尾")}读取）");
+        return monitor;
     }
 }
