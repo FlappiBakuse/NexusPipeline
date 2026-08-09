@@ -305,11 +305,12 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .detail .kv .k { color: var(--muted); }
 .back-link { display: inline-flex; align-items: center; gap: 5px; color: var(--accent); font-size: 13px; text-decoration: none; }
 .back-link:hover { text-decoration: underline; }
-.panel-body { padding: 5px 0 13px; }
+.panel-body { display: flex; flex-direction: column; gap: 12px; padding: 10px 0 13px; }
+.panel-body > .check { margin: 0; }
+.panel-body > .field-label, .panel-body > label { margin: 0; }
+.panel-body > .form-grid { margin-bottom: 0; }
 .modal-footer-inline { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .modal-footer-inline.plain { border-top: none; }
-.secret-row { display: flex; align-items: center; gap: 8px; }
-.secret-row input { min-width: 0; flex: 1; }
 .helper-copy { margin-top: 10px; }
 .stats-inline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .stats-inline > div { display: flex; flex-direction: column; gap: 3px; padding: 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }
@@ -393,8 +394,6 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .list-item-head button { align-self: flex-start; }
   .plugin-grid { grid-template-columns: minmax(0, 1fr); }
   .stats-inline { grid-template-columns: minmax(0, 1fr); }
-  .secret-row { align-items: stretch; flex-direction: column; }
-  .secret-row button { width: 100%; }
   .detail .kv { grid-template-columns: 78px minmax(0, 1fr); }
   .toast { left: 50%; right: auto; top: 12px; width: calc(100vw - 24px); max-width: 420px; transform: translateX(-50%); }
 }

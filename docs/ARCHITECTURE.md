@@ -80,12 +80,12 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 模块 | 职责 |
 |---|---|
 | `app.js` | 路由表 + 各视图 `actions` 注册表合并分发 + 全局 input 委托。**不加业务逻辑** |
-| `views/scripts.js` | 脚本实例页（卡片列表 + 新建卡片组 + 通用/专用弹窗，草稿为模块变量） |
+| `views/scripts.js` | 脚本实例页（紧凑列表行 + 新建卡片组 + 通用/专用弹窗，草稿为模块变量） |
 | `views/users.js` | 用户管理二级页（`#/scripts/{id}/users`） |
 | `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
 | `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
 | `views/history.js` | 历史列表 + 详情弹窗 |
-| `views/plugins.js` | 插件列表 + `#/plugins/{name}` 配置二级页 |
+| `views/plugins.js` | 插件列表 + `#/plugins/{name}` 配置二级页（密钥字段并入「保存设置」提交，仅非空提交） |
 | `views/settings.js` | 系统设置页 |
 | `views/dashboard.js` | 仪表盘（3 秒轮询） |
 | `core/api.js` | 请求封装（JSON/错误/AbortController 生命周期联动） |

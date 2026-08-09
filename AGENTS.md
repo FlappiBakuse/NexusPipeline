@@ -96,5 +96,15 @@ node uitest\test.mjs --ci      # CI 核心回归集：377 项断言（剔除纯�
 - 轮询页面必须通过 `state.js` 注册 timer 和 AbortController，并在路由切换时清理；轮询只能更新状态区域，不得覆盖用户正在编辑的表单、焦点和滚动位置。
 - 表单标签必须使用 `label[for]`，必填字段使用 `required` 或等效错误提示；弹窗必须有 `role="dialog"`、`aria-modal`、标题关联、Esc 关闭、焦点陷阱和关闭后的焦点恢复；Toast 必须使用 `role="status"`/`aria-live`。
 - 主题至少支持 `light`、`dark`、`system` 三种状态，选择持久化到 `localStorage`；主题切换不能改变业务数据和路由。
-- 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
+- **Notion 风格基线（v0.3.6+，与上方约束同权，新样式必须遵守）**：
+  - 浅色主题为 Notion 米色系：背景 `#f7f6f3`、面板纯白、正文墨色 `#37352f`、强调 `#2eaadc`（深色主题保留品牌深蓝）；
+  - 字体一律系统栈（`-apple-system, "Segoe UI", "Microsoft YaHei"`，禁止引入 Inter 等外置字体）；
+  - 圆角上限 12px（`--radius-lg`），徽章/进度条/输入框 6-8px；禁止胶囊（999px）与大圆角（`rounded-2xl` 级）；
+  - 阴影仅 `--shadow` 轻量双层，禁止重阴影；
+  - **禁止渐变**（唯一例外 `brand-mark` 品牌徽章）、**禁止 backdrop-filter 玻璃态**（侧栏/顶栏/弹窗遮罩一律实体背景 `--mask`）；
+  - 禁止装饰性 translate/scale 动画与 hover 位移/阴影跳变；hover 反馈一律背景色（`--hover-bg`/`--panel-hover`），过渡仅 `transition-colors` 级；
+  - 禁止 uppercase 小字 eyebrow；页面 kicker 用常规 `muted` 小字。
+- **展示模式（v0.3.6+）**：脚本实例/调度队列/用户列表统一为紧凑列表行（`.script-card`/`.user-card` 行样式 + 卡内分隔线 + 行 hover 背景）；禁止新增其他卡片式条目布局，新条目一律先复用行样式。
+- **密钥字段语义（v0.3.6+）**：密钥/敏感字段（Webhook 地址与签名密钥、SMTP 授权码）合并进「保存设置」统一提交，仅非空值提交（留空=不变，不提供清除按钮）；Webhook 地址用 `type="text"`、其余密钥类用 `type="password"`；已设置的密钥不回显明文，placeholder 提示「（已设置，留空不变）」。
+- 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
 - 每次前端改动必须运行 `build.cmd` 和完整 e2e；新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
