@@ -194,6 +194,7 @@ internal class RunSession
                     RunAttemptResult? postResult = await RunUserScriptAsync(user.PostRunScript, "任务后", attempt, _token).ConfigureAwait(false);
                     if (postResult is not null)
                     {
+                        postResult.NotifyText = result.NotifyText;
                         result = postResult;
                     }
                 }
@@ -202,7 +203,10 @@ internal class RunSession
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
                 record.Attempts = attemptNo;
-                record.CustomNotifyText = result.NotifyText;
+                if (!string.IsNullOrWhiteSpace(result.NotifyText))
+                {
+                    record.CustomNotifyText = result.NotifyText;
+                }
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 结束：{result.Status}（{result.Reason}） =====");
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
 
@@ -617,12 +621,12 @@ internal class RunSession
                     }
                 }
 
-                if (scriptMode && newContent.Length > 0 && result is null)
+                if (scriptMode && newContent.Length > 0 && result is null && markerSeenAt is null)
                 {
                     await TriggerJudgeAsync().ConfigureAwait(false);
                 }
                 else if (scriptMode && newContent.Length == 0 && result is null
-                    && firstEntryAt is not null && (DateTime.Now - lastJudgeAt).TotalSeconds >= 30)
+                    && firstEntryAt is not null && markerSeenAt is null && (DateTime.Now - lastJudgeAt).TotalSeconds >= 30)
                 {
                     _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
                     await TriggerJudgeAsync().ConfigureAwait(false);
@@ -682,13 +686,15 @@ internal class RunSession
 
                 if (markerSeenAt is null)
                 {
+                    bool stallHit = false;
+                    string stallReason = "";
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
                         double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
                         if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
                         {
-                            result = RunAttemptResult.Failed($"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件）");
-                            break;
+                            stallHit = true;
+                            stallReason = $"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件）";
                         }
                     }
                     else if (monitor is not null && firstEntryAt is null)
@@ -696,8 +702,8 @@ internal class RunSession
                         double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
                         if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
                         {
-                            result = RunAttemptResult.Failed($"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目");
-                            break;
+                            stallHit = true;
+                            stallReason = $"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目";
                         }
                     }
                     else if (monitor is not null)
@@ -705,9 +711,31 @@ internal class RunSession
                         double stallMinutes = (DateTime.Now - monitor.LastWrite).TotalMinutes;
                         if (_script.LogStallTimeoutMinutes > 0 && stallMinutes >= _script.LogStallTimeoutMinutes)
                         {
-                            result = RunAttemptResult.Failed($"日志超过 {_script.LogStallTimeoutMinutes} 分钟无更新");
-                            break;
+                            stallHit = true;
+                            stallReason = $"日志超过 {_script.LogStallTimeoutMinutes} 分钟无更新";
                         }
+                    }
+                    if (stallHit)
+                    {
+                        if (scriptMode)
+                        {
+                            _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
+                            await TriggerJudgeAsync().ConfigureAwait(false);
+                            if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
+                            {
+                                result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
+                                result.NotifyText = judgeNotifyText ?? "";
+                                break;
+                            }
+                            if (markerSeenAt is not null)
+                            {
+                                result = RunAttemptResult.Success(judgeReason ?? "判断脚本判定成功");
+                                result.NotifyText = judgeNotifyText ?? "";
+                                break;
+                            }
+                        }
+                        result = RunAttemptResult.Failed(stallReason);
+                        break;
                     }
                 }
 

@@ -207,11 +207,13 @@ internal static class UserConfigManager
         TryDeleteDir(ReplaceBackupDir(scriptId, userName));
     }
 
-    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath）。</summary>
+    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
     public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
     {
         string scriptDir = ScriptDir(scriptId, userName);
         string backupDir = ReplaceBackupDir(scriptId, userName);
+        string metaPath = Path.Combine(backupDir, ".meta");
+        List<string> newFiles = ReadMetaNewFiles(metaPath);
         foreach (string rel in replacements)
         {
             string? source = JudgeScriptRunner.ResolveWithin(scriptDir, rel);
@@ -235,14 +237,19 @@ internal static class UserConfigManager
             {
                 if (File.Exists(target))
                 {
-                    string backupFile = Path.Combine(backupDir, rel);
-                    if (!File.Exists(backupFile))
+                    if (!newFiles.Contains(rel, StringComparer.OrdinalIgnoreCase))
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(backupFile)!);
-                        File.Copy(target, backupFile, overwrite: true);
+                        string backupFile = Path.Combine(backupDir, rel);
+                        if (!File.Exists(backupFile))
+                        {
+                            Directory.CreateDirectory(Path.GetDirectoryName(backupFile)!);
+                            File.Copy(target, backupFile, overwrite: true);
+                        }
                     }
-                    Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(backupDir, ".meta"))!);
-                    File.WriteAllText(Path.Combine(backupDir, ".meta"), JsonSerializer.Serialize(new { configPath }));
+                }
+                else
+                {
+                    newFiles.Add(rel);
                 }
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 File.Copy(source, target, overwrite: true);
@@ -253,10 +260,44 @@ internal static class UserConfigManager
                 Logger.Warn($"[警告] 配置替换失败（{rel}）：{ex.Message}");
             }
         }
+        if (newFiles.Count > 0 || (Directory.Exists(backupDir) && Directory.EnumerateFileSystemEntries(backupDir).Any()))
+        {
+            Directory.CreateDirectory(backupDir);
+            File.WriteAllText(metaPath, JsonSerializer.Serialize(new { configPath, newFiles }));
+        }
         return null;
     }
 
-    /// <summary>还原配置替换：从 replace-backup 恢复全部被替换文件（按 .meta 记录的 configPath），随后清理备份目录。</summary>
+    /// <summary>读取 .meta 中记录的新增文件清单（多轮替换累积）。</summary>
+    private static List<string> ReadMetaNewFiles(string metaPath)
+    {
+        var list = new List<string>();
+        if (!File.Exists(metaPath))
+        {
+            return list;
+        }
+        try
+        {
+            JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
+            if (node?["newFiles"] is JsonArray arr)
+            {
+                foreach (JsonNode? item in arr)
+                {
+                    string? text = item?.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
+                    {
+                        list.Add(text);
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+        return list;
+    }
+
+    /// <summary>还原配置替换：从 replace-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
     public static void RestoreConfigReplacements(string scriptId, string? userName)
     {
         string backupDir = ReplaceBackupDir(scriptId, userName);
@@ -266,11 +307,24 @@ internal static class UserConfigManager
         }
         string metaPath = Path.Combine(backupDir, ".meta");
         string? configPath = null;
+        var newFiles = new List<string>();
         if (File.Exists(metaPath))
         {
             try
             {
-                configPath = JsonNode.Parse(File.ReadAllText(metaPath))?["configPath"]?.ToString();
+                JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
+                configPath = node?["configPath"]?.ToString();
+                if (node?["newFiles"] is JsonArray arr)
+                {
+                    foreach (JsonNode? item in arr)
+                    {
+                        string? text = item?.ToString();
+                        if (!string.IsNullOrWhiteSpace(text))
+                        {
+                            newFiles.Add(text);
+                        }
+                    }
+                }
             }
             catch (Exception)
             {
@@ -301,6 +355,23 @@ internal static class UserConfigManager
             catch (Exception ex)
             {
                 Logger.Warn($"[警告] 还原配置替换失败（{target}）：{ex.Message}");
+            }
+        }
+        foreach (string rel in newFiles)
+        {
+            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            if (target is null || !File.Exists(target))
+            {
+                continue;
+            }
+            try
+            {
+                File.Delete(target);
+                Logger.Info($"[配置替换] 已清理替换新增文件：{target}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 清理替换新增文件失败（{target}）：{ex.Message}");
             }
         }
         TryDeleteDir(backupDir);

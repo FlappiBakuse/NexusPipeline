@@ -272,11 +272,7 @@ internal static class JudgeScriptRunner
         {
             return null;
         }
-        if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        return full;
+        return IsWithin(rootFull, full) ? full : null;
     }
 
     private static bool IsWithinAny(string abs, params string[] roots)
@@ -288,12 +284,38 @@ internal static class JudgeScriptRunner
                 continue;
             }
             string rootFull = Path.GetFullPath(root);
-            if (abs.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            if (IsWithin(rootFull, abs))
             {
                 return true;
             }
         }
         return false;
+    }
+
+    /// <summary>路径边界检查：full 必须等于 root 或位于 root 目录之下。
+    /// 使用 GetRelativePath 判定，禁止前缀误匹配（如 data\script1evil 命中 data\script1）。</summary>
+    private static bool IsWithin(string rootFull, string full)
+    {
+        if (string.Equals(rootFull, full, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        string rel;
+        try
+        {
+            rel = Path.GetRelativePath(rootFull, full);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+        if (Path.IsPathRooted(rel))
+        {
+            return false;
+        }
+        return !rel.Equals("..", StringComparison.Ordinal)
+            && !rel.StartsWith("..\\", StringComparison.Ordinal)
+            && !rel.StartsWith("../", StringComparison.Ordinal);
     }
 
     private static async Task<JudgeScriptResult> RunPythonAsync(string code, string inputJson, CancellationToken token)

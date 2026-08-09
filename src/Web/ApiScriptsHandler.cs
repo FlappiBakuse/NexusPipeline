@@ -99,6 +99,11 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = pluginError }, 400).ConfigureAwait(false);
                 return;
             }
+            if (script.JudgeScriptEnabled && string.IsNullOrWhiteSpace(script.JudgeScript))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "开启「使用判断脚本」但判断脚本代码为空" }, 400).ConfigureAwait(false);
+                return;
+            }
             string? pathError = Limits.CheckScriptPaths(script);
             if (pathError is not null)
             {
@@ -136,6 +141,11 @@ internal static class ApiScriptsHandler
             if (pluginError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = pluginError }, 400).ConfigureAwait(false);
+                return;
+            }
+            if (update.JudgeScriptEnabled && string.IsNullOrWhiteSpace(update.JudgeScript))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "开启「使用判断脚本」但判断脚本代码为空" }, 400).ConfigureAwait(false);
                 return;
             }
             string? pathError = Limits.CheckScriptPaths(update);
