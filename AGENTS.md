@@ -12,11 +12,11 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 全量 341 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
-node uitest\test.mjs --ci      # CI 核心回归集：318 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
+node uitest\test.mjs           # 全量 345 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs --ci      # CI 核心回归集：322 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 341 / 318（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 345 / 322（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
@@ -79,14 +79,14 @@ node uitest\test.mjs --ci      # CI 核心回归集：318 项断言（剔除纯�
 - 命名空间：`NexusPipeline`（核心域）/ `NexusPipeline.Web` / `NexusPipeline.Cli` / `NexusPipeline.Plugins`。
 - **public 仅限契约**：Program、插件契约（IPlugin/ISpecializedScriptPlugin/ScriptProfile/PluginContext/INotifyChannel）、插件签名需要的领域模型（AppSettings/ScriptInstance/ScriptUser/DispatchQueue/QueueTask/QueueTimeSet/RunRecord/RunAttempt）；其余一律 `internal`。
 - 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 路由表注册一行；新菜单：`src/Cli/` 对应菜单类；新服务：核心域 + RuntimeContext 持有。
-- 插件只能通过 `PluginContext` 与宿主交互；通知能力实现 `INotifyChannel`（`DispatchCenter` 经 `PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发，无静态委托）；专用插件实现 `ISpecializedScriptPlugin`（`Resolve(rootPath)` 推导主程序/参数/配置/日志与**完成标志**，保存专用脚本实例时固化快照，完成标志同步固化；外部插件默认启用，显式禁用记入 `DisabledPlugins`）。
+- 插件只能通过 `PluginContext` 与宿主交互；通知能力实现 `INotifyChannel`（`DispatchCenter` 经 `PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发，无静态委托）；专用插件实现 `ISpecializedScriptPlugin`（`Resolve(rootPath)` 推导主程序/参数/配置/日志与**完成标志**，保存专用脚本实例时固化快照，完成标志同步固化；`GameName` 提供中文游戏名，脚本卡片徽章显示「{GameName}专项」，**游戏名不得写入主程序**，仅由插件提供；外部插件默认启用，显式禁用记入 `DisabledPlugins`）。
 - **完成标志**：无内置关键词，专用插件固化自有关键词（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`）；通用脚本无完成标志时按「进程自行退出」判定成功（`RunSession` 无标志分支）。
 - 日志路径为「路径格式」（如 `{YYYY-MM-DD}.log`、`{YYYY-MM-DD-*}.log`、固定文件 `log.txt`），严格按格式匹配（`LogPattern.ResolveFile`），禁止格式外猜测；脚本启动后无日志条目按"日志无更新超时"失败。
 
 ## 前端开发强约束（v0.2.0+）
 
 - wwwroot 必须保持零构建、零 CDN 依赖；使用原生 ES modules，浏览器直接加载 `.js` 文件，不引入需要打包步骤的框架或工具链。
-- 模块边界固定为：`app.js`（启动/路由/注册表分发）、`core/api.js`（请求）、`core/state.js`（生命周期与跨域缓存）、`core/ui.js`（页面/Toast/主题）、`core/modal.js`（弹窗）、`core/forms.js`（表单模板）、`core/dom.js`（查询）、`core/format.js`（格式化）、`views/`（页面，一域一文件）、`effects/`（独立视觉效果）。业务视图不得修改另一个视图的 DOM；新增交互 = 视图导出函数 + 加入该视图 `actions` 注册表（不再往 app.js 加 case）。
+- 模块边界固定为：`app.js`（启动/路由/注册表分发）、`core/api.js`（请求）、`core/state.js`（生命周期与跨域缓存）、`core/ui.js`（页面/Toast/主题/`initAutoScroll` 长文本滚动）、`core/modal.js`（弹窗）、`core/forms.js`（表单模板，长提示用 `scrollField` 滚动浮层，禁止超长原生 placeholder）、`core/dom.js`（查询）、`core/format.js`（格式化）、`views/`（页面，一域一文件）、`effects/`（独立视觉效果）。业务视图不得修改另一个视图的 DOM；新增交互 = 视图导出函数 + 加入该视图 `actions` 注册表（不再往 app.js 加 case）。
 - 所有颜色、背景、边框、阴影、圆角、间距和层级必须使用 CSS 变量；禁止在视图模板中写 `style="..."`，禁止新增散落的颜色字面量。
 - 所有页面必须在 360px 手机、768px 平板、1280px 电脑视口可用；禁止固定宽度导致溢出，密集数据必须放入横向滚动容器，表单必须允许堆叠，触控目标不得小于 40px。
 - 禁止新增 inline `onclick`、`onchange` 等事件；交互统一使用 `data-action` + `app.js` 事件委托。可交互元素必须使用原生 `button`、`a`、`input`、`select` 或 `textarea`。

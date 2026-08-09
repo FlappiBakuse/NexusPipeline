@@ -16,7 +16,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，全量 341 项断言 / --ci 核心集 318 项）
+└── uitest/             Playwright 端到端测试（黑盒，全量 345 项断言 / --ci 核心集 322 项）
 ```
 
 ## 后端分层（src/）
@@ -120,6 +120,7 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 {
     public string Name => "bettergi";            // 脚本实例 PluginType 引用此名
     public string DisplayName => "BetterGI";
+    public string GameName => "原神";            // 中文游戏名：脚本卡片徽章「原神专项」
     public string Description => "...";
     public string Version => "1.0.0";
     public bool IsBuiltIn => false;

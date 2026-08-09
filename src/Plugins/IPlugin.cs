@@ -21,6 +21,9 @@ public interface IPlugin
 /// <summary>专用插件：对专项脚本实例的配置进行接管（根据脚本根目录推导主程序/参数/配置/日志路径）。</summary>
 public interface ISpecializedScriptPlugin : IPlugin
 {
+    /// <summary>中文游戏名（脚本卡片徽章显示，如「原神专项」）；为空时前端回退 <see cref="IPlugin.DisplayName"/>。</summary>
+    string GameName { get; }
+
     /// <summary>根据脚本根目录推导专项配置；无法推导（如目录结构不符、缺少主程序）时返回 null。</summary>
     ScriptProfile? Resolve(string rootPath);
 }

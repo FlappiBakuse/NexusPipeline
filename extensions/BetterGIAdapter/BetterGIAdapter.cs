@@ -9,6 +9,8 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 
     public string DisplayName => "BetterGI";
 
+    public string GameName => "原神";
+
     public string Description => "BetterGenshinImpact 专项脚本实例配置接管（自动推导主程序、配置、日志路径与自启动参数）";
 
     public string Version => "1.0.0";

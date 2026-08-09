@@ -5,7 +5,7 @@
 ## 快速开始
 
 1. 同步最新代码：`git checkout main && git pull`；
-2. 本地验证：`build.cmd` → `node uitest\test.mjs`（全量 e2e，341 项断言）全绿；CI 跑核心回归集 `node uitest\test.mjs --ci`；
+2. 本地验证：`build.cmd` → `node uitest\test.mjs`（全量 e2e，345 项断言）全绿；CI 跑核心回归集 `node uitest\test.mjs --ci`；
 3. 提交并推送（v1.0.0 之前直接 push `main`，禁止 force push；发布操作须先经用户同意）。
 
 ## 协作模式（以 v1.0.0 为界）

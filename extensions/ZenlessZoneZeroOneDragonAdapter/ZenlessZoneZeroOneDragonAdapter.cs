@@ -12,6 +12,8 @@ public sealed class ZenlessZoneZeroOneDragonAdapterPlugin : ISpecializedScriptPl
 
     public string DisplayName => "ZenlessZoneZeroOneDragon";
 
+    public string GameName => "绝区零";
+
     public string Description => "Zenless Zone Zero OneDragon 专项脚本实例配置接管（自动推导主程序、启动参数、配置与日志路径）";
 
     public string Version => "1.0.0";

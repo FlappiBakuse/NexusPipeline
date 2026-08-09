@@ -16,8 +16,8 @@ const CI = process.argv.includes("--ci");
 const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
-const EXPECTED = 341;
-const CI_EXPECTED = 318;
+const EXPECTED = 345;
+const CI_EXPECTED = 322;
 
 let passed = 0;
 let failed = 0;
@@ -1122,6 +1122,7 @@ async function testSpecializedScript(page) {
   const st = await (await fetch(baseUrl + "api/status")).json();
   const bgi = (st.plugins || []).find(p => p.name === "bettergi");
   assert(bgi && bgi.kind === "specialized" && bgi.enabled, "BetterGI 专用插件已加载且启用（kind=specialized）");
+  assert(bgi && bgi.gameName === "原神", "BetterGI 插件提供游戏名（gameName=原神）");
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi" });
   const profile = (await probeOk.json()).profile;
@@ -1164,7 +1165,7 @@ async function testSpecializedScript(page) {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.textContent.includes("专项脚本A"), null, { timeout: 5000 });
   const cardText = await page.textContent('[data-testid="script-card"]');
-  assert(cardText.includes("BetterGI专项"), "脚本卡片显示专项标识（BetterGI专项）");
+  assert(cardText.includes("原神专项"), "脚本卡片显示专项标识（原神专项，游戏名由插件提供）");
   assert(await page.$('[data-testid="script-card"] img.script-ico'), "脚本卡片含主程序图标（img）");
 
   await page.click('[data-testid="new-script"]');
@@ -1332,6 +1333,7 @@ async function testMarch7thPlugin(page) {
   const st = await (await fetch(baseUrl + "api/status")).json();
   const m7 = (st.plugins || []).find(p => p.name === "march7th");
   assert(m7 && m7.kind === "specialized" && m7.enabled, "March7thAssistant 专用插件已加载且启用（kind=specialized）");
+  assert(m7 && m7.gameName === "崩坏：星穹铁道", "March7thAssistant 插件提供游戏名（gameName=崩坏：星穹铁道）");
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th" });
   assert(probeOk.ok, "march7th probe 成功");
@@ -1391,6 +1393,7 @@ async function testZenlessPlugin(page) {
   const st = await (await fetch(baseUrl + "api/status")).json();
   const z = (st.plugins || []).find(p => p.name === "zzzonedragon");
   assert(z && z.kind === "specialized" && z.enabled, "ZenlessZoneZeroOneDragon 专用插件已加载且启用（kind=specialized）");
+  assert(z && z.gameName === "绝区零", "ZenlessZoneZeroOneDragon 插件提供游戏名（gameName=绝区零）");
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon" });
   assert(probeOk.ok, "zzzonedragon probe 成功");
@@ -1424,6 +1427,7 @@ async function testZenlessPlugin(page) {
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   const chooserText = await page.textContent(".new-script-chooser");
   assert(chooserText.includes("新建ZenlessZoneZeroOneDragon专项脚本实例"), "选择卡片层含「新建ZenlessZoneZeroOneDragon专项脚本实例」卡片");
+  assert(await page.$$eval(".new-script-chooser .scroll-text", els => els.some(el => el.classList.contains("scrolling"))), "长卡片名溢出时启用文字滚动（.scrolling）");
   await page.click(".modal button:has-text('取消')");
 }
 

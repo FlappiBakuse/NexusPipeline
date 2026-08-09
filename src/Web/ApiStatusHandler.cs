@@ -55,6 +55,7 @@ internal static class ApiStatusHandler
             {
                 plugin.Name,
                 plugin.DisplayName,
+                gameName = plugin is ISpecializedScriptPlugin specialized ? specialized.GameName : "",
                 plugin.Description,
                 plugin.Version,
                 plugin.IsBuiltIn,

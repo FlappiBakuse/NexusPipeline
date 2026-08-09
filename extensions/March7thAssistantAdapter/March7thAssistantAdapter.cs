@@ -14,6 +14,8 @@ public sealed class March7thAssistantAdapterPlugin : ISpecializedScriptPlugin
 
     public string DisplayName => "March7thAssistant";
 
+    public string GameName => "崩坏：星穹铁道";
+
     public string Description => "March7th Assistant 专项脚本实例配置接管（Launcher 编辑配置 / Assistant 运行脚本，自动推导主程序、启动目标、配置与日志路径）";
 
     public string Version => "1.0.0";

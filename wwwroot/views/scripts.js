@@ -1,7 +1,7 @@
 import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
-import { valueField, pageHeader } from "../core/forms.js";
+import { scrollField, valueField, pageHeader } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, modalShell, showModal } from "../core/modal.js";
@@ -20,6 +20,12 @@ function specializedPlugins() {
 function pluginDisplay(name) {
   const plugin = (state.plugins || []).find(p => p.name === name);
   return plugin ? plugin.displayName : name;
+}
+
+/** 徽章游戏名：专用插件提供（gameName），无则回退显示名。 */
+function pluginGameName(name) {
+  const plugin = (state.plugins || []).find(p => p.name === name);
+  return plugin ? (plugin.gameName || plugin.displayName) : name;
 }
 
 export async function pageScripts(token) {
@@ -48,8 +54,8 @@ export async function pageScripts(token) {
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card">
         <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
         <div class="script-main">
-          <div class="script-name-row"><strong>${esc(script.name)}</strong></div>
-          <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginDisplay(script.pluginType))}专项` : "通用"}</span>${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
+          <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
+          <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
         </div>
         <div class="script-ops">
           <button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
@@ -83,7 +89,7 @@ export function openNewScriptChooser() {
       <strong>新建通用脚本实例</strong><span class="muted">手动配置主程序、自启动参数、配置与日志路径</span>
     </button>
     ${specials.map(p => `<button type="button" class="chooser-card" data-action="open-script-type" data-plugin="${esc(p.name)}">
-      <strong>新建${esc(p.displayName)}专项脚本实例</strong><span class="muted">由专用插件自动适配配置</span>
+      <strong class="scroll-text"><span class="scroll-inner">新建${esc(p.displayName)}专项脚本实例</span></strong><span class="muted">由专用插件自动适配配置</span>
     </button>`).join("")}
   </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
@@ -148,11 +154,11 @@ export async function openScriptModal(id = "", plugin = "") {
     </div>
     <div class="form-grid">
       ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
-      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选；如 ..\\March7th Assistant.exe?-x（路径后加 ? 传参数）"')}
+      ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 ..\\March7th Assistant.exe?-x（路径后加 ? 传参数）")}
     </div>
     <div class="form-grid">
       ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
-      ${valueField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "text", 'placeholder="例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt"')}
+      ${scrollField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt")}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
       <div class="check-grid">

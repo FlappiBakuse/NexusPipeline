@@ -9,6 +9,38 @@ const SHAKE_WINDOW_MS = 2500;
 
 export function render(html) {
   view.innerHTML = html;
+  initAutoScroll(view);
+}
+
+/** 长文本滚动：内容溢出容器时启用往返滚动（否则保持省略号兜底）。</summary> */
+export function initAutoScroll(root = view) {
+  root.querySelectorAll(".scroll-text").forEach(el => {
+    const inner = el.querySelector(":scope > .scroll-inner");
+    if (!inner) return;
+    if (inner.scrollWidth > el.clientWidth + 1) {
+      el.style.setProperty("--scroll-x", `${el.clientWidth - inner.scrollWidth}px`);
+      el.classList.add("scrolling");
+    } else {
+      el.classList.remove("scrolling");
+    }
+  });
+  initInputHints(root);
+}
+
+/** 滚动提示浮层显隐：输入框有值或聚焦时隐藏（原生 placeholder 无法滚动，改用浮层；:placeholder-shown 对无 placeholder 属性的输入框不可靠）。 */
+function initInputHints(root) {
+  root.querySelectorAll(".input-scroll").forEach(wrap => {
+    const input = wrap.querySelector("input");
+    const hint = wrap.querySelector(".input-scroll-hint");
+    if (!input || !hint) return;
+    const sync = () => {
+      hint.hidden = input.value.length > 0 || document.activeElement === input;
+    };
+    input.addEventListener("input", sync);
+    input.addEventListener("focus", sync);
+    input.addEventListener("blur", sync);
+    sync();
+  });
 }
 
 export function navActive(page) {
