@@ -16,8 +16,8 @@ const CI = process.argv.includes("--ci");
 const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
-const EXPECTED = 353;
-const CI_EXPECTED = 330;
+const EXPECTED = 354;
+const CI_EXPECTED = 331;
 
 let passed = 0;
 let failed = 0;
@@ -87,14 +87,15 @@ async function createScript(body) {
   return { ok: res.ok, id: (await res.json()).id };
 }
 
-/** 创建真实存在的脚本目录（根目录/占位 run.bat/配置目录/日志目录），路径校验用例使用。 */
+/** 创建真实存在的脚本目录（根目录/占位脚本/配置目录/日志目录），路径校验用例使用。
+ *  占位脚本用唯一命名（nexustest-*），避免 IsExeRunning 按进程名误报（如 run.bat → 进程名 run）。 */
 function makeScriptDir(label) {
   const dir = path.join(runtimeDir, "test-" + label);
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "cfg"), { recursive: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "run.bat"), "@echo off\r\nexit /b 0\r\n", "ascii");
-  return { root: dir, main: path.join(dir, "run.bat"), cfg: path.join(dir, "cfg"), log: path.join(dir, "logs") };
+  fs.writeFileSync(path.join(dir, `nexustest-${label}.bat`), "@echo off\r\nexit /b 0\r\n", "ascii");
+  return { root: dir, main: path.join(dir, `nexustest-${label}.bat`), cfg: path.join(dir, "cfg"), log: path.join(dir, "logs") };
 }
 
 async function runningCount() {
@@ -468,6 +469,8 @@ async function testDispatchAndHistory(page) {
   await page.waitForSelector("#dc-script");
   await page.selectOption("#dc-script", { label: "跑批脚本" });
   await page.click("button:has-text('执行')");
+  await page.waitForFunction(() => !!document.querySelector("#dispatch-running .list-item"), null, { timeout: 8000 });
+  assert(true, "调度中心出现正在运行的任务卡片（执行已受理）");
   await page.waitForTimeout(1500);
 
   await page.click('nav a[href="#/history"]');

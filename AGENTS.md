@@ -12,11 +12,11 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 全量 353 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs           # 全量 354 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
 node uitest\test.mjs --ci      # CI 核心回归集：330 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 353 / 330（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 354 / 331（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
