@@ -13,15 +13,20 @@ function resize() {
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   context?.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const count = window.innerWidth < 640 ? 22 : window.innerWidth < 1000 ? 34 : 48;
-  particles = Array.from({ length: count }, (_, index) => ({
-    x: (index * 83) % Math.max(window.innerWidth, 1),
-    y: (index * 47) % Math.max(window.innerHeight, 1),
-    vx: ((index % 5) - 2) * 0.08,
-    vy: ((index % 7) - 3) * 0.05,
-    r: 1 + index % 3 * 0.35,
-  }));
+  const count = window.innerWidth < 640 ? 44 : window.innerWidth < 1000 ? 68 : 96;
+  particles = Array.from({ length: count }, () => spawn());
   if (context && (paused || reducedMotion)) drawFrame(false);
+}
+
+function spawn() {
+  return {
+    x: Math.random() * Math.max(window.innerWidth, 1),
+    y: Math.random() * Math.max(window.innerHeight, 1),
+    vx: (Math.random() - 0.5) * 0.28,
+    vy: (Math.random() - 0.5) * 0.2,
+    drift: (Math.random() - 0.5) * 0.004,
+    r: 1 + Math.random() * 2.6,
+  };
 }
 
 function color() {
@@ -37,6 +42,8 @@ function drawFrame(move) {
   const accent = color();
   particles.forEach(point => {
     if (move) {
+      point.vx += (Math.random() - 0.5) * point.drift * 2;
+      point.vy += (Math.random() - 0.5) * point.drift;
       point.x += point.vx;
       point.y += point.vy;
       if (point.x < -10) point.x = width + 10;

@@ -16,8 +16,8 @@ const CI = process.argv.includes("--ci");
 const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
-const EXPECTED = 345;
-const CI_EXPECTED = 322;
+const EXPECTED = 353;
+const CI_EXPECTED = 330;
 
 let passed = 0;
 let failed = 0;
@@ -85,6 +85,16 @@ async function api(method, pathName, body) {
 async function createScript(body) {
   const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, ...body });
   return { ok: res.ok, id: (await res.json()).id };
+}
+
+/** 创建真实存在的脚本目录（根目录/占位 run.bat/配置目录/日志目录），路径校验用例使用。 */
+function makeScriptDir(label) {
+  const dir = path.join(runtimeDir, "test-" + label);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "cfg"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "run.bat"), "@echo off\r\nexit /b 0\r\n", "ascii");
+  return { root: dir, main: path.join(dir, "run.bat"), cfg: path.join(dir, "cfg"), log: path.join(dir, "logs") };
 }
 
 async function runningCount() {
@@ -340,10 +350,11 @@ async function testScriptCrud(page) {
   await page.waitForTimeout(200);
 
   await page.fill("#sm-name", "测试脚本A");
-  await page.fill("#sm-root", "C:\\scripts\\a");
-  await page.fill("#sm-exe", "C:\\scripts\\a\\run.bat");
-  await page.fill("#sm-config", "C:\\scripts\\a\\config");
-  await page.fill("#sm-log", "C:\\scripts\\a\\logs");
+  const crudDir = makeScriptDir("crud");
+  await page.fill("#sm-root", crudDir.root.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-exe", crudDir.main.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-config", crudDir.cfg.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-log", crudDir.log.replace(/\\/g, "\\\\"));
   await page.click(".modal button:has-text('保存')");
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A"), null, { timeout: 5000 });
@@ -367,7 +378,8 @@ async function testScriptCrud(page) {
 
 async function testQueueCrud(page) {
   console.log("[用例] 调度队列：新建（定时+任务）/ 编辑 / 删除");
-  const created = await createScript({ name: "队列用脚本", rootPath: "C:\\scripts\\q", mainExe: "C:\\scripts\\q\\run.bat", configPath: "C:\\scripts\\q\\config", logPath: "C:\\scripts\\q\\logs", maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const qDir = makeScriptDir("queue");
+  const created = await createScript({ name: "队列用脚本", rootPath: qDir.root, mainExe: qDir.main, configPath: qDir.cfg, logPath: qDir.log, maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(created.ok, "通过 API 预创建队列用脚本");
   await page.click('nav a[href="#/queues"]');
   await page.waitForSelector("h2");
@@ -448,7 +460,8 @@ async function testQueueCrud(page) {
 
 async function testDispatchAndHistory(page) {
   console.log("[用例] 调度中心执行 + 历史记录详情");
-  const created = await createScript({ name: "跑批脚本", rootPath: "C:\\scripts\\b", mainExe: "C:\\scripts\\b\\nonexist.exe", configPath: "C:\\scripts\\b\\config", logPath: "C:\\scripts\\b\\logs", maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const dDir = makeScriptDir("dispatch");
+  const created = await createScript({ name: "跑批脚本", rootPath: dDir.root, mainExe: dDir.main, configPath: dDir.cfg, logPath: dDir.log, maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(created.ok, "通过 API 预创建调度中心用脚本");
 
   await page.click('nav a[href="#/dispatch"]');
@@ -503,6 +516,7 @@ async function testLogScroll(page) {
   await page.selectOption("#dc-script", { label: "日志脚本" });
   await page.click("button:has-text('执行')");
   await page.waitForSelector(".run-log", { timeout: 10000 });
+  await page.waitForFunction(() => { const el = document.querySelector(".run-log"); return el && el.textContent.includes("SCRIPT"); }, null, { timeout: 10000 });
   const logText = await page.textContent(".run-log");
   assert(logText.includes("SCRIPT"), "日志框实时显示脚本输出（首行：" + (logText.split("\n")[0] || "") + "）");
   const scrolled = await page.evaluate(() => {
@@ -556,9 +570,10 @@ async function testAudit(page) {
   const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
   const readLog = () => fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "");
 
+  const aDir = makeScriptDir("audit");
   const created = await api("POST", "/api/scripts", {
-    name: "审计脚本", rootPath: "C:\\audit", mainExe: "C:\\audit\\run.bat",
-    configPath: "C:\\audit\\config", logPath: "C:\\audit\\logs",
+    name: "审计脚本", rootPath: aDir.root, mainExe: aDir.main,
+    configPath: aDir.cfg, logPath: aDir.log,
     maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "API 创建脚本");
@@ -569,8 +584,8 @@ async function testAudit(page) {
   const target = list.find(x => x.name === "审计脚本");
   assert(!!target, "列表可查询到审计脚本");
   const updated = await api("PUT", "/api/scripts/" + target.id, {
-    id: target.id, name: "审计脚本改", rootPath: "C:\\audit", mainExe: "C:\\audit\\run.bat",
-    configPath: "C:\\audit\\config", logPath: "C:\\audit\\logs",
+    id: target.id, name: "审计脚本改", rootPath: aDir.root, mainExe: aDir.main,
+    configPath: aDir.cfg, logPath: aDir.log,
     maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(updated.ok, "API 修改脚本");
@@ -612,9 +627,10 @@ async function testLogLevel(page) {
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").replace(/^\uFEFF/, ""));
   assert(cfg.LogLevel === "warn", "settings.json 已落盘 LogLevel=warn");
 
+  const lgDir = makeScriptDir("loglevel");
   const created = await api("POST", "/api/scripts", {
-    name: "日志级别脚本", rootPath: "C:\\lg", mainExe: "C:\\lg\\run.bat",
-    configPath: "C:\\lg\\cfg", logPath: "C:\\lg\\log",
+    name: "日志级别脚本", rootPath: lgDir.root, mainExe: lgDir.main,
+    configPath: lgDir.cfg, logPath: lgDir.log,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "创建日志级别测试脚本（触发 INFO 审计）");
@@ -878,7 +894,7 @@ async function testBatchGameLaunch() {
 
   const create = await api("POST", "/api/scripts", {
     name: "批处理游戏脚本", rootPath: runtimeDir, mainExe: mainBat,
-    configPath: "", logPath: "", launchGame: true, gameExe: gameBat,
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: true, gameExe: gameBat,
     gameArgs: "", gameWaitSeconds: 0, forceCloseGame: false,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
@@ -898,28 +914,28 @@ async function testBatchGameLaunch() {
 }
 
 async function testGameProcessConfirm() {
-  console.log("[用例] 游戏进程确认：空路径跳过 / 填写路径检测双启动");
+  console.log("[用例] 游戏进程确认：未勾选启动游戏跳过 / 填写路径检测双启动");
   const exitBat = path.join(runtimeDir, "exit-ok.bat");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
 
   const a = await api("POST", "/api/scripts", {
     name: "空游戏路径脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: "", logPath: "", launchGame: true, gameExe: "",
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: "",
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
-  assert(a.ok, "创建空游戏路径脚本（launchGame=true / gameExe 为空）");
+  assert(a.ok, "创建未勾选启动游戏脚本（launchGame=false / gameExe 为空）");
   const aid = (await a.json()).id;
   await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
-  assert(await waitNoRunning(60000), "空游戏路径脚本运行结束");
+  assert(await waitNoRunning(60000), "未勾选启动游戏脚本运行结束");
   const aHist = await (await fetch(baseUrl + "api/history?days=7")).json();
   const aRec = aHist.filter(h => h.scriptInstanceId === aid).at(-1);
-  assert(aRec && aRec.finalStatus === "success", "未填游戏路径跳过游戏启动，运行成功（FinalStatus=success）");
+  assert(aRec && aRec.finalStatus === "success", "未勾选启动游戏时跳过游戏启动，运行成功（FinalStatus=success）");
   await api("DELETE", "/api/scripts/" + aid);
 
   const ping = "C:\\Windows\\System32\\PING.EXE";
   const b = await api("POST", "/api/scripts", {
     name: "双启动确认脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: "", logPath: "", launchGame: true, gameExe: ping,
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: true, gameExe: ping,
     gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 10, forceCloseGame: true,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
@@ -945,7 +961,7 @@ async function testForceCloseGating(page) {
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
   const created = await api("POST", "/api/scripts", {
     name: "强制关闭联动脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: "", logPath: "", launchGame: false, gameExe: "C:\\nonexist\\game.exe", forceCloseGame: true,
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: "C:\\nonexist\\game.exe", forceCloseGame: true,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
   assert(created.ok, "API 提交 launchGame=false / forceCloseGame=true 成功");
@@ -978,13 +994,14 @@ async function testScriptEditPreservesUsers() {
   fs.rmSync(keepCfg, { recursive: true, force: true });
   fs.mkdirSync(keepCfg, { recursive: true });
   fs.writeFileSync(path.join(keepCfg, "cfg.txt"), "KEEP");
-  const created = await createScript({ name: "保留用户脚本", rootPath: "C:\\keep", mainExe: "C:\\keep\\run.bat", configPath: keepCfg, logPath: "C:\\keep\\log" });
+  const kDir = makeScriptDir("keep");
+  const created = await createScript({ name: "保留用户脚本", rootPath: kDir.root, mainExe: kDir.main, configPath: keepCfg, logPath: kDir.log });
   assert(created.ok, "创建脚本");
   const sid = created.id;
   const ur = await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
   assert(ur.ok, "添加用户甲");
   assert(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "添加用户生成配置快照");
-  const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: "C:\\keep", mainExe: "C:\\keep\\run.bat", configPath: keepCfg, logPath: "C:\\keep\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: kDir.root, mainExe: kDir.main, configPath: keepCfg, logPath: kDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(put.ok, "PUT 改名（payload 不含 users，模拟前端）");
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
@@ -1031,19 +1048,41 @@ async function testExeOpenGuard() {
 
 async function testPathQuoteNormalize() {
   console.log("[用例] 脚本路径引号去除（成对首尾引号）");
+  const qDir = makeScriptDir("quote");
   const created = await api("POST", "/api/scripts", {
-    name: "引号路径脚本", rootPath: "\"C:\\Scripts\\Daily\"", mainExe: "'C:\\Scripts\\Daily\\run.bat'",
-    configPath: "\"C:\\Scripts\\Daily\\cfg\"", logPath: "'C:\\Scripts\\Daily\\logs'",
-    gameExe: "\"C:\\Games\\game.exe\"", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+    name: "引号路径脚本", rootPath: `"${qDir.root}"`, mainExe: `'${qDir.main}'`,
+    configPath: `"${qDir.cfg}"`, logPath: `'${qDir.log}'`,
+    gameExe: `"${qDir.main}"`, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "POST 带引号路径成功");
   const sid = (await created.json()).id;
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
-  assert(got && got.rootPath === "C:\\Scripts\\Daily" && got.mainExe === "C:\\Scripts\\Daily\\run.bat"
-    && got.configPath === "C:\\Scripts\\Daily\\cfg" && got.logPath === "C:\\Scripts\\Daily\\logs"
-    && got.gameExe === "C:\\Games\\game.exe", "路径已去除成对引号");
+  assert(got && got.rootPath === qDir.root && got.mainExe === qDir.main
+    && got.configPath === qDir.cfg && got.logPath === qDir.log
+    && got.gameExe === qDir.main, "路径已去除成对引号");
   await api("DELETE", "/api/scripts/" + sid);
+}
+
+async function testPathValidation() {
+  console.log("[用例] 路径合规校验：通用脚本假路径 / 专项根目录 / 游戏路径 校验拒绝");
+  const p = makeScriptDir("pathval");
+  const post = body => api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, ...body });
+  const badRoot = await post({ name: "假路径脚本", rootPath: "C:\\no-such-dir-xyz", mainExe: "C:\\no-such-dir-xyz\\run.bat", configPath: "C:\\no-such-dir-xyz\\cfg", logPath: "C:\\no-such-dir-xyz\\logs" });
+  assert(badRoot.status === 400 && (await badRoot.json()).error.includes("根目录"), "根目录不存在被拒（400）");
+  const badMain = await post({ name: "假主程序脚本", rootPath: p.root, mainExe: path.join(p.root, "no.exe"), configPath: p.cfg, logPath: p.log });
+  assert(badMain.status === 400 && (await badMain.json()).error.includes("主程序"), "主程序不存在被拒（400）");
+  const badCfg = await post({ name: "假配置脚本", rootPath: p.root, mainExe: p.main, configPath: path.join(p.root, "no-cfg"), logPath: p.log });
+  assert(badCfg.status === 400 && (await badCfg.json()).error.includes("配置"), "配置路径不存在被拒（400）");
+  const badLog = await post({ name: "非法日志脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: path.join(p.log, "a?b.log") });
+  assert(badLog.status === 400 && (await badLog.json()).error.includes("日志路径"), "日志路径含非法字符被拒（400）");
+  const badGame = await post({ name: "空游戏脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: p.log, launchGame: true, gameExe: "" });
+  assert(badGame.status === 400 && (await badGame.json()).error.includes("游戏"), "勾选启动游戏且游戏路径为空被拒（400）");
+  const spBad = await post({ name: "专项假根目录", rootPath: "C:\\no-such-zenless", pluginType: "zzzonedragon" });
+  assert(spBad.status === 400 && (await spBad.json()).error.includes("根目录"), "专项脚本根目录不存在被拒（400）");
+  const good = await post({ name: "合规脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: path.join(p.log, "{YYYY-MM-DD}.log") });
+  assert(good.ok, "真实路径且日志格式合规通过（存在性校验不误伤）");
+  await api("DELETE", "/api/scripts/" + (await good.json()).id);
 }
 
 async function testV020Features(page) {
@@ -1058,7 +1097,8 @@ async function testV020Features(page) {
   const argsDisabled = await page.$eval("#sm-args", el => el.disabled);
   const logDisabled = await page.$eval("#sm-log", el => el.disabled);
   assert(exeDisabled && argsDisabled && logDisabled, "根目录未填时主程序/参数/日志输入禁用（幽灵状态）");
-  await page.fill("#sm-root", "C:\\scripts\\v");
+  const vDir = makeScriptDir("v020");
+  await page.fill("#sm-root", vDir.root.replace(/\\/g, "\\\\"));
   await page.waitForFunction(() => document.querySelector("#sm-exe") && !document.querySelector("#sm-exe").disabled, null, { timeout: 5000 });
   const exeEnabled = await page.$eval("#sm-exe", el => !el.disabled);
   assert(exeEnabled, "填写根目录后输入启用");
@@ -1151,14 +1191,18 @@ async function testSpecializedScript(page) {
   const bad = await api("POST", "/api/scripts", { name: "专项脚本B", rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(bad.status === 400, "根目录无法推导时创建被拒（400）");
 
-  const iconOk = await createScript({ name: "图标脚本", rootPath: runtimeDir, mainExe: runtimeExe.replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
-  assert(iconOk.ok, "创建图标测试脚本（mainExe 为真 exe）");
+  const iconOk = await createScript({ name: "图标脚本", rootPath: runtimeDir, mainExe: "C:\\Windows\\explorer.exe", configPath: runtimeDir, logPath: runtimeDir });
+  assert(iconOk.ok, "创建图标测试脚本（mainExe 为带高分辨率图标的系统 exe）");
   const iconRes = await fetch(baseUrl + "api/scripts/" + iconOk.id + "/icon");
   assert(iconRes.status === 200 && (iconRes.headers.get("content-type") || "").includes("image/png"), "图标 API 返回 PNG");
+  const iconBytes = Buffer.from(await iconRes.arrayBuffer());
+  assert(iconBytes.length > 24 && iconBytes.readUInt32BE(16) >= 48, "图标 API 返回最高分辨率图标（PNG 宽度 ≥ 48）");
   await api("DELETE", "/api/scripts/" + iconOk.id);
-  const noIcon = await createScript({ name: "无图标脚本", rootPath: runtimeDir, mainExe: path.join(runtimeDir, "no-icon.exe").replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
+  const noIconBat = path.join(runtimeDir, "no-icon.bat");
+  fs.writeFileSync(noIconBat, "@echo off\r\nexit /b 0\r\n", "ascii");
+  const noIcon = await createScript({ name: "无图标脚本", rootPath: runtimeDir, mainExe: noIconBat.replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
   const icon404 = await fetch(baseUrl + "api/scripts/" + noIcon.id + "/icon");
-  assert(icon404.status === 404, "主程序不存在时图标 API 返回 404");
+  assert(icon404.status === 404, "主程序无图标资源时图标 API 返回 404");
   await api("DELETE", "/api/scripts/" + noIcon.id);
 
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
@@ -1530,7 +1574,8 @@ async function testPluginConfig(page) {
 
 async function testNotifyPluginGating(page) {
   console.log("[用例] 通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）");
-  const created = await createScript({ name: "门禁样式脚本", rootPath: "C:\\gating", mainExe: "C:\\gating\\run.bat", configPath: "C:\\gating\\cfg", logPath: "C:\\gating\\log" });
+  const gDir = makeScriptDir("gating");
+  const created = await createScript({ name: "门禁样式脚本", rootPath: gDir.root, mainExe: gDir.main, configPath: gDir.cfg, logPath: gDir.log });
   assert(created.ok, "预创建样式断言用脚本");
 
   const disable = await api("POST", "/api/plugins/notify/disable");
@@ -1585,8 +1630,8 @@ async function testNextScheduleAndStats(page) {
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
   const created = await createScript({
     name: "统计脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: path.join(runtimeDir, "stat-cfg").replace(/\\/g, "\\\\"),
-    logPath: path.join(runtimeDir, "stat-log").replace(/\\/g, "\\\\"),
+    configPath: runtimeDir.replace(/\\/g, "\\\\"),
+    logPath: runtimeDir.replace(/\\/g, "\\\\"),
     notifyEnabled: true,
   });
   const sid = created.id;
@@ -1618,11 +1663,13 @@ async function testLimitsApi() {
   assert(limits.warnings.length === 0, "默认配置无警告");
 
   const ids = [];
+  const xDir = makeScriptDir("limits");
+  const limitBase = { rootPath: xDir.root, mainExe: xDir.main, configPath: xDir.cfg, logPath: xDir.log };
   for (let i = 0; i < 25; i++) {
-    const r = await api("POST", "/api/scripts", { name: "约束脚本" + String(i).padStart(2, "0"), rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+    const r = await api("POST", "/api/scripts", { name: "约束脚本" + String(i).padStart(2, "0"), ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
   }
-  const r26 = await api("POST", "/api/scripts", { name: "超限脚本", rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const r26 = await api("POST", "/api/scripts", { name: "超限脚本", ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(r26.status === 400, "第 26 个脚本被拒（400）");
 
   for (let i = 0; i < 10; i++) {
@@ -1648,7 +1695,8 @@ async function testLimitsApi() {
 
 async function testLimitsFields() {
   console.log("[用例] 约束体系：名称字节 / 数值区间 / 任务总用户");
-  const base = { rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
+  const fDir = makeScriptDir("fields");
+  const base = { rootPath: fDir.root, mainExe: fDir.main, configPath: fDir.cfg, logPath: fDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
   const postScript = body => api("POST", "/api/scripts", body);
 
   const longName = await postScript({ ...base, name: "长".repeat(43) });
@@ -1683,8 +1731,9 @@ async function testLimitsFields() {
 async function testPagination(page) {
   console.log("[用例] 分页：脚本列表前端分页 + 达上限禁用 + 历史 API 分页");
   const ids = [];
+  const pgDir = makeScriptDir("pager");
   for (let i = 0; i < 25; i++) {
-    const r = await api("POST", "/api/scripts", { name: "分页脚本" + String(i).padStart(2, "0"), rootPath: "C:\\x", mainExe: "C:\\x\\run.bat", configPath: "C:\\x\\cfg", logPath: "C:\\x\\log", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+    const r = await api("POST", "/api/scripts", { name: "分页脚本" + String(i).padStart(2, "0"), rootPath: pgDir.root, mainExe: pgDir.main, configPath: pgDir.cfg, logPath: pgDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
   }
   await page.click('nav a[href="#/scripts"]');
@@ -1803,7 +1852,7 @@ async function main() {
       const tests = [
         testDashboard, testResponsiveSmoke, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
-        testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
+        testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize, testPathValidation,
         testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testZenlessPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,
         testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,

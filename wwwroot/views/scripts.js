@@ -136,7 +136,7 @@ export async function openScriptModal(id = "", plugin = "") {
         <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
-      <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
+      <div id="sm-game-box" class="nested-panel">
         <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
       </div>
@@ -166,7 +166,7 @@ export async function openScriptModal(id = "", plugin = "") {
         <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
-      <div id="sm-game-box" class="nested-panel" ${d.launchGame ? "" : "hidden"}>
+      <div id="sm-game-box" class="nested-panel">
         <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
       </div>
@@ -182,8 +182,6 @@ export async function openScriptModal(id = "", plugin = "") {
   showModal(modalShell(title, body, footer));
   syncScriptGhostState();
   $dom("#sm-launch")?.addEventListener("change", event => {
-    const box = $dom("#sm-game-box");
-    if (box) box.toggleAttribute("hidden", !event.target.checked);
     const force = $dom("#sm-force");
     if (force) {
       force.disabled = !event.target.checked;
@@ -232,6 +230,19 @@ export async function saveScript() {
     element.classList.remove("field-error");
   }
   const l = state.limits || {};
+  const ILLEGAL_PATH = /["<>|?*{}]/;
+  const ILLEGAL_LOG = /["<>|?]/;
+  const pathFields = isSpecial
+    ? [["sm-root", "脚本根目录", ILLEGAL_PATH]]
+    : [["sm-root", "脚本根目录", ILLEGAL_PATH], ["sm-exe", "脚本主程序路径", ILLEGAL_PATH], ["sm-config", "配置文件路径/文件夹", ILLEGAL_PATH], ["sm-log", "日志路径（支持日期占位符与通配符）", ILLEGAL_LOG]];
+  for (const [id, label, illegal] of pathFields) {
+    const value = $dom("#" + id)?.value.trim() || "";
+    if (illegal.test(value)) {
+      toast(`${label}包含非法字符`, "error");
+      $dom("#" + id)?.focus();
+      return;
+    }
+  }
   const nameBytes = new TextEncoder().encode($dom("#sm-name").value.trim()).length;
   if (l.maxScriptNameBytes && nameBytes > l.maxScriptNameBytes) {
     toast(`脚本名称最多 ${l.maxScriptNameBytes} 字节`, "error");
@@ -252,11 +263,23 @@ export async function saveScript() {
     toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
     return;
   }
+  const launchGame = $dom("#sm-launch").checked;
+  const gameExe = $dom("#sm-game-exe")?.value.trim() || "";
+  if (gameExe && ILLEGAL_PATH.test(gameExe)) {
+    toast("游戏路径包含非法字符", "error");
+    $dom("#sm-game-exe")?.focus();
+    return;
+  }
+  if (launchGame && !gameExe) {
+    toast("已勾选运行脚本前启动游戏，请填写游戏路径", "error");
+    $dom("#sm-game-exe")?.focus();
+    return;
+  }
   const payload = {
     id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: $dom("#sm-root").value.trim(),
     mainExe: isSpecial ? "" : $dom("#sm-exe").value.trim(), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : $dom("#sm-config").value.trim(), logPath: isSpecial ? "" : $dom("#sm-log").value.trim(),
-    launchGame: $dom("#sm-launch").checked, gameExe: $dom("#sm-game-exe")?.value.trim() || "", gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
+    launchGame, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
   };

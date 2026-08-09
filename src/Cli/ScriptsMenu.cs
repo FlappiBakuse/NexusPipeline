@@ -159,6 +159,7 @@ internal static class ScriptsMenu
         limitError ??= Limits.CheckAttempts(script.MaxAttempts);
         limitError ??= Limits.CheckStallMinutes(script.LogStallTimeoutMinutes);
         limitError ??= Limits.CheckTotalMinutes(script.TotalTimeoutMinutes);
+        limitError ??= Limits.CheckScriptPaths(script);
         if (limitError is not null)
         {
             Console.WriteLine($"[错误] {limitError}，未保存。");

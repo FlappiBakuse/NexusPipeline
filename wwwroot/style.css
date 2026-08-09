@@ -232,10 +232,11 @@ tbody tr:hover td { background: var(--accent-soft); }
 .script-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .script-card { display: flex; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--border); border-radius: 13px; background: var(--panel-soft); }
 .script-card:hover { border-color: var(--border-strong); }
-.script-ico { flex: 0 0 auto; width: 40px; height: 40px; border-radius: 9px; border: 1px solid var(--border); background: var(--panel); object-fit: contain; }
+.script-ico { flex: 0 0 auto; width: 50px; height: 50px; border-radius: 11px; border: 1px solid var(--border); background: var(--panel); object-fit: contain; }
 .script-main { flex: 1 1 auto; min-width: 0; }
 .script-name-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
-.script-name-row strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.script-name-row strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.script-card .badge, .queue-card .badge { min-height: 30px; padding: 4px 13px; font-size: 14px; }
 .scroll-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scroll-text .scroll-inner { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .scroll-text.scrolling .scroll-inner { max-width: none; overflow: visible; text-overflow: clip; animation: text-marquee 8s linear infinite alternate; }
@@ -257,7 +258,7 @@ tbody tr:hover td { background: var(--accent-soft); }
 pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid var(--border); border-radius: 10px; background: #09101d; color: #b9d5f4; font-family: Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 body[data-theme="light"] pre.logbox { background: #17263b; color: #d9eaff; }
 
-.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
 .pager { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .pager .pager-info { margin-right: auto; color: var(--muted); font-size: 12px; }
 .pager button + button { margin-left: 0; }
