@@ -13,7 +13,7 @@ function resize() {
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   context?.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const count = window.innerWidth < 640 ? 44 : window.innerWidth < 1000 ? 68 : 96;
+  const count = window.innerWidth < 640 ? 24 : window.innerWidth < 1000 ? 36 : 48;
   particles = Array.from({ length: count }, () => spawn());
   if (context && (paused || reducedMotion)) drawFrame(false);
 }
@@ -53,17 +53,17 @@ function drawFrame(move) {
     }
     context.beginPath();
     context.fillStyle = accent;
-    context.globalAlpha = 0.38;
+    context.globalAlpha = 0.12;
     context.arc(point.x, point.y, point.r, 0, Math.PI * 2);
     context.fill();
   });
-  context.globalAlpha = 0.16;
+  context.globalAlpha = 0.05;
   particles.forEach((point, index) => {
     particles.slice(index + 1).forEach(other => {
       const dx = point.x - other.x;
       const dy = point.y - other.y;
       const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance > 125) return;
+      if (distance > 90) return;
       context.beginPath();
       context.strokeStyle = accent;
       context.lineWidth = 1;

@@ -52,7 +52,7 @@ function queueCardMarkup(queue, scripts) {
     ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">队列级通知：${queue.notifyEnabled ? "开" : "关"}</span>`
     : "";
   const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row">${timeBadge}${notifyBadge}</div>` : "";
-  return `<article class="card script-card queue-card" data-testid="queue-card">
+  return `<article class="script-card queue-card" data-testid="queue-card">
     <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
     <div class="script-main">
       <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></strong></div>

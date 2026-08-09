@@ -31,11 +31,11 @@ export async function pageScriptUsers(scriptId, token) {
   const totalPages = Math.max(1, Math.ceil(users.length / USER_PAGE_SIZE));
   if (userPage > totalPages) userPage = totalPages;
   const pageItems = users.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
-  const usersMarkup = users.length ? `${pageItems.map((user, pageIndex) => {
+  const usersMarkup = users.length ? `<section class="card">${pageItems.map((user, pageIndex) => {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
     const first = userIndex === 0;
     const last = userIndex === users.length - 1;
-    return `<article class="card user-card">
+    return `<article class="user-card">
     <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
       <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
       <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
@@ -50,7 +50,7 @@ export async function pageScriptUsers(scriptId, token) {
       </div></div>
     </div>
   </article>`;
-  }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
+  }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
   render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
 }
