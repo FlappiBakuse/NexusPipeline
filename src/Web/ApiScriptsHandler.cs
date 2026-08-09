@@ -424,10 +424,6 @@ internal static class ApiScriptsHandler
         script.ConfigPath = StripPathQuotes(script.ConfigPath);
         script.LogPath = StripPathQuotes(script.LogPath);
         script.GameExe = StripPathQuotes(script.GameExe);
-        if (!script.LaunchGame)
-        {
-            script.ForceCloseGame = false;
-        }
     }
 
     /// <summary>去除成对首尾引号（"…" / '…'），保留路径内部的合法单引号（如 C:\O'Brien\）。</summary>
@@ -489,6 +485,11 @@ internal static class ApiScriptsHandler
                     Logger.Warn($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
                 }
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
+                return;
+            }
+            if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
+            {
+                await HandleReorderUsersAsync(context, seg, body).ConfigureAwait(false);
                 return;
             }
             if (seg.Length == 4 && method == "PUT")
@@ -592,6 +593,57 @@ internal static class ApiScriptsHandler
             }
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    /// <summary>用户顺序重排：请求体携带完整用户名名单（忽略大小写），与现有用户集合完全一致时按新顺序落盘。</summary>
+    private static async Task HandleReorderUsersAsync(HttpListenerContext context, string[] seg, string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptInstance? script = ctx.FindScript(seg[1]);
+        if (script is null)
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        JsonNode? node = HttpHelper.ParseBody(body);
+        List<string>? names = node?["names"] is JsonArray array
+            ? array.Select(item => item?.ToString() ?? "").ToList()
+            : null;
+        if (names is null || names.Count != script.Users.Count
+            || names.Any(string.IsNullOrWhiteSpace)
+            || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "用户顺序名单缺失或与当前用户列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        HashSet<string> existing = new(script.Users.Select(user => user.Name), StringComparer.OrdinalIgnoreCase);
+        if (names.Any(name => !existing.Contains(name)))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "用户顺序名单与当前用户列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
+        if (!gate.Wait(0))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法调整用户顺序" }, 409).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            Dictionary<string, ScriptUser> byName = script.Users.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
+            script.Users.Clear();
+            foreach (string name in names)
+            {
+                script.Users.Add(byName[name]);
+            }
+            DataStore.SaveScripts(ctx.Scripts);
+            Audit.Log(Audit.Web, "调整用户顺序", $"{script.Name} / {names.Count} 个用户");
+            await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private static async Task HandleEditConfigAsync(HttpListenerContext context, string[] seg, string body)

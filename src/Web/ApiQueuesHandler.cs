@@ -120,5 +120,17 @@ internal static class ApiQueuesHandler
                 timeSet.Time = "08:00";
             }
         }
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var distinct = new List<QueueTimeSet>();
+        foreach (QueueTimeSet timeSet in queue.TimeSets)
+        {
+            string key = $"{timeSet.Enabled}|{string.Join(",", timeSet.Days.OrderBy(day => day))}|{timeSet.Time}";
+            if (!seen.Add(key))
+            {
+                continue;
+            }
+            distinct.Add(timeSet);
+        }
+        queue.TimeSets = distinct;
     }
 }

@@ -31,13 +31,26 @@ export async function pageScriptUsers(scriptId, token) {
   const totalPages = Math.max(1, Math.ceil(users.length / USER_PAGE_SIZE));
   if (userPage > totalPages) userPage = totalPages;
   const pageItems = users.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
-  const usersMarkup = users.length ? `${pageItems.map(user => `<article class="card user-card">
-    <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div></div>
-      <div class="action-row"><button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button><button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button><button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button></div>
+  const usersMarkup = users.length ? `${pageItems.map((user, pageIndex) => {
+    const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
+    const first = userIndex === 0;
+    const last = userIndex === users.length - 1;
+    return `<article class="card user-card">
+    <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
+      <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
+      <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
     </div>
-    <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
-    <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
-  </article>`).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
+      <div class="action-row"><div class="user-actions">
+        <button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
+        <button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
+        <button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
+        <span class="user-actions-spacer" aria-hidden="true"></span>
+        <button class="sm" type="button" data-action="move-user-up" data-id="${script.id}" data-name="${esc(user.name)}" ${first ? "disabled" : ""} title="${first ? "已是第一位用户" : "上移用户"}">上移用户</button>
+        <button class="sm" type="button" data-action="move-user-down" data-id="${script.id}" data-name="${esc(user.name)}" ${last ? "disabled" : ""} title="${last ? "已是最后一位用户" : "下移用户"}">下移用户</button>
+      </div></div>
+    </div>
+  </article>`;
+  }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
   render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
 }
@@ -80,6 +93,22 @@ export async function deleteUser(scriptId, userName) {
   catch (error) { toast(error.message, "error"); }
 }
 
+export async function moveUser(scriptId, userName, direction) {
+  const script = state.scripts.find(item => item.id === scriptId);
+  if (!script) return;
+  const users = script.users || [];
+  const index = users.findIndex(user => user.name === userName);
+  const other = index + direction;
+  if (index < 0 || other < 0 || other >= users.length) return;
+  const names = users.map(user => user.name);
+  [names[index], names[other]] = [names[other], names[index]];
+  try {
+    await api("PUT", `/api/scripts/${scriptId}/users/order`, { names });
+    toast(direction < 0 ? "用户已上移" : "用户已下移");
+    await pageScriptUsers(scriptId, state.routeToken);
+  } catch (error) { toast(error.message, "error"); }
+}
+
 export async function editUserConfig(scriptId, userName) {
   try {
     await api("POST", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}/edit-config`, { action: "start" });
@@ -98,6 +127,8 @@ export const actions = {
   "edit-user": target => openUserModal(target.dataset.id, target.dataset.name),
   "save-user": () => saveUser(),
   "delete-user": target => deleteUser(target.dataset.id, target.dataset.name),
+  "move-user-up": target => moveUser(target.dataset.id, target.dataset.name, -1),
+  "move-user-down": target => moveUser(target.dataset.id, target.dataset.name, 1),
   "edit-user-config": target => editUserConfig(target.dataset.id, target.dataset.name),
   "edit-config-done": target => editConfigAction(target.dataset.id, target.dataset.name, "done"),
   "edit-config-cancel": target => editConfigAction(target.dataset.id, target.dataset.name, "cancel"),

@@ -4,12 +4,13 @@ import { esc, scriptFallbackIcon } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
-import { closeModal, modalShell, showModal } from "../core/modal.js";
+import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let queueDraft = null;
 let queuePage = 1;
 let nextTimer = null;
+let queuePendingMerged = false;
 const QUEUE_PAGE_SIZE = 20;
 const FALLBACK_ICON = scriptFallbackIcon;
 
@@ -175,13 +176,69 @@ export async function saveQueue() {
   if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(`定时列表已达上限（${draft.timeSets.length}/${l.maxTimeSetsPerQueue}）`, "error"); return; }
   const totalUsers = queueTotalUsers();
   if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(`任务列表的启用用户总数已达上限（${totalUsers}/${l.maxQueueTotalUsers}）`, "error"); return; }
-  try { if (draft.id) await api("PUT", "/api/queues/" + draft.id, draft); else await api("POST", "/api/queues", draft); closeModal(); toast("调度队列已保存"); await pageQueues(state.routeToken); }
-  catch (error) { toast(error.message, "error"); }
+  const mergedCount = mergeTimeSets();
+  queuePendingMerged = mergedCount > 0;
+  if (hasTimeGap()) {
+    showModal(modalShell("定时间隔警告", `<p class="modal-copy">存在间隔低于10分钟的定时任务，如果之前的定时任务还未完成，之后的定时任务可能会忽略，确定吗？</p>`, '<button type="button" data-action="confirm-timegap-save">确定</button><button class="ghost" type="button" data-action="cancel-timegap">取消</button>'));
+    return;
+  }
+  await doSaveQueue(queuePendingMerged);
 }
 
-export async function deleteQueue(id, name) {
-  if (!confirm("确定删除调度队列「" + name + "」？")) return;
-  try { await api("DELETE", "/api/queues/" + id); toast("调度队列已删除"); await pageQueues(state.routeToken); }
+/** 定时列表去重合并（启用+执行周期+时间完全一致视为同一条），修改 draft 并返回被合并条数。</summary> */
+function mergeTimeSets() {
+  const seen = new Set();
+  const merged = [];
+  let removed = 0;
+  for (const timeSet of queueDraft.timeSets) {
+    const key = `${timeSet.enabled}|${[...timeSet.days].sort((a, b) => a - b).join(",")}|${timeSet.time}`;
+    if (seen.has(key)) { removed++; continue; }
+    seen.add(key);
+    merged.push(timeSet);
+  }
+  queueDraft.timeSets = merged;
+  return removed;
+}
+
+/** 是否存在间隔低于 10 分钟的定时触发点：启用列表按一周内分钟数排序，相邻差或跨周首尾差 &lt;10 即命中。</summary> */
+function hasTimeGap() {
+  const minutes = [];
+  for (const timeSet of queueDraft.timeSets) {
+    if (!timeSet.enabled) continue;
+    const parts = String(timeSet.time).split(":");
+    const hm = (+parts[0] || 0) * 60 + (+parts[1] || 0);
+    for (const day of timeSet.days) minutes.push(day * 1440 + hm);
+  }
+  if (minutes.length < 2) return false;
+  const sorted = [...new Set(minutes)].sort((a, b) => a - b);
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i] - sorted[i - 1] < 10) return true;
+  }
+  return sorted[0] + 7 * 1440 - sorted[sorted.length - 1] < 10;
+}
+
+function cancelTimeGap() {
+  closeModal();
+  renderQueueModal();
+}
+
+async function doSaveQueue(merged) {
+  const draft = queueDraft;
+  try {
+    if (draft.id) await api("PUT", "/api/queues/" + draft.id, draft);
+    else await api("POST", "/api/queues", draft);
+    closeModal();
+    toast(merged ? "完全一致的定时列表已被合并" : "调度队列已保存");
+    await pageQueues(state.routeToken);
+  } catch (error) { toast(error.message, "error"); }
+}
+
+export function deleteQueue(id, name) {
+  confirmModal("删除调度队列", `确定删除调度队列「${esc(name)}」？`, "confirm-delete-queue", { id, name });
+}
+
+export async function confirmDeleteQueue(id, name) {
+  try { await api("DELETE", "/api/queues/" + id); closeModal(); toast("调度队列已删除"); await pageQueues(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 
@@ -189,7 +246,10 @@ export const actions = {
   "open-queue-modal": target => openQueueModal(target.dataset.id || ""),
   "edit-queue": target => openQueueModal(target.dataset.id),
   "delete-queue": target => deleteQueue(target.dataset.id, target.dataset.name),
+  "confirm-delete-queue": target => confirmDeleteQueue(target.dataset.id, target.dataset.name),
   "save-queue": () => saveQueue(),
+  "confirm-timegap-save": () => doSaveQueue(queuePendingMerged),
+  "cancel-timegap": () => cancelTimeGap(),
   "add-time-set": () => queueAddTimeSet(),
   "remove-time-set": target => queueRemoveTimeSet(+target.dataset.index),
   "add-task": () => queueAddTask(),

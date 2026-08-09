@@ -4,7 +4,7 @@ import { esc, scriptFallbackIcon } from "../core/format.js";
 import { scrollField, valueField, pageHeader } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
-import { closeModal, modalShell, showModal } from "../core/modal.js";
+import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let scriptDraft = null;
@@ -133,11 +133,11 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
       <div class="check-grid">
         <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
       <div id="sm-game-box" class="nested-panel">
-        <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
+        <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
       </div>
     </div>
@@ -163,11 +163,11 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
       <div class="check-grid">
         <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame && d.launchGame ? "checked" : ""} ${d.launchGame ? "" : "disabled"}><span>运行结束后强制关闭游戏</span></label>
+        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
         <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
       </div>
       <div id="sm-game-box" class="nested-panel">
-        <div class="form-grid">${valueField("sm-game-exe", "游戏路径", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
+        <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
       </div>
     </div>
@@ -181,13 +181,6 @@ export async function openScriptModal(id = "", plugin = "") {
   const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
   showModal(modalShell(title, body, footer));
   syncScriptGhostState();
-  $dom("#sm-launch")?.addEventListener("change", event => {
-    const force = $dom("#sm-force");
-    if (force) {
-      force.disabled = !event.target.checked;
-      if (!event.target.checked) force.checked = false;
-    }
-  });
   const rootInput = $dom("#sm-root");
   rootInput?.addEventListener("input", syncScriptGhostState);
   rootInput?.addEventListener("change", event => {
@@ -214,6 +207,19 @@ export function syncScriptGhostState() {
   });
 }
 
+/** 去除成对首尾引号（"…" / '…'），与后端 StripPathQuotes 语义一致；内部引号保留。</summary> */
+function stripQuotes(value) {
+  const trimmed = (value || "").trim();
+  if (trimmed.length >= 2) {
+    const first = trimmed[0];
+    const last = trimmed[trimmed.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1).trim();
+    }
+  }
+  return trimmed;
+}
+
 export async function saveScript() {
   const isSpecial = !!scriptDraft.pluginType;
   const required = isSpecial
@@ -236,7 +242,7 @@ export async function saveScript() {
     ? [["sm-root", "脚本根目录", ILLEGAL_PATH]]
     : [["sm-root", "脚本根目录", ILLEGAL_PATH], ["sm-exe", "脚本主程序路径", ILLEGAL_PATH], ["sm-config", "配置文件路径/文件夹", ILLEGAL_PATH], ["sm-log", "日志路径（支持日期占位符与通配符）", ILLEGAL_LOG]];
   for (const [id, label, illegal] of pathFields) {
-    const value = $dom("#" + id)?.value.trim() || "";
+    const value = stripQuotes($dom("#" + id)?.value);
     if (illegal.test(value)) {
       toast(`${label}包含非法字符`, "error");
       $dom("#" + id)?.focus();
@@ -264,21 +270,21 @@ export async function saveScript() {
     return;
   }
   const launchGame = $dom("#sm-launch").checked;
-  const gameExe = $dom("#sm-game-exe")?.value.trim() || "";
-  if (gameExe && ILLEGAL_PATH.test(gameExe)) {
+  const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
+  if (!gameExe) {
+    toast("请填写游戏路径", "error");
+    $dom("#sm-game-exe")?.focus();
+    return;
+  }
+  if (ILLEGAL_PATH.test(gameExe)) {
     toast("游戏路径包含非法字符", "error");
     $dom("#sm-game-exe")?.focus();
     return;
   }
-  if (launchGame && !gameExe) {
-    toast("已勾选运行脚本前启动游戏，请填写游戏路径", "error");
-    $dom("#sm-game-exe")?.focus();
-    return;
-  }
   const payload = {
-    id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: $dom("#sm-root").value.trim(),
-    mainExe: isSpecial ? "" : $dom("#sm-exe").value.trim(), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
-    configPath: isSpecial ? "" : $dom("#sm-config").value.trim(), logPath: isSpecial ? "" : $dom("#sm-log").value.trim(),
+    id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: stripQuotes($dom("#sm-root")?.value),
+    mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
+    configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
     launchGame, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
@@ -293,9 +299,12 @@ export async function saveScript() {
   } catch (error) { toast(error.message, "error"); }
 }
 
-export async function deleteScript(id, name) {
-  if (!confirm("确定删除脚本实例「" + name + "」？")) return;
-  try { await api("DELETE", "/api/scripts/" + id); toast("脚本实例已删除"); await pageScripts(state.routeToken); }
+export function deleteScript(id, name) {
+  confirmModal("删除脚本实例", `确定删除脚本实例「${esc(name)}」？此操作不可恢复。`, "confirm-delete-script", { id, name });
+}
+
+export async function confirmDeleteScript(id, name) {
+  try { await api("DELETE", "/api/scripts/" + id); closeModal(); toast("脚本实例已删除"); await pageScripts(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 
@@ -304,5 +313,6 @@ export const actions = {
   "open-script-type": target => openScriptModal("", target.dataset.plugin || ""),
   "edit-script": target => openScriptModal(target.dataset.id),
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
+  "confirm-delete-script": target => confirmDeleteScript(target.dataset.id, target.dataset.name),
   "save-script": () => saveScript(),
 };

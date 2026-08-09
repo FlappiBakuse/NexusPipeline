@@ -1,4 +1,5 @@
 import { $, $$ } from "./dom.js";
+import { esc } from "./format.js";
 import { initAutoScroll } from "./ui.js";
 
 let modalReturnFocus = null;
@@ -11,6 +12,15 @@ export function modalShell(title, body, footer = "") {
   </div>
   <div class="modal-body">${body}</div>
   ${footer ? `<div class="modal-footer">${footer}</div>` : ""}`;
+}
+
+/** 通用确认卡片：确定按钮走 data-action 事件委托（data 透传为 data-* 属性），取消/遮罩/Esc 关闭。</summary> */
+export function confirmModal(title, message, confirmAction, data = {}) {
+  const dataAttrs = Object.entries(data)
+    .map(([key, value]) => ` data-${key}="${esc(value)}"`)
+    .join("");
+  showModal(modalShell(title, `<p class="modal-copy">${message}</p>`,
+    `<button type="button" data-action="${esc(confirmAction)}"${dataAttrs}>确定</button><button class="ghost" type="button" data-action="close-modal">取消</button>`));
 }
 
 export function showModal(content, wide = false) {

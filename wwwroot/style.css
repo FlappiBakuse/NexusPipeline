@@ -144,6 +144,11 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .check-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .action-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .action-row button + button { margin-left: 0; }
+.user-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; }
+.user-actions button { width: 100%; margin-left: 0; }
+.user-actions button:disabled { cursor: not-allowed; opacity: .45; }
+.user-actions-spacer { display: block; }
+.user-card .qk-row { margin-top: 6px; }
 .back-row { margin: -10px 0 16px; }
 
 button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 0 15px; border: 1px solid transparent; border-radius: 10px; background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: #fff; font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; transition: filter .2s, transform .2s, box-shadow .2s; }

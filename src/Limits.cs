@@ -159,7 +159,7 @@ internal static class Limits
     /// 脚本实例路径校验（Web + CLI 共用）：
     /// 通用脚本——根目录/主程序/配置文件必须存在（主程序还需可执行），日志路径仅格式合规（不查存在性，支持日期占位符与通配符）；
     /// 专项脚本——仅校验根目录存在（主程序/配置/日志由插件固化，不做存在性校验）；
-    /// 勾选启动游戏时游戏路径必须为存在的可执行文件。返回错误信息或 null。
+    /// 游戏路径一律必填且必须为存在的可执行文件（运行前启动游戏、运行后强制关闭游戏均与填写解绑）。返回错误信息或 null。
     /// </summary>
     public static string? CheckScriptPaths(ScriptInstance script)
     {
@@ -169,26 +169,25 @@ internal static class Limits
         {
             return $"脚本根目录不存在或不是文件夹：{root}";
         }
-        if (specialized)
+        if (!specialized)
         {
-            return null;
+            if (!TextRules.IsExecutable(script.MainExe))
+            {
+                return $"脚本主程序路径不存在或不是可执行文件：{script.MainExe}";
+            }
+            string config = script.ConfigPath.Trim();
+            if (string.IsNullOrWhiteSpace(config) || (!File.Exists(config) && !Directory.Exists(config)))
+            {
+                return $"配置文件路径/文件夹不存在：{config}";
+            }
+            if (!IsLogPathPlausible(script.LogPath))
+            {
+                return $"日志路径格式不合法（不允许包含 引号/尖括号/竖线/问号）：{script.LogPath}";
+            }
         }
-        if (!TextRules.IsExecutable(script.MainExe))
+        if (!TextRules.IsExecutable(script.GameExe))
         {
-            return $"脚本主程序路径不存在或不是可执行文件：{script.MainExe}";
-        }
-        string config = script.ConfigPath.Trim();
-        if (string.IsNullOrWhiteSpace(config) || (!File.Exists(config) && !Directory.Exists(config)))
-        {
-            return $"配置文件路径/文件夹不存在：{config}";
-        }
-        if (!IsLogPathPlausible(script.LogPath))
-        {
-            return $"日志路径格式不合法（不允许包含 引号/尖括号/竖线/问号）：{script.LogPath}";
-        }
-        if (script.LaunchGame && !TextRules.IsExecutable(script.GameExe))
-        {
-            return $"已勾选运行脚本前启动游戏，游戏路径必须为存在的可执行文件：{script.GameExe}";
+            return $"游戏路径必须为存在的可执行文件：{script.GameExe}";
         }
         return null;
     }

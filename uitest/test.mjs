@@ -16,8 +16,9 @@ const CI = process.argv.includes("--ci");
 const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
-const EXPECTED = 354;
-const CI_EXPECTED = 331;
+const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
+const EXPECTED = 400;
+const CI_EXPECTED = 377;
 
 let passed = 0;
 let failed = 0;
@@ -83,7 +84,7 @@ async function api(method, pathName, body) {
 }
 
 async function createScript(body) {
-  const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, ...body });
+  const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, gameExe: PING_GAME, ...body });
   return { ok: res.ok, id: (await res.json()).id };
 }
 
@@ -166,7 +167,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.3.3"), "版本显示 0.3.3（x.x.x 不带 v）");
+  assert(body.includes("0.3.5"), "版本显示 0.3.5（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -356,6 +357,7 @@ async function testScriptCrud(page) {
   await page.fill("#sm-exe", crudDir.main.replace(/\\/g, "\\\\"));
   await page.fill("#sm-config", crudDir.cfg.replace(/\\/g, "\\\\"));
   await page.fill("#sm-log", crudDir.log.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-game-exe", crudDir.main.replace(/\\/g, "\\\\"));
   await page.click(".modal button:has-text('保存')");
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A"), null, { timeout: 5000 });
@@ -371,8 +373,10 @@ async function testScriptCrud(page) {
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A-改"), null, { timeout: 5000 });
   assert((await page.textContent("body")).includes("测试脚本A-改"), "编辑后名称已更新");
 
-  page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-script"]');
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  assert((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）");
+  await page.click('[data-action="confirm-delete-script"]');
   await waitAbsent(page, "测试脚本A-改");
   assert(!(await page.textContent("body")).includes("测试脚本A-改"), "删除后列表不再显示该脚本");
 }
@@ -453,10 +457,82 @@ async function testQueueCrud(page) {
   assert(tqGot && tqGot.nextTrigger, "定时运行队列 API 返回 nextTrigger");
   await api("DELETE", "/api/queues/" + tqGot.id);
 
-  page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-queue"]');
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  assert((await page.textContent(".modal")).includes("确定删除调度队列"), "删除队列弹出确认卡片（含确定/取消）");
+  await page.click('[data-action="confirm-delete-queue"]');
   await waitAbsent(page, "测试队列A-改");
   assert(!(await page.textContent("body")).includes("测试队列A-改"), "删除后卡片消失");
+}
+
+async function testTimeSetMergeAndGap(page) {
+  console.log("[用例] 定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10分钟确认卡片");
+  const mDir = makeScriptDir("timeset");
+  const created = await createScript({ name: "定时合并用脚本", rootPath: mDir.root, mainExe: mDir.main, configPath: mDir.cfg, logPath: mDir.log });
+  assert(created.ok, "创建定时合并用脚本");
+  const sid = created.id;
+
+  const dup = await api("POST", "/api/queues", {
+    name: "合并兜底队列", autoRunMode: "scheduled", completionAction: "none",
+    timeSets: [
+      { id: "", enabled: true, days: [1, 2, 3], time: "08:00" },
+      { id: "", enabled: true, days: [3, 1, 2], time: "08:00" },
+      { id: "", enabled: false, days: [1, 2, 3], time: "08:00" },
+    ],
+    tasks: [{ id: "", index: 0, scriptInstanceId: sid }],
+  });
+  assert(dup.ok, "API 提交含重复定时列表成功");
+  const dupId = (await dup.json()).id;
+  let qList = await (await fetch(baseUrl + "api/queues")).json();
+  const dupGot = qList.find(q => q.id === dupId);
+  assert(dupGot && dupGot.timeSets.length === 2, "后端兜底去重：完全一致定时合并为 1 条（天数乱序也视为一致，保留启用/禁用各一）");
+  await api("DELETE", "/api/queues/" + dupId);
+
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h2");
+  await page.click("button:has-text('新建调度队列')");
+  await page.waitForSelector("#qm-name");
+  await page.fill("#qm-name", "合并UI队列");
+  await page.click("text=+ 添加任务");
+  await page.selectOption('[data-task-idx="0"]', { label: "定时合并用脚本" });
+  await page.click("button:has-text('+ 添加定时')");
+  assert((await page.$$eval(".timeset-card", els => els.length)) === 2, "弹窗中已有两条完全相同定时列表（默认复制）");
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  assert((await page.textContent("#toast")).includes("完全一致的定时列表已被合并"), "保存后弹出合并 toast（完全一致的定时列表已被合并）");
+  qList = await (await fetch(baseUrl + "api/queues")).json();
+  const uiQ = qList.find(q => q.name === "合并UI队列");
+  assert(uiQ && uiQ.timeSets.length === 1, "合并后队列仅保留 1 条定时");
+  await api("DELETE", "/api/queues/" + uiQ.id);
+
+  await page.click("button:has-text('新建调度队列')");
+  await page.waitForSelector("#qm-name");
+  await page.fill("#qm-name", "间隔确认队列");
+  await page.selectOption("#qm-mode", "scheduled");
+  await page.click("text=+ 添加任务");
+  await page.selectOption('[data-task-idx="0"]', { label: "定时合并用脚本" });
+  await page.click("button:has-text('+ 添加定时')");
+  await page.fill('[data-ts-time="0"]', "08:00");
+  await page.fill('[data-ts-time="1"]', "08:05");
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  const confirmText = await page.textContent(".modal");
+  assert(confirmText.includes("间隔低于10分钟") && confirmText.includes("确定"), "间隔<10分钟时弹出确认卡片（含警告文案与确定按钮）");
+  await page.click('[data-action="cancel-timegap"]');
+  await page.waitForFunction(() => document.querySelector("#qm-name"), null, { timeout: 5000 });
+  qList = await (await fetch(baseUrl + "api/queues")).json();
+  assert(!qList.some(q => q.name === "间隔确认队列"), "确认卡片取消后队列未保存（弹窗保留可继续编辑）");
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  await page.click('[data-action="confirm-timegap-save"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  qList = await (await fetch(baseUrl + "api/queues")).json();
+  const gapQ = qList.find(q => q.name === "间隔确认队列");
+  assert(gapQ && gapQ.timeSets.length === 2, "确认卡片确定后队列已保存（两条定时保留）");
+  await api("DELETE", "/api/queues/" + gapQ.id);
+
+  await api("DELETE", "/api/scripts/" + sid);
 }
 
 async function testDispatchAndHistory(page) {
@@ -576,7 +652,7 @@ async function testAudit(page) {
   const aDir = makeScriptDir("audit");
   const created = await api("POST", "/api/scripts", {
     name: "审计脚本", rootPath: aDir.root, mainExe: aDir.main,
-    configPath: aDir.cfg, logPath: aDir.log,
+    configPath: aDir.cfg, logPath: aDir.log, gameExe: PING_GAME,
     maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "API 创建脚本");
@@ -588,7 +664,7 @@ async function testAudit(page) {
   assert(!!target, "列表可查询到审计脚本");
   const updated = await api("PUT", "/api/scripts/" + target.id, {
     id: target.id, name: "审计脚本改", rootPath: aDir.root, mainExe: aDir.main,
-    configPath: aDir.cfg, logPath: aDir.log,
+    configPath: aDir.cfg, logPath: aDir.log, gameExe: PING_GAME,
     maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(updated.ok, "API 修改脚本");
@@ -633,7 +709,7 @@ async function testLogLevel(page) {
   const lgDir = makeScriptDir("loglevel");
   const created = await api("POST", "/api/scripts", {
     name: "日志级别脚本", rootPath: lgDir.root, mainExe: lgDir.main,
-    configPath: lgDir.cfg, logPath: lgDir.log,
+    configPath: lgDir.cfg, logPath: lgDir.log, gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "创建日志级别测试脚本（触发 INFO 审计）");
@@ -671,7 +747,7 @@ async function testUserManagement(page) {
 
   const create = await api("POST", "/api/scripts", {
     name: "用户测试脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: cfgDir.replace(/\\/g, "\\\\"), logPath: logDir.replace(/\\/g, "\\\\"),
+    configPath: cfgDir.replace(/\\/g, "\\\\"), logPath: logDir.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const script = await create.json();
@@ -778,14 +854,105 @@ async function testUserManagement(page) {
 
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("h2");
-  page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-script"][data-name="用户测试脚本"]');
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  assert((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）");
+  await page.click('[data-action="confirm-delete-script"]');
   await waitAbsent(page, "用户测试脚本");
   assert(!fs.existsSync(dataDir), "删除脚本后 data 目录已清理");
   const queues = await (await fetch(baseUrl + "api/queues")).json();
   for (const q of queues) {
     if (q.name === "用户队列测试") await api("DELETE", "/api/queues/" + q.id);
   }
+}
+
+async function testUserOrdering(page) {
+  console.log("[用例] 用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移下移 / 执行顺序准确");
+  const ordDir = makeScriptDir("ordering");
+  const ordCfg = path.join(runtimeDir, "order-cfg");
+  fs.rmSync(ordCfg, { recursive: true, force: true });
+  fs.mkdirSync(ordCfg, { recursive: true });
+  fs.writeFileSync(path.join(ordCfg, "config.txt"), "ORIGINAL");
+  const orderFlag = path.join(runtimeDir, "order-seq.flag");
+  fs.rmSync(orderFlag, { force: true });
+  const preBat = user => path.join(runtimeDir, `order-pre-${user}.bat`);
+  const mkPre = (user, tag) => fs.writeFileSync(preBat(user), [
+    "@echo off",
+    `echo ${tag} >> "${orderFlag}"`,
+    "exit /b 0",
+  ].join("\r\n"), "ascii");
+  mkPre("甲", "FIRST");
+  mkPre("乙", "SECOND");
+  mkPre("丙", "THIRD");
+
+  const created = await api("POST", "/api/scripts", {
+    name: "排序脚本", rootPath: ordDir.root, mainExe: ordDir.main,
+    configPath: ordCfg, logPath: ordDir.log, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  assert(created.ok, "创建排序测试脚本");
+  const sid = (await created.json()).id;
+  for (const name of ["甲", "乙", "丙"]) {
+    await api("POST", `/api/scripts/${sid}/users`, { name, enabled: true, preRunScript: preBat(name) });
+  }
+  const orderApi = names => api("PUT", `/api/scripts/${sid}/users/order`, { names });
+
+  let r = await orderApi(["丙", "乙", "甲"]);
+  assert(r.ok, "提交完整顺序名单成功");
+  let list = await (await fetch(baseUrl + "api/scripts")).json();
+  let got = list.find(s => s.id === sid);
+  assert(got.users.map(u => u.name).join() === "丙,乙,甲", "排序后用户顺序为 丙,乙,甲");
+
+  assert((await orderApi(["丙", "乙"])).status === 400, "名单缺用户被拒（400）");
+  assert((await orderApi(["丙", "乙", "丁"])).status === 400, "名单含不存在用户被拒（400）");
+  assert((await orderApi(["丙", "乙", "乙"])).status === 400, "名单含重复用户被拒（400）");
+
+  r = await orderApi(["甲", "丙", "乙"]);
+  assert(r.ok, "恢复顺序 甲,丙,乙");
+  await api("POST", "/api/dispatch/script", { scriptId: sid, mode: "manual" });
+  assert(await waitNoRunning(30000), "排序脚本运行结束");
+  const seq = fs.existsSync(orderFlag) ? fs.readFileSync(orderFlag, "utf8") : "";
+  const pos = (tag) => seq.indexOf(tag);
+  assert(pos("FIRST") >= 0 && pos("THIRD") > pos("FIRST") && pos("SECOND") > pos("THIRD"), "按用户排序顺序依次执行（实际：" + JSON.stringify(seq.trim()) + "）");
+
+  const longBat = path.join(runtimeDir, "order-long.bat");
+  fs.writeFileSync(longBat, "@echo off\r\nping -n 6 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  const created2 = await api("POST", "/api/scripts", {
+    name: "排序门禁脚本", rootPath: ordDir.root, mainExe: longBat.replace(/\\/g, "\\\\"),
+    configPath: ordCfg, logPath: ordDir.log, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  assert(created2.ok, "创建排序门禁脚本成功");
+  const sid2 = (await created2.json()).id;
+  await api("POST", `/api/scripts/${sid2}/users`, { name: "甲", enabled: true });
+  await api("POST", `/api/scripts/${sid2}/users`, { name: "乙", enabled: true });
+  const dr2 = await api("POST", "/api/dispatch/script", { scriptId: sid2, mode: "manual" });
+  assert(dr2.ok, "门禁脚本开始运行（dispatch 受理）");
+  await waitFor(async () => (await runningCount()) > 0, 10000);
+  const during = await api("PUT", `/api/scripts/${sid2}/users/order`, { names: ["乙", "甲"] });
+  assert(during.status === 409, "脚本运行中调整用户顺序被拒（409）");
+  assert(await waitNoRunning(30000), "门禁脚本运行结束");
+
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="new-script"]', { timeout: 10000 });
+  await page.waitForFunction(() => document.body.textContent.includes("排序脚本"), null, { timeout: 10000 });
+  await page.click(`[data-action="manage-users"][data-id="${sid}"]`);
+  await page.waitForFunction(() => document.body.textContent.includes("添加用户") && document.body.textContent.includes("丙"), null, { timeout: 10000 });
+  await page.click('[data-action="move-user-up"][data-name="丙"]');
+  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "丙"; }, null, { timeout: 10000 });
+  assert(true, "点击上移后 丙 成为第一位（卡片顺序更新）");
+  assert(await page.$eval('[data-action="move-user-up"][data-name="丙"]', el => el.disabled), "首位用户上移按钮禁用");
+  assert(await page.$eval('[data-action="move-user-down"][data-name="乙"]', el => el.disabled), "末位用户下移按钮禁用");
+  list = await (await fetch(baseUrl + "api/scripts")).json();
+  got = list.find(s => s.id === sid);
+  assert(got.users.map(u => u.name).join() === "丙,甲,乙", "UI 上移后顺序已落盘（丙,甲,乙）");
+  await page.click('[data-action="move-user-down"][data-name="丙"]');
+  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "甲"; }, null, { timeout: 10000 });
+  assert(true, "点击下移后 丙 回到第二位（卡片顺序更新）");
+
+  await api("DELETE", "/api/scripts/" + sid);
+  await api("DELETE", "/api/scripts/" + sid2);
 }
 
 async function testQueueMultiUser() {
@@ -803,7 +970,7 @@ async function testQueueMultiUser() {
 
   const create = await api("POST", "/api/scripts", {
     name: "多用户脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: cfgDir.replace(/\\/g, "\\\\"), logPath: muLog.replace(/\\/g, "\\\\"),
+    configPath: cfgDir.replace(/\\/g, "\\\\"), logPath: muLog.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const sid = (await create.json()).id;
@@ -862,7 +1029,7 @@ async function testGateRelease() {
   const ping = "C:\\Windows\\System32\\PING.EXE";
   const create = await api("POST", "/api/scripts", {
     name: "门禁测试脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: ping,
-    args: "-n 8 127.0.0.1", configPath: gateCfg.replace(/\\/g, "\\\\"), logPath: gateLog.replace(/\\/g, "\\\\"),
+    args: "-n 8 127.0.0.1", configPath: gateCfg.replace(/\\/g, "\\\\"), logPath: gateLog.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const sid = (await create.json()).id;
@@ -922,11 +1089,11 @@ async function testGameProcessConfirm() {
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
 
   const a = await api("POST", "/api/scripts", {
-    name: "空游戏路径脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: "",
+    name: "不启动游戏脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
-  assert(a.ok, "创建未勾选启动游戏脚本（launchGame=false / gameExe 为空）");
+  assert(a.ok, "创建未勾选启动游戏脚本（launchGame=false / gameExe 必填但跳过游戏启动）");
   const aid = (await a.json()).id;
   await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
   assert(await waitNoRunning(60000), "未勾选启动游戏脚本运行结束");
@@ -959,19 +1126,19 @@ async function testGameProcessConfirm() {
 }
 
 async function testForceCloseGating(page) {
-  console.log("[用例] 强制关闭游戏依赖启动游戏：后端归一化 + 前端联动禁用");
+  console.log("[用例] 强制关闭游戏独立于启动游戏：后端保留 + 前端复选框解绑");
   const exitBat = path.join(runtimeDir, "exit-ok.bat");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
   const created = await api("POST", "/api/scripts", {
-    name: "强制关闭联动脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: "C:\\nonexist\\game.exe", forceCloseGame: true,
+    name: "强制关闭解绑脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: PING_GAME, forceCloseGame: true,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
-  assert(created.ok, "API 提交 launchGame=false / forceCloseGame=true 成功");
+  assert(created.ok, "API 提交 launchGame=false / forceCloseGame=true / gameExe 必填 成功");
   const sid = (await created.json()).id;
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
-  assert(got && got.forceCloseGame === false, "后端归一化：LaunchGame=false 时 ForceCloseGame 强制为 false");
+  assert(got && got.forceCloseGame === true, "后端保留 ForceCloseGame=true（不再归一化为 false）");
   await api("DELETE", "/api/scripts/" + sid);
 
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
@@ -980,15 +1147,89 @@ async function testForceCloseGating(page) {
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
-  assert(await page.$eval("#sm-force", el => el.disabled), "未勾选「运行脚本前启动游戏」时强制关闭复选框禁用");
-  assert(!(await page.$eval("#sm-force", el => el.checked)), "未勾选启动游戏时强制关闭默认不勾选");
-  await page.click("#sm-launch");
-  assert(!(await page.$eval("#sm-force", el => el.disabled)), "勾选启动游戏后强制关闭启用");
+  assert(!(await page.$eval("#sm-force", el => el.disabled)), "未勾选「运行脚本前启动游戏」时强制关闭复选框仍可用（解绑）");
+  assert(!(await page.$eval("#sm-force", el => el.checked)), "强制关闭默认不勾选");
   await page.click("#sm-force");
-  assert(await page.$eval("#sm-force", el => el.checked), "启用后可勾选强制关闭");
+  assert(await page.$eval("#sm-force", el => el.checked), "未勾选启动游戏也可勾选强制关闭");
+  await page.click("#sm-force");
   await page.click("#sm-launch");
-  assert(await page.$eval("#sm-force", el => el.disabled && !el.checked), "取消启动游戏后强制关闭恢复禁用并取消勾选");
-  await page.click(".modal button:has-text('取消')");
+  assert(!(await page.$eval("#sm-force", el => el.disabled)), "勾选启动游戏后强制关闭复选框不受影响");
+  await page.click('[data-action="close-modal"]');
+}
+
+async function testForceKillGameOnFailure() {
+  console.log("[用例] 失败强制结束游戏进程 + 成功/取消按设置绑定");
+  const failBat = path.join(runtimeDir, "game-fail.bat");
+  fs.writeFileSync(failBat, "@echo off\r\nexit /b 1\r\n", "ascii");
+  const okBat = path.join(runtimeDir, "game-ok.bat");
+  fs.writeFileSync(okBat, "@echo off\r\nexit /b 0\r\n", "ascii");
+  const logDir = path.join(runtimeDir, "fk-logs");
+  const failLogDir = path.join(runtimeDir, "fk-fail-logs");
+  fs.rmSync(logDir, { recursive: true, force: true });
+  fs.rmSync(failLogDir, { recursive: true, force: true });
+  fs.mkdirSync(logDir, { recursive: true });
+  fs.mkdirSync(failLogDir, { recursive: true });
+  const logFile = path.join(logDir, "run.log");
+  fs.writeFileSync(logFile, "");
+  const pingProc = () => spawn(PING_GAME, ["-n", "60", "127.0.0.1"], { stdio: "ignore" });
+  const pingRunning = () => spawnSync("tasklist", ["/FI", "IMAGENAME eq ping.exe"], { stdio: "pipe", encoding: "utf8" }).stdout.toLowerCase().includes("ping.exe");
+  const killPing = () => spawnSync("taskkill", ["/IM", "ping.exe", "/F"], { stdio: "ignore" });
+  const base = { rootPath: runtimeDir, configPath: runtimeDir, logPath: failLogDir, gameExe: PING_GAME, gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 1, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10 };
+
+  pingProc();
+  await sleep(1500);
+  assert(pingRunning(), "游戏进程（ping）已启动作为前置");
+  const f1 = await api("POST", "/api/scripts", { name: "失败杀游戏脚本", mainExe: failBat.replace(/\\/g, "\\\\"), successMarkers: "NEVER-SEEN-MARKER", ...base });
+  assert(f1.ok, "创建失败杀游戏脚本（完成标志永不出现 → 任务失败需强制结束游戏）");
+  const f1id = (await f1.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: f1id, mode: "manual" });
+  assert(await waitNoRunning(30000), "失败脚本运行结束");
+  await sleep(800);
+  assert(!pingRunning(), "任务失败后游戏进程被强制结束（任何失败类型均强制）");
+  await api("DELETE", "/api/scripts/" + f1id);
+  killPing();
+
+  pingProc();
+  await sleep(1500);
+  const f2 = await api("POST", "/api/scripts", { name: "成功留游戏脚本", mainExe: okBat.replace(/\\/g, "\\\\"), forceCloseGame: false, ...base, logPath: logFile });
+  assert(f2.ok, "创建成功留游戏脚本（日志文件存在 + 无完成标志 → 进程退出判成功）");
+  const f2id = (await f2.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: f2id, mode: "manual" });
+  assert(await waitNoRunning(30000), "成功脚本运行结束");
+  await sleep(500);
+  assert(pingRunning(), "任务成功且未勾选强制关闭时游戏进程保留");
+  await api("DELETE", "/api/scripts/" + f2id);
+  killPing();
+
+  pingProc();
+  await sleep(1500);
+  const f3 = await api("POST", "/api/scripts", { name: "成功杀游戏脚本", mainExe: okBat.replace(/\\/g, "\\\\"), forceCloseGame: true, ...base, logPath: logFile });
+  assert(f3.ok, "创建成功杀游戏脚本（勾选强制关闭）");
+  const f3id = (await f3.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: f3id, mode: "manual" });
+  assert(await waitNoRunning(30000), "成功脚本运行结束");
+  await sleep(800);
+  assert(!pingRunning(), "任务成功且勾选强制关闭时游戏进程被结束");
+  await api("DELETE", "/api/scripts/" + f3id);
+  killPing();
+
+  const cancelBat = path.join(runtimeDir, "game-cancel.bat");
+  fs.writeFileSync(cancelBat, "@echo off\r\nping -n 30 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  pingProc();
+  await sleep(1500);
+  const f4 = await api("POST", "/api/scripts", { name: "取消留游戏脚本", mainExe: cancelBat.replace(/\\/g, "\\\\"), forceCloseGame: false, ...base });
+  const f4id = (await f4.json()).id;
+  await api("POST", "/api/dispatch/script", { scriptId: f4id, mode: "manual" });
+  await waitFor(async () => (await runningCount()) > 0, 10000);
+  const status = await (await fetch(baseUrl + "api/status")).json();
+  const runId = (status.running || []).find(item => item.targetId === f4id)?.id;
+  assert(!!runId, "取消前已获取运行任务 id");
+  await api("POST", "/api/cancel", { runId });
+  assert(await waitNoRunning(30000), "取消后脚本运行结束");
+  await sleep(500);
+  assert(pingRunning(), "手动取消且未勾选强制关闭时游戏进程保留（按设置绑定）");
+  await api("DELETE", "/api/scripts/" + f4id);
+  killPing();
 }
 
 async function testScriptEditPreservesUsers() {
@@ -1004,7 +1245,7 @@ async function testScriptEditPreservesUsers() {
   const ur = await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
   assert(ur.ok, "添加用户甲");
   assert(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "添加用户生成配置快照");
-  const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: kDir.root, mainExe: kDir.main, configPath: keepCfg, logPath: kDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: kDir.root, mainExe: kDir.main, configPath: keepCfg, logPath: kDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(put.ok, "PUT 改名（payload 不含 users，模拟前端）");
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
@@ -1024,7 +1265,7 @@ async function testExeOpenGuard() {
   fs.mkdirSync(logDir, { recursive: true });
   const created = await api("POST", "/api/scripts", {
     name: "占用检测脚本", rootPath: runtimeDir, mainExe: ping,
-    configPath: cfgDir, logPath: logDir,
+    configPath: cfgDir, logPath: logDir, gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const sid = (await created.json()).id;
@@ -1049,7 +1290,7 @@ async function testExeOpenGuard() {
   await api("DELETE", `/api/scripts/${sid}`);
 }
 
-async function testPathQuoteNormalize() {
+async function testPathQuoteNormalize(page) {
   console.log("[用例] 脚本路径引号去除（成对首尾引号）");
   const qDir = makeScriptDir("quote");
   const created = await api("POST", "/api/scripts", {
@@ -1064,6 +1305,20 @@ async function testPathQuoteNormalize() {
   assert(got && got.rootPath === qDir.root && got.mainExe === qDir.main
     && got.configPath === qDir.cfg && got.logPath === qDir.log
     && got.gameExe === qDir.main, "路径已去除成对引号");
+
+  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="new-script"]', { timeout: 10000 });
+  await page.click('[data-action="edit-script"][data-id="' + sid + '"]');
+  await page.waitForSelector("#sm-name");
+  await page.fill("#sm-root", `"${qDir.root}"`);
+  await page.fill("#sm-game-exe", `'${qDir.main}'`);
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  const list2 = await (await fetch(baseUrl + "api/scripts")).json();
+  const got2 = list2.find(s => s.id === sid);
+  assert(got2 && got2.rootPath === qDir.root && got2.gameExe === qDir.main, "前端编辑带引号路径保存成功且落盘去除成对引号");
+
   await api("DELETE", "/api/scripts/" + sid);
 }
 
@@ -1081,9 +1336,17 @@ async function testPathValidation() {
   assert(badLog.status === 400 && (await badLog.json()).error.includes("日志路径"), "日志路径含非法字符被拒（400）");
   const badGame = await post({ name: "空游戏脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: p.log, launchGame: true, gameExe: "" });
   assert(badGame.status === 400 && (await badGame.json()).error.includes("游戏"), "勾选启动游戏且游戏路径为空被拒（400）");
+  const badGame2 = await post({ name: "无游戏路径脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: p.log, launchGame: false });
+  assert(badGame2.status === 400 && (await badGame2.json()).error.includes("游戏"), "游戏路径必填：未勾选启动游戏且无游戏路径同样被拒（400）");
   const spBad = await post({ name: "专项假根目录", rootPath: "C:\\no-such-zenless", pluginType: "zzzonedragon" });
   assert(spBad.status === 400 && (await spBad.json()).error.includes("根目录"), "专项脚本根目录不存在被拒（400）");
-  const good = await post({ name: "合规脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: path.join(p.log, "{YYYY-MM-DD}.log") });
+  const spRoot = path.join(runtimeDir, "pathval-special");
+  fs.rmSync(spRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(spRoot, "config"), { recursive: true });
+  fs.writeFileSync(path.join(spRoot, "OneDragon-Launcher.exe"), "");
+  const spNoGame = await post({ name: "专项空游戏路径", rootPath: spRoot, pluginType: "zzzonedragon" });
+  assert(spNoGame.status === 400 && (await spNoGame.json()).error.includes("游戏"), "专项脚本同样要求游戏路径必填（400）");
+  const good = await post({ name: "合规脚本", rootPath: p.root, mainExe: p.main, configPath: p.cfg, logPath: path.join(p.log, "{YYYY-MM-DD}.log"), gameExe: p.main });
   assert(good.ok, "真实路径且日志格式合规通过（存在性校验不误伤）");
   await api("DELETE", "/api/scripts/" + (await good.json()).id);
 }
@@ -1177,7 +1440,7 @@ async function testSpecializedScript(page) {
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
   assert(probeBad.status === 400, "probe 对无法推导的根目录返回 400");
 
-  const created = await api("POST", "/api/scripts", { name: "专项脚本A", rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  const created = await api("POST", "/api/scripts", { name: "专项脚本A", rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi", gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   assert(created.ok, "API 创建专用脚本实例成功");
   const sid = (await created.json()).id;
   const list = await (await fetch(baseUrl + "api/scripts")).json();
@@ -1224,6 +1487,7 @@ async function testSpecializedScript(page) {
   assert(!(await page.$("#sm-exe")) && !(await page.$("#sm-args")) && !(await page.$("#sm-config")) && !(await page.$("#sm-log")), "简化弹窗移除主程序/参数/配置/日志字段");
   await page.fill("#sm-name", "专项UI脚本");
   await page.fill("#sm-root", bgiRoot.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-game-exe", PING_GAME);
   await page.click(".modal button:has-text('保存')");
   await page.waitForFunction(() => document.body.textContent.includes("专项UI脚本"), null, { timeout: 5000 });
   assert(true, "简化弹窗保存成功（根目录 change 触发 probe 校验）");
@@ -1232,8 +1496,10 @@ async function testSpecializedScript(page) {
   assert(!(await page.$("#sm-exe")), "编辑专用实例仍为简化弹窗（无主程序字段）");
   await page.click(".modal button:has-text('取消')");
 
-  page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-script"][data-name="专项UI脚本"]');
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  assert((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除专项 UI 脚本弹出确认卡片");
+  await page.click('[data-action="confirm-delete-script"]');
   await waitAbsent(page, "专项UI脚本");
   assert(true, "删除专项 UI 脚本成功");
   await api("DELETE", "/api/scripts/" + sid);
@@ -1347,7 +1613,7 @@ async function testLaunchTargetArgs(page) {
   const s5 = await api("POST", "/api/scripts", {
     name: "启动目标门禁", rootPath: ltDir.replace(/\\/g, "\\\\"),
     mainExe: launcherBat.replace(/\\/g, "\\\\"), args: ".\\lt-exec.exe",
-    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern, gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   const sid5 = (await s5.json()).id;
@@ -1406,7 +1672,7 @@ async function testMarch7thPlugin(page) {
   fs.rmSync(path.join(runtimeDir, "March7th Assistant.exe"), { force: true });
 
   const created = await api("POST", "/api/scripts", {
-    name: "专项M7脚本", rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th",
+    name: "专项M7脚本", rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th", gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "API 创建 march7th 专项脚本实例成功");
@@ -1455,7 +1721,7 @@ async function testZenlessPlugin(page) {
   assert(probeBad.status === 400, "zzzonedragon probe 对无法推导的根目录返回 400");
 
   const created = await api("POST", "/api/scripts", {
-    name: "专项ZEN脚本", rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon",
+    name: "专项ZEN脚本", rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon", gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   assert(created.ok, "API 创建 zzzonedragon 专项脚本实例成功");
@@ -1489,7 +1755,7 @@ async function testLogPattern(page) {
 
   const a = await api("POST", "/api/scripts", {
     name: "无条目脚本", rootPath: runtimeDir, mainExe: ping, args: "-n 90 127.0.0.1",
-    configPath: runtimeDir, logPath: path.join(logRoot, "a", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: path.join(logRoot, "a", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 1, totalTimeoutMinutes: 10,
   });
   const aid = (await a.json()).id;
@@ -1506,7 +1772,7 @@ async function testLogPattern(page) {
   fs.writeFileSync(bBat, "@echo off\r\necho [SCRIPT] NEW-ENTRY-BRANDNEW >> \"" + bLog + "\"\r\necho [SCRIPT] 任务完成 >> \"" + bLog + "\"\r\nexit /b 0\r\n", "ascii");
   const b = await api("POST", "/api/scripts", {
     name: "忽略旧日志脚本", rootPath: runtimeDir, mainExe: bBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const bid = (await b.json()).id;
@@ -1532,7 +1798,7 @@ async function testLogPattern(page) {
   ].join("\r\n"), "ascii");
   const c = await api("POST", "/api/scripts", {
     name: "通配轮换脚本", rootPath: runtimeDir, mainExe: cBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"),
+    configPath: runtimeDir, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const cid = (await c.json()).id;
@@ -1667,7 +1933,7 @@ async function testLimitsApi() {
 
   const ids = [];
   const xDir = makeScriptDir("limits");
-  const limitBase = { rootPath: xDir.root, mainExe: xDir.main, configPath: xDir.cfg, logPath: xDir.log };
+  const limitBase = { rootPath: xDir.root, mainExe: xDir.main, configPath: xDir.cfg, logPath: xDir.log, gameExe: PING_GAME };
   for (let i = 0; i < 25; i++) {
     const r = await api("POST", "/api/scripts", { name: "约束脚本" + String(i).padStart(2, "0"), ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
@@ -1699,7 +1965,7 @@ async function testLimitsApi() {
 async function testLimitsFields() {
   console.log("[用例] 约束体系：名称字节 / 数值区间 / 任务总用户");
   const fDir = makeScriptDir("fields");
-  const base = { rootPath: fDir.root, mainExe: fDir.main, configPath: fDir.cfg, logPath: fDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
+  const base = { rootPath: fDir.root, mainExe: fDir.main, configPath: fDir.cfg, logPath: fDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
   const postScript = body => api("POST", "/api/scripts", body);
 
   const longName = await postScript({ ...base, name: "长".repeat(43) });
@@ -1736,7 +2002,7 @@ async function testPagination(page) {
   const ids = [];
   const pgDir = makeScriptDir("pager");
   for (let i = 0; i < 25; i++) {
-    const r = await api("POST", "/api/scripts", { name: "分页脚本" + String(i).padStart(2, "0"), rootPath: pgDir.root, mainExe: pgDir.main, configPath: pgDir.cfg, logPath: pgDir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+    const r = await api("POST", "/api/scripts", { name: "分页脚本" + String(i).padStart(2, "0"), rootPath: pgDir.root, mainExe: pgDir.main, configPath: pgDir.cfg, logPath: pgDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
   }
   await page.click('nav a[href="#/scripts"]');
@@ -1854,11 +2120,11 @@ async function main() {
       page.on("pageerror", error => console.error("[页面错误] " + error.message));
       const tests = [
         testDashboard, testResponsiveSmoke, testResponsiveShell, testNavigation, testScriptCrud,
-        testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
+        testUserManagement, testUserOrdering, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating, testForceKillGameOnFailure,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize, testPathValidation,
         testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testZenlessPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,
-        testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,
+        testQueueCrud, testTimeSetMergeAndGap, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,
         testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testLimitsFatal,
       ];

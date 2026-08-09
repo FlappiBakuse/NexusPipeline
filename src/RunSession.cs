@@ -620,7 +620,16 @@ internal class RunSession
         attempt.LogTail = new List<string>(logTail);
 
         KillStartedScript();
-        if (_script.ForceCloseGame && _script.LaunchGame && !string.IsNullOrWhiteSpace(_script.GameExe))
+        string resultStatus = result?.Status ?? "failed";
+        if (resultStatus == "failed")
+        {
+            if (!string.IsNullOrWhiteSpace(_script.GameExe))
+            {
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」任务失败，强制结束游戏进程。");
+                SystemActions.KillByName(_script.GameExe, "游戏");
+            }
+        }
+        else if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
         {
             SystemActions.KillByName(_script.GameExe, "游戏");
         }

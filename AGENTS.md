@@ -12,11 +12,11 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 全量 354 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
-node uitest\test.mjs --ci      # CI 核心回归集：330 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
+node uitest\test.mjs           # 全量 400 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs --ci      # CI 核心回归集：377 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 354 / 331（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 400 / 377（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
@@ -81,7 +81,7 @@ node uitest\test.mjs --ci      # CI 核心回归集：330 项断言（剔除纯�
 - 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 路由表注册一行；新菜单：`src/Cli/` 对应菜单类；新服务：核心域 + RuntimeContext 持有。
 - 插件只能通过 `PluginContext` 与宿主交互；通知能力实现 `INotifyChannel`（`DispatchCenter` 经 `PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发，无静态委托）；专用插件实现 `ISpecializedScriptPlugin`（`Resolve(rootPath)` 推导主程序/参数/配置/日志与**完成标志**，保存专用脚本实例时固化快照，完成标志同步固化；`GameName` 提供中文游戏名，脚本卡片徽章显示「{GameName}专项」，**游戏名不得写入主程序**，仅由插件提供；外部插件默认启用，显式禁用记入 `DisabledPlugins`）。
 - **完成标志**：无内置关键词，专用插件固化自有关键词（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`）；通用脚本无完成标志时按「进程自行退出」判定成功（`RunSession` 无标志分支）。
-- **脚本路径校验**（`Limits.CheckScriptPaths`，Web/API/CLI 三处统一）：通用脚本根目录/主程序/配置路径必须存在（主程序需可执行），日志路径仅格式合规（支持占位符与通配符，不查存在性）；专项脚本（插件固化路径）仅校验根目录存在；勾选「启动游戏」时游戏路径必填且必须为可执行文件。游戏配置卡在弹窗内**常驻显示**（不与启动游戏复选框绑定）。
+- **脚本路径校验**（`Limits.CheckScriptPaths`，Web/API/CLI 三处统一）：通用脚本根目录/主程序/配置路径必须存在（主程序需可执行），日志路径仅格式合规（支持占位符与通配符，不查存在性）；专项脚本（插件固化路径）仅校验根目录存在；游戏路径一律必填且必须为可执行文件（运行前启动游戏、运行后强制关闭游戏均与游戏路径填写解绑；任务失败时无条件强制结束游戏进程）。游戏配置卡在弹窗内**常驻显示**（不与启动游戏复选框绑定）。
 - **脚本图标**：`ApiScriptsHandler.ExtractIcon` 取主程序 PE 资源最高分辨率图标（`EnumResourceNames` 遍历 RT_GROUP_ICON，GRPICONDIR 选最大，含 256×256），无资源回退关联图标，bat/cmd 直接 404（前端占位图）。
 - 日志路径为「路径格式」（如 `{YYYY-MM-DD}.log`、`{YYYY-MM-DD-*}.log`、固定文件 `log.txt`），严格按格式匹配（`LogPattern.ResolveFile`），禁止格式外猜测；脚本启动后无日志条目按"日志无更新超时"失败。
 
