@@ -67,11 +67,11 @@ public class ScriptInstance
         };
     }
 
+    /// <summary>完成标志列表：专用插件固化或历史配置；为空表示无完成标志（通用脚本按进程自行退出判定成功）。</summary>
     public List<string> MarkerList()
     {
-        var list = SuccessMarkers
+        return SuccessMarkers
             .Split(new[] { ',', '，', ';', '；', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
-        return list.Count == 0 ? TextRules.DefaultCompletionMarkers : list;
     }
 }

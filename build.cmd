@@ -15,6 +15,9 @@ copy /y "%~dp0build-tmp\plugins\BetterGIAdapter.dll" "%~dp0release\plugins\" >nu
 dotnet publish "%~dp0extensions\March7thAssistantAdapter\March7thAssistantAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
 if errorlevel 1 goto build_failed
 copy /y "%~dp0build-tmp\plugins\March7thAssistantAdapter.dll" "%~dp0release\plugins\" >nul
+dotnet publish "%~dp0extensions\ZenlessZoneZeroOneDragonAdapter\ZenlessZoneZeroOneDragonAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
+if errorlevel 1 goto build_failed
+copy /y "%~dp0build-tmp\plugins\ZenlessZoneZeroOneDragonAdapter.dll" "%~dp0release\plugins\" >nul
 rmdir /s /q "%~dp0build-tmp"
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe

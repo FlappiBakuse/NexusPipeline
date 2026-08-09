@@ -550,6 +550,10 @@ internal class RunSession
                     {
                         result = RunAttemptResult.Success("日志出现完成标志，脚本正常运行结束");
                     }
+                    else if (markers.Count == 0)
+                    {
+                        result = RunAttemptResult.Success("进程自行退出（未配置完成标志，按退出判定成功）");
+                    }
                     else
                     {
                         result = RunAttemptResult.Failed("进程退出但未检测到完成标志");

@@ -35,6 +35,9 @@ public class ScriptProfile
     public string ConfigPath { get; set; } = "";
 
     public string LogPath { get; set; } = "";
+
+    /// <summary>完成标志（逗号分隔）；专用插件提供自有关键词，固化到脚本实例。</summary>
+    public string SuccessMarkers { get; set; } = "";
 }
 
 /// <summary>通知能力接口：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>

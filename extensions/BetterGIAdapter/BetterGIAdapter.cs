@@ -41,6 +41,7 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
             Args = "--startOneDragon",
             ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "默认配置.json"),
             LogPath = Path.Combine(rootPath, "log", "better-genshin-impact{YYYYMMDD}.log"),
+            SuccessMarkers = "一条龙和配置组任务结束",
         };
     }
 }

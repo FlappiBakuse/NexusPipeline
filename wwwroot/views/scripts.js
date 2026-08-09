@@ -110,7 +110,7 @@ export async function openScriptModal(id = "", plugin = "") {
     launchGame: !!value.launchGame, gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
     gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
-    totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120, successMarkers: value.successMarkers || "",
+    totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
     notifyEnabled: !!value.notifyEnabled,
   };
   const d = scriptDraft;
@@ -141,7 +141,6 @@ export async function openScriptModal(id = "", plugin = "") {
         ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
         ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
     </div>`
     : `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
@@ -172,7 +171,6 @@ export async function openScriptModal(id = "", plugin = "") {
         ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
         ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <label class="field-label" for="sm-markers">自定义完成标志（逗号分隔，留空=内置关键词）</label><input id="sm-markers" type="text" value="${esc(d.successMarkers)}">
     </div>`;
   const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
   showModal(modalShell(title, body, footer));
@@ -254,7 +252,7 @@ export async function saveScript() {
     configPath: isSpecial ? "" : $dom("#sm-config").value.trim(), logPath: isSpecial ? "" : $dom("#sm-log").value.trim(),
     launchGame: $dom("#sm-launch").checked, gameExe: $dom("#sm-game-exe")?.value.trim() || "", gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
-    successMarkers: $dom("#sm-markers").value.trim(), notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
+    notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
   };
   try {
     if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);

@@ -150,6 +150,7 @@ internal static class ApiScriptsHandler
         script.Args = profile.Args;
         script.ConfigPath = profile.ConfigPath;
         script.LogPath = profile.LogPath;
+        script.SuccessMarkers = profile.SuccessMarkers;
         return null;
     }
 

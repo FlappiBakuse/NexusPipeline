@@ -148,11 +148,6 @@ internal static class ScriptsMenu
         {
             script.TotalTimeoutMinutes = totalMinutes;
         }
-        string? markers = Ui.PromptText("自定义完成标志（逗号分隔，留空=内置关键词）", script.SuccessMarkers);
-        if (markers is not null)
-        {
-            script.SuccessMarkers = markers;
-        }
         string? notify = Ui.PromptText("是否发送运行状态通知（1=是 0=否）", script.NotifyEnabled ? "1" : "0");
         if (notify is not null)
         {

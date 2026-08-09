@@ -4,12 +4,6 @@ namespace NexusPipeline;
 
 internal static class TextRules
 {
-    public static readonly List<string> DefaultCompletionMarkers = new()
-    {
-        "任务结束", "任务完成", "完成", "暂停运行", "全部结束", "游戏已退出", "游戏终止", "停止运行", "执行成功",
-        "done", "completed", "complete", "success", "succeeded", "finished",
-    };
-
     public static readonly string[] ExecutableExtensions = { ".exe", ".bat", ".cmd", ".com", ".ps1" };
 
     public static bool Contains(string text, string needle)

@@ -16,7 +16,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，全量 323 项断言 / --ci 核心集 300 项）
+└── uitest/             Playwright 端到端测试（黑盒，全量 341 项断言 / --ci 核心集 318 项）
 ```
 
 ## 后端分层（src/）
@@ -111,7 +111,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 类别 | 接口 | 职责 | 启用语义 |
 |---|---|---|---|
 | 通用插件 | `IPlugin`（+ 能力接口如 `INotifyChannel`） | 为程序添加能力 | 内置插件白名单 `EnabledPlugins`（默认 notify）；外部插件默认启用 |
-| 专用插件 | `ISpecializedScriptPlugin : IPlugin` | 接管专项脚本实例配置：`Resolve(rootPath)` 推导主程序/参数/配置/日志 | 外部插件默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
+| 专用插件 | `ISpecializedScriptPlugin : IPlugin` | 接管专项脚本实例配置：`Resolve(rootPath)` 推导主程序/参数/配置/日志/完成标志 | 外部插件默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
 
 ### 编写专用插件（示例：`extensions/BetterGIAdapter/`）
 
@@ -136,13 +136,14 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
             Args = "--startOneDragon",
             ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "默认配置.json"),
             LogPath = Path.Combine(rootPath, "log", "better-genshin-impact{YYYYMMDD}.log"),
+            SuccessMarkers = "一条龙和配置组任务结束",   // 完成标志由插件固化
         };
     }
 }
 ```
 
 - 专用插件工程通过 `ProjectReference` 引用 `src/NexusPipeline.csproj`（契约类为 public），构建产物 DLL 放入 `release/plugins/`（见 `build.cmd`）。
-- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
+- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath/SuccessMarkers）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
 - 元数据 + 生命周期：实现 `IPlugin`；通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
 - 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings），**不要**引用 `RuntimeContext`。
 - 内置插件 `NotifyPlugin` 在 `PluginManager.DiscoverBuiltIn` 注册；外部插件与内置插件同契约。

@@ -25,7 +25,7 @@
 
 1. 同步最新代码：`git checkout main && git pull`（提交前必做，避免分叉）；
 2. 在 `main` 上完成改动（v1.0.0 前阶段）；确需协作时开前缀分支（见第 4 节）；
-3. 本地验证：`build.cmd` → `node uitest\test.mjs`（全量 e2e，323 项断言）全绿，或先跑核心回归集 `node uitest\test.mjs --ci`（300 项断言）；
+3. 本地验证：`build.cmd` → `node uitest\test.mjs`（全量 e2e，341 项断言）全绿，或先跑核心回归集 `node uitest\test.mjs --ci`（318 项断言）；
 4. 按第 3 节规范提交（小改动一条提交，大改动分多条逻辑提交）；
 5. 推送：`git push origin main`（禁止 force push）；
 6. 如需发布：按第 5、6 节执行。

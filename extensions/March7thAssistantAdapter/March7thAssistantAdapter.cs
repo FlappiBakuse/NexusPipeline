@@ -57,6 +57,7 @@ public sealed class March7thAssistantAdapterPlugin : ISpecializedScriptPlugin
             Args = args,
             ConfigPath = Path.Combine(rootPath, "config.yaml"),
             LogPath = Path.Combine(rootPath, "logs", "{YYYY-MM-DD}.log"),
+            SuccessMarkers = "游戏终止：StarRail",
         };
     }
 

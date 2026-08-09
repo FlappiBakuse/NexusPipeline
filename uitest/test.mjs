@@ -16,8 +16,8 @@ const CI = process.argv.includes("--ci");
 const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
-const EXPECTED = 323;
-const CI_EXPECTED = 300;
+const EXPECTED = 341;
+const CI_EXPECTED = 318;
 
 let passed = 0;
 let failed = 0;
@@ -215,11 +215,12 @@ async function testResponsiveShell(page) {
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   const chooserStack = await page.evaluate(() => {
     const cards = Array.from(document.querySelectorAll(".chooser-card"));
-    if (cards.length !== 3) return false;
+    if (cards.length !== 4) return false;
     const a = cards[0].getBoundingClientRect();
     const b = cards[1].getBoundingClientRect();
     const c = cards[2].getBoundingClientRect();
-    return b.top > a.bottom && c.top > b.bottom && Math.abs(a.left - b.left) <= 1 && Math.abs(b.left - c.left) <= 1;
+    const d = cards[3].getBoundingClientRect();
+    return b.top > a.bottom && c.top > b.bottom && d.top > c.bottom && Math.abs(a.left - b.left) <= 1 && Math.abs(b.left - c.left) <= 1 && Math.abs(c.left - d.left) <= 1;
   });
   assert(chooserStack, "手机端新建选择卡片堆叠");
   await page.click('[data-action="open-script-type"][data-plugin=""]');
@@ -328,7 +329,7 @@ async function testScriptCrud(page) {
   assert(!!newBtn, "新建通用脚本实例按钮位于右上角（page-head 内）");
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
-  assert((await page.$$(".chooser-card")).length === 3, "选择卡片层含通用与专项三张卡片");
+  assert((await page.$$(".chooser-card")).length === 4, "选择卡片层含通用与专项四张卡片");
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal-mask");
 
@@ -494,7 +495,7 @@ async function testLogScroll(page) {
     "echo [CONSOLE] console: all done",
     "exit /b 0",
   ].join("\r\n"), "ascii");
-  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: runtimeDir, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10 });
+  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: runtimeDir, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "ALL-DONE-MARKER" });
   assert(created.ok, "创建日志测试脚本");
 
   await page.click('nav a[href="#/dispatch"]');
@@ -1128,6 +1129,7 @@ async function testSpecializedScript(page) {
   assert(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon");
   assert(profile.configPath.includes("默认配置.json"), "probe 推导出配置文件路径");
   assert(profile.logPath.includes("{YYYYMMDD}"), "probe 推导出日志格式路径（better-genshin-impact{YYYYMMDD}.log）");
+  assert(profile.successMarkers === "一条龙和配置组任务结束", "probe 推导完成标志（一条龙和配置组任务结束）");
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
   assert(probeBad.status === 400, "probe 对无法推导的根目录返回 400");
 
@@ -1139,6 +1141,7 @@ async function testSpecializedScript(page) {
   assert(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi");
   assert(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化");
   assert(got.configPath.includes("默认配置.json") && got.logPath.includes("{YYYYMMDD}"), "配置/日志路径由插件固化");
+  assert(got.successMarkers === "一条龙和配置组任务结束", "完成标志由插件固化");
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
   assert(cfgGot && cfgGot.PluginType === "bettergi", "scripts.json 落盘 PluginType（PascalCase）");
@@ -1229,7 +1232,7 @@ async function testLaunchTargetArgs(page) {
   const s1 = await createScript({
     name: "启动目标相对", rootPath: ltDir.replace(/\\/g, "\\\\"),
     mainExe: launcherBat.replace(/\\/g, "\\\\"), args: ".\\exec target.bat ?-x marker",
-    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern,
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern, successMarkers: "done",
   });
   assert(s1.ok, "创建启动目标脚本（Args 显式相对路径，含空格无引号 + ? 前带空格）");
   await api("POST", "/api/dispatch/script", { scriptId: s1.id, mode: "manual" });
@@ -1337,6 +1340,7 @@ async function testMarch7thPlugin(page) {
   assert(profile.args === ".\\March7th Assistant.exe", "probe 启动目标为显式相对路径（.\\ 前缀，无引号）");
   assert(profile.configPath.endsWith("config.yaml"), "probe 推导配置文件 config.yaml");
   assert(profile.logPath.includes("{YYYY-MM-DD}.log"), "probe 推导日志路径 logs/{YYYY-MM-DD}.log");
+  assert(profile.successMarkers === "游戏终止：StarRail", "probe 推导完成标志（游戏终止：StarRail）");
 
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-m7"), pluginType: "march7th" });
   assert(probeBad.status === 400, "march7th probe 对无法推导的根目录返回 400");
@@ -1364,6 +1368,7 @@ async function testMarch7thPlugin(page) {
   assert(got.mainExe.endsWith("March7th Launcher.exe"), "主程序由插件固化（Launcher）");
   assert(got.args === ".\\March7th Assistant.exe", "Args 启动目标由插件固化（.\\ 显式相对路径，无引号）");
   assert(got.configPath.endsWith("config.yaml") && got.logPath.includes("{YYYY-MM-DD}.log"), "配置/日志路径由插件固化");
+  assert(got.successMarkers === "游戏终止：StarRail", "完成标志由插件固化（游戏终止：StarRail）");
   await api("DELETE", "/api/scripts/" + sid);
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -1372,6 +1377,53 @@ async function testMarch7thPlugin(page) {
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   const chooserText = await page.textContent(".new-script-chooser");
   assert(chooserText.includes("新建March7thAssistant专项脚本实例"), "选择卡片层含「新建March7thAssistant专项脚本实例」卡片");
+  await page.click(".modal button:has-text('取消')");
+}
+
+async function testZenlessPlugin(page) {
+  console.log("[用例] 专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建卡片");
+  const zRoot = path.join(runtimeDir, "sim-zenless");
+  fs.rmSync(zRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(zRoot, ".log"), { recursive: true });
+  fs.mkdirSync(path.join(zRoot, "config"), { recursive: true });
+  fs.writeFileSync(path.join(zRoot, "OneDragon-Launcher.exe"), "");
+
+  const st = await (await fetch(baseUrl + "api/status")).json();
+  const z = (st.plugins || []).find(p => p.name === "zzzonedragon");
+  assert(z && z.kind === "specialized" && z.enabled, "ZenlessZoneZeroOneDragon 专用插件已加载且启用（kind=specialized）");
+
+  const probeOk = await api("POST", "/api/scripts/probe", { rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon" });
+  assert(probeOk.ok, "zzzonedragon probe 成功");
+  const profile = (await probeOk.json()).profile;
+  assert(profile.mainExe.endsWith("OneDragon-Launcher.exe"), "probe 主程序为 OneDragon-Launcher.exe");
+  assert(profile.args === "-o -c", "probe 推导启动参数 -o -c");
+  assert(profile.configPath.endsWith("config"), "probe 推导配置文件目录 config");
+  assert(profile.logPath.includes(".log") && profile.logPath.endsWith("log.txt"), "probe 推导日志路径 .log/log.txt（固定文件）");
+  assert(profile.successMarkers === "关闭游戏成功", "probe 推导完成标志（关闭游戏成功）");
+
+  const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-zenless"), pluginType: "zzzonedragon" });
+  assert(probeBad.status === 400, "zzzonedragon probe 对无法推导的根目录返回 400");
+
+  const created = await api("POST", "/api/scripts", {
+    name: "专项ZEN脚本", rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon",
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  assert(created.ok, "API 创建 zzzonedragon 专项脚本实例成功");
+  const sid = (await created.json()).id;
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  assert(got && got.pluginType === "zzzonedragon", "专项实例保存 pluginType=zzzonedragon");
+  assert(got.mainExe.endsWith("OneDragon-Launcher.exe") && got.args === "-o -c", "主程序/启动参数由插件固化");
+  assert(got.configPath.endsWith("config") && got.logPath.endsWith("log.txt"), "配置/日志路径由插件固化");
+  assert(got.successMarkers === "关闭游戏成功", "完成标志由插件固化（关闭游戏成功）");
+  await api("DELETE", "/api/scripts/" + sid);
+
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="new-script"]', { timeout: 5000 });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  const chooserText = await page.textContent(".new-script-chooser");
+  assert(chooserText.includes("新建ZenlessZoneZeroOneDragon专项脚本实例"), "选择卡片层含「新建ZenlessZoneZeroOneDragon专项脚本实例」卡片");
   await page.click(".modal button:has-text('取消')");
 }
 
@@ -1404,7 +1456,7 @@ async function testLogPattern(page) {
   const b = await api("POST", "/api/scripts", {
     name: "忽略旧日志脚本", rootPath: runtimeDir, mainExe: bBat.replace(/\\/g, "\\\\"),
     configPath: runtimeDir, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"),
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const bid = (await b.json()).id;
   await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
@@ -1430,7 +1482,7 @@ async function testLogPattern(page) {
   const c = await api("POST", "/api/scripts", {
     name: "通配轮换脚本", rootPath: runtimeDir, mainExe: cBat.replace(/\\/g, "\\\\"),
     configPath: runtimeDir, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"),
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const cid = (await c.json()).id;
   await api("POST", "/api/dispatch/script", { scriptId: cid, mode: "manual" });
@@ -1748,7 +1800,7 @@ async function main() {
         testDashboard, testResponsiveSmoke, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
-        testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
+        testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testZenlessPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,
         testQueueCrud, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,
