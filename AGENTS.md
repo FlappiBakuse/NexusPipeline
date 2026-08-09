@@ -6,17 +6,17 @@ NexusPipeline（枢链）：C#/.NET 8 (net8.0-windows) WinForms 托盘 + 纯静�
 
 ```powershell
 # 1. 构建（产物输出到 release/，不提交）
-build.cmd                      # 提权版（requireAdministrator，正式发布用）
-build.cmd /test                # 无提权版（CI / e2e 用，避免 UAC 弹窗挂起）
-# 源码在 src/，运行物在 release/；正式版提权后所有形态均以管理员运行，开机自启为计划任务（onlogon + highest）
+build.cmd                      # 提权版（requireAdministrator，唯一构建形态；无 /test 无提权版）
+# 源码在 src/，运行物在 release/；程序必须以管理员身份运行（非管理员启动拒绝并退出，exit 2）；
+# 开机自启为计划任务（onlogon + highest）
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 338 项用例；先跑 build.cmd /test，否则 setupRuntime 直接中止
-node uitest\test.mjs --quick   # 开发迭代快速模式：仅 15 个 UI 冒烟用例（约 184 项断言），CI 仍跑全量
+node uitest\test.mjs           # 全量 323 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs --ci      # CI 核心回归集：300 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 303（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 323 / 300（用例增减须同步更新本文件数字）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
@@ -63,7 +63,7 @@ node uitest\test.mjs --quick   # 开发迭代快速模式：仅 15 个 UI 冒烟
   2. 未设 UTF8 输出编码时 gh 的 UTF-8 中文被 GBK 误读（mojibake），且经 GB18030 往返**有损不可逆**；含中文的 gh 写操作一律走文件：`gh release edit --notes-file`（UTF-8 无 BOM），命令内不写中文字面量。
   3. **修改已发布 release（edit body / 资产）前，先 `gh api ... --jq .body` 把原正文备份到本地文件**，再动手。
 - 脚本自启动参数（Args）以显式路径开头（`X:\`、`\\`、`.\`、`..\`）时 =「运行时启动目标」（管理端/执行端分离）：整段到 `?` 为止为路径（路径段去尾随空格），相对脚本根目录标准语义解析，含空格无需引号；`?` 后为启动目标参数；**Args 一律禁止引号**（引号视为普通参数内容，不用于路径，避免歧义）；解析失败回退主程序并警告。其他路径字段（RootPath/MainExe/ConfigPath/LogPath/GameExe）保留去成对首尾引号功能。
-- 脚本启动 `Win32Exception 740`（ERROR_ELEVATION_REQUIRED）＝目标程序 manifest 要求管理员：自动改用 ShellExecute runas 提升启动（UAC 从不通知+管理员账户直接提权无弹窗；标准用户弹凭据；取消则明确中文错误）。提权路径无 stdout 重定向，运行判定依赖日志文件；`StartVisible`（编辑配置）同样支持。
+- 脚本启动 `Win32Exception 740`（ERROR_ELEVATION_REQUIRED）＝目标程序 manifest 要求管理员：**程序必须管理员运行**（`Program.Main` 启动自检 `WindowsPrincipal.IsInRole(Administrator)`，非管理员 → FATAL + 提示框 + exit 2），管理员下同权限直接 CreateProcess，740 不再发生；仍出现时给出明确中文错误并失败，**禁止 runas 降级提权**（不接管 stdout、脚本独立弹窗，违背"必须管理员"意图）；`StartVisible`（编辑配置）同样处理。
 
 ## 主要入口
 

@@ -10,37 +10,6 @@ internal static class SystemActions
         return Path.GetExtension(path).ToLowerInvariant() is ".bat" or ".cmd" or ".com";
     }
 
-    /// <summary>是否为「请求的操作需要提升」（ERROR_ELEVATION_REQUIRED，目标程序 manifest 要求管理员权限）。</summary>
-    public static bool IsElevationRequired(Exception ex)
-    {
-        return ex is System.ComponentModel.Win32Exception { NativeErrorCode: 740 };
-    }
-
-    /// <summary>
-    /// 以提升权限启动（ShellExecute Verb=runas）：目标程序 manifest 要求管理员权限时的兜底方案，
-    /// 不依赖宿主进程权限；UAC 从不通知 + 管理员账户时直接提权无弹窗，标准用户弹凭据确认。
-    /// 提权路径不可重定向输出（GUI 程序无碍，运行判定依赖日志文件）。
-    /// </summary>
-    public static Process? StartWithElevation(string exePath, string workingDir, IEnumerable<string> args)
-    {
-        var sb = new StringBuilder();
-        foreach (string arg in args)
-        {
-            sb.Append(" \"").Append(arg.Replace("\"", "\\\"")).Append('"');
-        }
-        var psi = new ProcessStartInfo(exePath)
-        {
-            WorkingDirectory = workingDir,
-            UseShellExecute = true,
-            Verb = "runas",
-        };
-        if (sb.Length > 0)
-        {
-            psi.Arguments = sb.ToString().TrimStart();
-        }
-        return Process.Start(psi);
-    }
-
     /// <summary>
     /// 解析脚本自启动参数是否为「运行时启动目标 + 参数」（管理端/执行端分离场景）。
     /// 仅当 Args 以显式路径特征开头（盘符 X:\、UNC \\、.\ 或 ..\）时按此语义处理：
@@ -168,6 +137,7 @@ internal static class SystemActions
     /// 可见窗口启动（编辑配置模式）。所有路径都通过 CreateProcess + 重定向管道启动：
     /// 无控制台父进程也能为 cmd.exe、PowerShell 等控制台程序提供有效 stdio，避免 ERROR_NO_DATA(0x800700E8)。
     /// 批处理仅作为启动器静默运行，直接启动的编辑器保留可见窗口。
+    /// NexusPipeline 已强制以管理员身份运行，目标程序要求管理员权限时（740）直接报错，不再降级提权。
     /// </summary>
     public static Process? StartVisible(string exePath, string workingDir)
     {
@@ -177,21 +147,9 @@ internal static class SystemActions
         {
             return StartWithOutputDrain(psi);
         }
-        catch (Exception ex) when (IsElevationRequired(ex))
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
         {
-            Logger.Info($"[提示] 程序需要管理员权限，以提升权限（runas）启动：{exePath}");
-            try
-            {
-                return StartWithElevation(exePath, workingDir, Array.Empty<string>());
-            }
-            catch (System.ComponentModel.Win32Exception ex2) when (ex2.NativeErrorCode == 1223)
-            {
-                throw new InvalidOperationException($"程序启动失败（{exePath}）：需要管理员权限，用户取消了提权确认", ex2);
-            }
-            catch (Exception ex2)
-            {
-                throw new InvalidOperationException($"程序启动失败（{exePath}）：需要管理员权限，提权重试失败：{ex2.Message}", ex2);
-            }
+            throw new InvalidOperationException($"程序启动失败（{exePath}）：目标程序要求管理员权限，但 NexusPipeline 已以管理员身份运行仍被拒绝，请检查目标程序的权限配置", ex);
         }
         catch (Exception ex)
         {

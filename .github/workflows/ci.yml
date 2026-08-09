@@ -32,9 +32,9 @@ jobs:
         working-directory: uitest
         run: npm ci
 
-      - name: 发布构建（build.cmd /test 无提权版，e2e 无法弹 UAC）
-        run: .\build.cmd /test
+      - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
+        run: .\build.cmd
 
-      - name: 运行 e2e 测试
+      - name: 运行 e2e 测试（核心回归集）
         shell: cmd
-        run: node uitest\test.mjs
+        run: node uitest\test.mjs --ci

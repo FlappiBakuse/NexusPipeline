@@ -1,10 +1,8 @@
 ﻿@echo off
 setlocal
 cd /d "%~dp0"
-set "ELEVATE=1"
-if /i "%~1"=="/test" set "ELEVATE=0"
 if exist "%~dp0release" rmdir /s /q "%~dp0release"
-dotnet publish "%~dp0src\NexusPipeline.csproj" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -p:Elevate=%ELEVATE% -o "%~dp0release"
+dotnet publish "%~dp0src\NexusPipeline.csproj" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o "%~dp0release"
 if errorlevel 1 goto build_failed
 if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
 xcopy /e /i /y "%~dp0wwwroot" "%~dp0release\wwwroot" >nul
@@ -20,7 +18,7 @@ copy /y "%~dp0build-tmp\plugins\March7thAssistantAdapter.dll" "%~dp0release\plug
 rmdir /s /q "%~dp0build-tmp"
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
-if "%ELEVATE%"=="1" (echo 构建类型：提权版（requireAdministrator，正式发布）) else (echo 构建类型：无提权版（/test，CI 与 e2e 用）)
+echo 构建类型：提权版（requireAdministrator，程序必须以管理员身份运行）
 echo 部署：整体拷贝 release 文件夹到目标目录即可（config/history/logs 运行时自动生成）。
 exit /b 0
 

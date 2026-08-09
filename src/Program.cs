@@ -11,6 +11,20 @@ public static class Program
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
+    private static bool IsAdministrator()
+    {
+        try
+        {
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            return new System.Security.Principal.WindowsPrincipal(identity)
+                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     [STAThread]
     public static int Main(string[] args)
     {
@@ -34,6 +48,21 @@ public static class Program
         }
         catch
         {
+        }
+
+        if (!IsAdministrator())
+        {
+            const string msg = "NexusPipeline 必须以管理员身份运行（脚本程序需要管理员权限才能被接管运行），当前实例未获得管理员权限，即将退出。请右键「以管理员身份运行」，或确认部署的是提权版（requireAdministrator）。";
+            Logger.Fatal(msg);
+            Console.Error.WriteLine($"[FATAL] {msg}");
+            try
+            {
+                System.Windows.Forms.MessageBox.Show(msg, "NexusPipeline 需要管理员权限", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+            catch
+            {
+            }
+            return 2;
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -131,8 +160,7 @@ public static class Program
         using var mutex = new Mutex(true, "NexusPipeline.SingleInstance", out bool createdNew);
         if (!createdNew)
         {
-            Logger.Info("NexusPipeline 已在运行，打开管理页面。");
-            Logger.Info("[提示] 若需以管理员身份运行，请先退出当前 NexusPipeline 实例（托盘退出或任务管理器结束进程）。");
+            Logger.Info("检测到 NexusPipeline 已在运行，本次启动退出（可在托盘图标打开管理页面）。");
             TrayApp.OpenWeb();
             return;
         }

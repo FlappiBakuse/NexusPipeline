@@ -412,22 +412,9 @@ internal class RunSession
                 process = Process.Start(psi);
                 stdoutAttached = true;
             }
-            catch (System.ComponentModel.Win32Exception ex) when (SystemActions.IsElevationRequired(ex))
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
             {
-                _statusChanged?.Invoke("目标程序需要管理员权限，正在请求提权（UAC）...");
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」目标程序需要管理员权限，改用提升权限（runas）启动：{launchExe}");
-                try
-                {
-                    process = SystemActions.StartWithElevation(launchExe, workingDir, launchArgs);
-                }
-                catch (System.ComponentModel.Win32Exception ex2) when (ex2.NativeErrorCode == 1223)
-                {
-                    return RunAttemptResult.Failed("脚本启动失败：目标程序需要管理员权限，用户取消了提权确认");
-                }
-                catch (Exception ex2)
-                {
-                    return RunAttemptResult.Failed($"脚本启动失败：目标程序需要管理员权限，提权重试失败：{ex2.Message}");
-                }
+                return RunAttemptResult.Fatal($"脚本启动失败：目标程序要求管理员权限（{launchExe}）。NexusPipeline 已以管理员身份运行仍被拒绝时，请检查目标程序的权限配置");
             }
             catch (Exception ex)
             {

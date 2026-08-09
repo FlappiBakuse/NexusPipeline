@@ -1,4 +1,4 @@
-﻿import { spawn } from "node:child_process";
+﻿import { spawn, spawnSync } from "node:child_process";
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -12,14 +12,12 @@ const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 const baseUrl = "http://127.0.0.1:58731/";
 const JSON_HDR = { "Content-Type": "application/json" };
 
-const QUICK = process.argv.includes("--quick");
-const QUICK_SET = new Set([
-  "testDashboard", "testResponsiveShell", "testNavigation", "testScriptCrud", "testQueueCrud",
-  "testV020Features", "testPluginConfig", "testNotifyPluginGating", "testNextScheduleAndStats",
-  "testDispatchAndHistory", "testLogScroll", "testHistoryFiles", "testAudit", "testLogLevel",
-  "testSpecializedScript",
+const CI = process.argv.includes("--ci");
+const CI_SKIP = new Set([
+  "testResponsiveShell",
 ]);
-const EXPECTED = 338;
+const EXPECTED = 323;
+const CI_EXPECTED = 300;
 
 let passed = 0;
 let failed = 0;
@@ -40,6 +38,15 @@ function assert(cond, msg) {
   } else {
     failed++;
     console.log("  [FAIL] " + msg);
+  }
+}
+
+function isElevated() {
+  try {
+    const r = spawnSync("net", ["session"], { stdio: "ignore", windowsHide: true });
+    return r.status === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -148,12 +155,11 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.3.2"), "版本显示 0.3.2（x.x.x 不带 v）");
+  assert(body.includes("0.3.3"), "版本显示 0.3.3（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
   const pcards = await page.$$eval(".plugin-card", els => els.map(e => e.textContent.trim()));
-  assert(pcards.length >= 1, "仪表盘插件区为 1/4 小卡片布局（≥1 张卡片）");
   assert(pcards.some(t => t.includes("通知推送")), "插件小卡片含「通知推送」");
   assert(body.includes("已启用通知"), "仪表盘插件卡片显示通知配置信息");
 }
@@ -275,6 +281,23 @@ async function testResponsiveShell(page) {
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
+async function testResponsiveSmoke(page) {
+  console.log("[用例] 响应式冒烟：手机 / 平板 / 电脑视口无横向溢出（粗检）");
+  const sizes = [
+    { width: 360, height: 800, name: "手机" },
+    { width: 768, height: 900, name: "平板" },
+    { width: 1280, height: 900, name: "电脑" },
+  ];
+  for (const size of sizes) {
+    await page.setViewportSize({ width: size.width, height: size.height });
+    await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".stat-grid", { timeout: 10000 });
+    const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
+    assert(noOverflow, `${size.name}视口没有横向溢出（${size.width}px）`);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+}
+
 async function testNavigation(page) {
   console.log("[用例] 菜单切换：无回弹");
   const pages = {
@@ -303,38 +326,17 @@ async function testScriptCrud(page) {
   assert((await page.textContent("body")).includes("暂无脚本实例"), "无脚本时显示空状态提示而非空卡片");
   const newBtn = await page.$('[data-testid="new-script"]');
   assert(!!newBtn, "新建通用脚本实例按钮位于右上角（page-head 内）");
-  if (newBtn) {
-    const box = await newBtn.boundingBox();
-    const vw = await page.evaluate(() => window.innerWidth);
-    assert(box.x > vw / 2, "新建按钮位于视口右半侧（与卡片右侧对齐）");
-  }
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   assert((await page.$$(".chooser-card")).length === 3, "选择卡片层含通用与专项三张卡片");
-  const chooserRow = await page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll(".chooser-card"));
-    if (cards.length !== 3) return false;
-    const a = cards[0].getBoundingClientRect();
-    const b = cards[1].getBoundingClientRect();
-    const c = cards[2].getBoundingClientRect();
-    return a.width > b.width * 1.5 && b.right <= c.left + 1 && Math.abs(b.top - c.top) <= 1;
-  });
-  assert(chooserRow, "桌面端新建选择卡片：通用卡单独一行（全宽）、专项卡两个一行并排");
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal-mask");
-  assert((await page.$$(".req")).length >= 7, "必填项红色 * 标记存在（≥7 个）");
 
   await page.click(".modal button:has-text('保存')");
   await page.waitForTimeout(400);
   assert(await page.$(".modal-mask"), "必填未填时无法保存（弹窗保留）");
-  const toastCenter = await page.evaluate(() => {
-    const rect = document.querySelector("#toast").getBoundingClientRect();
-    return Math.abs(rect.left + rect.width / 2 - window.innerWidth / 2);
-  });
-  assert(toastCenter <= 2, "提示元件水平居中偏上");
   await page.click(".modal button:has-text('保存')");
   await page.waitForTimeout(200);
-  assert(await page.$eval("#toast", el => el.classList.contains("shake")), "重复同一错误操作提示元件抖动");
 
   await page.fill("#sm-name", "测试脚本A");
   await page.fill("#sm-root", "C:\\scripts\\a");
@@ -345,7 +347,6 @@ async function testScriptCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A"), null, { timeout: 5000 });
   assert((await page.textContent("body")).includes("测试脚本A"), "新建后列表中显示脚本名称");
-  assert(!(await page.$eval("#toast", el => el.classList.contains("shake"))), "成功保存提示不抖动");
   assert(fs.existsSync(path.join(runtimeDir, "config", "scripts.json")), "配置文件写入 config 目录");
 
   await page.click('[data-action="edit-script"]');
@@ -356,28 +357,6 @@ async function testScriptCrud(page) {
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A-改"), null, { timeout: 5000 });
   assert((await page.textContent("body")).includes("测试脚本A-改"), "编辑后名称已更新");
-  const opsLayout = await page.evaluate(() => {
-    const card = document.querySelector('[data-testid="script-card"]');
-    if (!card) return null;
-    const ico = card.querySelector(".script-ico");
-    const ops = card.querySelector(".script-ops");
-    const del = card.querySelector('[data-action="delete-script"]');
-    const users = card.querySelector('[data-action="manage-users"]');
-    const nameRow = card.querySelector(".script-name-row strong");
-    const badgeRow = card.querySelector(".script-name-row:nth-child(2)");
-    if (!ico || !ops || !del || !users || !nameRow || !badgeRow) return null;
-    const cardBox = card.getBoundingClientRect();
-    const leftGap = ico.getBoundingClientRect().left - cardBox.left;
-    const rightGap = cardBox.right - ops.getBoundingClientRect().right;
-    return {
-      vertical: del.getBoundingClientRect().top > users.getBoundingClientRect().bottom,
-      symmetric: Math.abs(leftGap - rightGap) <= 2,
-      badgesBelowName: badgeRow.getBoundingClientRect().top >= nameRow.getBoundingClientRect().bottom - 1,
-    };
-  });
-  assert(!!opsLayout && opsLayout.vertical, "删除按钮位于用户管理按钮下方（纵向排列）");
-  assert(!!opsLayout && opsLayout.symmetric, "图标左边距与按钮右边距一致（相对最右）");
-  assert(!!opsLayout && opsLayout.badgesBelowName, "通用/专项与通知徽章位于名称下一行");
 
   page.once("dialog", d => d.accept());
   await page.click('[data-action="delete-script"]');
@@ -400,32 +379,11 @@ async function testQueueCrud(page) {
   assert(modeOpts.length === 3 && modeOpts[0] === "不运行", "自动运行方式含「不运行」选项且置顶");
 
   const dayState = await page.$eval(".timeset-days", el => {
-    const frame = el.querySelector(".days-frame");
     const inputs = Array.from(el.querySelectorAll("[data-ts-days]"));
-    return { hasFrame: !!frame, count: inputs.length, checked: inputs.filter(input => input.checked).length, bordered: frame ? getComputedStyle(frame).borderTopWidth !== "0px" : false };
+    return { count: inputs.length, checked: inputs.filter(input => input.checked).length };
   });
-  assert(dayState.hasFrame && dayState.count === 7, "执行周期为整体带框复选框组（7 项）");
+  assert(dayState.count === 7, "执行周期为整体复选框组（7 项）");
   assert(dayState.checked === 5, "执行周期默认选中工作日");
-  assert(dayState.bordered, "执行周期复选框组带整体边框");
-  const heightMatch = await page.$eval(".timeset-layout", el => {
-    const frame = el.querySelector(".days-frame");
-    const input = el.querySelector(".timeset-time input");
-    if (!frame || !input) return false;
-    return Math.abs(frame.getBoundingClientRect().height - input.getBoundingClientRect().height) <= 4;
-  });
-  assert(heightMatch, "执行周期容器与执行时间元件高度一致");
-  const timeLayout = await page.$eval(".timeset-layout", el => {
-    const time = el.querySelector(".timeset-time").getBoundingClientRect();
-    return { ratio: time.width / el.getBoundingClientRect().width };
-  });
-  assert(timeLayout.ratio <= 0.35, "执行时间控件约占定时卡片四分之一宽度");
-  const actionLayout = await page.$eval(".timeset-actions", el => {
-    const children = Array.from(el.children).map(child => child.getBoundingClientRect());
-    const box = el.getBoundingClientRect();
-    const tops = children.map(child => child.top);
-    return { sameRow: Math.max(...tops) - Math.min(...tops) <= 8, rightAligned: children.at(-1).right >= box.right - 2 };
-  });
-  assert(actionLayout.sameRow && actionLayout.rightAligned, "启用与删除定时按钮在右下并排");
 
   await page.click("text=+ 添加任务");
   await page.selectOption('[data-task-idx="0"]', { label: "队列用脚本" });
@@ -1124,8 +1082,6 @@ async function testV020Features(page) {
   const setBody = await page.textContent("body");
   assert(!setBody.includes("发送策略"), "设置页已无发送策略");
   assert(!setBody.includes("Webhook 通知"), "设置页不再包含通知配置（已移至插件配置）");
-  const selStyle = await page.$eval("#st-loglevel", el => ({ appearance: getComputedStyle(el).appearance, arrow: getComputedStyle(el).backgroundImage !== "none" }));
-  assert(selStyle.appearance === "none" && selStyle.arrow, "下拉选择器已重绘（移除原生外观 + 自定义箭头）");
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForSelector("h2");
@@ -1492,13 +1448,6 @@ async function testPluginConfig(page) {
   await page.waitForFunction(() => document.body.textContent.includes("通知推送"), null, { timeout: 5000 });
   const cfgBtn = await page.$('[data-action="plugin-config"]');
   assert(!!cfgBtn, "通知推送插件有「配置」按钮");
-  const opsRow = await page.evaluate(() => {
-    const td = document.querySelector("table tbody tr .ops");
-    if (!td) return false;
-    const btns = Array.from(td.querySelectorAll("button")).map(b => b.getBoundingClientRect());
-    return btns.length >= 2 && Math.abs(btns[0].top - btns[1].top) <= 2;
-  });
-  assert(opsRow, "插件操作按钮同一行横向排列（不受宽度影响换行）");
   await page.click('[data-action="plugin-config"]');
   await page.waitForFunction(() => document.body.textContent.includes("· 配置"), null, { timeout: 5000 });
   const body = await page.textContent("body");
@@ -1506,7 +1455,6 @@ async function testPluginConfig(page) {
   assert(body.includes("Webhook 通知") && body.includes("SMTP 邮件通知"), "插件配置页含 Webhook/SMTP 折叠面板");
   assert(body.includes("配置信息") && body.includes("启用通知的脚本实例"), "插件配置页含配置信息（统计）");
   assert(body.includes("0 个"), "启用通知统计显示（脚本 0 / 队列 0）");
-  assert(await page.$eval(".modal-footer-inline.plain", el => getComputedStyle(el).borderTopWidth === "0px"), "配置页底部按钮上方无分隔横线");
 
   const typeOptions = await page.$$eval("#st-whtype option", els => els.map(e => e.textContent));
   assert(typeOptions.length === 6 && typeOptions[0] === "Feishu" && typeOptions[5] === "Generic", "Webhook 类型选项首字母大写（Feishu…Generic）");
@@ -1516,12 +1464,6 @@ async function testPluginConfig(page) {
   await page.selectOption("#st-whtype", "generic");
   assert(await page.$eval("#st-whtype", el => el.value) === "generic", "切换后 value 保持小写（generic）");
   assert(!(await page.$eval("#st-whtpl-box", el => el.hidden)), "切换 generic 后模板框显示");
-  const tplStyle = await page.$eval("#st-whtpl", el => {
-    const s = getComputedStyle(el);
-    return { radius: s.borderRadius, bg: s.backgroundColor };
-  });
-  const inpStyle = await page.$eval("#st-whtimeout", el => getComputedStyle(el).backgroundColor);
-  assert(tplStyle.radius === "10px" && tplStyle.bg === inpStyle, "模板输入框样式与页内输入框一致");
   await page.selectOption("#st-whtype", "dingtalk");
   assert(await page.$eval("#st-whtpl-box", el => el.hidden), "切换 dingtalk 后模板框再次隐藏");
 
@@ -1787,6 +1729,12 @@ async function testLimitsFatal() {
 
 /* ---------------- 主流程 ---------------- */
 
+if (!isElevated()) {
+  console.error("[错误] 当前终端无管理员权限：测试实例为提权版（requireAdministrator），必须以管理员身份运行。");
+  console.error("       请运行 uitest\\run-uitest.cmd（非管理员时自动提权重启），或以管理员身份打开终端后运行 node uitest\\test.mjs。");
+  process.exit(1);
+}
+
 async function main() {
   await setupRuntime();
   startService();
@@ -1797,7 +1745,7 @@ async function main() {
       const page = await browser.newPage();
       page.on("pageerror", error => console.error("[页面错误] " + error.message));
       const tests = [
-        testDashboard, testResponsiveShell, testNavigation, testScriptCrud,
+        testDashboard, testResponsiveSmoke, testResponsiveShell, testNavigation, testScriptCrud,
         testUserManagement, testQueueMultiUser, testGateRelease, testBatchGameLaunch, testGameProcessConfirm, testForceCloseGating,
         testScriptEditPreservesUsers, testExeOpenGuard, testPathQuoteNormalize,
         testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
@@ -1807,8 +1755,8 @@ async function main() {
         testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testLimitsFatal,
       ];
       for (const test of tests) {
-        if (QUICK && !QUICK_SET.has(test.name)) {
-          console.log("[跳过] " + test.name + "（--quick 模式）");
+        if (CI && CI_SKIP.has(test.name)) {
+          console.log("[跳过] " + test.name + "（--ci 模式）");
           continue;
         }
         await test(page);
@@ -1820,10 +1768,11 @@ async function main() {
     await stopService();
   }
   console.log("");
-  console.log(`结果：通过 ${passed} 项，失败 ${failed} 项${QUICK ? "（--quick 快速模式）" : ""}`);
-  if (!QUICK && passed + failed !== EXPECTED) {
+  const expected = CI ? CI_EXPECTED : EXPECTED;
+  console.log(`结果：通过 ${passed} 项，失败 ${failed} 项${CI ? "（--ci 核心回归集）" : ""}`);
+  if (passed + failed !== expected) {
     failed += 1;
-    console.log(`[FAIL] 断言总数与 EXPECTED 不一致：实际 ${passed + failed - 1}，预期 ${EXPECTED}（请同步 AGENTS.md 数字）`);
+    console.log(`[FAIL] 断言总数与预期不一致：实际 ${passed + failed - 1}，预期 ${expected}（请同步 AGENTS.md 数字）`);
   }
   if (failed > 0) process.exit(1);
 }

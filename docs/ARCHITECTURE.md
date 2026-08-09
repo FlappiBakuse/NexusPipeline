@@ -16,7 +16,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，303 项断言）
+└── uitest/             Playwright 端到端测试（黑盒，全量 323 项断言 / --ci 核心集 300 项）
 ```
 
 ## 后端分层（src/）
