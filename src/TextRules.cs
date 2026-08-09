@@ -83,3 +83,58 @@ internal static class TextRules
         return string.Join("\n", lines.TakeLast(maxLines));
     }
 }
+
+/// <summary>自定义完成标志关键字规则：每行一组，组内逗号分隔为 AND（同一行内全部词出现才命中），换行之间为 OR。</summary>
+internal static class KeywordRule
+{
+    public static List<List<string>> Parse(string text)
+    {
+        var groups = new List<List<string>>();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return groups;
+        }
+        foreach (string rawLine in text.Split('\n'))
+        {
+            string line = rawLine.Trim().TrimEnd('\r');
+            if (line.Length == 0)
+            {
+                continue;
+            }
+            var words = line.Split(new[] { ',', '，' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(word => word.Length > 0)
+                .ToList();
+            if (words.Count > 0)
+            {
+                groups.Add(words);
+            }
+        }
+        return groups;
+    }
+
+    /// <summary>单行是否命中任一组：组内 AND（全部词都出现在该行），组间 OR（任一组命中即命中）。</summary>
+    public static bool LineHits(string line, List<List<string>> groups)
+    {
+        if (string.IsNullOrWhiteSpace(line) || groups.Count == 0)
+        {
+            return false;
+        }
+        foreach (List<string> words in groups)
+        {
+            bool all = true;
+            foreach (string word in words)
+            {
+                if (!line.Contains(word, StringComparison.OrdinalIgnoreCase))
+                {
+                    all = false;
+                    break;
+                }
+            }
+            if (all)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}

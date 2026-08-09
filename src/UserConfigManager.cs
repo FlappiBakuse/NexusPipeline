@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
 namespace NexusPipeline;
@@ -166,6 +167,157 @@ internal static class UserConfigManager
     public static string CacheDir(string scriptId, string userName)
     {
         return Path.Combine(UserDir(scriptId, userName), "cache");
+    }
+
+    /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
+    public static string ScriptDir(string scriptId, string? userName)
+    {
+        return string.IsNullOrWhiteSpace(userName)
+            ? Path.Combine(AppPaths.DataDir, scriptId, "script")
+            : Path.Combine(UserDir(scriptId, userName), "script");
+    }
+
+    /// <summary>配置替换备份目录（无用户交换时用于还原；有用户时由配置交换机制还原，备份作双保险）。</summary>
+    public static string ReplaceBackupDir(string scriptId, string? userName)
+    {
+        return string.IsNullOrWhiteSpace(userName)
+            ? Path.Combine(AppPaths.DataDir, scriptId, "replace-backup")
+            : Path.Combine(UserDir(scriptId, userName), "replace-backup");
+    }
+
+    /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>
+    public static void PrepareScriptDir(string scriptId, string? userName)
+    {
+        string dir = ScriptDir(scriptId, userName);
+        TryDeleteDir(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 准备判断脚本目录失败（{dir}）：{ex.Message}");
+        }
+    }
+
+    /// <summary>运行结束清理：清空判断脚本目录与配置替换备份目录。</summary>
+    public static void CleanupScriptArea(string scriptId, string? userName)
+    {
+        TryDeleteDir(ScriptDir(scriptId, userName));
+        TryDeleteDir(ReplaceBackupDir(scriptId, userName));
+    }
+
+    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath）。</summary>
+    public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
+    {
+        string scriptDir = ScriptDir(scriptId, userName);
+        string backupDir = ReplaceBackupDir(scriptId, userName);
+        foreach (string rel in replacements)
+        {
+            string? source = JudgeScriptRunner.ResolveWithin(scriptDir, rel);
+            if (source is null || !File.Exists(source))
+            {
+                Logger.Warn($"[警告] 配置替换源文件无效（{rel}），跳过");
+                continue;
+            }
+            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            if (target is null)
+            {
+                Logger.Warn($"[警告] 配置替换目标越界（{rel}），跳过");
+                continue;
+            }
+            if (File.Exists(configPath) && !string.Equals(target, Path.GetFullPath(configPath), StringComparison.OrdinalIgnoreCase))
+            {
+                Logger.Warn($"[警告] config 为单文件，拒绝替换其他目标（{rel}），跳过");
+                continue;
+            }
+            try
+            {
+                if (File.Exists(target))
+                {
+                    string backupFile = Path.Combine(backupDir, rel);
+                    if (!File.Exists(backupFile))
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(backupFile)!);
+                        File.Copy(target, backupFile, overwrite: true);
+                    }
+                    Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(backupDir, ".meta"))!);
+                    File.WriteAllText(Path.Combine(backupDir, ".meta"), JsonSerializer.Serialize(new { configPath }));
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(source, target, overwrite: true);
+                Logger.Info($"[配置替换] 脚本「{scriptId}」已替换配置：{target} ← {rel}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 配置替换失败（{rel}）：{ex.Message}");
+            }
+        }
+        return null;
+    }
+
+    /// <summary>还原配置替换：从 replace-backup 恢复全部被替换文件（按 .meta 记录的 configPath），随后清理备份目录。</summary>
+    public static void RestoreConfigReplacements(string scriptId, string? userName)
+    {
+        string backupDir = ReplaceBackupDir(scriptId, userName);
+        if (!Directory.Exists(backupDir))
+        {
+            return;
+        }
+        string metaPath = Path.Combine(backupDir, ".meta");
+        string? configPath = null;
+        if (File.Exists(metaPath))
+        {
+            try
+            {
+                configPath = JsonNode.Parse(File.ReadAllText(metaPath))?["configPath"]?.ToString();
+            }
+            catch (Exception)
+            {
+            }
+        }
+        if (string.IsNullOrWhiteSpace(configPath))
+        {
+            TryDeleteDir(backupDir);
+            return;
+        }
+        foreach (string file in Directory.GetFiles(backupDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(backupDir, file);
+            if (rel.Equals(".meta", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            if (target is null)
+            {
+                continue;
+            }
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(file, target, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 还原配置替换失败（{target}）：{ex.Message}");
+            }
+        }
+        TryDeleteDir(backupDir);
+    }
+
+    private static void TryDeleteDir(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception)
+        {
+        }
     }
 
     public static ScriptUser? FindEnabledUser(ScriptInstance script, string? userName)
@@ -367,7 +519,7 @@ internal static class UserConfigManager
         Audit.Log(Audit.System, "恢复配置交换", $"{mark.ConfigPath}（用户 {userName}）");
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）。</summary>
+    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。</summary>
     public static void RecoverInterrupted()
     {
         try
@@ -378,10 +530,38 @@ internal static class UserConfigManager
             }
             foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
             {
+                string scriptId = Path.GetFileName(scriptDir);
+                string noUserBackup = Path.Combine(scriptDir, "replace-backup");
+                if (Directory.Exists(noUserBackup) && Directory.EnumerateFileSystemEntries(noUserBackup).Any())
+                {
+                    Logger.Info($"[恢复] 检测到未还原的配置替换（无用户），还原脚本 {scriptId} 的配置。");
+                    try
+                    {
+                        RestoreConfigReplacements(scriptId, null);
+                        Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId}（无用户）");
+                    }
+                    catch (Exception ex)
+                    {
+                        Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId}：{ex.Message}");
+                    }
+                }
                 foreach (string userDir in Directory.GetDirectories(scriptDir))
                 {
-                    string scriptId = Path.GetFileName(scriptDir);
                     string userName = Path.GetFileName(userDir);
+                    string userBackup = Path.Combine(userDir, "replace-backup");
+                    if (Directory.Exists(userBackup) && Directory.EnumerateFileSystemEntries(userBackup).Any())
+                    {
+                        Logger.Info($"[恢复] 检测到未还原的配置替换，还原脚本 {scriptId} 用户 {userName} 的配置。");
+                        try
+                        {
+                            RestoreConfigReplacements(scriptId, userName);
+                            Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId} / 用户 {userName}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId} / 用户 {userName}：{ex.Message}");
+                        }
+                    }
                     ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
                     if (mark is null)
                     {

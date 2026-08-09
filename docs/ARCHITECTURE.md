@@ -95,6 +95,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/settings） |
+| `src/JudgeScriptRunner.cs` | 自定义完成标志判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+日志全文）、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
 
 ### 新增交互的落点
 
@@ -158,6 +159,8 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 | 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（路由表见 `WebServer.RouteApiAsync`） |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
 | 脚本运行流程/重试/日志监控 | `src/RunSession.cs`、`src/LogPattern.cs`（日志路径格式解析） |
+| 自定义完成标志（关键字/判断脚本） | `src/RunSession.cs`（判定模式/触发时机）、`src/JudgeScriptRunner.cs`（脚本执行器）、`src/TextRules.cs`（`KeywordRule`） |
+| 判断脚本边界与配置替换 | `src/UserConfigManager.cs`（`ScriptDir`/`ApplyConfigReplacements`/`RestoreConfigReplacements`/启动恢复）、`src/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
 | 队列调度触发 | `src/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/WebhookSender.cs`、`src/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |

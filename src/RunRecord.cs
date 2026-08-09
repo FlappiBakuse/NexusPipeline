@@ -49,6 +49,10 @@ public class RunRecord
 
     public string ResultDetail { get; set; } = "";
 
+    /// <summary>判断脚本返回的自定义通知文本（仅本次运行有效，不落盘历史）；为空则通知使用默认正文。</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string CustomNotifyText { get; set; } = "";
+
     public string LogFile { get; set; } = "";
 
     public List<RunAttempt> AttemptDetails { get; set; } = new();

@@ -309,6 +309,12 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .panel-body > .check { margin: 0; }
 .panel-body > .field-label, .panel-body > label { margin: 0; }
 .panel-body > .form-grid { margin-bottom: 0; }
+.judge-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 12px; margin-top: 14px; }
+.judge-check { margin: 0; }
+.mode-toggle { border-color: var(--border-strong); background: transparent; color: var(--muted); }
+.mode-toggle:hover { background: var(--hover-bg); }
+.mode-toggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); }
+.code-area { min-height: 170px; line-height: 1.6; }
 .modal-footer-inline { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
 .modal-footer-inline.plain { border-top: none; }
 .helper-copy { margin-top: 10px; }

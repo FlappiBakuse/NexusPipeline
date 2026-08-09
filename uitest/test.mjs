@@ -17,8 +17,8 @@ const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
-const EXPECTED = 400;
-const CI_EXPECTED = 377;
+const EXPECTED = 466;
+const CI_EXPECTED = 443;
 
 let passed = 0;
 let failed = 0;
@@ -167,7 +167,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.3.6"), "版本显示 0.3.6（x.x.x 不带 v）");
+  assert(body.includes("0.4.0"), "版本显示 0.4.0（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -730,6 +730,325 @@ async function testLogLevel(page) {
   assert(put.ok, "恢复 logLevel=info 成功");
   const del = await api("DELETE", "/api/scripts/" + sid);
   assert(del.ok, "清理日志级别测试脚本");
+}
+
+/* ---------------- 自定义完成标志（v0.4.0） ---------------- */
+
+/** 构造判断脚本目录：bat 写日志到 logs\log.txt（ASCII 关键字规避 bat 中文编码问题）。 */
+function makeJudgeDir(label, logLines, delaySecs = 2) {
+  const dir = path.join(runtimeDir, "judge-" + label);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  const lines = Array.isArray(logLines) ? logLines : [logLines];
+  const batLines = ["@echo off", "echo START >> logs\\log.txt", `ping -n ${delaySecs} 127.0.0.1 >nul`];
+  for (const line of lines) batLines.push(`echo ${line} >> logs\\log.txt`);
+  batLines.push("exit /b 0");
+  fs.writeFileSync(path.join(dir, `nexusjudge-${label}.bat`), batLines.join("\r\n") + "\r\n", "ascii");
+  return dir;
+}
+
+async function judgeCreate(name, dir, label, extra = {}) {
+  const res = await api("POST", "/api/scripts", {
+    name, rootPath: dir, mainExe: path.join(dir, `nexusjudge-${label}.bat`),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 1, logStallTimeoutMinutes: 2, totalTimeoutMinutes: 10,
+    gameExe: PING_GAME, ...extra,
+  });
+  return { ok: res.ok, id: res.ok ? (await res.json()).id : "" };
+}
+
+async function judgeRunAndHistory(id) {
+  const dispatch = await api("POST", "/api/dispatch/script", { scriptId: id, mode: "manual" });
+  const ended = await waitNoRunning(90000);
+  const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const rec = hist.filter(h => h.scriptInstanceId === id).at(-1);
+  return { dispatchOk: dispatch.ok, ended, rec };
+}
+
+async function testJudgeKeywords(page) {
+  console.log("[用例] 自定义完成标志：成功/失败关键字判定（顺序、AND/OR、失败立即终止）");
+
+  const d1 = makeJudgeDir("succ", ["TASK DONE"]);
+  const s1 = await judgeCreate("关键字成功脚本", d1, "succ", { successKeywords: "DONE", failureKeywords: "" });
+  assert(s1.ok, "创建成功关键字脚本");
+  let r = await judgeRunAndHistory(s1.id);
+  assert(r.dispatchOk && r.ended, "成功关键字脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "命中成功关键字判定成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + s1.id);
+
+  const d2 = makeJudgeDir("and", ["TASK DONE COMPLETED"]);
+  const s2 = await judgeCreate("关键字AND脚本", d2, "and", { successKeywords: "DONE, COMPLETED", failureKeywords: "" });
+  assert(s2.ok, "创建 AND 关键字脚本（同行双词）");
+  r = await judgeRunAndHistory(s2.id);
+  assert(r.dispatchOk && r.ended, "AND 关键字脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "AND 组同行全部出现命中成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + s2.id);
+
+  const d3 = makeJudgeDir("and2", ["TASK DONE", "TASK COMPLETED"]);
+  const s3 = await judgeCreate("关键字AND跨行脚本", d3, "and2", { successKeywords: "DONE, COMPLETED", failureKeywords: "" });
+  assert(s3.ok, "创建 AND 跨行关键字脚本");
+  r = await judgeRunAndHistory(s3.id);
+  assert(r.dispatchOk && r.ended, "AND 跨行关键字脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "AND 词跨行不命中，进程退出判定失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + s3.id);
+
+  const d4 = makeJudgeDir("fail", ["TASK FAIL"]);
+  const s4 = await judgeCreate("失败关键字脚本", d4, "fail", { successKeywords: "", failureKeywords: "FAIL", maxAttempts: 2 });
+  assert(s4.ok, "创建失败关键字脚本");
+  r = await judgeRunAndHistory(s4.id);
+  assert(r.dispatchOk && r.ended, "失败关键字脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "命中失败关键字判定失败（FinalStatus=failed）");
+  assert(r.rec && (r.rec.attemptDetails || []).some(a => a.status === "failed" && /失败关键字/.test(a.reason)), "尝试详情含失败关键字判定原因");
+  await api("DELETE", "/api/scripts/" + s4.id);
+
+  const d5 = makeJudgeDir("succfirst", ["TASK DONE", "TASK FAIL"]);
+  const s5 = await judgeCreate("成功先于失败脚本", d5, "succfirst", { successKeywords: "DONE", failureKeywords: "FAIL" });
+  assert(s5.ok, "创建成功先于失败脚本");
+  r = await judgeRunAndHistory(s5.id);
+  assert(r.dispatchOk && r.ended, "成功先于失败脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "成功关键字先于失败关键字出现判定成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + s5.id);
+
+  const d6 = makeJudgeDir("failfirst", ["TASK FAIL", "TASK DONE"]);
+  const s6 = await judgeCreate("失败先于成功脚本", d6, "failfirst", { successKeywords: "DONE", failureKeywords: "FAIL" });
+  assert(s6.ok, "创建失败先于成功脚本");
+  r = await judgeRunAndHistory(s6.id);
+  assert(r.dispatchOk && r.ended, "失败先于成功脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "失败关键字先出现判定失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + s6.id);
+}
+
+async function testJudgeScript(page) {
+  console.log("[用例] 自定义完成标志：判断脚本（JS 内置引擎 / Python 系统 / 文件读取 / 无返回）");
+
+  const d1 = makeJudgeDir("jssucc", ["ANY OUTPUT"]);
+  const jsOk = 'console.log(JSON.stringify({ status: "success", reason: "judge-ok", notifyText: "自定义通知" }));';
+  const s1 = await judgeCreate("JS成功脚本", d1, "jssucc", { judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsOk });
+  assert(s1.ok, "创建 JS 判断脚本（返回 success）");
+  let r = await judgeRunAndHistory(s1.id);
+  assert(r.dispatchOk && r.ended, "JS 成功脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "JS 判定成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + s1.id);
+
+  const d2 = makeJudgeDir("jsfail", ["ANY OUTPUT"]);
+  const jsFail = 'console.log(JSON.stringify({ status: "failed", reason: "judge-fail" }));';
+  const s2 = await judgeCreate("JS失败脚本", d2, "jsfail", { judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsFail });
+  assert(s2.ok, "创建 JS 判断脚本（返回 failed）");
+  r = await judgeRunAndHistory(s2.id);
+  assert(r.dispatchOk && r.ended, "JS 失败脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "JS 判定失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + s2.id);
+
+  const d3 = makeJudgeDir("jsnone", ["ANY OUTPUT"]);
+  const s3 = await judgeCreate("JS无返回脚本", d3, "jsnone", { judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: 'console.log("hello judge");' });
+  assert(s3.ok, "创建 JS 判断脚本（无返回）");
+  r = await judgeRunAndHistory(s3.id);
+  assert(r.dispatchOk && r.ended, "JS 无返回脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "JS 未返回判定结果，进程退出判定失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + s3.id);
+
+  const d4 = makeJudgeDir("jsfile", ["ANY OUTPUT"]);
+  fs.writeFileSync(path.join(d4, "data.txt"), "MARK-42", "utf8");
+  fs.mkdirSync(path.join(d4, "cfg", "nested"), { recursive: true });
+  fs.writeFileSync(path.join(d4, "cfg", "nested", "conf.ini"), "KEY=YES", "utf8");
+  const jsFile = `
+const input = JSON.parse(__NEXUS_INPUT__);
+const files = nexus.listFiles();
+const data = nexus.readFile(files.find(f => f.endsWith("data.txt")));
+const conf = nexus.readFile(files.find(f => f.endsWith("conf.ini")));
+const wrote = nexus.writeFile("written.txt", "HELLO-SCRIPT");
+const readBack = nexus.readFile(input.scriptDir + "/written.txt");
+if (wrote && readBack && readBack.includes("HELLO-SCRIPT") && data && data.includes("MARK-42") && conf && conf.includes("KEY=YES")) {
+  console.log(JSON.stringify({ status: "success", reason: "files-read" }));
+} else {
+  console.log(JSON.stringify({ status: "failed", reason: "files-missing" }));
+}`;
+  const s4 = await judgeCreate("JS读文件脚本", d4, "jsfile", { judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsFile });
+  assert(s4.ok, "创建 JS 读文件脚本（config 递归 + script 目录读写）");
+  r = await judgeRunAndHistory(s4.id);
+  assert(r.dispatchOk && r.ended, "JS 读文件脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "JS 读取 config 文件并写入/读取 script 目录成功（FinalStatus=success）");
+  assert(!fs.existsSync(path.join(runtimeDir, "data", s4.id, "script")), "运行结束后 script 目录已清空");
+  await api("DELETE", "/api/scripts/" + s4.id);
+
+  const pyOk = spawnSync("python", ["--version"], { stdio: "ignore", windowsHide: true }).status === 0;
+  if (!pyOk) {
+    for (let i = 0; i < 6; i++) assert(true, "python 不可用（跳过 Python 判定脚本断言 " + (i + 1) + "/6）");
+  } else {
+    const d5 = makeJudgeDir("pysucc", ["ANY OUTPUT"]);
+    const pyCode = 'import json, sys\ninput_data = json.load(open(sys.argv[1], encoding="utf-8"))\nprint(json.dumps({"status": "success", "reason": "py-ok"}))';
+    const s5 = await judgeCreate("Python成功脚本", d5, "pysucc", { judgeScriptEnabled: true, judgeScriptLanguage: "python", judgeScript: pyCode });
+    assert(s5.ok, "创建 Python 判断脚本（返回 success）");
+    r = await judgeRunAndHistory(s5.id);
+    assert(r.dispatchOk && r.ended, "Python 成功脚本运行结束");
+    assert(r.rec && r.rec.finalStatus === "success", "Python 判定成功（FinalStatus=success）");
+    await api("DELETE", "/api/scripts/" + s5.id);
+
+    const d6 = makeJudgeDir("pyfail", ["ANY OUTPUT"]);
+    const pyFail = 'import json, sys\ninput_data = json.load(open(sys.argv[1], encoding="utf-8"))\nprint(json.dumps({"status": "failed", "reason": "py-fail"}))';
+    const s6 = await judgeCreate("Python失败脚本", d6, "pyfail", { judgeScriptEnabled: true, judgeScriptLanguage: "python", judgeScript: pyFail });
+    assert(s6.ok, "创建 Python 判断脚本（返回 failed）");
+    r = await judgeRunAndHistory(s6.id);
+    assert(r.dispatchOk && r.ended, "Python 失败脚本运行结束");
+    assert(r.rec && r.rec.finalStatus === "failed", "Python 判定失败（FinalStatus=failed）");
+    await api("DELETE", "/api/scripts/" + s6.id);
+  }
+}
+
+async function testJudgeReplace(page) {
+  console.log("[用例] 自定义完成标志：插队替换配置后重试（script 目录中转 + config 还原）");
+  const dir = path.join(runtimeDir, "judge-replace");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "mode.txt"), "FAIL", "utf8");
+  fs.writeFileSync(path.join(dir, "nexusjudge-replace.bat"), [
+    "@echo off",
+    "set /p MODE=<mode.txt",
+    'if "%MODE%"=="DONE" (echo TASK DONE >> logs\\log.txt) else (echo TASK FAIL >> logs\\log.txt)',
+    "exit /b 0",
+  ].join("\r\n") + "\r\n", "ascii");
+  const jsReplace = `
+const input = JSON.parse(__NEXUS_INPUT__);
+if (input.log.includes("TASK DONE")) {
+  console.log(JSON.stringify({ status: "success", reason: "done" }));
+} else {
+  nexus.writeFile("mode.txt", "DONE");
+  console.log(JSON.stringify({ status: "failed", reason: "task-failed", replaceConfigs: ["mode.txt"] }));
+}`;
+  const created = await api("POST", "/api/scripts", {
+    name: "插队替换脚本", rootPath: dir, mainExe: path.join(dir, "nexusjudge-replace.bat"),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 2, logStallTimeoutMinutes: 2, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsReplace,
+  });
+  assert(created.ok, "创建插队替换脚本（首次失败+replaceConfigs，重试后成功）");
+  const id = (await created.json()).id;
+  const r = await judgeRunAndHistory(id);
+  assert(r.dispatchOk && r.ended, "插队替换脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "partial", "替换配置后重试成功（重试>1，FinalStatus=partial）");
+  assert(r.rec && r.rec.attempts === 2, "替换后发生重试（attempts=2）");
+  const modeAfter = fs.readFileSync(path.join(dir, "mode.txt"), "utf8").trim();
+  assert(modeAfter === "FAIL", "运行结束后 config 已还原至启动前状态（mode.txt=FAIL，实际 " + modeAfter + "）");
+  await api("DELETE", "/api/scripts/" + id);
+}
+
+async function testJudgeFinalTrigger(page) {
+  console.log("[用例] 自定义完成标志：进程退出时最终触发一次判断脚本");
+  const d1 = makeJudgeDir("fin", ["ANY OUTPUT"]);
+  const jsFin = `
+const input = JSON.parse(__NEXUS_INPUT__);
+const counter = input.scriptDir + "/counter.txt";
+const n = Number(nexus.readFile(counter) || "0") + 1;
+nexus.writeFile("counter.txt", String(n));
+if (n >= 2) {
+  console.log(JSON.stringify({ status: "success", reason: "final-ok" }));
+}`;
+  const s1 = await judgeCreate("最终触发脚本", d1, "fin", { judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsFin });
+  assert(s1.ok, "创建最终触发脚本（首次批次触发无返回，进程退出最终触发判定成功）");
+  const r = await judgeRunAndHistory(s1.id);
+  assert(r.dispatchOk && r.ended, "最终触发脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "success", "进程退出时最终触发判定成功（FinalStatus=success）");
+  await api("DELETE", "/api/scripts/" + s1.id);
+}
+
+async function testJudgePeriodic(page) {
+  console.log("[用例] 自定义完成标志：日志阻塞时周期触发判断脚本（30 秒）");
+  const dir = path.join(runtimeDir, "judge-periodic");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "nexusjudge-periodic.bat"), [
+    "@echo off",
+    "echo ONLY-ONCE >> logs\\log.txt",
+    "ping -n 65 127.0.0.1 >nul",
+    "exit /b 0",
+  ].join("\r\n") + "\r\n", "ascii");
+  const jsPeriodic = `
+const n = Number(nexus.readFile("counter.txt") || "0") + 1;
+nexus.writeFile("counter.txt", String(n));
+if (n >= 2) {
+  console.log(JSON.stringify({ status: "failed", reason: "blocked" }));
+}`;
+  const created = await api("POST", "/api/scripts", {
+    name: "周期触发脚本", rootPath: dir, mainExe: path.join(dir, "nexusjudge-periodic.bat"),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsPeriodic,
+  });
+  assert(created.ok, "创建周期触发脚本（日志阻塞 65 秒，周期触发判定失败）");
+  const id = (await created.json()).id;
+  const r = await judgeRunAndHistory(id);
+  assert(r.dispatchOk && r.ended, "周期触发脚本运行结束");
+  assert(r.rec && r.rec.finalStatus === "failed", "阻塞期间周期触发判定失败（FinalStatus=failed）");
+  await api("DELETE", "/api/scripts/" + id);
+}
+
+async function testJudgeFrontend(page) {
+  console.log("[用例] 自定义完成标志前端：关键字区/脚本区切换、上传识别语言、专用脚本不显示");
+  await page.click('nav a[href="#/scripts"]');
+  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
+  await page.waitForSelector("#sm-mode-btn", { timeout: 5000 });
+
+  assert(await page.$("#sm-succ-kw"), "成功关键字填写框显示");
+  assert(await page.$("#sm-fail-kw"), "失败关键字填写框显示");
+  assert(!(await page.$("#sm-script-box:not([hidden])")), "默认关闭时脚本区隐藏");
+  assert(await page.$("#sm-kw-box:not([hidden])"), "默认关键字区可见");
+  assert((await page.$eval("#sm-mode-btn", el => el.getAttribute("aria-pressed"))) === "false", "默认按钮未激活");
+
+  await page.click('[data-action="toggle-judge-mode"]');
+  assert((await page.$eval("#sm-mode-btn", el => el.getAttribute("aria-pressed"))) === "true", "点击按钮后激活");
+  assert(await page.$("#sm-kw-box[hidden]"), "开启后关键字区隐藏");
+  assert(await page.$("#sm-script-box:not([hidden])"), "开启后脚本区显示");
+  assert(await page.$("#sm-upload-btn:not([hidden])"), "上传脚本按钮显示");
+  const langVal = await page.$eval("#sm-judge-lang", el => el.value);
+  assert(langVal === "javascript", "语言默认 JavaScript");
+
+  await page.click('[data-action="toggle-judge-mode"]');
+  assert((await page.$eval("#sm-mode-btn", el => el.getAttribute("aria-pressed"))) === "false", "再次点击按钮还原为未激活");
+  assert(await page.$("#sm-kw-box:not([hidden])"), "还原后关键字区重新显示");
+  assert(await page.$("#sm-upload-btn[hidden]"), "还原后上传按钮隐藏");
+  await page.click('[data-action="toggle-judge-mode"]');
+
+  const pyFile = path.join(runtimeDir, "judge-upload.py");
+  fs.writeFileSync(pyFile, "import json, sys\nprint('x')\n", "utf8");
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.click('[data-action="upload-judge-script"]'),
+  ]);
+  await chooser.setFiles(pyFile);
+  await page.waitForFunction(() => (document.querySelector("#sm-judge-code")?.value || "").includes("import json"), null, { timeout: 5000 });
+  const codeVal = await page.$eval("#sm-judge-code", el => el.value);
+  const langVal2 = await page.$eval("#sm-judge-lang", el => el.value);
+  assert(codeVal.includes("import json"), "上传后代码填入代码框");
+  assert(langVal2 === "python", "上传 .py 自动识别为 Python");
+
+  const jsFile = path.join(runtimeDir, "judge-upload.js");
+  fs.writeFileSync(jsFile, "console.log('x');\n", "utf8");
+  const [chooser2] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.click('[data-action="upload-judge-script"]'),
+  ]);
+  await chooser2.setFiles(jsFile);
+  await page.waitForFunction(() => document.querySelector("#sm-judge-lang")?.value === "javascript", null, { timeout: 5000 });
+  const langVal3 = await page.$eval("#sm-judge-lang", el => el.value);
+  assert(langVal3 === "javascript", "上传 .js 自动识别为 JavaScript");
+  await page.click('[data-action="close-modal"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+
+  const bgiRoot = path.join(runtimeDir, "sim-bettergi-ui");
+  fs.rmSync(bgiRoot, { recursive: true, force: true });
+  fs.mkdirSync(bgiRoot, { recursive: true });
+  fs.writeFileSync(path.join(bgiRoot, "BetterGI.exe"), "");
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin="bettergi"]');
+  await page.waitForSelector("#sm-root", { timeout: 5000 });
+  assert(!(await page.$("#sm-mode-btn")), "专用脚本弹窗不显示自定义完成标志区");
+  await page.click('[data-action="close-modal"]');
+  await page.evaluate(() => { location.hash = "#/dashboard"; });
+  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("仪表盘"), null, { timeout: 5000 });
 }
 
 async function testUserManagement(page) {
@@ -2126,6 +2445,7 @@ async function main() {
         testLogPattern,
         testQueueCrud, testTimeSetMergeAndGap, testDispatchAndHistory, testLogScroll, testHistoryFiles,
         testAudit, testLogLevel,
+        testJudgeKeywords, testJudgeScript, testJudgeReplace, testJudgeFinalTrigger, testJudgePeriodic, testJudgeFrontend,
         testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testLimitsFatal,
       ];
       for (const test of tests) {

@@ -49,6 +49,10 @@ internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 
     private static string BuildScriptText(ScriptInstance script, RunRecord record)
     {
+        if (!string.IsNullOrWhiteSpace(record.CustomNotifyText))
+        {
+            return record.CustomNotifyText;
+        }
         string mode = record.Mode == "auto" ? "自动运行" : "手动运行";
         string status = record.Status switch
         {

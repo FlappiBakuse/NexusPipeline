@@ -201,6 +201,11 @@ internal static class ApiScriptsHandler
         script.ConfigPath = profile.ConfigPath;
         script.LogPath = profile.LogPath;
         script.SuccessMarkers = profile.SuccessMarkers;
+        script.SuccessKeywords = "";
+        script.FailureKeywords = "";
+        script.JudgeScriptEnabled = false;
+        script.JudgeScriptLanguage = "";
+        script.JudgeScript = "";
         return null;
     }
 

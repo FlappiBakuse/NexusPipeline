@@ -11,6 +11,9 @@ internal class RunAttemptResult
 
     public bool IsFatal { get; set; }
 
+    /// <summary>判断脚本返回的自定义通知文本（可选）。</summary>
+    public string NotifyText { get; set; } = "";
+
     public static RunAttemptResult Success(string reason)
     {
         return new RunAttemptResult { Status = "success", Reason = reason };
@@ -59,6 +62,8 @@ internal class RunSession
     private readonly StringBuilder _scriptFullLog = new();
 
     private bool _scriptLogTruncated;
+
+    private ScriptUser? _activeUser;
 
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
@@ -128,6 +133,12 @@ internal class RunSession
         {
             record.UserName = user.Name;
         }
+        _activeUser = user;
+
+        if (_script.HasJudgeScript())
+        {
+            UserConfigManager.PrepareScriptDir(_script.Id, user?.Name);
+        }
 
         bool configPrepared = false;
         if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
@@ -191,6 +202,7 @@ internal class RunSession
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
                 record.Attempts = attemptNo;
+                record.CustomNotifyText = result.NotifyText;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 结束：{result.Status}（{result.Reason}） =====");
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
 
@@ -243,6 +255,11 @@ internal class RunSession
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置还原失败：{restoreError}");
                 }
+            }
+            if (_script.HasJudgeScript())
+            {
+                UserConfigManager.RestoreConfigReplacements(_script.Id, user?.Name);
+                UserConfigManager.CleanupScriptArea(_script.Id, user?.Name);
             }
         }
     }
@@ -457,17 +474,69 @@ internal class RunSession
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
         LogMonitor? monitor = resolvedBeforeStart is null ? null : new LogMonitor(resolvedBeforeStart, readFromStart: false);
         List<string> markers = _script.MarkerList();
+        List<List<string>> successGroups = KeywordRule.Parse(_script.SuccessKeywords);
+        List<List<string>> failureGroups = KeywordRule.Parse(_script.FailureKeywords);
+        bool scriptMode = _script.HasJudgeScript();
+        bool keywordMode = !scriptMode && (successGroups.Count > 0 || failureGroups.Count > 0);
+        bool judgeConfigured = scriptMode || keywordMode || markers.Count > 0;
         var logTail = new List<string>();
         DateTime attemptStart = DateTime.Now;
         DateTime? firstEntryAt = null;
         DateTime? markerSeenAt = null;
+        DateTime? failureSeenAt = null;
+        string? judgeReason = null;
+        string? judgeNotifyText = null;
+        DateTime lastJudgeAt = attemptStart;
         RunAttemptResult? result = null;
+
+        // 触发一次判断脚本并按结果设置判定/应用配置替换；返回 true 表示已设置成功或失败判定。
+        async Task<bool> TriggerJudgeAsync()
+        {
+            lastJudgeAt = DateTime.Now;
+            (string status, string reason, string notifyText, List<string> replaceConfigs, string? error) = await RunJudgeOnceAsync().ConfigureAwait(false);
+            if (error is not null)
+            {
+                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」判断脚本执行错误（视为继续运行）：{error}");
+                return false;
+            }
+            if (status == "success" && markerSeenAt is null)
+            {
+                markerSeenAt = DateTime.Now;
+                judgeReason = "判断脚本判定成功：" + reason;
+                judgeNotifyText = notifyText;
+                _statusChanged?.Invoke("判断脚本判定成功，等待脚本退出...");
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本判定成功：{reason}");
+                return true;
+            }
+            if (status == "failed" && failureSeenAt is null)
+            {
+                failureSeenAt = DateTime.Now;
+                judgeReason = "判断脚本判定失败：" + reason;
+                judgeNotifyText = notifyText;
+                if (replaceConfigs.Count > 0)
+                {
+                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本请求替换配置（{replaceConfigs.Count} 个文件），应用后重试。");
+                    UserConfigManager.ApplyConfigReplacements(_script.Id, _activeUser?.Name, _script.ConfigPath, replaceConfigs);
+                }
+                _statusChanged?.Invoke("判断脚本判定失败");
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本判定失败：{reason}");
+                return true;
+            }
+            return false;
+        }
 
         try
         {
             while (result is null)
             {
                 _token.ThrowIfCancellationRequested();
+
+                if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
+                {
+                    KillStartedScript();
+                    result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
+                    break;
+                }
 
                 if (_script.TotalTimeoutMinutes > 0
                     && (DateTime.Now - attemptStart).TotalMinutes >= _script.TotalTimeoutMinutes)
@@ -524,13 +593,39 @@ internal class RunSession
                         }
                         _logLine?.Invoke(line);
                         AppendScriptLog(line);
-                        if (markerSeenAt is null && TextRules.LineHasCompletionMarker(line, markers))
+                        if (keywordMode)
+                        {
+                            if (markerSeenAt is null && KeywordRule.LineHits(line, successGroups))
+                            {
+                                markerSeenAt = DateTime.Now;
+                                _statusChanged?.Invoke("已检测到成功关键字，等待脚本退出...");
+                                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现成功关键字。");
+                            }
+                            if (failureSeenAt is null && KeywordRule.LineHits(line, failureGroups))
+                            {
+                                failureSeenAt = DateTime.Now;
+                                _statusChanged?.Invoke("已检测到失败关键字，任务判定失败");
+                                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现失败关键字，任务判定失败。");
+                            }
+                        }
+                        else if (markers.Count > 0 && markerSeenAt is null && TextRules.LineHasCompletionMarker(line, markers))
                         {
                             markerSeenAt = DateTime.Now;
                             _statusChanged?.Invoke("已检测到完成标志，等待脚本退出...");
                             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现完成标志。");
                         }
                     }
+                }
+
+                if (scriptMode && newContent.Length > 0 && result is null)
+                {
+                    await TriggerJudgeAsync().ConfigureAwait(false);
+                }
+                else if (scriptMode && newContent.Length == 0 && result is null
+                    && firstEntryAt is not null && (DateTime.Now - lastJudgeAt).TotalSeconds >= 30)
+                {
+                    _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
+                    await TriggerJudgeAsync().ConfigureAwait(false);
                 }
 
                 bool scriptExited = process is null
@@ -544,19 +639,43 @@ internal class RunSession
                     }
                     else if (monitor is null)
                     {
-                        result = RunAttemptResult.Success("进程自行退出（未配置日志监控，按退出判定成功）");
+                        result = scriptMode
+                            ? RunAttemptResult.Failed("未配置日志路径，判断脚本无法触发，进程已退出")
+                            : RunAttemptResult.Success("进程自行退出（未配置日志监控，按退出判定成功）");
+                    }
+                    else if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
+                    {
+                        result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
                     }
                     else if (markerSeenAt is not null)
                     {
-                        result = RunAttemptResult.Success("日志出现完成标志，脚本正常运行结束");
+                        result = RunAttemptResult.Success(judgeReason ?? "日志出现完成标志，脚本正常运行结束");
+                        result.NotifyText = judgeNotifyText ?? "";
                     }
-                    else if (markers.Count == 0)
+                    else if (judgeConfigured)
                     {
-                        result = RunAttemptResult.Success("进程自行退出（未配置完成标志，按退出判定成功）");
+                        if (scriptMode)
+                        {
+                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
+                            await TriggerJudgeAsync().ConfigureAwait(false);
+                            if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
+                            {
+                                result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
+                                result.NotifyText = judgeNotifyText ?? "";
+                                break;
+                            }
+                            if (markerSeenAt is not null)
+                            {
+                                result = RunAttemptResult.Success(judgeReason ?? "判断脚本判定成功");
+                                result.NotifyText = judgeNotifyText ?? "";
+                                break;
+                            }
+                        }
+                        result = RunAttemptResult.Failed("进程退出但未检测到完成标志");
                     }
                     else
                     {
-                        result = RunAttemptResult.Failed("进程退出但未检测到完成标志");
+                        result = RunAttemptResult.Success("进程自行退出（未配置完成标志，按退出判定成功）");
                     }
                     break;
                 }
@@ -596,7 +715,8 @@ internal class RunSession
                     && (DateTime.Now - markerSeenAt.Value).TotalSeconds >= ExitGraceSecondsAfterMarker)
                 {
                     KillStartedScript();
-                    result = RunAttemptResult.Success("完成标志已出现，等待退出超时后已终止脚本，判定成功");
+                    result = RunAttemptResult.Success(judgeReason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功");
+                    result.NotifyText = judgeNotifyText ?? "";
                     break;
                 }
 
@@ -663,9 +783,22 @@ internal class RunSession
         }
     }
 
+    /// <summary>执行一次判断脚本：收集 config/script 文件清单 + 构建输入 JSON + 执行；返回 (status, reason, notifyText, replaceConfigs, error)。</summary>
+    private async Task<(string Status, string Reason, string NotifyText, List<string> ReplaceConfigs, string? Error)> RunJudgeOnceAsync()
+    {
+        string scriptDir = UserConfigManager.ScriptDir(_script.Id, _activeUser?.Name);
+        List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir);
+        string inputJson = JudgeScriptRunner.BuildInput(_script, _activeUser, files, scriptDir, _scriptFullLog.ToString());
+        JudgeScriptResult judge = await JudgeScriptRunner.ExecuteAsync(_script, inputJson, files, _script.ConfigPath, scriptDir, _token).ConfigureAwait(false);
+        if (judge.JudgeError is not null)
+        {
+            return ("", "", "", new List<string>(), judge.JudgeError);
+        }
+        return (judge.Status, judge.Reason, judge.NotifyText, judge.ReplaceConfigs, null);
+    }
+
     /// <summary>创建日志监控：文件在尝试启动后产生（新文件/轮换）→ 从头读；启动前已存在 → 从末尾读（忽略已有日志）。</summary>
-    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)    {
-        bool fresh;
+    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)    {        bool fresh;
         try
         {
             fresh = File.GetLastWriteTime(resolved) >= attemptStart.AddSeconds(-5);

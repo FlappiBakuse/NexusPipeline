@@ -117,6 +117,8 @@ export async function openScriptModal(id = "", plugin = "") {
     gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
     totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
+    successKeywords: value.successKeywords || "", failureKeywords: value.failureKeywords || "",
+    judgeScriptEnabled: !!value.judgeScriptEnabled, judgeScriptLanguage: value.judgeScriptLanguage || "", judgeScript: value.judgeScript || "",
     notifyEnabled: !!value.notifyEnabled,
   };
   const d = scriptDraft;
@@ -177,10 +179,29 @@ export async function openScriptModal(id = "", plugin = "") {
         ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
         ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
+      <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
+        <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
+          <label class="field-label" for="sm-succ-kw">成功关键字</label>
+          <textarea id="sm-succ-kw" placeholder="每行一组：组内逗号分隔为 AND（同一行内全部出现才命中），换行之间为 OR；留空表示不判定成功">${esc(d.successKeywords)}</textarea>
+          <label class="field-label" for="sm-fail-kw">失败关键字</label>
+          <textarea id="sm-fail-kw" placeholder="命中即判定失败并终止本次尝试，按最大尝试次数重试；语法同成功关键字">${esc(d.failureKeywords)}</textarea>
+        </div>
+        <div id="sm-script-box" ${d.judgeScriptEnabled ? "" : "hidden"}>
+          <label class="field-label" for="sm-judge-lang">判断脚本语言</label>
+          <select id="sm-judge-lang"><option value="javascript" ${d.judgeScriptLanguage === "python" ? "" : "selected"}>JavaScript（内置引擎）</option><option value="python" ${d.judgeScriptLanguage === "python" ? "selected" : ""}>Python（系统解释器）</option></select>
+          <label class="field-label" for="sm-judge-code">判断脚本代码</label>
+          <textarea id="sm-judge-code" class="mono code-area" placeholder="脚本输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}，status 与 reason 必填，无输出视为继续运行。&#10;JavaScript：JSON.parse(__NEXUS_INPUT__) 读取输入；nexus.readFile(路径) 只读 config 与 script 目录；nexus.writeFile(相对路径, 内容) 写 script 目录；nexus.listFiles() 列出全部文件。&#10;Python：sys.argv[1] 为输入 JSON 路径，可直接 open() 读取文件清单内文件，脚本目录可读写。">${esc(d.judgeScript)}</textarea>
+        </div>
+        <div class="judge-actions">
+          <button class="ghost sm" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
+          <button class="sm mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本（脚本优先）</button>
+        </div>
+      </div>
     </div>`;
   const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
   showModal(modalShell(title, body, footer));
   syncScriptGhostState();
+  syncJudgeBox();
   const rootInput = $dom("#sm-root");
   rootInput?.addEventListener("input", syncScriptGhostState);
   rootInput?.addEventListener("change", event => {
@@ -188,6 +209,7 @@ export async function openScriptModal(id = "", plugin = "") {
     if (isSpecial && event.target.value.trim()) probeSpecialRoot(event.target.value.trim(), pluginType);
   });
   rootInput?.addEventListener("keyup", syncScriptGhostState);
+  $dom("#sm-judge-enabled")?.addEventListener("change", syncJudgeBox);
 }
 
 async function probeSpecialRoot(rootPath, pluginType) {
@@ -205,6 +227,51 @@ export function syncScriptGhostState() {
     const element = $dom("#" + id);
     if (element) element.disabled = !hasRoot;
   });
+}
+
+/** 自定义完成标志开关（按钮切换模式）：开启显示脚本区（隐藏关键字区），关闭反之。 */
+export function syncJudgeBox() {
+  const enabled = $dom("#sm-mode-btn")?.getAttribute("aria-pressed") === "true";
+  const kw = $dom("#sm-kw-box");
+  const script = $dom("#sm-script-box");
+  const upload = $dom("#sm-upload-btn");
+  if (kw) kw.hidden = enabled;
+  if (script) script.hidden = !enabled;
+  if (upload) upload.hidden = !enabled;
+}
+
+/** 切换「使用判断脚本」按钮状态。 */
+export function toggleJudgeMode() {
+  const btn = $dom("#sm-mode-btn");
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+  syncJudgeBox();
+}
+
+/** 上传判断脚本文件：读取内容填入代码框，按扩展名自动识别语言（.py=Python，其余=JavaScript）。 */
+export function uploadJudgeScript() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".js,.py";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      toast("脚本文件过大（上限 256KB）", "error");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const lang = file.name.toLowerCase().endsWith(".py") ? "python" : "javascript";
+      const code = $dom("#sm-judge-code");
+      const language = $dom("#sm-judge-lang");
+      if (code) code.value = String(reader.result || "");
+      if (language) language.value = lang;
+      toast(`已载入脚本（${lang === "python" ? "Python" : "JavaScript"}）`);
+    };
+    reader.readAsText(file, "utf-8");
+  });
+  input.click();
 }
 
 /** 去除成对首尾引号（"…" / '…'），与后端 StripPathQuotes 语义一致；内部引号保留。</summary> */
@@ -269,6 +336,13 @@ export async function saveScript() {
     toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
     return;
   }
+  const judgeEnabled = ($dom("#sm-mode-btn")?.getAttribute("aria-pressed") ?? "false") === "true";
+  const judgeCode = $dom("#sm-judge-code")?.value ?? "";
+  if (judgeEnabled && !judgeCode.trim()) {
+    toast("请填写判断脚本代码，或关闭「使用脚本」", "error");
+    $dom("#sm-judge-code")?.focus();
+    return;
+  }
   const launchGame = $dom("#sm-launch").checked;
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
@@ -287,6 +361,8 @@ export async function saveScript() {
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
     launchGame, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
+    successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
+    judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
     notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
   };
   try {
@@ -315,4 +391,6 @@ export const actions = {
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "confirm-delete-script": target => confirmDeleteScript(target.dataset.id, target.dataset.name),
   "save-script": () => saveScript(),
+  "upload-judge-script": () => uploadJudgeScript(),
+  "toggle-judge-mode": () => toggleJudgeMode(),
 };
