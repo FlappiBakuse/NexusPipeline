@@ -1,4 +1,4 @@
-﻿import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
@@ -85,7 +85,12 @@ async function api(method, pathName, body) {
 
 async function createScript(body) {
   const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, gameExe: PING_GAME, ...body });
-  return { ok: res.ok, id: (await res.json()).id };
+  if (!res.ok) {
+    return { ok: false, id: "" };
+  }
+  const script = await res.json();
+  await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
+  return { ok: true, id: script.id };
 }
 
 /** 创建真实存在的脚本目录（根目录/占位脚本/配置目录/日志目录），路径校验用例使用。
@@ -167,7 +172,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.4.1"), "版本显示 0.4.1（x.x.x 不带 v）");
+  assert(body.includes("0.4.2"), "版本显示 0.4.2（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -587,7 +592,10 @@ async function testLogScroll(page) {
     "echo [CONSOLE] console: all done",
     "exit /b 0",
   ].join("\r\n"), "ascii");
-  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: runtimeDir, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "ALL-DONE-MARKER" });
+  const logCfg = path.join(runtimeDir, "log-cfg");
+  fs.rmSync(logCfg, { recursive: true, force: true });
+  fs.mkdirSync(logCfg, { recursive: true });
+  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: logCfg, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "ALL-DONE-MARKER" });
   assert(created.ok, "创建日志测试脚本");
 
   await page.click('nav a[href="#/dispatch"]');
@@ -754,7 +762,12 @@ async function judgeCreate(name, dir, label, extra = {}) {
     maxAttempts: 1, logStallTimeoutMinutes: 2, totalTimeoutMinutes: 10,
     gameExe: PING_GAME, ...extra,
   });
-  return { ok: res.ok, id: res.ok ? (await res.json()).id : "" };
+  if (!res.ok) {
+    return { ok: false, id: "" };
+  }
+  const script = await res.json();
+  await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
+  return { ok: true, id: script.id };
 }
 
 async function judgeRunAndHistory(id) {
@@ -923,6 +936,7 @@ if (input.log.includes("TASK DONE")) {
   });
   assert(created.ok, "创建插队替换脚本（首次失败+replaceConfigs，重试后成功）");
   const id = (await created.json()).id;
+  await api("POST", `/api/scripts/${id}/users`, { name: "默认", enabled: true });
   const r = await judgeRunAndHistory(id);
   assert(r.dispatchOk && r.ended, "插队替换脚本运行结束");
   assert(r.rec && r.rec.finalStatus === "partial", "替换配置后重试成功（重试>1，FinalStatus=partial）");
@@ -976,6 +990,7 @@ if (n >= 2) {
   });
   assert(created.ok, "创建周期触发脚本（日志阻塞 65 秒，周期触发判定失败）");
   const id = (await created.json()).id;
+  await api("POST", `/api/scripts/${id}/users`, { name: "默认", enabled: true });
   const r = await judgeRunAndHistory(id);
   assert(r.dispatchOk && r.ended, "周期触发脚本运行结束");
   assert(r.rec && r.rec.finalStatus === "failed", "阻塞期间周期触发判定失败（FinalStatus=failed）");
@@ -1372,7 +1387,10 @@ async function testBatchGameLaunch() {
   const gameBat = path.join(runtimeDir, "game-launch.bat");
   const mainBat = path.join(runtimeDir, "game-main.bat");
   const marker = path.join(runtimeDir, "game-started.flag");
+  const batchCfg = path.join(runtimeDir, "batch-cfg");
   fs.rmSync(marker, { force: true });
+  fs.rmSync(batchCfg, { recursive: true, force: true });
+  fs.mkdirSync(batchCfg, { recursive: true });
   fs.writeFileSync(gameBat, [
     "@echo off",
     "echo [GAME] started",
@@ -1383,12 +1401,13 @@ async function testBatchGameLaunch() {
 
   const create = await api("POST", "/api/scripts", {
     name: "批处理游戏脚本", rootPath: runtimeDir, mainExe: mainBat,
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: true, gameExe: gameBat,
+    configPath: batchCfg, logPath: batchCfg, launchGame: true, gameExe: gameBat,
     gameArgs: "", gameWaitSeconds: 0, forceCloseGame: false,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
   const script = await create.json();
   assert(create.ok, "创建批处理游戏测试脚本");
+  await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
 
   const dispatch = await api("POST", "/api/dispatch/script", { scriptId: script.id, mode: "manual" });
   assert(dispatch.ok, "批处理游戏脚本已开始运行");
@@ -1405,15 +1424,20 @@ async function testBatchGameLaunch() {
 async function testGameProcessConfirm() {
   console.log("[用例] 游戏进程确认：未勾选启动游戏跳过 / 填写路径检测双启动");
   const exitBat = path.join(runtimeDir, "exit-ok.bat");
+  const gpcCfg = path.join(runtimeDir, "gpc-cfg");
+  fs.rmSync(gpcCfg, { recursive: true, force: true });
+  fs.mkdirSync(gpcCfg, { recursive: true });
+  fs.writeFileSync(path.join(gpcCfg, "log.txt"), "");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
 
   const a = await api("POST", "/api/scripts", {
     name: "不启动游戏脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: PING_GAME,
+    configPath: gpcCfg, logPath: path.join(gpcCfg, "log.txt"), launchGame: false, gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
   assert(a.ok, "创建未勾选启动游戏脚本（launchGame=false / gameExe 必填但跳过游戏启动）");
   const aid = (await a.json()).id;
+  await api("POST", `/api/scripts/${aid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
   assert(await waitNoRunning(60000), "未勾选启动游戏脚本运行结束");
   const aHist = await (await fetch(baseUrl + "api/history?days=7")).json();
@@ -1424,12 +1448,13 @@ async function testGameProcessConfirm() {
   const ping = "C:\\Windows\\System32\\PING.EXE";
   const b = await api("POST", "/api/scripts", {
     name: "双启动确认脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: true, gameExe: ping,
+    configPath: gpcCfg, logPath: path.join(gpcCfg, "log.txt"), launchGame: true, gameExe: ping,
     gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 10, forceCloseGame: true,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
   assert(b.ok, "创建双启动确认脚本（游戏=PING，等待 10 秒确认）");
   const bid = (await b.json()).id;
+  await api("POST", `/api/scripts/${bid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
   const managerLog = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
   const seenConfirm = await waitFor(() => {
@@ -1493,7 +1518,10 @@ async function testForceKillGameOnFailure() {
   const pingProc = () => spawn(PING_GAME, ["-n", "60", "127.0.0.1"], { stdio: "ignore" });
   const pingRunning = () => spawnSync("tasklist", ["/FI", "IMAGENAME eq ping.exe"], { stdio: "pipe", encoding: "utf8" }).stdout.toLowerCase().includes("ping.exe");
   const killPing = () => spawnSync("taskkill", ["/IM", "ping.exe", "/F"], { stdio: "ignore" });
-  const base = { rootPath: runtimeDir, configPath: runtimeDir, logPath: failLogDir, gameExe: PING_GAME, gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 1, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10 };
+  const fkCfg = path.join(runtimeDir, "fk-cfg");
+  fs.rmSync(fkCfg, { recursive: true, force: true });
+  fs.mkdirSync(fkCfg, { recursive: true });
+  const base = { rootPath: runtimeDir, configPath: fkCfg, logPath: failLogDir, gameExe: PING_GAME, gameArgs: "-n 60 127.0.0.1", gameWaitSeconds: 1, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10 };
 
   pingProc();
   await sleep(1500);
@@ -1501,6 +1529,7 @@ async function testForceKillGameOnFailure() {
   const f1 = await api("POST", "/api/scripts", { name: "失败杀游戏脚本", mainExe: failBat.replace(/\\/g, "\\\\"), successMarkers: "NEVER-SEEN-MARKER", ...base });
   assert(f1.ok, "创建失败杀游戏脚本（完成标志永不出现 → 任务失败需强制结束游戏）");
   const f1id = (await f1.json()).id;
+  await api("POST", `/api/scripts/${f1id}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: f1id, mode: "manual" });
   assert(await waitNoRunning(30000), "失败脚本运行结束");
   await sleep(800);
@@ -1513,6 +1542,7 @@ async function testForceKillGameOnFailure() {
   const f2 = await api("POST", "/api/scripts", { name: "成功留游戏脚本", mainExe: okBat.replace(/\\/g, "\\\\"), forceCloseGame: false, ...base, logPath: logFile });
   assert(f2.ok, "创建成功留游戏脚本（日志文件存在 + 无完成标志 → 进程退出判成功）");
   const f2id = (await f2.json()).id;
+  await api("POST", `/api/scripts/${f2id}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: f2id, mode: "manual" });
   assert(await waitNoRunning(30000), "成功脚本运行结束");
   await sleep(500);
@@ -1525,6 +1555,7 @@ async function testForceKillGameOnFailure() {
   const f3 = await api("POST", "/api/scripts", { name: "成功杀游戏脚本", mainExe: okBat.replace(/\\/g, "\\\\"), forceCloseGame: true, ...base, logPath: logFile });
   assert(f3.ok, "创建成功杀游戏脚本（勾选强制关闭）");
   const f3id = (await f3.json()).id;
+  await api("POST", `/api/scripts/${f3id}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: f3id, mode: "manual" });
   assert(await waitNoRunning(30000), "成功脚本运行结束");
   await sleep(800);
@@ -1538,6 +1569,7 @@ async function testForceKillGameOnFailure() {
   await sleep(1500);
   const f4 = await api("POST", "/api/scripts", { name: "取消留游戏脚本", mainExe: cancelBat.replace(/\\/g, "\\\\"), forceCloseGame: false, ...base });
   const f4id = (await f4.json()).id;
+  await api("POST", `/api/scripts/${f4id}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: f4id, mode: "manual" });
   await waitFor(async () => (await runningCount()) > 0, 10000);
   const status = await (await fetch(baseUrl + "api/status")).json();
@@ -1568,7 +1600,7 @@ async function testScriptEditPreservesUsers() {
   assert(put.ok, "PUT 改名（payload 不含 users，模拟前端）");
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
-  assert(got && (got.users || []).length === 1 && got.users[0].name === "甲", "改名后用户仍保留");
+  assert(got && (got.users || []).length === 2 && got.users.some(u => u.name === "甲"), "改名后用户仍保留（默认+甲）");
   assert(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "改名后用户数据目录未被重建或丢失");
   await api("DELETE", `/api/scripts/${sid}`);
 }
@@ -1793,8 +1825,11 @@ async function testSpecializedScript(page) {
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.textContent.includes("专项脚本A"), null, { timeout: 5000 });
-  const cardText = await page.textContent('[data-testid="script-card"]');
-  assert(cardText.includes("原神专项"), "脚本卡片显示专项标识（原神专项，游戏名由插件提供）");
+  const specialCard = await page.$$eval('[data-testid="script-card"]', els => {
+    const el = els.find(e => e.textContent.includes("专项脚本A"));
+    return el ? el.textContent : "";
+  });
+  assert(specialCard.includes("原神专项"), "脚本卡片显示专项标识（原神专项，游戏名由插件提供）");
   assert(await page.$('[data-testid="script-card"] img.script-ico'), "脚本卡片含主程序图标（img）");
 
   await page.click('[data-testid="new-script"]');
@@ -1810,7 +1845,7 @@ async function testSpecializedScript(page) {
   await page.click(".modal button:has-text('保存')");
   await page.waitForFunction(() => document.body.textContent.includes("专项UI脚本"), null, { timeout: 5000 });
   assert(true, "简化弹窗保存成功（根目录 change 触发 probe 校验）");
-  await page.click('[data-action="edit-script"]');
+  await page.click('[data-action="edit-script"][data-id="' + sid + '"]');
   await page.waitForSelector("#sm-name");
   assert(!(await page.$("#sm-exe")), "编辑专用实例仍为简化弹窗（无主程序字段）");
   await page.click(".modal button:has-text('取消')");
@@ -1841,11 +1876,14 @@ function findHistoryRecord(scriptId) {
 async function testLaunchTargetArgs(page) {
   console.log("[用例] 自启动参数显式路径：运行时启动目标（管理端/执行端分离）/ 普通参数不受影响 / 解析失败回退 / 编辑配置门禁");
   const ltDir = path.join(runtimeDir, "lt-scripts");
+  const ltFlags = path.join(runtimeDir, "lt-flags");
   fs.rmSync(ltDir, { recursive: true, force: true });
+  fs.rmSync(ltFlags, { recursive: true, force: true });
   fs.mkdirSync(ltDir, { recursive: true });
-  const managerFlag = path.join(ltDir, "launcher-ran.flag");
-  const execFlag = path.join(ltDir, "exec-ran.flag");
-  const execArgsFlag = path.join(ltDir, "exec-args.flag");
+  fs.mkdirSync(ltFlags, { recursive: true });
+  const managerFlag = path.join(ltFlags, "launcher-ran.flag");
+  const execFlag = path.join(ltFlags, "exec-ran.flag");
+  const execArgsFlag = path.join(ltFlags, "exec-args.flag");
   const launcherBat = path.join(ltDir, "launcher.bat");
   const execBat = path.join(ltDir, "exec target.bat");
   const runLog = path.join(ltDir, "lt-run-" + localDate() + ".log");
@@ -2071,13 +2109,17 @@ async function testLogPattern(page) {
   fs.mkdirSync(path.join(logRoot, "c"), { recursive: true });
 
   const ping = "C:\\Windows\\System32\\PING.EXE";
+  const lpCfg = path.join(runtimeDir, "lp-cfg");
+  fs.rmSync(lpCfg, { recursive: true, force: true });
+  fs.mkdirSync(lpCfg, { recursive: true });
 
   const a = await api("POST", "/api/scripts", {
     name: "无条目脚本", rootPath: runtimeDir, mainExe: ping, args: "-n 90 127.0.0.1",
-    configPath: runtimeDir, logPath: path.join(logRoot, "a", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    configPath: lpCfg, logPath: path.join(logRoot, "a", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 1, totalTimeoutMinutes: 10,
   });
   const aid = (await a.json()).id;
+  await api("POST", `/api/scripts/${aid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
   assert(await waitNoRunning(120000), "无条目脚本运行结束（约 1 分钟后无日志条目超时）");
   const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
@@ -2091,10 +2133,11 @@ async function testLogPattern(page) {
   fs.writeFileSync(bBat, "@echo off\r\necho [SCRIPT] NEW-ENTRY-BRANDNEW >> \"" + bLog + "\"\r\necho [SCRIPT] 任务完成 >> \"" + bLog + "\"\r\nexit /b 0\r\n", "ascii");
   const b = await api("POST", "/api/scripts", {
     name: "忽略旧日志脚本", rootPath: runtimeDir, mainExe: bBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    configPath: lpCfg, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const bid = (await b.json()).id;
+  await api("POST", `/api/scripts/${bid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
   assert(await waitNoRunning(60000), "忽略旧日志脚本运行结束");
   const sl = scriptHistoryLog(bid);
@@ -2117,10 +2160,11 @@ async function testLogPattern(page) {
   ].join("\r\n"), "ascii");
   const c = await api("POST", "/api/scripts", {
     name: "通配轮换脚本", rootPath: runtimeDir, mainExe: cBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    configPath: lpCfg, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
   });
   const cid = (await c.json()).id;
+  await api("POST", `/api/scripts/${cid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: cid, mode: "manual" });
   assert(await waitNoRunning(60000), "通配轮换脚本运行结束");
   const cl = scriptHistoryLog(cid);

@@ -529,6 +529,25 @@ internal class RunSession
             return false;
         }
 
+        // 最终触发一次判断脚本并按结果设置成功/失败判定（失败时替换配置已在 TriggerJudgeAsync 内应用）；返回 true 表示已设置判定。
+        async Task<bool> FinalJudgeOnceAsync()
+        {
+            await TriggerJudgeAsync().ConfigureAwait(false);
+            if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
+            {
+                result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
+                result.NotifyText = judgeNotifyText ?? "";
+                return true;
+            }
+            if (markerSeenAt is not null)
+            {
+                result = RunAttemptResult.Success(judgeReason ?? "判断脚本判定成功");
+                result.NotifyText = judgeNotifyText ?? "";
+                return true;
+            }
+            return false;
+        }
+
         try
         {
             while (result is null)
@@ -639,11 +658,21 @@ internal class RunSession
                 {
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
-                        result = RunAttemptResult.Failed("已配置日志路径但未找到日志文件，进程退出且未检测到完成标志");
+                        if (scriptMode)
+                        {
+                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
+                            await FinalJudgeOnceAsync().ConfigureAwait(false);
+                        }
+                        result ??= RunAttemptResult.Failed("已配置日志路径但未找到日志文件，进程退出且未检测到完成标志");
                     }
                     else if (monitor is null)
                     {
-                        result = scriptMode
+                        if (scriptMode)
+                        {
+                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
+                            await FinalJudgeOnceAsync().ConfigureAwait(false);
+                        }
+                        result ??= scriptMode
                             ? RunAttemptResult.Failed("未配置日志路径，判断脚本无法触发，进程已退出")
                             : RunAttemptResult.Success("进程自行退出（未配置日志监控，按退出判定成功）");
                     }
@@ -661,21 +690,9 @@ internal class RunSession
                         if (scriptMode)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
-                            await TriggerJudgeAsync().ConfigureAwait(false);
-                            if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
-                            {
-                                result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
-                                result.NotifyText = judgeNotifyText ?? "";
-                                break;
-                            }
-                            if (markerSeenAt is not null)
-                            {
-                                result = RunAttemptResult.Success(judgeReason ?? "判断脚本判定成功");
-                                result.NotifyText = judgeNotifyText ?? "";
-                                break;
-                            }
+                            await FinalJudgeOnceAsync().ConfigureAwait(false);
                         }
-                        result = RunAttemptResult.Failed("进程退出但未检测到完成标志");
+                        result ??= RunAttemptResult.Failed("进程退出但未检测到完成标志");
                     }
                     else
                     {
@@ -720,21 +737,9 @@ internal class RunSession
                         if (scriptMode)
                         {
                             _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
-                            await TriggerJudgeAsync().ConfigureAwait(false);
-                            if (failureSeenAt is not null && (markerSeenAt is null || failureSeenAt <= markerSeenAt))
-                            {
-                                result = RunAttemptResult.Failed(judgeReason ?? "日志出现失败关键字，任务判定失败");
-                                result.NotifyText = judgeNotifyText ?? "";
-                                break;
-                            }
-                            if (markerSeenAt is not null)
-                            {
-                                result = RunAttemptResult.Success(judgeReason ?? "判断脚本判定成功");
-                                result.NotifyText = judgeNotifyText ?? "";
-                                break;
-                            }
+                            await FinalJudgeOnceAsync().ConfigureAwait(false);
                         }
-                        result = RunAttemptResult.Failed(stallReason);
+                        result ??= RunAttemptResult.Failed(stallReason);
                         break;
                     }
                 }

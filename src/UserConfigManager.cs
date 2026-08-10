@@ -207,6 +207,18 @@ internal static class UserConfigManager
         TryDeleteDir(ReplaceBackupDir(scriptId, userName));
     }
 
+    /// <summary>解析配置替换目标：config 为单文件时仅允许替换该文件本身（rel 须等于文件名，忽略大小写），目录时走相对路径边界解析。</summary>
+    private static string? ResolveConfigTarget(string configPath, string rel)
+    {
+        if (File.Exists(configPath))
+        {
+            return string.Equals(Path.GetFileName(configPath), rel, StringComparison.OrdinalIgnoreCase)
+                ? Path.GetFullPath(configPath)
+                : null;
+        }
+        return JudgeScriptRunner.ResolveWithin(configPath, rel);
+    }
+
     /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
     public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
     {
@@ -222,15 +234,10 @@ internal static class UserConfigManager
                 Logger.Warn($"[警告] 配置替换源文件无效（{rel}），跳过");
                 continue;
             }
-            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            string? target = ResolveConfigTarget(configPath, rel);
             if (target is null)
             {
                 Logger.Warn($"[警告] 配置替换目标越界（{rel}），跳过");
-                continue;
-            }
-            if (File.Exists(configPath) && !string.Equals(target, Path.GetFullPath(configPath), StringComparison.OrdinalIgnoreCase))
-            {
-                Logger.Warn($"[警告] config 为单文件，拒绝替换其他目标（{rel}），跳过");
                 continue;
             }
             try
@@ -342,7 +349,7 @@ internal static class UserConfigManager
             {
                 continue;
             }
-            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            string? target = ResolveConfigTarget(configPath, rel);
             if (target is null)
             {
                 continue;
@@ -359,7 +366,7 @@ internal static class UserConfigManager
         }
         foreach (string rel in newFiles)
         {
-            string? target = JudgeScriptRunner.ResolveWithin(configPath, rel);
+            string? target = ResolveConfigTarget(configPath, rel);
             if (target is null || !File.Exists(target))
             {
                 continue;
@@ -735,6 +742,10 @@ internal static class UserConfigManager
                 if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
                 {
                     CopyAs(store, configPath, RestoreKind(mark));
+                }
+                else if (PathKindUtil.Parse(mark.OriginalKind) != PathKind.File)
+                {
+                    Directory.CreateDirectory(configPath);
                 }
                 prepared = true;
             });

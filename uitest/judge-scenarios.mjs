@@ -145,11 +145,14 @@ function stopHookServer() {
 
 /**
  * 多任务伪脚本目录：
- *  - config 目录 tasks.txt：每行 `id|enabled|mode`，mode = success | fail | stuck-silent | stuck-alt
- *    success     → 输出 TASK {id} DONE
- *    fail        → 输出 TASK {id} FAIL
- *    stuck-silent→ 静默卡住（ping 长延时，无任何输出）
- *    stuck-alt   → 按 cnt.txt 奇偶：奇数次运行卡住，偶数次 DONE（模拟「首次卡住、重试成功」）
+ *  - config 目录 tasks.txt：每行 `id|enabled|mode`，mode = success | fail | stuck-silent | stuck-alt | crash-silent | script-crash | game-crash
+ *    success       → 输出 TASK {id} DONE
+ *    fail          → 输出 TASK {id} FAIL
+ *    stuck-silent  → 静默卡住（ping 长延时，无任何输出）
+ *    stuck-alt     → 按 %TEMP% 计数文件奇偶：奇数次运行卡住，偶数次 DONE（模拟「首次卡住、重试成功」）
+ *    crash-silent  → 无任何日志输出，立即非零退出（模拟脚本直接崩溃）
+ *    script-crash  → 输出 START 后运行片刻，脚本自身非零退出（模拟运行中途脚本崩溃）
+ *    game-crash    → 输出 START 并启动游戏进程（ping 模拟），游戏进程仍在时脚本退出（模拟运行中途游戏崩溃，宿主失败后强制结束游戏进程）
  *  - 日志 logs/log.txt（主程序负责追加，全部 ASCII 规避 bat 中文编码问题）
  */
 const MULTI_TASK_BAT = [
@@ -160,14 +163,26 @@ const MULTI_TASK_BAT = [
   "ping -n 3 127.0.0.1 >nul",
   "for /f \"tokens=1,2,3 delims=|\" %%a in (tasks.txt) do (",
   "  if /i \"%%b\"==\"enabled\" (",
+  "    if \"%%c\"==\"crash-silent\" exit /b 1",
+  "    if \"%%c\"==\"script-crash\" (",
+  "      echo TASK %%a START >> logs\\log.txt",
+  "      ping -n 4 127.0.0.1 >nul",
+  "      exit /b 1",
+  "    )",
+  "    if \"%%c\"==\"game-crash\" (",
+  "      start \"\" /b ping -n 10 127.0.0.1 >nul",
+  "      echo TASK %%a START >> logs\\log.txt",
+  "      ping -n 3 127.0.0.1 >nul",
+  "      exit /b 1",
+  "    )",
   "    if \"%%c\"==\"success\" echo TASK %%a DONE >> logs\\log.txt",
   "    if \"%%c\"==\"fail\" echo TASK %%a FAIL >> logs\\log.txt",
   "    if \"%%c\"==\"stuck-silent\" ping -n 75 127.0.0.1 >nul",
   "    if \"%%c\"==\"stuck-alt\" (",
   "      set /a n=0",
-  "      if exist cnt.txt set /p n=<cnt.txt",
+  "      if exist \"%TEMP%\\%~n0-cnt.txt\" set /p n=<\"%TEMP%\\%~n0-cnt.txt\"",
   "      set /a n+=1",
-  "      >cnt.txt echo !n!",
+  "      >\"%TEMP%\\%~n0-cnt.txt\" echo !n!",
   "      set /a m=n%%2",
   "      if \"!m!\"==\"1\" ping -n 75 127.0.0.1 >nul",
   "      if \"!m!\"==\"0\" echo TASK %%a DONE >> logs\\log.txt",
@@ -244,7 +259,23 @@ async function createJudgeScript(extra = {}) {
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
     ...extra,
   });
-  return { ok: res.ok, id: res.ok ? (await res.json()).id : "", error: res.ok ? "" : await res.text() };
+  if (!res.ok) {
+    return { ok: false, id: "", error: await res.text() };
+  }
+  const script = await res.json();
+  const userRes = await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
+  if (!userRes.ok) {
+    return { ok: false, id: "", error: "添加默认用户失败" };
+  }
+  return { ok: true, id: script.id };
+}
+
+function userScriptDir(id, user = "默认") {
+  return path.join(runtimeDir, "data", id, user, "script");
+}
+
+function userBackupDir(id, user = "默认") {
+  return path.join(runtimeDir, "data", id, user, "replace-backup");
 }
 
 async function runScript(id, userName, timeoutMs = 180000) {
@@ -299,8 +330,8 @@ async function testScenarioB() {
   const cfgAfter = fs.readFileSync(path.join(dir, "tasks.txt"), "utf8");
   const restored = cfgAfter.includes("1|enabled|success") && cfgAfter.includes("2|enabled|fail") && cfgAfter.includes("4|enabled|success");
   assert(restored, "运行结束后 config/tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "script")), "运行结束后 script 目录已清空");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "replace-backup")), "运行结束后 replace-backup 已清理");
+  assert(!fs.existsSync(userScriptDir(created.id)), "运行结束后 script 目录已清空");
+  assert(!fs.existsSync(userBackupDir(created.id)), "运行结束后 replace-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -327,8 +358,8 @@ async function testScenarioC() {
   const cfgAfter = fs.readFileSync(path.join(dir, "tasks.txt"), "utf8");
   const restored = cfgAfter.includes("1|enabled|success") && cfgAfter.includes("2|enabled|stuck-alt") && cfgAfter.includes("4|enabled|stuck-silent");
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "script")), "script 目录已清空");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "replace-backup")), "replace-backup 已清理");
+  assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
+  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -352,7 +383,7 @@ nexus.writeFile("count", String(n));`;
   assert(created.ok, "创建零日志卡住脚本（stall=1 分钟）");
   const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
   assert(dispatch.ok, "dispatch 成功");
-  const scriptDir = path.join(runtimeDir, "data", created.id, "script");
+  const scriptDir = userScriptDir(created.id);
   const countFile = path.join(scriptDir, "count");
   let maxCount = 0;
   const probeDeadline = Date.now() + 170000;
@@ -412,7 +443,7 @@ console.log(JSON.stringify({ status: ok ? "failed" : "success", reason: ok ? "es
   assert(created.ok, "创建路径逃逸脚本");
   const r = await runScript(created.id);
   assert(r.dispatchOk && r.ended, "运行结束");
-  const scriptParent = path.join(runtimeDir, "data", created.id);
+  const scriptParent = path.join(runtimeDir, "data", created.id, "默认");
   const evil = path.join(scriptParent, "script-evil", "x.txt");
   assert(!fs.existsSync(evil), "越界写入被拒绝（script-evil/x.txt 不存在）");
   assert(r.rec && r.rec.finalStatus === "success", "逃逸被拒绝 → 判断脚本判定 success（FinalStatus=" + r.rec?.finalStatus + "）");
@@ -449,7 +480,7 @@ console.log(JSON.stringify({ status: "success", reason: "ok" }));`;
   assert(created.ok, "创建 marker 重复触发脚本（DONE 后继续输出 2 批日志）");
   const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
   assert(dispatch.ok, "dispatch 成功");
-  const countFile = path.join(runtimeDir, "data", created.id, "script", "count");
+  const countFile = path.join(userScriptDir(created.id), "count");
   let maxCount = 0;
   const probeDeadline = Date.now() + 60000;
   while (Date.now() < probeDeadline && (await runningCount()) > 0) {
@@ -583,13 +614,13 @@ console.log(JSON.stringify({ status: "failed", reason: "round-" + n, replaceConf
   const cfg1 = fs.readFileSync(path.join(dir, "cfg1.txt"), "utf8").trim();
   const cfg2 = fs.readFileSync(path.join(dir, "cfg2.txt"), "utf8").trim();
   assert(cfg1 === "V1" && cfg2 === "W1", "两轮替换后 config 均还原（cfg1=" + cfg1 + " cfg2=" + cfg2 + "）");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "script")), "script 目录已清空");
-  assert(!fs.existsSync(path.join(runtimeDir, "data", created.id, "replace-backup")), "replace-backup 已清理");
+  assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
+  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
 async function testSingleFileConfig() {
-  console.log("[用例] B-6 确认：单文件 config + replaceConfigs 替换行为");
+  console.log("[用例] 修复验证：单文件 config + replaceConfigs（项等于文件名）替换生效并还原");
   const dir = path.join(runtimeDir, "mt-singlecfg");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
@@ -605,11 +636,25 @@ console.log(JSON.stringify({ status: "failed", reason: "single-cfg", replaceConf
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsSingle,
   });
   assert(created.ok, "创建单文件 config 脚本");
-  const r = await runScript(created.id);
-  assert(r.dispatchOk && r.ended, "运行结束");
-  assert(r.rec && r.rec.finalStatus === "failed", "判定失败（FinalStatus=" + r.rec?.finalStatus + "）");
-  const cfgAfter = fs.readFileSync(cfgFile, "utf8").trim();
-  assert(cfgAfter === "ORIG", "单文件 config 未被替换（cfg.txt=" + cfgAfter + "，替换被拒绝或未应用）");
+  const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
+  assert(dispatch.ok, "dispatch 成功");
+  let replaced = false;
+  while ((await runningCount()) > 0) {
+    try {
+      if (fs.readFileSync(cfgFile, "utf8").trim() === "NEW") {
+        replaced = true;
+        break;
+      }
+    } catch { /* 交换瞬间文件短暂不存在，继续轮询 */ }
+    await sleep(200);
+  }
+  const ended = await waitNoRunning(30000);
+  const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const rec = hist.filter(h => h.scriptInstanceId === created.id).at(-1);
+  assert(ended, "运行结束");
+  assert(replaced, "单文件 config 替换生效（运行中 cfg.txt=NEW）");
+  assert(rec && rec.finalStatus === "failed", "判定失败（FinalStatus=" + rec?.finalStatus + "）");
+  assert(fs.readFileSync(cfgFile, "utf8").trim() === "ORIG", "运行结束后单文件 config 已还原（cfg.txt=ORIG）");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -620,7 +665,7 @@ async function testCrashRecovery() {
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
   fs.writeFileSync(path.join(dir, "cfg.txt"), "ORIG", "utf8");
   fs.writeFileSync(path.join(dir, "nexusmt-crash.bat"), [
-    "@echo off", "echo HELLO >> logs\\log.txt", "ping -n 25 127.0.0.1 >nul", "exit /b 0",
+    "@echo off", "echo HELLO >> logs\\log.txt", "ping -n 3 127.0.0.1 >nul", "exit /b 0",
   ].join("\r\n") + "\r\n", "ascii");
   const jsCrash = `
 nexus.writeFile("cfg.txt", "REPLACED");
@@ -633,17 +678,132 @@ console.log(JSON.stringify({ status: "failed", reason: "crash-replace", replaceC
   assert(created.ok, "创建崩溃恢复脚本");
   const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
   assert(dispatch.ok, "dispatch 成功");
-  const replaced = await waitFor(() => fs.readFileSync(path.join(dir, "cfg.txt"), "utf8").trim() === "REPLACED", 20000, 300);
+  const replaced = await waitFor(() => {
+    try {
+      return fs.readFileSync(path.join(dir, "cfg.txt"), "utf8").trim() === "REPLACED";
+    } catch {
+      return false;
+    }
+  }, 20000, 300);
   assert(replaced, "配置替换已发生（cfg.txt=REPLACED）");
-  assert(fs.existsSync(path.join(runtimeDir, "data", created.id, "replace-backup", "cfg.txt")), "replace-backup 已建立");
+  assert(fs.existsSync(path.join(userBackupDir(created.id), "cfg.txt")), "replace-backup 已建立");
   await stopService();
-  await sleep(1500);
+  await sleep(4000);
   startService();
   await waitForService();
   await sleep(800);
-  const cfgAfter = fs.readFileSync(path.join(dir, "cfg.txt"), "utf8").trim();
+  const cfgPath = path.join(dir, "cfg.txt");
+  const cfgAfter = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, "utf8").trim() : "(缺失)";
   assert(cfgAfter === "ORIG", "重启后 RecoverInterrupted 自动还原配置（cfg.txt=" + cfgAfter + "）");
   await api("DELETE", "/api/scripts/" + created.id);
+}
+
+async function testScenarioD() {
+  console.log("[用例] 场景D：极端崩溃（无日志崩溃→游戏崩溃→脚本崩溃）→ 3次失败 + 通知「任务4运行失败」");
+  const dir = makeMultiTaskDir("d", ["1|enabled|crash-silent", "2|enabled|game-crash", "3|disabled|success", "4|enabled|script-crash"]);
+  const jsCrashJudge = `
+const input = JSON.parse(__NEXUS_INPUT__);
+const log = input.log || "";
+const cfgFile = (input.files || []).find(f => f.Root === "config" && f.Path === "tasks.txt");
+const cfgText = cfgFile ? (nexus.readFile(cfgFile.Abs) || "") : "";
+const enabled = [];
+for (const line of cfgText.split(/\\r?\\n/)) {
+  const p = line.split("|");
+  if (p.length >= 3 && p[1].trim().toLowerCase() === "enabled") {
+    enabled.push({ id: p[0].trim(), mode: p[2].trim() });
+  }
+}
+const doneIds = [...log.matchAll(/TASK\\s+(\\w+)\\s+DONE/g)].map(m => m[1]);
+const undone = enabled.filter(t => !doneIds.includes(t.id));
+if (enabled.length > 0 && undone.length === 0) {
+  console.log(JSON.stringify({ status: "success", reason: "all-done", notifyText: "所有任务已全部完成" }));
+} else if (undone.length > 0) {
+  const failedId = undone[0].id;
+  const lines = [];
+  for (const t of enabled) {
+    if (t.id === failedId) lines.push(t.id + "|disabled|" + t.mode);
+    else lines.push(t.id + "|enabled|" + t.mode);
+  }
+  nexus.writeFile("tasks.txt", lines.join("\\r\\n"));
+  console.log(JSON.stringify({ status: "failed", reason: "task-crash-" + failedId, notifyText: "任务" + failedId + "运行失败", replaceConfigs: ["tasks.txt"] }));
+}`;
+  const created = await createJudgeScript({
+    name: "场景D崩溃重试", rootPath: dir, mainExe: path.join(dir, "nexusmt-d.bat"),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 3, judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsCrashJudge,
+    notifyEnabled: true,
+  });
+  assert(created.ok, "创建场景D脚本");
+  const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
+  assert(dispatch.ok, "dispatch 成功");
+  const ended = await waitNoRunning(180000);
+  const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const rec = hist.filter(h => h.scriptInstanceId === created.id).at(-1);
+  assert(ended, "场景D运行结束");
+  assert(rec && rec.attempts === 3, "达到最大尝试次数（attempts=3，实际 " + rec?.attempts + "）");
+  assert(rec && rec.finalStatus === "failed", "最终失败（FinalStatus=" + rec?.finalStatus + "）");
+  const reasons = (rec?.attemptDetails || []).map(a => a.reason);
+  assert(reasons[0] && /task-crash-1/.test(reasons[0]), "尝试1：任务1 无日志崩溃被判定失败（原因：" + JSON.stringify(reasons) + "）");
+  assert(reasons[1] && /task-crash-2/.test(reasons[1]), "尝试2：任务2 游戏崩溃被判定失败（原因：" + JSON.stringify(reasons) + "）");
+  assert(reasons[2] && /task-crash-4/.test(reasons[2]), "尝试3：任务4 脚本崩溃被判定失败（原因：" + JSON.stringify(reasons) + "）");
+  await waitFor(() => hookBodies.some(b => b.includes("任务4运行失败")), 8000);
+  assert(hookBodies.some(b => b.includes("任务4运行失败")), "webhook 收到通知「任务4运行失败」（最后一次尝试 notifyText）");
+  const cfgAfter = fs.readFileSync(path.join(dir, "tasks.txt"), "utf8");
+  const restored = cfgAfter.includes("1|enabled|crash-silent") && cfgAfter.includes("2|enabled|game-crash") && cfgAfter.includes("4|enabled|script-crash");
+  assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
+  assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
+  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
+  const logPath = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  let managerLog = "";
+  if (fs.existsSync(logPath)) managerLog = fs.readFileSync(logPath, "utf8");
+  assert(managerLog.includes("已强制关闭游戏"), "尝试2 失败后游戏进程被强制结束（管理器日志含「已强制关闭游戏」）");
+  await api("DELETE", "/api/scripts/" + created.id);
+}
+
+async function testNoUserRejected() {
+  console.log("[用例] 修复验证：无启用用户脚本手动运行被拒绝（全局强制）");
+  const dir = makeMultiTaskDir("nouser", ["1|enabled|success"]);
+  const res = await api("POST", "/api/scripts", {
+    name: "无用户脚本", rootPath: dir, mainExe: path.join(dir, "nexusmt-nouser.bat"),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "x" }));',
+  });
+  assert(res.ok, "创建无用户脚本成功");
+  const id = (await res.json()).id;
+  const dispatch = await api("POST", "/api/dispatch/script", { scriptId: id, mode: "manual" });
+  assert(!dispatch.ok, "手动运行无用户脚本被拒绝（400：" + (await dispatch.text()).slice(0, 60) + "）");
+  await api("DELETE", "/api/scripts/" + id);
+}
+
+async function testQueueSkipNoUser() {
+  console.log("[用例] 修复验证：队列运行时无启用用户脚本被跳过（failed 历史 + 不计进度）");
+  const dir = makeMultiTaskDir("qskip", ["1|enabled|success"]);
+  const res = await api("POST", "/api/scripts", {
+    name: "队列跳过脚本", rootPath: dir, mainExe: path.join(dir, "nexusmt-qskip.bat"),
+    configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "x" }));',
+  });
+  assert(res.ok, "创建无用户脚本成功");
+  const id = (await res.json()).id;
+  const qRes = await api("POST", "/api/queues", {
+    name: "跳过无用户队列", tasks: [{ id: "", index: 0, scriptInstanceId: id }], notifyEnabled: false,
+  });
+  assert(qRes.ok, "创建队列成功");
+  const queues = await (await fetch(baseUrl + "api/queues")).json();
+  const queue = queues.find(x => x.name === "跳过无用户队列");
+  const dispatch = await api("POST", "/api/dispatch/queue", { queueId: queue.id, mode: "manual" });
+  assert(dispatch.ok, "队列执行已受理");
+  const ended = await waitNoRunning(60000);
+  assert(ended, "队列运行结束");
+  const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+  const rec = hist.filter(h => h.scriptInstanceId === id).at(-1);
+  assert(rec && rec.status === "failed" && rec.resultDetail.includes("未配置启用用户"),
+    "跳过记录 failed 历史（结果：" + rec?.resultDetail + "）");
+  assert(!fs.existsSync(userScriptDir(id)), "被跳过脚本未产生运行数据（script 目录不存在）");
+  await api("DELETE", "/api/queues/" + queue.id);
+  await api("DELETE", "/api/scripts/" + id);
 }
 
 /* ---------------- 主流程 ---------------- */
@@ -668,6 +828,7 @@ async function main() {
   await testScenarioA();
   await testScenarioB();
   await testScenarioC();
+  await testScenarioD();
   await testEdgeNoLogStuck();
   await testBugNewFileResidue();
   await testBugPathEscape();
@@ -678,6 +839,8 @@ async function main() {
   await testBugReplaceMultiRoundRestore();
   await testSingleFileConfig();
   await testCrashRecovery();
+  await testNoUserRejected();
+  await testQueueSkipNoUser();
 
   console.log("========== 收尾 ==========");
   await stopService();

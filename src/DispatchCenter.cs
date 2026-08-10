@@ -108,6 +108,10 @@ internal class DispatchCenter
         {
             throw new InvalidOperationException($"用户「{userName}」不存在或已禁用");
         }
+        if (string.IsNullOrWhiteSpace(userName) && !script.Users.Any(user => user.Enabled))
+        {
+            throw new InvalidOperationException($"脚本「{script.Name}」未配置启用用户，无法运行");
+        }
         var exec = new RunningExecution
         {
             Kind = "script",
@@ -135,7 +139,7 @@ internal class DispatchCenter
         foreach (QueueTask queueTask in queue.Tasks)
         {
             ScriptInstance? script = RuntimeContext.Instance.FindScript(queueTask.ScriptInstanceId);
-            totalTasks += script is null ? 1 : Math.Max(1, script.Users.Count(user => user.Enabled));
+            totalTasks += script is null ? 1 : script.Users.Count(user => user.Enabled);
         }
         var exec = new RunningExecution
         {
@@ -363,7 +367,24 @@ internal class DispatchCenter
                 List<string?> runUsers = script.Users.Where(user => user.Enabled).Select(user => user.Name).Cast<string?>().ToList();
                 if (runUsers.Count == 0)
                 {
-                    runUsers.Add(null);
+                    var skipped = new RunRecord
+                    {
+                        ScriptInstanceId = script.Id,
+                        ScriptName = script.Name,
+                        QueueId = queue.Id,
+                        QueueName = queue.Name,
+                        Mode = exec.Mode,
+                        StartTime = DateTime.Now,
+                        EndTime = DateTime.Now,
+                        Status = "failed",
+                        ResultDetail = "脚本实例未配置启用用户，已跳过",
+                    };
+                    records.Add(skipped);
+                    exec.Records.Add(skipped);
+                    exec.DoneTasks++;
+                    RuntimeContext.Instance.History.Save(skipped, "");
+                    Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
+                    continue;
                 }
                 records.AddRange(await RunUsersAsync(exec, script, queue.Id, queue.Name, runUsers).ConfigureAwait(false));
                 if (exec.Status == "cancelled")
