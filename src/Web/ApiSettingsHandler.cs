@@ -24,6 +24,13 @@ internal static class ApiSettingsHandler
                         smtpEnabled = ctx.Settings.SmtpEnabled,
                     },
                     autoStart = TaskRegistration.IsRegistered(),
+                    remote = new
+                    {
+                        allowed = ctx.Settings.AllowRemoteAccess,
+                        localOnly = !ctx.Settings.AllowRemoteAccess,
+                        tokenSet = !string.IsNullOrWhiteSpace(ctx.Settings.AccessToken),
+                        lanAddresses = ctx.Settings.AllowRemoteAccess ? NetInfo.ListLanAddresses() : new List<string>(),
+                    },
                 },
             }).ConfigureAwait(false);
             return;
@@ -56,10 +63,13 @@ internal static class ApiSettingsHandler
             if (node.Get("historyRetentionDays") is not null)
             {
                 int days = node.Get("historyRetentionDays").Int(current.HistoryRetentionDays);
-                if (days >= 1)
+                string? check = Limits.CheckRetentionDays(days);
+                if (check is not null)
                 {
-                    current.HistoryRetentionDays = days;
+                    await HttpHelper.WriteJsonAsync(context, new { error = check }, 400).ConfigureAwait(false);
+                    return;
                 }
+                current.HistoryRetentionDays = days;
             }
             if (node.Get("webPort") is not null)
             {
@@ -145,14 +155,22 @@ internal static class ApiSettingsHandler
                     current.LogLevel = level;
                 }
             }
+            if (node.Get("allowRemoteAccess") is not null)
+            {
+                current.AllowRemoteAccess = node.Get("allowRemoteAccess").Bool(current.AllowRemoteAccess);
+            }
             ConfigStore.Save(current);
+            if (current.AllowRemoteAccess)
+            {
+                FirewallRule.EnsureAllowInbound();
+            }
             TaskRegistration.SyncWithSettings(current);
             string secretDetail = "";
             if (node.Get("secretKey") is not null && node.Get("secretValue") is not null)
             {
                 string key = node.Get("secretKey").Str();
                 string value = node.Get("secretValue").Str();
-                if (key is "webhookUrl" or "webhookSecret" or "smtpPassword")
+                if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
                 {
                     if (string.IsNullOrWhiteSpace(value))
                     {
@@ -211,6 +229,8 @@ internal static class ApiSettingsHandler
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
             settings.LogLevel,
+            settings.AllowRemoteAccess,
+            accessToken = settings.AccessToken.StartsWith("enc:", StringComparison.Ordinal) ? "enc:***" : settings.AccessToken,
         };
     }
 
@@ -228,6 +248,9 @@ internal static class ApiSettingsHandler
             case "smtpPassword":
                 settings.SmtpPassword = encrypted;
                 break;
+            case "accessToken":
+                settings.AccessToken = encrypted;
+                break;
         }
     }
 
@@ -243,6 +266,9 @@ internal static class ApiSettingsHandler
                 break;
             case "smtpPassword":
                 settings.SmtpPassword = "";
+                break;
+            case "accessToken":
+                settings.AccessToken = "";
                 break;
         }
     }

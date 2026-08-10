@@ -7,7 +7,7 @@ internal class HistoryService
 {
     private static readonly object Sync = new();
 
-    public void Save(RunRecord record, string scriptLog)
+    public void Save(RunRecord record, string scriptLog, string consoleLog = "")
     {
         if (record.StartTime == DateTime.MinValue)
         {
@@ -22,12 +22,17 @@ internal class HistoryService
                 string baseName = record.StartTime.ToString("HH-mm-ss");
                 string jsonPath = FindFreePath(dayDir, baseName, ".json");
                 string logPath = Path.ChangeExtension(jsonPath, ".log");
+                string consolePath = Path.ChangeExtension(jsonPath, ".console.log");
                 record.LogFile = Path.GetFileName(jsonPath);
                 File.WriteAllText(jsonPath, JsonSerializer.Serialize(record, JsonOpts.Indented), new UTF8Encoding(true));
                 string logText = string.IsNullOrWhiteSpace(scriptLog)
                     ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
                     : scriptLog;
                 File.WriteAllText(logPath, logText, new UTF8Encoding(true));
+                string consoleText = string.IsNullOrWhiteSpace(consoleLog)
+                    ? "（无控制台输出）" + Environment.NewLine
+                    : consoleLog;
+                File.WriteAllText(consolePath, consoleText, new UTF8Encoding(true));
                 AppendIndex(record.StartTime, record);
             }
         }
@@ -178,6 +183,17 @@ internal class HistoryService
 
     public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record)
     {
+        return ReadDayFile(record, ".log");
+    }
+
+    /// <summary>读取本次运行完整控制台输出（.console.log 三件套）。</summary>
+    public (string LogText, int TotalLines)? ReadConsoleLog(RunRecord record)
+    {
+        return ReadDayFile(record, ".console.log");
+    }
+
+    private static (string LogText, int TotalLines)? ReadDayFile(RunRecord record, string extension)
+    {
         if (string.IsNullOrWhiteSpace(record.LogFile))
         {
             return null;
@@ -186,17 +202,18 @@ internal class HistoryService
         {
             string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
             string logPath = Path.Combine(dayDir, Path.GetFileName(record.LogFile));
-            if (!File.Exists(logPath))
+            string target = Path.ChangeExtension(logPath, extension);
+            if (!File.Exists(target))
             {
                 return null;
             }
-            string text = File.ReadAllText(logPath, Encoding.UTF8);
+            string text = File.ReadAllText(target, Encoding.UTF8);
             int lines = text.Count(c => c == '\n') + (text.Length == 0 ? 0 : 1);
             return (text, lines);
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[警告] 读取脚本日志失败：{ex.Message}");
+            Logger.Warn($"[警告] 读取历史文件失败：{ex.Message}");
             return null;
         }
     }

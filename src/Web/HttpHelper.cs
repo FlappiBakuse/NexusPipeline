@@ -27,6 +27,7 @@ internal static class HttpHelper
             _ => "application/octet-stream",
         };
         context.Response.ContentType = contentType;
+        context.Response.Headers["Cache-Control"] = "no-cache";
         byte[] data = File.ReadAllBytes(filePath);
         context.Response.ContentLength64 = data.Length;
         context.Response.OutputStream.Write(data, 0, data.Length);

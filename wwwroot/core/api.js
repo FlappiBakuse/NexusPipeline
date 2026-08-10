@@ -4,6 +4,8 @@ export async function api(method, path, body, signal) {
   const controller = signal ? null : trackController(new AbortController());
   const options = { method, headers: {}, signal: signal || controller.signal };
   try {
+    const token = localStorage.getItem("nexus-token");
+    if (token) options.headers["Authorization"] = "Bearer " + token;
     if (body !== undefined) {
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(body);
@@ -11,6 +13,11 @@ export async function api(method, path, body, signal) {
     const response = await fetch(path, options);
     if (response.status === 204) return null;
     const data = await response.json().catch(() => null);
+    if (response.status === 401 || (data && data.error && String(data.error).includes("访问令牌"))) {
+      localStorage.removeItem("nexus-token");
+      if (typeof window.__showTokenPrompt === "function") window.__showTokenPrompt();
+      throw new Error((data && data.error) || "需要访问令牌");
+    }
     if (!response.ok) {
       throw new Error((data && data.error) || ("HTTP " + response.status));
     }

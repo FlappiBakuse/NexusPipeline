@@ -175,9 +175,13 @@ public static class Program
         if (!ctx.Settings.LightweightMode)
         {
             web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
-            if (web is not null && ctx.Settings.AutoOpenBrowser)
+            if (web is not null)
             {
-                TrayApp.OpenWeb(web.Port);
+                Bootstrap.AfterWebStarted(web);
+                if (ctx.Settings.AutoOpenBrowser)
+                {
+                    TrayApp.OpenWeb(web.Port);
+                }
             }
         }
         else
@@ -203,6 +207,7 @@ public static class Program
             Console.WriteLine("[错误] 无法启动 Web 服务（端口均被占用）。");
             return 1;
         }
+        Bootstrap.AfterWebStarted(web);
         Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
         if (ctx.Settings.AutoOpenBrowser)
         {

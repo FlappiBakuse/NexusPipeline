@@ -312,7 +312,7 @@ internal class DispatchCenter
                 exec.DoneTasks++;
                 exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
                 Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
-                RuntimeContext.Instance.History.Save(record, session.ScriptLog);
+                RuntimeContext.Instance.History.Save(record, session.ScriptLog, session.ConsoleLog);
             }
             finally
             {

@@ -14,6 +14,8 @@ internal class Scheduler : IDisposable
 
     private bool _startupRunsIssued;
 
+    private string? _lastCleanupDate;
+
     public void Start()
     {
         if (_loop is not null)
@@ -116,6 +118,14 @@ internal class Scheduler : IDisposable
 
     private void Tick()
     {
+        // 每日清理一次（历史/脚本控制台/管理器日志按保留天数，服务持续运行期间同样生效）。
+        string today = DateTime.Now.ToString("yyyy-MM-dd");
+        if (!string.Equals(_lastCleanupDate, today, StringComparison.Ordinal))
+        {
+            _lastCleanupDate = today;
+            RuntimeContext.Instance.History.Cleanup(RuntimeContext.Instance.Settings.HistoryRetentionDays);
+        }
+
         if (!_startupRunsIssued)
         {
             _startupRunsIssued = true;

@@ -35,9 +35,9 @@ internal static class ConfigStore
 
     private static void Normalize(AppSettings settings)
     {
-        if (settings.HistoryRetentionDays < 1)
+        if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > 180)
         {
-            settings.HistoryRetentionDays = 3;
+            settings.HistoryRetentionDays = 7;
         }
         if (settings.WebPort < 1024 || settings.WebPort > 65535)
         {

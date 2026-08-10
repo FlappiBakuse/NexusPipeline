@@ -12,11 +12,11 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-node uitest\test.mjs           # 全量 466 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
-node uitest\test.mjs --ci      # CI 核心回归集：443 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
+node uitest\test.mjs           # 全量 479 项断言（发布前本地回归）；先跑 build.cmd，否则 setupRuntime 直接中止
+node uitest\test.mjs --ci      # CI 核心回归集：456 项断言（剔除纯外观用例 testResponsiveShell，含响应式粗检）
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 466 / 443（用例增减须同步更新本文件数字）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；断言数字 479 / 456（用例增减须同步更新本文件数字）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：99 项断言（场景 A/B/C/D、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
@@ -35,21 +35,21 @@ node uitest\test.mjs --ci      # CI 核心回归集：443 项断言（剔除纯�
 | 位置 | 内容 |
 |---|---|
 | `config/settings|scripts|queues.json` | 用户配置（PascalCase，**含加密密钥与用户数据，永不提交**；`Program.MigrateLegacyConfig()` 负责旧配置迁移） |
-| `history/YYYY-MM-DD/HH-mm-ss.json` + `.log` | 运行状态（PascalCase，如 `Attempts`/`FinalStatus`/`LogFile`）+ 脚本日志全文（成对，冲突加 `-1` 后缀） |
-| `logs/YYYY-MM-DD.log` | 脚本控制台输出（与脚本日志严格分离） |
-| `logs/nexus-pipeline-YYYYMMDD.log` | 管理器日志，审计行 `[审计] 来源 \| 操作（详情）`，来源 web/manage/cli/scheduler/system |
+| `history/YYYY-MM-DD/HH-mm-ss.json` + `.log` + `.console.log` | 运行状态（PascalCase，如 `Attempts`/`FinalStatus`/`LogFile`）+ 脚本日志全文 + 本次运行完整控制台输出（三件套成对，冲突加 `-1` 后缀；控制台与脚本日志均 20MB 截断） |
+| `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志，审计行 `[审计] 来源 \| 操作（详情）`，来源 web/manage/cli/scheduler/system |
 
 - **磁盘 JSON = PascalCase；Web API 返回 camelCase**（`JsonOpts.Web`）；读测试 JSON 前先 `.replace(/^\uFEFF/, "")` 去 BOM。
 - `FinalStatus`：success / partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled。
 - `plugins/` 必须有占位文件（git 不跟踪空目录）——删除时保留 `plugins/.gitkeep`。
+- **清理（v0.4.4+）**：历史/管理器日志/旧聚合文件按保留天数（`HistoryRetentionDays`，默认 7、上限 180 由 `limits.json` 的 `MaxHistoryRetentionDays` 约束）每天清理一次（启动时 + 调度器每日首次 tick，服务持续运行同样生效）。
 
 ## 日志级别（v0.1.1+）
 
-- 管理器日志（`logs/nexus-pipeline-YYYYMMDD.log`）带级别：`[HH:mm:ss] [LEVEL] 消息`，LEVEL 为 DEBUG/INFO/WARN/ERROR/FATAL。
+- 管理器日志（`logs/nexus-pipeline-YYYY-MM-DD.log`）带级别：`[HH:mm:ss] [LEVEL] 消息`，LEVEL 为 DEBUG/INFO/WARN/ERROR/FATAL。
 - **禁止使用 `Logger.Log(msg)`**：一律显式调用 `Logger.Debug/Info/Warn/Error/Fatal(msg)`（审计行 `Audit.Log` 为 INFO，跟随阈值不过滤豁免）。
 - 阈值取自 `settings.json` 的 `LogLevel`（debug/info/warn/error/fatal，默认 info），**即时生效**；`ConfigStore.Normalize` 校验非法值回退 info。
 - DEBUG 级 Web 请求记录在 `WebServer.HandleAsync`，`GET /api/status` 轮询豁免不记录。
-- 控制台按级别着色（WARN 黄 / ERROR 红 / FATAL 红底白字），仅在 `Console.IsOutputRedirected == false` 时启用；`logs/YYYY-MM-DD.log`（脚本控制台输出，ConsoleLog）不参与级别过滤。
+- 控制台按级别着色（WARN 黄 / ERROR 红 / FATAL 红底白字），仅在 `Console.IsOutputRedirected == false` 时启用；控制台输出不参与级别过滤（v0.4.4 起随历史按次保存，`ConsoleLog` 聚合文件已废弃）。
 
 ## 环境陷阱（Windows PowerShell 5.1）
 
@@ -87,6 +87,7 @@ node uitest\test.mjs --ci      # CI 核心回归集：443 项断言（剔除纯�
 - **判断脚本触发时机（v0.4.0+）**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（拿最终判定，仅一次防循环；日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
 - **运行前置（v0.4.2+）**：脚本实例运行必须至少有一个启用用户；手动运行（Web/CLI/调度中心）无启用用户时拒绝启动并报错，调度队列运行时跳过该脚本实例并记录 failed 历史（「脚本实例未配置启用用户，已跳过」），队列进度不计入该任务。
 - **运行超时（v0.4.3+）**：`TotalTimeoutMinutes`（运行总时间超时）按**整个运行**（含全部重试与前置/后置用户脚本）计时，超时判定失败且不再重试；单次尝试时长由日志无更新超时控制。
+- **远程访问（v0.4.4+）**：默认仅绑定 `127.0.0.1` 无认证；`settings.json` 的 `AllowRemoteAccess=true` 时绑定 `http://+:{port}/`（**禁止用 `0.0.0.0` 前缀**——http.sys 不接受，绑定必失败），**远程请求**（非回环地址）须带请求头 `Authorization: Bearer <token>`（令牌 DPAPI 加密存 `AccessToken`），本地请求豁免；开启时 `WebServer.Start` 绑定生效需重启，令牌校验即时生效。**防火墙**：开启远程（设置保存或启动时）自动 `netsh` 添加入站允许规则（`FirewallRule.EnsureAllowInbound`，失败仅告警），局域网设备访问须用本机局域网 IP（`NetInfo.ListLanAddresses` 枚举，写入启动日志与 `/api/settings` 的 `status.remote.lanAddresses`）。`Bootstrap.StartWebWithRetry` 每次重试必须新建 WebServer 实例（HttpListener.Start 失败后实例不可复用，复用抛 ObjectDisposedException 会闪退——已踩坑），非端口冲突异常返回 null 不崩溃。
 - **脚本路径校验**（`Limits.CheckScriptPaths`，Web/API/CLI 三处统一）：通用脚本根目录/主程序/配置路径必须存在（主程序需可执行），日志路径仅格式合规（支持占位符与通配符，不查存在性）；专项脚本（插件固化路径）仅校验根目录存在；游戏路径一律必填且必须为可执行文件（运行前启动游戏、运行后强制关闭游戏均与游戏路径填写解绑；任务失败时无条件强制结束游戏进程）。游戏配置卡在弹窗内**常驻显示**（不与启动游戏复选框绑定）。
 - **脚本图标**：`ApiScriptsHandler.ExtractIcon` 取主程序 PE 资源最高分辨率图标（`EnumResourceNames` 遍历 RT_GROUP_ICON，GRPICONDIR 选最大，含 256×256），无资源回退关联图标，bat/cmd 直接 404（前端占位图）。
 - 日志路径为「路径格式」（如 `{YYYY-MM-DD}.log`、`{YYYY-MM-DD-*}.log`、固定文件 `log.txt`），严格按格式匹配（`LogPattern.ResolveFile`），禁止格式外猜测；脚本启动后无日志条目按"日志无更新超时"失败。

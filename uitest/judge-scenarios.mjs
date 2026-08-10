@@ -808,7 +808,7 @@ if (enabled.length > 0 && undone.length === 0) {
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
   assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
   assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
-  const logPath = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logPath = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   let managerLog = "";
   if (fs.existsSync(logPath)) managerLog = fs.readFileSync(logPath, "utf8");
   assert(managerLog.includes("已强制关闭游戏"), "尝试2 失败后游戏进程被强制结束（管理器日志含「已强制关闭游戏」）");

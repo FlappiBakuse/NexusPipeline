@@ -9,7 +9,12 @@ internal sealed class PluginManager
 
     public IReadOnlyList<IPlugin> Plugins => _plugins;
 
-    public INotifyChannel? NotifyChannel => _plugins.OfType<INotifyChannel>().FirstOrDefault();
+    /// <summary>全部已启用的通知通道（内置 + 外部 INotifyChannel 并存，多通道同时发送）。</summary>
+    public IReadOnlyList<INotifyChannel> NotifyChannels =>
+        _plugins.OfType<IPlugin>()
+            .Where(p => p is INotifyChannel && IsEnabled(p.Name))
+            .Cast<INotifyChannel>()
+            .ToList();
 
     /// <summary>已启用的专用插件（专项脚本实例的适配能力来源）。</summary>
     public IReadOnlyList<ISpecializedScriptPlugin> SpecializedPlugins =>
@@ -39,20 +44,41 @@ internal sealed class PluginManager
         }
     }
 
+    /// <summary>向全部已启用通知通道分发脚本运行通知（多通道并存，单个通道失败不影响其余）。</summary>
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
     {
-        if (NotifyChannel is { } channel)
+        foreach (INotifyChannel channel in NotifyChannels)
         {
-            await channel.NotifyScriptAsync(script, record).ConfigureAwait(false);
+            try
+            {
+                await channel.NotifyScriptAsync(script, record).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[通知] 通道「{channelName(channel)}」发送脚本通知失败：{ex.Message}");
+            }
         }
     }
 
+    /// <summary>向全部已启用通知通道分发队列汇总通知（多通道并存，单个通道失败不影响其余）。</summary>
     public async Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
     {
-        if (NotifyChannel is { } channel)
+        foreach (INotifyChannel channel in NotifyChannels)
         {
-            await channel.NotifyQueueAsync(queue, records).ConfigureAwait(false);
+            try
+            {
+                await channel.NotifyQueueAsync(queue, records).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[通知] 通道「{channelName(channel)}」发送队列通知失败：{ex.Message}");
+            }
         }
+    }
+
+    private static string channelName(INotifyChannel channel)
+    {
+        return channel is IPlugin plugin ? plugin.DisplayName : channel.GetType().Name;
     }
 
     public void LoadAll()

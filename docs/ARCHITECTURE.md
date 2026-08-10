@@ -114,6 +114,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 通用插件 | `IPlugin`（+ 能力接口如 `INotifyChannel`） | 为程序添加能力 | 内置插件白名单 `EnabledPlugins`（默认 notify）；外部插件默认启用 |
 | 专用插件 | `ISpecializedScriptPlugin : IPlugin` | 接管专项脚本实例配置：`Resolve(rootPath)` 推导主程序/参数/配置/日志/完成标志 | 外部插件默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
 
+> **通知通道（v0.4.4+）**：`INotifyChannel` 为**多通道并存**语义——`PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发至全部已启用通道（内置 NotifyPlugin 内部按 Webhook/SMTP 独立开关并行双发；外部插件实现 `INotifyChannel` 即额外通道，与内置并存，通知正文各通道一致）。单个通道异常仅记警告，不影响其余通道。
+
 ### 编写专用插件（示例：`extensions/BetterGIAdapter/`）
 
 ```csharp

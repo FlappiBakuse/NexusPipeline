@@ -63,6 +63,11 @@ internal class RunSession
 
     private bool _scriptLogTruncated;
 
+    /// <summary>本次运行完整控制台输出（stdout/stderr 捕获 + 分隔行），运行结束随历史按次保存。</summary>
+    private readonly StringBuilder _consoleFullLog = new();
+
+    private bool _consoleLogTruncated;
+
     /// <summary>整个运行（含全部重试与前置/后置脚本）的开始时间：TotalTimeoutMinutes 以它为准。</summary>
     private DateTime _runStartedAt;
 
@@ -88,6 +93,30 @@ internal class RunSession
         {
             return _scriptFullLog.ToString();
         }
+    }
+
+    /// <summary>本次运行完整控制台输出（超限截断时含说明行）。</summary>
+    public string ConsoleLog
+    {
+        get
+        {
+            return _consoleFullLog.ToString();
+        }
+    }
+
+    private void AppendConsoleLog(string line)
+    {
+        if (_consoleLogTruncated)
+        {
+            return;
+        }
+        if (_consoleFullLog.Length > MaxScriptLogBytes)
+        {
+            _consoleLogTruncated = true;
+            _consoleFullLog.AppendLine("（控制台输出超过 20MB，已截断尾部）");
+            return;
+        }
+        _consoleFullLog.AppendLine(line);
     }
 
     private void AppendScriptLog(string line)
@@ -172,8 +201,8 @@ internal class RunSession
                     StartTime = DateTime.Now,
                 };
                 record.AttemptDetails.Add(attempt);
-                attempt.OutputFile = ConsoleLog.FileFor(DateTime.Now);
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
+                AppendConsoleLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
@@ -295,7 +324,7 @@ internal class RunSession
         }
         _statusChanged?.Invoke($"{role}脚本已启动（PID {process.Id}）");
         Logger.Info($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
-        ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出开始（PID {process.Id}）");
+        AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出开始（PID {process.Id}）");
 
         void OnConsoleData(string? data)
         {
@@ -304,7 +333,7 @@ internal class RunSession
                 return;
             }
             _logLine?.Invoke(data);
-            ConsoleLog.Write(data);
+            AppendConsoleLog(data);
         }
 
         process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
@@ -345,7 +374,7 @@ internal class RunSession
         }
         finally
         {
-            ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出结束");
+            AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出结束");
         }
     }
 
@@ -454,7 +483,7 @@ internal class RunSession
             }
             _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
-            ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
+            AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
         }
 
         var outputTail = new StringBuilder();
@@ -471,7 +500,7 @@ internal class RunSession
                 outputTail.Remove(0, 4096);
             }
             _logLine?.Invoke(data);
-            ConsoleLog.Write(data);
+            AppendConsoleLog(data);
         }
 
         if (process is not null && stdoutAttached)
@@ -773,7 +802,7 @@ internal class RunSession
             result = RunAttemptResult.Failed($"监控异常：{ex.Message}");
         }
 
-        ConsoleLog.WriteSeparator($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出结束：{result?.Status}（{result?.Reason}）");
+        AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出结束：{result?.Status}（{result?.Reason}）");
         monitor?.Dispose();
         monitor = null;
         attempt.OutputTail = TextRules.TakeTail(outputTail.ToString(), 50);

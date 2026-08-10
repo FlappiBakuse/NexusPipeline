@@ -31,6 +31,9 @@ internal class AppLimits
     public int MinTotalMinutes { get; set; } = 5;
 
     public int MaxTotalMinutes { get; set; } = 720;
+
+    /// <summary>历史保留天数上限（默认 180 天）。</summary>
+    public int MaxHistoryRetentionDays { get; set; } = 180;
 }
 
 /// <summary>约束体系：绝对安全区间（内置默认值）静默生效；超安全值但入警告区间 → 启动警告；超警告区间或区间矛盾 → FATAL 拒绝启动。</summary>
@@ -73,6 +76,7 @@ internal static class Limits
         CheckRange(limits.MinAttempts, limits.MaxAttempts, 1, 10, 30, "尝试次数（Min/MaxAttempts）", warnings, fatals);
         CheckRange(limits.MinStallMinutes, limits.MaxStallMinutes, 1, 60, 480, "日志无更新超时（Min/MaxStallMinutes）", warnings, fatals);
         CheckRange(limits.MinTotalMinutes, limits.MaxTotalMinutes, 5, 720, 2880, "运行总时间超时（Min/MaxTotalMinutes）", warnings, fatals);
+        CheckCount(limits.MaxHistoryRetentionDays, 180, 365, "MaxHistoryRetentionDays（历史保留天数上限）", warnings, fatals);
 
         Current = limits;
         Warnings.Clear();
@@ -153,6 +157,11 @@ internal static class Limits
     public static string? CheckTotalMinutes(int value)
     {
         return value >= Current.MinTotalMinutes && value <= Current.MaxTotalMinutes ? null : $"运行总时间超时须在 {Current.MinTotalMinutes}-{Current.MaxTotalMinutes} 分钟之间";
+    }
+
+    public static string? CheckRetentionDays(int value)
+    {
+        return value >= 1 && value <= Current.MaxHistoryRetentionDays ? null : $"历史保留天数须在 1-{Current.MaxHistoryRetentionDays} 天之间";
     }
 
     /// <summary>

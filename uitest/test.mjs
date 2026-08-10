@@ -17,8 +17,8 @@ const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
-const EXPECTED = 466;
-const CI_EXPECTED = 443;
+const EXPECTED = 479;
+const CI_EXPECTED = 456;
 
 let passed = 0;
 let failed = 0;
@@ -172,7 +172,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.4.3"), "版本显示 0.4.3（x.x.x 不带 v）");
+  assert(body.includes("0.4.4"), "版本显示 0.4.4（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -616,7 +616,7 @@ async function testLogScroll(page) {
 }
 
 async function testHistoryFiles() {
-  console.log("[用例] 历史文件夹：.log/.json 配对 + 脚本日志与控制台输出分离 + partial 判定");
+  console.log("[用例] 历史文件夹：.json/.log/.console.log 三件套 + 脚本日志与控制台输出分离 + partial 判定");
   const historyRoot = path.join(runtimeDir, "history");
   const dayDir = path.join(historyRoot, latestHistoryDay());
   await waitFor(() => fs.existsSync(dayDir), 8000);
@@ -626,6 +626,7 @@ async function testHistoryFiles() {
   assert(jsons.length >= 1, "存在 .json 状态文件（" + jsons.length + " 个）");
   assert(logs.length >= 1, "存在 .log 日志文件（" + logs.length + " 个）");
   assert(jsons.some(f => logs.includes(f.replace(".json", ".log"))), ".log 与 .json 同名配对");
+  assert(jsons.some(f => logs.includes(f.replace(".json", ".console.log"))), ".console.log 与 .json 同名配对（三件套）");
 
   const newestJson = jsons[jsons.length - 1];
   const readText = p => fs.readFileSync(p, "utf8").replace(/^\uFEFF/, "");
@@ -638,23 +639,14 @@ async function testHistoryFiles() {
   assert(scriptLog.includes("[SCRIPT]"), "历史 .log 含脚本日志内容");
   assert(!scriptLog.includes("[CONSOLE]"), "历史 .log 不含控制台输出（分离）");
 
-  const logRoot = path.join(runtimeDir, "logs");
-  const latestConsole = () => {
-    const files = fs.existsSync(logRoot) ? fs.readdirSync(logRoot).filter(f => /^\d{4}-\d{2}-\d{2}\.log$/.test(f)).sort() : [];
-    return files.length ? files[files.length - 1] : localDate() + ".log";
-  };
-  const consoleFile = path.join(logRoot, latestConsole());
-  assert(fs.existsSync(consoleFile), "logs/YYYY-MM-DD.log 存在");
-  if (fs.existsSync(consoleFile)) {
-    const consoleText = readText(consoleFile);
-    assert(consoleText.includes("[CONSOLE]"), "控制台日志含控制台输出");
-    assert(!consoleText.includes("[SCRIPT]"), "控制台日志不含脚本日志内容（分离）");
-  }
+  const consoleLog = readText(path.join(dayDir, newestJson.replace(".json", ".console.log")));
+  assert(consoleLog.includes("[CONSOLE]"), "历史 .console.log 含控制台输出");
+  assert(!consoleLog.includes("[SCRIPT]"), "历史 .console.log 不含脚本日志内容（分离）");
 }
 
 async function testAudit(page) {
   console.log("[用例] 审计日志：增删改/查询记录 + 轮询豁免");
-  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "");
 
   const aDir = makeScriptDir("audit");
@@ -697,7 +689,7 @@ async function testAudit(page) {
 
 async function testLogLevel(page) {
   console.log("[用例] 日志级别：设置 UI / 落盘 / 阈值过滤 / DEBUG 请求记录");
-  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
 
   await page.click('nav a[href="#/settings"]');
@@ -1456,7 +1448,7 @@ async function testGameProcessConfirm() {
   const bid = (await b.json()).id;
   await api("POST", `/api/scripts/${bid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: bid, mode: "manual" });
-  const managerLog = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const managerLog = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const seenConfirm = await waitFor(() => {
     if (!fs.existsSync(managerLog)) return false;
     return fs.readFileSync(managerLog, "utf8").includes("已确认游戏进程启动");
@@ -1951,7 +1943,7 @@ async function testLaunchTargetArgs(page) {
   assert(managerOut5.includes("exec target.bat"), "引号内容按普通参数原样传给主程序");
   await api("DELETE", "/api/scripts/" + sQ.id);
 
-  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
   const logBefore = readLog();
   const s4 = await createScript({
@@ -2388,7 +2380,7 @@ async function testPagination(page) {
 
 async function testLimitsWarnings(page) {
   console.log("[用例] 约束警告：非法配置告警 + 前端卡片（知道了/不再提醒）");
-  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
   const limitsFile = path.join(runtimeDir, "config", "limits.json");
 
@@ -2432,9 +2424,47 @@ async function testLimitsWarnings(page) {
   assert(l2.warnings.length === 0 && l2.limits.maxScripts === 25, "恢复默认配置后无警告");
 }
 
+async function testRemoteAndRetention() {
+  console.log("[用例] 远程访问设置（令牌加密存储 + 本地豁免）与历史保留天数上限校验");
+  const bad = await api("PUT", "/api/settings", { historyRetentionDays: 999 });
+  assert(bad.status === 400, "历史保留天数 999 被拒（400）");
+  const good = await api("PUT", "/api/settings", { historyRetentionDays: 7 });
+  assert(good.ok, "历史保留天数 7 保存成功");
+  const on = await api("PUT", "/api/settings", { allowRemoteAccess: true, secretKey: "accessToken", secretValue: "test-token-123" });
+  assert(on.ok, "开启远程访问 + 设置访问令牌成功");
+  const settings = await (await fetch(baseUrl + "api/settings")).json();
+  assert(settings.settings.allowRemoteAccess === true, "设置回读 allowRemoteAccess=true");
+  assert(settings.settings.accessToken === "enc:***", "令牌已加密存储（回显掩码 enc:***）");
+  assert(settings.status.remote && settings.status.remote.tokenSet === true, "状态含远程令牌已设置标记");
+  assert(Array.isArray(settings.status.remote.lanAddresses), "状态含局域网地址列表 lanAddresses（数组）");
+  assert(settings.status.remote.lanAddresses.every(addr => /^\d{1,3}(\.\d{1,3}){3}$/.test(addr)), "lanAddresses 均为点分 IPv4 格式");
+  const st = await fetch(baseUrl + "api/status");
+  assert(st.ok, "本地请求豁免令牌校验（/api/status 200）");
+  const off = await api("PUT", "/api/settings", { allowRemoteAccess: false });
+  assert(off.ok, "关闭远程访问成功");
+}
+
+async function testPortRetry() {
+  console.log("[用例] Web 端口占用自动 +1 重试（HttpListener 复用崩溃修复验证）");
+  const second = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: "ignore" });
+  const ok = await waitFor(async () => {
+    try {
+      const res = await fetch("http://127.0.0.1:58732/api/status");
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, 20000, 300);
+  assert(ok, "端口 58731 被占用时自动重试到 58732（/api/status 可达）");
+  assert(second.exitCode === null, "重试成功且进程未崩溃（exitCode=null）");
+  second.kill();
+  await sleep(600);
+  assert(true, "第二个实例已清理");
+}
+
 async function testLimitsFatal() {
   console.log("[用例] 约束 FATAL：致命配置拒绝启动");
-  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate().replace(/-/g, "") + ".log");
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
   const limitsFile = path.join(runtimeDir, "config", "limits.json");
 
@@ -2488,9 +2518,9 @@ async function main() {
         testV020Features, testSpecializedScript, testLaunchTargetArgs, testMarch7thPlugin, testZenlessPlugin, testPluginConfig, testNotifyPluginGating, testNextScheduleAndStats,
         testLogPattern,
         testQueueCrud, testTimeSetMergeAndGap, testDispatchAndHistory, testLogScroll, testHistoryFiles,
-        testAudit, testLogLevel,
+        testAudit, testLogLevel, testRemoteAndRetention,
         testJudgeKeywords, testJudgeScript, testJudgeReplace, testJudgeFinalTrigger, testJudgePeriodic, testJudgeFrontend,
-        testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testLimitsFatal,
+        testLimitsApi, testLimitsFields, testPagination, testLimitsWarnings, testPortRetry, testLimitsFatal,
       ];
       for (const test of tests) {
         if (CI && CI_SKIP.has(test.name)) {
