@@ -63,6 +63,9 @@ internal class RunSession
 
     private bool _scriptLogTruncated;
 
+    /// <summary>整个运行（含全部重试与前置/后置脚本）的开始时间：TotalTimeoutMinutes 以它为准。</summary>
+    private DateTime _runStartedAt;
+
     private ScriptUser? _activeUser;
 
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
@@ -83,10 +86,6 @@ internal class RunSession
     {
         get
         {
-            if (_scriptLogTruncated)
-            {
-                _scriptFullLog.AppendLine("（脚本日志超过 20MB，已截断尾部）");
-            }
             return _scriptFullLog.ToString();
         }
     }
@@ -100,6 +99,7 @@ internal class RunSession
         if (_scriptFullLog.Length > MaxScriptLogBytes)
         {
             _scriptLogTruncated = true;
+            _scriptFullLog.AppendLine("（脚本日志超过 20MB，已截断尾部）");
             return;
         }
         _scriptFullLog.AppendLine(line);
@@ -107,6 +107,7 @@ internal class RunSession
 
     public async Task<RunRecord> RunAsync()
     {
+        _runStartedAt = DateTime.Now;
         var record = new RunRecord
         {
             ScriptInstanceId = _script.Id,
@@ -316,7 +317,13 @@ internal class RunSession
             using var timeoutCts = new CancellationTokenSource();
             if (_script.TotalTimeoutMinutes > 0)
             {
-                timeoutCts.CancelAfter(TimeSpan.FromMinutes(_script.TotalTimeoutMinutes));
+                double remainingSeconds = _script.TotalTimeoutMinutes * 60.0 - (DateTime.Now - _runStartedAt).TotalSeconds;
+                if (remainingSeconds <= 0)
+                {
+                    SystemActions.KillTree(process.Id);
+                    return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
+                }
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(remainingSeconds));
             }
             using var combined = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
             try
@@ -562,7 +569,7 @@ internal class RunSession
                 }
 
                 if (_script.TotalTimeoutMinutes > 0
-                    && (DateTime.Now - attemptStart).TotalMinutes >= _script.TotalTimeoutMinutes)
+                    && (DateTime.Now - _runStartedAt).TotalMinutes >= _script.TotalTimeoutMinutes)
                 {
                     result = RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
                     break;
@@ -821,7 +828,19 @@ internal class RunSession
     {
         string scriptDir = UserConfigManager.ScriptDir(_script.Id, _activeUser?.Name);
         List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir);
-        string inputJson = JudgeScriptRunner.BuildInput(_script, _activeUser, files, scriptDir, _scriptFullLog.ToString());
+        bool logTruncated = false;
+        string logText;
+        int logLength = _scriptFullLog.Length;
+        if (logLength > JudgeScriptRunner.MaxJudgeLogChars)
+        {
+            logTruncated = true;
+            logText = _scriptFullLog.ToString(logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars);
+        }
+        else
+        {
+            logText = _scriptFullLog.ToString();
+        }
+        string inputJson = JudgeScriptRunner.BuildInput(_script, _activeUser, files, scriptDir, logText, logTruncated);
         JudgeScriptResult judge = await JudgeScriptRunner.ExecuteAsync(_script, inputJson, files, _script.ConfigPath, scriptDir, _token).ConfigureAwait(false);
         if (judge.JudgeError is not null)
         {

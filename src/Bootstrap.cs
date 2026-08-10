@@ -6,13 +6,14 @@ namespace NexusPipeline;
 /// <summary>服务启动/停止编排：插件、历史清理、调度器、Web 服务（端口重试）。</summary>
 internal static class Bootstrap
 {
-    /// <summary>加载插件、清理过期历史、启动调度器。</summary>
+    /// <summary>加载插件、清理过期历史、启动调度器与配置恢复重试。</summary>
     public static void StartServices()
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.Plugins.LoadAll();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();
+        UserConfigManager.StartRecoveryRetry();
     }
 
     /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。失败返回 null。</summary>
@@ -43,11 +44,12 @@ internal static class Bootstrap
         return web;
     }
 
-    /// <summary>停止调度器、Web 服务与全部插件。</summary>
+    /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件。</summary>
     public static void Shutdown(WebServer? web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.Scheduler.Stop();
+        UserConfigManager.StopRecoveryRetry();
         web?.Stop();
         ctx.Plugins.ShutdownAll();
     }

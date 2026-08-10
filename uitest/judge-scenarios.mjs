@@ -386,12 +386,13 @@ nexus.writeFile("count", String(n));`;
   const scriptDir = userScriptDir(created.id);
   const countFile = path.join(scriptDir, "count");
   let maxCount = 0;
-  const probeDeadline = Date.now() + 170000;
-  while (Date.now() < probeDeadline && (await runningCount()) > 0) {
+  const probeDeadline = Date.now() + 215000;
+  while (Date.now() < probeDeadline) {
     if (fs.existsSync(countFile)) {
       maxCount = Math.max(maxCount, Number(fs.readFileSync(countFile, "utf8").trim()) || 0);
     }
-    await sleep(250);
+    if ((await runningCount()) === 0) break;
+    await sleep(100);
   }
   const ended = await waitNoRunning(30000);
   const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
@@ -698,6 +699,60 @@ console.log(JSON.stringify({ status: "failed", reason: "crash-replace", replaceC
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
+async function testSwapCrashRecovery() {
+  console.log("[用例] 崩溃恢复：配置交换运行中强制终止服务 → 重启 → 现场还原");
+  const dir = path.join(runtimeDir, "mt-swapcrash");
+  const logDir = path.join(runtimeDir, "mt-swapcrash-log");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(logDir, { recursive: true, force: true });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(logDir, { recursive: true });
+  const cfgFile = path.join(dir, "cfg.txt");
+  fs.writeFileSync(cfgFile, "ORIGINAL", "utf8");
+  fs.writeFileSync(path.join(dir, "nexusmt-swapcrash.bat"), [
+    "@echo off",
+    "echo SWAP-RUN >> " + logDir.replace(/\\/g, "\\\\") + "\\log.txt",
+    "ping -n 20 127.0.0.1 >nul",
+    "exit /b 0",
+  ].join("\r\n") + "\r\n", "ascii");
+  const created = await createJudgeScript({
+    name: "交换崩溃恢复", rootPath: dir, mainExe: path.join(dir, "nexusmt-swapcrash.bat"),
+    configPath: dir, logPath: path.join(logDir, "log.txt"),
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript",
+    judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "ok" }));',
+  });
+  assert(created.ok, "创建交换崩溃脚本（默认用户快照=ORIGINAL）");
+  fs.writeFileSync(cfgFile, "MODIFIED", "utf8");
+  const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
+  assert(dispatch.ok, "dispatch 成功（现场 MODIFIED → cache，快照 ORIGINAL → configPath）");
+  const swapped = await waitFor(() => {
+    try {
+      return fs.readFileSync(cfgFile, "utf8").trim() === "ORIGINAL";
+    } catch {
+      return false;
+    }
+  }, 20000, 200);
+  assert(swapped, "交换已完成（运行中 configPath=用户快照 ORIGINAL）");
+  await stopService();
+  await sleep(4000);
+  startService();
+  await waitForService();
+  const restored = await waitFor(() => {
+    try {
+      return fs.readFileSync(cfgFile, "utf8").trim() === "MODIFIED";
+    } catch {
+      return false;
+    }
+  }, 60000, 500);
+  assert(restored, "重启后配置交换自动还原现场（延迟重试，cfg.txt=MODIFIED）");
+  const userDir = path.join(runtimeDir, "data", created.id, "默认");
+  assert(!fs.existsSync(path.join(userDir, ".session")), "恢复后 .session 标记已清除");
+  const cacheDir = path.join(userDir, "cache");
+  assert(!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0, "恢复后 cache 已清空");
+  await api("DELETE", "/api/scripts/" + created.id);
+}
+
 async function testScenarioD() {
   console.log("[用例] 场景D：极端崩溃（无日志崩溃→游戏崩溃→脚本崩溃）→ 3次失败 + 通知「任务4运行失败」");
   const dir = makeMultiTaskDir("d", ["1|enabled|crash-silent", "2|enabled|game-crash", "3|disabled|success", "4|enabled|script-crash"]);
@@ -839,6 +894,7 @@ async function main() {
   await testBugReplaceMultiRoundRestore();
   await testSingleFileConfig();
   await testCrashRecovery();
+  await testSwapCrashRecovery();
   await testNoUserRejected();
   await testQueueSkipNoUser();
 

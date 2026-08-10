@@ -34,7 +34,7 @@ internal class JudgeScriptInputFile
 
 /// <summary>
 /// 自定义完成标志判断脚本执行器：
-/// - 输入：脚本实例字段 + 当前用户 + config（运行时生效配置，只读）与 script（可读写）目录全递归文件清单 + 当前日志全文，打包为 JSON；
+/// - 输入：脚本实例字段 + 当前用户 + config（运行时生效配置，只读）与 script（可读写）目录全递归文件清单 + 当前日志全文（超过 4MB 仅提供尾部并置 logTruncated=true），打包为 JSON；
 /// - JavaScript 用内置 Jint 引擎（无 Node 库，注入 __NEXUS_INPUT__ / nexus.readFile / nexus.writeFile（限 script 目录）/ nexus.listFiles / console.log）；
 /// - Python 用系统 python.exe（sys.argv[1] 为输入 JSON 路径；可读写约定由文档约束，进程权限无法技术限制）；
 /// - 输出契约：stdout 最后一行 JSON {"status":"success|failed","reason":"...","notifyText":"可选","replaceConfigs":["相对script目录路径"]}，status/reason 必填；
@@ -45,6 +45,9 @@ internal static class JudgeScriptRunner
     private const int ScriptTimeoutSeconds = 30;
 
     private const long MaxReadFileBytes = 2 * 1024 * 1024;
+
+    /// <summary>输入 JSON 中 log 字段的字符上限：超出仅提供尾部，并置 logTruncated=true（避免超大日志拖垮内置引擎解析导致 30 秒超时）。</summary>
+    internal const int MaxJudgeLogChars = 4 * 1024 * 1024;
 
     private static readonly string[] JudgeExtensions = { ".js", ".py" };
 
@@ -108,8 +111,8 @@ internal static class JudgeScriptRunner
         }
     }
 
-    /// <summary>构建输入 JSON：脚本字段 + 用户 + config/script 文件清单 + 日志全文 + scriptDir。</summary>
-    public static string BuildInput(ScriptInstance script, ScriptUser? user, List<JudgeScriptInputFile> files, string scriptDir, string logText)
+    /// <summary>构建输入 JSON：脚本字段 + 用户 + config/script 文件清单 + 日志全文（超限截断尾部）+ scriptDir。</summary>
+    public static string BuildInput(ScriptInstance script, ScriptUser? user, List<JudgeScriptInputFile> files, string scriptDir, string logText, bool logTruncated)
     {
         return JsonSerializer.Serialize(new
         {
@@ -147,6 +150,7 @@ internal static class JudgeScriptRunner
             scriptDir,
             files = files.Select(file => new { file.Root, file.Path, file.Abs }).ToArray(),
             log = logText,
+            logTruncated,
         });
     }
 

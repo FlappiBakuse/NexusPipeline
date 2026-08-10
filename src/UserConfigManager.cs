@@ -578,7 +578,7 @@ internal static class UserConfigManager
 
     /* ---------------- 会话与恢复 ---------------- */
 
-    /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。</summary>
+    /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
     public static void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
@@ -593,11 +593,20 @@ internal static class UserConfigManager
             return;
         }
         Logger.Info($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
-        DoRestore(scriptId, userName, mark);
-        Audit.Log(Audit.System, "恢复配置交换", $"{mark.ConfigPath}（用户 {userName}）");
+        try
+        {
+            DoRestore(scriptId, userName, mark);
+            Audit.Log(Audit.System, "恢复配置交换", $"{mark.ConfigPath}（用户 {userName}）");
+        }
+        catch (Exception ex)
+        {
+            Audit.Log(Audit.System, "恢复配置交换失败", $"{mark.ConfigPath}（用户 {userName}）：{ex.Message}");
+            EnqueuePendingRecover(scriptId, userName);
+        }
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。</summary>
+    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。
+    /// 还原失败（如脚本孤儿进程仍占用配置目录）记入待办，由 <see cref="StartRecoveryRetry"/> 后台循环延迟重试。</summary>
     public static void RecoverInterrupted()
     {
         try
@@ -609,64 +618,175 @@ internal static class UserConfigManager
             foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
             {
                 string scriptId = Path.GetFileName(scriptDir);
-                string noUserBackup = Path.Combine(scriptDir, "replace-backup");
-                if (Directory.Exists(noUserBackup) && Directory.EnumerateFileSystemEntries(noUserBackup).Any())
-                {
-                    Logger.Info($"[恢复] 检测到未还原的配置替换（无用户），还原脚本 {scriptId} 的配置。");
-                    try
-                    {
-                        RestoreConfigReplacements(scriptId, null);
-                        Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId}（无用户）");
-                    }
-                    catch (Exception ex)
-                    {
-                        Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId}：{ex.Message}");
-                    }
-                }
+                TryRecoverItem(scriptId, null);
                 foreach (string userDir in Directory.GetDirectories(scriptDir))
                 {
                     string userName = Path.GetFileName(userDir);
-                    string userBackup = Path.Combine(userDir, "replace-backup");
-                    if (Directory.Exists(userBackup) && Directory.EnumerateFileSystemEntries(userBackup).Any())
-                    {
-                        Logger.Info($"[恢复] 检测到未还原的配置替换，还原脚本 {scriptId} 用户 {userName} 的配置。");
-                        try
-                        {
-                            RestoreConfigReplacements(scriptId, userName);
-                            Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId} / 用户 {userName}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId} / 用户 {userName}：{ex.Message}");
-                        }
-                    }
-                    ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
-                    if (mark is null)
-                    {
-                        continue;
-                    }
-                    string cache = Path.Combine(userDir, "cache");
-                    if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
-                    {
-                        ConfigSessionMark.Clear(scriptId, userName);
-                        continue;
-                    }
-                    Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
-                    try
-                    {
-                        DoRestore(scriptId, userName, mark);
-                        Audit.Log(Audit.System, "启动恢复配置交换", $"脚本 {scriptId} / 用户 {userName}（{mark.ConfigPath}）");
-                    }
-                    catch (Exception ex)
-                    {
-                        Audit.Log(Audit.System, "启动恢复配置交换失败", $"脚本 {scriptId} / 用户 {userName}：{ex.Message}");
-                    }
+                    TryRecoverItem(scriptId, userName);
                 }
             }
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 扫描未完成配置交换失败：{ex.Message}");
+        }
+    }
+
+    /* ---------------- 延迟恢复重试（崩溃后脚本孤儿进程退出后自动还原） ---------------- */
+
+    private static readonly List<(string ScriptId, string? UserName)> PendingRecovers = new();
+
+    private static readonly object PendingSync = new();
+
+    private static CancellationTokenSource? _retryCts;
+
+    /// <summary>尝试恢复一个脚本/用户的全部残留（配置替换 + 配置交换）；返回是否已完全恢复，失败记入待办。</summary>
+    private static bool TryRecoverItem(string scriptId, string? userName)
+    {
+        bool ok = true;
+        if (HasBackupResidue(scriptId, userName) && !RecoverBackupQuiet(scriptId, userName))
+        {
+            ok = false;
+        }
+        if (ok && !string.IsNullOrWhiteSpace(userName))
+        {
+            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+            if (mark is not null)
+            {
+                string cache = CacheDir(scriptId, userName);
+                if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
+                {
+                    ConfigSessionMark.Clear(scriptId, userName);
+                }
+                else if (!RecoverSwapQuiet(scriptId, userName, mark))
+                {
+                    ok = false;
+                }
+            }
+        }
+        if (!ok)
+        {
+            EnqueuePendingRecover(scriptId, userName);
+        }
+        return ok;
+    }
+
+    private static bool HasBackupResidue(string scriptId, string? userName)
+    {
+        string dir = ReplaceBackupDir(scriptId, userName);
+        return Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any();
+    }
+
+    private static bool RecoverBackupQuiet(string scriptId, string? userName)
+    {
+        Logger.Info($"[恢复] 检测到未还原的配置替换，还原脚本 {scriptId} 用户 {userName ?? "(无用户)"} 的配置。");
+        try
+        {
+            RestoreConfigReplacements(scriptId, userName);
+            Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId} / 用户 {userName ?? "(无用户)"}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId}：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
+    {
+        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
+        try
+        {
+            DoRestore(scriptId, userName!, mark);
+            Audit.Log(Audit.System, "启动恢复配置交换", $"脚本 {scriptId} / 用户 {userName}（{mark.ConfigPath}）");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Audit.Log(Audit.System, "启动恢复配置交换失败", $"脚本 {scriptId} / 用户 {userName}：{ex.Message}");
+            return false;
+        }
+    }
+
+    private static void EnqueuePendingRecover(string scriptId, string? userName)
+    {
+        lock (PendingSync)
+        {
+            if (!PendingRecovers.Any(item => item.ScriptId == scriptId && item.UserName == userName))
+            {
+                PendingRecovers.Add((scriptId, userName));
+            }
+        }
+    }
+
+    /// <summary>启动后台恢复重试循环：每 10 秒尝试还原待办项（孤儿进程退出/文件解锁后自动完成），直至全部成功或进程退出。</summary>
+    public static void StartRecoveryRetry()
+    {
+        if (_retryCts is not null)
+        {
+            return;
+        }
+        var cts = new CancellationTokenSource();
+        _retryCts = cts;
+        _ = Task.Run(() => RecoveryRetryLoopAsync(cts.Token));
+        Logger.Info("配置恢复重试循环已启动。");
+    }
+
+    public static void StopRecoveryRetry()
+    {
+        try
+        {
+            _retryCts?.Cancel();
+        }
+        catch
+        {
+        }
+        _retryCts = null;
+    }
+
+    private static async Task RecoveryRetryLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                List<(string ScriptId, string? UserName)> pending;
+                lock (PendingSync)
+                {
+                    pending = new List<(string, string?)>(PendingRecovers);
+                }
+                foreach ((string scriptId, string? userName) in pending)
+                {
+                    try
+                    {
+                        if (TryRecoverItem(scriptId, userName))
+                        {
+                            lock (PendingSync)
+                            {
+                                PendingRecovers.RemoveAll(item => item.ScriptId == scriptId && item.UserName == userName);
+                            }
+                            Logger.Info($"[恢复] 延迟重试成功：脚本 {scriptId} / 用户 {userName ?? "(无用户)"} 的配置已还原。");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[恢复] 延迟重试异常（脚本 {scriptId}）：{ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 配置恢复重试循环异常：{ex.Message}");
+            }
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
         }
     }
 
@@ -736,9 +856,10 @@ internal static class UserConfigManager
                 };
                 string cache = CacheDir(scriptId, userName);
                 string store = StoreDir(scriptId, userName);
+                // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——cache 空时恢复仅清标记（现场未动），cache 有内容时完整还原。
+                mark.Write();
                 ClearPath(cache, PathKindUtil.KindOf(cache));
                 MoveAs(configPath, cache, PathKind.Dir);
-                mark.Write();
                 if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
                 {
                     CopyAs(store, configPath, RestoreKind(mark));
