@@ -1,8 +1,11 @@
 using System.Net;
 using NexusPipeline.Plugins;
+using NexusPipeline.Models;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("status")]
 internal static class ApiStatusHandler
 {
     public static async Task Handle(HttpListenerContext context, string method)

@@ -1,7 +1,9 @@
 using System.Net;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("plugins")]
 internal static class ApiPluginsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)

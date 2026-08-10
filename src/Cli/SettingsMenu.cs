@@ -1,3 +1,7 @@
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 namespace NexusPipeline.Cli;
 
 /// <summary>系统设置子菜单：自启动 / 轻量模式 / 历史保留 / Web 端口 / 浏览器 / 日志级别 / 清理。</summary>

@@ -17,8 +17,8 @@ const CI_SKIP = new Set([
   "testResponsiveShell",
 ]);
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
-const EXPECTED = 479;
-const CI_EXPECTED = 456;
+const EXPECTED = 480;
+const CI_EXPECTED = 457;
 
 let passed = 0;
 let failed = 0;
@@ -172,7 +172,7 @@ async function testDashboard(page) {
   assert(body.includes("通知推送"), "插件「通知推送」在页面可见");
   assert(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片");
   assert(body.includes("当前版本"), "首行含当前版本卡片");
-  assert(body.includes("0.4.4"), "版本显示 0.4.4（x.x.x 不带 v）");
+  assert(body.includes("0.5.0"), "版本显示 0.5.0（x.x.x 不带 v）");
   assert(body.includes("下一调度队列"), "首行含下一调度队列卡片");
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   assert(nums.includes("无"), "无定时队列时下一调度显示「无」");
@@ -552,7 +552,9 @@ async function testDispatchAndHistory(page) {
   await page.click("button:has-text('执行')");
   await page.waitForFunction(() => !!document.querySelector("#dispatch-running .list-item"), null, { timeout: 8000 });
   assert(true, "调度中心出现正在运行的任务卡片（执行已受理）");
-  await page.waitForTimeout(1500);
+  // 历史页无轮询（仅进入时加载一次）：先等运行结束（历史已落盘）再进入，避免加载时机竞态。
+  assert(await waitNoRunning(60000), "跑批脚本运行结束");
+  await sleep(500);
 
   await page.click('nav a[href="#/history"]');
   await page.waitForSelector("h2");

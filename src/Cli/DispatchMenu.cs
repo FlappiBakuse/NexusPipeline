@@ -1,3 +1,5 @@
+using NexusPipeline.Models;
+using NexusPipeline.Services;
 namespace NexusPipeline.Cli;
 
 /// <summary>调度中心子菜单：手动执行脚本/队列、取消运行。</summary>

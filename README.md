@@ -111,7 +111,7 @@ release/
 
 | 文件或目录 | 用途 |
 |---|---|
-| `src/` | C# 源代码（`NexusPipeline.csproj` 与全部 `.cs` 文件） |
+| `src/` | C# 源代码（`NexusPipeline.csproj`；核心域按子域分目录：`Models/`、`Services/`、`Persistence/`、`Utilities/`，外加 `Web/`、`Cli/`、`Plugins/`；入口 `Program.cs` 与组合根 `RuntimeContext.cs`） |
 | `nexus-pipeline.exe` | 主程序（服务 / manage / status / web / run-script / run-queue / cancel / register / unregister） |
 | `config/settings.json` | 设置（含加密通知密钥） |
 | `config/scripts.json` | 脚本实例列表 |

@@ -7,7 +7,11 @@
 ```
 NexusPipeline/
 ├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener）
-│   ├── *.cs            核心域（NexusPipeline）
+│   ├── *.cs            入口与组合根（NexusPipeline）：Program/Bootstrap/RuntimeContext/TrayApp
+│   ├── Models/         领域模型（NexusPipeline.Models）
+│   ├── Services/       服务层（NexusPipeline.Services）
+│   ├── Persistence/    持久化层（NexusPipeline.Persistence）
+│   ├── Utilities/      工具层（NexusPipeline.Utilities）
 │   ├── Web/            HTTP 层（NexusPipeline.Web）
 │   ├── Cli/            命令行层（NexusPipeline.Cli）
 │   └── Plugins/        插件契约与内置插件（NexusPipeline.Plugins）
@@ -16,7 +20,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，全量 354 项断言 / --ci 核心集 331 项）
+└── uitest/             Playwright 端到端测试（黑盒，全量 480 项断言 / --ci 核心集 457 项）
 ```
 
 ## 后端分层（src/）
@@ -24,7 +28,8 @@ NexusPipeline/
 ### 依赖方向（只允许向下依赖）
 
 ```
-NexusPipeline（核心域：模型/服务/数据）
+NexusPipeline（根：Program/Bootstrap/RuntimeContext 组合根）
+   └── Models（领域模型）← Services（服务）← Persistence（持久化）← Utilities（工具，被一切依赖）
         ↑           ↑            ↑
 NexusPipeline.Web（HTTP 适配层）
 NexusPipeline.Cli（命令行适配层）
@@ -34,6 +39,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 - **核心域不得引用 Web/Cli/Plugins**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过契约接口（IPlugin / ISpecializedScriptPlugin / INotifyChannel / PluginContext）与宿主交互**，不得反向引用宿主实现细节。
+- **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities；Utilities 不依赖业务层。
 
 ### 关键类职责
 
@@ -41,19 +47,24 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 |---|---|---|
 | `Program` | src/Program.cs | CLI 命令分发（service/manage/status/web/run-script/run-queue/cancel/register/unregister） |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
-| `RuntimeContext` | src/RuntimeContext.cs | 组合根：持有 Settings/Scripts/Queues/Center/History/Plugins/Scheduler 单例 |
-| `DataStore` | src/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
-| `DispatchCenter` | src/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
-| `RunSession` | src/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换） |
-| `LogPattern` | src/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Scheduler.cs | 定时/启动时触发队列 |
-| `HistoryService` | src/HistoryService.cs | 历史记录读写与清理 |
-| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件、路由表（约 150 行） |
+| `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
+| `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换） |
+| `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：关键字/完成标志/判断脚本三模式，判定状态与输入 |
+| `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths` |
+| `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
+| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试 |
+| `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
+| `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
+| `Scheduler` | src/Services/Scheduler.cs | 定时/启动时触发队列 |
+| `HistoryService` | src/Services/HistoryService.cs | 历史记录读写与清理 |
+| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+） |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
-| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，路由表在此分发 |
+| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册（v0.5.0+） |
 | `MainMenu` + 菜单类 | src/Cli/ | 命令行交互（主菜单/脚本/队列/调度/历史/插件/设置/通知渠道） |
 | `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关/能力查询 |
-| `Logger` | src/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
+| `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
 
 ### public / internal 约定
 
@@ -62,9 +73,9 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 
 ### 新增 API 的落点
 
-- HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，并在 `WebServer.RouteApiAsync` 注册一行。
+- HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**（v0.5.0+）。
 - 命令行菜单：在 `src/Cli/` 对应菜单类加 case。
-- 业务服务：核心域新增服务类，由 `RuntimeContext` 持有。
+- 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
 
 ## 前端分层（wwwroot/）
 
@@ -158,17 +169,19 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 
 | 想找什么 | 去哪里 |
 |---|---|
-| 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（路由表见 `WebServer.RouteApiAsync`） |
+| 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（`[ApiRoute]` 特性注册，见 `WebServer.Routes`） |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
-| 脚本运行流程/重试/日志监控 | `src/RunSession.cs`、`src/LogPattern.cs`（日志路径格式解析） |
-| 自定义完成标志（关键字/判断脚本） | `src/RunSession.cs`（判定模式/触发时机）、`src/JudgeScriptRunner.cs`（脚本执行器）、`src/TextRules.cs`（`KeywordRule`） |
-| 判断脚本边界与配置替换 | `src/UserConfigManager.cs`（`ScriptDir`/`ApplyConfigReplacements`/`RestoreConfigReplacements`/启动恢复）、`src/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
-| 队列调度触发 | `src/Scheduler.cs` |
-| 通知发送（Webhook/SMTP） | `src/WebhookSender.cs`、`src/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
+| 脚本运行流程/重试/日志监控 | `src/Services/RunSession.cs`、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
+| 自定义完成标志（关键字/判断脚本） | `src/Services/SessionJudge.cs`（判定状态机）、`src/Services/RunSession.cs`（监控循环/触发时机）、`src/Services/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
+| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/ConfigSwapSession.cs`（替换/恢复）、`src/Services/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
+| 队列调度触发 | `src/Services/Scheduler.cs` |
+| 通知发送（Webhook/SMTP） | `src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
-| 配置读写/加密 | `src/ConfigStore.cs`、`src/SecretStore.cs` |
-| 历史记录格式 | `src/HistoryService.cs`、`src/RunRecord.cs` |
+| 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
+| 历史记录格式 | `src/Services/HistoryService.cs`、`src/Models/RunRecord.cs` |
+
+> **v0.5.0 分层变更**：核心域按子域重组（`Models/`、`Services/`、`Persistence/`、`Utilities/` 对应命名空间）；Web 路由改特性路由；`RuntimeContext` 引入壳式 DI（`ServiceProvider` + `Resolve<T>()`，外部访问方式不变）；`RunSession` 判定策略拆出 `SessionJudge`；`UserConfigManager` 拆为门面 + 原语/会话恢复/数据目录三层。public 契约清单不变，extensions 三插件工程对齐后仍可编译。
 
 ## 数据流速览
 

@@ -1,7 +1,10 @@
 using System.Net;
+using NexusPipeline.Models;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("limits")]
 internal static class ApiLimitsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method)

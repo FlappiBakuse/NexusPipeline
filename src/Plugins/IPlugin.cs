@@ -1,3 +1,5 @@
+using NexusPipeline.Models;
+using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
 /// <summary>插件契约：元数据 + 生命周期。能力通过接口扩展（如 <see cref="INotifyChannel"/> / <see cref="ISpecializedScriptPlugin"/>）。</summary>
@@ -64,5 +66,11 @@ public class PluginContext
     public void ReloadSettings()
     {
         RuntimeContext.Instance.ReloadSettings();
+    }
+
+    /// <summary>服务解析：从宿主组合根容器解析已注册服务（如通知渠道、服务实例）；未注册类型抛出异常。</summary>
+    public T Resolve<T>() where T : notnull
+    {
+        return RuntimeContext.Instance.Resolve<T>();
     }
 }

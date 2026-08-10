@@ -1,8 +1,12 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("dispatch")]
 internal static class ApiDispatchHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
@@ -53,6 +57,7 @@ internal static class ApiDispatchHandler
         }
     }
 
+    [ApiRoute("cancel")]
     public static async Task HandleCancel(HttpListenerContext context, string method, string body)
     {
         if (method != "POST")

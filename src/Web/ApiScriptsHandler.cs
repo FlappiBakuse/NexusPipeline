@@ -5,9 +5,14 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using NexusPipeline.Plugins;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("scripts")]
 internal static class ApiScriptsHandler
 {
     private const uint LoadLibraryAsDataFile = 0x2;

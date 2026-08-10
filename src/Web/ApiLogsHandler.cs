@@ -1,7 +1,9 @@
 using System.Net;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("logs")]
 internal static class ApiLogsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method)

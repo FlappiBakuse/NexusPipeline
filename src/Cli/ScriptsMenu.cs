@@ -1,4 +1,7 @@
-﻿namespace NexusPipeline.Cli;
+﻿using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+namespace NexusPipeline.Cli;
 
 /// <summary>脚本实例管理子菜单：列表 / 新建 / 编辑 / 删除。</summary>
 internal static class ScriptsMenu

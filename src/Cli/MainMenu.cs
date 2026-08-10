@@ -1,4 +1,6 @@
-﻿namespace NexusPipeline.Cli;
+﻿using NexusPipeline.Models;
+using NexusPipeline.Services;
+namespace NexusPipeline.Cli;
 
 /// <summary>命令行主菜单与状态查看（Program 的 manage/status 入口）。</summary>
 internal static class MainMenu

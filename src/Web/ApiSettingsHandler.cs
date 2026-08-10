@@ -1,8 +1,14 @@
 using System.Net;
+using System.Reflection;
 using System.Text.Json.Nodes;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("settings")]
 internal static class ApiSettingsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
@@ -44,117 +50,33 @@ internal static class ApiSettingsHandler
                 return;
             }
             AppSettings current = ctx.Settings;
-            if (node.Get("autoStart") is not null)
+            if (node is JsonObject json)
             {
-                current.AutoStart = node.Get("autoStart").Bool(current.AutoStart);
-            }
-            if (node.Get("minimizeToTray") is not null)
-            {
-                current.MinimizeToTray = node.Get("minimizeToTray").Bool(current.MinimizeToTray);
-            }
-            if (node.Get("lightweightMode") is not null)
-            {
-                current.LightweightMode = node.Get("lightweightMode").Bool(current.LightweightMode);
-            }
-            if (node.Get("autoOpenBrowser") is not null)
-            {
-                current.AutoOpenBrowser = node.Get("autoOpenBrowser").Bool(current.AutoOpenBrowser);
-            }
-            if (node.Get("historyRetentionDays") is not null)
-            {
-                int days = node.Get("historyRetentionDays").Int(current.HistoryRetentionDays);
-                string? check = Limits.CheckRetentionDays(days);
-                if (check is not null)
+                foreach (KeyValuePair<string, JsonNode?> pair in json)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = check }, 400).ConfigureAwait(false);
-                    return;
-                }
-                current.HistoryRetentionDays = days;
-            }
-            if (node.Get("webPort") is not null)
-            {
-                int port = node.Get("webPort").Int(current.WebPort);
-                if (port is >= 1024 and <= 65535)
-                {
-                    current.WebPort = port;
+                    string field = pair.Key;
+                    if (field is "secretKey" or "secretValue")
+                    {
+                        continue;
+                    }
+                    if (SecretFields.Contains(field) || ListFields.Contains(field))
+                    {
+                        continue;
+                    }
+                    JsonNode? value = pair.Value;
+                    if (value is null)
+                    {
+                        continue;
+                    }
+                    string? error = BindField(current, field, value);
+                    if (error is not null)
+                    {
+                        await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
+                        return;
+                    }
                 }
             }
-            if (node.Get("sendStrategy") is not null)
-            {
-                current.SendStrategy = node.Get("sendStrategy").Str();
-            }
-            if (node.Get("webhookEnabled") is not null)
-            {
-                current.WebhookEnabled = node.Get("webhookEnabled").Bool(current.WebhookEnabled);
-            }
-            if (node.Get("smtpEnabled") is not null)
-            {
-                current.SmtpEnabled = node.Get("smtpEnabled").Bool(current.SmtpEnabled);
-            }
-            if (node.Get("webhookType") is not null)
-            {
-                current.WebhookType = node.Get("webhookType").Str();
-            }
-            if (node.Get("webhookTemplate") is not null)
-            {
-                current.WebhookTemplate = node.Get("webhookTemplate").Str();
-            }
-            if (node.Get("webhookTimeout") is not null)
-            {
-                int timeout = node.Get("webhookTimeout").Int(current.WebhookTimeout);
-                if (timeout >= 1)
-                {
-                    current.WebhookTimeout = timeout;
-                }
-            }
-            if (node.Get("smtpHost") is not null)
-            {
-                current.SmtpHost = node.Get("smtpHost").Str();
-            }
-            if (node.Get("smtpPort") is not null)
-            {
-                int port = node.Get("smtpPort").Int(current.SmtpPort);
-                if (port is >= 1 and <= 65535)
-                {
-                    current.SmtpPort = port;
-                }
-            }
-            if (node.Get("smtpSecure") is not null)
-            {
-                current.SmtpSecure = node.Get("smtpSecure").Str();
-            }
-            if (node.Get("smtpUser") is not null)
-            {
-                current.SmtpUser = node.Get("smtpUser").Str();
-            }
-            if (node.Get("smtpFrom") is not null)
-            {
-                current.SmtpFrom = node.Get("smtpFrom").Str();
-            }
-            if (node.Get("smtpTo") is not null)
-            {
-                current.SmtpTo = node.Get("smtpTo").Str();
-            }
-            if (node.Get("smtpSubjectPrefix") is not null)
-            {
-                current.SmtpSubjectPrefix = node.Get("smtpSubjectPrefix").Str();
-            }
-            if (node.Get("smtpTimeout") is not null)
-            {
-                int timeout = node.Get("smtpTimeout").Int(current.SmtpTimeout);
-                if (timeout >= 1)
-                {
-                    current.SmtpTimeout = timeout;
-                }
-            }
-            if (node.Get("logLevel") is not null)
-            {
-                string level = node.Get("logLevel").Str().Trim().ToLowerInvariant();
-                if (LogLevelUtil.IsValid(level))
-                {
-                    current.LogLevel = level;
-                }
-            }
+            ConfigStore.Save(current);
             if (node.Get("allowRemoteAccess") is not null)
             {
                 current.AllowRemoteAccess = node.Get("allowRemoteAccess").Bool(current.AllowRemoteAccess);
@@ -199,6 +121,86 @@ internal static class ApiSettingsHandler
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    /// <summary>密钥字段（DPAPI 加密，仅经 secretKey/secretValue 协议写入；明文键不参与自动绑定）。</summary>
+    private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "webhookUrl", "webhookSecret", "smtpPassword", "accessToken",
+    };
+
+    /// <summary>集合字段（PUT 不绑定，保持现有语义）。</summary>
+    private static readonly HashSet<string> ListFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "enabledPlugins", "disabledPlugins",
+    };
+
+    /// <summary>约定自动绑定：请求体字段名（camelCase）↔ AppSettings 属性（PascalCase）；带校验字段返回 400 错误文本，非法值按原语义静默忽略。</summary>
+    private static string? BindField(AppSettings settings, string field, JsonNode value)
+    {
+        switch (field)
+        {
+            case "historyRetentionDays":
+                int days = value.Int(settings.HistoryRetentionDays);
+                string? check = Limits.CheckRetentionDays(days);
+                if (check is not null)
+                {
+                    return check;
+                }
+                settings.HistoryRetentionDays = days;
+                return null;
+            case "webPort":
+                int port = value.Int(settings.WebPort);
+                if (port is >= 1024 and <= 65535)
+                {
+                    settings.WebPort = port;
+                }
+                return null;
+            case "webhookTimeout":
+                int timeout = value.Int(settings.WebhookTimeout);
+                if (timeout >= 1)
+                {
+                    settings.WebhookTimeout = timeout;
+                }
+                return null;
+            case "smtpPort":
+                int smtpPort = value.Int(settings.SmtpPort);
+                if (smtpPort is >= 1 and <= 65535)
+                {
+                    settings.SmtpPort = smtpPort;
+                }
+                return null;
+            case "smtpTimeout":
+                int smtpTimeout = value.Int(settings.SmtpTimeout);
+                if (smtpTimeout >= 1)
+                {
+                    settings.SmtpTimeout = smtpTimeout;
+                }
+                return null;
+            case "logLevel":
+                string level = value.Str().Trim().ToLowerInvariant();
+                if (LogLevelUtil.IsValid(level))
+                {
+                    settings.LogLevel = level;
+                }
+                return null;
+        }
+        string propertyName = char.ToUpperInvariant(field[0]) + field[1..];
+        PropertyInfo? property = typeof(AppSettings).GetProperty(propertyName);
+        if (property is null || !property.CanWrite)
+        {
+            return null;
+        }
+        if (property.PropertyType == typeof(bool))
+        {
+            bool currentValue = property.GetValue(settings) is bool b && b;
+            property.SetValue(settings, value.Bool(currentValue));
+        }
+        else if (property.PropertyType == typeof(string))
+        {
+            property.SetValue(settings, value.Str());
+        }
+        return null;
     }
 
     private static object MaskedSettings(AppSettings settings)

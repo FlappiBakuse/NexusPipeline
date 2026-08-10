@@ -1,7 +1,11 @@
 ﻿using System.Net;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("queues")]
 internal static class ApiQueuesHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)

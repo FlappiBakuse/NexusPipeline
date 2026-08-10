@@ -1,4 +1,7 @@
 ﻿using System.Globalization;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.Cli;
 

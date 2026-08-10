@@ -1,11 +1,62 @@
 ﻿using System.Net;
+using System.Reflection;
 using System.Text;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
-/// <summary>HTTP 服务骨架：监听、请求分发、静态文件。业务路由见各 ApiXxxHandler。</summary>
+/// <summary>HTTP 服务骨架：监听、请求分发、静态文件。业务路由见各 ApiXxxHandler（[ApiRoute] 反射扫描注册）。</summary>
 internal sealed class WebServer : IDisposable
 {
+    private delegate Task ApiRouteHandler(HttpListenerContext context, string method, string[] seg, string body);
+
+    /// <summary>API 路由表：启动时反射扫描带 [ApiRoute] 的 handler 类/方法注册；新增 API 无需改路由表。</summary>
+    private static readonly Dictionary<string, ApiRouteHandler> Routes = BuildRoutes();
+
+    private static Dictionary<string, ApiRouteHandler> BuildRoutes()
+    {
+        var routes = new Dictionary<string, ApiRouteHandler>(StringComparer.OrdinalIgnoreCase);
+        foreach (Type type in typeof(WebServer).Assembly.GetTypes())
+        {
+            ApiRouteAttribute? classAttr = type.GetCustomAttribute<ApiRouteAttribute>();
+            if (classAttr is null)
+            {
+                continue;
+            }
+            MethodInfo? handle = type.GetMethod("Handle", BindingFlags.Public | BindingFlags.Static);
+            if (handle is not null)
+            {
+                routes[classAttr.Name] = (ctx, m, seg, b) => InvokeRouteAsync(handle, ctx, m, seg, b);
+            }
+            foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                ApiRouteAttribute? methodAttr = method.GetCustomAttribute<ApiRouteAttribute>();
+                if (methodAttr is not null)
+                {
+                    routes[methodAttr.Name] = (ctx, m, seg, b) => InvokeRouteAsync(method, ctx, m, seg, b);
+                }
+            }
+        }
+        return routes;
+    }
+
+    private static Task InvokeRouteAsync(MethodInfo mi, HttpListenerContext context, string methodName, string[] seg, string body)
+    {
+        ParameterInfo[] parameters = mi.GetParameters();
+        object?[] args = new object?[parameters.Length];
+        args[0] = context;
+        args[1] = methodName;
+        for (int i = 2; i < parameters.Length; i++)
+        {
+            args[i] = parameters[i].ParameterType == typeof(string[]) ? seg : body;
+        }
+        object? result = mi.Invoke(null, args);
+        return result is Task task ? task : Task.CompletedTask;
+    }
+
     private readonly HttpListener _listener = new();
 
     private CancellationTokenSource? _cts;
@@ -201,44 +252,11 @@ internal sealed class WebServer : IDisposable
             return;
         }
         string resource = seg[0].ToLowerInvariant();
-        switch (resource)
+        if (Routes.TryGetValue(resource, out ApiRouteHandler? handler))
         {
-            case "status":
-                await ApiStatusHandler.Handle(context, method).ConfigureAwait(false);
-                return;
-            case "scripts":
-                await ApiScriptsHandler.Handle(context, method, seg, body).ConfigureAwait(false);
-                return;
-            case "queues":
-                await ApiQueuesHandler.Handle(context, method, seg, body).ConfigureAwait(false);
-                return;
-            case "dispatch":
-                await ApiDispatchHandler.Handle(context, method, seg, body).ConfigureAwait(false);
-                return;
-            case "cancel":
-                await ApiDispatchHandler.HandleCancel(context, method, body).ConfigureAwait(false);
-                return;
-            case "history":
-                await ApiHistoryHandler.Handle(context, method, seg).ConfigureAwait(false);
-                return;
-            case "settings":
-                await ApiSettingsHandler.Handle(context, method, seg, body).ConfigureAwait(false);
-                return;
-            case "plugins":
-                await ApiPluginsHandler.Handle(context, method, seg).ConfigureAwait(false);
-                return;
-            case "logs":
-                await ApiLogsHandler.Handle(context, method).ConfigureAwait(false);
-                return;
-            case "limits":
-                await ApiLimitsHandler.Handle(context, method).ConfigureAwait(false);
-                return;
-            case "fs":
-                await ApiFsHandler.Handle(context, method, seg).ConfigureAwait(false);
-                return;
-            default:
-                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
-                return;
+            await handler(context, method, seg, body).ConfigureAwait(false);
+            return;
         }
+        await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
     }
 }

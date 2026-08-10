@@ -3,6 +3,10 @@ using System.Runtime.InteropServices;
 using System.Text;
 using NexusPipeline.Cli;
 using NexusPipeline.Web;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 

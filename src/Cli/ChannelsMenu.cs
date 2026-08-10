@@ -1,3 +1,6 @@
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
 namespace NexusPipeline.Cli;
 
 /// <summary>通知渠道子菜单：开关 / Webhook / SMTP / 测试通知。</summary>

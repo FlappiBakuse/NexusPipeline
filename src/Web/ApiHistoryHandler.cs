@@ -1,7 +1,11 @@
 using System.Net;
+using NexusPipeline.Models;
+using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("history")]
 internal static class ApiHistoryHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)

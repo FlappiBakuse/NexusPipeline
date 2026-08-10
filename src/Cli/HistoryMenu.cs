@@ -1,3 +1,4 @@
+using NexusPipeline.Models;
 namespace NexusPipeline.Cli;
 
 /// <summary>历史记录子菜单：最近记录列表 + 运行详情。</summary>

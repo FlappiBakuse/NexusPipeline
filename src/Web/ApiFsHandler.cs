@@ -2,6 +2,7 @@ using System.Net;
 
 namespace NexusPipeline.Web;
 
+[ApiRoute("fs")]
 internal static class ApiFsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)
