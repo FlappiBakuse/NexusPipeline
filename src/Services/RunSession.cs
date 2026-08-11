@@ -76,6 +76,9 @@ internal class RunSession
 
     private ScriptUser? _activeUser;
 
+    /// <summary>当前尝试在运行日志中的起点：判断脚本输入只取本次尝试的日志段（上次尝试的判定/残留行不跨尝试污染）。</summary>
+    private int _attemptLogStart;
+
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
     {
@@ -283,6 +286,13 @@ internal class RunSession
         }
         finally
         {
+            if (_script.HasJudgeScript())
+            {
+                // 先还原配置替换（replace-backup → config 恢复为替换前快照内容），
+                // 再执行配置交换还原（cache → config 恢复运行前现场），避免替换还原覆盖交换还原的现场。
+                UserConfigManager.RestoreConfigReplacements(_script.Id, user?.Name);
+                UserConfigManager.CleanupScriptArea(_script.Id, user?.Name);
+            }
             if (configPrepared)
             {
                 string? restoreError = UserConfigManager.RestoreAfterRun(_script.Id, user!.Name, _script.ConfigPath);
@@ -292,11 +302,6 @@ internal class RunSession
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置还原失败：{restoreError}");
                 }
-            }
-            if (_script.HasJudgeScript())
-            {
-                UserConfigManager.RestoreConfigReplacements(_script.Id, user?.Name);
-                UserConfigManager.CleanupScriptArea(_script.Id, user?.Name);
             }
         }
     }
@@ -383,6 +388,7 @@ internal class RunSession
 
     private async Task<RunAttemptResult> RunAttemptAsync(RunAttempt attempt)
     {
+        _attemptLogStart = _scriptFullLog.Length;
         string modeText = _mode == "auto" ? "自动" : "手动";
 
         if (_script.LaunchGame)
@@ -515,12 +521,14 @@ internal class RunSession
         }
 
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
-        LogMonitor? monitor = resolvedBeforeStart is null ? null : new LogMonitor(resolvedBeforeStart, readFromStart: false);
+        // 脚本启动后解析到的文件可能是上一尝试的残留日志：仅当文件在本次尝试开始后写过（严格时间点，无松弛窗口）
+        // 才从头读（快速重建场景），否则一律从末尾读（忽略旧内容）。截断/重建由 ReadNew 长度检查与 FileId 检测兜底。
+        DateTime attemptStart = DateTime.Now;
+        LogMonitor? monitor = resolvedBeforeStart is null ? null : NewMonitor(resolvedBeforeStart, attemptStart, modeText);
         var judge = new SessionJudge(_script);
         bool judgeConfigured = judge.IsConfigured;
         bool scriptMode = judge.ScriptMode;
         var logTail = new List<string>();
-        DateTime attemptStart = DateTime.Now;
         DateTime? firstEntryAt = null;
         RunAttemptResult? result = null;
 
@@ -611,10 +619,10 @@ internal class RunSession
                         {
                             try
                             {
-                                if (File.GetCreationTimeUtc(resolved).Ticks != monitor.FileStamp)
+                                if (monitor.FileReplaced(resolved))
                                 {
                                     monitor.ReopenFromStart();
-                                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志文件被重建，已重新从头读取：{resolved}");
+                                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志文件被替换，已重新从头读取：{resolved}");
                                 }
                             }
                             catch (Exception)
@@ -842,15 +850,15 @@ internal class RunSession
         List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir);
         bool logTruncated = false;
         string logText;
-        int logLength = _scriptFullLog.Length;
+        int logLength = _scriptFullLog.Length - _attemptLogStart;
         if (logLength > JudgeScriptRunner.MaxJudgeLogChars)
         {
             logTruncated = true;
-            logText = _scriptFullLog.ToString(logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars);
+            logText = _scriptFullLog.ToString(_attemptLogStart + logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars);
         }
         else
         {
-            logText = _scriptFullLog.ToString();
+            logText = _scriptFullLog.ToString(_attemptLogStart, logLength);
         }
         string inputJson = JudgeScriptRunner.BuildInput(_script, _activeUser, files, scriptDir, logText, logTruncated);
         JudgeScriptResult judge = await JudgeScriptRunner.ExecuteAsync(_script, inputJson, files, _script.ConfigPath, scriptDir, _token).ConfigureAwait(false);
@@ -861,11 +869,13 @@ internal class RunSession
         return (judge.Status, judge.Reason, judge.NotifyText, judge.ReplaceConfigs, null);
     }
 
-    /// <summary>创建日志监控：文件在尝试启动后产生（新文件/轮换）→ 从头读；启动前已存在 → 从末尾读（忽略已有日志）。</summary>
-    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)    {        bool fresh;
+    /// <summary>创建日志监控：文件在尝试启动后写过（LastWriteTime ≥ attemptStart，严格无松弛窗口）→ 从头读；否则从末尾读（忽略残留）。</summary>
+    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)
+    {
+        bool fresh;
         try
         {
-            fresh = File.GetLastWriteTime(resolved) >= attemptStart.AddSeconds(-5);
+            fresh = File.GetLastWriteTime(resolved) >= attemptStart;
         }
         catch (Exception)
         {

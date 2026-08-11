@@ -1,9 +1,38 @@
-﻿using System.Text;
+﻿using System.Runtime.InteropServices;
+using System.Text;
+using Microsoft.Win32.SafeHandles;
 
 namespace NexusPipeline.Services;
 
 internal class LogMonitor : IDisposable
 {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation
+    {
+        public uint FileAttributes;
+
+        public long CreationTime;
+
+        public long LastAccessTime;
+
+        public long LastWriteTime;
+
+        public uint VolumeSerialNumber;
+
+        public uint FileSizeHigh;
+
+        public uint FileSizeLow;
+
+        public uint NumberOfLinks;
+
+        public uint FileIndexHigh;
+
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetFileInformationByHandle(SafeFileHandle hFile, out ByHandleFileInformation lpFileInformation);
+
     private readonly string _path;
 
     private bool _readFromStart;
@@ -14,6 +43,14 @@ internal class LogMonitor : IDisposable
 
     private bool _reopenScheduled;
 
+    private uint _volSerial;
+
+    private uint _fileIndexHigh;
+
+    private uint _fileIndexLow;
+
+    private bool _fileIdValid;
+
     public LogMonitor(string path, bool readFromStart = false)
     {
         _path = path;
@@ -23,7 +60,7 @@ internal class LogMonitor : IDisposable
 
     public string Path => _path;
 
-    /// <summary>打开时记录的文件创建时间（Ticks），用于检测同路径文件被删除重建（追加写不改变创建时间，不误判）。</summary>
+    /// <summary>打开时记录的文件创建时间（Ticks），作为 FileId 不可用时的替换检测回退。</summary>
     public long FileStamp { get; private set; }
 
     public DateTime LastWrite { get; private set; } = DateTime.Now;
@@ -33,6 +70,45 @@ internal class LogMonitor : IDisposable
     {
         _readFromStart = true;
         Open();
+    }
+
+    /// <summary>
+    /// 检测同路径文件是否已被替换（move 归档后重建/删除重建）：对比当前打开句柄与路径当前文件的
+    /// 卷序列号+文件索引（FileId）。FileId 不可用时回退创建时间对比；路径文件不存在/打不开时不判定
+    /// （保留旧句柄，待新文件出现后下轮检测）。追加写不改变 FileId，不会误判。
+    /// </summary>
+    public bool FileReplaced(string path)
+    {
+        if (_stream is null || !_fileIdValid)
+        {
+            return false;
+        }
+        (uint vol, uint hi, uint lo, bool ok) = QueryFileId(_stream.SafeFileHandle);
+        if (!ok)
+        {
+            return false;
+        }
+        try
+        {
+            using var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            (uint pVol, uint pHi, uint pLo, bool pOk) = QueryFileId(probe.SafeFileHandle);
+            if (!pOk)
+            {
+                try
+                {
+                    return File.GetCreationTimeUtc(path).Ticks != FileStamp;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            }
+            return pVol != vol || pHi != hi || pLo != lo;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     public string ReadNew()
@@ -93,10 +169,30 @@ internal class LogMonitor : IDisposable
             {
                 FileStamp = 0;
             }
+            (uint vol, uint hi, uint lo, bool ok) = QueryFileId(_stream.SafeFileHandle);
+            _volSerial = vol;
+            _fileIndexHigh = hi;
+            _fileIndexLow = lo;
+            _fileIdValid = ok;
         }
         catch (Exception)
         {
         }
+    }
+
+    private static (uint Vol, uint Hi, uint Lo, bool Ok) QueryFileId(SafeFileHandle handle)
+    {
+        try
+        {
+            if (GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+            {
+                return (info.VolumeSerialNumber, info.FileIndexHigh, info.FileIndexLow, true);
+            }
+        }
+        catch (Exception)
+        {
+        }
+        return (0, 0, 0, false);
     }
 
     public void Dispose()
