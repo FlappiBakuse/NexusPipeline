@@ -37,4 +37,7 @@ jobs:
 
       - name: 运行 e2e 测试（核心回归集）
         shell: cmd
-        run: node uitest\test.mjs --ci
+        working-directory: uitest
+        env:
+          NEXUS_CI: "1"
+        run: npx playwright test

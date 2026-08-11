@@ -101,8 +101,8 @@ release/
 
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
-- 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `node uitest/test.mjs`）即可；
-- CI 与推送前回归跑核心集：`node uitest/test.mjs --ci`（排除纯外观用例，含响应式粗检）；发布前本地跑全量 `node uitest/test.mjs`；
+- 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（排除响应式外壳外观用例）；发布前本地跑全量（46 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon 适配与完成标志固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）；
 - 专项稳定性测试 `node uitest/judge-scenarios.mjs`：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）。

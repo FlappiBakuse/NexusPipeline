@@ -2,7 +2,7 @@ import { initParticles } from "./effects/particles.js";
 import { closeModal } from "./core/modal.js";
 import { cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
-import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./core/limits.js";
+import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
 import { pagerNavigate } from "./core/pager.js";
 import { pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";

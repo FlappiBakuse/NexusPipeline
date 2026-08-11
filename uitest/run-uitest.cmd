@@ -10,5 +10,7 @@ if errorlevel 1 (
     exit /b 0
 )
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-node test.mjs %*
+rem 旧参数 --ci 映射为 NEXUS_CI=1（核心回归集，剔除响应式外壳外观用例）
+if /i "%1"=="--ci" set NEXUS_CI=1
+npx playwright test
 exit /b %errorlevel%

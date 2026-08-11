@@ -1,6 +1,6 @@
-import { api } from "./api.js";
-import { esc } from "./format.js";
-import { state } from "./state.js";
+import { api } from "../core/api.js";
+import { esc } from "../core/format.js";
+import { state } from "../core/state.js";
 
 const DISMISS_KEY = "nexus-limits-dismissed";
 

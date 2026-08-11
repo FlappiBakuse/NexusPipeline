@@ -15,3 +15,5 @@ logs/
 uitest/node_modules/
 uitest/runtime/
 uitest/browsers/
+uitest/test-results/
+playwright-report/
