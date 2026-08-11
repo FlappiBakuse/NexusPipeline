@@ -10,7 +10,8 @@ internal class HistoryService
 {
     private static readonly object Sync = new();
 
-    public void Save(RunRecord record, string scriptLog, string consoleLog = "")
+    /// <summary>保存运行历史（v0.5.3 精简）：.json 纯运行状态 + 按尝试分批 .log（{base}-{尝试号}.log）。</summary>
+    public void Save(RunRecord record, List<string> attemptLogs)
     {
         if (record.StartTime == DateTime.MinValue)
         {
@@ -24,19 +25,18 @@ internal class HistoryService
                 Directory.CreateDirectory(dayDir);
                 string baseName = record.StartTime.ToString("HH-mm-ss");
                 string jsonPath = FindFreePath(dayDir, baseName, ".json");
-                string logPath = Path.ChangeExtension(jsonPath, ".log");
-                string consolePath = Path.ChangeExtension(jsonPath, ".console.log");
+                string jsonBase = Path.GetFileNameWithoutExtension(jsonPath);
                 record.LogFile = Path.GetFileName(jsonPath);
+                for (int i = 0; i < record.AttemptDetails.Count && i < attemptLogs.Count; i++)
+                {
+                    string attemptLogName = $"{jsonBase}-{record.AttemptDetails[i].Number}.log";
+                    record.AttemptDetails[i].LogFile = attemptLogName;
+                    string attemptLogText = string.IsNullOrWhiteSpace(attemptLogs[i])
+                        ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
+                        : attemptLogs[i];
+                    File.WriteAllText(Path.Combine(dayDir, attemptLogName), attemptLogText, new UTF8Encoding(true));
+                }
                 File.WriteAllText(jsonPath, JsonSerializer.Serialize(record, JsonOpts.Indented), new UTF8Encoding(true));
-                string logText = string.IsNullOrWhiteSpace(scriptLog)
-                    ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
-                    : scriptLog;
-                File.WriteAllText(logPath, logText, new UTF8Encoding(true));
-                string consoleText = string.IsNullOrWhiteSpace(consoleLog)
-                    ? "（无控制台输出）" + Environment.NewLine
-                    : consoleLog;
-                File.WriteAllText(consolePath, consoleText, new UTF8Encoding(true));
-                AppendIndex(record.StartTime, record);
             }
         }
         catch (Exception ex)
@@ -45,70 +45,30 @@ internal class HistoryService
         }
     }
 
-    private static string IndexPath(DateTime time)
+    /// <summary>读取某天的运行记录：直接扫描 .json 目录（v0.5.3 起无 jsonl 索引）。</summary>
+    private static List<RunRecord> ReadDayRecords(DateTime date)
     {
-        return Path.Combine(AppPaths.HistoryDir, $"runs-{time:yyyy-MM-dd}.jsonl");
-    }
-
-    private static void AppendIndex(DateTime time, RunRecord record)
-    {
-        string index = IndexPath(time);
-        File.AppendAllText(index, JsonSerializer.Serialize(record, JsonOpts.Default) + Environment.NewLine, new UTF8Encoding(false));
-    }
-
-    /// <summary>读取某天的运行记录：优先顺序索引 runs-*.jsonl；旧数据无索引时扫描 .json 目录并重建索引。</summary>
-    private static List<RunRecord> ReadDayIndex(DateTime date)
-    {
-        string index = IndexPath(date);
-        if (File.Exists(index))
+        var records = new List<RunRecord>();
+        string dayDir = Path.Combine(AppPaths.HistoryDir, date.ToString("yyyy-MM-dd"));
+        if (!Directory.Exists(dayDir))
         {
-            var records = new List<RunRecord>();
-            foreach (string line in File.ReadAllLines(index))
-            {
-                if (string.IsNullOrWhiteSpace(line))
-                {
-                    continue;
-                }
-                try
-                {
-                    RunRecord? record = JsonSerializer.Deserialize<RunRecord>(line, JsonOpts.Default);
-                    if (record is not null)
-                    {
-                        records.Add(record);
-                    }
-                }
-                catch
-                {
-                }
-            }
             return records;
         }
-
-        string dayDir = Path.Combine(AppPaths.HistoryDir, date.ToString("yyyy-MM-dd"));
-        var rebuilt = new List<RunRecord>();
-        if (Directory.Exists(dayDir))
+        foreach (string file in Directory.GetFiles(dayDir, "*.json"))
         {
-            foreach (string file in Directory.GetFiles(dayDir, "*.json"))
+            try
             {
-                try
+                RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
+                if (record is not null)
                 {
-                    RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
-                    if (record is not null)
-                    {
-                        rebuilt.Add(record);
-                    }
-                }
-                catch
-                {
+                    records.Add(record);
                 }
             }
-            if (rebuilt.Count > 0)
+            catch
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(index) ?? AppPaths.HistoryDir);
-                File.WriteAllLines(index, rebuilt.Select(record => JsonSerializer.Serialize(record, JsonOpts.Default)), new UTF8Encoding(false));
             }
         }
-        return rebuilt;
+        return records;
     }
 
     private static string FindFreePath(string directory, string baseName, string extension)
@@ -136,7 +96,7 @@ internal class HistoryService
         {
             for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
             {
-                foreach (RunRecord record in ReadDayIndex(date))
+                foreach (RunRecord record in ReadDayRecords(date))
                 {
                     if (record.StartTime < start || record.StartTime > end)
                     {
@@ -172,7 +132,7 @@ internal class HistoryService
             for (int offset = days - 1; offset >= 0; offset--)
             {
                 DateTime date = DateTime.Today.AddDays(-offset);
-                foreach (RunRecord record in ReadDayIndex(date))
+                foreach (RunRecord record in ReadDayRecords(date))
                 {
                     if (record.Id == id)
                     {
@@ -184,28 +144,29 @@ internal class HistoryService
         return null;
     }
 
-    public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record)
+    /// <summary>读取某次尝试的脚本日志（.log 按尝试分批文件，v0.5.3+）。</summary>
+    public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record, int attemptNo)
+    {
+        RunAttempt? attempt = record.AttemptDetails.FirstOrDefault(a => a.Number == attemptNo);
+        return attempt is null ? null : ReadDayFile(record, attempt.LogFile);
+    }
+
+    /// <summary>读取运行内全部尝试的日志（兼容旧数据：无按尝试文件时回退读取旧 .log 单文件）。</summary>
+    public (string LogText, int TotalLines)? ReadLegacyScriptLog(RunRecord record)
     {
         return ReadDayFile(record, ".log");
     }
 
-    /// <summary>读取本次运行完整控制台输出（.console.log 三件套）。</summary>
-    public (string LogText, int TotalLines)? ReadConsoleLog(RunRecord record)
+    private static (string LogText, int TotalLines)? ReadDayFile(RunRecord record, string attemptLogFile)
     {
-        return ReadDayFile(record, ".console.log");
-    }
-
-    private static (string LogText, int TotalLines)? ReadDayFile(RunRecord record, string extension)
-    {
-        if (string.IsNullOrWhiteSpace(record.LogFile))
+        if (string.IsNullOrWhiteSpace(attemptLogFile))
         {
             return null;
         }
         try
         {
             string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
-            string logPath = Path.Combine(dayDir, Path.GetFileName(record.LogFile));
-            string target = Path.ChangeExtension(logPath, extension);
+            string target = Path.Combine(dayDir, Path.GetFileName(attemptLogFile));
             if (!File.Exists(target))
             {
                 return null;
@@ -252,29 +213,6 @@ internal class HistoryService
                     catch (Exception ex)
                     {
                         Logger.Warn($"[警告] 删除过期历史目录失败：{ex.Message}");
-                    }
-                }
-            }
-            foreach (string file in Directory.GetFiles(AppPaths.HistoryDir, "runs-*.jsonl"))
-            {
-                DateTime fileDate;
-                try
-                {
-                    fileDate = File.GetLastWriteTime(file).Date;
-                }
-                catch
-                {
-                    continue;
-                }
-                if (fileDate < cutoff)
-                {
-                    try
-                    {
-                        File.Delete(file);
-                        removed++;
-                    }
-                    catch
-                    {
                     }
                 }
             }

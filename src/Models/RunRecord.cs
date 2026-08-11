@@ -12,11 +12,8 @@ public class RunAttempt
 
     public string Reason { get; set; } = "";
 
-    public string OutputTail { get; set; } = "";
-
-    public List<string> LogTail { get; set; } = new();
-
-    public string OutputFile { get; set; } = "";
+    /// <summary>本尝试脚本日志文件名（如 HH-mm-ss-1.log，按尝试分批落盘，v0.5.3+）。</summary>
+    public string LogFile { get; set; } = "";
 }
 
 public class RunRecord
@@ -83,9 +80,7 @@ public class RunRecord
                 EndTime = a.EndTime,
                 Status = a.Status,
                 Reason = a.Reason,
-                OutputTail = a.OutputTail,
-                LogTail = new List<string>(a.LogTail),
-                OutputFile = a.OutputFile,
+                LogFile = a.LogFile,
             }).ToList(),
         };
     }

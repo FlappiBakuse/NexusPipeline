@@ -66,11 +66,6 @@ internal class RunSession
 
     private bool _scriptLogTruncated;
 
-    /// <summary>本次运行完整控制台输出（stdout/stderr 捕获 + 分隔行），运行结束随历史按次保存。</summary>
-    private readonly StringBuilder _consoleFullLog = new();
-
-    private bool _consoleLogTruncated;
-
     /// <summary>整个运行（含全部重试与前置/后置脚本）的开始时间：TotalTimeoutMinutes 以它为准。</summary>
     private DateTime _runStartedAt;
 
@@ -78,6 +73,9 @@ internal class RunSession
 
     /// <summary>当前尝试在运行日志中的起点：判断脚本输入只取本次尝试的日志段（上次尝试的判定/残留行不跨尝试污染）。</summary>
     private int _attemptLogStart;
+
+    /// <summary>每尝试脚本日志段（v0.5.3+ 按尝试分批落盘，运行结束随历史保存）。</summary>
+    private readonly List<string> _attemptLogSegments = new();
 
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
@@ -93,36 +91,13 @@ internal class RunSession
         _logLine = logLine;
     }
 
-    public string ScriptLog
+    /// <summary>每尝试脚本日志段（按尝试分批落盘）。</summary>
+    public List<string> AttemptLogs
     {
         get
         {
-            return _scriptFullLog.ToString();
+            return _attemptLogSegments;
         }
-    }
-
-    /// <summary>本次运行完整控制台输出（超限截断时含说明行）。</summary>
-    public string ConsoleLog
-    {
-        get
-        {
-            return _consoleFullLog.ToString();
-        }
-    }
-
-    private void AppendConsoleLog(string line)
-    {
-        if (_consoleLogTruncated)
-        {
-            return;
-        }
-        if (_consoleFullLog.Length > MaxScriptLogBytes)
-        {
-            _consoleLogTruncated = true;
-            _consoleFullLog.AppendLine("（控制台输出超过 20MB，已截断尾部）");
-            return;
-        }
-        _consoleFullLog.AppendLine(line);
     }
 
     private void AppendScriptLog(string line)
@@ -208,7 +183,6 @@ internal class RunSession
                 };
                 record.AttemptDetails.Add(attempt);
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
-                AppendConsoleLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
@@ -245,6 +219,7 @@ internal class RunSession
                 }
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 结束：{result.Status}（{result.Reason}） =====");
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
+                _attemptLogSegments.Add(_scriptFullLog.ToString(_attemptLogStart, _scriptFullLog.Length - _attemptLogStart));
 
                 if (result.Status == "success")
                 {
@@ -332,7 +307,6 @@ internal class RunSession
         }
         _statusChanged?.Invoke($"{role}脚本已启动（PID {process.Id}）");
         Logger.Info($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
-        AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出开始（PID {process.Id}）");
 
         void OnConsoleData(string? data)
         {
@@ -341,7 +315,6 @@ internal class RunSession
                 return;
             }
             _logLine?.Invoke(data);
-            AppendConsoleLog(data);
         }
 
         process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
@@ -349,41 +322,34 @@ internal class RunSession
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
+        using var timeoutCts = new CancellationTokenSource();
+        if (_script.TotalTimeoutMinutes > 0)
+        {
+            double remainingSeconds = _script.TotalTimeoutMinutes * 60.0 - (DateTime.Now - _runStartedAt).TotalSeconds;
+            if (remainingSeconds <= 0)
+            {
+                SystemActions.KillTree(process.Id);
+                return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
+            }
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(remainingSeconds));
+        }
+        using var combined = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
         try
         {
-            using var timeoutCts = new CancellationTokenSource();
-            if (_script.TotalTimeoutMinutes > 0)
-            {
-                double remainingSeconds = _script.TotalTimeoutMinutes * 60.0 - (DateTime.Now - _runStartedAt).TotalSeconds;
-                if (remainingSeconds <= 0)
-                {
-                    SystemActions.KillTree(process.Id);
-                    return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-                }
-                timeoutCts.CancelAfter(TimeSpan.FromSeconds(remainingSeconds));
-            }
-            using var combined = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
-            try
-            {
-                await process.WaitForExitAsync(combined.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
-            {
-                SystemActions.KillTree(process.Id);
-                return RunAttemptResult.Failed($"{role}脚本运行超时（{_script.TotalTimeoutMinutes} 分钟）");
-            }
-            catch (OperationCanceledException)
-            {
-                SystemActions.KillTree(process.Id);
-                return RunAttemptResult.Cancelled($"已取消（{role}脚本执行期间）");
-            }
-            bool ok = process.HasExited && process.ExitCode == 0;
-            return ok ? null : RunAttemptResult.Failed($"{role}脚本执行失败（退出码 {process.ExitCode}）");
+            await process.WaitForExitAsync(combined.Token).ConfigureAwait(false);
         }
-        finally
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
         {
-            AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 {role}脚本 输出结束");
+            SystemActions.KillTree(process.Id);
+            return RunAttemptResult.Failed($"{role}脚本运行超时（{_script.TotalTimeoutMinutes} 分钟）");
         }
+        catch (OperationCanceledException)
+        {
+            SystemActions.KillTree(process.Id);
+            return RunAttemptResult.Cancelled($"已取消（{role}脚本执行期间）");
+        }
+        bool ok = process.HasExited && process.ExitCode == 0;
+        return ok ? null : RunAttemptResult.Failed($"{role}脚本执行失败（退出码 {process.ExitCode}）");
     }
 
     private async Task<RunAttemptResult> RunAttemptAsync(RunAttempt attempt)
@@ -492,10 +458,7 @@ internal class RunSession
             }
             _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
-            AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出开始（PID {process.Id}）");
         }
-
-        var outputTail = new StringBuilder();
 
         void OnConsoleData(string? data)
         {
@@ -503,13 +466,7 @@ internal class RunSession
             {
                 return;
             }
-            outputTail.AppendLine(data);
-            if (outputTail.Length > 8192)
-            {
-                outputTail.Remove(0, 4096);
-            }
             _logLine?.Invoke(data);
-            AppendConsoleLog(data);
         }
 
         if (process is not null && stdoutAttached)
@@ -528,7 +485,6 @@ internal class RunSession
         var judge = new SessionJudge(_script);
         bool judgeConfigured = judge.IsConfigured;
         bool scriptMode = judge.ScriptMode;
-        var logTail = new List<string>();
         DateTime? firstEntryAt = null;
         RunAttemptResult? result = null;
 
@@ -641,11 +597,6 @@ internal class RunSession
                         if (line.Trim().Length == 0)
                         {
                             continue;
-                        }
-                        logTail.Add(line);
-                        if (logTail.Count > 50)
-                        {
-                            logTail.RemoveAt(0);
                         }
                         _logLine?.Invoke(line);
                         AppendScriptLog(line);
@@ -793,11 +744,8 @@ internal class RunSession
             result = RunAttemptResult.Failed($"监控异常：{ex.Message}");
         }
 
-        AppendConsoleLog($"脚本「{_script.Name}」第 {attempt.Number} 次尝试 控制台输出结束：{result?.Status}（{result?.Reason}）");
         monitor?.Dispose();
         monitor = null;
-        attempt.OutputTail = TextRules.TakeTail(outputTail.ToString(), 50);
-        attempt.LogTail = new List<string>(logTail);
 
         KillStartedScript();
         string resultStatus = result?.Status ?? "failed";

@@ -179,7 +179,7 @@ internal class Scheduler : IDisposable
                 FinalStatus = "failed",
                 ResultDetail = $"检测到脚本「{blocked}」正在运行，已跳过该队列",
             };
-            RuntimeContext.Instance.History.Save(skipped, "");
+            RuntimeContext.Instance.History.Save(skipped, new List<string>());
             return;
         }
         lock (_sync)

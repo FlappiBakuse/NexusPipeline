@@ -30,15 +30,38 @@ internal static class ApiHistoryHandler
                 return;
             }
             Audit.Log(Audit.Web, "查询运行详情", $"{record.ScriptName}（{record.StartTime:yyyy-MM-dd HH:mm:ss}）");
-            var log = RuntimeContext.Instance.History.ReadScriptLog(record);
-            var console = RuntimeContext.Instance.History.ReadConsoleLog(record);
+            var attemptLogs = new List<object>();
+            bool legacyFallback = false;
+            foreach (RunAttempt attempt in record.AttemptDetails)
+            {
+                var log = RuntimeContext.Instance.History.ReadScriptLog(record, attempt.Number);
+                if (log is null && string.IsNullOrWhiteSpace(attempt.LogFile))
+                {
+                    legacyFallback = true;
+                    break;
+                }
+                attemptLogs.Add(new
+                {
+                    number = attempt.Number,
+                    logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
+                    logTotalLines = log?.TotalLines ?? 0,
+                });
+            }
+            object? legacyLog = null;
+            if (legacyFallback)
+            {
+                var log = RuntimeContext.Instance.History.ReadLegacyScriptLog(record);
+                legacyLog = new
+                {
+                    logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
+                    logTotalLines = log?.TotalLines ?? 0,
+                };
+            }
             await HttpHelper.WriteJsonAsync(context, new
             {
                 record,
-                logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
-                logTotalLines = log?.TotalLines ?? 0,
-                consoleTail = console is null ? null : TextRules.TakeTail(console.Value.LogText, 200),
-                consoleTotalLines = console?.TotalLines ?? 0,
+                attemptLogs,
+                legacyLog,
             }).ConfigureAwait(false);
             return;
         }

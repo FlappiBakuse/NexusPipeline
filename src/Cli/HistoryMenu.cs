@@ -42,20 +42,13 @@ internal static class HistoryMenu
             Console.WriteLine($"--- 第 {attempt.Number} 次尝试：{attempt.Status} ---");
             Console.WriteLine($"原因：{attempt.Reason}");
             Console.WriteLine($"时间：{attempt.StartTime:HH:mm:ss} - {attempt.EndTime:HH:mm:ss}");
-            if (attempt.LogTail.Count > 0)
+            var log = RuntimeContext.Instance.History.ReadScriptLog(record, attempt.Number);
+            if (log is not null)
             {
                 Console.WriteLine("日志尾部：");
-                foreach (string line in attempt.LogTail.TakeLast(10))
+                foreach (string line in log.Value.LogText.Split('\n').TakeLast(10))
                 {
-                    Console.WriteLine($"  {line}");
-                }
-            }
-            if (!string.IsNullOrWhiteSpace(attempt.OutputTail))
-            {
-                Console.WriteLine("控制台输出尾部：");
-                foreach (string line in attempt.OutputTail.Split('\n').TakeLast(10))
-                {
-                    Console.WriteLine($"  {line}");
+                    Console.WriteLine($"  {line.TrimEnd('\r')}");
                 }
             }
         }

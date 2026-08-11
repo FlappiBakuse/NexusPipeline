@@ -314,7 +314,7 @@ internal class DispatchCenter
                 exec.DoneTasks++;
                 exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
                 Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
-                RuntimeContext.Instance.History.Save(record, session.ScriptLog, session.ConsoleLog);
+                RuntimeContext.Instance.History.Save(record, session.AttemptLogs);
             }
             finally
             {
@@ -357,7 +357,7 @@ internal class DispatchCenter
                     records.Add(missing);
                     exec.Records.Add(missing);
                     exec.DoneTasks++;
-                    RuntimeContext.Instance.History.Save(missing, "");
+                    RuntimeContext.Instance.History.Save(missing, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
                     continue;
                 }
@@ -384,7 +384,7 @@ internal class DispatchCenter
                     records.Add(skipped);
                     exec.Records.Add(skipped);
                     exec.DoneTasks++;
-                    RuntimeContext.Instance.History.Save(skipped, "");
+                    RuntimeContext.Instance.History.Save(skipped, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
                 }
