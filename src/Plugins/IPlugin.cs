@@ -1,4 +1,7 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Models;
+using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
@@ -53,9 +56,18 @@ public interface INotifyChannel
     Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);
 }
 
-/// <summary>宿主提供给插件的上下文抽象：插件只能通过它访问宿主能力，不直接依赖全局单例。</summary>
+/// <summary>宿主提供给插件的上下文抽象：插件只能通过它访问宿主能力，不直接依赖全局单例。
+/// 插件级配置（v0.5.1+）：<see cref="GetConfig{T}"/>/<see cref="SetConfig{T}"/> 落盘 config/plugins/&lt;插件名&gt;.json（PascalCase），
+/// 密钥经 <see cref="GetSecret"/>/<see cref="SetSecret"/> 走 DPAPI（enc: 前缀），普通字段与密钥同文件。</summary>
 public class PluginContext
 {
+    private readonly string _pluginName;
+
+    internal PluginContext(string pluginName)
+    {
+        _pluginName = pluginName;
+    }
+
     public void Log(string message)
     {
         Logger.Info($"[插件] {message}");
@@ -72,5 +84,101 @@ public class PluginContext
     public T Resolve<T>() where T : notnull
     {
         return RuntimeContext.Instance.Resolve<T>();
+    }
+
+    /// <summary>插件配置文件路径：config/plugins/&lt;插件名&gt;.json（普通配置与密钥同文件，密钥值 DPAPI 加密 enc: 前缀）。</summary>
+    public string ConfigPath
+    {
+        get
+        {
+            string name = _pluginName;
+            foreach (char c in Path.GetInvalidFileNameChars())
+            {
+                name = name.Replace(c, '_');
+            }
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "plugin";
+            }
+            return Path.Combine(AppPaths.ConfigDir, "plugins", name + ".json");
+        }
+    }
+
+    /// <summary>读取插件级配置（磁盘 JSON = PascalCase）；文件不存在或解析失败返回 null。</summary>
+    public T? GetConfig<T>() where T : class
+    {
+        string path = ConfigPath;
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOpts.Default);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>保存插件级配置（原子写入，PascalCase）。</summary>
+    public void SetConfig<T>(T config)
+    {
+        string path = ConfigPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(config, JsonOpts.Indented));
+    }
+
+    /// <summary>读取插件级密钥（DPAPI 加密存储 enc: 前缀）；未设置返回 null。</summary>
+    public string? GetSecret(string key)
+    {
+        string? stored = ReadRoot()[key] is JsonValue value && value.TryGetValue<string>(out string? s) ? s : null;
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return null;
+        }
+        return SecretStore.TryDecrypt(stored, out string? plain) ? plain : null;
+    }
+
+    /// <summary>设置插件级密钥（DPAPI 加密后写入配置文件；value 为空 = 清除该密钥）。</summary>
+    public void SetSecret(string key, string value)
+    {
+        JsonObject root = ReadRoot();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            root.Remove(key);
+        }
+        else
+        {
+            root[key] = SecretStore.Encrypt(value);
+        }
+        WriteRoot(root);
+    }
+
+    private JsonObject ReadRoot()
+    {
+        string path = ConfigPath;
+        if (File.Exists(path))
+        {
+            try
+            {
+                if (JsonNode.Parse(File.ReadAllText(path)) is JsonObject obj)
+                {
+                    return obj;
+                }
+            }
+            catch
+            {
+            }
+        }
+        return new JsonObject();
+    }
+
+    private void WriteRoot(JsonObject root)
+    {
+        string path = ConfigPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        JsonUtil.WriteAtomic(path, root.ToJsonString(JsonOpts.Indented));
     }
 }

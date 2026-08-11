@@ -103,7 +103,7 @@ internal sealed class PluginManager
             {
                 try
                 {
-                    plugin.Initialize(new PluginContext());
+                    plugin.Initialize(new PluginContext(plugin.Name));
                     Logger.Info($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
                 }
                 catch (Exception ex)

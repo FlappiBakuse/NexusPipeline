@@ -160,7 +160,7 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 - 专用插件工程通过 `ProjectReference` 引用 `src/NexusPipeline.csproj`（契约类为 public），构建产物 DLL 放入 `release/plugins/`（见 `build.cmd`）。
 - 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath/SuccessMarkers）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
 - 元数据 + 生命周期：实现 `IPlugin`；通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
-- 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings），**不要**引用 `RuntimeContext`。
+- 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings / Resolve&lt;T&gt; / **插件级配置 GetConfig&lt;T&gt;/SetConfig&lt;T&gt;**（落盘 `config/plugins/&lt;插件名&gt;.json`，PascalCase）/ **密钥 GetSecret/SetSecret**（DPAPI 加密 `enc:` 前缀，与普通配置同文件）），**不要**引用 `RuntimeContext`。
 - 内置插件 `NotifyPlugin` 在 `PluginManager.DiscoverBuiltIn` 注册；外部插件与内置插件同契约。
 
 > v0.2.0 起命名空间为 `NexusPipeline.Plugins`，v0.1.x 编译的外部插件需重新编译；v0.3.0 起新增 `ISpecializedScriptPlugin` / `ScriptProfile` 契约。
