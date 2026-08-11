@@ -67,16 +67,16 @@ export function openUserModal(scriptId, userName = "") {
   };
   const d = userDraft;
   const body = `${valueField("um-name", "用户名 <span class='req'>*</span>", d.name, "text", 'placeholder="脚本内不可重复"')}
-    <label class="check"><input id="um-enabled" type="checkbox" ${d.enabled ? "checked" : ""}><span>启用该用户（禁用后不可选用于运行）</span></label>
-    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写地址则启用，留空不启用）", d.preRunScript)}<label class="check"><input id="um-pre-once" type="checkbox" ${d.preRunOnceOnly ? "checked" : ""}><span>仅首次运行启用（重试时不再执行）</span></label></div>
-    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写地址则启用，留空不启用）", d.postRunScript)}<label class="check"><input id="um-post-final" type="checkbox" ${d.postRunOnFinalOnly ? "checked" : ""}><span>仅最终运行完成启用</span></label></div>`;
+    <div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-enabled" id="um-enabled" aria-pressed="${d.enabled ? "true" : "false"}">启用用户</button><span class="muted">禁用后不可选用于运行</span></div>
+    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-pre-once" id="um-pre-once" aria-pressed="${d.preRunOnceOnly ? "true" : "false"}">仅首次执行</button><span class="muted">重试时不再执行</span></div></div>
+    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-post-final" id="um-post-final" aria-pressed="${d.postRunOnFinalOnly ? "true" : "false"}">仅最终完成</button><span class="muted">仅最终运行完成启用</span></div></div>`;
   showModal(modalShell(user ? "编辑用户" : "添加用户", body, '<button type="button" data-action="save-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
 export async function saveUser() {
   const name = $dom("#um-name")?.value.trim();
   if (!name) { toast("请填写用户名", "error"); $dom("#um-name")?.focus(); return; }
-  const payload = { name, enabled: $dom("#um-enabled").checked, preRunScript: $dom("#um-pre").value.trim(), preRunOnceOnly: $dom("#um-pre-once").checked, postRunScript: $dom("#um-post").value.trim(), postRunOnFinalOnly: $dom("#um-post-final").checked };
+  const payload = { name, enabled: $dom("#um-enabled")?.getAttribute("aria-pressed") === "true", preRunScript: $dom("#um-pre").value.trim(), preRunOnceOnly: $dom("#um-pre-once")?.getAttribute("aria-pressed") === "true", postRunScript: $dom("#um-post").value.trim(), postRunOnFinalOnly: $dom("#um-post-final")?.getAttribute("aria-pressed") === "true" };
   try {
     const base = "/api/scripts/" + userModalScriptId + "/users";
     if (userEditingName) await api("PUT", base + "/" + encodeURIComponent(userEditingName), payload);
@@ -132,4 +132,5 @@ export const actions = {
   "edit-user-config": target => editUserConfig(target.dataset.id, target.dataset.name),
   "edit-config-done": target => editConfigAction(target.dataset.id, target.dataset.name, "done"),
   "edit-config-cancel": target => editConfigAction(target.dataset.id, target.dataset.name, "cancel"),
+  "toggle-um-flag": target => { const btn = $dom("#" + target.dataset.flag); if (btn) btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true"); },
 };

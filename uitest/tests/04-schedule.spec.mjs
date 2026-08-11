@@ -105,12 +105,12 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   const modeOpts = await page.$$eval("#qm-mode option", els => els.map(e => e.textContent));
   expect(modeOpts.length === 3 && modeOpts[0] === "不运行", "自动运行方式含「不运行」选项且置顶").toBeTruthy();
 
-  const dayState = await page.$eval(".timeset-days", el => {
+  const dayState = await page.$eval(".days-btn-grid", el => {
     const inputs = Array.from(el.querySelectorAll("[data-ts-days]"));
-    return { count: inputs.length, checked: inputs.filter(input => input.checked).length };
+    return { count: inputs.length, pressed: inputs.filter(input => input.getAttribute("aria-pressed") === "true").length };
   });
-  expect(dayState.count === 7, "执行周期为整体复选框组（7 项）").toBeTruthy();
-  expect(dayState.checked === 5, "执行周期默认选中工作日").toBeTruthy();
+  expect(dayState.count === 7, "执行周期为整体星期按钮组（7 项）").toBeTruthy();
+  expect(dayState.pressed === 5, "执行周期默认选中工作日").toBeTruthy();
 
   await page.click("text=+ 添加任务");
   await page.selectOption('[data-task-idx="0"]', { label: "队列用脚本" });

@@ -470,13 +470,14 @@ test("强制关闭游戏独立于启动游戏：后端保留 + 前端复选框�
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
-  expect(!(await page.$eval("#sm-force", el => el.disabled)), "未勾选「运行脚本前启动游戏」时强制关闭复选框仍可用（解绑）").toBeTruthy();
-  expect(!(await page.$eval("#sm-force", el => el.checked)), "强制关闭默认不勾选").toBeTruthy();
+  const smPressed = id => page.$eval(id, el => el.getAttribute("aria-pressed") === "true");
+  expect(await page.$("#sm-force"), "强制关闭切换按钮存在（解绑独立）").toBeTruthy();
+  expect(!(await smPressed("#sm-force")), "强制关闭默认未激活").toBeTruthy();
   await page.click("#sm-force");
-  expect(await page.$eval("#sm-force", el => el.checked), "未勾选启动游戏也可勾选强制关闭").toBeTruthy();
+  expect(await smPressed("#sm-force"), "未激活启动游戏也可激活强制关闭").toBeTruthy();
   await page.click("#sm-force");
   await page.click("#sm-launch");
-  expect(!(await page.$eval("#sm-force", el => el.disabled)), "勾选启动游戏后强制关闭复选框不受影响").toBeTruthy();
+  expect(!(await smPressed("#sm-force")), "激活启动游戏后强制关闭按钮不受影响").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 });
 

@@ -129,15 +129,16 @@ export async function openScriptModal(id = "", plugin = "") {
   const body = isSpecial
     ? `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\BetterGenshinImpact"')}
+      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
     </div>
     <p class="muted helper-copy">由专用插件「${esc(pluginDisplay(pluginType))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
-      <div class="check-grid">
-        <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
-        <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+      <div class="toggle-grid">
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
       </div>
+      <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
         <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
@@ -156,18 +157,19 @@ export async function openScriptModal(id = "", plugin = "") {
     </div>
     <div class="form-grid">
       ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
-      ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 ..\\March7th Assistant.exe?-x（路径后加 ? 传参数）")}
+      ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 -x --mode=1；以路径开头（如 .\\app.exe?-args）时 ? 后为执行端参数")}
     </div>
     <div class="form-grid">
       ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
       ${scrollField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt")}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
-      <div class="check-grid">
-        <label class="check"><input id="sm-launch" type="checkbox" ${d.launchGame ? "checked" : ""}><span>运行脚本前启动游戏</span></label>
-        <label class="check"><input id="sm-force" type="checkbox" ${d.forceCloseGame ? "checked" : ""}><span>运行结束后强制关闭游戏</span></label>
-        <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="sm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>发送运行状态通知</span></label>
+      <div class="toggle-grid">
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
+        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
       </div>
+      <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
         <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
         <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
@@ -190,7 +192,8 @@ export async function openScriptModal(id = "", plugin = "") {
           <label class="field-label" for="sm-judge-lang">判断脚本语言</label>
           <select id="sm-judge-lang"><option value="javascript" ${d.judgeScriptLanguage === "python" ? "" : "selected"}>JavaScript（内置引擎）</option><option value="python" ${d.judgeScriptLanguage === "python" ? "selected" : ""}>Python（系统解释器）</option></select>
           <label class="field-label" for="sm-judge-code">判断脚本代码</label>
-          <textarea id="sm-judge-code" class="mono code-area" placeholder="脚本输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}，status 与 reason 必填，无输出视为继续运行。&#10;JavaScript：JSON.parse(__NEXUS_INPUT__) 读取输入；nexus.readFile(路径) 只读 config 与 script 目录；nexus.writeFile(相对路径, 内容) 写 script 目录；nexus.listFiles() 列出全部文件。&#10;Python：sys.argv[1] 为输入 JSON 路径，可直接 open() 读取文件清单内文件，脚本目录可读写。">${esc(d.judgeScript)}</textarea>
+          <textarea id="sm-judge-code" class="mono code-area" placeholder="输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}">${esc(d.judgeScript)}</textarea>
+          <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
         </div>
         <div class="judge-actions">
           <button class="ghost sm" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
@@ -246,6 +249,13 @@ export function toggleJudgeMode() {
   if (!btn) return;
   btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
   syncJudgeBox();
+}
+
+/** 切换游戏/通知开关按钮状态（启动游戏｜强制关闭｜运行通知）。 */
+function toggleSmFlag(flag) {
+  const btn = $dom("#sm-" + flag);
+  if (!btn) return;
+  btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
 }
 
 /** 上传判断脚本文件：读取内容填入代码框，按扩展名自动识别语言（.py=Python，其余=JavaScript）。 */
@@ -343,7 +353,7 @@ export async function saveScript() {
     $dom("#sm-judge-code")?.focus();
     return;
   }
-  const launchGame = $dom("#sm-launch").checked;
+  const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     toast("请填写游戏路径", "error");
@@ -360,10 +370,10 @@ export async function saveScript() {
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
     launchGame, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
-    forceCloseGame: $dom("#sm-force").checked, maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
+    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
-    notifyEnabled: $dom("#sm-notify")?.checked ?? !!scriptDraft.notifyEnabled,
+    notifyEnabled: $dom("#sm-notify")?.getAttribute("aria-pressed") === "true" || !!scriptDraft.notifyEnabled,
   };
   try {
     if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);
@@ -393,4 +403,5 @@ export const actions = {
   "save-script": () => saveScript(),
   "upload-judge-script": () => uploadJudgeScript(),
   "toggle-judge-mode": () => toggleJudgeMode(),
+  "toggle-sm-flag": target => toggleSmFlag(target.dataset.flag),
 };

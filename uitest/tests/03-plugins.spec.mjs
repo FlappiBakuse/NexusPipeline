@@ -289,14 +289,14 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
-  expect(!(await page.isVisible("#sm-notify")), "插件禁用时脚本弹窗隐藏「发送运行状态通知」").toBeTruthy();
+  expect(!(await page.isVisible("#sm-notify")), "插件禁用时脚本弹窗隐藏「运行通知」切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("调度队列"), null, { timeout: 5000 });
   await page.click('[data-action="open-queue-modal"]');
   await page.waitForSelector("#qm-name");
-  expect(!(await page.isVisible("#qm-notify")), "插件禁用时队列弹窗隐藏「队列级通知」").toBeTruthy();
+  expect(!(await page.isVisible("#qm-notify")), "插件禁用时队列弹窗隐藏「队列通知」切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   const enable = await api("POST", "/api/plugins/notify/enable");
@@ -311,14 +311,14 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
-  expect(await page.isVisible("#sm-notify"), "插件启用后脚本弹窗恢复显示通知复选框").toBeTruthy();
+  expect(await page.isVisible("#sm-notify"), "插件启用后脚本弹窗恢复显示「运行通知」切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("调度队列"), null, { timeout: 5000 });
   await page.click('[data-action="open-queue-modal"]');
   await page.waitForSelector("#qm-name");
-  expect(await page.isVisible("#qm-notify"), "插件启用后队列弹窗恢复显示通知复选框").toBeTruthy();
+  expect(await page.isVisible("#qm-notify"), "插件启用后队列弹窗恢复显示「队列通知」切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   await api("DELETE", "/api/scripts/" + created.id);

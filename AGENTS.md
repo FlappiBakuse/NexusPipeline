@@ -72,7 +72,7 @@ $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：45 用例（�
 - `src/Program.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）+ 配置迁移；启动编排见 `src/Bootstrap.cs`。
 - `src/Web/WebServer.cs`：HTTP 骨架 + **特性路由表**（v0.5.0+：`[ApiRoute("资源名")]` 标注在 handler 类/方法上，`WebServer.Routes` 启动反射扫描注册，新增 API 无需改路由表；每个 `/api/*` 资源一个 `ApiXxxHandler`，见 `src/Web/`）；`GET /api/status` 不记审计（轮询豁免）。
 - `src/Cli/`：命令行菜单（MainMenu + 脚本/队列/调度/历史/插件/设置/通知渠道 7 个菜单类）。
-- `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知复选框同行（启动游戏｜强制关闭｜发送通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。
+- `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知切换按钮同行（启动游戏｜强制关闭｜运行通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。
 - 模块边界与定位指南见 `docs/ARCHITECTURE.md`（v0.2.0+）。
 - CI：`.github/workflows/ci.yml`（windows-latest，build.cmd + npm ci + e2e）。
 
@@ -118,5 +118,10 @@ $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：45 用例（�
 - **展示模式（v0.3.6+）**：脚本实例/调度队列/用户列表统一为紧凑列表行（`.script-card`/`.user-card` 行样式 + 卡内分隔线 + 行 hover 背景）；禁止新增其他卡片式条目布局，新条目一律先复用行样式。
 - **密钥字段语义（v0.3.6+）**：密钥/敏感字段（Webhook 地址与签名密钥、SMTP 授权码）合并进「保存设置」统一提交，仅非空值提交（留空=不变，不提供清除按钮）；Webhook 地址用 `type="text"`、其余密钥类用 `type="password"`；已设置的密钥不回显明文，placeholder 提示「（已设置，留空不变）」。
 - **自定义完成标志前端（v0.4.0+，仅通用脚本弹窗「运行设置」区显示，专用脚本整块不渲染）**：默认显示成功/失败关键字填写框（各独占一行 textarea，placeholder 说明「每行一组，组内逗号分隔为 AND，换行为 OR」）；底部公共操作区为「上传脚本文件」按钮（仅脚本模式显示）与「使用判断脚本（脚本优先）」**切换按钮**（`data-action="toggle-judge-mode"` + `aria-pressed`，激活态 accent 高亮，点击在关键字/脚本两区互斥切换——禁止双复选框同 id）；脚本模式显示语言下拉（JavaScript 内置引擎 / Python 系统解释器）+ 等宽代码框（placeholder 含 `replaceConfigs` 契约说明）+ 上传按钮（`.js`/`.py` 扩展名自动识别语言并读入代码框，文件 ≤256KB）；保存校验：开启且代码为空时报错。
+- **切换按钮（v0.5.4+，全部开关控件统一形态）**：所有开关一律 `.mode-toggle` 切换按钮（`data-action` 切换 + `aria-pressed`，激活态 accent 高亮，状态读取用 `getAttribute("aria-pressed") === "true"`）；长语义说明移入按钮旁 `muted` 小字（`.toggle-row`，`align-items: flex-end` 与按钮底部对齐）；`.toggle-row`/`.toggle-grid`/`.field-btn-row` 自带 `margin: 12px 0` 与上下内容间距一致（`panel-body` 内由 gap 管理、`margin: 0` 覆盖；modal 内 `.toggle-row` 与上方填写框统一 20px）；按钮与输入框同行时高度一致（40px，`.field-btn-row`），同一行内按钮等宽（定时卡片「启用/删除」64px、任务行 ↑/↓/删除 52px）；星期周期按钮 `.days-btn-grid` 桌面/平板 7 个等宽一行、手机（≤600px）4+3 两行；`.toggle-grid` 桌面 3 等宽一行、手机 2 列换行。
+- **手机端表单间距（v0.5.4+，≤600px）**：`.form-grid`/`.row` 系列 gap 与 `.modal-body` 块间距统一 **12px**（`gap: 4px` 废弃），subsection 区域分隔保持 24px；禁止再出现同 grid 内字段间距远小于 grid 间间距的割裂。
+- **select 下拉（v0.5.4+）**：保持原生 `<select>`（禁止自定义 div 下拉组件），`appearance:none` + 自定义箭头 + `option/optgroup` 背景色跟随主题（`--panel-solid`/`--text`）、选中项 `--accent-soft` 高亮、聚焦边框 accent。
+- **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
+- **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- 每次前端改动必须运行 `build.cmd` 和完整 e2e；新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 46（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、extensions/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（99）+ `chaos-queue.mjs`（171）；**版本发布前**一律全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

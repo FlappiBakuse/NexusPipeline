@@ -112,13 +112,13 @@ function syncQueueDraftFromDom() {
   const name = $("#qm-name"); if (name) queueDraft.name = name.value.trim();
   const mode = $("#qm-mode"); if (mode) queueDraft.autoRunMode = mode.value;
   const action = $("#qm-action"); if (action) queueDraft.completionAction = action.value;
-  const notify = $("#qm-notify"); if (notify) queueDraft.notifyEnabled = notify.checked;
+  const notify = $("#qm-notify"); if (notify) queueDraft.notifyEnabled = notify.getAttribute("aria-pressed") === "true";
   $$(".timeset-card").forEach((card, index) => {
     const target = queueDraft.timeSets[index]; if (!target) return;
-    const enabled = card.querySelector("[data-ts-enable]"); if (enabled) target.enabled = enabled.checked;
+    const enabled = card.querySelector("[data-ts-enable]"); if (enabled) target.enabled = enabled.getAttribute("aria-pressed") === "true";
     const time = card.querySelector("[data-ts-time]"); if (time) target.time = time.value.trim() || target.time;
-    const dayInputs = Array.from(card.querySelectorAll("[data-ts-days]")).filter(input => input.checked);
-    target.days = dayInputs.map(input => +input.dataset.day);
+    const dayButtons = Array.from(card.querySelectorAll("[data-ts-days]")).filter(input => input.getAttribute("aria-pressed") === "true");
+    target.days = dayButtons.map(input => +input.dataset.day);
   });
   $$('[data-task-idx]').forEach(select => { const index = +select.dataset.taskIdx; if (queueDraft.tasks[index]) queueDraft.tasks[index].scriptInstanceId = select.value; });
 }
@@ -132,8 +132,8 @@ export function renderQueueModal() {
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
   const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
     <div class="form-grid"><div><label class="field-label" for="qm-mode">自动运行方式</label><select id="qm-mode"><option value="none" ${d.autoRunMode === "none" ? "selected" : ""}>不运行</option><option value="scheduled" ${d.autoRunMode === "scheduled" ? "selected" : ""}>定时运行</option><option value="startup" ${d.autoRunMode === "startup" ? "selected" : ""}>启动时运行</option></select></div><div><label class="field-label" for="qm-action">运行完成操作</label><select id="qm-action"><option value="none" ${d.completionAction === "none" ? "selected" : ""}>无操作</option><option value="exit" ${d.completionAction === "exit" ? "selected" : ""}>退出软件</option><option value="sleep" ${d.completionAction === "sleep" ? "selected" : ""}>休眠</option><option value="reboot" ${d.completionAction === "reboot" ? "selected" : ""}>重启</option><option value="shutdown" ${d.completionAction === "shutdown" ? "selected" : ""}>关机</option></select></div></div>
-    <label class="check" ${notifyAvailable() ? "" : "hidden"}><input id="qm-notify" type="checkbox" ${d.notifyEnabled ? "checked" : ""}><span>队列级通知（统一发送所有脚本状态，覆盖实例级设置）</span></label>
-    <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">可添加多个触发时间</span></div><div id="qm-timesets">${d.timeSets.map((timeSet, index) => `<div class="card timeset-card compact-card"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-frame" role="group" aria-label="执行周期">${days.map((name, day) => `<label class="check days-option"><input type="checkbox" data-ts-days="${index}" data-day="${day}" ${timeSet.days.includes(day) ? "checked" : ""}><span>${name}</span></label>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><label class="check"><input type="checkbox" data-ts-enable="${index}" ${timeSet.enabled ? "checked" : ""}><span>启用</span></label><button class="sm danger" type="button" data-action="remove-time-set" data-index="${index}">删除该定时</button></div></div>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
+    <div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-qm-flag" id="qm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">队列通知</button><span class="muted">统一发送所有脚本状态，覆盖实例级设置</span></div>
+    <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">可添加多个触发时间</span></div><div id="qm-timesets">${d.timeSets.map((timeSet, index) => `<div class="card timeset-card compact-card"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><button class="mode-toggle" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" aria-pressed="${timeSet.enabled ? "true" : "false"}">启用</button><button class="sm danger" type="button" data-action="remove-time-set" data-index="${index}">删除</button></div></div>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
     <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按序号先后执行</span></div><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row"><span class="muted task-number">${index + 1}.</span><select data-task-idx="${index}"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${script.id}" ${script.id === task.scriptInstanceId ? "selected" : ""}>${esc(script.name)}</option>`).join("")}</select><button class="sm" type="button" data-action="move-task-up" data-index="${index}" aria-label="任务上移">↑</button><button class="sm" type="button" data-action="move-task-down" data-index="${index}" aria-label="任务下移">↓</button><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div><button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
   showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body, '<button type="button" data-action="save-queue">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), true);
 }
@@ -165,7 +165,7 @@ export function queueMoveTask(index, direction) { syncQueueDraftFromDom(); const
 export async function saveQueue() {
   syncQueueDraftFromDom();
   const draft = queueDraft;
-  draft.timeSets.forEach((timeSet, index) => { timeSet.enabled = $(`[data-ts-enable='${index}']`)?.checked ?? timeSet.enabled; timeSet.time = $(`[data-ts-time='${index}']`)?.value.trim() || "05:30"; timeSet.days = $$(`[data-ts-days='${index}']`).filter(input => input.checked).map(input => +input.dataset.day); });
+  draft.timeSets.forEach((timeSet, index) => { const tsEnable = $(`[data-ts-enable='${index}']`); if (tsEnable) timeSet.enabled = tsEnable.getAttribute("aria-pressed") === "true"; timeSet.time = $(`[data-ts-time='${index}']`)?.value.trim() || "05:30"; timeSet.days = $$(`[data-ts-days='${index}']`).filter(input => input.getAttribute("aria-pressed") === "true").map(input => +input.dataset.day); });
   draft.timeSets = draft.timeSets.filter(timeSet => timeSet.days.length);
   draft.tasks = draft.tasks.map((task, index) => ({ ...task, index, scriptInstanceId: $(`[data-task-idx='${index}']`)?.value || task.scriptInstanceId })).filter(task => task.scriptInstanceId);
   if (!draft.name) { toast("队列名称不能为空", "error"); return; }
@@ -256,4 +256,11 @@ export const actions = {
   "remove-task": target => queueRemoveTask(+target.dataset.index),
   "move-task-up": target => queueMoveTask(+target.dataset.index, -1),
   "move-task-down": target => queueMoveTask(+target.dataset.index, 1),
+  "toggle-qm-flag": () => { const btn = $("#qm-notify"); if (btn) togglePressed(btn); },
+  "toggle-ts-day": target => togglePressed(target),
+  "toggle-ts-enable": target => togglePressed(target),
 };
+
+function togglePressed(btn) {
+  btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+}
