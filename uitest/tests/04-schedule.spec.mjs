@@ -12,7 +12,7 @@ function scriptHistoryLog(scriptId) {
     for (const f of files) {
       const rec = JSON.parse(fs.readFileSync(path.join(historyRoot, dir, f), "utf8").replace(/^\uFEFF/, ""));
       if (rec.ScriptInstanceId === scriptId) {
-        const logFile = path.join(historyRoot, dir, f.replace(".json", ".log"));
+        const logFile = path.join(historyRoot, dir, f.replace(".json", "-1.log"));
         return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
       }
     }
@@ -318,7 +318,7 @@ test("调度中心：运行中任务实时日志滚动（重试后成功 → 部
   expect(true, "运行结束后日志框随任务消失").toBeTruthy();
 });
 
-test("历史文件夹：.json/.log/.console.log 三件套 + 脚本日志与控制台输出分离 + partial 判定", async () => {
+test("历史文件夹：.json 纯状态 + 按尝试分批 .log 标号 + 脚本日志与控制台分离 + partial 判定", async () => {
   const historyRoot = path.join(runtimeDir, "history");
   const dayDir = path.join(historyRoot, latestHistoryDay());
   await waitFor(() => fs.existsSync(dayDir), 8000);
@@ -326,9 +326,10 @@ test("历史文件夹：.json/.log/.console.log 三件套 + 脚本日志与控�
   const jsons = fs.existsSync(dayDir) ? fs.readdirSync(dayDir).filter(f => f.endsWith(".json")) : [];
   const logs = fs.existsSync(dayDir) ? fs.readdirSync(dayDir).filter(f => f.endsWith(".log")) : [];
   expect(jsons.length >= 1, "存在 .json 状态文件（" + jsons.length + " 个）").toBeTruthy();
-  expect(logs.length >= 1, "存在 .log 日志文件（" + logs.length + " 个）").toBeTruthy();
-  expect(jsons.some(f => logs.includes(f.replace(".json", ".log"))), ".log 与 .json 同名配对").toBeTruthy();
-  expect(jsons.some(f => logs.includes(f.replace(".json", ".console.log"))), ".console.log 与 .json 同名配对（三件套）").toBeTruthy();
+  expect(logs.length >= 1, "存在按尝试分批的 .log 日志文件（" + logs.length + " 个）").toBeTruthy();
+  expect(jsons.some(f => logs.includes(f.replace(".json", "-1.log"))), "尝试 1 日志与 .json 配对（-1.log 分批标号）").toBeTruthy();
+  expect(jsons.some(f => logs.includes(f.replace(".json", "-2.log"))), "尝试 2 日志与 .json 配对（-2.log 分批标号）").toBeTruthy();
+  expect(!logs.some(f => f.endsWith(".console.log")), "不再生成 .console.log（控制台输出不落盘）").toBeTruthy();
 
   const newestJson = jsons[jsons.length - 1];
   const readText = p => fs.readFileSync(p, "utf8").replace(/^\uFEFF/, "");
@@ -336,12 +337,16 @@ test("历史文件夹：.json/.log/.console.log 三件套 + 脚本日志与控�
   expect(record.FinalStatus === "partial", "重试后成功判定为部分失败（FinalStatus=" + record.FinalStatus + "）").toBeTruthy();
   expect(record.Attempts === 2, "重试次数记录为 2（Attempts=" + record.Attempts + "）").toBeTruthy();
   expect(record.LogFile === newestJson, "json 记录 LogFile 引用").toBeTruthy();
+  expect(record.AttemptDetails && record.AttemptDetails.length === 2, "尝试详情 2 条（AttemptDetails 长度）").toBeTruthy();
+  expect(record.AttemptDetails[0].LogFile === newestJson.replace(".json", "-1.log"), "尝试 1 记录 LogFile=-1.log").toBeTruthy();
+  expect(record.AttemptDetails[1].LogFile === newestJson.replace(".json", "-2.log"), "尝试 2 记录 LogFile=-2.log").toBeTruthy();
+  expect(!("LogTail" in record.AttemptDetails[0]) && !("OutputTail" in record.AttemptDetails[0]), "json 尝试详情不含日志内容（纯状态，无 LogTail/OutputTail）").toBeTruthy();
 
-  const scriptLog = readText(path.join(dayDir, newestJson.replace(".json", ".log")));
-  expect(scriptLog.includes("[SCRIPT]"), "历史 .log 含脚本日志内容").toBeTruthy();
-  expect(!scriptLog.includes("[CONSOLE]"), "历史 .log 不含控制台输出（分离）").toBeTruthy();
-
-  const consoleLog = readText(path.join(dayDir, newestJson.replace(".json", ".console.log")));
-  expect(consoleLog.includes("[CONSOLE]"), "历史 .console.log 含控制台输出").toBeTruthy();
-  expect(!consoleLog.includes("[SCRIPT]"), "历史 .console.log 不含脚本日志内容（分离）").toBeTruthy();
+  const attempt1Log = readText(path.join(dayDir, newestJson.replace(".json", "-1.log")));
+  expect(attempt1Log.includes("[SCRIPT]"), "尝试 1 日志文件含脚本日志内容").toBeTruthy();
+  expect(!attempt1Log.includes("[CONSOLE]"), "尝试 1 日志文件不含控制台输出（分离）").toBeTruthy();
+  const attempt2Log = readText(path.join(dayDir, newestJson.replace(".json", "-2.log")));
+  expect(attempt2Log.includes("[SCRIPT]"), "尝试 2 日志文件含脚本日志内容").toBeTruthy();
+  expect(attempt2Log.includes("ALL-DONE-MARKER"), "尝试 2 日志文件含成功标志行").toBeTruthy();
+  expect(!attempt2Log.includes("[CONSOLE]"), "尝试 2 日志文件不含控制台输出（分离）").toBeTruthy();
 });

@@ -734,7 +734,7 @@ function scriptHistoryLog(scriptId) {
     for (const f of files) {
       const rec = JSON.parse(fs.readFileSync(path.join(historyRoot, dir, f), "utf8").replace(/^\uFEFF/, ""));
       if (rec.ScriptInstanceId === scriptId) {
-        const logFile = path.join(historyRoot, dir, f.replace(".json", ".log"));
+        const logFile = path.join(historyRoot, dir, f.replace(".json", "-1.log"));
         return fs.existsSync(logFile) ? fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "") : "";
       }
     }
