@@ -39,7 +39,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 用户（ScriptUser） | 脚本实例下的账号：名称 + 独立配置快照 + 可选前置/后置脚本；同一实例可多用户，运行按序串行轮换 |
 | 调度队列（DispatchQueue） | 按 Index 顺序链式执行一组脚本实例（每实例内仍按用户串行）；可定时/启动时自动运行，结束可执行完成操作 |
 | 尝试（RunAttempt） | 一次尝试 = 一次完整的进程启动→监控→判定→清理；失败按 MaxAttempts 重试 |
-| 运行（RunRecord） | 一次「脚本实例 × 用户」的完整运行（含全部尝试），落盘历史三件套 |
+| 运行（RunRecord） | 一次「脚本实例 × 用户」的完整运行（含全部尝试），落盘历史（.json 纯状态 + 按尝试分批日志） |
 | 完成判定（SessionJudge） | 判断脚本/关键字/插件标志三模式的判定状态机，每尝试独立实例 |
 | 配置交换（ConfigSwap） | 运行前 configPath ↔ 用户快照的交换机制（见第 4 节） |
 | 日志监控（LogMonitor） | 对脚本日志文件的增量读取器，支持追加/截断/替换三种文件形态（见第 6 节） |
@@ -80,7 +80,7 @@ sequenceDiagram
         end
     end
     S->>S: 还原替换配置 → 清空脚本区 → 配置交换还原现场
-    DC->>DC: 历史三件套落盘 → 通知分发
+    DC->>DC: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发
 ```
 
 **分步细节（RunAttemptAsync 内）：**
@@ -117,7 +117,7 @@ flowchart TD
     F -- 是 --> H[RunUsersAsync 按用户顺序串行]
     H --> I[门禁 ScriptConfigGate 等待]
     I --> J[RunSession 运行该用户]
-    J --> K[历史三件套落盘 + 进度 DoneTasks++]
+    J --> K[历史落盘（.json 纯状态 + 按尝试分批日志）+ 进度 DoneTasks++]
     K --> C
     C -- 遍历完成 --> L{queue.NotifyEnabled}
     L -- 是 --> M[队列级汇总通知]
@@ -247,11 +247,10 @@ flowchart LR
 
 ### 7.2 历史与日志落盘
 
-- 每次「脚本实例 × 用户」运行结束保存三件套（同名前缀，冲突加 `-1` 后缀）：
-  - `history/YYYY-MM-DD/HH-mm-ss.json`：运行状态（PascalCase，Attempts/FinalStatus/每次尝试详情/LogFile 等）；
-  - `.log`：脚本日志全文（LogMonitor 读到的全部行，20MB 截断）；
-  - `.console.log`：本次运行完整控制台输出（stdout/stderr 捕获 + 分隔行，20MB 截断）；
-  - 另追加 `runs-YYYY-MM-DD.jsonl` 索引（查询走索引，缺失时扫描 .json 目录重建）。
+- 每次「脚本实例 × 用户」运行结束保存（v0.5.3 精简：纯状态 + 按尝试分批日志）：
+  - `history/YYYY-MM-DD/HH-mm-ss.json`：**纯运行状态**（PascalCase，Attempts/FinalStatus/每次尝试详情（含各尝试 `LogFile` 引用）等，**不含任何日志内容**；同秒冲突加 `-1` 后缀）；
+  - `history/YYYY-MM-DD/HH-mm-ss-{尝试号}.log`：**每次尝试一个独立日志文件**（脚本日志全文，20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）——重试失败按尝试分批标号，排查清晰；
+  - 控制台输出（stdout/stderr）**不再落盘**（运行中实时显示仍保留）；历史详情按尝试展示各日志文件尾部。
 - `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled。
 - 保留天数 `HistoryRetentionDays`（默认 7、上限 180）每日清理一次（启动时 + 调度器每日首次 tick）；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
@@ -260,7 +259,7 @@ flowchart LR
 
 以下行为属**设计语义**（如实记录，非缺陷）：
 
-1. **配置交换清除运行产物**：运行结束时 `DoRestore` 清空 configPath 再还原现场，**运行期间脚本写入 configPath 内的文件（含脚本日志文件）会被删除**。日志文件的安全保存依赖宿主历史三件套，脚本自身文件请避免放在 configPath 内。
+1. **配置交换清除运行产物**：运行结束时 `DoRestore` 清空 configPath 再还原现场，**运行期间脚本写入 configPath 内的文件（含脚本日志文件）会被删除**。日志文件的安全保存依赖宿主历史落盘（.json + 按尝试分批 .log），脚本自身文件请避免放在 configPath 内。
 2. **同一用户尝试间的日志残留**：配置还原只在**整个运行结束**时执行，尝试之间 log.txt 保留（监控已按末尾读+严格 fresh 处理，无害）。
 3. **配置 JSON 无事务锁**：服务运行期间不建议另一个实例同时修改配置。
 4. **定时触发为每分钟秒级检测**：服务在该分钟内处于运行状态即可触发，错过整点不补跑；触发时队列内任一脚本已在运行则跳过该队列并记录失败历史。

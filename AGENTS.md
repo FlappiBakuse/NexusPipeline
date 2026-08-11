@@ -36,7 +36,7 @@ $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：45 用例（�
 | 位置 | 内容 |
 |---|---|
 | `config/settings|scripts|queues.json` | 用户配置（PascalCase，**含加密密钥与用户数据，永不提交**；`Program.MigrateLegacyConfig()` 负责旧配置迁移） |
-| `history/YYYY-MM-DD/HH-mm-ss.json` + `.log` + `.console.log` | 运行状态（PascalCase，如 `Attempts`/`FinalStatus`/`LogFile`）+ 脚本日志全文 + 本次运行完整控制台输出（三件套成对，冲突加 `-1` 后缀；控制台与脚本日志均 20MB 截断） |
+| `history/YYYY-MM-DD/HH-mm-ss.json` + `-{尝试号}.log` | 运行状态（PascalCase，如 `Attempts`/`FinalStatus`/`LogFile`，含每次尝试详情与各尝试 `LogFile`）+ **按尝试分批**的脚本日志全文（v0.5.3 起：`.json` 纯状态不含日志内容；每次尝试一个 `HH-mm-ss-{n}.log`；同秒冲突加 `-1` 后缀；旧版 `.console.log`/`runs-*.jsonl` 已废弃不写入） |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志，审计行 `[审计] 来源 \| 操作（详情）`，来源 web/manage/cli/scheduler/system |
 
 - **磁盘 JSON = PascalCase；Web API 返回 camelCase**（`JsonOpts.Web`）；读测试 JSON 前先 `.replace(/^\uFEFF/, "")` 去 BOM。

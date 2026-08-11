@@ -2,6 +2,14 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## [v0.5.3]（2026-08-11）
+
+### 变更
+
+- **历史与日志落盘精简**：每次运行仅保留 `.json` 纯运行状态（移除尝试详情的日志尾部快照 LogTail/OutputTail/OutputFile）+ **按尝试分批**的 `.log` 脚本日志文件（`HH-mm-ss-{尝试号}.log`，重试失败按尝试标号，排查清晰）；**废弃 `.console.log`**（控制台输出仅保留运行中实时显示，不再落盘）与 **`runs-*.jsonl` 索引**（历史查询直接扫描 `.json` 目录）；运行会话移除控制台全文缓存（内存占用下降）。
+- 历史详情（Web/CLI）：按尝试分批展示脚本日志；旧数据兼容（无按尝试文件的旧记录回退读取旧 `.log`）。
+- e2e「历史文件集」用例重写为两件套 + 按尝试分批标号断言；版本号 0.5.3。
+
 ## [v0.5.2]（2026-08-11）
 
 ### 修复
@@ -161,4 +169,5 @@
 
 - 初始提交（枢链）：脚本实例/用户/队列管理、托盘服务、Web 管理界面、调度与通知的基础能力。
 
+[v0.5.3]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.3
 [v0.5.2]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.2
