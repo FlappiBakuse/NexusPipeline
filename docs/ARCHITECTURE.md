@@ -1,6 +1,7 @@
 ﻿# NexusPipeline 架构说明
 
 本文件是开发者与大模型的导航地图：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
+核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
 ## 总体结构
 
@@ -50,8 +51,10 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
-| `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换） |
+| `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换）；判断脚本输入按尝试切片（v0.5.2+） |
 | `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：关键字/完成标志/判断脚本三模式，判定状态与输入 |
+| `JudgeScriptRunner` | src/Services/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（Length<position 从头重读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths` |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试 |
@@ -106,7 +109,6 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/settings） |
-| `src/JudgeScriptRunner.cs` | 自定义完成标志判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+日志全文）、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
 
 ### 新增交互的落点
 
@@ -171,7 +173,7 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 |---|---|
 | 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（`[ApiRoute]` 特性注册，见 `WebServer.Routes`） |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
-| 脚本运行流程/重试/日志监控 | `src/Services/RunSession.cs`、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
+| 脚本运行流程/重试/日志监控 | `src/Services/RunSession.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/SessionJudge.cs`（判定状态机）、`src/Services/RunSession.cs`（监控循环/触发时机）、`src/Services/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/ConfigSwapSession.cs`（替换/恢复）、`src/Services/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
 | 队列调度触发 | `src/Services/Scheduler.cs` |
@@ -182,6 +184,10 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 | 历史记录格式 | `src/Services/HistoryService.cs`、`src/Models/RunRecord.cs` |
 
 > **v0.5.0 分层变更**：核心域按子域重组（`Models/`、`Services/`、`Persistence/`、`Utilities/` 对应命名空间）；Web 路由改特性路由；`RuntimeContext` 引入壳式 DI（`ServiceProvider` + `Resolve<T>()`，外部访问方式不变）；`RunSession` 判定策略拆出 `SessionJudge`；`UserConfigManager` 拆为门面 + 原语/会话恢复/数据目录三层。public 契约清单不变，extensions 三插件工程对齐后仍可编译。
+>
+> **v0.5.1 变更**：插件级配置（`PluginContext.GetConfig/SetConfig/GetSecret/SetSecret`，落盘 `config/plugins/<插件名>.json`，DPAPI `enc:` 前缀）；e2e 迁移 @playwright/test（tests/ 按域 7 文件 46 用例，旧 test.mjs 移除）；`core/limits.js` 归位 `views/limits.js`。
+>
+> **v0.5.2 变更**：日志监控文件替换检测改 FileId（`LogMonitor.FileReplaced`，根治 move+重建场景句柄残留）；初始监控严格 fresh（`LastWriteTime ≥ attemptStart`）；判断脚本输入按尝试切片（本次尝试日志段，跨尝试不污染判定）；RunAsync finally 还原顺序调整（先配置替换还原、后配置交换还原）。
 
 ## 数据流速览
 
