@@ -16,7 +16,7 @@ public sealed class ZenlessZoneZeroOneDragonAdapterPlugin : ISpecializedScriptPl
 
     public string Description => "Zenless Zone Zero OneDragon 专项脚本实例配置接管（自动推导主程序、启动参数、配置与日志路径）";
 
-    public string Version => "1.0.0";
+    public string Version => "0.1.0";
 
     public bool IsBuiltIn => false;
 

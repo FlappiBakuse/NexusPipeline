@@ -13,12 +13,18 @@ internal static class ConfigSwapPaths
 
     public static string StoreDir(string scriptId, string userName)
     {
-        return Path.Combine(UserDir(scriptId, userName), "config");
+        return Path.Combine(UserDir(scriptId, userName), "store");
     }
 
     public static string CacheDir(string scriptId, string userName)
     {
-        return Path.Combine(UserDir(scriptId, userName), "cache");
+        return Path.Combine(UserDir(scriptId, userName), "original");
+    }
+
+    /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
+    public static string HiddenConfigDir(string scriptId, string userName)
+    {
+        return Path.Combine(UserDir(scriptId, userName), "edit-hidden");
     }
 
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
@@ -33,8 +39,8 @@ internal static class ConfigSwapPaths
     public static string ReplaceBackupDir(string scriptId, string? userName)
     {
         return string.IsNullOrWhiteSpace(userName)
-            ? Path.Combine(AppPaths.DataDir, scriptId, "replace-backup")
-            : Path.Combine(UserDir(scriptId, userName), "replace-backup");
+            ? Path.Combine(AppPaths.DataDir, scriptId, "swap-backup")
+            : Path.Combine(UserDir(scriptId, userName), "swap-backup");
     }
 
     /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>
@@ -57,6 +63,59 @@ internal static class ConfigSwapPaths
     {
         ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
         ConfigSwapPrimitives.TryDeleteDir(ReplaceBackupDir(scriptId, userName));
+    }
+
+    /// <summary>数据目录命名迁移（v0.6.0）：旧名 → 新名（config→store、cache→original、edit-hide→edit-hidden、replace-backup→swap-backup）。
+    /// 幂等：目标名已存在则跳过（保留新现场）；失败仅告警不阻断。启动时在崩溃恢复扫描前调用，确保旧版本残留现场仍可恢复。</summary>
+    public static void MigrateLegacyLayout()
+    {
+        if (!Directory.Exists(AppPaths.DataDir))
+        {
+            return;
+        }
+        foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
+        {
+            string scriptId = Path.GetFileName(scriptDir);
+            foreach ((string oldName, string newName) in LegacyDirMap)
+            {
+                TryRenameDir(Path.Combine(scriptDir, oldName), Path.Combine(scriptDir, newName), $"{scriptId}（无用户）");
+                foreach (string userDir in Directory.GetDirectories(scriptDir))
+                {
+                    string userName = Path.GetFileName(userDir);
+                    TryRenameDir(Path.Combine(userDir, oldName), Path.Combine(userDir, newName), $"{scriptId} / {userName}");
+                }
+            }
+        }
+    }
+
+    private static readonly (string Old, string New)[] LegacyDirMap =
+    {
+        ("config", "store"),
+        ("cache", "original"),
+        ("edit-hide", "edit-hidden"),
+        ("replace-backup", "swap-backup"),
+    };
+
+    private static void TryRenameDir(string oldPath, string newPath, string scope)
+    {
+        if (!Directory.Exists(oldPath))
+        {
+            return;
+        }
+        if (Directory.Exists(newPath))
+        {
+            Logger.Warn($"[警告] 数据目录命名迁移跳过（目标已存在）：{oldPath} → {newPath}");
+            return;
+        }
+        try
+        {
+            Directory.Move(oldPath, newPath);
+            Logger.Info($"[迁移] 数据目录命名更新：{oldPath} → {newPath}（{scope}）");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 数据目录命名迁移失败（{scope}）：{oldPath} → {newPath}（{ex.Message}）");
+        }
     }
 
     /// <summary>删除脚本时清理其全部数据目录。</summary>

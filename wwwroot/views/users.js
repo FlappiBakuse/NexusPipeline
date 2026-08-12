@@ -53,6 +53,18 @@ export async function pageScriptUsers(scriptId, token) {
   }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
   render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
+  restoreEditSessionCard(scriptId);
+}
+
+/** 刷新后恢复进行中的「配置编辑中」锁定卡片（后端会话仍在，用户可继续完成/取消）。 */
+async function restoreEditSessionCard(scriptId) {
+  if (!$dom(".modal-mask")) {
+    try {
+      const sessions = await api("GET", "/api/scripts/edit-sessions");
+      const session = (sessions || []).find(item => item.scriptId === scriptId);
+      if (session) showEditConfigCard(scriptId, session.userName);
+    } catch (error) { /* 查询失败静默，下次进入页面重试 */ }
+  }
 }
 
 export function openUserModal(scriptId, userName = "") {
@@ -112,8 +124,13 @@ export async function moveUser(scriptId, userName, direction) {
 export async function editUserConfig(scriptId, userName) {
   try {
     await api("POST", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}/edit-config`, { action: "start" });
-    showModal(modalShell("配置编辑中", `<p class="modal-copy">主程序已启动（不带参数）。请自行设置好当前用户「${esc(userName)}」的脚本配置。设置完成后点击「完成」保存，或点击「取消」放弃本次修改。</p>`, `<button type="button" data-action="edit-config-done" data-id="${scriptId}" data-name="${esc(userName)}">完成</button><button class="ghost" type="button" data-action="edit-config-cancel" data-id="${scriptId}" data-name="${esc(userName)}">取消</button>`));
+    showEditConfigCard(scriptId, userName);
   } catch (error) { toast(error.message, "error"); }
+}
+
+/** 「配置编辑中」锁定卡片（Esc/遮罩/× 均不可关闭，只能完成或取消）；刷新后由用户管理页自动恢复。 */
+function showEditConfigCard(scriptId, userName) {
+  showModal(modalShell("配置编辑中", `<p class="modal-copy">主程序已启动（不带参数）。请自行设置好当前用户「${esc(userName)}」的脚本配置。设置完成后点击「完成」保存，或点击「取消」放弃本次修改。</p>`, `<button type="button" data-action="edit-config-done" data-id="${scriptId}" data-name="${esc(userName)}">完成</button><button class="ghost" type="button" data-action="edit-config-cancel" data-id="${scriptId}" data-name="${esc(userName)}">取消</button>`), false, true);
 }
 
 export async function editConfigAction(scriptId, userName, action) {

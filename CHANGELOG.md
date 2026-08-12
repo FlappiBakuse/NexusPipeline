@@ -2,6 +2,26 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## [v0.6.0]（2026-08-12）
+
+### 新增
+
+- **专用插件判断脚本（第一阶段：BetterGI，插件固化）**：专项脚本实例的判断脚本由插件全权提供（`ScriptProfile.JudgeScript`），后端 `ApplyProfile` 保存时固化（`JudgeScriptEnabled=true`、语言固定 JavaScript），**用户不可编辑**（专项弹窗不渲染自定义完成标志区，关键字仍强制清空；判定走脚本模式时替代插件固化标志）。
+- **BetterGI 默认判断脚本**（JS/Jint，基于配置与日志调研）：以「一条龙和配置组任务结束」为运行结束关键字；出现后以 `执行失败/执行异常` 模式提取失败任务（含别名映射「前往冒险家协会领取奖励→领取每日奖励」）→ 读取 OneDragon 配置 → `TaskEnabledList` 仅失败任务开启、其余关闭 → `replaceConfigs` 覆盖配置并自动重试（运行结束自动还原）；无失败任务判成功；无法识别的失败任务保守终止（不误改配置）。
+- **专项配置模板（NexusPipeline.json）**：BetterGI 专项 `ConfigPath` 指向 `User\OneDragon\NexusPipeline.json`（不直接使用 BetterGI 自带配置）；`ScriptProfile.ConfigTemplate` 提供最小配置模板（结构键完整、值全空，任务列表/定义为空由用户在编辑时自行添加，不读取可能改名的现有配置文件）；首次编辑用户配置会话时生成到配置位置（cancel 清理，崩溃残留由下次编辑覆盖）。
+- **配置交换形态修复**：`PrepareForRun` 仅原配置形态为目录时重建目录（缺失形态不再误建同名目录，修复专项首次编辑时 NexusPipeline.json 被建为目录导致模板写入拒绝访问）；`RestoreKind` 对 Missing 按文件还原（修复二次编辑时文件快照以目录形态落位成「目录/同名文件」残留、配置选项丢失）；`EnsureConfigForEdit` 对误建/残留的同名目录递归清理再写模板（自愈）。e2e 新增专项编辑配置模板用例（47 用例 / CI 46）。
+- **编辑会话隐藏机制**：专项脚本 + config 为单文件时，编辑会话 start 将 config 同目录下其他 `*.json` 配置（如 BetterGI 自带「默认配置.json」）暂移入 `data/{脚本Id}/{用户}/edit-hidden`，使 BetterGI 配置列表仅剩 NexusPipeline（自动选中，无需手动切换）；done/cancel 恢复，崩溃残留由下次 start 幂等恢复。
+- **编辑会话锁定与恢复**：「配置编辑中」卡片改为锁定弹窗（Esc/遮罩/× 不可关闭，只能完成/取消）；新增 `GET /api/scripts/edit-sessions` 查询进行中会话，用户管理页刷新后自动恢复锁定卡片继续编辑；重启后端时 `.session` 标记（`GeneratedTemplate`）驱动恢复——清理编辑会话生成的配置模板并移回隐藏配置，还原编辑前状态。e2e 新增锁定/刷新恢复/重启恢复用例（48 用例 / CI 47）。
+- **配置交换数据目录命名统一**：`data/{脚本Id}/{用户名}/` 下子目录改为语义明确的名称——`config/`→`store/`（内部储存配置快照，与 DESIGN 设计名对齐）、`cache/`→`original/`（原配置暂存，崩溃恢复保底）、`replace-backup/`→`swap-backup/`（配置替换备份）、`edit-hide/`→`edit-hidden/`（编辑会话隐藏配置）；`script/`、`.session` 不变。启动恢复扫描前自动把旧名残留目录迁移到新名（幂等，旧版本崩溃现场仍可完整恢复）；判断脚本输入契约（`files[].Root`、`replaceConfigs`）不受影响。e2e 新增迁移与崩溃现场恢复用例（49 用例 / CI 48）。
+- **Missing 形态还原修复**：运行/编辑前配置位置不存在（Missing）时，会话结束后原逻辑「original 空仅清标记不动现场」，导致运行生效的 store 快照**残留在配置位置**（专项 NexusPipeline.json 场景：每次运行后残留并污染下次添加用户快照，真机复现确认）。修复：`DoRestore` 对 Missing 形态删除会话期间在配置位置产生的文件/目录，还原为「不存在」（删除失败保留标记交由自愈/后台重试）。e2e 新增自然结束/运行中取消双变体回归用例（50 用例 / CI 49）。
+- **运行收尾顺序增强**：杀脚本进程改为「进程树清理 + 轮询按名强杀直至确认退出」（处理 BetterGI 等「被杀后自重启」的脚本——真机日志曾需强杀两轮才干净），确认进程退出后再按设置处理游戏进程、最后进行配置交换还原，消除文件占用导致的还原失败窗口。
+- **脚本/游戏窗口启动前置**：宿主启动脚本主程序与游戏进程后，后台将可见主窗口前置一次（SetForegroundWindow；bat/无窗口进程静默跳过），避免其他界面遮挡导致 BetterGI 等截图识别类脚本运行失败。
+
+### 变更
+
+- 插件版本统一 1.0.0 → **0.1.0**（与项目 Pre-release 阶段对齐，3 个扩展适配器 + 通知推送插件）。
+- 版本号 0.6.0。
+
 ## [v0.5.4]（2026-08-11）
 
 ### 变更

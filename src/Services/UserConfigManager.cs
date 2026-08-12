@@ -1,5 +1,7 @@
 ﻿using System.Collections.Concurrent;
+using System.Text;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -8,7 +10,7 @@ namespace NexusPipeline.Services;
 /// 配置储存管理对外门面（v0.5.0 拆分）：保持全部外部 API 签名不变。
 /// 实现分层：文件原语 <see cref="ConfigSwapPrimitives"/>（安全移动/原子替换/重试/跨进程互斥）、
 /// 会话与恢复 <see cref="ConfigSwapSession"/>（.session 标记/门禁/回滚/finally 还原/启动扫描恢复）、
-/// 数据目录 <see cref="ConfigSwapPaths"/>。数据保全序：cache（原配置）&gt; config &gt; store（可重建）。
+/// 数据目录 <see cref="ConfigSwapPaths"/>。数据保全序：original（原配置）&gt; config &gt; store（可重建）。
 /// </summary>
 internal static class UserConfigManager
 {
@@ -96,7 +98,7 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>运行前准备：config → cache（移动），store → config（复制）。失败自动回滚并还原现场。</summary>
+    /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。</summary>
     public static bool PrepareForRun(string scriptId, string userName, string configPath, out string? error)
     {
         error = null;
@@ -116,7 +118,7 @@ internal static class UserConfigManager
                 };
                 string cache = CacheDir(scriptId, userName);
                 string store = StoreDir(scriptId, userName);
-                // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——cache 空时恢复仅清标记（现场未动），cache 有内容时完整还原。
+                // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——original 空时恢复仅清标记（现场未动），original 有内容时完整还原。
                 mark.Write();
                 ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
                 ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
@@ -124,7 +126,7 @@ internal static class UserConfigManager
                 {
                     ConfigSwapPrimitives.CopyAs(store, configPath, ConfigSwapPrimitives.RestoreKind(mark));
                 }
-                else if (PathKindUtil.Parse(mark.OriginalKind) != PathKind.File)
+                else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
                 {
                     Directory.CreateDirectory(configPath);
                 }
@@ -170,7 +172,7 @@ internal static class UserConfigManager
         }
     }
 
-    /// <summary>运行结束后还原：清 config（运行产物），cache → config 还原原配置。失败保留标记与缓存，交由自愈。</summary>
+    /// <summary>运行结束后还原：清 config（运行产物），original → config 还原原配置。失败保留标记与缓存，交由自愈。</summary>
     public static string? RestoreAfterRun(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -200,13 +202,134 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>编辑配置开始：config → cache（移动），store → config（复制）。</summary>
+    /// <summary>编辑配置开始：config → original（移动），store → config（复制）。</summary>
     public static string? PrepareForEdit(string scriptId, string userName, string configPath)
     {
         return PrepareForRun(scriptId, userName, configPath, out string? error) ? null : (error ?? "配置交换失败");
     }
+    /// <summary>编辑配置会话：ConfigPath 不存在且插件提供最小配置模板时生成（值全空，由用户在编辑时自行配置）；返回是否生成了模板（cancel 时需清理）。</summary>
+    public static bool EnsureConfigForEdit(ScriptInstance script)
+    {
+        if (File.Exists(script.ConfigPath))
+        {
+            return false;
+        }
+        ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
+        if (profile is null || string.IsNullOrWhiteSpace(profile.ConfigTemplate))
+        {
+            return false;
+        }
+        // 防御自愈（仅模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
+        // 避免 WriteAllText 对目录写文件报拒绝访问；通用脚本目录型 config 不进入此分支。
+        if (Directory.Exists(script.ConfigPath))
+        {
+            try
+            {
+                Directory.Delete(script.ConfigPath, recursive: true);
+                Logger.Warn($"[警告] 编辑配置会话已清理误建的配置残留目录：{script.ConfigPath}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 编辑配置会话清理残留目录失败（目录可能被占用，请手动检查）：{script.ConfigPath}（{ex.Message}）");
+                return false;
+            }
+        }
+        try
+        {
+            string? dir = Path.GetDirectoryName(script.ConfigPath);
+            if (!string.IsNullOrWhiteSpace(dir))
+            {
+                Directory.CreateDirectory(dir);
+            }
+            File.WriteAllText(script.ConfigPath, profile.ConfigTemplate, new UTF8Encoding(false));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
+            return false;
+        }
+    }
 
-    /// <summary>编辑配置提交：先 config → store（新配置入库），再 cache → config（还原原配置）。</summary>
+    /// <summary>编辑会话隐藏目录：暂存 config 同目录的其他配置文件（如 BetterGI 自带配置），使编辑目标成为唯一可选配置。</summary>
+    public static string HiddenConfigDir(string scriptId, string userName)
+    {
+        return ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
+    }
+
+    /// <summary>恢复隐藏配置（幂等：隐藏目录为空则无操作）；编辑会话开始前调用可自愈崩溃残留。</summary>
+    public static void RestoreHiddenConfigs(string scriptId, string userName, string configPath)
+    {
+        string hideDir = HiddenConfigDir(scriptId, userName);
+        if (!Directory.Exists(hideDir) || !Directory.EnumerateFileSystemEntries(hideDir).Any())
+        {
+            return;
+        }
+        string? dir = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+        foreach (string file in Directory.GetFiles(hideDir))
+        {
+            try
+            {
+                File.Move(file, Path.Combine(dir, Path.GetFileName(file)), overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 恢复隐藏配置失败（保持原样）：{file}（{ex.Message}）");
+            }
+        }
+        try
+        {
+            if (Directory.Exists(hideDir) && !Directory.EnumerateFileSystemEntries(hideDir).Any())
+            {
+                Directory.Delete(hideDir);
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    /// <summary>编辑会话隐藏 config 同目录下其他配置文件（仅专项脚本 + config 为单文件；排除 ConfigPath 文件本身，忽略大小写）。</summary>
+    public static bool HideOtherConfigs(ScriptInstance script, string scriptId, string userName)
+    {
+        if (string.IsNullOrWhiteSpace(script.PluginType) || !File.Exists(script.ConfigPath))
+        {
+            return false;
+        }
+        string? dir = Path.GetDirectoryName(script.ConfigPath);
+        if (string.IsNullOrWhiteSpace(dir))
+        {
+            return false;
+        }
+        string targetName = Path.GetFileName(script.ConfigPath);
+        string[] others = Directory.GetFiles(dir, "*.json")
+            .Where(file => !Path.GetFileName(file).Equals(targetName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (others.Length == 0)
+        {
+            return false;
+        }
+        string hideDir = HiddenConfigDir(scriptId, userName);
+        Directory.CreateDirectory(hideDir);
+        foreach (string file in others)
+        {
+            try
+            {
+                File.Move(file, Path.Combine(hideDir, Path.GetFileName(file)));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 隐藏配置失败（保持原样）：{file}（{ex.Message}）");
+            }
+        }
+        return true;
+    }
+
+    /// <summary>编辑配置提交：先 config → store（新配置入库），再 original → config（还原原配置）。</summary>
     public static string? CommitEdit(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -237,7 +360,7 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>编辑配置取消：清 config（编辑产物），cache → config 还原原配置。</summary>
+    /// <summary>编辑配置取消：清 config（编辑产物），original → config 还原原配置。</summary>
     public static string? CancelEdit(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -262,13 +385,13 @@ internal static class UserConfigManager
 
     /* ---------------- 配置替换 / 恢复（转发 ConfigSwapSession） ---------------- */
 
-    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
+    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 swap-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
     public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
     {
         return ConfigSwapSession.ApplyConfigReplacements(scriptId, userName, configPath, replacements);
     }
 
-    /// <summary>还原配置替换：从 replace-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
+    /// <summary>还原配置替换：从 swap-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
     public static void RestoreConfigReplacements(string scriptId, string? userName)
     {
         ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
@@ -280,7 +403,7 @@ internal static class UserConfigManager
         ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。</summary>
+    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；original 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。</summary>
     public static void RecoverInterrupted()
     {
         ConfigSwapSession.RecoverInterrupted();

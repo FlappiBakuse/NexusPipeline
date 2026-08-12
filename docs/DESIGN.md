@@ -25,10 +25,10 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 
 - **本地优先、零外部依赖**：所有能力内置于单个 exe（.NET 8 WinForms 托盘 + HttpListener + 零构建静态 Web UI）。不依赖任何云平台、数据库或运行时环境，部署即拷贝。
 - **接管而非包装**：宿主以管理员身份**直接接管**脚本进程（创建进程、捕获输出、监控日志、强制清理进程树），脚本自身无需任何改造；bat 经 `cmd /d /s /c` 包装以规避 ShellExecute 弹窗陷阱。
-- **多用户配置隔离（配置交换）**：同一脚本实例可为多个账号（用户）各存一份配置；运行前把该用户的配置快照交换到 configPath，运行后还原现场。数据保全序：**cache（原配置）> config（运行时生效）> store（用户快照，可重建）**。
+- **多用户配置隔离（配置交换）**：同一脚本实例可为多个账号（用户）各存一份配置；运行前把该用户的配置快照交换到 configPath，运行后还原现场。数据保全序：**original（原配置）> config（运行时生效）> store（用户快照，可重建）**。
 - **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python），其次成功/失败关键字，再次插件固化标志；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
 - **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态（而非仅依赖进程退出码），因此日志监控对文件「重建/截断/追加」三种形态都必须可靠——v0.5.2 起以**文件身份（FileId）检测**根治句柄残留。
-- **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换全程 `.session` 标记 + replace-backup 双保险，宿主启动/后台延迟自动还原。
+- **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换全程 `.session` 标记 + swap-backup 双保险，宿主启动/后台延迟自动还原。
 - **可扩展插件**：通用插件（`IPlugin` + 能力接口）扩展程序能力；专用插件（`ISpecializedScriptPlugin`）接管某类游戏脚本的配置推导与完成标志。
 
 ## 2. 核心概念
@@ -102,7 +102,7 @@ sequenceDiagram
 7. **超时**：启动后 `LogStallTimeoutMinutes` 无任何日志条目、或日志超过该时长无更新、或未找到日志文件 → 失败；`TotalTimeoutMinutes` 按**整个运行（含全部重试与前置/后置脚本）**计时，超时判定失败且不再重试。
 8. **尝试结束清理**：无条件 `taskkill /T /F` 杀本次启动的进程树；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
 9. **重试**：失败且未达 `MaxAttempts` → 下一次尝试（每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 已在上一次尝试失败时应用）。
-10. **运行收尾（finally）**：还原配置替换（replace-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（cache → config）——顺序固定，避免替换还原覆盖交换还原的现场（v0.5.2 BUG #1 修复）。
+10. **运行收尾（finally）**：还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）——顺序固定，避免替换还原覆盖交换还原的现场（v0.5.2 BUG #1 修复）。
 
 ### 3.2 队列执行链路
 
@@ -142,9 +142,10 @@ flowchart TD
 ```
 data/{脚本Id}/{用户名}/
 ├── store/          用户配置快照（添加用户时从 configPath 复制，可重建）
-├── cache/          运行前 configPath 原内容（移动进来，运行后移回）
+├── original/       运行前 configPath 原内容（移动进来，运行后移回；崩溃恢复保底）
 ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
-├── replace-backup/ 配置替换备份（首次替换前复制原文件 + .meta 清单）
+├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
+├── edit-hidden/    编辑会话隐藏配置暂存（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）
 └── .session        会话标记（崩溃恢复用）
 ```
 
@@ -153,7 +154,7 @@ data/{脚本Id}/{用户名}/
 ```mermaid
 flowchart LR
     subgraph 运行前
-        C1[configPath 原内容] -- MoveAs 移动 --> CA[cache]
+        C1[configPath 原内容] -- MoveAs 移动 --> CA[original]
         ST[store 用户快照] -- CopyAs 复制 --> C2[configPath=快照]
     end
     subgraph 运行中
@@ -165,22 +166,25 @@ flowchart LR
     end
 ```
 
-1. **运行前**：`.session` 标记先行写入 → configPath 内容整体**移动**到 cache → store 快照**复制**回 configPath（运行生效配置）。任一步失败自动回滚并还原现场。
-2. **运行后**：清空 configPath（删除运行产物）→ cache **移动**还原 → 清除标记。
+1. **运行前**：`.session` 标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。任一步失败自动回滚并还原现场。
+2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**复用同一机制（PrepareForEdit/CommitEdit/CancelEdit），运行与编辑经 `ScriptConfigGate` 互斥。
 
 ### 4.3 插队替换配置（replaceConfigs）
 
-- 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；**首次替换前**备份原文件到 replace-backup（`.meta` 记录 configPath 与新增文件清单）。
+- 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
 - 本次尝试失败后重试循环自动用新配置重试（可多轮替换，计入 MaxAttempts）。
-- 运行结束从 replace-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
+- 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
 
-- **启动恢复（RecoverInterrupted）**：扫描全部残留 `.session` 标记与 replace-backup，自动还原；cache 为空则仅清标记（现场未动）。
+- **启动恢复（RecoverInterrupted）**：扫描全部残留 `.session` 标记与 swap-backup，自动还原；original 为空则仅清标记（现场未动）。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
-- 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 cache 完整还原现场。
+- 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 original 完整还原现场。
+- **数据目录命名迁移（v0.6.0）**：启动恢复前将旧版残留目录名迁移到新名（`config`→`store`、`cache`→`original`、`edit-hide`→`edit-hidden`、`replace-backup`→`swap-backup`，幂等；目标名已存在则跳过），保证旧版本崩溃现场仍可完整恢复。
+- **Missing 形态还原（v0.6.0）**：`DoRestore` 在 original 空且原形态为 Missing（运行/编辑前 config 位置不存在）时，删除会话期间在 config 位置产生的文件/目录（运行生效的 store 快照、编辑模板），还原为「不存在」——否则运行结束后 store 快照残留 config 位置并污染后续添加用户快照（真机复现修复）；删除失败保留标记交由自愈/后台重试。
+- **收尾顺序（v0.6.0）**：运行收尾固定为「杀脚本进程（`KillAndConfirmExited`：进程树 + 轮询按名强杀直至确认退出，处理被杀后自重启的脚本）→ 按设置处理游戏进程 → 配置交换还原」，确保还原前进程已完全退出。
 
 ## 5. 完成判定机制
 

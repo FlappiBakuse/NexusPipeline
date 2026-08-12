@@ -263,8 +263,8 @@ internal class RunSession
         {
             if (_script.HasJudgeScript())
             {
-                // 先还原配置替换（replace-backup → config 恢复为替换前快照内容），
-                // 再执行配置交换还原（cache → config 恢复运行前现场），避免替换还原覆盖交换还原的现场。
+                // 先还原配置替换（swap-backup → config 恢复为替换前快照内容），
+                // 再执行配置交换还原（original → config 恢复运行前现场），避免替换还原覆盖交换还原的现场。
                 UserConfigManager.RestoreConfigReplacements(_script.Id, user?.Name);
                 UserConfigManager.CleanupScriptArea(_script.Id, user?.Name);
             }
@@ -379,7 +379,12 @@ internal class RunSession
                     {
                         gamePsi.UseShellExecute = true;
                     }
-                    _ = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
+                    Process? gameProcess = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
+                    int gamePid = gameProcess?.Id ?? 0;
+                    if (gamePid > 0)
+                    {
+                        _ = Task.Run(() => SystemActions.BringToFront(gamePid));
+                    }
                     Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
                 }
                 catch (Exception ex)
@@ -423,12 +428,8 @@ internal class RunSession
             {
                 return;
             }
-            SystemActions.KillTree(process.Id);
-            if (SystemActions.IsExeRunning(launchExe))
-            {
-                Logger.Info($"[提示] 脚本「{_script.Name}」主进程已退出但检测到同名进程仍在运行（自重启产物），按进程名强制结束。");
-                SystemActions.KillByName(launchExe, "脚本");
-            }
+            // 进程树清理 + 轮询按名强杀直至确认退出（处理「被杀后自重启」的脚本），确保配置还原前进程已完全退出
+            SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本");
         }
 
         if (SystemActions.IsExeRunning(launchExe))
@@ -456,6 +457,7 @@ internal class RunSession
             {
                 return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
             }
+            _ = Task.Run(() => SystemActions.BringToFront(process.Id));
             _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
         }

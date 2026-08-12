@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace NexusPipeline.Utilities;
@@ -246,6 +247,33 @@ internal static class SystemActions
         }
     }
 
+    /// <summary>
+    /// 清理脚本进程并确认退出（v0.6.0+）：进程树清理后轮询同名进程，处理「被杀后自重启」的脚本
+    /// （如 BetterGI 防崩溃机制，日志曾出现强杀两轮才干净）——每轮仍存在则按名强杀，直至确认退出或轮数耗尽。
+    /// 确保配置交换还原前脚本进程已完全退出，消除文件占用导致的还原失败窗口。
+    /// </summary>
+    public static void KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800)
+    {
+        KillTree(pid);
+        for (int round = 1; round <= rounds; round++)
+        {
+            if (!IsExeRunning(exePath))
+            {
+                return;
+            }
+            Logger.Info($"[提示] {display}进程仍在运行（第 {round}/{rounds} 轮按名清理，含自重启产物）。");
+            KillByName(exePath, display);
+            if (round < rounds)
+            {
+                Thread.Sleep(intervalMs);
+            }
+        }
+        if (IsExeRunning(exePath))
+        {
+            Logger.Warn($"[警告] {display}进程清理后仍在运行（疑似持续自重启），请手动检查：{exePath}");
+        }
+    }
+
     public static void Shutdown(int delaySeconds = 60)
     {
         Run("shutdown.exe", $"/s /t {delaySeconds} /c \"NexusPipeline 队列已完成，自动关机\"");
@@ -272,6 +300,69 @@ internal static class SystemActions
         {
             Logger.Warn($"[警告] 退出软件失败：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 将指定进程的可见主窗口前置（仅启动时一次，v0.6.0+）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
+    /// 找到后还原最小化状态并 SetForegroundWindow 前置。用于运行脚本/游戏启动后避免被其他界面遮挡
+    /// （如 BetterGI 截图识别游戏画面需要窗口可见）。找不到可见窗口（bat/cmd 无窗口、进程无窗口）静默放弃。
+    /// </summary>
+    public static bool BringToFront(int pid, int timeoutSeconds = 30)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+        DateTime deadline = DateTime.Now.AddSeconds(timeoutSeconds);
+        while (DateTime.Now < deadline)
+        {
+            IntPtr hWnd = FindVisibleWindow(pid);
+            if (hWnd != IntPtr.Zero)
+            {
+                ShowWindow(hWnd, SW_RESTORE);
+                SetForegroundWindow(hWnd);
+                Logger.Debug($"[前置] 已前置进程窗口（PID {pid}，句柄 {hWnd}）。");
+                return true;
+            }
+            Thread.Sleep(300);
+        }
+        Logger.Debug($"[前置] 未找到进程可见窗口（PID {pid}），跳过。");
+        return false;
+    }
+
+    private const int SW_RESTORE = 9;
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    private static IntPtr FindVisibleWindow(int pid)
+    {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows((hWnd, _) =>
+        {
+            GetWindowThreadProcessId(hWnd, out uint windowPid);
+            if (windowPid == (uint)pid && IsWindowVisible(hWnd))
+            {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 
     private static void Run(string file, string args)

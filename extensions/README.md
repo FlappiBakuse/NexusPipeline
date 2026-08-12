@@ -16,7 +16,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>YourPluginAdapter</AssemblyName>
     <RootNamespace>YourPluginAdapter</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

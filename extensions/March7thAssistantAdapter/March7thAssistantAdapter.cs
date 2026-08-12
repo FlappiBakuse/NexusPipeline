@@ -18,7 +18,7 @@ public sealed class March7thAssistantAdapterPlugin : ISpecializedScriptPlugin
 
     public string Description => "March7th Assistant 专项脚本实例配置接管（Launcher 编辑配置 / Assistant 运行脚本，自动推导主程序、启动目标、配置与日志路径）";
 
-    public string Version => "1.0.0";
+    public string Version => "0.1.0";
 
     public bool IsBuiltIn => false;
 

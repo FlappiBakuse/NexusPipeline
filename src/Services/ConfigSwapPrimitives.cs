@@ -62,7 +62,7 @@ internal static class ScriptConfigGate
 
 /// <summary>
 /// 配置交换文件原语层（v0.5.0 从 UserConfigManager 拆出）：安全移动/原子替换/重试/跨进程互斥/形态判断。
-/// 数据保全序：cache（原配置）&gt; config &gt; store（可重建）。
+/// 数据保全序：original（原配置）&gt; config &gt; store（可重建）。
 /// </summary>
 internal static class ConfigSwapPrimitives
 {
@@ -244,14 +244,15 @@ internal static class ConfigSwapPrimitives
         }
     }
 
-    /// <summary>还原目标形态：单文件内容还原为文件，否则还原为目录。</summary>
+    /// <summary>还原目标形态：单文件内容还原为文件，否则还原为目录。Missing（配置路径不存在，仅专项文件型配置首次会话）按文件处理，
+    /// 避免把文件快照以目录形态落位（曾致 NexusPipeline.json 被复制成「目录/同名文件」残留）。</summary>
     public static PathKind RestoreKind(ConfigSessionMark mark)
     {
         PathKind original = PathKindUtil.Parse(mark.OriginalKind);
-        if (original == PathKind.File)
+        if (original == PathKind.Dir)
         {
-            return PathKind.File;
+            return PathKind.Dir;
         }
-        return PathKind.Dir;
+        return PathKind.File;
     }
 }

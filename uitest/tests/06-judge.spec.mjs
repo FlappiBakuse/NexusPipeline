@@ -252,7 +252,7 @@ if (n >= 2) {
   await api("DELETE", "/api/scripts/" + id);
 });
 
-test("自定义完成标志前端：关键字区/脚本区切换、上传识别语言、专用脚本不显示", async ({ page }) => {
+test("自定义完成标志前端：关键字区/脚本区切换、上传识别语言、专用脚本不显示（判断脚本固化）", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
   await page.click('[data-testid="new-script"]');
@@ -314,8 +314,87 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin="bettergi"]');
   await page.waitForSelector("#sm-root", { timeout: 5000 });
-  expect(!(await page.$("#sm-mode-btn")), "专用脚本弹窗不显示自定义完成标志区").toBeTruthy();
+  expect(!(await page.$("#sm-mode-btn")), "专项脚本弹窗不显示自定义完成标志区（判断脚本由插件固化，用户不可编辑）").toBeTruthy();
   await page.click('[data-action="close-modal"]');
+
+  const created = await api("POST", "/api/scripts", {
+    name: "专项判断脚本固化", pluginType: "bettergi",
+    rootPath: bgiRoot.replace(/\\/g, "\\\\"),
+    maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30, gameExe: PING_GAME,
+  });
+  expect(created.ok, "API 创建 BetterGI 专项脚本（模拟目录）").toBeTruthy();
+  const sp = await created.json();
+  expect(sp.judgeScriptEnabled === true, "专项脚本自动固化判断脚本（JudgeScriptEnabled=true）").toBeTruthy();
+  expect(sp.judgeScript.includes("一条龙和配置组任务结束"), "固化判断脚本含运行结束关键字").toBeTruthy();
+  expect(sp.judgeScript.includes("NexusPipeline.json"), "固化判断脚本的配置交换文件名为 NexusPipeline.json").toBeTruthy();
+  expect(sp.configPath.endsWith("NexusPipeline.json"), "专项 ConfigPath 指向 NexusPipeline.json").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + sp.id);
   await page.evaluate(() => { location.hash = "#/dashboard"; });
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("仪表盘"), null, { timeout: 5000 });
+});
+
+test("Missing 形态还原：运行前配置位置不存在，运行结束（自然结束/运行中取消）后不残留 store 快照", async () => {
+  // ---- 变体 A：专项脚本 + 快速退出进程（ping 冒充 BetterGI）→ 自然结束 ----
+  const rootA = path.join(runtimeDir, "sim-bgi-missing-a");
+  fs.rmSync(rootA, { recursive: true, force: true });
+  fs.mkdirSync(path.join(rootA, "User", "OneDragon"), { recursive: true });
+  fs.copyFileSync("C:\\Windows\\System32\\ping.exe", path.join(rootA, "BetterGI.exe"));
+  const cfgA = path.join(rootA, "User", "OneDragon", "NexusPipeline.json");
+  fs.writeFileSync(cfgA, JSON.stringify({ Name: "初始配置", TaskEnabledList: {} }), "utf8");
+  const createdA = await api("POST", "/api/scripts", { name: "Missing自然结束", pluginType: "bettergi", rootPath: rootA.replace(/\\/g, "\\\\"), gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(createdA.ok, "创建专项脚本（ping 冒充 BetterGI，快速退出）").toBeTruthy();
+  const spA = await createdA.json();
+  await api("POST", `/api/scripts/${spA.id}/users`, { name: "默认", enabled: true });
+  const dataA = path.join(runtimeDir, "data", spA.id, "默认");
+  expect(fs.existsSync(path.join(dataA, "store", "NexusPipeline.json")), "添加用户生成 store 快照").toBeTruthy();
+  fs.rmSync(cfgA, { force: true });
+  expect(!fs.existsSync(cfgA), "运行前配置位置不存在（Missing 形态）").toBeTruthy();
+
+  await api("POST", "/api/dispatch/script", { scriptId: spA.id, mode: "manual" });
+  expect(await waitNoRunning(90000), "自然结束运行结束").toBeTruthy();
+  await new Promise(r => setTimeout(r, 300));
+  expect(!fs.existsSync(cfgA), "运行结束后配置位置还原为不存在（不残留 store 快照）").toBeTruthy();
+  expect(fs.existsSync(path.join(dataA, "store", "NexusPipeline.json")), "store 快照保留").toBeTruthy();
+  expect(!fs.existsSync(path.join(dataA, ".session")), "运行结束后 .session 已清除").toBeTruthy();
+  const originalA = path.join(dataA, "original");
+  expect(!fs.existsSync(originalA) || fs.readdirSync(originalA).length === 0, "original 已清空").toBeTruthy();
+  const bgiA = spawnSync("tasklist", ["/FI", "IMAGENAME eq BetterGI.exe"], { stdio: "pipe", encoding: "utf8" }).stdout;
+  expect(!bgiA.toLowerCase().includes("bettergi.exe"), "运行结束后 BetterGI 进程无残留").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + spA.id);
+
+  // ---- 变体 B：通用脚本 + 单文件配置（先建后删）+ 长运行脚本 → 运行中取消 ----
+  const dirB = path.join(runtimeDir, "sim-missing-cancel");
+  fs.rmSync(dirB, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dirB, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dirB, "nexusmissing.bat"), "@echo off\r\nping -n 30 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  const cfgB = path.join(dirB, "setup.txt");
+  fs.writeFileSync(cfgB, "INITIAL", "utf8");
+  const createdB = await api("POST", "/api/scripts", {
+    name: "Missing运行取消", rootPath: dirB.replace(/\\/g, "\\\\"),
+    mainExe: path.join(dirB, "nexusmissing.bat").replace(/\\/g, "\\\\"),
+    configPath: cfgB.replace(/\\/g, "\\\\"), logPath: path.join(dirB, "logs\\log.txt"),
+    gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30,
+  });
+  expect(createdB.ok, "创建通用脚本（单文件配置）").toBeTruthy();
+  const spB = await createdB.json();
+  await api("POST", `/api/scripts/${spB.id}/users`, { name: "默认", enabled: true });
+  const dataB = path.join(runtimeDir, "data", spB.id, "默认");
+  expect(fs.existsSync(path.join(dataB, "store", "setup.txt")), "添加用户生成 store 快照").toBeTruthy();
+  fs.rmSync(cfgB, { force: true });
+  expect(!fs.existsSync(cfgB), "运行前配置位置不存在（Missing 形态）").toBeTruthy();
+
+  await api("POST", "/api/dispatch/script", { scriptId: spB.id, mode: "manual" });
+  await waitFor(async () => (await (await fetch(baseUrl + "api/status")).json()).running?.length > 0, 10000);
+  const statusB = await (await fetch(baseUrl + "api/status")).json();
+  const runIdB = (statusB.running || []).find(item => item.targetId === spB.id)?.id;
+  expect(!!runIdB, "取消前已获取运行任务 id").toBeTruthy();
+  await api("POST", "/api/cancel", { runId: runIdB });
+  expect(await waitNoRunning(30000), "取消后运行结束").toBeTruthy();
+  await new Promise(r => setTimeout(r, 500));
+  expect(!fs.existsSync(cfgB), "取消后配置位置还原为不存在（不残留 store 快照）").toBeTruthy();
+  expect(fs.existsSync(path.join(dataB, "store", "setup.txt")), "store 快照保留").toBeTruthy();
+  expect(!fs.existsSync(path.join(dataB, ".session")), "取消后 .session 已清除").toBeTruthy();
+  const originalB = path.join(dataB, "original");
+  expect(!fs.existsSync(originalB) || fs.readdirSync(originalB).length === 0, "original 已清空").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + spB.id);
 });

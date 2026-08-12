@@ -22,6 +22,9 @@ internal sealed class ConfigSessionMark
 
     public DateTime StartedAt { get; set; } = DateTime.Now;
 
+    /// <summary>本次编辑会话由宿主生成了配置模板（重启恢复时清理 config 位置的编辑产物，还原编辑前状态）。</summary>
+    public bool GeneratedTemplate { get; set; }
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -79,6 +82,9 @@ internal sealed class EditSession
     public Process? Process { get; set; }
 
     public ConfigSessionMark Mark { get; init; } = new();
+
+    /// <summary>本次会话由宿主生成了配置模板（cancel 时需清理生成文件）。</summary>
+    public bool GeneratedConfigTemplate { get; set; }
 }
 
 /// <summary>
@@ -102,7 +108,7 @@ internal static class ConfigSwapSession
         return JudgeScriptRunner.ResolveWithin(configPath, rel);
     }
 
-    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 replace-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
+    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 swap-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
     public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
     {
         string scriptDir = ConfigSwapPaths.ScriptDir(scriptId, userName);
@@ -187,7 +193,7 @@ internal static class ConfigSwapSession
         return list;
     }
 
-    /// <summary>还原配置替换：从 replace-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
+    /// <summary>还原配置替换：从 swap-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
     public static void RestoreConfigReplacements(string scriptId, string? userName)
     {
         string backupDir = ConfigSwapPaths.ReplaceBackupDir(scriptId, userName);
@@ -296,12 +302,13 @@ internal static class ConfigSwapSession
         }
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；cache 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。
+    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；original 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。
     /// 还原失败（如脚本孤儿进程仍占用配置目录）记入待办，由 <see cref="StartRecoveryRetry"/> 后台循环延迟重试。</summary>
     public static void RecoverInterrupted()
     {
         try
         {
+            ConfigSwapPaths.MigrateLegacyLayout();
             if (!Directory.Exists(AppPaths.DataDir))
             {
                 return;
@@ -344,10 +351,11 @@ internal static class ConfigSwapSession
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
             if (mark is not null)
             {
+                RestoreHiddenQuiet(scriptId, userName, mark.ConfigPath);
                 string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
                 if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
                 {
-                    ConfigSessionMark.Clear(scriptId, userName);
+                    DoRestore(scriptId, userName, mark);
                 }
                 else if (!RecoverSwapQuiet(scriptId, userName, mark))
                 {
@@ -384,9 +392,52 @@ internal static class ConfigSwapSession
         }
     }
 
-    private static bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
+    /// <summary>恢复编辑会话隐藏的配置（幂等）：编辑会话崩溃/重启后，把暂存在 edit-hidden 的配置移回 config 目录并清理目录。</summary>
+    private static void RestoreHiddenQuiet(string scriptId, string userName, string configPath)
     {
-        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
+        string hideDir = ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
+        if (!Directory.Exists(hideDir) || !Directory.EnumerateFileSystemEntries(hideDir).Any())
+        {
+            return;
+        }
+        string? dir = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[恢复] 重建配置目录失败（{dir}）：{ex.Message}");
+                return;
+            }
+        }
+        foreach (string file in Directory.GetFiles(hideDir))
+        {
+            try
+            {
+                File.Move(file, Path.Combine(dir, Path.GetFileName(file)), overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[恢复] 恢复隐藏配置失败（保持原样）：{file}（{ex.Message}）");
+            }
+        }
+        try
+        {
+            if (Directory.Exists(hideDir) && !Directory.EnumerateFileSystemEntries(hideDir).Any())
+            {
+                Directory.Delete(hideDir);
+            }
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    private static bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
+    {        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
         try
         {
             DoRestore(scriptId, userName!, mark);
@@ -481,17 +532,32 @@ internal static class ConfigSwapSession
         }
     }
 
-    /// <summary>执行还原：清 config（当前形态），cache → config 还原原配置，随后清除标记。</summary>
+    /// <summary>执行还原：清 config（当前形态），original → config 还原原配置，随后清除标记。
+    /// original 为空（首次会话）时：清理会话期间在 config 位置产生的文件/目录，还原为编辑前状态——
+    /// ① 编辑会话生成的配置模板（GeneratedTemplate）；② 运行会话原配置形态为 Missing（运行前 config 位置不存在，
+    /// 运行生效的 store 快照为会话产物，必须删除，否则残留污染 config 位置与后续快照）。</summary>
     public static void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
     {
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
+            bool restoreMissing = mark.GeneratedTemplate
+                || PathKindUtil.Parse(mark.OriginalKind) == PathKind.Missing;
+            if (restoreMissing)
+            {
+                PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
+                if (current != PathKind.Missing)
+                {
+                    // 删除失败自然抛出（ClearPath 带重试），标记保留，交由调用方（自愈/后台延迟重试）再次尝试
+                    ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
+                    Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");
+                }
+            }
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
-        PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
-        ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
+        PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
+        ConfigSwapPrimitives.ClearPath(mark.ConfigPath, currentState);
         ConfigSwapPrimitives.MoveAs(cache, mark.ConfigPath, ConfigSwapPrimitives.RestoreKind(mark));
         ConfigSessionMark.Clear(scriptId, userName);
     }

@@ -23,7 +23,7 @@ export function confirmModal(title, message, confirmAction, data = {}) {
     `<button type="button" data-action="${esc(confirmAction)}"${dataAttrs}>确定</button><button class="ghost" type="button" data-action="close-modal">取消</button>`));
 }
 
-export function showModal(content, wide = false) {
+export function showModal(content, wide = false, locked = false) {
   closeModal();
   modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const mask = document.createElement("div");
@@ -33,17 +33,19 @@ export function showModal(content, wide = false) {
   modal.className = wide ? "modal wide" : "modal";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
+  if (locked) modal.dataset.locked = "";
   modal.innerHTML = content;
   const heading = $("[id^='modal-title-']", modal);
   if (heading) modal.setAttribute("aria-labelledby", heading.id);
   mask.appendChild(modal);
+  const isLocked = () => modal.dataset.locked !== undefined;
   mask.addEventListener("mousedown", event => {
-    if (event.target === mask) closeModal();
+    if (event.target === mask && !isLocked()) closeModal();
   });
   mask.addEventListener("keydown", event => {
     if (event.key === "Escape") {
       event.preventDefault();
-      closeModal();
+      if (!isLocked()) closeModal();
       return;
     }
     if (event.key !== "Tab") return;

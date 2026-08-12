@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate, restartService } from "./helpers.mjs";
 
 test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编辑 / 删除", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -93,7 +93,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.waitForFunction(() => document.body.textContent.includes(">甲<") || document.body.textContent.includes("已启用"), null, { timeout: 5000 });
   body = await page.textContent("body");
   expect(body.includes("甲") && body.includes("已启用"), "添加用户后卡片显示用户名与启用状态").toBeTruthy();
-  expect(fs.existsSync(path.join(dataDir, "甲", "config", "configA.txt")), "首次添加用户生成配置快照（data/…/甲/config/configA.txt）").toBeTruthy();
+  expect(fs.existsSync(path.join(dataDir, "甲", "store", "configA.txt")), "首次添加用户生成配置快照（data/…/甲/store/configA.txt）").toBeTruthy();
 
   await page.click("button:has-text('添加用户')");
   await page.waitForSelector("#um-name");
@@ -114,7 +114,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.fill("#um-name", "甲改");
   await page.click(".modal button:has-text('保存')");
   await page.waitForFunction(() => document.body.textContent.includes("甲改"), null, { timeout: 5000 });
-  expect(fs.existsSync(path.join(dataDir, "甲改", "config", "configA.txt")), "改名后用户数据目录已迁移").toBeTruthy();
+  expect(fs.existsSync(path.join(dataDir, "甲改", "store", "configA.txt")), "改名后用户数据目录已迁移").toBeTruthy();
   expect(!fs.existsSync(path.join(dataDir, "甲")), "改名后旧用户目录已不存在（重命名而非复制）").toBeTruthy();
   const user = "甲改";
   const userDir = path.join(dataDir, user);
@@ -123,15 +123,20 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.waitForSelector(".modal", { timeout: 5000 });
   body = await page.textContent("body");
   expect(body.includes("配置编辑中"), "编辑配置弹窗显示提示").toBeTruthy();
+  await page.keyboard.press("Escape");
+  expect(await page.$(".modal"), "锁定弹窗：Esc 无法关闭（须完成或取消）").toBeTruthy();
+  await page.mouse.click(20, 400);
+  expect(await page.$(".modal"), "锁定弹窗：点击遮罩无法关闭").toBeTruthy();
+  expect(!(await page.isVisible(".modal-close")), "锁定弹窗：隐藏关闭按钮").toBeTruthy();
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "编辑配置开始后配置路径为内部储存副本").toBeTruthy();
-  expect(fs.existsSync(path.join(userDir, "cache", "configA.txt")), "原配置已移入缓存区").toBeTruthy();
+  expect(fs.existsSync(path.join(userDir, "original", "configA.txt")), "原配置已移入缓存区").toBeTruthy();
   fs.writeFileSync(cfgFile, "NEWSETUP");
   await page.click('[data-action="edit-config-done"]');
   await page.waitForFunction(() => !document.querySelector(".modal"), null, { timeout: 5000 });
   await new Promise(r => setTimeout(r, 300));
-  expect(fs.readFileSync(path.join(userDir, "config", "configA.txt"), "utf8") === "NEWSETUP", "完成后新配置已保存（store）").toBeTruthy();
+  expect(fs.readFileSync(path.join(userDir, "store", "configA.txt"), "utf8") === "NEWSETUP", "完成后新配置已保存（store）").toBeTruthy();
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "完成后原配置已还原到配置路径").toBeTruthy();
-  expect(!fs.existsSync(path.join(userDir, "cache", "configA.txt")), "完成后缓存区已清空").toBeTruthy();
+  expect(!fs.existsSync(path.join(userDir, "original", "configA.txt")), "完成后缓存区已清空").toBeTruthy();
 
   await page.click(`[data-action="edit-user-config"][data-name="${user}"]`);
   await page.waitForSelector(".modal", { timeout: 5000 });
@@ -140,7 +145,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.waitForFunction(() => !document.querySelector(".modal"), null, { timeout: 5000 });
   await new Promise(r => setTimeout(r, 300));
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "取消后原配置已还原").toBeTruthy();
-  expect(fs.readFileSync(path.join(userDir, "config", "configA.txt"), "utf8") === "NEWSETUP", "取消不改变已保存的用户配置").toBeTruthy();
+  expect(fs.readFileSync(path.join(userDir, "store", "configA.txt"), "utf8") === "NEWSETUP", "取消不改变已保存的用户配置").toBeTruthy();
 
   await page.click('nav a[href="#/dispatch"]');
   await page.waitForSelector("#dc-script");
@@ -153,7 +158,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   expect(await waitFor(() => {
     try { return fs.readFileSync(cfgFile, "utf8") === "ORIGINAL"; } catch { return false; }
   }, 5000), "运行结束后原配置已还原（实际：" + fs.readFileSync(cfgFile, "utf8") + "）").toBeTruthy();
-  expect(fs.readFileSync(path.join(userDir, "config", "configA.txt"), "utf8") === "NEWSETUP", "运行结束后用户配置保留").toBeTruthy();
+  expect(fs.readFileSync(path.join(userDir, "store", "configA.txt"), "utf8") === "NEWSETUP", "运行结束后用户配置保留").toBeTruthy();
   const runHist = await (await fetch(baseUrl + "api/history?days=7")).json();
   const manualRecs = runHist.filter(h => h.scriptInstanceId === sid && h.mode === "manual");
   expect(manualRecs.length === 2, "手动执行按启用用户依次运行产生 2 条记录（实际 " + manualRecs.length + "）").toBeTruthy();
@@ -327,8 +332,8 @@ test("队列多用户依次运行 + 配置交换", async () => {
   const names = recent.map(h => h.userName);
   expect(names.includes("甲") && names.includes("乙"), "两条记录分别属于启用用户（甲、乙）").toBeTruthy();
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "队列运行结束后配置路径已还原").toBeTruthy();
-  expect(fs.readFileSync(path.join(runtimeDir, "data", sid, "甲", "config", "configA.txt"), "utf8") === "NEWA", "甲用户配置保留").toBeTruthy();
-  expect(fs.readFileSync(path.join(runtimeDir, "data", sid, "乙", "config", "configA.txt"), "utf8") === "NEWB", "乙用户配置保留").toBeTruthy();
+  expect(fs.readFileSync(path.join(runtimeDir, "data", sid, "甲", "store", "configA.txt"), "utf8") === "NEWA", "甲用户配置保留").toBeTruthy();
+  expect(fs.readFileSync(path.join(runtimeDir, "data", sid, "乙", "store", "configA.txt"), "utf8") === "NEWB", "乙用户配置保留").toBeTruthy();
 
   await api("DELETE", "/api/queues/" + qid);
   await api("DELETE", "/api/scripts/" + sid);
@@ -573,13 +578,13 @@ test("编辑脚本保留用户（PUT 不含 users 不覆盖）", async () => {
   const sid = created.id;
   const ur = await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
   expect(ur.ok, "添加用户甲").toBeTruthy();
-  expect(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "添加用户生成配置快照").toBeTruthy();
+  expect(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "store", "cfg.txt")), "添加用户生成配置快照").toBeTruthy();
   const put = await api("PUT", `/api/scripts/${sid}`, { name: "保留用户脚本-改", rootPath: kDir.root, mainExe: kDir.main, configPath: keepCfg, logPath: kDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   expect(put.ok, "PUT 改名（payload 不含 users，模拟前端）").toBeTruthy();
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
   expect(got && (got.users || []).length === 2 && got.users.some(u => u.name === "甲"), "改名后用户仍保留（默认+甲）").toBeTruthy();
-  expect(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "config", "cfg.txt")), "改名后用户数据目录未被重建或丢失").toBeTruthy();
+  expect(fs.existsSync(path.join(runtimeDir, "data", sid, "甲", "store", "cfg.txt")), "改名后用户数据目录未被重建或丢失").toBeTruthy();
   await api("DELETE", `/api/scripts/${sid}`);
 });
 
@@ -758,7 +763,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const profile = (await probeOk.json()).profile;
   expect(probeOk.ok && profile.mainExe.endsWith("BetterGI.exe"), "probe 推导出主程序路径").toBeTruthy();
   expect(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon").toBeTruthy();
-  expect(profile.configPath.includes("默认配置.json"), "probe 推导出配置文件路径").toBeTruthy();
+  expect(profile.configPath.includes("NexusPipeline.json"), "probe 推导出配置文件路径（NexusPipeline.json）").toBeTruthy();
   expect(profile.logPath.includes("{YYYYMMDD}"), "probe 推导出日志格式路径（better-genshin-impact{YYYYMMDD}.log）").toBeTruthy();
   expect(profile.successMarkers === "一条龙和配置组任务结束", "probe 推导完成标志（一条龙和配置组任务结束）").toBeTruthy();
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
@@ -771,7 +776,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
   expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.includes("默认配置.json") && got.logPath.includes("{YYYYMMDD}"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.configPath.includes("NexusPipeline.json") && got.logPath.includes("{YYYYMMDD}"), "配置/日志路径由插件固化").toBeTruthy();
   expect(got.successMarkers === "一条龙和配置组任务结束", "完成标志由插件固化").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
@@ -829,5 +834,134 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   await page.click('[data-action="confirm-delete-script"]');
   await waitAbsent(page, "专项UI脚本");
   expect(true, "删除专项 UI 脚本成功").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + sid);
+});
+
+test("专项脚本编辑配置：模板生成/隐藏默认配置/cancel 恢复/done 快照/残留自愈", async () => {
+  const root = path.join(runtimeDir, "sim-bgi-edit");
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(path.join(root, "User", "OneDragon"), { recursive: true });
+  fs.copyFileSync("C:\\Windows\\System32\\cmd.exe", path.join(root, "BetterGI.exe"));
+  fs.writeFileSync(path.join(root, "User", "OneDragon", "默认配置.json"), JSON.stringify({ Name: "默认配置", TaskEnabledList: {} }), "utf8");
+  const created = await api("POST", "/api/scripts", { name: "编辑配置模板", pluginType: "bettergi", rootPath: root.replace(/\\/g, "\\\\"), gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
+  const sp = await created.json();
+  await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
+  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
+  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
+
+  const start = await api("POST", editBase, { action: "start" });
+  expect(start.ok, "首次编辑配置 start 成功（生成模板）").toBeTruthy();
+  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "首次编辑生成 NexusPipeline.json 文件（非目录）").toBeTruthy();
+  expect(!fs.existsSync(defaultCfg), "编辑期间默认配置被隐藏（BetterGI 仅 NexusPipeline 可选）").toBeTruthy();
+  const text = fs.readFileSync(cfgPath, "utf8");
+  expect(text.includes('"TaskEnabledList"') && text.includes('"NexusPipeline"'), "模板含任务列表结构与配置名").toBeTruthy();
+  expect(text.includes('"TaskDefinitions"') && text.includes('"CompletionAction"'), "模板含任务定义与完成动作键").toBeTruthy();
+
+  const cancel = await api("POST", editBase, { action: "cancel" });
+  expect(cancel.ok, "取消编辑成功").toBeTruthy();
+  expect(!fs.existsSync(cfgPath), "cancel 清理本次生成的模板").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "cancel 后默认配置恢复").toBeTruthy();
+
+  const start2 = await api("POST", editBase, { action: "start" });
+  expect(start2.ok, "再次 start 成功（快照恢复）").toBeTruthy();
+  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "再次 start NexusPipeline.json 为文件（快照恢复，非目录残留）").toBeTruthy();
+  fs.writeFileSync(cfgPath, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }, null, 2), "utf8");
+  const done = await api("POST", editBase, { action: "done" });
+  expect(done.ok, "完成编辑成功").toBeTruthy();
+  expect(!fs.existsSync(cfgPath), "done 后 config 位置清理（还原语义）").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "done 后默认配置恢复").toBeTruthy();
+  const store = path.join(runtimeDir, "data", sp.id, "默认", "store");
+  expect(fs.existsSync(path.join(store, "NexusPipeline.json")), "编辑产物已入库用户快照").toBeTruthy();
+  expect(fs.readFileSync(path.join(store, "NexusPipeline.json"), "utf8").includes("用户配置"), "快照内容为编辑后的配置").toBeTruthy();
+
+  fs.mkdirSync(cfgPath);
+  fs.writeFileSync(path.join(cfgPath, "NexusPipeline.json"), "{}", "utf8");
+  const start3 = await api("POST", editBase, { action: "start" });
+  expect(start3.ok, "残留目录场景 start 成功").toBeTruthy();
+  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "残留目录被清理并生成模板文件（自愈）").toBeTruthy();
+  const cancel2 = await api("POST", editBase, { action: "cancel" });
+  expect(cancel2.ok, "自愈会话取消成功").toBeTruthy();
+
+  await api("DELETE", "/api/scripts/" + sp.id);
+});
+
+test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启后配置恢复", async ({ page }) => {
+  const root = path.join(runtimeDir, "sim-bgi-lock");
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(path.join(root, "User", "OneDragon"), { recursive: true });
+  fs.copyFileSync("C:\\Windows\\System32\\cmd.exe", path.join(root, "BetterGI.exe"));
+  fs.writeFileSync(path.join(root, "User", "OneDragon", "默认配置.json"), JSON.stringify({ Name: "默认配置", TaskEnabledList: {} }), "utf8");
+  const created = await api("POST", "/api/scripts", { name: "编辑会话锁定", pluginType: "bettergi", rootPath: root.replace(/\\/g, "\\\\"), gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
+  const sp = await created.json();
+  await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
+  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
+  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
+
+  const start = await api("POST", editBase, { action: "start" });
+  expect(start.ok, "编辑配置 start 成功").toBeTruthy();
+  await page.goto(baseUrl + `#/scripts/${sp.id}/users`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".modal", { timeout: 5000 });
+  expect((await page.textContent(".modal")).includes("配置编辑中"), "刷新后自动恢复「配置编辑中」锁定卡片").toBeTruthy();
+  await page.keyboard.press("Escape");
+  expect(await page.$(".modal"), "锁定弹窗：Esc 无法关闭").toBeTruthy();
+  await page.mouse.click(20, 400);
+  expect(await page.$(".modal"), "锁定弹窗：点击遮罩无法关闭").toBeTruthy();
+  expect(!(await page.isVisible(".modal-close")), "锁定弹窗：无关闭按钮").toBeTruthy();
+  await page.click('[data-action="edit-config-cancel"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  expect(!fs.existsSync(cfgPath), "取消后本次生成的模板已清理").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "取消后默认配置恢复").toBeTruthy();
+
+  const start2 = await api("POST", editBase, { action: "start" });
+  expect(start2.ok, "再次 start 成功（重启恢复前置）").toBeTruthy();
+  expect(fs.existsSync(cfgPath), "模板已生成").toBeTruthy();
+  await restartService();
+  expect(!fs.existsSync(cfgPath), "重启后编辑会话生成的模板已清理（恢复编辑前状态）").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "重启后隐藏的默认配置已恢复").toBeTruthy();
+
+  await api("DELETE", "/api/scripts/" + sp.id);
+});
+
+test("数据目录命名迁移：旧名残留（config/cache/edit-hide）迁移为新名且崩溃现场可恢复", async () => {
+  const migrateDir = makeScriptDir("migrate");
+  const create = await api("POST", "/api/scripts", {
+    name: "迁移测试脚本", rootPath: migrateDir.root.replace(/\\/g, "\\\\"),
+    mainExe: migrateDir.main.replace(/\\/g, "\\\\"),
+    configPath: migrateDir.cfg.replace(/\\/g, "\\\\"), logPath: migrateDir.log.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const script = await create.json();
+  const sid = script.id;
+  const uDir = path.join(runtimeDir, "data", sid, "甲");
+  fs.mkdirSync(uDir, { recursive: true });
+  const cfgFile = path.join(migrateDir.cfg, "configA.txt");
+  fs.writeFileSync(cfgFile, "CURRENT", "utf8");
+
+  fs.mkdirSync(path.join(uDir, "config"), { recursive: true });
+  fs.writeFileSync(path.join(uDir, "config", "configA.txt"), "STORED", "utf8");
+  fs.mkdirSync(path.join(uDir, "cache"), { recursive: true });
+  fs.writeFileSync(path.join(uDir, "cache", "configA.txt"), "ORIGINAL", "utf8");
+  fs.mkdirSync(path.join(uDir, "edit-hide"), { recursive: true });
+  fs.writeFileSync(path.join(uDir, "edit-hide", "other.json"), "{}", "utf8");
+  fs.writeFileSync(path.join(uDir, ".session"), JSON.stringify({
+    scriptId: sid, userName: "甲", configPath: migrateDir.cfg, originalKind: "dir",
+    phase: "run", generatedTemplate: false,
+  }), "utf8");
+
+  await restartService();
+
+  expect(fs.readFileSync(path.join(uDir, "store", "configA.txt"), "utf8") === "STORED", "旧 config/ 已迁移为 store/").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, "config")), "旧 config/ 目录已不存在").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, "cache")), "旧 cache/ 目录已不存在").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, "edit-hide")), "旧 edit-hide/ 目录已不存在（迁移为 edit-hidden 并由会话恢复消费）").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, "edit-hidden")), "edit-hidden 恢复后已清理").toBeTruthy();
+  expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "迁移后的崩溃现场已恢复（原配置还原到配置路径）").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, ".session")), "崩溃现场恢复后 .session 标记已清除").toBeTruthy();
+  expect(!fs.existsSync(path.join(uDir, "original")) || fs.readdirSync(path.join(uDir, "original")).length === 0, "恢复后 original 已清空（内容已移回配置路径）").toBeTruthy();
+
   await api("DELETE", "/api/scripts/" + sid);
 });

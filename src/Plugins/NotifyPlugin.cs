@@ -13,7 +13,7 @@ internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 
     public string Description => "脚本实例与调度队列运行状态通知（Webhook / SMTP 邮件）";
 
-    public string Version => "1.0.0";
+    public string Version => "0.1.0";
 
     public bool IsBuiltIn => true;
 

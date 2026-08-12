@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>ZenlessZoneZeroOneDragonAdapter</AssemblyName>
     <RootNamespace>ZenlessZoneZeroOneDragonAdapter</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -65,6 +65,14 @@ internal static class ApiScriptsHandler
             await HttpHelper.WriteJsonAsync(context, ctx.Scripts).ConfigureAwait(false);
             return;
         }
+        if (method == "GET" && seg.Length == 2 && seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
+        {
+            var sessions = UserConfigManager.EditSessions.Values
+                .Select(session => new { scriptId = session.Script.Id, scriptName = session.Script.Name, userName = session.User.Name })
+                .ToList();
+            await HttpHelper.WriteJsonAsync(context, sessions).ConfigureAwait(false);
+            return;
+        }
         if (method == "GET" && seg.Length == 3 && seg[2].Equals("icon", StringComparison.OrdinalIgnoreCase))
         {
             await HandleIconAsync(context, seg[1]).ConfigureAwait(false);
@@ -218,9 +226,10 @@ internal static class ApiScriptsHandler
         script.SuccessMarkers = profile.SuccessMarkers;
         script.SuccessKeywords = "";
         script.FailureKeywords = "";
-        script.JudgeScriptEnabled = false;
-        script.JudgeScriptLanguage = "";
-        script.JudgeScript = "";
+        // v0.6.0+：专项脚本判断脚本由插件固化（用户不可编辑），语言固定内置引擎 JavaScript。
+        script.JudgeScriptEnabled = !string.IsNullOrWhiteSpace(profile.JudgeScript);
+        script.JudgeScriptLanguage = "javascript";
+        script.JudgeScript = profile.JudgeScript ?? "";
         return null;
     }
 
@@ -711,14 +720,16 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "检测到已打开的脚本，退出脚本后才能编辑配置。" }, 409).ConfigureAwait(false);
                     return;
                 }
+                UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
                 string? prepError = UserConfigManager.PrepareForEdit(script.Id, user.Name, script.ConfigPath);
                 if (prepError is not null)
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "配置交换失败：" + prepError }, 400).ConfigureAwait(false);
                     return;
                 }
-                Process? proc;
-                try
+                bool generatedTemplate = UserConfigManager.EnsureConfigForEdit(script);
+                UserConfigManager.HideOtherConfigs(script, script.Id, user.Name);
+                Process? proc;                try
                 {
                     proc = SystemActions.StartVisible(script.MainExe,
                         string.IsNullOrWhiteSpace(script.RootPath) ? Path.GetDirectoryName(script.MainExe) ?? "" : script.RootPath);
@@ -729,11 +740,12 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试" }, 400).ConfigureAwait(false);
                     return;
                 }
-                UserConfigManager.EditSessions[scriptId] = new EditSession
+                var editSession = new EditSession
                 {
                     Script = script,
                     User = user,
                     Process = proc,
+                    GeneratedConfigTemplate = generatedTemplate,
                     Mark = new ConfigSessionMark
                     {
                         ScriptId = script.Id,
@@ -743,6 +755,9 @@ internal static class ApiScriptsHandler
                         Phase = "edit",
                     },
                 };
+                editSession.Mark.GeneratedTemplate = generatedTemplate;
+                editSession.Mark.Write();
+                UserConfigManager.EditSessions[scriptId] = editSession;
                 keepGate = true;
                 Audit.Log(Audit.Web, "开始编辑配置", $"{script.Name} / {user.Name}（主程序已启动）");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true, pid = proc?.Id ?? 0 }).ConfigureAwait(false);
@@ -781,6 +796,21 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = (action == "done" ? "提交" : "取消") + "失败：" + swapError }, 400).ConfigureAwait(false);
                     return;
                 }
+                if (action == "cancel" && session.GeneratedConfigTemplate)
+                {
+                    try
+                    {
+                        if (File.Exists(script.ConfigPath))
+                        {
+                            File.Delete(script.ConfigPath);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[警告] 清理编辑会话生成的配置模板失败：{ex.Message}");
+                    }
+                }
+                UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             }

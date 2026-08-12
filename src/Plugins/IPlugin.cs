@@ -46,6 +46,12 @@ public class ScriptProfile
 
     /// <summary>完成标志（逗号分隔）；专用插件提供自有关键词，固化到脚本实例。</summary>
     public string SuccessMarkers { get; set; } = "";
+
+    /// <summary>默认判断脚本（JS，v0.6.0+）：专项脚本实例保存时固化到脚本字段（用户不可编辑）；为空表示插件不提供。</summary>
+    public string JudgeScript { get; set; } = "";
+
+    /// <summary>最小配置模板（JSON 内容，v0.6.0+）：编辑用户配置会话中 ConfigPath 不存在时生成（值全空，由用户在编辑时自行配置）；为空表示插件不提供。</summary>
+    public string ConfigTemplate { get; set; } = "";
 }
 
 /// <summary>通知能力接口：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>

@@ -1,5 +1,5 @@
 /**
- * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 46 用例）
+ * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 48 用例）
  *
  * 覆盖内容：
  *  - 混沌队列（notifyEnabled=true）：S1(1用户)/S2(2用户)/S3(3用户) 共 6 用户串行执行
@@ -511,10 +511,10 @@ function assertNoResidue(scriptId, users) {
   for (const u of users) {
     const dir = userDataDir(scriptId, u);
     assert(!fs.existsSync(path.join(dir, "script")), `data/${scriptId}/${u} 无 script 残留`);
-    assert(!fs.existsSync(path.join(dir, "replace-backup")), `data/${scriptId}/${u} 无 replace-backup 残留`);
+    assert(!fs.existsSync(path.join(dir, "swap-backup")), `data/${scriptId}/${u} 无 swap-backup 残留`);
     assert(!fs.existsSync(path.join(dir, ".session")), `data/${scriptId}/${u} 无 .session 残留`);
-    const cache = path.join(dir, "cache");
-    assert(!fs.existsSync(cache) || fs.readdirSync(cache).length === 0, `data/${scriptId}/${u} cache 已清空`);
+    const original = path.join(dir, "original");
+    assert(!fs.existsSync(original) || fs.readdirSync(original).length === 0, `data/${scriptId}/${u} original 已清空`);
   }
 }
 
@@ -758,7 +758,7 @@ async function randomSeedRound() {
     rand.push({ user: u.name, seed });
     seedMap[u.name] = seed;
     gameMap[u.name] = u.game;
-    const store = path.join(runtimeDir, "data", scriptIds[u.inst], u.name, "config", "tasks.txt");
+    const store = path.join(runtimeDir, "data", scriptIds[u.inst], u.name, "store", "tasks.txt");
     fs.writeFileSync(store, `USER|${seed}|${u.game}\r\n`, "ascii");
     console.log(`  [随机] ${u.name} seed=${seed}`);
   }

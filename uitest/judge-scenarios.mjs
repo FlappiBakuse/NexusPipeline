@@ -275,7 +275,7 @@ function userScriptDir(id, user = "默认") {
 }
 
 function userBackupDir(id, user = "默认") {
-  return path.join(runtimeDir, "data", id, user, "replace-backup");
+  return path.join(runtimeDir, "data", id, user, "swap-backup");
 }
 
 async function runScript(id, userName, timeoutMs = 180000) {
@@ -331,7 +331,7 @@ async function testScenarioB() {
   const restored = cfgAfter.includes("1|enabled|success") && cfgAfter.includes("2|enabled|fail") && cfgAfter.includes("4|enabled|success");
   assert(restored, "运行结束后 config/tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
   assert(!fs.existsSync(userScriptDir(created.id)), "运行结束后 script 目录已清空");
-  assert(!fs.existsSync(userBackupDir(created.id)), "运行结束后 replace-backup 已清理");
+  assert(!fs.existsSync(userBackupDir(created.id)), "运行结束后 swap-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -359,7 +359,7 @@ async function testScenarioC() {
   const restored = cfgAfter.includes("1|enabled|success") && cfgAfter.includes("2|enabled|stuck-alt") && cfgAfter.includes("4|enabled|stuck-silent");
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
   assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
-  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
+  assert(!fs.existsSync(userBackupDir(created.id)), "swap-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -616,7 +616,7 @@ console.log(JSON.stringify({ status: "failed", reason: "round-" + n, replaceConf
   const cfg2 = fs.readFileSync(path.join(dir, "cfg2.txt"), "utf8").trim();
   assert(cfg1 === "V1" && cfg2 === "W1", "两轮替换后 config 均还原（cfg1=" + cfg1 + " cfg2=" + cfg2 + "）");
   assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
-  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
+  assert(!fs.existsSync(userBackupDir(created.id)), "swap-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -660,7 +660,7 @@ console.log(JSON.stringify({ status: "failed", reason: "single-cfg", replaceConf
 }
 
 async function testCrashRecovery() {
-  console.log("[用例] 崩溃恢复：运行中强制终止服务 → 重启 → replace-backup 自动还原");
+  console.log("[用例] 崩溃恢复：运行中强制终止服务 → 重启 → swap-backup 自动还原");
   const dir = path.join(runtimeDir, "mt-crash");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
@@ -687,7 +687,7 @@ console.log(JSON.stringify({ status: "failed", reason: "crash-replace", replaceC
     }
   }, 20000, 300);
   assert(replaced, "配置替换已发生（cfg.txt=REPLACED）");
-  assert(fs.existsSync(path.join(userBackupDir(created.id), "cfg.txt")), "replace-backup 已建立");
+  assert(fs.existsSync(path.join(userBackupDir(created.id), "cfg.txt")), "swap-backup 已建立");
   await stopService();
   await sleep(4000);
   startService();
@@ -748,8 +748,8 @@ async function testSwapCrashRecovery() {
   assert(restored, "重启后配置交换自动还原现场（延迟重试，cfg.txt=MODIFIED）");
   const userDir = path.join(runtimeDir, "data", created.id, "默认");
   assert(!fs.existsSync(path.join(userDir, ".session")), "恢复后 .session 标记已清除");
-  const cacheDir = path.join(userDir, "cache");
-  assert(!fs.existsSync(cacheDir) || fs.readdirSync(cacheDir).length === 0, "恢复后 cache 已清空");
+  const originalDir = path.join(userDir, "original");
+  assert(!fs.existsSync(originalDir) || fs.readdirSync(originalDir).length === 0, "恢复后 original 已清空");
   await api("DELETE", "/api/scripts/" + created.id);
 }
 
@@ -807,7 +807,7 @@ if (enabled.length > 0 && undone.length === 0) {
   const restored = cfgAfter.includes("1|enabled|crash-silent") && cfgAfter.includes("2|enabled|game-crash") && cfgAfter.includes("4|enabled|script-crash");
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
   assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
-  assert(!fs.existsSync(userBackupDir(created.id)), "replace-backup 已清理");
+  assert(!fs.existsSync(userBackupDir(created.id)), "swap-backup 已清理");
   const logPath = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   let managerLog = "";
   if (fs.existsSync(logPath)) managerLog = fs.readFileSync(logPath, "utf8");
