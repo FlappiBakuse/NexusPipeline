@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## [v0.6.1]（2026-08-13）
+
+### 新增
+
+- **MaaEnd 专项插件（第四阶段，`extensions/MaaEndAdapter/`）**：MaaEnd（明日方舟：终末地自动化，MXU 客户端 + agent/go-service + MaaFramework）脚本实例配置接管——`Resolve` 推导主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（自启动模式触发自动执行，任务运行完成时进程自动退出）、配置目录 `config/`（`mxu-MaaEnd.json`，MXU 首次启动自动生成，目录型不提供配置模板）、日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改）。判断脚本（JS/Jint，内嵌 43 任务显示名映射表 + 3 旧名别名，zh-CN）：以最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾（MXU 按 tasks[] 顺序串行执行、失败不中断流程）→ 提取全部「任务失败: X」→ 全部可映射时改写配置（该实例全部 `enabled=false`、失败任务 `enabled=true`，保留其余字段）经 `replaceConfigs` 触发**选择性重试**（MXU 无运行记录机制、无天然选择性补做）；无法识别的失败任务保守不改写。启用任务判定只按 `enabled===true`（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存）。已知边界：RealTimeTask 永不结束（宿主超时兜底）、跳过任务仍记完成、`--quit-after-run` 未触发执行时不退出（stall 超时兜底）、与手动运行并发互相干扰。
+- **March7thAssistant 判断脚本（v0.6.1）**：「游戏终止：StarRail」marker 先判成功路径；扫描任务级失败提示行（每日实训未完成/清体力未完成/模拟宇宙未完成/锄大地未完成/遗器背包已满/领取星琼失败）→ failed（无 replaceConfigs，宿主重试天然选择性补做——时间戳仅在达标时保存）；未出现 marker 时匹配 `/ \| ERROR \| 发生错误/`（main.py 顶层 except 的 ErrorOccurred 模板行）快速失败（跳过 30 秒 stall 等待）；良性噪声（尚未刷新/未开启/截图失败/空错误）不误判。不提供 ConfigTemplate（config.yaml 正常安装必然存在且支持默认值合并）。
+- **ZenlessZoneZeroOneDragon 判断脚本（v0.6.1）**：「关闭游戏成功」（after_done=关闭游戏）或「暂停运行」（收尾必现兜底）判定运行结束；提取「指令[ X ] 执行失败 返回状态 Y」去重并过滤良性噪声（等待大世界画面=瞬时重试、通知=SMTP 推送成功）；无失败 → success；有失败 → success + notifyText「本次运行有应用执行失败：X、Y」（应用级失败不中断一条龙，宿主 FinalStatus 因日志含「失败」自动落 partial）。无 ConfigTemplate（config 为 500+ 文件目录，单文件模板机制不适用，目录型误删风险）；配置交换重试调研结论为不需要（`ApplicationRunRecord` 状态 0/1/2/3 按日/周重置驱动「应用已完成」跳过，失败应用重跑自动补做）。
+
+### 修复
+
+- **BetterGI 判断脚本 LogPath（重要 bug）**：`log\better-genshin-impact{YYYYMMDD}.log` → `log\better-genshin-impact.log`（BetterGI 用 Serilog 滚动日志，**当前文件恒为无日期名**、带日期的是午夜归档；原模式指向当日归档（当天不存在）→ 真实运行必因「无日志条目」超时失败，v0.6.0 阶段未暴露）。e2e 两处 LogPath 断言同步。
+
+### 变更
+
+- **BetterGI 判断脚本加固**：失败任务改写配置时清空 `NextTaskId`（BetterGI `OnOneKeyExecute` 若 NextTaskId 非空会从中间任务开始执行，可能跳过被重试的失败任务）；`ConfigTemplate` 替换为真实配置内容（6 个标准任务 GUID，TaskEnabledList 全 false，枫丹/挪德卡莱，CompletionAction=关闭游戏和软件）。
+- **测试与文案同步**：e2e 新增 MaaEnd 专项适配用例与选择卡片数量/堆叠断言（51 用例 / CI 50）；judge-scenarios 新增 MaaEnd 专项判断脚本端到端场景（从插件源码提取判断脚本，116 断言：失败任务选择性重试与还原 / 全成功单轮 / 未知失败名保守不改写）；插件页与脚本列表文案核对无硬编码（专用插件均动态渲染）；测试数字与插件名单同步至 AGENTS/README/DEVELOPMENT/CONTRIBUTING/ARCHITECTURE。
+- 版本号 0.6.1。
+
 ## [v0.6.0]（2026-08-12）
 
 ### 新增
@@ -203,5 +221,27 @@
 
 - 初始提交（枢链）：脚本实例/用户/队列管理、托盘服务、Web 管理界面、调度与通知的基础能力。
 
+[v0.6.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.6.0
+[v0.5.4]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.4
 [v0.5.3]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.3
 [v0.5.2]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.2
+[v0.5.1]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.1
+[v0.5.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.5.0
+[v0.4.4]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.4.4
+[v0.4.3]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.4.3
+[v0.4.2]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.4.2
+[v0.4.1]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.4.1
+[v0.4.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.4.0
+[v0.3.6]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.6
+[v0.3.5]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.5
+[v0.3.4]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.4
+[v0.3.3]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.3
+[v0.3.2]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.2
+[v0.3.1]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.1
+[v0.3.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.3.0
+[v0.2.3]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.2.3
+[v0.2.2]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.2.2
+[v0.2.1]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.2.1
+[v0.2.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.2.0
+[v0.1.1]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.1.1
+[v0.1.0]: https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.1.0

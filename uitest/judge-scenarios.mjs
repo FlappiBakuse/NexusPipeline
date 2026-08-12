@@ -1,5 +1,5 @@
 /**
- * judge-scenarios.mjs — v0.4.0 自定义完成标志稳定性专项测试（独立文件，不影响 test.mjs 的 466 断言计数）
+ * judge-scenarios.mjs — v0.4.0 自定义完成标志稳定性专项测试（独立文件，断言计数见 AGENTS.md 与运行输出）
  *
  * 覆盖内容：
  *  - 用户场景 A：全部任务成功 → 一轮成功 + 通知「所有任务已全部完成」
@@ -361,6 +361,148 @@ async function testScenarioC() {
   assert(!fs.existsSync(userScriptDir(created.id)), "script 目录已清空");
   assert(!fs.existsSync(userBackupDir(created.id)), "swap-backup 已清理");
   await api("DELETE", "/api/scripts/" + created.id);
+}
+
+/* ---------------- MaaEnd 专项判断脚本场景（v0.6.1） ---------------- */
+
+/**
+ * MaaEnd 默认判断脚本：从 extensions/MaaEndAdapter/MaaEndAdapter.cs 提取 DefaultJudgeScript raw string
+ * （统一剥离 C# raw string 的公共缩进），保证测试用的即发布代码。
+ */
+function maaendJudgeScript() {
+  const src = fs.readFileSync(path.join(projectRoot, "extensions", "MaaEndAdapter", "MaaEndAdapter.cs"), "utf8");
+  const m = src.match(/private const string DefaultJudgeScript = """\r?\n([\s\S]*?)\r?\n\s*""";/);
+  if (!m) throw new Error("无法从 MaaEndAdapter.cs 提取 DefaultJudgeScript");
+  const lines = m[1].split(/\r?\n/);
+  const indent = lines[0].match(/^\s*/)[0].length;
+  return lines.map(l => l.slice(indent)).join("\n");
+}
+
+/**
+ * MaaEnd 模拟脚本（node 伪脚本，UTF-8 写日志规避 bat 中文编码问题）：
+ *  - retry 模式：奇数次运行输出「售卖产品完成 + 高阶培养四失败 + 环境监测完成」（模拟 MXU 失败不中断收尾），
+ *    偶数次只输出「高阶培养四完成」（模拟配置改写后仅失败任务启用重跑）；
+ *  - all-ok 模式：全部任务完成；
+ *  - unknown 模式：含「任务失败: 未知任务」（无法映射 → 判断脚本保守不改写）。
+ * 日志行模拟 MXU 格式：[YYYY-MM-DD HH:mm:ss.fff] 任务开始/完成/失败: <显示名>
+ */
+const FAKE_MAAEND_JS = `
+const fs = require("fs");
+const path = require("path");
+const mode = process.argv[2] || "retry";
+const logFile = path.join(__dirname, "logs", "log.txt");
+const cntFile = path.join(__dirname, "cnt.txt");
+let n = 0;
+try { n = Number(fs.readFileSync(cntFile, "utf8").trim()) || 0; } catch (e) { n = 0; }
+n += 1;
+fs.writeFileSync(cntFile, String(n));
+fs.mkdirSync(path.dirname(logFile), { recursive: true });
+const odd = [
+  "任务开始: 🛒售卖产品", "任务完成: 🛒售卖产品",
+  "任务开始: 高阶培养四", "任务失败: 高阶培养四",
+  "任务开始: 🌿环境监测", "任务完成: 🌿环境监测"
+];
+const even = ["任务开始: 高阶培养四", "任务完成: 高阶培养四"];
+const allOk = [
+  "任务开始: 🛒售卖产品", "任务完成: 🛒售卖产品",
+  "任务开始: 🌿环境监测", "任务完成: 🌿环境监测"
+];
+const unknown = [
+  "任务开始: 🛒售卖产品", "任务完成: 🛒售卖产品",
+  "任务开始: 未知任务", "任务失败: 未知任务",
+  "任务开始: 🌿环境监测", "任务完成: 🌿环境监测"
+];
+const pick = mode === "all-ok" ? allOk : mode === "unknown" ? unknown : (n % 2 === 1 ? odd : even);
+fs.appendFileSync(logFile, pick.map(l => "[2026-08-13 06:00:00.000] " + l).join("\\r\\n") + "\\r\\n", "utf8");
+setTimeout(() => process.exit(0), 1200);
+`;
+
+/** MaaEnd 模拟配置（真实 mxu-MaaEnd.json 结构：instances[].tasks + settings.autoStartInstanceId）。 */
+const MAAEND_CFG = {
+  version: "1.0",
+  instances: [
+    {
+      id: "automas",
+      name: "AUTO-MAS",
+      controllerName: "Win32-Front",
+      tasks: [
+        { id: "t1", taskName: "SellProduct", enabled: true, enabledByController: { "Win32-Front": true }, optionValues: {} },
+        { id: "t2", taskName: "ProtocolSpace", customName: "高阶培养四", enabled: true, enabledByController: { "Win32-Front": true }, optionValues: {} },
+        { id: "t3", taskName: "EnvironmentMonitoring", enabled: true, enabledByController: { "Win32-Front": true }, optionValues: {} },
+      ],
+    },
+  ],
+  settings: { autoStartInstanceId: "automas", language: "zh-CN" },
+};
+
+function makeMaaEndDir(label) {
+  const dir = path.join(runtimeDir, "mt-maaend-" + label);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "config"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "fake-maaend.js"), FAKE_MAAEND_JS, "utf8");
+  // 复制 node.exe 为 fake-node.exe：避免与测试进程（node.exe）同名触发宿主「主程序已在运行」门禁，
+  // 且伪脚本可用 node 原生 fs/path 以 UTF-8 写日志（规避 bat 中文编码问题）。
+  fs.copyFileSync(process.execPath, path.join(dir, "fake-node.exe"));
+  const cfgPath = path.join(dir, "config", "mxu-MaaEnd.json");
+  fs.writeFileSync(cfgPath, JSON.stringify(MAAEND_CFG, null, 2), "utf8");
+  fs.rmSync(path.join(dir, "cnt.txt"), { force: true });
+  fs.rmSync(path.join(dir, "logs", "log.txt"), { force: true });
+  return { dir, cfgPath, cfgBefore: fs.readFileSync(cfgPath, "utf8") };
+}
+
+async function testMaaEndJudgeScript() {
+  console.log("[用例] MaaEnd 判断脚本（v0.6.1）：失败任务选择性重试 + 运行还原 / 全成功单轮 / 未知失败名保守不改写");
+
+  // 子场景 1：失败任务选择性重试（attempt1 失败 → 改写配置 → attempt2 仅重跑失败任务成功）
+  const s1 = makeMaaEndDir("retry");
+  const c1 = await createJudgeScript({
+    name: "MaaEnd失败重试", rootPath: s1.dir,
+    mainExe: path.join(s1.dir, "fake-node.exe").replace(/\\/g, "\\\\"), args: "fake-maaend.js retry",
+    configPath: path.join(s1.dir, "config"), logPath: path.join(s1.dir, "logs\\log.txt"),
+    maxAttempts: 3, judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: maaendJudgeScript(),
+  });
+  assert(c1.ok, "创建 MaaEnd 模拟脚本（node 伪脚本 + 插件提取判断脚本）");
+  const r1 = await runScript(c1.id);
+  assert(r1.dispatchOk && r1.ended, "MaaEnd 失败重试运行结束");
+  assert(r1.rec && r1.rec.attempts === 2, "失败后仅重跑失败任务成功（attempts=2，实际 " + r1.rec?.attempts + "）");
+  assert(r1.rec && r1.rec.finalStatus === "partial", "重试>1 → FinalStatus=partial（实际 " + r1.rec?.finalStatus + "）");
+  assert((r1.rec?.attemptDetails || [])[0]?.reason.includes("高阶培养四"), "首次尝试原因含失败任务（已调整为仅重试失败任务，原因：" + (r1.rec?.attemptDetails || [])[0]?.reason + "）");
+  assert(fs.readFileSync(s1.cfgPath, "utf8") === s1.cfgBefore, "运行结束后 config/mxu-MaaEnd.json 还原为运行前状态");
+  assert(!fs.existsSync(userScriptDir(c1.id)), "script 目录已清空");
+  assert(!fs.existsSync(userBackupDir(c1.id)), "swap-backup 已清理");
+  await api("DELETE", "/api/scripts/" + c1.id);
+
+  // 子场景 2：全部任务成功 → 单轮 success
+  const s2 = makeMaaEndDir("ok");
+  const c2 = await createJudgeScript({
+    name: "MaaEnd全成功", rootPath: s2.dir,
+    mainExe: path.join(s2.dir, "fake-node.exe").replace(/\\/g, "\\\\"), args: "fake-maaend.js all-ok",
+    configPath: path.join(s2.dir, "config"), logPath: path.join(s2.dir, "logs\\log.txt"),
+    maxAttempts: 2, judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: maaendJudgeScript(),
+  });
+  assert(c2.ok, "创建 MaaEnd 全成功模拟脚本");
+  const r2 = await runScript(c2.id);
+  assert(r2.dispatchOk && r2.ended, "MaaEnd 全成功运行结束");
+  assert(r2.rec && r2.rec.attempts === 1, "全成功单轮（attempts=1，实际 " + r2.rec?.attempts + "）");
+  assert(r2.rec && r2.rec.finalStatus === "success", "全部任务执行成功（FinalStatus=success，实际 " + r2.rec?.finalStatus + "）");
+  await api("DELETE", "/api/scripts/" + c2.id);
+
+  // 子场景 3：未知失败名 → failed 且不改写配置（保守分支）
+  const s3 = makeMaaEndDir("unknown");
+  const c3 = await createJudgeScript({
+    name: "MaaEnd未知失败", rootPath: s3.dir,
+    mainExe: path.join(s3.dir, "fake-node.exe").replace(/\\/g, "\\\\"), args: "fake-maaend.js unknown",
+    configPath: path.join(s3.dir, "config"), logPath: path.join(s3.dir, "logs\\log.txt"),
+    maxAttempts: 1, judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: maaendJudgeScript(),
+  });
+  assert(c3.ok, "创建 MaaEnd 未知失败名模拟脚本");
+  const r3 = await runScript(c3.id);
+  assert(r3.dispatchOk && r3.ended, "MaaEnd 未知失败名运行结束");
+  assert(r3.rec && r3.rec.finalStatus === "failed", "无法映射失败名 → 判定失败（FinalStatus=failed，实际 " + r3.rec?.finalStatus + "）");
+  assert(r3.rec && r3.rec.attempts === 1, "保守分支不再重试（attempts=1，实际 " + r3.rec?.attempts + "）");
+  assert(fs.readFileSync(s3.cfgPath, "utf8") === s3.cfgBefore, "无法映射时配置未被改写（mxu-MaaEnd.json 原样）");
+  await api("DELETE", "/api/scripts/" + c3.id);
 }
 
 async function testEdgeNoLogStuck() {
@@ -884,6 +1026,7 @@ async function main() {
   await testScenarioB();
   await testScenarioC();
   await testScenarioD();
+  await testMaaEndJudgeScript();
   await testEdgeNoLogStuck();
   await testBugNewFileResidue();
   await testBugPathEscape();

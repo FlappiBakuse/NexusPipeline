@@ -1,5 +1,5 @@
 /**
- * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 48 用例）
+ * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 51 用例）
  *
  * 覆盖内容：
  *  - 混沌队列（notifyEnabled=true）：S1(1用户)/S2(2用户)/S3(3用户) 共 6 用户串行执行

@@ -49,7 +49,7 @@ export async function pageScripts(token) {
   if (scriptPage > totalPages) scriptPage = totalPages;
   const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
-    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建通用脚本实例」创建你的第一个脚本。</div>'
+    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
     : `<section class="card"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card">
         <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">

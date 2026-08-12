@@ -12,7 +12,7 @@ test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编�
   expect(!!newBtn, "新建通用脚本实例按钮位于右上角（page-head 内）").toBeTruthy();
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
-  expect((await page.$$(".chooser-card")).length === 4, "选择卡片层含通用与专项四张卡片").toBeTruthy();
+  expect((await page.$$(".chooser-card")).length === 5, "选择卡片层含通用与专项五张卡片").toBeTruthy();
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector(".modal-mask");
 
@@ -764,7 +764,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(probeOk.ok && profile.mainExe.endsWith("BetterGI.exe"), "probe 推导出主程序路径").toBeTruthy();
   expect(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon").toBeTruthy();
   expect(profile.configPath.includes("NexusPipeline.json"), "probe 推导出配置文件路径（NexusPipeline.json）").toBeTruthy();
-  expect(profile.logPath.includes("{YYYYMMDD}"), "probe 推导出日志格式路径（better-genshin-impact{YYYYMMDD}.log）").toBeTruthy();
+  expect(profile.logPath.endsWith("better-genshin-impact.log"), "probe 推导出日志路径（Serilog 当前文件 better-genshin-impact.log，带日期为归档）").toBeTruthy();
   expect(profile.successMarkers === "一条龙和配置组任务结束", "probe 推导完成标志（一条龙和配置组任务结束）").toBeTruthy();
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
   expect(probeBad.status === 400, "probe 对无法推导的根目录返回 400").toBeTruthy();
@@ -776,7 +776,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
   expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.includes("NexusPipeline.json") && got.logPath.includes("{YYYYMMDD}"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.configPath.includes("NexusPipeline.json") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
   expect(got.successMarkers === "一条龙和配置组任务结束", "完成标志由插件固化").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);

@@ -243,6 +243,53 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
   await page.click(".modal button:has-text('取消')");
 });
 
+test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ page }) => {
+  const mRoot = path.join(runtimeDir, "sim-maaend");
+  fs.rmSync(mRoot, { recursive: true, force: true });
+  fs.mkdirSync(mRoot, { recursive: true });
+  fs.writeFileSync(path.join(mRoot, "MaaEnd.exe"), "");
+
+  const st = await (await fetch(baseUrl + "api/status")).json();
+  const m = (st.plugins || []).find(p => p.name === "maaend");
+  expect(m && m.kind === "specialized" && m.enabled, "MaaEnd 专用插件已加载且启用（kind=specialized）").toBeTruthy();
+  expect(m && m.gameName === "明日方舟：终末地", "MaaEnd 插件提供游戏名（gameName=明日方舟：终末地）").toBeTruthy();
+
+  const probeOk = await api("POST", "/api/scripts/probe", { rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "maaend" });
+  expect(probeOk.ok, "maaend probe 成功").toBeTruthy();
+  const profile = (await probeOk.json()).profile;
+  expect(profile.mainExe.endsWith("MaaEnd.exe"), "probe 主程序为 MaaEnd.exe").toBeTruthy();
+  expect(profile.args === "--autostart --quit-after-run", "probe 推导启动参数 --autostart --quit-after-run").toBeTruthy();
+  expect(profile.configPath.endsWith("config"), "probe 推导配置文件目录 config").toBeTruthy();
+  expect(profile.logPath.includes("{YYYY-MM-DD}-*.log"), "probe 推导日志路径 debug/{YYYY-MM-DD}-*.log（通配）").toBeTruthy();
+  expect(profile.successMarkers === "", "probe 无关键字完成标志（MaaEnd 无固定标志，判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.judgeScript && profile.judgeScript.includes("mxu-MaaEnd.json"), "probe 提供判断脚本（读取 mxu-MaaEnd.json）").toBeTruthy();
+
+  const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-maaend"), pluginType: "maaend" });
+  expect(probeBad.status === 400, "maaend probe 对无法推导的根目录返回 400").toBeTruthy();
+
+  const created = await api("POST", "/api/scripts", {
+    name: "专项MAA脚本", rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "maaend", gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  expect(created.ok, "API 创建 maaend 专项脚本实例成功").toBeTruthy();
+  const sid = (await created.json()).id;
+  const list = await (await fetch(baseUrl + "api/scripts")).json();
+  const got = list.find(s => s.id === sid);
+  expect(got && got.pluginType === "maaend", "专项实例保存 pluginType=maaend").toBeTruthy();
+  expect(got.mainExe.endsWith("MaaEnd.exe") && got.args === "--autostart --quit-after-run", "主程序/启动参数由插件固化").toBeTruthy();
+  expect(got.configPath.endsWith("config") && got.logPath.includes("{YYYY-MM-DD}-*.log"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.judgeScriptEnabled === true && got.judgeScriptLanguage === "javascript" && got.judgeScript.includes("mxu-MaaEnd.json"), "判断脚本由插件固化（JudgeScriptEnabled=true、JavaScript、读取 mxu-MaaEnd.json）").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + sid);
+
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="new-script"]', { timeout: 5000 });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  const chooserText = await page.textContent(".new-script-chooser");
+  expect(chooserText.includes("新建MaaEnd专项脚本实例"), "选择卡片层含「新建MaaEnd专项脚本实例」卡片").toBeTruthy();
+  await page.click(".modal button:has-text('取消')");
+});
+
 test("插件配置二级页：布局 + 类型选择器 + generic 模板联动与样式", async ({ page }) => {
   await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("h2");

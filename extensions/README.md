@@ -1,9 +1,9 @@
 # NexusPipeline 外部插件开发指南
 
-本目录存放随发布附带的专用插件工程（`BetterGIAdapter` / `March7thAssistantAdapter` / `ZenlessZoneZeroOneDragonAdapter`）。
+本目录存放随发布附带的专用插件工程（`BetterGIAdapter` / `March7thAssistantAdapter` / `ZenlessZoneZeroOneDragonAdapter` / `MaaEndAdapter`）。
 插件以 DLL 形式放入主程序 `plugins/` 目录，启动时自动发现加载。
 
-## 工程模板（三个插件已对齐）
+## 工程模板（四个插件已对齐）
 
 每个插件工程为一个 SDK 风格类库，csproj 统一结构：
 
@@ -57,5 +57,14 @@
 
 ## 打包与发布
 
-- 发布 zip 含 `plugins/` 目录（三个内置插件 DLL），随主程序整体拷贝部署；
+- 发布 zip 含 `plugins/` 目录（四个内置插件 DLL），随主程序整体拷贝部署；
 - 插件 DLL 可删可替换（外部插件默认启用，显式禁用记入设置 `DisabledPlugins`）。
+
+## 专项插件一览
+
+| 插件 | 游戏 | 主程序/启动参数 | 配置/日志 | 判定要点 |
+|---|---|---|---|---|
+| BetterGIAdapter | 原神 | `BetterGI.exe --startOneDragon` | `User\OneDragon\NexusPipeline.json` / `log\better-genshin-impact.log` | 「一条龙和配置组任务结束」结束关键字 + 失败任务改写 `TaskEnabledList` 选择性重试（+ 清空 NextTaskId） |
+| March7thAssistantAdapter | 崩坏：星穹铁道 | `StarRailAssistant.exe` | `config.yaml` / 日志目录 | 「游戏终止：StarRail」marker + 任务级失败提示行 |
+| ZenlessZoneZeroOneDragonAdapter | 绝区零 | `OneDragon-Launcher.exe -o -c` | `config/` / `.log\log.txt` | 「关闭游戏成功/暂停运行」结束 + 「指令[ X ] 执行失败」提取（成功 + notifyText） |
+| MaaEndAdapter | 明日方舟：终末地 | `MaaEnd.exe --autostart --quit-after-run` | `config/`（`mxu-MaaEnd.json`）/ `debug\{YYYY-MM-DD}-*.log` | 最后一个启用任务「任务完成/失败: X」判定行收尾 + 失败任务改写配置选择性重试（无运行记录机制） |

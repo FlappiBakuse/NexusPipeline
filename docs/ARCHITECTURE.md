@@ -21,7 +21,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 46 用例 / NEXUS_CI 核心集 45）
+└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 51 用例 / NEXUS_CI 核心集 50）
 ```
 
 ## 后端分层（src/）
@@ -151,8 +151,8 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
         {
             MainExe = exe,
             Args = "--startOneDragon",
-            ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "默认配置.json"),
-            LogPath = Path.Combine(rootPath, "log", "better-genshin-impact{YYYYMMDD}.log"),
+            ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "NexusPipeline.json"),
+            LogPath = Path.Combine(rootPath, "log", "better-genshin-impact.log"),  // Serilog 滚动：当前文件恒为无日期名，带日期为归档
             SuccessMarkers = "一条龙和配置组任务结束",   // 完成标志由插件固化
         };
     }
@@ -164,6 +164,8 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
 - 元数据 + 生命周期：实现 `IPlugin`；通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
 - 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings / Resolve&lt;T&gt; / **插件级配置 GetConfig&lt;T&gt;/SetConfig&lt;T&gt;**（落盘 `config/plugins/&lt;插件名&gt;.json`，PascalCase）/ **密钥 GetSecret/SetSecret**（DPAPI 加密 `enc:` 前缀，与普通配置同文件）），**不要**引用 `RuntimeContext`。
 - 内置插件 `NotifyPlugin` 在 `PluginManager.DiscoverBuiltIn` 注册；外部插件与内置插件同契约。
+
+> **MaaEnd 专项要点（v0.6.1，`extensions/MaaEndAdapter/`）**：主程序 `MaaEnd.exe`（MXU 客户端改名）以 `--autostart --quit-after-run` 启动（任务运行完成时进程自动退出）；配置目录 `config/`（`mxu-MaaEnd.json` 为实例/任务核心配置），**目录型 ConfigPath 禁止提供 ConfigTemplate**（MXU 首次启动自动生成完整配置）；日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改 = 当前会话）。判断脚本按「最后一个启用任务的任务完成/任务失败判定行」收尾（MXU 无运行记录机制、无天然选择性补做），失败任务改写 `mxu-MaaEnd.json`（全部 `enabled=false`、失败任务 `enabled=true`）经 `replaceConfigs` 触发选择性重试；启用任务判定**只按 `enabled===true`**（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存不参与分发）。
 
 > v0.2.0 起命名空间为 `NexusPipeline.Plugins`，v0.1.x 编译的外部插件需重新编译；v0.3.0 起新增 `ISpecializedScriptPlugin` / `ScriptProfile` 契约。
 

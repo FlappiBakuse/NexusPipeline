@@ -11,20 +11,20 @@
 
 - **脚本实例**：每个实例包含
   - 脚本配置：名称、脚本根目录、主程序路径、自启动参数、配置文件路径/文件夹、日志路径（支持日期占位符与通配符，如 `{YYYY-MM-DD}.log`、`{YYYY-MM-DD-*}.log`）；
-  - 专用脚本实例：由已启用的专用插件（如 BetterGI）接管主程序/参数/配置/日志与完成标志，新建与编辑时自动适配，无需手动填写；卡片徽章显示插件提供的中文游戏名（如「原神专项」「崩坏：星穹铁道专项」「绝区零专项」）；
+  - 专用脚本实例：由已启用的专用插件（如 BetterGI）接管主程序/参数/配置/日志与完成标志，新建与编辑时自动适配，无需手动填写；卡片徽章显示插件提供的中文游戏名（如「原神专项」「崩坏：星穹铁道专项」「绝区零专项」「明日方舟：终末地专项」）；
   - 用户管理：多账号配置独立储存与自动交换（运行前切换、运行后还原），可临时进入「编辑配置」修改某个用户的配置；
   - 游戏配置：运行前是否启动游戏（PC 客户端）、游戏路径、启动参数、启动后等待秒数（默认 30）；游戏配置卡在弹窗内常驻显示（不与复选框绑定），勾选「运行脚本前启动游戏」时游戏路径必填且必须为可执行文件；「运行结束后强制关闭游戏」为**独立开关**（与是否启动游戏解绑）；**任务失败时无条件强制结束游戏进程**（不依赖开关）；
   - 路径合规：保存脚本时校验脚本根目录/主程序/配置路径必须存在（主程序需可执行，日志路径仅校验格式），否则无法保存；脚本图标自动取主程序最高分辨率（含 256×256，无图标资源时回退系统关联图标）；
   - 运行设置：最大尝试次数（含首次，默认 3）、日志无更新超时（默认 5 分钟，脚本启动后未产生任何日志条目同样按此超时失败）、运行总时间超时（默认 120 分钟，按整个运行含全部重试计时）；
   - 自定义完成标志：成功/失败关键字（每行一组，组内逗号分隔为 AND、换行之间为 OR；命中失败关键字立即终止本次尝试，命中成功关键字等待脚本退出判定成功）；或使用判断脚本（JavaScript 内置引擎 / Python 系统解释器，日志新增/阻塞周期/进程退出时触发，输入为脚本实例字段+用户+config（只读）与 script（可读写）目录文件清单+**本次尝试日志段**的 JSON（上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 logTruncated=true），脚本输出 `{"status":"success|failed","reason":"原因","notifyText":"可选","replaceConfigs":["相对script目录路径"]}` 判定结果，无输出视为继续运行）；判断脚本优先于关键字；脚本返回 `replaceConfigs` 可在失败后替换配置文件并自动重试（运行结束还原），返回的自定义通知文本可替换通知正文；
-  - 完成标志：专用插件自动提供（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`）；通用脚本可配置自定义完成标志（关键字或判断脚本），均未配置时按「进程自行退出」判定成功。
+  - 完成标志：专用插件自动提供（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`；MaaEnd 无关键字标志，判定完全由插件判断脚本驱动——MXU 日志最后一个启用任务的「任务完成/失败」判定行收尾，失败任务自动改写配置选择性重试）；通用脚本可配置自定义完成标志（关键字或判断脚本），均未配置时按「进程自行退出」判定成功。
 - **调度队列**：链式运行脚本实例
   - 自动运行方式：不运行（默认，仅手动调度）/ 启动时运行 / 定时运行；
   - 完成操作：无操作 / 退出软件 / 休眠 / 重启 / 关机（系统操作带 60 秒倒计时，可 `shutdown /a` 取消）；
   - 定时列表：多条，每条可设置启用状态、一周七天多选、执行时间（hh:mm）；
   - 任务列表：按序号先后执行，引用已创建的脚本实例。
 - **调度中心**：手动执行任意脚本实例（启用用户将自动依次运行）或调度队列，可取消。
-- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon 专用插件：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；**Args 禁止使用引号**，引号一律视为参数内容）。`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` / `ISpecializedScriptPlugin` 接口）会自动加载，外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
+- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon、MaaEnd 专用插件：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数，失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；MaaEnd 适配明日方舟：终末地自动化（MXU 客户端），主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（任务运行完成时进程自动退出）、配置目录 `config\`（MXU 首次启动自动生成，无需手动配置）、日志 `debug\{YYYY-MM-DD}-*.log`（前端写入，当天每次启动自增序号）；**Args 禁止使用引号**，引号一律视为参数内容）。`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` / `ISpecializedScriptPlugin` 接口）会自动加载，外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
 - **仪表盘**：脚本实例数、调度队列数、下一调度队列（倒计时）、当前版本；正在运行的任务；插件卡片。
 - **历史记录**：每个脚本实例/调度队列的完整运行记录（每次尝试的原因、按尝试分批的脚本日志），按保留天数清理（默认 7 天，上限 180 天，每天自动清理）。
 - **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、日志级别（DEBUG/INFO/WARN/ERROR/FATAL，控制台按级别着色，即时生效）、Web 端口、远程访问（可选开启 + 访问令牌）。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
@@ -103,11 +103,11 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；
-- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（45 用例，剔除响应式外壳外观用例）；发布前本地跑全量（46 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（50 用例，剔除响应式外壳外观用例）；发布前本地跑全量（51 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
-- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（99 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；
+- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（116 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；
 - 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；
-- e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon 适配与完成标志固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
+- e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 适配与完成标志固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
 
 ## 文件结构
 
@@ -122,7 +122,7 @@ release/
 | `config/scripts.json` | 脚本实例列表 |
 | `config/queues.json` | 调度队列列表 |
 | `wwwroot/` | 网页管理界面（静态文件） |
-| `plugins/` | 插件目录（发布自带 BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon 专用插件 DLL，可删可替换） |
+| `plugins/` | 插件目录（发布自带 BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 专用插件 DLL，可删可替换） |
 | `history/YYYY-MM-DD/HH-mm-ss.json` | 每次脚本运行的完成状态（启动/结束时间、手动/自动、重试次数、最终状态：成功/部分失败/失败/已取消、每次尝试详情，纯状态不含日志内容） |
 | `history/YYYY-MM-DD/HH-mm-ss-{n}.log` | 第 n 次尝试的脚本日志全文（按尝试分批标号，与 `.json` 成组；旧版 `.console.log`/`runs-*.jsonl` 已废弃） |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器运行日志（含级别标记：DEBUG/INFO/WARN/ERROR/FATAL；审计行 `[审计] 来源 \| 操作（详情）`，来源分 web/manage/cli/scheduler/system） |
@@ -133,7 +133,7 @@ release/
 
 - 协作方式以 v1.0.0 为界：之前直接提交并推送 `main`（无分支保护，版本发布为 Pre-release）；正式版 v1.0.0 起仅通过 Pull Request 合入。规范见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 核心设计理念与运行流程见 [docs/DESIGN.md](docs/DESIGN.md)；模块边界与功能定位指南见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；
-- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 46 + judge-scenarios 99 + chaos-queue 171）。
+- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 51 + judge-scenarios 116 + chaos-queue 171）。
 
 ## License
 

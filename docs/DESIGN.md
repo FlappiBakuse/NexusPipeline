@@ -202,7 +202,7 @@ flowchart LR
 ### 5.3 关键字与标志
 
 - 成功/失败关键字：每行一组，组内逗号分隔为 AND、换行之间为 OR；失败命中立即终止本次尝试，成功命中等待退出 60 秒。
-- 专用插件固化标志：BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`；专用脚本实例强制清空自定义字段（后端 `ApplyProfile` 兜底）。
+- 专用插件固化标志：BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`；MaaEnd 无关键字标志（判定完全由插件判断脚本驱动——MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾，失败任务改写配置选择性重试）；专用脚本实例强制清空自定义字段（后端 `ApplyProfile` 兜底）。
 
 ## 6. 日志监控机制
 
