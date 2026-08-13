@@ -1,8 +1,8 @@
 import { api } from "../core/api.js";
 import { systemActionCard } from "../core/forms.js";
 import { esc, statusBadge } from "../core/format.js";
-import { isCurrent, schedule, state } from "../core/state.js";
-import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown, toast } from "../core/ui.js";
+import { isCurrent, schedule } from "../core/state.js";
+import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown } from "../core/ui.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>暂无运行任务</strong>当前没有正在运行的脚本或调度队列。</div>';
@@ -49,27 +49,10 @@ export async function pageDashboard(token) {
     <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl">下一调度队列</div></div>
     <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
   </section>
-  ${systemActionCard(status.systemAction)}
+  <div id="system-action-area">${systemActionCard(status.systemAction)}</div>
   <section class="card" data-testid="running-panel"><div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}</section>
   <section class="card"><div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid">${pluginMarkup(status, stats) || '<div class="empty">暂无已加载插件</div>'}</div></section>`);
   if (next) startCountdown("next-q", next.time);
   startSystemActionCountdown();
   schedule(() => pageDashboard(token), 3000, "dashboard", token);
 }
-
-/** 取消完成操作倒计时（v0.6.3+）：成功提示并立即重新拉取状态。 */
-export async function cancelSystemAction() {
-  const card = document.querySelector('[data-testid="system-action-card"]');
-  const verb = card?.dataset.actionVerb || "执行";
-  try {
-    await api("POST", "/api/system-action/cancel");
-    toast(`已取消${verb}`);
-    pageDashboard(state.routeToken);
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
-export const actions = {
-  "cancel-system-action": () => cancelSystemAction(),
-};

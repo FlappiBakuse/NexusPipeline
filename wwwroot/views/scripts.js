@@ -212,7 +212,6 @@ export async function openScriptModal(id = "", plugin = "") {
     if (isSpecial && event.target.value.trim()) probeSpecialRoot(event.target.value.trim(), pluginType);
   });
   rootInput?.addEventListener("keyup", syncScriptGhostState);
-  $dom("#sm-judge-enabled")?.addEventListener("change", syncJudgeBox);
 }
 
 async function probeSpecialRoot(rootPath, pluginType) {

@@ -6,7 +6,7 @@ namespace NexusPipeline.Services;
 /// <summary>
 /// 完成判定策略（v0.5.0 从 RunSession 拆出）：关键字 / 判断脚本 两模式的判定状态机。
 /// 只维护判定状态与输入，不含 IO/日志/进程操作（由调用方经回调与返回值驱动，行为零变化）。
-/// 判定优先级：判断脚本（脚本优先）→ 成功/失败关键字（行内 AND、行间 OR）→ 无配置按进程退出判定。
+/// 判定优先级：判断脚本（脚本优先，脚本模式下关键字完全不参与判定，v0.6.4 对齐设计语义）→ 成功/失败关键字（行内 AND、行间 OR）→ 无配置按进程退出判定。
 /// </summary>
 internal sealed class SessionJudge
 {
@@ -51,9 +51,9 @@ internal sealed class SessionJudge
 
     public SessionJudge(ScriptInstance script)
     {
-        _successGroups = KeywordRule.Parse(script.SuccessKeywords);
-        _failureGroups = KeywordRule.Parse(script.FailureKeywords);
         bool scriptMode = script.HasJudgeScript();
+        _successGroups = scriptMode ? [] : KeywordRule.Parse(script.SuccessKeywords);
+        _failureGroups = scriptMode ? [] : KeywordRule.Parse(script.FailureKeywords);
         _mode = scriptMode
             ? JudgeMode.JudgeScript
             : _successGroups.Count > 0 || _failureGroups.Count > 0 ? JudgeMode.Keyword : JudgeMode.None;

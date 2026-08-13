@@ -237,13 +237,18 @@ internal static class UserConfigManager
         }
         try
         {
-            string? targetDir = Path.GetDirectoryName(script.ConfigPath);
-            if (string.IsNullOrWhiteSpace(targetDir))
+            string? parentDir = Path.GetDirectoryName(script.ConfigPath);
+            if (string.IsNullOrWhiteSpace(parentDir))
             {
                 return new List<string>();
             }
+            // 目录型 ConfigPath（无扩展名，如 MaaEnd 的 config\）模板整体复制到 ConfigPath 本身；
+            // 文件型（如 BetterGI 的 NexusPipeline.json）复制到父目录（文件落在 ConfigPath 位置）。
+            // 复制清单相对 ConfigPath 父目录记录（与 DoRestore 清理基准一致），目录型恢复时按 "config\mxu-MaaEnd.json" 精确清理。
+            bool dirKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath));
+            string targetDir = dirKind ? script.ConfigPath : parentDir;
             Directory.CreateDirectory(targetDir);
-            return CopyTemplateFiles(profile.ConfigTemplateDir, targetDir);
+            return CopyTemplateFiles(profile.ConfigTemplateDir, targetDir, parentDir);
         }
         catch (Exception ex)
         {
@@ -252,17 +257,16 @@ internal static class UserConfigManager
         }
     }
 
-    /// <summary>递归复制模板目录内容到目标目录（覆盖同名，不删除其他文件）；返回相对目标目录的文件相对路径清单。</summary>
-    private static List<string> CopyTemplateFiles(string sourceDir, string targetDir)
+    /// <summary>递归复制模板目录内容到目标目录（覆盖同名，不删除其他文件）；返回文件相对 relBaseDir 的相对路径清单（DoRestore 清理用）。</summary>
+    private static List<string> CopyTemplateFiles(string sourceDir, string targetDir, string relBaseDir)
     {
         var files = new List<string>();
         foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
         {
-            string rel = Path.GetRelativePath(sourceDir, file);
-            string dest = Path.Combine(targetDir, rel);
+            string dest = Path.Combine(targetDir, Path.GetRelativePath(sourceDir, file));
             Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
             File.Copy(file, dest, overwrite: true);
-            files.Add(rel);
+            files.Add(Path.GetRelativePath(relBaseDir, dest));
         }
         return files;
     }

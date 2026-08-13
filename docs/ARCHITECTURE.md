@@ -21,7 +21,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 53 用例 / NEXUS_CI 核心集 52）
+└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 54 用例 / NEXUS_CI 核心集 53；单元测试见 src/NexusPipeline.Tests/）
 ```
 
 ## 后端分层（src/）
@@ -176,7 +176,7 @@ plugins/bettergi/
 - `config-template/` 目录在编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置，复制清单随 `.session` 标记持久化（cancel/重启恢复按清单清理）。
 - 完整 schema 见 `plugins/README.md`。
 
-> **MaaEnd 专项要点（v0.6.1，`plugins/maaend/`）**：主程序 `MaaEnd.exe`（MXU 客户端改名）以 `--autostart --quit-after-run` 启动（任务运行完成时进程自动退出）；配置目录 `config/`（`mxu-MaaEnd.json` 为实例/任务核心配置），**目录型 ConfigPath 不提供 config-template**（MXU 首次启动自动生成完整配置）；日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改 = 当前会话）。判断脚本按「最后一个启用任务的任务完成/任务失败判定行」收尾（MXU 无运行记录机制、无天然选择性补做），失败任务改写 `mxu-MaaEnd.json`（全部 `enabled=false`、失败任务 `enabled=true`）经 `replaceConfigs` 触发选择性重试；启用任务判定**只按 `enabled===true`**（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存不参与分发）。
+> **MaaEnd 专项要点（v0.6.1，`plugins/maaend/`）**：主程序 `MaaEnd.exe`（MXU 客户端改名）以 `--autostart --quit-after-run` 启动（任务运行完成时进程自动退出）；配置目录 `config/`（`mxu-MaaEnd.json` 为实例/任务核心配置），v0.6.4 起**提供默认配置模板**（`data/config-template/` 含 `mxu-MaaEnd.json` 与 `maa_option.json`，编辑用户配置会话时 config 目录不存在则整体复制生成——目录型 ConfigPath 模板复制到 ConfigPath 本身，恢复按相对父目录清单精确清理）；日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改 = 当前会话）。判断脚本按「最后一个启用任务的任务完成/任务失败判定行」收尾（MXU 无运行记录机制、无天然选择性补做），失败任务改写 `mxu-MaaEnd.json`（全部 `enabled=false`、失败任务 `enabled=true`）经 `replaceConfigs` 触发选择性重试；启用任务判定**只按 `enabled===true`**（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存不参与分发）。
 
 > v0.6.3 起插件契约为宿主内置（`IPlugin`/`INotifyChannel`/`PluginContext`/`ScriptProfile` 均 internal），不再对外提供 DLL 插件契约与 `ISpecializedScriptPlugin`。
 

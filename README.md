@@ -24,7 +24,7 @@
   - 定时列表：多条，每条可设置启用状态、一周七天多选、执行时间（hh:mm）；
   - 任务列表：按序号先后执行，引用已创建的脚本实例。
 - **调度中心**：手动执行任意脚本实例（启用用户将自动依次运行）或调度队列，可取消。
-- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon、MaaEnd 专用插件，v0.6.3 起为**数据化目录形态**：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数，失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；MaaEnd 适配明日方舟：终末地自动化（MXU 客户端），主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（任务运行完成时进程自动退出）、配置目录 `config\`（MXU 首次启动自动生成，无需手动配置）、日志 `debug\{YYYY-MM-DD}-*.log`（前端写入，当天每次启动自增序号）；**Args 禁止使用引号**，引号一律视为参数内容）。每个插件 = `plugins/` 下「插件名」文件夹（`plugin.json` 根文件 + `data/` 推导配置与判断脚本），可整体复制自定义、可删可替换，无需编译；外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
+- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon、MaaEnd 专用插件，v0.6.3 起为**数据化目录形态**：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数，失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；MaaEnd 适配明日方舟：终末地自动化（MXU 客户端），主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（任务运行完成时进程自动退出）、配置目录 `config\`（默认配置模板随插件自带——`mxu-MaaEnd.json` 与 `maa_option.json`，编辑用户配置会话时自动生成，MXU 尚未运行过也可直接编辑）、日志 `debug\{YYYY-MM-DD}-*.log`（前端写入，当天每次启动自增序号）；**Args 禁止使用引号**，引号一律视为参数内容）。每个插件 = `plugins/` 下「插件名」文件夹（`plugin.json` 根文件 + `data/` 推导配置与判断脚本），可整体复制自定义、可删可替换，无需编译；外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
 - **仪表盘**：脚本实例数、调度队列数、下一调度队列（倒计时）、当前版本；正在运行的任务；插件卡片。
 - **历史记录**：每个脚本实例/调度队列的完整运行记录（每次尝试的原因、按尝试分批的脚本日志），按保留天数清理（默认 7 天，上限 180 天，每天自动清理）。
 - **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、日志级别（DEBUG/INFO/WARN/ERROR/FATAL，控制台按级别着色，即时生效）、Web 端口、远程访问（可选开启 + 访问令牌）。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
@@ -104,19 +104,20 @@ release/
 
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
-- 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；
-- **时间加速（v0.6.2+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=60` 加速档（宿主等待按比例缩放：1 分钟 stall → 1 秒，三套测试合计从 20+ 分钟降到约 5 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
-- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（52 用例，剔除响应式外壳外观用例）；发布前本地跑全量（53 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
+- 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；build.cmd 为增量构建（src 未变时跳过 publish，仅同步 wwwroot/plugins）；
+- **时间加速（v0.6.4+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=10` 加速档（宿主等待按比例缩放：1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒；e2e 全量 54 用例约 3 分钟，三套测试合计约 10 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
+- **单元测试（v0.6.4+）**：`dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj`（毫秒级，覆盖判定状态机/关键字规则/日志路径解析/模型规则校验，无需管理员）；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（53 用例，剔除响应式外壳用例）；发布前本地跑全量（54 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；CI 与本地一致使用加速档；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
-- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\judge-scenarios.mjs`；
-- 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\chaos-queue.mjs`；
+- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；
+- 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`；
 - e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、完成操作倒计时卡片可取消（DRYRUN 抑制真实系统操作）、CLI run-script 经 HTTP 提交与自动拉起常驻服务、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 适配与判断脚本固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
 
 ## 文件结构
 
 | 文件或目录 | 用途 |
 |---|---|
-| `src/` | C# 源代码（`NexusPipeline.csproj`；核心域按子域分目录：`Models/`、`Services/`、`Persistence/`、`Utilities/`，外加 `Web/`、`Cli/`、`Plugins/`；入口 `Program.cs` 与组合根 `RuntimeContext.cs`） |
+| `src/` | C# 源代码（`NexusPipeline.csproj`；核心域按子域分目录：`Models/`、`Services/`、`Persistence/`、`Utilities/`，外加 `Web/`、`Cli/`、`Plugins/`；入口 `Program.cs` 与组合根 `RuntimeContext.cs`；`NexusPipeline.Tests/` 为单元测试工程，`dotnet test` 毫秒级运行） |
 | `docs/` | 项目文档（`DESIGN.md` 核心设计与运行流程、`ARCHITECTURE.md` 模块导航、`DEVELOPMENT.md` 开发与提交规范） |
 | `CHANGELOG.md` | 版本历史 |
 | `plugins/` | 专项插件目录（数据化形态：每个插件一个文件夹，`plugin.json` 根文件 + `data/` 推导配置/判断脚本/默认配置模板；随发布自带 BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd，可整体复制自定义、可删可替换；开发指南见 `plugins/README.md`） |
@@ -135,7 +136,7 @@ release/
 
 - 协作方式以 v1.0.0 为界：之前直接提交并推送 `main`（无分支保护，版本发布为 Pre-release）；正式版 v1.0.0 起仅通过 Pull Request 合入。规范见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 核心设计理念与运行流程见 [docs/DESIGN.md](docs/DESIGN.md)；模块边界与功能定位指南见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；
-- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 51 + judge-scenarios 116 + chaos-queue 171）。
+- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 54 + judge-scenarios 115 + chaos-queue 171 + 单元测试 51）。
 
 ## License
 

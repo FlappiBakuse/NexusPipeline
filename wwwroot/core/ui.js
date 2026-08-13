@@ -1,5 +1,7 @@
 import { $, $$ } from "./dom.js";
 import { registerInterval } from "./state.js";
+import { api } from "./api.js";
+import { systemActionCard } from "./forms.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -121,6 +123,24 @@ export function setNavOpen(open) {
   document.body.classList.toggle("nav-open", open);
   const sidebar = $("#sidebar");
   if (sidebar) sidebar.setAttribute("aria-hidden", String(!open && window.innerWidth <= 820));
+}
+
+/** 取消完成操作倒计时（v0.6.4+ 全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
+export async function cancelSystemAction() {
+  const card = document.querySelector('[data-testid="system-action-card"]');
+  const verb = card?.dataset.actionVerb || "执行";
+  try {
+    await api("POST", "/api/system-action/cancel");
+    toast(`已取消${verb}`);
+    const status = await api("GET", "/api/status");
+    const area = document.querySelector("#system-action-area");
+    if (area) {
+      area.innerHTML = systemActionCard(status.systemAction);
+      startSystemActionCountdown();
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  }
 }
 
 export function initTheme() {

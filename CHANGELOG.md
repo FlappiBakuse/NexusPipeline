@@ -2,6 +2,23 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.4（Pre-release）
+
+### 变更
+
+- **判定语义对齐（脚本/关键字互斥）**：`SessionJudge` 在判断脚本模式下不再解析与匹配成功/失败关键字组（此前脚本模式下关键字仍生效、失败关键字可劫持脚本判定，与「判断脚本优先、忽略关键字」的设计声明不符）；通用脚本用户在脚本模式下残留的关键字不再参与判定，专项脚本行为不变。
+- **前端修复**：① 调度中心「取消系统操作」对已解析响应再调 `.json()` 的 TypeError（取消后 UI 不刷新并弹错误 toast）；② `"cancel-system-action"` 双视图同名动作静默覆盖（dashboard 版死代码），收敛为 `core/ui.js` 全局 shell 动作（仪表盘/调度中心共用、局部刷新卡片）；③ 清理死监听（`#sm-judge-enabled`）、死条件（`attempt.number === 1 || true`）与过时字段兜底（`attemptCount`）。
+- **安全加固（Web 层）**：① 跨站请求防护——带 `Origin` 头的请求必须来自合法源（回环或本机局域网地址且与请求 `Host` 一致），阻止任意网页触发的 CSRF 简单请求与 DNS rebinding（CLI/curl 无 Origin 不受限）；② 远程认证防爆破——连续 5 次令牌失败按远端 IP 锁定 60 秒；③ `/api/fs/browse` 白名单——仅允许已配置脚本的根目录/配置路径/游戏路径及其子路径（403 拒绝任意盘符遍历，e2e 断言同步）；④ 请求体大小上限 10MB（超限 413）。
+- **测试提速（唯一加速档收敛）**：
+  - 时间加速档统一为 `NEXUS_TIME_SCALE=10`（替代 60）：stall 6 秒/周期触发 3 秒/marker 宽限 6 秒；`run-uitest.cmd` 默认档、CI 与文档同步；真实计时档仅发布前最终回归；
+  - `build.cmd` 增量构建：src 无变化时跳过 `dotnet publish`，仅同步 wwwroot/plugins（指纹 `.build-src-hash` 不入库；CI 全新检出仍全量）；
+  - e2e 三处既有耗时缺陷修复（加速档全量 11.9 分钟 → **2.8 分钟**）：`下一调度/通知统计` 与 `BetterGI 图标` 用例的 `configPath=runtimeDir` 导致添加用户时配置快照递归复制自身（各 86 秒 + PathTooLong）；`CLI 自动拉起` 用例 spawnSync 等待 CLI 拉起的常驻服务继承的 stdout 管道 EOF 直至 120 秒超时（改异步 spawn + exit 事件）；
+  - 加速档余量适配 scale=10：judge `STUCK_PINGS` 3→6（卡住 5s > 周期 3s）、零日志卡住 `ping -n 5`→10（> stall 6s）、chaos `STUCK_PINGS` 3→8（> stall 6s）、06 周期触发 `ping -n 5`→6；
+  - 07 FATAL 负向等待 8s→5s；CI 从真实档改 scale=10 核心集（脱离 15 分钟超时风险）。
+- **单元测试工程（试点）**：新增 `src/NexusPipeline.Tests/`（xUnit，net8.0-windows，毫秒级、无管理员）：51 断言覆盖 `SessionJudge` 判定状态机（含新模式互斥语义与失败优先/防抖）、`KeywordRule`（行内 AND/行间 OR）、`LogPattern`（精确/目录/日期占位符/通配解析）、`ScriptUserRule`/`QueueRule`/`ScriptInstance.Clone`；CI 新增 `dotnet test` 步骤；主工程 `InternalsVisibleTo` 暴露 internal 契约、`Compile Remove` 排除测试目录。
+- **MaaEnd 默认配置模板**：`plugins/maaend/data/config-template/` 新增 `mxu-MaaEnd.json`（完整 MXU 实例/任务核心配置，含默认实例与设置项，任务列表由用户编辑时自行添加）与 `maa_option.json`（绘制质量/日志等选项）；`plugin.json` 声明 `configTemplate`。配套修复 `EnsureConfigForEdit` 对**目录型 ConfigPath** 的支持——模板整体复制到 ConfigPath 本身（此前仅适配 BetterGI 单文件型，复制目标固定为父目录会把目录型模板错放到脚本根目录），复制清单统一相对 ConfigPath 父目录记录，cancel/重启恢复按清单精确清理；MaaEnd 编辑会话在 MXU 尚未运行过（config 目录不存在）时也能直接生成默认配置进行编辑。
+- 版本号 0.6.4。
+
 ## v0.6.3（Pre-release）
 
 ### 变更

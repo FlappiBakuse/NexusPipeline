@@ -1,5 +1,5 @@
 /**
- * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 51 用例）
+ * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 54 用例）
  *
  * 覆盖内容：
  *  - 混沌队列（notifyEnabled=true）：S1(1用户)/S2(2用户)/S3(3用户) 共 6 用户串行执行
@@ -28,10 +28,10 @@ const JSON_HDR = { "Content-Type": "application/json" };
 const HOOK_PORT = 58888;
 const PING_SRC = "C:\\Windows\\System32\\PING.EXE";
 
-// 测试时间加速（v0.6.2+）：NEXUS_TIME_SCALE=60 时宿主等待按比例缩放，伪造脚本卡住时长同步缩放（仍远大于缩放后的 stall/周期）。
+// 测试时间加速（v0.6.2+，v0.6.4 统一 scale=10）：NEXUS_TIME_SCALE 时宿主等待按比例缩放，伪造脚本卡住时长同步缩放（仍远大于缩放后的 stall/周期）。
 const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
 const FAST = TIME_SCALE > 1;
-const STUCK_PINGS = FAST ? 3 : 75;   // 卡住轮：真实 75 秒，加速 ≈ 2s（stall 1 秒抢在脚本退出前判定失败）
+const STUCK_PINGS = FAST ? 8 : 75;   // 卡住轮：真实 75 秒，加速 8 次 ping ≈ 7s（v0.6.4 scale=10 下 stall 6s 先于脚本退出触发失败；60 档语义保持）
 const CRASH_PINGS = FAST ? 1 : 25;   // crash 轮持续输出循环：日志写入间隔必须 < 加速后的 stall（1 秒），否则误判 stall
 
 const USERS = [

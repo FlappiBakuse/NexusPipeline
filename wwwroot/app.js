@@ -1,10 +1,10 @@
 import { initParticles } from "./effects/particles.js";
 import { closeModal } from "./core/modal.js";
-import { cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
+import { cancelSystemAction, cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
 import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
 import { pagerNavigate } from "./core/pager.js";
-import { actions as dashboardActions, pageDashboard } from "./views/dashboard.js";
+import { pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";
 import { actions as usersActions, pageScriptUsers } from "./views/users.js";
 import { actions as queuesActions, pageQueues } from "./views/queues.js";
@@ -23,11 +23,11 @@ const shellActions = {
   "pager-page": target => pagerNavigate(target.dataset.pager, "page", target),
   "pager-prev": target => pagerNavigate(target.dataset.pager, "prev", target),
   "pager-next": target => pagerNavigate(target.dataset.pager, "next", target),
+  "cancel-system-action": () => cancelSystemAction(),
 };
 
 const allActions = {
   ...shellActions,
-  ...dashboardActions,
   ...scriptsActions,
   ...usersActions,
   ...queuesActions,

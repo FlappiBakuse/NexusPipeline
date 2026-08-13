@@ -35,9 +35,13 @@ jobs:
       - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
         run: .\build.cmd
 
-      - name: 运行 e2e 测试（核心回归集）
+      - name: 运行单元测试（毫秒级，覆盖判定/解析/校验纯逻辑）
+        run: dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
+
+      - name: 运行 e2e 测试（核心回归集，加速档）
         shell: cmd
         working-directory: uitest
         env:
           NEXUS_CI: "1"
+          NEXUS_TIME_SCALE: "10"
         run: npx playwright test

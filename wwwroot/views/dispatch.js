@@ -83,22 +83,8 @@ export async function cancelRun(runId) {
   catch (error) { toast(error.message, "error"); }
 }
 
-/** 取消完成操作倒计时（v0.6.3+）：成功提示并立即重新拉取状态刷新卡片。 */
-export async function cancelSystemAction() {
-  const verb = document.querySelector('[data-testid="system-action-card"]')?.dataset.actionVerb || "执行";
-  try {
-    await api("POST", "/api/system-action/cancel");
-    toast(`已取消${verb}`);
-    const status = await (await api("GET", "/api/status")).json();
-    if (isCurrent("dispatch", state.routeToken)) { updateRunning(status); updateSystemAction(status); }
-  } catch (error) {
-    toast(error.message, "error");
-  }
-}
-
 export const actions = {
   "dispatch-script": () => dispatchScript(),
   "dispatch-queue": () => dispatchQueue(),
   "cancel-run": target => cancelRun(target.dataset.id),
-  "cancel-system-action": () => cancelSystemAction(),
 };

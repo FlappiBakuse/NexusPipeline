@@ -27,11 +27,11 @@ const JSON_HDR = { "Content-Type": "application/json" };
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 const HOOK_PORT = 58888;
 
-// 测试时间加速（v0.6.2+）：run-uitest 加速档设置 NEXUS_TIME_SCALE=60 时，宿主等待（stall/周期触发/宽限/超时）按比例缩放，
+// 测试时间加速（v0.6.2+，v0.6.4 统一 scale=10）：run-uitest 加速档设置 NEXUS_TIME_SCALE 时，宿主等待（stall/周期触发/宽限/超时）按比例缩放，
 // 伪造脚本的墙钟卡住时长与判断脚本内部墙钟常量同步缩放，保持场景语义（卡住时长仍远大于缩放后的周期触发间隔）。
 const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
 const FAST = TIME_SCALE > 1;
-const STUCK_PINGS = FAST ? 3 : 75;   // 卡住时长：真实 75 秒 ≈ 74s，加速 3 次 ping ≈ 2s（仍远大于周期触发 1s）
+const STUCK_PINGS = FAST ? 6 : 75;   // 卡住时长：真实 75 秒，加速 6 次 ping ≈ 5s（v0.6.4 scale=10 下周期触发 3s 先于退出、stall 30s 未到；60 档语义保持）
 const CRASH_PINGS = FAST ? 3 : 9;    // marker 后继续输出批次（重复触发验证）：真实 8s，加速 ≈ 2s
 const RESTART_WAIT_MS = FAST ? 1000 : 4000;   // 服务停止/重启静置等待
 
@@ -522,7 +522,7 @@ async function testEdgeNoLogStuck() {
   const dir = path.join(runtimeDir, "mt-silent");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "nexusmt-silent.bat"), ["@echo off", "ping -n " + (FAST ? 5 : 200) + " 127.0.0.1 >nul", "exit /b 0"].join("\r\n") + "\r\n", "ascii");
+  fs.writeFileSync(path.join(dir, "nexusmt-silent.bat"), ["@echo off", "ping -n " + (FAST ? 10 : 200) + " 127.0.0.1 >nul", "exit /b 0"].join("\r\n") + "\r\n", "ascii");
   const countJs = `
 const input = JSON.parse(__NEXUS_INPUT__);
 const countFile = (input.files || []).find(f => f.Root === "script" && f.Path === "count");

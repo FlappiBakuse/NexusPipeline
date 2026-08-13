@@ -1,21 +1,32 @@
-ï»¿@echo off
+@echo off
 setlocal
 cd /d "%~dp0"
+rem ÔöÁ¿¹¹½¨£¨v0.6.4+£©£ºsrc ÎŞ±ä»¯Ê±Ìø¹ı dotnet publish£¬½öÍ¬²½ wwwroot/plugins£¨Ç°¶Ë¸Ä¶¯ÎŞĞèÖØ±à£©£»
+rem Ö¸ÎÆÎÄ¼ş .build-src-hash ÔÚÏîÄ¿¸ù£¨²»Èë¿â£©£¬CI È«ĞÂ¼ì³öÎŞ´ËÎÄ¼ş = È«Á¿¹¹½¨¡£
+for /f "usebackq delims=" %%h in (`powershell -NoProfile -Command "(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''"`) do set SRC_HASH=%%h
+if exist "%~dp0release\nexus-pipeline.exe" (
+    if exist "%~dp0.build-src-hash" (
+        set /p OLD_HASH=<"%~dp0.build-src-hash"
+        if "%OLD_HASH%"=="%SRC_HASH%" goto sync_web
+    )
+)
 if exist "%~dp0release" rmdir /s /q "%~dp0release"
 dotnet publish "%~dp0src\NexusPipeline.csproj" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o "%~dp0release"
 if errorlevel 1 goto build_failed
+> "%~dp0.build-src-hash" echo %SRC_HASH%
+:sync_web
 if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
 xcopy /e /i /y "%~dp0wwwroot" "%~dp0release\wwwroot" >nul
 if exist "%~dp0plugins" xcopy /e /i /y "%~dp0plugins" "%~dp0release\plugins" >nul
 if not exist "%~dp0release\plugins" mkdir "%~dp0release\plugins"
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
-echo æ„å»ºç±»å‹ï¼šææƒç‰ˆï¼ˆrequireAdministratorï¼Œç¨‹åºå¿…é¡»ä»¥ç®¡ç†å‘˜èº«ä»½è¿è¡Œï¼‰
-echo éƒ¨ç½²ï¼šæ•´ä½“æ‹·è´ release æ–‡ä»¶å¤¹åˆ°ç›®æ ‡ç›®å½•å³å¯ï¼ˆconfig/history/logs è¿è¡Œæ—¶è‡ªåŠ¨ç”Ÿæˆï¼‰ã€‚
+echo ¹¹½¨ÀàĞÍ£ºÌáÈ¨°æ£¨requireAdministrator£¬³ÌĞò±ØĞëÒÔ¹ÜÀíÔ±Éí·İÔËĞĞ£©
+echo ²¿Êğ£ºÕûÌå¿½±´ release ÎÄ¼ş¼Ğµ½Ä¿±êÄ¿Â¼¼´¿É£¨config/history/logs ÔËĞĞÊ±×Ô¶¯Éú³É£©¡£
 exit /b 0
 
 :build_failed
 if exist "%~dp0build-tmp" rmdir /s /q "%~dp0build-tmp"
 echo.
-echo Build failed. è¯·æ£€æŸ¥ä¸Šæ–¹é”™è¯¯ä¿¡æ¯ã€‚
+echo Build failed. Çë¼ì²éÉÏ·½´íÎóĞÅÏ¢¡£
 exit /b 1

@@ -704,7 +704,7 @@ test("v0.2.0：幽灵联动 / 字段改名 / fs 浏览 / 通知开关 / 时间�
   const fsList = await (await fetch(baseUrl + "api/fs/browse")).json();
   expect((fsList.dirs || []).some(d => /^C:\\$/.test(d)), "fs browse 返回盘符列表（含 C:\\）").toBeTruthy();
   const fsSub = await (await fetch(baseUrl + "api/fs/browse?path=" + encodeURIComponent("C:\\"))).json();
-  expect(Array.isArray(fsSub.dirs) && Array.isArray(fsSub.files), "fs browse 返回目录与文件列表").toBeTruthy();
+  expect(fsSub.error && fsSub.error.includes("允许浏览范围"), "fs browse 白名单：未配置脚本时任意目录浏览被拒（403）").toBeTruthy();
 
   const put = await api("PUT", "/api/settings", { webhookEnabled: true, smtpEnabled: true });
   expect(put.ok, "PUT 设置通知开关成功").toBeTruthy();
@@ -787,7 +787,10 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const bad = await api("POST", "/api/scripts", { name: "专项脚本B", rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi", maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   expect(bad.status === 400, "根目录无法推导时创建被拒（400）").toBeTruthy();
 
-  const iconOk = await createScript({ name: "图标脚本", rootPath: runtimeDir, mainExe: "C:\\Windows\\explorer.exe", configPath: runtimeDir, logPath: runtimeDir });
+  const iconCfg = path.join(runtimeDir, "icon-cfg");
+  fs.rmSync(iconCfg, { recursive: true, force: true });
+  fs.mkdirSync(iconCfg, { recursive: true });
+  const iconOk = await createScript({ name: "图标脚本", rootPath: runtimeDir, mainExe: "C:\\Windows\\explorer.exe", configPath: iconCfg, logPath: runtimeDir });
   expect(iconOk.ok, "创建图标测试脚本（mainExe 为带高分辨率图标的系统 exe）").toBeTruthy();
   const iconRes = await fetch(baseUrl + "api/scripts/" + iconOk.id + "/icon");
   expect(iconRes.status === 200 && (iconRes.headers.get("content-type") || "").includes("image/png"), "图标 API 返回 PNG").toBeTruthy();
@@ -796,7 +799,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   await api("DELETE", "/api/scripts/" + iconOk.id);
   const noIconBat = path.join(runtimeDir, "no-icon.bat");
   fs.writeFileSync(noIconBat, "@echo off\r\nexit /b 0\r\n", "ascii");
-  const noIcon = await createScript({ name: "无图标脚本", rootPath: runtimeDir, mainExe: noIconBat.replace(/\\/g, "\\\\"), configPath: runtimeDir, logPath: runtimeDir });
+  const noIcon = await createScript({ name: "无图标脚本", rootPath: runtimeDir, mainExe: noIconBat.replace(/\\/g, "\\\\"), configPath: iconCfg, logPath: runtimeDir });
   const icon404 = await fetch(baseUrl + "api/scripts/" + noIcon.id + "/icon");
   expect(icon404.status === 404, "主程序无图标资源时图标 API 返回 404").toBeTruthy();
   await api("DELETE", "/api/scripts/" + noIcon.id);
@@ -1010,9 +1013,17 @@ test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务
   await api("POST", `/api/scripts/${cliScript.id}/users`, { name: "默认", enabled: true });
   await stopService();
   try {
-    const r = spawnSync(runtimeExe, ["run-script", cliScript.id], { cwd: runtimeDir, encoding: "utf8", timeout: 120000 });
-    const out = r.stdout || "";
-    expect(r.status === 0, "服务未运行时 CLI 自动拉起服务并完成任务（退出码 0；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
+    // 注意：CLI 自动拉起的常驻服务进程会继承 CLI 的 stdout 管道（spawnSync 会一直等到管道 EOF，
+    // 而服务常驻导致 120s 超时）；改用异步 spawn + exit 事件（进程退出即返回，不依赖管道 EOF）。
+    const cli = spawn(runtimeExe, ["run-script", cliScript.id], { cwd: runtimeDir });
+    let out = "";
+    cli.stdout.on("data", d => { out += d; });
+    cli.stderr.on("data", d => { out += d; });
+    const exitCode = await Promise.race([
+      new Promise(resolve => cli.on("exit", code => resolve(code))),
+      new Promise(resolve => setTimeout(() => { cli.kill(); resolve(null); }, 90000)),
+    ]);
+    expect(exitCode === 0, "服务未运行时 CLI 自动拉起服务并完成任务（退出码 0；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
     expect(out.includes("正在自动拉起"), "CLI 提示自动拉起常驻服务").toBeTruthy();
     expect(out.includes("===== CLI拉起脚本 ====="), "CLI 输出含记录分隔行").toBeTruthy();
   } finally {

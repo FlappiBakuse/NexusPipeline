@@ -17,3 +17,4 @@ uitest/runtime/
 uitest/browsers/
 uitest/test-results/
 playwright-report/
+.build-src-hash

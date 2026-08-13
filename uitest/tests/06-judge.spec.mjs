@@ -225,12 +225,12 @@ test("自定义完成标志：日志阻塞时周期触发判断脚本", async ()
   const dir = path.join(runtimeDir, "judge-periodic");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
-  // NEXUS_TIME_SCALE 加速档下宿主周期触发间隔 30 秒 → 1 秒，脚本阻塞时长同步缩放（真实 64 秒 / 加速 4 秒）
+  // NEXUS_TIME_SCALE 加速档下宿主周期触发间隔 30 秒 → 1 秒（scale=10 → 3 秒），脚本阻塞时长同步缩放（真实 64 秒 / 加速 5 秒）
   const FAST = (Number(process.env.NEXUS_TIME_SCALE || "1") || 1) > 1;
   fs.writeFileSync(path.join(dir, "nexusjudge-periodic.bat"), [
     "@echo off",
     "echo ONLY-ONCE >> logs\\log.txt",
-    "ping -n " + (FAST ? 5 : 65) + " 127.0.0.1 >nul",
+    "ping -n " + (FAST ? 6 : 65) + " 127.0.0.1 >nul",
     "exit /b 0",
   ].join("\r\n") + "\r\n", "ascii");
   const jsPeriodic = `

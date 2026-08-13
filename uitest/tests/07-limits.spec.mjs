@@ -174,7 +174,7 @@ test("约束 FATAL：致命配置拒绝启动", async () => {
   await new Promise(r => setTimeout(r, 400));
   startService();
   let started = true;
-  try { await waitForService(8000); } catch { started = false; }
+  try { await waitForService(5000); } catch { started = false; }
   expect(!started, "超警告区间（MaxScripts=60）服务拒绝启动").toBeTruthy();
   await new Promise(r => setTimeout(r, 500));
   expect(readLog().includes("[FATAL] 约束配置 [MaxScripts"), "启动日志含 FATAL 约束记录").toBeTruthy();
@@ -184,7 +184,7 @@ test("约束 FATAL：致命配置拒绝启动", async () => {
   await new Promise(r => setTimeout(r, 400));
   startService();
   started = true;
-  try { await waitForService(8000); } catch { started = false; }
+  try { await waitForService(5000); } catch { started = false; }
   expect(!started, "Min>Max 区间矛盾配置服务拒绝启动").toBeTruthy();
   await new Promise(r => setTimeout(r, 500));
   expect(readLog().includes("[FATAL]") && readLog().includes("区间矛盾"), "日志含区间矛盾 FATAL").toBeTruthy();

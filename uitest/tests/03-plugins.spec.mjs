@@ -374,12 +374,15 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
 });
 
 test("下一调度队列显示/倒计时 + 通知统计", async ({ page }) => {
-  const exitBat = path.join(runtimeDir, "exit-ok.bat");
+  const statDir = path.join(runtimeDir, "stat");
+  fs.rmSync(statDir, { recursive: true, force: true });
+  fs.mkdirSync(statDir, { recursive: true });
+  const exitBat = path.join(statDir, "exit-ok.bat");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
   const created = await createScript({
-    name: "统计脚本", rootPath: runtimeDir.replace(/\\/g, "\\\\"), mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir.replace(/\\/g, "\\\\"),
-    logPath: runtimeDir.replace(/\\/g, "\\\\"),
+    name: "统计脚本", rootPath: statDir, mainExe: exitBat,
+    configPath: statDir,
+    logPath: statDir,
     notifyEnabled: true,
   });
   const sid = created.id;
