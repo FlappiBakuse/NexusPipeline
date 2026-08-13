@@ -54,13 +54,41 @@ internal static class Bootstrap
         }
     }
 
-    /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件。</summary>
+    /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护（v0.6.5+）：单步异常不影响其余清理步骤执行。</summary>
     public static void Shutdown(WebServer? web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        ctx.Scheduler.Stop();
-        UserConfigManager.StopRecoveryRetry();
-        web?.Stop();
-        ctx.Plugins.ShutdownAll();
+        try
+        {
+            ctx.Scheduler.Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 调度器停止异常：{ex.Message}");
+        }
+        try
+        {
+            UserConfigManager.StopRecoveryRetry();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 配置恢复重试停止异常：{ex.Message}");
+        }
+        try
+        {
+            web?.Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] Web 服务停止异常：{ex.Message}");
+        }
+        try
+        {
+            ctx.Plugins.ShutdownAll();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 插件停止异常：{ex.Message}");
+        }
     }
 }

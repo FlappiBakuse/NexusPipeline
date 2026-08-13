@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, api, localDate } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, api, localDate, startService, stopService, restartService, waitForService, waitFor, waitNoRunning, runningCount, createScript, killRuntimeServices, sleep } from "./helpers.mjs";
 
 test("审计日志：增删改/查询记录 + 轮询豁免", async ({ page }) => {
   const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
@@ -106,4 +106,63 @@ test("远程访问设置（令牌加密存储 + 本地豁免）与历史保留�
   expect(st.ok, "本地请求豁免令牌校验（/api/status 200）").toBeTruthy();
   const off = await api("PUT", "/api/settings", { allowRemoteAccess: false });
   expect(off.ok, "关闭远程访问成功").toBeTruthy();
+});
+
+test("重启服务：确认卡片 → 自动重启并恢复（service 模式）", async ({ page }) => {
+  // 自重启仅常驻服务模式支持；测试基建默认以 web 模式启动服务，此用例切换为 service 模式。
+  // 注意：本机若同时运行着其他 nexus-pipeline 常驻服务，单实例互斥体冲突会导致启动失败。
+  await stopService();
+  startService("service");
+  await waitForService();
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
+  await page.click('[data-testid="restart-service"]');
+  await page.waitForSelector('[data-action="restart-confirm"]', { timeout: 5000 });
+  await page.click('[data-action="restart-confirm"]');
+  // 等待新进程完成重启并接管服务（旧进程响应后 ~1 秒退出，新进程等待互斥体后接管）
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
+  const readLog = () => fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "");
+  await waitFor(() => readLog().includes("[重启] 正在等待旧进程退出"), 30000, 300);
+  const reachable = await waitFor(async () => {
+    try {
+      const res = await fetch(baseUrl + "api/status");
+      if (!res.ok) return false;
+      const s = await res.json();
+      return !!s.version;
+    } catch { return false; }
+  }, 30000, 300);
+  expect(reachable, "重启后服务可达（新进程接管）").toBeTruthy();
+  const logText = readLog();
+  expect(logText.includes("[审计] web | 重启服务"), "重启操作产生审计行").toBeTruthy();
+  expect(logText.includes("[重启] 正在等待旧进程退出"), "新进程记录重启日志").toBeTruthy();
+  // 清理：杀掉自重启拉起的进程（service 模式，未登记 PID 文件），恢复标准 web 模式测试环境
+  await killRuntimeServices();
+  startService("web");
+  await waitForService();
+  await sleep(500);
+});
+
+test("重启服务：运行任务时 409 拒绝", async () => {
+  await stopService();
+  startService("service");
+  await waitForService();
+  const dDir = makeScriptDir("restart409");
+  fs.writeFileSync(path.join(dDir.root, "nexustest-restart409.bat"), "@echo off\r\nping -n 8 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  const created = await createScript({ name: "重启409脚本", rootPath: dDir.root, mainExe: dDir.main, configPath: dDir.cfg, logPath: dDir.log });
+  expect(created.ok, "创建运行任务脚本").toBeTruthy();
+  const dispatch = await (await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" })).json();
+  expect(!!dispatch.runId, "发起运行任务成功").toBeTruthy();
+  await waitFor(async () => (await runningCount()) > 0, 10000);
+  const res = await fetch(baseUrl + "api/settings/restart", { method: "POST" });
+  expect(res.status === 409, "运行任务时重启返回 409（" + res.status + "）").toBeTruthy();
+  const data = await res.json();
+  expect(data.error && data.error.includes("运行中"), "409 错误文案提示存在运行任务").toBeTruthy();
+  await api("POST", "/api/cancel", { runId: dispatch.runId });
+  await waitNoRunning(30000);
+  const del = await api("DELETE", "/api/scripts/" + created.id);
+  expect(del.ok, "清理运行任务脚本").toBeTruthy();
+  await killRuntimeServices();
+  startService("web");
+  await waitForService();
+  await sleep(500);
 });

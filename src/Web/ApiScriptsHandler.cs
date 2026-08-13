@@ -204,6 +204,8 @@ internal static class ApiScriptsHandler
                 IconCache.Remove(seg[1]);
             }
             DataStore.SaveScripts(ctx.Scripts);
+            ScriptConfigGate.Remove(seg[1]);
+            ConfigSwapPrimitives.RemoveMutex(seg[1]);
             Audit.Log(Audit.Web, "删除脚本实例", removed is null ? $"id={seg[1]}（不存在）" : $"{removed.Name}（id={seg[1]}）");
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             return;
@@ -740,6 +742,8 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试" }, 400).ConfigureAwait(false);
                     return;
                 }
+                // v0.6.5+：编辑配置场景主程序窗口前置（用户需在窗口内编辑配置），避免被浏览器等前台窗口遮挡。
+                SystemActions.BringToFrontFireAndForget(proc?.Id ?? 0, "编辑配置");
                 var editSession = new EditSession
                 {
                     Script = script,

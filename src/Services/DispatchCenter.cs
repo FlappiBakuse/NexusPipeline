@@ -292,6 +292,12 @@ internal class DispatchCenter
     {
         lock (_sync)
         {
+            // 原子防重入（v0.6.5+）：并发触发（如双击）可能在进程检测通过后同时注册同一脚本实例，
+            // 锁内按脚本查重拒绝后者，避免双会话同时运行。
+            if (exec.Kind == "script" && _active.Any(active => active.Kind == "script" && active.TargetId == exec.TargetId))
+            {
+                throw new InvalidOperationException($"脚本「{exec.TargetName}」正在运行，请先退出后再执行");
+            }
             _active.Add(exec);
         }
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");

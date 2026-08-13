@@ -158,7 +158,54 @@ internal static class SystemActions
         }
     }
 
-    public static void KillTree(int pid)
+    /// <summary>
+    /// 清理进程树（v0.6.5+ 自实现）：Toolhelp 快照枚举父子关系后 BFS 遍历，逐进程 taskkill /F（不带 /T）。
+    /// excludeProcessBaseName 非空时（与 GameExe 同名的进程名，不含扩展名、忽略大小写）跳过该进程整棵子树——
+    /// 脚本自启动的游戏进程即使父进程是脚本，只要进程名与游戏配置一致就视为「游戏进程」而非脚本树成员，
+    /// 其生杀归游戏管理（ForceCloseGame / 失败路径按名关闭），不被脚本进程树连带清理。
+    /// 快照失败回退原 taskkill /T 全树语义（宁可不残留，日志 Warn 提示）。
+    /// </summary>
+    public static void KillTree(int pid, string? excludeProcessBaseName = null)
+    {
+        try
+        {
+            IReadOnlyDictionary<int, ProcessNode> nodes = SnapshotProcesses();
+            if (!nodes.ContainsKey(pid))
+            {
+                Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
+                return;
+            }
+            HashSet<int> targets = CollectTree(pid, nodes, excludeProcessBaseName);
+            int killed = 0;
+            foreach (int target in targets)
+            {
+                if (KillProcess(target))
+                {
+                    killed++;
+                }
+            }
+            if (targets.Count == 0)
+            {
+                Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
+            }
+            else if (killed == targets.Count)
+            {
+                Logger.Info($"已清理进程树（PID {pid}，共 {killed} 个进程）。");
+            }
+            else
+            {
+                Logger.Warn($"[警告] 进程树清理部分失败（PID {pid}，成功 {killed}/{targets.Count}）。");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}，回退全树清理。");
+            FallbackKillTree(pid);
+        }
+    }
+
+    /// <summary>回退方案：taskkill /T 递归全树（快照失败时使用，不排除游戏进程）。</summary>
+    private static void FallbackKillTree(int pid)
     {
         try
         {
@@ -186,6 +233,137 @@ internal static class SystemActions
             Logger.Warn($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}");
         }
     }
+
+    internal sealed record ProcessNode(int Pid, int Ppid, string ExeName);
+
+    /// <summary>Toolhelp 快照全部进程（PID/父 PID/映像名）；失败抛异常由调用方回退。</summary>
+    private static IReadOnlyDictionary<int, ProcessNode> SnapshotProcesses()
+    {
+        var nodes = new Dictionary<int, ProcessNode>();
+        IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+        {
+            throw new InvalidOperationException($"进程快照失败（错误码 {Marshal.GetLastWin32Error()}）");
+        }
+        try
+        {
+            var entry = new PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf<PROCESSENTRY32>() };
+            if (Process32First(snapshot, ref entry))
+            {
+                do
+                {
+                    nodes[(int)entry.th32ProcessID] = new ProcessNode((int)entry.th32ProcessID, (int)entry.th32ParentProcessID, entry.szExeFile);
+                }
+                while (Process32Next(snapshot, ref entry));
+            }
+            return nodes;
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+    }
+
+    /// <summary>从根 PID BFS 收集进程树；excludeBaseName 匹配的节点跳过且不扩展其子树（internal 供单元测试验证纯逻辑）。</summary>
+    internal static HashSet<int> CollectTree(int rootPid, IReadOnlyDictionary<int, ProcessNode> nodes, string? excludeBaseName)
+    {
+        var result = new HashSet<int>();
+        var queue = new Queue<int>();
+        queue.Enqueue(rootPid);
+        while (queue.Count > 0)
+        {
+            int pid = queue.Dequeue();
+            if (result.Contains(pid) || !nodes.TryGetValue(pid, out ProcessNode? node))
+            {
+                continue;
+            }
+            if (excludeBaseName is not null && IsSameProcessName(node.ExeName, excludeBaseName))
+            {
+                continue;
+            }
+            result.Add(pid);
+            foreach ((int childPid, ProcessNode child) in nodes)
+            {
+                if (child.Ppid == pid)
+                {
+                    queue.Enqueue(childPid);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static bool IsSameProcessName(string exeFile, string baseName)
+    {
+        try
+        {
+            return string.Equals(Path.GetFileNameWithoutExtension(exeFile), baseName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>单个进程强制结束（taskkill /F，不带 /T）。</summary>
+    private static bool KillProcess(int pid)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo("taskkill.exe", $"/PID {pid} /F")
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+            process?.WaitForExit(10000);
+            return process is not null && process.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+
+        public uint cntUsage;
+
+        public uint th32ProcessID;
+
+        public IntPtr th32DefaultHeapID;
+
+        public uint th32ModuleID;
+
+        public uint cntThreads;
+
+        public uint th32ParentProcessID;
+
+        public int pcPriClassBase;
+
+        public uint dwFlags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool Process32First(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool Process32Next(IntPtr hSnapshot, ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool CloseHandle(IntPtr hObject);
 
     /// <summary>
     /// 检测指定可执行程序是否已有进程在运行（编辑配置/运行前的防冲突检查）。
@@ -251,10 +429,12 @@ internal static class SystemActions
     /// 清理脚本进程并确认退出（v0.6.0+）：进程树清理后轮询同名进程，处理「被杀后自重启」的脚本
     /// （如 BetterGI 防崩溃机制，日志曾出现强杀两轮才干净）——每轮仍存在则按名强杀，直至确认退出或轮数耗尽。
     /// 确保配置交换还原前脚本进程已完全退出，消除文件占用导致的还原失败窗口。
+    /// excludeProcessBaseName（v0.6.5+）：与 GameExe 同名的进程不视为脚本树成员（见 <see cref="KillTree"/>），
+    /// 游戏进程由游戏管理逻辑（ForceCloseGame/失败路径按名关闭）处理。
     /// </summary>
-    public static void KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800)
+    public static void KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800, string? excludeProcessBaseName = null)
     {
-        KillTree(pid);
+        KillTree(pid, excludeProcessBaseName);
         for (int round = 1; round <= rounds; round++)
         {
             if (!IsExeRunning(exePath))
@@ -336,9 +516,58 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 将指定进程的可见主窗口前置（仅启动时一次，v0.6.0+）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
-    /// 找到后还原最小化状态并 SetForegroundWindow 前置。用于运行脚本/游戏启动后避免被其他界面遮挡
-    /// （如 BetterGI 截图识别游戏画面需要窗口可见）。找不到可见窗口（bat/cmd 无窗口、进程无窗口）静默放弃。
+    /// 后台前置进程窗口（v0.6.5+，仅启动时一次）：fire-and-forget 但观察异常（宿主为常驻服务进程，P/Invoke 均在后台线程执行）。
+    /// 编辑用户配置（主程序窗口前置）与运行脚本实例/调度队列（游戏窗口前置）共用。
+    /// </summary>
+    public static void BringToFrontFireAndForget(int pid, string what)
+    {
+        if (pid <= 0)
+        {
+            return;
+        }
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                BringToFront(pid);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 前置{what}窗口失败：{ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 后台最小化进程窗口（v0.6.5+，仅启动时一次）：fire-and-forget 但观察异常。
+    /// 运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出），游戏窗口前置以利截图识别。
+    /// </summary>
+    public static void MinimizeWindowFireAndForget(int pid, string what)
+    {
+        if (pid <= 0)
+        {
+            return;
+        }
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                MinimizeWindow(pid);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 最小化{what}窗口失败：{ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 将指定进程的可见主窗口前置（v0.6.5+ 强化）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
+    /// 找到后组合前置——还原最小化 + AttachThreadInput 模拟前台线程输入（绕过 Windows 前台锁定，
+    /// 后台常驻服务进程直接 SetForegroundWindow 几乎必然失败）+ BringWindowToTop 置顶 Z 序 + SetForegroundWindow 激活；
+    /// 前置失败（前台被其他窗口占据/窗口尚未就绪）每 1 秒重试，直至成功或超时。
+    /// 用于游戏窗口/编辑配置主程序启动后避免被浏览器等前台窗口遮挡（如 BetterGI 截图识别游戏画面需要窗口在最前）。
+    /// 找不到可见窗口（bat/cmd 无窗口、进程无窗口）静默放弃；超时仍失败输出 Warn 日志（可观测）。
     /// </summary>
     public static bool BringToFront(int pid, int timeoutSeconds = 30)
     {
@@ -350,20 +579,85 @@ internal static class SystemActions
         while (DateTime.Now < deadline)
         {
             IntPtr hWnd = FindVisibleWindow(pid);
+            if (hWnd != IntPtr.Zero && TryBringToFront(hWnd))
+            {
+                Logger.Debug($"[前置] 已前置进程窗口（PID {pid}，句柄 {hWnd}）。");
+                return true;
+            }
+            Thread.Sleep(1000);
+        }
+        Logger.Warn($"[警告] 前置进程窗口超时（PID {pid}，{timeoutSeconds} 秒内未能置顶），窗口可能被其他界面遮挡。");
+        return false;
+    }
+
+    /// <summary>
+    /// 将指定进程的可见主窗口最小化（v0.6.5+）：轮询窗口出现后 ShowWindow(SW_MINIMIZE)（GUI 脚本让位，
+    /// 控制台脚本经 cmd 包装已无窗口，静默跳过）。用于运行脚本实例/调度队列时脚本主窗口最小化。
+    /// </summary>
+    public static bool MinimizeWindow(int pid, int timeoutSeconds = 30)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+        DateTime deadline = DateTime.Now.AddSeconds(timeoutSeconds);
+        while (DateTime.Now < deadline)
+        {
+            IntPtr hWnd = FindVisibleWindow(pid);
             if (hWnd != IntPtr.Zero)
             {
-                ShowWindow(hWnd, SW_RESTORE);
-                SetForegroundWindow(hWnd);
-                Logger.Debug($"[前置] 已前置进程窗口（PID {pid}，句柄 {hWnd}）。");
+                ShowWindow(hWnd, SW_MINIMIZE);
+                Logger.Debug($"[最小化] 已最小化进程窗口（PID {pid}，句柄 {hWnd}）。");
                 return true;
             }
             Thread.Sleep(300);
         }
-        Logger.Debug($"[前置] 未找到进程可见窗口（PID {pid}），跳过。");
+        Logger.Debug($"[最小化] 未找到进程可见窗口（PID {pid}），跳过。");
         return false;
     }
 
+    /// <summary>组合前置单次尝试：还原最小化 → 附加前台线程输入（绕过前台锁定）→ 置顶 → 激活。返回 SetForegroundWindow 是否成功。</summary>
+    private static bool TryBringToFront(IntPtr hWnd)
+    {
+        ShowWindow(hWnd, SW_RESTORE);
+        ShowWindow(hWnd, SW_SHOW);
+        IntPtr foreground = GetForegroundWindow();
+        uint targetThread = GetWindowThreadProcessId(hWnd, out _);
+        bool attached = false;
+        if (foreground != IntPtr.Zero)
+        {
+            uint fgThread = GetWindowThreadProcessId(foreground, out _);
+            if (fgThread != targetThread)
+            {
+                attached = AttachThreadInput(fgThread, targetThread, true);
+            }
+        }
+        try
+        {
+            BringWindowToTop(hWnd);
+            bool ok = SetForegroundWindow(hWnd);
+            if (ok)
+            {
+                SetFocus(hWnd);
+                SetActiveWindow(hWnd);
+            }
+            return ok;
+        }
+        finally
+        {
+            if (attached)
+            {
+                uint fgThread = GetWindowThreadProcessId(foreground, out _);
+                AttachThreadInput(fgThread, targetThread, false);
+            }
+        }
+    }
+
     private const int SW_RESTORE = 9;
+
+    private const int SW_MINIMIZE = 6;
+
+    private const int SW_SHOW = 5;
 
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
@@ -381,6 +675,21 @@ internal static class SystemActions
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetActiveWindow(IntPtr hWnd);
 
     private static IntPtr FindVisibleWindow(int pid)
     {

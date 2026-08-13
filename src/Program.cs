@@ -19,6 +19,9 @@ public static class Program
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
+    /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web，v0.6.5+）：该模式不支持自动重启，仅常驻服务模式支持。</summary>
+    internal static bool IsWebOnly { get; private set; }
+
     private static bool IsAdministrator()
     {
         try
@@ -125,6 +128,8 @@ public static class Program
                 return 0;
             case "web":
                 return RunWebOnly(args.Skip(1).ToArray());
+            case "restart":
+                return RunRestart();
             case "run-script":
                 return RunScriptCli(args.Skip(1).ToArray());
             case "run-queue":
@@ -177,8 +182,8 @@ public static class Program
 
     private static void RunService()
     {
-        using var mutex = new Mutex(true, "NexusPipeline.SingleInstance", out bool createdNew);
-        if (!createdNew)
+        using Mutex? mutex = AcquireSingleInstanceMutex();
+        if (mutex is null)
         {
             Logger.Info("检测到 NexusPipeline 已在运行，本次启动退出（可在托盘图标打开管理页面）。");
             TrayApp.OpenWeb();
@@ -217,8 +222,85 @@ public static class Program
         Logger.Info("NexusPipeline 已退出。");
     }
 
+    /// <summary>
+    /// 创建单实例互斥体并取得所有权（v0.6.5+）：处理「服务被强杀后互斥体被遗弃」——构造函数会抛
+    /// AbandonedMutexException（所有权已授予本线程），此时先打开同一互斥体释放遗弃所有权再重试一次，
+    /// 避免强杀后首次启动即崩溃（曾需启动两次）。已有实例在运行时返回 null。
+    /// </summary>
+    private static Mutex? AcquireSingleInstanceMutex()
+    {
+        const string name = "NexusPipeline.SingleInstance";
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                var mutex = new Mutex(true, name, out bool createdNew);
+                if (createdNew)
+                {
+                    return mutex;
+                }
+                mutex.Dispose();
+                return null;
+            }
+            catch (AbandonedMutexException ex)
+            {
+                Logger.Warn($"[警告] 接管上次异常退出残留的单实例互斥体（{ex.Message}），正在重试启动...");
+                try
+                {
+                    using var stale = new Mutex(false, name);
+                    stale.ReleaseMutex();
+                }
+                catch
+                {
+                }
+            }
+        }
+        Logger.Error("[错误] 获取单实例互斥体失败（两次尝试均被遗弃状态占用）。");
+        return null;
+    }
+
+    /// <summary>自动重启分支（v0.6.5+）：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
+    /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。</summary>
+    private static int RunRestart()
+    {
+        Logger.Info("[重启] 正在等待旧进程退出...");
+        try
+        {
+            using var probe = new Mutex(false, "NexusPipeline.SingleInstance");
+            DateTime deadline = DateTime.Now.AddSeconds(30);
+            while (DateTime.Now < deadline)
+            {
+                try
+                {
+                    if (probe.WaitOne(500))
+                    {
+                        try
+                        {
+                            probe.ReleaseMutex();
+                        }
+                        catch
+                        {
+                        }
+                        break;
+                    }
+                }
+                catch (AbandonedMutexException)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[重启] 等待旧进程退出异常（继续启动）：{ex.Message}");
+        }
+        RunService();
+        return 0;
+    }
+
     private static int RunWebOnly(string[] args)
     {
+        IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
@@ -555,6 +637,8 @@ public static class Program
         Console.WriteLine("     同上，显式启动常驻服务");
         Console.WriteLine("  nexus-pipeline.exe web");
         Console.WriteLine("     仅启动网页界面（默认不自动打开浏览器，可在设置中开启）");
+        Console.WriteLine("  nexus-pipeline.exe restart");
+        Console.WriteLine("     等待旧实例退出后重启常驻服务（由设置页「重启服务」自动调用）");
         Console.WriteLine("  nexus-pipeline.exe manage");
         Console.WriteLine("     打开交互式管理菜单（命令行操作）");
         Console.WriteLine("  nexus-pipeline.exe status");

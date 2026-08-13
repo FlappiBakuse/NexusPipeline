@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Reflection;
 using System.Text.Json.Nodes;
@@ -118,6 +119,64 @@ internal static class ApiSettingsHandler
             bool ok = await NotifySender.SendAsync(settings, text).ConfigureAwait(false);
             Audit.Log(Audit.Web, "发送测试通知", ok ? "成功" : "失败");
             await HttpHelper.WriteJsonAsync(context, new { ok }).ConfigureAwait(false);
+            return;
+        }
+        if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "restart")
+        {
+            if (ctx.Settings.LightweightMode)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "轻量模式未启动 Web 服务，请手动重启程序" }, 400).ConfigureAwait(false);
+                return;
+            }
+            if (Program.IsWebOnly)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "当前为仅网页模式（web），不支持自动重启，请手动重启" }, 400).ConfigureAwait(false);
+                return;
+            }
+            if (ctx.Center.Active.Count > 0)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "存在运行中的任务，请等待完成或取消后再重启" }, 409).ConfigureAwait(false);
+                return;
+            }
+            int newPort = ctx.Settings.WebPort;
+            Audit.Log(Audit.Web, "重启服务", $"端口 {newPort}");
+            // 先响应 { ok, newPort }，后台拉起新进程（restart 分支会等待旧进程退出并接管），随后退出本进程。
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, newPort }).ConfigureAwait(false);
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Thread.Sleep(1000);
+                    string exePath = Environment.ProcessPath ?? "";
+                    if (string.IsNullOrWhiteSpace(exePath))
+                    {
+                        Logger.Error("[重启] 无法获取当前程序路径，放弃重启。");
+                        return;
+                    }
+                    Process.Start(new ProcessStartInfo(exePath) { Arguments = "restart", UseShellExecute = false, CreateNoWindow = true });
+                    Logger.Info("[重启] 已拉起新进程，即将退出当前进程。");
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"[重启] 拉起新进程失败：{ex.Message}");
+                    return;
+                }
+                try
+                {
+                    System.Windows.Forms.Application.Exit();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"[重启] 退出当前进程失败：{ex.Message}");
+                    try
+                    {
+                        Environment.Exit(0);
+                    }
+                    catch
+                    {
+                    }
+                }
+            });
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);

@@ -349,8 +349,10 @@ internal class RunSession
             SystemActions.KillTree(process.Id);
             return RunAttemptResult.Cancelled($"已取消（{role}脚本执行期间）");
         }
-        bool ok = process.HasExited && process.ExitCode == 0;
-        return ok ? null : RunAttemptResult.Failed($"{role}脚本执行失败（退出码 {process.ExitCode}）");
+        bool hasExited = process.HasExited;
+        int exitCode = process.ExitCode;
+        process.Dispose();
+        return hasExited && exitCode == 0 ? null : RunAttemptResult.Failed($"{role}脚本执行失败（退出码 {exitCode}）");
     }
 
     private async Task<RunAttemptResult> RunAttemptAsync(RunAttempt attempt)
@@ -384,7 +386,7 @@ internal class RunSession
                     int gamePid = gameProcess?.Id ?? 0;
                     if (gamePid > 0)
                     {
-                        _ = Task.Run(() => SystemActions.BringToFront(gamePid));
+                        SystemActions.BringToFrontFireAndForget(gamePid, "游戏");
                     }
                     Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
                 }
@@ -429,8 +431,10 @@ internal class RunSession
             {
                 return;
             }
-            // 进程树清理 + 轮询按名强杀直至确认退出（处理「被杀后自重启」的脚本），确保配置还原前进程已完全退出
-            SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本");
+            // 进程树清理 + 轮询按名强杀直至确认退出（处理「被杀后自重启」的脚本），确保配置还原前进程已完全退出。
+            // v0.6.5+：与 GameExe 同名的进程（脚本自启动的游戏）不属于脚本树，树清理排除，由游戏管理逻辑按名处理。
+            string? excludeGame = string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe);
+            SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
         }
 
         if (SystemActions.IsExeRunning(launchExe))
@@ -458,10 +462,16 @@ internal class RunSession
             {
                 return RunAttemptResult.Failed("脚本启动失败：未能创建进程");
             }
-            _ = Task.Run(() => SystemActions.BringToFront(process.Id));
+            // v0.6.5+：运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出；控制台脚本无窗口自动跳过），
+            // 游戏窗口另由 BringToFrontFireAndForget 前置以利截图识别。
+            SystemActions.MinimizeWindowFireAndForget(process.Id, "脚本");
             _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
         }
+
+        // v0.6.5+：统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
+        // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
+        BringGameToFrontIfRunning();
 
         void OnConsoleData(string? data)
         {
@@ -481,10 +491,11 @@ internal class RunSession
         }
 
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
-        // 脚本启动后解析到的文件可能是上一尝试的残留日志：仅当文件在本次尝试开始后写过（严格时间点，无松弛窗口）
-        // 才从头读（快速重建场景），否则一律从末尾读（忽略旧内容）。截断/重建由 ReadNew 长度检查与 FileId 检测兜底。
+        // 记录尝试开始前的日志文件快照（长度）：启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，
+        // 也只从「启动时长度」续读，残留内容不再污染判定输入（v0.6.5 修复原 LastWriteTime 误判）。
+        LogFileSnapshot? snapshotBeforeStart = resolvedBeforeStart is null ? null : TrySnapshot(resolvedBeforeStart);
         DateTime attemptStart = DateTime.Now;
-        LogMonitor? monitor = resolvedBeforeStart is null ? null : NewMonitor(resolvedBeforeStart, attemptStart, modeText);
+        LogMonitor? monitor = resolvedBeforeStart is null ? null : NewMonitor(resolvedBeforeStart, snapshotBeforeStart, modeText);
         var judge = new SessionJudge(_script);
         bool judgeConfigured = judge.IsConfigured;
         bool scriptMode = judge.ScriptMode;
@@ -567,12 +578,12 @@ internal class RunSession
                     {
                         if (monitor is null)
                         {
-                            monitor = NewMonitor(resolved, attemptStart, modeText);
+                            monitor = NewMonitor(resolved, null, modeText);
                         }
                         else if (!string.Equals(resolved, monitor.Path, StringComparison.OrdinalIgnoreCase))
                         {
                             monitor.Dispose();
-                            monitor = NewMonitor(resolved, attemptStart, modeText, rotated: true);
+                            monitor = NewMonitor(resolved, null, modeText, rotated: true);
                         }
                         else
                         {
@@ -748,6 +759,11 @@ internal class RunSession
         monitor = null;
 
         KillStartedScript();
+
+        // v0.6.5+：运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
+        process?.Dispose();
+        process = null;
+
         string resultStatus = result?.Status ?? "failed";
         if (resultStatus == "failed")
         {
@@ -817,20 +833,61 @@ internal class RunSession
         return (judge.Status, judge.Reason, judge.NotifyText, judge.ReplaceConfigs, null);
     }
 
-    /// <summary>创建日志监控：文件在尝试启动后写过（LastWriteTime ≥ attemptStart，严格无松弛窗口）→ 从头读；否则从末尾读（忽略残留）。</summary>
-    private LogMonitor NewMonitor(string resolved, DateTime attemptStart, string modeText, bool rotated = false)
+    /// <summary>尝试开始前的日志文件快照（仅长度；存在性由 null 表达）。</summary>
+    private sealed record LogFileSnapshot(long Length);
+
+    /// <summary>读取文件当前长度作为快照；文件不存在/读取失败返回 null（视作本次尝试新建，从头读）。</summary>
+    private static LogFileSnapshot? TrySnapshot(string resolved)
     {
-        bool fresh;
         try
         {
-            fresh = File.GetLastWriteTime(resolved) >= attemptStart;
+            return File.Exists(resolved) ? new LogFileSnapshot(new FileInfo(resolved).Length) : null;
         }
         catch (Exception)
         {
-            fresh = false;
+            return null;
         }
-        var monitor = new LogMonitor(resolved, readFromStart: fresh);
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(rotated ? "日志轮换，改监控" : "开始监控")}：{resolved}（{(fresh ? "从头" : "末尾")}读取）");
+    }
+
+    /// <summary>统一游戏窗口前置（v0.6.5+）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）存在即后台前置其可见主窗口。
+    /// 游戏启动方式复杂（启动器常驻/必须以启动器启动等）由脚本专门适配，宿主不重复启动游戏；此处仅做窗口前置。
+    /// 找不到窗口（游戏未启动/无窗口）由 BringToFront 内部静默跳过。</summary>
+    private void BringGameToFrontIfRunning()
+    {
+        if (string.IsNullOrWhiteSpace(_script.GameExe))
+        {
+            return;
+        }
+        try
+        {
+            Process[] procs = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_script.GameExe));
+            try
+            {
+                if (procs.Length > 0)
+                {
+                    SystemActions.BringToFrontFireAndForget(procs[0].Id, "游戏");
+                }
+            }
+            finally
+            {
+                foreach (Process proc in procs)
+                {
+                    proc.Dispose();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 检测游戏进程失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>创建日志监控：文件在尝试开始前不存在（本次新建）或被轮换 → 从头读；否则从「尝试开始时长度」续读（忽略残留旧内容）。</summary>
+    private LogMonitor NewMonitor(string resolved, LogFileSnapshot? beforeStart, string modeText, bool rotated = false)
+    {
+        bool fresh = rotated || beforeStart is null;
+        var monitor = new LogMonitor(resolved, readFromStart: fresh, initialPosition: beforeStart?.Length ?? -1);
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(rotated ? "日志轮换，改监控" : "开始监控")}：{resolved}（{(fresh ? "从头" : "续读")}）");
         return monitor;
     }
 }

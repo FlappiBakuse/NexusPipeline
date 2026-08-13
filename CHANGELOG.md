@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.5（Pre-release）
+
+### 变更
+
+- **设置页「重启服务」**：常驻服务模式可在 Web 界面一键重启（`POST /api/settings/restart`）——先响应 `{ ok, newPort }` 再由后台拉起 `nexus-pipeline.exe restart` 新进程（等待旧进程退出并接管，最多 30 秒）后退出；前端确认卡片 + 「重启中」锁定弹窗 + 轮询 `/api/status` 恢复后自动刷新（端口漂移自动跳转，含 +1 补偿）；校验：轻量模式 400（重启后无 Web）、web 仅网页模式 400、有运行任务 409。保存设置不自动重启；端口改动未保存时前端提示先保存。
+- **单实例互斥体加固（服务强杀恢复）**：`Program.AcquireSingleInstanceMutex` 捕获互斥体被遗弃（abandoned）场景——强杀服务后首次重启不再抛 `AbandonedMutexException` 崩溃退出（此前需启动两次）；`restart` 分支轮询等待旧进程释放互斥体时同样处理遗弃状态。
+- **日志监控 fresh 判定收紧（判定输入防污染）**：`RunSession` 在尝试开始前记录日志文件快照（存在性 + 长度），启动前不存在的文件才从头读；已存在的残留日志从「尝试开始时长度」续读——残留被启动后追加写刷新 `LastWriteTime` 不再误判从头读，旧内容不再进入判断脚本/关键字判定输入（`LogMonitor` 新增显式初始读取位置；轮换/替换/截断语义不变）。
+- **脚本运行防重入（原子化）**：`DispatchCenter.Register` 锁内按脚本实例查重——并发触发（如双击）不再通过进程检测窗口双开会话，后者返回「正在运行」错误。
+- **资源管理加固**：① 前置/后置用户脚本与主脚本进程句柄运行结束即 `Dispose`（此前延迟到 GC）；② `ScriptConfigGate`/`ConfigSwapPrimitives` 静态字典随脚本删除清理（`Mutex` 内核句柄不再累积）；③ `Scheduler.Stop` 释放 CTS；④ 窗口前置后台任务捕获异常不再无观察（fire-and-forget 失败仅告警）；⑤ `Bootstrap.Shutdown` 分步保护，单步异常不中断其余清理。
+- **窗口处理分场景重构（截图识别防遮挡）**：运行脚本实例/调度队列时脚本主窗口**最小化**让位（命令行/日志已接管输出）、游戏窗口**前置**；编辑用户配置时主程序窗口**前置**（此前该路径无任何前置逻辑）。前置机制强化——`AttachThreadInput` 模拟前台线程输入绕过 Windows 前台锁定（后台常驻服务进程直接 `SetForegroundWindow` 几乎必然失败，v0.6.0 的前置实际未生效）+ `BringWindowToTop` 置顶 + 失败每 1 秒重试至 30 秒超时（超时 Warn 日志可观测）；全部后台 fire-and-forget 且观察异常。**游戏窗口统一前置**：运行路径检测到游戏进程存在即前置（与 `LaunchGame` 配置无关——游戏启动方式复杂（启动器常驻等）由脚本专门适配，宿主不重复启动；`LaunchGame=true` 宿主启动能力保留为用户可选）。
+- **进程树清理排除游戏进程**：`KillTree` 自实现（Toolhelp 快照 + BFS 遍历逐进程 `taskkill /F`，替代 `taskkill /T` 全树）——与 `GameExe` 同名的进程（脚本自启动的游戏，即使父进程是脚本）视为「游戏进程」而非脚本树成员，清理时跳过其整棵子树，生杀归游戏管理（`ForceCloseGame`/失败路径按名关闭）；修复「取消后显示『未发现需要关闭的游戏进程』但游戏被连带关闭」的日志矛盾，并消除 `ForceCloseGame=false` 时游戏被连带误杀的隐患；快照失败回退 `/T` 全树。新增单元测试 7 项（ProcessTreeTests，单测 51 → **58**）。
+- **测试**：e2e 新增 2 用例（重启服务自动恢复（service 模式，用例内切换并还原测试环境）、运行任务时 409），全量 54 → **56**、CI 核心集 53 → **55**；`helpers.startService` 支持 service 模式启动；数字同步 AGENTS/README/DEVELOPMENT/ARCHITECTURE。
+- 版本号 0.6.5。
+
 ## v0.6.4（Pre-release）
 
 ### 变更

@@ -37,6 +37,8 @@ internal class LogMonitor : IDisposable
 
     private bool _readFromStart;
 
+    private long _initialPosition = -1;
+
     private FileStream? _stream;
 
     private long _position;
@@ -51,10 +53,11 @@ internal class LogMonitor : IDisposable
 
     private bool _fileIdValid;
 
-    public LogMonitor(string path, bool readFromStart = false)
+    public LogMonitor(string path, bool readFromStart = false, long initialPosition = -1)
     {
         _path = path;
         _readFromStart = readFromStart;
+        _initialPosition = initialPosition;
         Open();
     }
 
@@ -160,7 +163,16 @@ internal class LogMonitor : IDisposable
         try
         {
             _stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            _position = _readFromStart || _stream.Length == 0 ? 0 : _stream.Length;
+            // 读取起点：从头读 / 显式起点（v0.6.5+：尝试开始时长度，只读本次尝试新增内容）/ 打开时文件尾。
+            // 显式起点超过当前长度（文件被截断/重建）时由 ReadNew 的长度检查归零从头读。
+            if (_readFromStart || _stream.Length == 0)
+            {
+                _position = 0;
+            }
+            else
+            {
+                _position = _initialPosition >= 0 ? Math.Min(_initialPosition, _stream.Length) : _stream.Length;
+            }
             try
             {
                 FileStamp = File.GetCreationTimeUtc(_path).Ticks;

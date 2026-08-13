@@ -58,6 +58,15 @@ internal static class ScriptConfigGate
     {
         return Gates.GetOrAdd(scriptId, _ => new SemaphoreSlim(1, 1));
     }
+
+    /// <summary>脚本删除时清理门禁（v0.6.5+）：移除并释放条目，避免静态字典随脚本增删累积。</summary>
+    public static void Remove(string scriptId)
+    {
+        if (Gates.TryRemove(scriptId, out SemaphoreSlim? gate))
+        {
+            gate.Dispose();
+        }
+    }
 }
 
 /// <summary>
@@ -77,6 +86,21 @@ internal static class ConfigSwapPrimitives
     private static Mutex OpenMutex(string scriptId)
     {
         return Mutexes.GetOrAdd(scriptId, id => new Mutex(false, "NexusPipeline.ConfigSwap." + id));
+    }
+
+    /// <summary>脚本删除时清理跨进程互斥体（v0.6.5+）：内核句柄不随进程生命周期释放，删除脚本时移除条目。</summary>
+    public static void RemoveMutex(string scriptId)
+    {
+        if (Mutexes.TryRemove(scriptId, out Mutex? mutex))
+        {
+            try
+            {
+                mutex.Dispose();
+            }
+            catch
+            {
+            }
+        }
     }
 
     public static void WithSwapLock(string scriptId, Action action)

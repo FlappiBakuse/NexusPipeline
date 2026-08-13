@@ -132,8 +132,10 @@ export function setupRuntime() {
   }
 }
 
-export function startService() {
-  child = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: "ignore" });
+/** 启动测试服务（v0.6.5+ 支持 service 模式：自重启仅常驻服务模式支持，测试用无参数启动；默认 web 模式）。 */
+export function startService(mode = "web") {
+  const args = mode === "service" ? [] : [mode];
+  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: "ignore" });
   try {
     fs.writeFileSync(pidFile, String(child.pid));
   } catch { /* pid 文件仅作跨进程兜底，写失败不阻塞 */ }
@@ -166,4 +168,15 @@ export async function restartService() {
   startService();
   await waitForService();
   await sleep(500);
+}
+
+/** 强杀 uitest/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。 */
+export async function killRuntimeServices() {
+  try {
+    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      { stdio: "ignore" });
+  } catch { /* 清理失败不阻塞 */ }
+  await sleep(600);
+  child = null;
 }

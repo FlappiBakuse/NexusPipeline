@@ -38,6 +38,15 @@ internal class Scheduler : IDisposable
         catch
         {
         }
+        // v0.6.5+：取消后释放 CTS（此前仅 Cancel 不 Dispose，重复 Start 时旧 CTS 泄漏）。
+        try
+        {
+            _cts?.Dispose();
+        }
+        catch
+        {
+        }
+        _cts = null;
         _loop = null;
     }
 
