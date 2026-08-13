@@ -8,20 +8,6 @@ if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
 xcopy /e /i /y "%~dp0wwwroot" "%~dp0release\wwwroot" >nul
 if exist "%~dp0plugins" xcopy /e /i /y "%~dp0plugins" "%~dp0release\plugins" >nul
 if not exist "%~dp0release\plugins" mkdir "%~dp0release\plugins"
-rem 外部专用插件（与主程序解耦，随发布分发，可删可换）
-dotnet publish "%~dp0extensions\BetterGIAdapter\BetterGIAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
-if errorlevel 1 goto build_failed
-copy /y "%~dp0build-tmp\plugins\BetterGIAdapter.dll" "%~dp0release\plugins\" >nul
-dotnet publish "%~dp0extensions\March7thAssistantAdapter\March7thAssistantAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
-if errorlevel 1 goto build_failed
-copy /y "%~dp0build-tmp\plugins\March7thAssistantAdapter.dll" "%~dp0release\plugins\" >nul
-dotnet publish "%~dp0extensions\ZenlessZoneZeroOneDragonAdapter\ZenlessZoneZeroOneDragonAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
-if errorlevel 1 goto build_failed
-copy /y "%~dp0build-tmp\plugins\ZenlessZoneZeroOneDragonAdapter.dll" "%~dp0release\plugins\" >nul
-dotnet publish "%~dp0extensions\MaaEndAdapter\MaaEndAdapter.csproj" -c Release -p:PublishSingleFile=false -o "%~dp0build-tmp\plugins" >nul
-if errorlevel 1 goto build_failed
-copy /y "%~dp0build-tmp\plugins\MaaEndAdapter.dll" "%~dp0release\plugins\" >nul
-rmdir /s /q "%~dp0build-tmp"
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
 echo 构建类型：提权版（requireAdministrator，程序必须以管理员身份运行）

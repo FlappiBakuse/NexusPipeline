@@ -52,7 +52,7 @@ test("日志路径格式：严格匹配 / 无条目超时失败 / 已有日志�
   const b = await api("POST", "/api/scripts", {
     name: "忽略旧日志脚本", rootPath: runtimeDir, mainExe: bBat.replace(/\\/g, "\\\\"),
     configPath: lpCfg, logPath: path.join(logRoot, "b", "run-{YYYY-MM-DD}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successKeywords: "任务完成",
   });
   const bid = (await b.json()).id;
   await api("POST", `/api/scripts/${bid}/users`, { name: "默认", enabled: true });
@@ -79,7 +79,7 @@ test("日志路径格式：严格匹配 / 无条目超时失败 / 已有日志�
   const c = await api("POST", "/api/scripts", {
     name: "通配轮换脚本", rootPath: runtimeDir, mainExe: cBat.replace(/\\/g, "\\\\"),
     configPath: lpCfg, logPath: path.join(cDir, "run-{YYYY-MM-DD-*}.log").replace(/\\/g, "\\\\"), gameExe: PING_GAME,
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "任务完成",
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successKeywords: "任务完成",
   });
   const cid = (await c.json()).id;
   await api("POST", `/api/scripts/${cid}/users`, { name: "默认", enabled: true });
@@ -301,7 +301,7 @@ test("调度中心：运行中任务实时日志滚动（重试后成功 → 部
   const logCfg = path.join(runtimeDir, "log-cfg");
   fs.rmSync(logCfg, { recursive: true, force: true });
   fs.mkdirSync(logCfg, { recursive: true });
-  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: logCfg, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successMarkers: "ALL-DONE-MARKER" });
+  const created = await createScript({ name: "日志脚本", rootPath: runtimeDir, mainExe: batPath, configPath: logCfg, logPath, maxAttempts: 2, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, successKeywords: "ALL-DONE-MARKER" });
   expect(created.ok, "创建日志测试脚本").toBeTruthy();
 
   await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
@@ -352,4 +352,42 @@ test("历史文件夹：.json 纯状态 + 按尝试分批 .log 标号 + 脚本�
   expect(attempt2Log.includes("[SCRIPT]"), "尝试 2 日志文件含脚本日志内容").toBeTruthy();
   expect(attempt2Log.includes("ALL-DONE-MARKER"), "尝试 2 日志文件含成功标志行").toBeTruthy();
   expect(!attempt2Log.includes("[CONSOLE]"), "尝试 2 日志文件不含控制台输出（分离）").toBeTruthy();
+});
+
+test("完成操作倒计时卡片：队列完成后可取消（shutdown DRYRUN）", async ({ page }) => {
+  const saDir = makeScriptDir("sysact");
+  const created = await createScript({ name: "倒计时脚本", rootPath: saDir.root, mainExe: saDir.main, configPath: saDir.cfg, logPath: saDir.log });
+  expect(created.ok, "创建倒计时用例脚本").toBeTruthy();
+  const qr = await api("POST", "/api/queues", {
+    name: "倒计时队列", autoRunMode: "none", completionAction: "shutdown", timeSets: [],
+    tasks: [{ id: "", index: 0, scriptInstanceId: created.id }],
+  });
+  expect(qr.ok, "创建完成操作队列（shutdown）").toBeTruthy();
+  const qid = (await qr.json()).id;
+  try {
+    const dispatch = await api("POST", "/api/dispatch/queue", { queueId: qid, mode: "manual" });
+    expect(dispatch.ok, "手动执行倒计时队列").toBeTruthy();
+    expect(await waitNoRunning(60000), "倒计时队列运行结束").toBeTruthy();
+    const status1 = await (await fetch(baseUrl + "api/status")).json();
+    expect(status1.systemAction && status1.systemAction.action === "shutdown", "队列完成后 /api/status 出现 systemAction（shutdown）").toBeTruthy();
+    expect(status1.systemAction.queueName === "倒计时队列", "systemAction 携带队列名").toBeTruthy();
+    expect(status1.systemAction.deadline && new Date(status1.systemAction.deadline).getTime() > Date.now(), "systemAction 携带未来截止时间（倒计时进行中）").toBeTruthy();
+
+    await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="system-action-card"]', { timeout: 10000 });
+    const cardText = await page.textContent('[data-testid="system-action-card"]');
+    expect(cardText.includes("倒计时队列") && cardText.includes("秒后将关机"), "卡片显示队列名与倒计时文案").toBeTruthy();
+    const cdText = (await page.textContent('[data-testid="system-action-countdown"]') || "").trim();
+    expect(/\d+ 秒后将关机/.test(cdText), "倒计时文本为「N 秒后将关机」（" + cdText + "）").toBeTruthy();
+
+    await page.click('[data-action="cancel-system-action"]');
+    await page.waitForFunction(() => !document.querySelector('[data-testid="system-action-card"]'), null, { timeout: 10000 });
+    expect(true, "取消后卡片消失（状态已重新拉取）").toBeTruthy();
+    const status2 = await (await fetch(baseUrl + "api/status")).json();
+    expect(status2.systemAction === null, "取消后 /api/status 的 systemAction 为 null").toBeTruthy();
+  } finally {
+    try { await api("POST", "/api/system-action/cancel"); } catch { /* 兜底清理：断言失败也不留关机倒计时 */ }
+    await api("DELETE", "/api/queues/" + qid);
+    await api("DELETE", "/api/scripts/" + created.id);
+  }
 });

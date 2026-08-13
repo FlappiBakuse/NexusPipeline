@@ -4,7 +4,7 @@ import { cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
 import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
 import { pagerNavigate } from "./core/pager.js";
-import { pageDashboard } from "./views/dashboard.js";
+import { actions as dashboardActions, pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";
 import { actions as usersActions, pageScriptUsers } from "./views/users.js";
 import { actions as queuesActions, pageQueues } from "./views/queues.js";
@@ -27,6 +27,7 @@ const shellActions = {
 
 const allActions = {
   ...shellActions,
+  ...dashboardActions,
   ...scriptsActions,
   ...usersActions,
   ...queuesActions,

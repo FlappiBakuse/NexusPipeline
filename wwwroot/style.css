@@ -134,9 +134,15 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .page-head .back-link { margin-bottom: 7px; }
 .page-head h2 { margin: 0; }
 .page-kicker { margin-top: 7px; color: var(--muted); font-size: 12px; }
+.history-days-box { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .card, .stat, .empty { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md); box-shadow: var(--shadow); }
 .card { padding: clamp(16px, 2vw, 24px); margin-bottom: 18px; }
 .card h3 { margin-bottom: 15px; }
+/* 完成操作倒计时卡片（v0.6.3+）：warning 级语义，复用现有 --warn 变量 */
+.system-action-card { border-color: var(--warn); }
+.system-action-card .section-heading h3 { color: var(--warn); }
+.system-action-card .countdown-text { margin: 0 0 12px; color: var(--text); }
+.system-action-card .countdown-text strong { color: var(--warn); }
 .subsection { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
 .subsection:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .nested-panel { margin-top: 10px; padding: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-soft); }

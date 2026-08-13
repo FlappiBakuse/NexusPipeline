@@ -185,7 +185,7 @@ SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
 
 1. 确认本地构建与测试全绿（见第 7 节）；
 2. 按用户要求的版本号完成版本 bump 提交并推送；
-3. **文档一致性自检（v0.6.2 起）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/extensions-README 只做简引）；
+3. **文档一致性自检（v0.6.2 起）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/plugins-README 只做简引）；
 4. 打 tag：`git tag vX.Y.Z` → `git push origin vX.Y.Z`（发布操作先经用户同意）；
 5. 编写 release notes 到临时文件（`gh pr create --body` 引号坑同理，用 `--notes-file`）；
 6. `gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file <file>`；

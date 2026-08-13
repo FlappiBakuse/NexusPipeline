@@ -25,6 +25,9 @@ internal sealed class ConfigSessionMark
     /// <summary>本次编辑会话由宿主生成了配置模板（重启恢复时清理 config 位置的编辑产物，还原编辑前状态）。</summary>
     public bool GeneratedTemplate { get; set; }
 
+    /// <summary>模板目录复制生成的文件清单（相对 configPath 父目录，v0.6.3+ 模板目录形态；cancel/重启恢复按清单精确清理）。</summary>
+    public List<string> TemplateFiles { get; set; } = new();
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -548,6 +551,29 @@ internal static class ConfigSwapSession
                 PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
                 if (current != PathKind.Missing)
                 {
+                    // 模板目录形态（v0.6.3+）：先按清单删除复制生成的模板文件，再对 configPath 位置兜底清理（防残留）
+                    if (mark.TemplateFiles.Count > 0)
+                    {
+                        string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
+                        if (!string.IsNullOrWhiteSpace(baseDir))
+                        {
+                            foreach (string rel in mark.TemplateFiles)
+                            {
+                                try
+                                {
+                                    string dest = Path.Combine(baseDir, rel);
+                                    if (File.Exists(dest))
+                                    {
+                                        File.Delete(dest);
+                                    }
+                                }
+                                catch
+                                {
+                                    // 删除失败保留标记，交由调用方（自愈/后台延迟重试）再次尝试
+                                }
+                            }
+                        }
+                    }
                     // 删除失败自然抛出（ClearPath 带重试），标记保留，交由调用方（自愈/后台延迟重试）再次尝试
                     ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
                     Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");

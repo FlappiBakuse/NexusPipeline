@@ -1,0 +1,11 @@
+{
+  "require": [
+    { "var": "main", "file": "BetterGI.exe" }
+  ],
+  "paths": {
+    "mainExe": "{main}",
+    "args": "--startOneDragon",
+    "configPath": "User/OneDragon/NexusPipeline.json",
+    "logPath": "log/better-genshin-impact.log"
+  }
+}

@@ -47,7 +47,7 @@ test("自启动参数显式路径：运行时启动目标（管理端/执行端�
   const s1 = await createScript({
     name: "启动目标相对", rootPath: ltDir.replace(/\\/g, "\\\\"),
     mainExe: launcherBat.replace(/\\/g, "\\\\"), args: ".\\exec target.bat ?-x marker",
-    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern, successMarkers: "done",
+    configPath: ltDir.replace(/\\/g, "\\\\"), logPath: logPattern, successKeywords: "done",
   });
   expect(s1.ok, "创建启动目标脚本（Args 显式相对路径，含空格无引号 + ? 前带空格）").toBeTruthy();
   await api("POST", "/api/dispatch/script", { scriptId: s1.id, mode: "manual" });
@@ -155,7 +155,7 @@ test("专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上
   expect(profile.args === ".\\March7th Assistant.exe", "probe 启动目标为显式相对路径（.\\ 前缀，无引号）").toBeTruthy();
   expect(profile.configPath.endsWith("config.yaml"), "probe 推导配置文件 config.yaml").toBeTruthy();
   expect(profile.logPath.includes("{YYYY-MM-DD}.log"), "probe 推导日志路径 logs/{YYYY-MM-DD}.log").toBeTruthy();
-  expect(profile.successMarkers === "", "probe 无完成标志（March7th 判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.successMarkers === undefined, "probe 不再返回完成标志字段（已废弃）").toBeTruthy();
   expect(profile.judgeScript && profile.judgeScript.includes("游戏终止：StarRail"), "probe 提供判断脚本（含运行结束关键字）").toBeTruthy();
 
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-m7"), pluginType: "march7th" });
@@ -184,7 +184,7 @@ test("专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上
   expect(got.mainExe.endsWith("March7th Launcher.exe"), "主程序由插件固化（Launcher）").toBeTruthy();
   expect(got.args === ".\\March7th Assistant.exe", "Args 启动目标由插件固化（.\\ 显式相对路径，无引号）").toBeTruthy();
   expect(got.configPath.endsWith("config.yaml") && got.logPath.includes("{YYYY-MM-DD}.log"), "配置/日志路径由插件固化").toBeTruthy();
-  expect(got.successMarkers === "", "专项实例不再固化完成标志（判定由判断脚本驱动）").toBeTruthy();
+  expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sid);
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -215,7 +215,7 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
   expect(profile.args === "-o -c", "probe 推导启动参数 -o -c").toBeTruthy();
   expect(profile.configPath.endsWith("config"), "probe 推导配置文件目录 config").toBeTruthy();
   expect(profile.logPath.includes(".log") && profile.logPath.endsWith("log.txt"), "probe 推导日志路径 .log/log.txt（固定文件）").toBeTruthy();
-  expect(profile.successMarkers === "", "probe 无完成标志（Zenless 判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.successMarkers === undefined, "probe 不再返回完成标志字段（已废弃）").toBeTruthy();
   expect(profile.judgeScript && profile.judgeScript.includes("关闭游戏成功"), "probe 提供判断脚本（含运行结束关键字）").toBeTruthy();
 
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-zenless"), pluginType: "zzzonedragon" });
@@ -232,7 +232,7 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
   expect(got && got.pluginType === "zzzonedragon", "专项实例保存 pluginType=zzzonedragon").toBeTruthy();
   expect(got.mainExe.endsWith("OneDragon-Launcher.exe") && got.args === "-o -c", "主程序/启动参数由插件固化").toBeTruthy();
   expect(got.configPath.endsWith("config") && got.logPath.endsWith("log.txt"), "配置/日志路径由插件固化").toBeTruthy();
-  expect(got.successMarkers === "", "专项实例不再固化完成标志（判定由判断脚本驱动）").toBeTruthy();
+  expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sid);
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -263,7 +263,7 @@ test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ pa
   expect(profile.args === "--autostart --quit-after-run", "probe 推导启动参数 --autostart --quit-after-run").toBeTruthy();
   expect(profile.configPath.endsWith("config"), "probe 推导配置文件目录 config").toBeTruthy();
   expect(profile.logPath.includes("{YYYY-MM-DD}-*.log"), "probe 推导日志路径 debug/{YYYY-MM-DD}-*.log（通配）").toBeTruthy();
-  expect(profile.successMarkers === "", "probe 无关键字完成标志（MaaEnd 无固定标志，判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.successMarkers === undefined, "probe 不再返回完成标志字段（已废弃）").toBeTruthy();
   expect(profile.judgeScript && profile.judgeScript.includes("mxu-MaaEnd.json"), "probe 提供判断脚本（读取 mxu-MaaEnd.json）").toBeTruthy();
 
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-maaend"), pluginType: "maaend" });

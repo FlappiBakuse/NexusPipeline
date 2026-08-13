@@ -1,4 +1,3 @@
-using System.Reflection;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -6,33 +5,55 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
-/// <summary>插件生命周期管理：发现（内置 + plugins/*.dll）、加载、启用开关、能力查询。</summary>
+/// <summary>插件统一元数据投影（前端插件列表 / 新建专项脚本选择卡片）。</summary>
+internal sealed record PluginSummary(
+    string Name, string DisplayName, string GameName, string Description,
+    string Version, bool IsBuiltIn, string Kind);
+
+/// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
 internal sealed class PluginManager
 {
     private readonly List<IPlugin> _plugins = new();
 
-    public IReadOnlyList<IPlugin> Plugins => _plugins;
+    private readonly List<DataSpecializedPlugin> _dataPlugins = new();
 
-    /// <summary>全部已启用的通知通道（内置 + 外部 INotifyChannel 并存，多通道同时发送）。</summary>
+    /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
     public IReadOnlyList<INotifyChannel> NotifyChannels =>
         _plugins.OfType<IPlugin>()
             .Where(p => p is INotifyChannel && IsEnabled(p.Name))
             .Cast<INotifyChannel>()
             .ToList();
 
-    /// <summary>已启用的专用插件（专项脚本实例的适配能力来源）。</summary>
-    public IReadOnlyList<ISpecializedScriptPlugin> SpecializedPlugins =>
-        _plugins.OfType<ISpecializedScriptPlugin>().Where(p => IsEnabled(p.Name)).ToList();
+    /// <summary>已启用的数据化专项插件（专项脚本实例的适配能力来源）。</summary>
+    public IReadOnlyList<DataSpecializedPlugin> SpecializedPlugins =>
+        _dataPlugins.Where(p => IsEnabled(p.Name)).ToList();
 
-    /// <summary>调用专用插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
+    /// <summary>插件统一元数据投影（内置 general + 数据化 specialized）。</summary>
+    public IReadOnlyList<PluginSummary> PluginSummaries
+    {
+        get
+        {
+            var list = new List<PluginSummary>();
+            foreach (IPlugin plugin in _plugins)
+            {
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general"));
+            }
+            foreach (DataSpecializedPlugin plugin in _dataPlugins)
+            {
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized"));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>调用数据化专项插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
     public ScriptProfile? ResolveProfile(string pluginName, string rootPath)
     {
         if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
         {
             return null;
         }
-        ISpecializedScriptPlugin? plugin = _plugins.OfType<ISpecializedScriptPlugin>()
-            .FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
         if (plugin is null || !IsEnabled(plugin.Name))
         {
             return null;
@@ -43,7 +64,7 @@ internal sealed class PluginManager
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[插件] 专用插件「{plugin.DisplayName}」解析「{rootPath}」失败：{ex.Message}");
+            Logger.Warn($"[插件] 数据化插件「{plugin.DisplayName}」解析「{rootPath}」失败：{ex.Message}");
             return null;
         }
     }
@@ -91,9 +112,9 @@ internal sealed class PluginManager
         {
             _plugins.Add(plugin);
         }
-        foreach (IPlugin plugin in DiscoverExternal())
+        foreach (DataSpecializedPlugin plugin in DiscoverDataPlugins())
         {
-            _plugins.Add(plugin);
+            _dataPlugins.Add(plugin);
         }
         PruneUnknownPluginSettings();
         foreach (IPlugin plugin in _plugins)
@@ -116,12 +137,24 @@ internal sealed class PluginManager
                 Logger.Info($"[插件] 已禁用：{plugin.DisplayName}");
             }
         }
+        foreach (DataSpecializedPlugin plugin in _dataPlugins)
+        {
+            Logger.Info($"[插件] 已{(IsEnabled(plugin.Name) ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化）");
+        }
     }
 
     private void PruneUnknownPluginSettings()
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
-        var known = new HashSet<string>(_plugins.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
+        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (IPlugin plugin in _plugins)
+        {
+            known.Add(plugin.Name);
+        }
+        foreach (DataSpecializedPlugin plugin in _dataPlugins)
+        {
+            known.Add(plugin.Name);
+        }
         int before = settings.EnabledPlugins.Count + settings.DisabledPlugins.Count;
         settings.EnabledPlugins.RemoveAll(name => !known.Contains(name));
         settings.DisabledPlugins.RemoveAll(name => !known.Contains(name));
@@ -148,16 +181,16 @@ internal sealed class PluginManager
 
     public bool IsEnabled(string name)
     {
-        IPlugin? plugin = _plugins.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (plugin is null)
-        {
-            return false;
-        }
         AppSettings settings = RuntimeContext.Instance.Settings;
-        if (plugin.IsBuiltIn)
+        if (_plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
             return settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
         }
+        if (!_dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            return false;
+        }
+        // 数据化专项插件：外部默认启用，显式禁用记入 DisabledPlugins（重启后仍禁用）。
         return !settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -188,39 +221,30 @@ internal sealed class PluginManager
 
     private static List<IPlugin> DiscoverBuiltIn()
     {
-        var list = new List<IPlugin>
+        return new List<IPlugin>
         {
             new NotifyPlugin(),
         };
-        return list;
     }
 
-    private static List<IPlugin> DiscoverExternal()
+    /// <summary>发现数据化专项插件：plugins/ 下每个含有效 plugin.json 的子目录注册一个插件；无效目录仅警告。</summary>
+    private static List<DataSpecializedPlugin> DiscoverDataPlugins()
     {
-        var list = new List<IPlugin>();
+        var list = new List<DataSpecializedPlugin>();
         if (!Directory.Exists(AppPaths.PluginsDir))
         {
             return list;
         }
-        foreach (string dll in Directory.GetFiles(AppPaths.PluginsDir, "*.dll"))
+        foreach (string dir in Directory.GetDirectories(AppPaths.PluginsDir))
         {
-            try
+            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(dir);
+            if (plugin is not null)
             {
-                Assembly assembly = Assembly.LoadFrom(dll);
-                foreach (Type type in assembly.GetTypes())
-                {
-                    if (typeof(IPlugin).IsAssignableFrom(type) && !type.IsAbstract && type.GetConstructor(Type.EmptyTypes) is not null)
-                    {
-                        if (Activator.CreateInstance(type) is IPlugin plugin)
-                        {
-                            list.Add(plugin);
-                        }
-                    }
-                }
+                list.Add(plugin);
             }
-            catch (Exception ex)
+            else
             {
-                Logger.Warn($"[插件] 加载 {Path.GetFileName(dll)} 失败：{ex.Message}");
+                Logger.Warn($"[插件] 跳过无效插件目录：{Path.GetFileName(dir)}（缺少 plugin.json 或 data 引用无效）");
             }
         }
         return list;

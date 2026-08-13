@@ -35,8 +35,6 @@ public class ScriptInstance
 
     public int TotalTimeoutMinutes { get; set; } = 120;
 
-    public string SuccessMarkers { get; set; } = "";
-
     /// <summary>成功关键字（自定义完成标志）：每行一组，组内逗号分隔为 AND（同一行内全部出现才命中），换行之间为 OR；留空表示不启用。</summary>
     public string SuccessKeywords { get; set; } = "";
 
@@ -76,7 +74,6 @@ public class ScriptInstance
             MaxAttempts = MaxAttempts,
             LogStallTimeoutMinutes = LogStallTimeoutMinutes,
             TotalTimeoutMinutes = TotalTimeoutMinutes,
-            SuccessMarkers = SuccessMarkers,
             SuccessKeywords = SuccessKeywords,
             FailureKeywords = FailureKeywords,
             JudgeScriptEnabled = JudgeScriptEnabled,
@@ -85,14 +82,6 @@ public class ScriptInstance
             NotifyEnabled = NotifyEnabled,
             Users = Users.Select(user => user.Clone()).ToList(),
         };
-    }
-
-    /// <summary>完成标志列表：专用插件固化或历史配置；为空表示无完成标志（通用脚本按进程自行退出判定成功）。</summary>
-    public List<string> MarkerList()
-    {
-        return SuccessMarkers
-            .Split(new[] { ',', '，', ';', '；', '|', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
     }
 
     /// <summary>是否配置了判断脚本（开关开启且代码非空）。</summary>

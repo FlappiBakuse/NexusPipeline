@@ -5,8 +5,8 @@ using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
-/// <summary>插件契约：元数据 + 生命周期。能力通过接口扩展（如 <see cref="INotifyChannel"/> / <see cref="ISpecializedScriptPlugin"/>）。</summary>
-public interface IPlugin
+/// <summary>内置插件契约（v0.6.3 起仅供宿主内置插件使用）：元数据 + 生命周期。能力通过接口扩展（如 <see cref="INotifyChannel"/>）。</summary>
+internal interface IPlugin
 {
     string Name { get; }
 
@@ -23,18 +23,8 @@ public interface IPlugin
     void Shutdown();
 }
 
-/// <summary>专用插件：对专项脚本实例的配置进行接管（根据脚本根目录推导主程序/参数/配置/日志路径）。</summary>
-public interface ISpecializedScriptPlugin : IPlugin
-{
-    /// <summary>中文游戏名（脚本卡片徽章显示，如「原神专项」）；为空时前端回退 <see cref="IPlugin.DisplayName"/>。</summary>
-    string GameName { get; }
-
-    /// <summary>根据脚本根目录推导专项配置；无法推导（如目录结构不符、缺少主程序）时返回 null。</summary>
-    ScriptProfile? Resolve(string rootPath);
-}
-
-/// <summary>专用插件推导出的脚本配置快照（保存时固化到脚本实例字段）。</summary>
-public class ScriptProfile
+/// <summary>专项插件推导出的脚本配置快照（v0.6.3 起由数据化专项插件提供：保存时固化到脚本实例字段）。</summary>
+internal class ScriptProfile
 {
     public string MainExe { get; set; } = "";
 
@@ -44,28 +34,28 @@ public class ScriptProfile
 
     public string LogPath { get; set; } = "";
 
-    /// <summary>完成标志（逗号分隔）；专用插件提供自有关键词，固化到脚本实例。</summary>
-    public string SuccessMarkers { get; set; } = "";
-
-    /// <summary>默认判断脚本（JS，v0.6.0+）：专项脚本实例保存时固化到脚本字段（用户不可编辑）；为空表示插件不提供。</summary>
+    /// <summary>默认判断脚本（v0.6.0+）：专项脚本实例保存时固化到脚本字段（用户不可编辑）；为空表示插件不提供。</summary>
     public string JudgeScript { get; set; } = "";
 
-    /// <summary>最小配置模板（JSON 内容，v0.6.0+）：编辑用户配置会话中 ConfigPath 不存在时生成（值全空，由用户在编辑时自行配置）；为空表示插件不提供。</summary>
-    public string ConfigTemplate { get; set; } = "";
+    /// <summary>判断脚本语言（数据化插件按扩展名：.js → javascript / .py → python）。</summary>
+    public string JudgeScriptLanguage { get; set; } = "javascript";
+
+    /// <summary>默认配置模板目录（v0.6.3 起为文件夹形态）：编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置（用户按需修改）；为空表示插件不提供。</summary>
+    public string ConfigTemplateDir { get; set; } = "";
 }
 
-/// <summary>通知能力接口：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>
-public interface INotifyChannel
+/// <summary>通知能力接口（v0.6.3 起仅供宿主内置插件使用）：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>
+internal interface INotifyChannel
 {
     Task NotifyScriptAsync(ScriptInstance script, RunRecord record);
 
     Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);
 }
 
-/// <summary>宿主提供给插件的上下文抽象：插件只能通过它访问宿主能力，不直接依赖全局单例。
+/// <summary>宿主提供给内置插件的上下文抽象：插件只能通过它访问宿主能力，不直接依赖全局单例。
 /// 插件级配置（v0.5.1+）：<see cref="GetConfig{T}"/>/<see cref="SetConfig{T}"/> 落盘 config/plugins/&lt;插件名&gt;.json（PascalCase），
 /// 密钥经 <see cref="GetSecret"/>/<see cref="SetSecret"/> 走 DPAPI（enc: 前缀），普通字段与密钥同文件。</summary>
-public class PluginContext
+internal class PluginContext
 {
     private readonly string _pluginName;
 

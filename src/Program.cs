@@ -1,6 +1,10 @@
+using System.Diagnostics;
 using System.Net;
+using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Cli;
 using NexusPipeline.Web;
 using NexusPipeline.Models;
@@ -45,6 +49,18 @@ public static class Program
         }
         catch
         {
+        }
+        // v0.6.3：stdout 重定向（管道/文件）下 Console.OutputEncoding 不生效（实测仍按系统 ANSI 代码页写 GBK），
+        // 显式用 UTF-8 流包装 stdout，保证 CLI 管道输出中文正确（e2e CLI 断言依赖；控制台模式不受影响）。
+        if (Console.IsOutputRedirected)
+        {
+            try
+            {
+                Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true });
+            }
+            catch
+            {
+            }
         }
         try
         {
@@ -272,18 +288,7 @@ public static class Program
             Console.WriteLine($"[错误] 未找到脚本实例：{target}");
             return 1;
         }
-        RuntimeContext.Instance.Plugins.LoadAll();
-        RunningExecution exec;
-        try
-        {
-            exec = RuntimeContext.Instance.Center.StartScript(script.Id, mode, Audit.Cli, userName);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[错误] {ex.Message}");
-            return 1;
-        }
-        return WaitCli(exec);
+        return RunCliViaHttp("script", new { scriptId = script.Id, mode, userName }, script.Name);
     }
 
     private static int RunQueueCli(string[] args)
@@ -308,50 +313,201 @@ public static class Program
             Console.WriteLine($"[错误] 未找到调度队列：{target}");
             return 1;
         }
-        RuntimeContext.Instance.Plugins.LoadAll();
-        string? blocked = DispatchCenter.QueueBlockedBy(queue);
-        if (blocked is not null)
+        return RunCliViaHttp("queue", new { queueId = queue.Id, mode }, queue.Name);
+    }
+
+    /// <summary>
+    /// 通过常驻服务 HTTP API 提交任务并轮询结果（v0.6.3+）：提交 POST /api/dispatch/{kind}，
+    /// 成功后轮询 GET /api/dispatch/{runId} 直至结束，输出贴近原 WaitCli 风格；全部记录 success 返回 0。
+    /// </summary>
+    private static int RunCliViaHttp(string kind, object body, string displayName)
+    {
+        int? port = EnsureCliService();
+        if (port is null)
         {
-            Console.WriteLine($"[错误] 队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行。");
             return 1;
         }
-        RunningExecution exec;
+        using var client = new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(5);
         try
         {
-            exec = RuntimeContext.Instance.Center.StartQueue(queue.Id, mode, Audit.Cli);
+            HttpResponseMessage resp = client.PostAsync($"http://127.0.0.1:{port}/api/dispatch/{kind}",
+                new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+            if (!resp.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[错误] {ReadError(resp)}");
+                return 1;
+            }
+            string runId = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())?["runId"]?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(runId))
+            {
+                Console.WriteLine("[错误] 服务未返回运行 ID。");
+                return 1;
+            }
+            return PollCliRun(client, port.Value, runId);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[错误] {ex.Message}");
+            Console.WriteLine($"[错误] 提交任务失败：{ex.Message}");
             return 1;
         }
-        return WaitCli(exec);
     }
 
-    private static int WaitCli(RunningExecution exec)
+    /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1。</summary>
+    private static int PollCliRun(HttpClient client, int port, string runId)
     {
         string lastStatus = "";
-        while (exec.Status == "running")
+        int consecutiveFailures = 0;
+        JsonNode? node = null;
+        while (true)
         {
-            if (!string.IsNullOrEmpty(exec.CurrentStatus) && exec.CurrentStatus != lastStatus)
+            try
             {
-                lastStatus = exec.CurrentStatus;
-                Console.WriteLine($"  {exec.CurrentScriptName}：{lastStatus}（第 {exec.CurrentAttempt}/{exec.CurrentMaxAttempts} 次）");
+                HttpResponseMessage resp = client.GetAsync($"http://127.0.0.1:{port}/api/dispatch/{runId}").GetAwaiter().GetResult();
+                consecutiveFailures = 0;
+                if (!resp.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[错误] 查询运行状态失败：HTTP {(int)resp.StatusCode}（{ReadError(resp)}）");
+                    return 1;
+                }
+                node = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            }
+            catch (Exception)
+            {
+                consecutiveFailures++;
+                if (consecutiveFailures >= 3)
+                {
+                    Console.WriteLine("[错误] 连续 3 次查询运行状态失败（服务可能已退出）。");
+                    return 1;
+                }
+                Thread.Sleep(1000);
+                continue;
+            }
+            string status = node?["status"]?.ToString() ?? "";
+            string currentStatus = node?["currentStatus"]?.ToString() ?? "";
+            string currentScriptName = node?["currentScriptName"]?.ToString() ?? "";
+            int attempt = int.TryParse(node?["currentAttempt"]?.ToString(), out int a) ? a : 0;
+            int maxAttempts = int.TryParse(node?["currentMaxAttempts"]?.ToString(), out int m) ? m : 0;
+            if (!string.IsNullOrEmpty(currentStatus) && currentStatus != lastStatus)
+            {
+                lastStatus = currentStatus;
+                Console.WriteLine($"  {currentScriptName}：{currentStatus}（第 {attempt}/{maxAttempts} 次）");
+            }
+            if (status != "running")
+            {
+                break;
             }
             Thread.Sleep(1000);
         }
         Console.WriteLine();
-        foreach (RunRecord record in exec.Records)
+        if (node?["records"] is not JsonArray records || records.Count == 0)
         {
-            Console.WriteLine($"===== {record.ScriptName} =====");
-            Console.WriteLine($"状态：{record.Status}（{record.ResultDetail}）");
-            Console.WriteLine($"开始：{record.StartTime:HH:mm:ss}  结束：{record.EndTime:HH:mm:ss}");
-            foreach (RunAttempt attempt in record.AttemptDetails)
+            Console.WriteLine("[提示] 服务未返回运行记录。");
+            return 1;
+        }
+        foreach (JsonNode? record in records)
+        {
+            string name = record?["scriptName"]?.ToString() ?? "";
+            string recStatus = record?["status"]?.ToString() ?? "";
+            string detail = record?["resultDetail"]?.ToString() ?? "";
+            Console.WriteLine($"===== {name} =====");
+            Console.WriteLine($"状态：{recStatus}（{detail}）");
+            Console.WriteLine($"开始：{FmtTime(record?["startTime"]?.ToString())}  结束：{FmtTime(record?["endTime"]?.ToString())}");
+            if (record?["attemptDetails"] is JsonArray attempts)
             {
-                Console.WriteLine($"  第 {attempt.Number} 次：{attempt.Status}（{attempt.Reason}）");
+                foreach (JsonNode? attemptNode in attempts)
+                {
+                    Console.WriteLine($"  第 {attemptNode?["number"]?.ToString()} 次：{attemptNode?["status"]?.ToString()}（{attemptNode?["reason"]?.ToString()}）");
+                }
             }
         }
-        return exec.Records.Count > 0 && exec.Records.All(record => record.Status == "success") ? 0 : 1;
+        return records.All(record => record?["status"]?.ToString() == "success") ? 0 : 1;
+    }
+
+    /// <summary>ISO 时间字符串取 HH:mm:ss 段（DateTime 无时区，序列化无 Z 后缀）。</summary>
+    private static string FmtTime(string? iso)
+    {
+        if (string.IsNullOrWhiteSpace(iso))
+        {
+            return "";
+        }
+        int t = iso.IndexOf('T');
+        if (t >= 0 && t + 9 <= iso.Length)
+        {
+            return iso.Substring(t + 1, 8);
+        }
+        return iso;
+    }
+
+    /// <summary>确保常驻服务可达：探测失败时轻量模式报错退出，否则自动拉起服务进程并等待（最多 30 秒）。返回实际端口或 null。</summary>
+    private static int? EnsureCliService()
+    {
+        int port = RuntimeContext.Instance.Settings.WebPort;
+        if (ProbeService(port, 2000))
+        {
+            return port;
+        }
+        if (RuntimeContext.Instance.Settings.LightweightMode)
+        {
+            Console.WriteLine("[错误] 服务处于轻量运行模式，未启动 Web 接口，无法提交任务");
+            return null;
+        }
+        Console.WriteLine($"[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...");
+        try
+        {
+            string exePath = Environment.ProcessPath ?? "";
+            Process.Start(new ProcessStartInfo(exePath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[错误] 自动拉起常驻服务失败：{ex.Message}");
+            return null;
+        }
+        DateTime deadline = DateTime.Now.AddSeconds(30);
+        while (DateTime.Now < deadline)
+        {
+            Thread.Sleep(500);
+            if (ProbeService(port, 2000))
+            {
+                return port;
+            }
+        }
+        Console.WriteLine("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
+        return null;
+    }
+
+    /// <summary>GET /api/status 探测服务可达性（HTTP 2xx 视为可达）。</summary>
+    private static bool ProbeService(int port, int timeoutMs)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeoutMs);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+            using HttpResponseMessage resp = client.GetAsync($"http://127.0.0.1:{port}/api/status", cts.Token).GetAwaiter().GetResult();
+            return resp.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>读取响应体 {error} 字段（失败时回退原文/状态码）。</summary>
+    private static string ReadError(HttpResponseMessage resp)
+    {
+        try
+        {
+            string text = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            return JsonNode.Parse(text)?["error"]?.ToString() ?? text;
+        }
+        catch
+        {
+            return $"服务返回错误（HTTP {(int)resp.StatusCode}）";
+        }
     }
 
     private static int CancelCli(string[] args)
@@ -362,15 +518,28 @@ public static class Program
             Console.WriteLine("[错误] 用法：nexus-pipeline.exe cancel <运行ID>");
             return 1;
         }
+        int? port = EnsureCliService();
+        if (port is null)
+        {
+            return 1;
+        }
         try
         {
-            RuntimeContext.Instance.Center.Cancel(runId, Audit.Cli);
-            Console.WriteLine("[OK] 已发送取消请求。");
-            return 0;
+            using var client = new HttpClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+            HttpResponseMessage resp = client.PostAsync($"http://127.0.0.1:{port}/api/cancel",
+                new StringContent(JsonSerializer.Serialize(new { runId }, JsonOpts.Default), Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+            if (resp.IsSuccessStatusCode)
+            {
+                Console.WriteLine("[OK] 已发送取消请求。");
+                return 0;
+            }
+            Console.WriteLine($"[错误] {ReadError(resp)}");
+            return 1;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[错误] {ex.Message}");
+            Console.WriteLine($"[错误] 提交取消请求失败：{ex.Message}");
             return 1;
         }
     }
@@ -391,11 +560,11 @@ public static class Program
         Console.WriteLine("  nexus-pipeline.exe status");
         Console.WriteLine("     查看状态");
         Console.WriteLine("  nexus-pipeline.exe run-script <脚本ID或名称> [-Auto|-Manual] [-user <用户名>]");
-        Console.WriteLine("     手动执行脚本实例并等待结果（-user 指定使用哪个用户的配置）");
+        Console.WriteLine("     手动执行脚本实例并等待结果（需常驻服务运行，未运行时会自动拉起；-user 指定使用哪个用户的配置）");
         Console.WriteLine("  nexus-pipeline.exe run-queue <队列ID或名称> [-Auto|-Manual]");
-        Console.WriteLine("     手动执行调度队列并等待结果");
+        Console.WriteLine("     手动执行调度队列并等待结果（需常驻服务运行，未运行时会自动拉起）");
         Console.WriteLine("  nexus-pipeline.exe cancel <运行ID>");
-        Console.WriteLine("     取消正在运行的脚本或队列");
+        Console.WriteLine("     取消正在运行的脚本或队列（需常驻服务运行，未运行时会自动拉起）");
         Console.WriteLine("  nexus-pipeline.exe register / unregister");
         Console.WriteLine("     注册 / 取消开机自启动");
         Console.WriteLine();

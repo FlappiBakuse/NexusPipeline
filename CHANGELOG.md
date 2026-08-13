@@ -2,6 +2,18 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.3（Pre-release）
+
+### 变更
+
+- **废弃通用完成标志（SuccessMarkers）**：判定优先级收敛为 判断脚本（脚本优先）→ 成功/失败关键字 → 无任何配置按「进程自行退出」判定成功。`SuccessMarkers` 从模型（`ScriptInstance`/`ScriptProfile`）、判定器（`SessionJudge`）、插件契约、`ApplyProfile` 与扩展适配器注释全链路删除；旧版 `config/scripts.json` 残留字段反序列化自动忽略（JsonOpts 未开启未知属性报错），下次保存自然丢弃，无需迁移。e2e 断言语义等价替换（`successMarkers` → `successKeywords`；字段断言改 `=== undefined`）。
+- **CLI 统一调度走常驻服务 HTTP**：`run-script` / `run-queue` / `cancel` 不再本地直调调度中心，改为向常驻服务 HTTP API 提交并轮询结果（`POST /api/dispatch/{script|queue}`、`POST /api/cancel`、轮询 `GET /api/dispatch/{runId}`），CLI 与服务并发操作配置无锁问题随之消除；服务不可达时自动拉起常驻服务进程（轻量运行模式直接报错）；输出风格贴近原等待逻辑（进度行 + 记录明细 + 退出码=全部 success 才 0）。服务端 `DispatchCenter` 新增已结束执行保留列表（`FindAny`，上限 100 条）+ 运行任务查询 API（`records` 完整返回）。`manage` 交互菜单仍本地直调（不在本版范围）。
+- **完成操作 Web 倒计时卡片（可取消）**：队列全部完成后执行 休眠/重启/关机 前，Web 界面（仪表盘/调度中心）显示 60 秒倒计时卡片，可点击取消——重启/关机走 Windows 倒计时（`shutdown /t 60`，取消执行 `shutdown /a`），休眠走应用内 60 秒延迟（取消后不执行）；倒计时为真实墙钟，不随测试时间加速缩放；exit（退出软件）保持立即执行。新增 `POST /api/system-action/cancel` 与 `/api/status` 的 `systemAction` 字段。**测试防护**：`NEXUS_SYSTEM_ACTION_DRYRUN=1` 时系统操作仅记录日志不真正执行（e2e global-setup 设置，CI 绝不真关机）。
+- **小加固**：① 静态文件服务路径包含校验（`Path.GetFullPath` 前缀比对，纵深防御防逃逸）；② 历史页天数上限放宽至 `MaxHistoryRetentionDays`（默认 180）并新增前端天数选择器（7/30/180，切换重置分页）；③ `StartScript` 指定 `userName` 时 `TotalTasks=1`（进度口径修正）。
+- **专项插件全面数据化（v0.6.3）**：专项插件从 C# DLL 工程改为**纯数据目录形态**（`plugins/<插件名>/plugin.json` 根文件 + `data/`）——推导配置写成 `resolve.json`（`require` 必需文件校验含 `searchUpward` 向上搜索规则 + `paths` 模板占位符 `{var}`/`{rel:var}`，完整保留 March7th 管理端/执行端分离推导）、判断脚本写成独立 `judge.{js,py}` 文件（按扩展名定语言，替代内嵌 C# raw string）、默认配置模板改为 `config-template/` **文件夹**（直接放入设置好的默认配置文件；编辑会话 start 时整体复制到配置位置，复制清单随 `.session` 标记持久化，cancel 与重启恢复按清单精确清理）。宿主新增 `DataSpecializedPlugin` 加载器（`PluginManager` 扫描 `plugins/` 注册，替代 DLL 反射加载）；`ISpecializedScriptPlugin` 契约与 `extensions/` 四个 C# 工程移除，插件契约（`IPlugin`/`INotifyChannel`/`PluginContext`/`ScriptProfile`）收敛为宿主内置 internal（public 仅剩入口与领域模型）；`build.cmd` 移除插件编译段（`plugins/` 整体复制到 `release/plugins/`）。judge-scenarios 的 MaaEnd 判断脚本改从 `plugins/maaend/data/judge.js` 读取；e2e 插件断言（插件列表/probe/固化/新建卡片/编辑模板）数据化后字段与内容一致。开发指南见 `plugins/README.md`。
+- **测试**：e2e 新增 2 用例（CLI run-script 经 HTTP 提交与自动拉起、完成操作倒计时卡片取消），全量 51 → **53**、CI 核心集 50 → **52**；数字同步 AGENTS/README。
+- 版本号 0.6.3。
+
 ## [v0.6.2]（2026-08-13）
 
 ### 变更

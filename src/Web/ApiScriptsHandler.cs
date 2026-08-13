@@ -223,12 +223,11 @@ internal static class ApiScriptsHandler
         script.Args = profile.Args;
         script.ConfigPath = profile.ConfigPath;
         script.LogPath = profile.LogPath;
-        script.SuccessMarkers = profile.SuccessMarkers;
         script.SuccessKeywords = "";
         script.FailureKeywords = "";
-        // v0.6.0+：专项脚本判断脚本由插件固化（用户不可编辑），语言固定内置引擎 JavaScript。
+        // v0.6.0+：专项脚本判断脚本由插件固化（用户不可编辑），语言按数据化插件判断脚本扩展名（.js 内置引擎 / .py 系统解释器）。
         script.JudgeScriptEnabled = !string.IsNullOrWhiteSpace(profile.JudgeScript);
-        script.JudgeScriptLanguage = "javascript";
+        script.JudgeScriptLanguage = string.IsNullOrWhiteSpace(profile.JudgeScriptLanguage) ? "javascript" : profile.JudgeScriptLanguage;
         script.JudgeScript = profile.JudgeScript ?? "";
         return null;
     }
@@ -727,7 +726,8 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "配置交换失败：" + prepError }, 400).ConfigureAwait(false);
                     return;
                 }
-                bool generatedTemplate = UserConfigManager.EnsureConfigForEdit(script);
+                List<string> generatedTemplateFiles = UserConfigManager.EnsureConfigForEdit(script);
+                bool generatedTemplate = generatedTemplateFiles.Count > 0;
                 UserConfigManager.HideOtherConfigs(script, script.Id, user.Name);
                 Process? proc;                try
                 {
@@ -756,6 +756,7 @@ internal static class ApiScriptsHandler
                     },
                 };
                 editSession.Mark.GeneratedTemplate = generatedTemplate;
+                editSession.Mark.TemplateFiles = generatedTemplateFiles;
                 editSession.Mark.Write();
                 UserConfigManager.EditSessions[scriptId] = editSession;
                 keepGate = true;
@@ -798,17 +799,7 @@ internal static class ApiScriptsHandler
                 }
                 if (action == "cancel" && session.GeneratedConfigTemplate)
                 {
-                    try
-                    {
-                        if (File.Exists(script.ConfigPath))
-                        {
-                            File.Delete(script.ConfigPath);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[警告] 清理编辑会话生成的配置模板失败：{ex.Message}");
-                    }
+                    DeleteGeneratedTemplateFiles(session.Mark);
                 }
                 UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
@@ -825,5 +816,45 @@ internal static class ApiScriptsHandler
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { error = "未知操作：" + action }, 400).ConfigureAwait(false);
+    }
+
+    /// <summary>按会话标记的模板文件清单清理编辑会话生成的模板（v0.6.3+ 模板目录形态；无清单回退清理 ConfigPath 单文件）。</summary>
+    private static void DeleteGeneratedTemplateFiles(ConfigSessionMark mark)
+    {
+        if (mark.TemplateFiles.Count > 0)
+        {
+            string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
+            if (string.IsNullOrWhiteSpace(baseDir))
+            {
+                return;
+            }
+            foreach (string rel in mark.TemplateFiles)
+            {
+                try
+                {
+                    string dest = Path.Combine(baseDir, rel);
+                    if (File.Exists(dest))
+                    {
+                        File.Delete(dest);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[警告] 清理编辑会话生成的配置模板失败：{rel}（{ex.Message}）");
+                }
+            }
+            return;
+        }
+        try
+        {
+            if (File.Exists(mark.ConfigPath))
+            {
+                File.Delete(mark.ConfigPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理编辑会话生成的配置模板失败：{ex.Message}");
+        }
     }
 }

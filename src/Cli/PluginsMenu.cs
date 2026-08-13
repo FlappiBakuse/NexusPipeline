@@ -10,7 +10,7 @@ internal static class PluginsMenu
     {
         Ui.ClearScreen();
         Console.WriteLine("===== 插件 =====");
-        foreach (IPlugin plugin in ctx.Plugins.Plugins)
+        foreach (PluginSummary plugin in ctx.Plugins.PluginSummaries)
         {
             bool enabled = ctx.Plugins.IsEnabled(plugin.Name);
             Console.WriteLine($"  {plugin.DisplayName} v{plugin.Version} [{(enabled ? "已启用" : "已禁用")}]");

@@ -207,20 +207,21 @@ internal static class UserConfigManager
     {
         return PrepareForRun(scriptId, userName, configPath, out string? error) ? null : (error ?? "配置交换失败");
     }
-    /// <summary>编辑配置会话：ConfigPath 不存在且插件提供最小配置模板时生成（值全空，由用户在编辑时自行配置）；返回是否生成了模板（cancel 时需清理）。</summary>
-    public static bool EnsureConfigForEdit(ScriptInstance script)
+    /// <summary>编辑配置会话：ConfigPath 不存在且数据化插件提供默认配置模板目录（config-template/）时整体复制到配置位置（用户按需修改）；
+    /// 返回复制生成的文件清单（相对 configPath 父目录；空 = 未生成模板，cancel 时无需清理）。</summary>
+    public static List<string> EnsureConfigForEdit(ScriptInstance script)
     {
         if (File.Exists(script.ConfigPath))
         {
-            return false;
+            return new List<string>();
         }
         ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
-        if (profile is null || string.IsNullOrWhiteSpace(profile.ConfigTemplate))
+        if (profile is null || string.IsNullOrWhiteSpace(profile.ConfigTemplateDir) || !Directory.Exists(profile.ConfigTemplateDir))
         {
-            return false;
+            return new List<string>();
         }
         // 防御自愈（仅模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
-        // 避免 WriteAllText 对目录写文件报拒绝访问；通用脚本目录型 config 不进入此分支。
+        // 避免复制对目录写文件报拒绝访问；通用脚本目录型 config 不进入此分支。
         if (Directory.Exists(script.ConfigPath))
         {
             try
@@ -231,24 +232,39 @@ internal static class UserConfigManager
             catch (Exception ex)
             {
                 Logger.Warn($"[警告] 编辑配置会话清理残留目录失败（目录可能被占用，请手动检查）：{script.ConfigPath}（{ex.Message}）");
-                return false;
+                return new List<string>();
             }
         }
         try
         {
-            string? dir = Path.GetDirectoryName(script.ConfigPath);
-            if (!string.IsNullOrWhiteSpace(dir))
+            string? targetDir = Path.GetDirectoryName(script.ConfigPath);
+            if (string.IsNullOrWhiteSpace(targetDir))
             {
-                Directory.CreateDirectory(dir);
+                return new List<string>();
             }
-            File.WriteAllText(script.ConfigPath, profile.ConfigTemplate, new UTF8Encoding(false));
-            return true;
+            Directory.CreateDirectory(targetDir);
+            return CopyTemplateFiles(profile.ConfigTemplateDir, targetDir);
         }
         catch (Exception ex)
         {
             Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
-            return false;
+            return new List<string>();
         }
+    }
+
+    /// <summary>递归复制模板目录内容到目标目录（覆盖同名，不删除其他文件）；返回相对目标目录的文件相对路径清单。</summary>
+    private static List<string> CopyTemplateFiles(string sourceDir, string targetDir)
+    {
+        var files = new List<string>();
+        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(sourceDir, file);
+            string dest = Path.Combine(targetDir, rel);
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.Copy(file, dest, overwrite: true);
+            files.Add(rel);
+        }
+        return files;
     }
 
     /// <summary>编辑会话隐藏目录：暂存 config 同目录的其他配置文件（如 BetterGI 自带配置），使编辑目标成为唯一可选配置。</summary>

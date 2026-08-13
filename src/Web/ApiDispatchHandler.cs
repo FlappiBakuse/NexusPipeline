@@ -11,6 +11,14 @@ internal static class ApiDispatchHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
+        // GET /api/dispatch/{runId}：查询运行任务（含已结束，CLI 轮询结果用）；seg[1] 非 script/queue 即视为 runId。
+        if (method == "GET" && seg.Length == 2
+            && !seg[1].Equals("script", StringComparison.OrdinalIgnoreCase)
+            && !seg[1].Equals("queue", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleQueryAsync(context, seg[1]).ConfigureAwait(false);
+            return;
+        }
         if (method != "POST")
         {
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
@@ -55,6 +63,36 @@ internal static class ApiDispatchHandler
         {
             await HttpHelper.WriteJsonAsync(context, new { ok = false, error = ex.Message }, 400).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>查询运行任务（含已结束）：返回状态快照与完整记录列表；不存在返回 404。</summary>
+    private static async Task HandleQueryAsync(HttpListenerContext context, string runId)
+    {
+        RunningExecution? exec = RuntimeContext.Instance.Center.FindAny(runId);
+        if (exec is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = $"未找到运行任务：{runId}" }, 404).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, new
+        {
+            exec.Id,
+            exec.Kind,
+            exec.TargetId,
+            exec.TargetName,
+            exec.Mode,
+            exec.Status,
+            exec.StartedAt,
+            exec.FinishedAt,
+            exec.TotalTasks,
+            exec.DoneTasks,
+            exec.CurrentScriptName,
+            exec.CurrentStatus,
+            exec.CurrentAttempt,
+            exec.CurrentMaxAttempts,
+            logTail = exec.LogTail(60),
+            records = exec.Records,
+        }).ConfigureAwait(false);
     }
 
     [ApiRoute("cancel")]

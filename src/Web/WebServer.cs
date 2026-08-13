@@ -175,7 +175,15 @@ internal sealed class WebServer : IDisposable
                 return;
             }
             string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-            HttpHelper.ServeFile(context, filePath);
+            // 静态文件路径包含校验（v0.6.3+，纵深防御）：HttpListener 已规范化拒绝 .. 段，此处兜底防止路径逃逸出 wwwroot。
+            string fullPath = Path.GetFullPath(filePath);
+            string rootFull = Path.GetFullPath(AppPaths.WwwRootDir).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
+            if (!fullPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            HttpHelper.ServeFile(context, fullPath);
         }
         catch (Exception ex)
         {

@@ -1,8 +1,9 @@
 import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
+import { systemActionCard } from "../core/forms.js";
 import { esc } from "../core/format.js";
 import { isCurrent, schedule, state } from "../core/state.js";
-import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast } from "../core/ui.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>当前没有正在运行的任务</strong>选择脚本或队列后，可以在这里查看实时状态。</div>';
@@ -29,6 +30,13 @@ function updateRunning(status) {
   $$(".run-log", panel).forEach(log => { log.scrollTop = log.scrollHeight; });
 }
 
+function updateSystemAction(status) {
+  const area = $("#system-action-area");
+  if (!area) return;
+  area.innerHTML = systemActionCard(status.systemAction);
+  startSystemActionCountdown();
+}
+
 export async function pageDispatch(token) {
   if (!isCurrent("dispatch", token)) return;
   navActive("dispatch"); setTopbarTitle("调度中心");
@@ -38,18 +46,20 @@ export async function pageDispatch(token) {
   if (!isCurrent("dispatch", token)) return;
   state.scripts = scripts; state.queues = queues;
   render(`<div class="page-head"><div><div class="eyebrow">RUN CONTROL</div><h2>调度中心</h2><p class="page-kicker">手动启动任务，观察实时输出并及时取消运行。</p></div></div>
+    <div id="system-action-area"></div>
     <section class="card" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div>${runningMarkup(status.running || [])}</section>
     <div class="dispatch-cards">
     <section class="card"><div class="section-heading"><h3>手动执行脚本实例</h3><span class="muted">启用用户将自动依次运行</span></div><div class="form-grid dispatch-controls dispatch-script-controls"><div><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${script.id}">${esc(script.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-script">执行</button></div></div></section>
     <section class="card"><div class="section-heading"><h3>手动执行调度队列</h3><span class="muted">按队列内顺序运行</span></div><div class="form-grid dispatch-controls dispatch-queue-controls"><div><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${queue.id}">${esc(queue.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-queue">执行</button></div></div></section>
     </div>`);
   applyProgress();
+  updateSystemAction(status);
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }
 
 async function refreshDispatch(token) {
   if (!isCurrent("dispatch", token)) return;
-  try { const status = await api("GET", "/api/status"); if (isCurrent("dispatch", token)) updateRunning(status); }
+  try { const status = await api("GET", "/api/status"); if (isCurrent("dispatch", token)) { updateRunning(status); updateSystemAction(status); } }
   catch (error) { if (isCurrent("dispatch", token)) toast("状态更新失败：" + error.message, "error"); }
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }
@@ -73,8 +83,22 @@ export async function cancelRun(runId) {
   catch (error) { toast(error.message, "error"); }
 }
 
+/** 取消完成操作倒计时（v0.6.3+）：成功提示并立即重新拉取状态刷新卡片。 */
+export async function cancelSystemAction() {
+  const verb = document.querySelector('[data-testid="system-action-card"]')?.dataset.actionVerb || "执行";
+  try {
+    await api("POST", "/api/system-action/cancel");
+    toast(`已取消${verb}`);
+    const status = await (await api("GET", "/api/status")).json();
+    if (isCurrent("dispatch", state.routeToken)) { updateRunning(status); updateSystemAction(status); }
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 export const actions = {
   "dispatch-script": () => dispatchScript(),
   "dispatch-queue": () => dispatchQueue(),
   "cancel-run": target => cancelRun(target.dataset.id),
+  "cancel-system-action": () => cancelSystemAction(),
 };

@@ -19,3 +19,14 @@ export function scrollField(id, label, value, placeholder = "") {
 export function selectField(id, label, value, options, extra = "") {
   return `<div><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${v}" ${v === value ? "selected" : ""}>${t}</option>`; }).join("")}</select></div>`;
 }
+
+/** 完成操作倒计时卡片（v0.6.3+）：队列全部完成后 60 秒倒计时窗口，可取消；无待执行操作返回空串。 */
+export function systemActionCard(action) {
+  if (!action) return "";
+  const verb = action.action === "sleep" ? "休眠" : action.action === "reboot" ? "重启" : "关机";
+  return `<section class="card system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${verb}">
+    <div class="section-heading"><h3>完成操作倒计时</h3><span class="muted">队列已完成，等待执行系统操作</span></div>
+    <p class="countdown-text">调度队列「${esc(action.queueName || "")}」已完成，<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
+    <div class="qk-row"><button type="button" data-action="cancel-system-action">取消${verb}</button></div>
+  </section>`;
+}

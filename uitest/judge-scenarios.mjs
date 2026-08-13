@@ -381,16 +381,13 @@ async function testScenarioC() {
 /* ---------------- MaaEnd 专项判断脚本场景（v0.6.1） ---------------- */
 
 /**
- * MaaEnd 默认判断脚本：从 extensions/MaaEndAdapter/MaaEndAdapter.cs 提取 DefaultJudgeScript raw string
- * （统一剥离 C# raw string 的公共缩进），保证测试用的即发布代码。
+ * MaaEnd 默认判断脚本：从数据化插件目录 plugins/maaend/data/judge.js 读取
+ * （v0.6.3 起判断脚本为独立文件，保证测试用的即发布代码）。
  */
 function maaendJudgeScript() {
-  const src = fs.readFileSync(path.join(projectRoot, "extensions", "MaaEndAdapter", "MaaEndAdapter.cs"), "utf8");
-  const m = src.match(/private const string DefaultJudgeScript = """\r?\n([\s\S]*?)\r?\n\s*""";/);
-  if (!m) throw new Error("无法从 MaaEndAdapter.cs 提取 DefaultJudgeScript");
-  const lines = m[1].split(/\r?\n/);
-  const indent = lines[0].match(/^\s*/)[0].length;
-  return lines.map(l => l.slice(indent)).join("\n");
+  const file = path.join(projectRoot, "plugins", "maaend", "data", "judge.js");
+  if (!fs.existsSync(file)) throw new Error("无法读取 plugins/maaend/data/judge.js");
+  return fs.readFileSync(file, "utf8");
 }
 
 /**

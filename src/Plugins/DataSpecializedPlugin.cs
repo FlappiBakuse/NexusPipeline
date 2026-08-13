@@ -1,0 +1,270 @@
+using System.Text.Json.Nodes;
+using NexusPipeline.Utilities;
+
+namespace NexusPipeline.Plugins;
+
+/// <summary>
+/// 数据化专项插件（v0.6.3+）：纯目录形态 plugins/&lt;名称&gt;/——
+/// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）、
+/// 可选 data/config-template/（默认配置模板目录，编辑会话生成用）。
+/// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
+/// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）。
+/// </summary>
+internal sealed class DataSpecializedPlugin
+{
+    public string Name { get; private set; } = "";
+
+    public string DisplayName { get; private set; } = "";
+
+    public string GameName { get; private set; } = "";
+
+    public string Description { get; private set; } = "";
+
+    public string Version { get; private set; } = "";
+
+    public bool IsBuiltIn => false;
+
+    private string _pluginDir = "";
+
+    private string _resolvePath = "";
+
+    private string _judgeScriptPath = "";
+
+    private string? _configTemplateDir;
+
+    private string? _resolveText;
+
+    private string? _judgeScript;
+
+    private readonly object _sync = new();
+
+    /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
+    public static DataSpecializedPlugin? Load(string pluginDir)
+    {
+        string metaPath = Path.Combine(pluginDir, "plugin.json");
+        if (!File.Exists(metaPath))
+        {
+            return null;
+        }
+        try
+        {
+            JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
+            var plugin = new DataSpecializedPlugin
+            {
+                Name = node?["name"]?.ToString() ?? "",
+                DisplayName = node?["displayName"]?.ToString() ?? "",
+                GameName = node?["gameName"]?.ToString() ?? "",
+                Description = node?["description"]?.ToString() ?? "",
+                Version = node?["version"]?.ToString() ?? "",
+                _pluginDir = pluginDir,
+                _resolvePath = node?["resolve"]?.ToString() ?? "",
+                _judgeScriptPath = node?["judgeScript"]?.ToString() ?? "",
+            };
+            string? templateRef = node?["configTemplate"]?.ToString();
+            if (string.IsNullOrWhiteSpace(plugin.Name) || string.IsNullOrWhiteSpace(plugin._resolvePath) || string.IsNullOrWhiteSpace(plugin._judgeScriptPath))
+            {
+                return null;
+            }
+            plugin._resolvePath = Path.Combine(pluginDir, plugin._resolvePath);
+            plugin._judgeScriptPath = Path.Combine(pluginDir, plugin._judgeScriptPath);
+            if (!File.Exists(plugin._resolvePath) || !File.Exists(plugin._judgeScriptPath))
+            {
+                return null;
+            }
+            if (!string.IsNullOrWhiteSpace(templateRef))
+            {
+                string templateDir = Path.Combine(pluginDir, templateRef);
+                if (Directory.Exists(templateDir))
+                {
+                    plugin._configTemplateDir = templateDir;
+                }
+            }
+            return plugin;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件] 加载数据化插件 {Path.GetFileName(pluginDir)} 失败：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>判断脚本语言：data/judge.{js|py} 按扩展名（默认 javascript）。</summary>
+    public string JudgeScriptLanguage
+    {
+        get
+        {
+            string ext = Path.GetExtension(_judgeScriptPath).ToLowerInvariant();
+            return ext == ".py" ? "python" : "javascript";
+        }
+    }
+
+    /// <summary>默认配置模板目录（不存在/未配置为 null）。</summary>
+    public string? ConfigTemplateDir => _configTemplateDir;
+
+    /// <summary>按脚本根目录推导配置快照：require 全部满足才成功；解析失败返回 null。</summary>
+    public ScriptProfile? Resolve(string rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            return null;
+        }
+        string resolveText;
+        lock (_sync)
+        {
+            _resolveText ??= File.ReadAllText(_resolvePath);
+            resolveText = _resolveText;
+        }
+        JsonNode? resolve;
+        try
+        {
+            resolve = JsonNode.Parse(resolveText);
+        }
+        catch
+        {
+            return null;
+        }
+        var bindings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (resolve?["require"] is JsonArray requireList)
+        {
+            foreach (JsonNode? item in requireList)
+            {
+                string file = item?["file"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(file))
+                {
+                    return null;
+                }
+                string found = FindFile(rootPath, file, item?["searchUpward"]?.GetValue<bool>() == true);
+                if (found is null)
+                {
+                    return null;
+                }
+                string? varName = item?["var"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(varName))
+                {
+                    bindings[varName] = found;
+                }
+            }
+        }
+        JsonNode? paths = resolve?["paths"];
+        if (paths is null)
+        {
+            return null;
+        }
+        var profile = new ScriptProfile
+        {
+            MainExe = ResolvePath(paths["mainExe"]?.ToString(), rootPath, bindings),
+            Args = ResolveArgs(paths["args"]?.ToString(), rootPath, bindings),
+            ConfigPath = ResolvePath(paths["configPath"]?.ToString(), rootPath, bindings),
+            LogPath = ResolvePath(paths["logPath"]?.ToString(), rootPath, bindings),
+            JudgeScriptLanguage = JudgeScriptLanguage,
+        };
+        if (string.IsNullOrWhiteSpace(profile.MainExe) || !File.Exists(profile.MainExe))
+        {
+            return null;
+        }
+        profile.JudgeScript = ReadJudgeScript();
+        if (!string.IsNullOrWhiteSpace(_configTemplateDir))
+        {
+            profile.ConfigTemplateDir = _configTemplateDir;
+        }
+        return profile;
+    }
+
+    private string ReadJudgeScript()
+    {
+        lock (_sync)
+        {
+            if (_judgeScript is null)
+            {
+                try
+                {
+                    _judgeScript = File.ReadAllText(_judgeScriptPath);
+                }
+                catch
+                {
+                    _judgeScript = "";
+                }
+            }
+            return _judgeScript;
+        }
+    }
+
+    /// <summary>在根目录查找文件；searchUpward 时逐级向上（最多 4 层）。</summary>
+    private static string? FindFile(string rootPath, string file, bool searchUpward)
+    {
+        string candidate = Path.Combine(rootPath, file);
+        if (File.Exists(candidate))
+        {
+            return candidate;
+        }
+        if (!searchUpward)
+        {
+            return null;
+        }
+        string? dir = Directory.GetParent(rootPath)?.FullName;
+        for (int depth = 0; dir is not null && depth < 4; depth++)
+        {
+            candidate = Path.Combine(dir, file);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+        return null;
+    }
+
+    /// <summary>参数模板解析（args 为参数文本，非路径）：含占位符时按路径语义解析（{rel:var} 相对路径），否则原样返回。</summary>
+    private static string ResolveArgs(string? template, string rootPath, Dictionary<string, string> bindings)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return "";
+        }
+        foreach ((string key, string value) in bindings)
+        {
+            string rel = "{rel:" + key + "}";
+            if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
+            {
+                return MakeRelativePath(rootPath, value);
+            }
+            string abs = "{" + key + "}";
+            if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+        return template;
+    }
+
+    /// <summary>路径模板解析：{var} = 绑定文件绝对路径；{rel:var} = 相对 rootPath 的相对路径；其余按相对 rootPath 拼接。</summary>
+    private static string ResolvePath(string? template, string rootPath, Dictionary<string, string> bindings)
+    {
+        if (string.IsNullOrWhiteSpace(template))
+        {
+            return "";
+        }
+        foreach ((string key, string value) in bindings)
+        {
+            string abs = "{" + key + "}";
+            string rel = "{rel:" + key + "}";
+            if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
+            {
+                return MakeRelativePath(rootPath, value);
+            }
+            if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+        return Path.Combine(rootPath, template.Trim());
+    }
+
+    /// <summary>计算相对路径（toFile 相对 fromDir）；同目录结果以 .\ 开头（运行时启动目标语义）。</summary>
+    private static string MakeRelativePath(string fromDir, string toFile)
+    {
+        string from = fromDir.EndsWith("\\", StringComparison.Ordinal) ? fromDir : fromDir + "\\";
+        string rel = Uri.UnescapeDataString(new Uri(from).MakeRelativeUri(new Uri(toFile)).ToString()).Replace('/', '\\');
+        return rel.StartsWith(".\\", StringComparison.Ordinal) || rel.StartsWith("..\\", StringComparison.Ordinal) ? rel : ".\\" + rel;
+    }
+}

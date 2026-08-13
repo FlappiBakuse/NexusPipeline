@@ -6,13 +6,15 @@ import { modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let historyPage = 1;
+let historyDays = 7;
 const HISTORY_PAGE_SIZE = 20;
+const HISTORY_DAY_OPTIONS = [7, 30, 180];
 
 export async function pageHistory(token) {
   if (!isCurrent("history", token)) return;
   navActive("history"); setTopbarTitle("历史记录");
   let data, scripts, queues;
-  try { [data, scripts, queues] = await Promise.all([api("GET", `/api/history?days=7&offset=${(historyPage - 1) * HISTORY_PAGE_SIZE}&limit=${HISTORY_PAGE_SIZE}`), api("GET", "/api/scripts"), api("GET", "/api/queues")]); }
+  try { [data, scripts, queues] = await Promise.all([api("GET", `/api/history?days=${historyDays}&offset=${(historyPage - 1) * HISTORY_PAGE_SIZE}&limit=${HISTORY_PAGE_SIZE}`), api("GET", "/api/scripts"), api("GET", "/api/queues")]); }
   catch (error) { render(`<div class="empty"><strong>加载历史记录失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("history", token)) return;
   const records = data.records || data;
@@ -20,8 +22,17 @@ export async function pageHistory(token) {
   const scriptName = id => scripts.find(script => script.id === id)?.name || "(已删除)";
   const queueName = id => queues.find(queue => queue.id === id)?.name || "";
   const content = records.length ? `<section class="card"><div class="table-scroll"><table class="data-table"><thead><tr><th>时间</th><th>脚本</th><th>队列</th><th>模式</th><th>结果</th><th>操作</th></tr></thead><tbody>${records.map(record => `<tr><td>${esc(fmtTime(record.startTime))}</td><td>${esc(scriptName(record.scriptInstanceId))}</td><td>${esc(queueName(record.queueId)) || "-"}</td><td>${record.mode === "auto" ? "自动" : "手动"}</td><td>${statusBadge(finalStatusOf(record))}</td><td class="ops"><button class="sm" type="button" data-action="history-detail" data-id="${record.id}">查看详情</button></td></tr>`).join("")}</tbody></table></div>${pagerMarkup("history", historyPage, HISTORY_PAGE_SIZE, total)}</section>` : '<div class="empty"><strong>暂无历史记录</strong>运行脚本或调度队列后在此查看。</div>';
-  render(`<div class="page-head"><div><div class="eyebrow">RUN ARCHIVE</div><h2>历史记录（最近 7 天，共 ${total} 条）</h2><p class="page-kicker">按运行时间查看结果、重试过程和脚本输出。</p></div></div>${content}`);
+  render(`<div class="page-head"><div><div class="eyebrow">RUN ARCHIVE</div><h2>历史记录（最近 ${historyDays} 天，共 ${total} 条）</h2><p class="page-kicker">按运行时间查看结果、重试过程和脚本输出。</p></div><div class="history-days-box"><label class="field-label" for="history-days">天数范围</label><select id="history-days" data-action="history-days" data-testid="history-days">${HISTORY_DAY_OPTIONS.map(days => `<option value="${days}" ${days === historyDays ? "selected" : ""}>${days} 天</option>`).join("")}</select></div></div>${content}`);
   registerPager("history", page => { historyPage = page; pageHistory(state.routeToken); });
+}
+
+/** 历史天数范围切换（v0.6.3+）：重置分页并重新拉取。 */
+export function historyDaysChange(target) {
+  const days = Number(target.value) || 7;
+  if (days === historyDays) return;
+  historyDays = days;
+  historyPage = 1;
+  pageHistory(state.routeToken);
 }
 
 export async function historyDetail(id) {
@@ -41,4 +52,5 @@ export async function historyDetail(id) {
 
 export const actions = {
   "history-detail": target => historyDetail(target.dataset.id),
+  "history-days": target => historyDaysChange(target),
 };

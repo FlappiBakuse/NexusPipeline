@@ -11,20 +11,20 @@
 
 - **脚本实例**：每个实例包含
   - 脚本配置：名称、脚本根目录、主程序路径、自启动参数、配置文件路径/文件夹、日志路径（支持日期占位符与通配符，如 `{YYYY-MM-DD}.log`、`{YYYY-MM-DD-*}.log`）；
-  - 专用脚本实例：由已启用的专用插件（如 BetterGI）接管主程序/参数/配置/日志与完成标志，新建与编辑时自动适配，无需手动填写；卡片徽章显示插件提供的中文游戏名（如「原神专项」「崩坏：星穹铁道专项」「绝区零专项」「明日方舟：终末地专项」）；
+  - 专用脚本实例：由已启用的专用插件（如 BetterGI）接管主程序/参数/配置/日志与判断脚本，新建与编辑时自动适配，无需手动填写；卡片徽章显示插件提供的中文游戏名（如「原神专项」「崩坏：星穹铁道专项」「绝区零专项」「明日方舟：终末地专项」）；
   - 用户管理：多账号配置独立储存与自动交换（运行前切换、运行后还原），可临时进入「编辑配置」修改某个用户的配置；
   - 游戏配置：运行前是否启动游戏（PC 客户端）、游戏路径、启动参数、启动后等待秒数（默认 30）；游戏配置卡在弹窗内常驻显示（不与复选框绑定），勾选「运行脚本前启动游戏」时游戏路径必填且必须为可执行文件；「运行结束后强制关闭游戏」为**独立开关**（与是否启动游戏解绑）；**任务失败时无条件强制结束游戏进程**（不依赖开关）；
   - 路径合规：保存脚本时校验脚本根目录/主程序/配置路径必须存在（主程序需可执行，日志路径仅校验格式），否则无法保存；脚本图标自动取主程序最高分辨率（含 256×256，无图标资源时回退系统关联图标）；
   - 运行设置：最大尝试次数（含首次，默认 3）、日志无更新超时（默认 5 分钟，脚本启动后未产生任何日志条目同样按此超时失败）、运行总时间超时（默认 120 分钟，按整个运行含全部重试计时）；
   - 自定义完成标志：成功/失败关键字（每行一组，组内逗号分隔为 AND、换行之间为 OR；命中失败关键字立即终止本次尝试，命中成功关键字等待脚本退出判定成功）；或使用判断脚本（JavaScript 内置引擎 / Python 系统解释器，日志新增/阻塞周期/进程退出时触发，输入为脚本实例字段+用户+config（只读）与 script（可读写）目录文件清单+**本次尝试日志段**的 JSON（上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 logTruncated=true），脚本输出 `{"status":"success|failed","reason":"原因","notifyText":"可选","replaceConfigs":["相对script目录路径"]}` 判定结果，无输出视为继续运行）；判断脚本优先于关键字；脚本返回 `replaceConfigs` 可在失败后替换配置文件并自动重试（运行结束还原），返回的自定义通知文本可替换通知正文；
-  - 完成标志：专用插件判断脚本由插件固化（用户不可编辑，判定完全由插件判断脚本驱动——BetterGI 以「一条龙和配置组任务结束」为结束关键字、失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 以「游戏终止：StarRail」为结束关键字、扫描任务级失败提示行；ZenlessZoneZeroOneDragon 以「关闭游戏成功/暂停运行」为结束、提取「指令[ X ] 执行失败」；MaaEnd 以 MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾、失败任务自动改写配置选择性重试）；通用脚本可配置自定义完成标志（关键字或判断脚本），均未配置时按「进程自行退出」判定成功。
+  - 完成判定：专用插件判断脚本由插件固化（用户不可编辑，判定完全由插件判断脚本驱动——BetterGI 以「一条龙和配置组任务结束」为结束关键字、失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 以「游戏终止：StarRail」为结束关键字、扫描任务级失败提示行；ZenlessZoneZeroOneDragon 以「关闭游戏成功/暂停运行」为结束、提取「指令[ X ] 执行失败」；MaaEnd 以 MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾、失败任务自动改写配置选择性重试）；通用脚本可配置成功/失败关键字或判断脚本，均未配置时按「进程自行退出」判定成功。
 - **调度队列**：链式运行脚本实例
   - 自动运行方式：不运行（默认，仅手动调度）/ 启动时运行 / 定时运行；
-  - 完成操作：无操作 / 退出软件 / 休眠 / 重启 / 关机（系统操作带 60 秒倒计时，可 `shutdown /a` 取消）；
+  - 完成操作：无操作 / 退出软件 / 休眠 / 重启 / 关机（休眠/重启/关机执行前 Web 界面显示 60 秒倒计时卡片，可点击取消；退出软件立即执行）；
   - 定时列表：多条，每条可设置启用状态、一周七天多选、执行时间（hh:mm）；
   - 任务列表：按序号先后执行，引用已创建的脚本实例。
 - **调度中心**：手动执行任意脚本实例（启用用户将自动依次运行）或调度队列，可取消。
-- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon、MaaEnd 专用插件：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数，失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；MaaEnd 适配明日方舟：终末地自动化（MXU 客户端），主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（任务运行完成时进程自动退出）、配置目录 `config\`（MXU 首次启动自动生成，无需手动配置）、日志 `debug\{YYYY-MM-DD}-*.log`（前端写入，当天每次启动自增序号）；**Args 禁止使用引号**，引号一律视为参数内容）。`plugins/` 目录下的外部 DLL 插件（实现 `IPlugin` / `ISpecializedScriptPlugin` 接口）会自动加载，外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
+- **插件设置**：插件分通用与专用两类——通用插件为程序添加能力（内置「通知推送」，默认启用，只可禁用不可删除）；专用插件接管专项脚本实例配置（发布自带 BetterGI、March7thAssistant、ZenlessZoneZeroOneDragon、MaaEnd 专用插件，v0.6.3 起为**数据化目录形态**：BetterGI 根据脚本根目录自动推导主程序、配置、日志路径与自启动参数，失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 处理管理端/执行端分离——`March7th Launcher.exe` 用于编辑配置、`March7th Assistant.exe` 作为运行时启动目标，由「脚本自启动参数」的显式相对路径（`.\` / `..\`）指定，含空格无需引号，追加参数用 `?` 分隔，如 `..\March7th Assistant.exe?-x`；ZenlessZoneZeroOneDragon 适配绝区零·青龙脚本，主程序 `OneDragon-Launcher.exe`、启动参数 `-o -c`、日志 `.log\log.txt`；MaaEnd 适配明日方舟：终末地自动化（MXU 客户端），主程序 `MaaEnd.exe`、启动参数 `--autostart --quit-after-run`（任务运行完成时进程自动退出）、配置目录 `config\`（MXU 首次启动自动生成，无需手动配置）、日志 `debug\{YYYY-MM-DD}-*.log`（前端写入，当天每次启动自增序号）；**Args 禁止使用引号**，引号一律视为参数内容）。每个插件 = `plugins/` 下「插件名」文件夹（`plugin.json` 根文件 + `data/` 推导配置与判断脚本），可整体复制自定义、可删可替换，无需编译；外部插件默认启用。仪表盘以 1/4 小卡片展示各插件状态；「通知推送」可进入插件配置二级页（Webhook / SMTP 开关、启用通知的脚本与队列统计）。
 - **仪表盘**：脚本实例数、调度队列数、下一调度队列（倒计时）、当前版本；正在运行的任务；插件卡片。
 - **历史记录**：每个脚本实例/调度队列的完整运行记录（每次尝试的原因、按尝试分批的脚本日志），按保留天数清理（默认 7 天，上限 180 天，每天自动清理）。
 - **设置**：开机自启动、轻量运行模式（不起网页服务，纯命令行）、历史保留天数、日志级别（DEBUG/INFO/WARN/ERROR/FATAL，控制台按级别着色，即时生效）、Web 端口、远程访问（可选开启 + 访问令牌）。通知渠道（Webhook / SMTP，加密存储）在插件配置页管理。
@@ -54,12 +54,14 @@ nexus-pipeline.exe                    # 常驻服务模式（托盘 + 网页 + �
 nexus-pipeline.exe manage             # 交互式管理菜单（命令行操作）
 nexus-pipeline.exe status             # 查看状态
 nexus-pipeline.exe web                # 仅启动网页界面并打开浏览器
-nexus-pipeline.exe run-script <ID或名称> [-Auto|-Manual] [-user <用户名>]   # 手动执行脚本并等待结果（-user 指定使用哪个用户的配置）
-nexus-pipeline.exe run-queue  <ID或名称> [-Auto|-Manual]   # 手动执行队列并等待结果
-nexus-pipeline.exe cancel <运行ID>    # 取消正在运行的脚本或队列
+nexus-pipeline.exe run-script <ID或名称> [-Auto|-Manual] [-user <用户名>]   # 手动执行脚本并等待结果（需常驻服务运行，未运行时会自动拉起；-user 指定使用哪个用户的配置）
+nexus-pipeline.exe run-queue  <ID或名称> [-Auto|-Manual]   # 手动执行队列并等待结果（需常驻服务运行，未运行时会自动拉起）
+nexus-pipeline.exe cancel <运行ID>    # 取消正在运行的脚本或队列（需常驻服务运行，未运行时会自动拉起）
 nexus-pipeline.exe register           # 注册开机自启动（计划任务，登录时以最高权限运行）
 nexus-pipeline.exe unregister         # 取消开机自启动
 ```
+
+> v0.6.3 起 `run-script` / `run-queue` / `cancel` 经常驻服务的 HTTP 接口提交并轮询结果（服务未运行时自动拉起，任务完成后服务保持常驻）；服务处于轻量运行模式（无 Web 接口）时这三个命令无法使用。
 
 ## 脚本运行流程
 
@@ -68,20 +70,20 @@ nexus-pipeline.exe unregister         # 取消开机自启动
 3. 校验并启动脚本主程序（工作目录 = 脚本根目录，参数按引号规则拆分），**不弹出新窗口**，控制台输出重定向捕获用于运行中实时显示；若检测到脚本已在运行则直接监控其日志，不重复启动。
 4. 持续监控日志（按用户填写的日志路径格式严格匹配，忽略运行前已有内容；脚本重建/截断日志时自动重新从头读取——v0.5.2 起按文件身份检测文件替换，日志被 move 归档后重建同样可靠）：
    - 脚本启动后最多等待"日志无更新超时"仍无任何日志条目 → 本次尝试失败，重试；
-   - 出现完成标志（专用插件提供） → 判定成功，等待脚本自行退出（最多 60 秒，超时则终止进程）；
+   - 出现成功/失败关键字（成功命中等待脚本自行退出，最多 60 秒超时则终止进程；失败命中立即终止本次尝试）或判断脚本判定成功 → 判定成功；
    - 日志超过"无更新超时"仍无新内容 → 本次尝试失败，重试；
    - 运行总时间超时（含全部重试）→ 直接判定失败（不再重试）；
    - 判断脚本模式：每次日志新增批次触发一次、日志阻塞 30 秒周期触发一次、进程退出且无判定时最终触发一次，输入为本次尝试日志段；
-   - 进程退出：日志有完成标志 → 成功；无完成标志且配置了完成标志 → 失败；未配置完成标志（通用脚本）或无日志监控 → 按进程退出判定成功。
+   - 进程退出：判定已命中成功关键字/判断脚本成功 → 成功；配置了判定但未命中 → 失败；未配置任何判定（通用脚本）或无日志监控 → 按进程退出判定成功。
 5. 每次尝试结束清理进程树（`taskkill /T /F`，无论成败强制结束本次启动的脚本进程），任务失败时无条件强制结束游戏进程，成功时按「运行结束后强制关闭游戏」设置。
 6. 未达最大尝试次数 → 自动重试（判断脚本可返回 `replaceConfigs` 替换配置后重试）；队列执行完一项进入下一项。
-7. 队列全部跑完 → 执行完成操作（退出/休眠/重启/关机）。
+7. 队列全部跑完 → 执行完成操作（退出/休眠/重启/关机；休眠/重启/关机前 Web 界面显示 60 秒倒计时卡片可取消）。
 
 ## 通知规则
 
 - **脚本实例级**：实例开启通知后，在最终运行阶段（一次成功 / 多次尝试后成功 / 多次失败后）发送该实例的运行状态；
 - **调度队列级**：队列开启通知后，忽略实例级设置，统一在队列结束后汇总发送所有脚本状态；
-- 渠道：Webhook（飞书/钉钉/企业微信/Slack/Discord/自定义模板）与 SMTP 邮件**可同时启用**（独立开关，并行发送），外部插件实现 `INotifyChannel` 亦可并存；密钥以 DPAPI 加密（`enc:` 前缀）保存在 `settings.json`，绑定当前电脑和用户。
+- 渠道：Webhook（飞书/钉钉/企业微信/Slack/Discord/自定义模板）与 SMTP 邮件**可同时启用**（独立开关，并行发送）；密钥以 DPAPI 加密（`enc:` 前缀）保存在 `settings.json`，绑定当前电脑和用户。
 
 ## 编译与部署
 
@@ -104,11 +106,11 @@ release/
 
 - 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；
 - **时间加速（v0.6.2+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=60` 加速档（宿主等待按比例缩放：1 分钟 stall → 1 秒，三套测试合计从 20+ 分钟降到约 5 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
-- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（50 用例，剔除响应式外壳外观用例）；发布前本地跑全量（51 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（52 用例，剔除响应式外壳外观用例）；发布前本地跑全量（53 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\judge-scenarios.mjs`；
 - 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\chaos-queue.mjs`；
-- e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 适配与完成标志固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
+- e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、完成操作倒计时卡片可取消（DRYRUN 抑制真实系统操作）、CLI run-script 经 HTTP 提交与自动拉起常驻服务、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 适配与判断脚本固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
 
 ## 文件结构
 
@@ -117,13 +119,12 @@ release/
 | `src/` | C# 源代码（`NexusPipeline.csproj`；核心域按子域分目录：`Models/`、`Services/`、`Persistence/`、`Utilities/`，外加 `Web/`、`Cli/`、`Plugins/`；入口 `Program.cs` 与组合根 `RuntimeContext.cs`） |
 | `docs/` | 项目文档（`DESIGN.md` 核心设计与运行流程、`ARCHITECTURE.md` 模块导航、`DEVELOPMENT.md` 开发与提交规范） |
 | `CHANGELOG.md` | 版本历史 |
-| `extensions/` | 随发布附带的专用插件工程（外部插件开发指南见 `extensions/README.md`） |
+| `plugins/` | 专项插件目录（数据化形态：每个插件一个文件夹，`plugin.json` 根文件 + `data/` 推导配置/判断脚本/默认配置模板；随发布自带 BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd，可整体复制自定义、可删可替换；开发指南见 `plugins/README.md`） |
 | `nexus-pipeline.exe` | 主程序（服务 / manage / status / web / run-script / run-queue / cancel / register / unregister） |
 | `config/settings.json` | 设置（含加密通知密钥） |
 | `config/scripts.json` | 脚本实例列表 |
 | `config/queues.json` | 调度队列列表 |
 | `wwwroot/` | 网页管理界面（静态文件） |
-| `plugins/` | 插件目录（发布自带 BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 专用插件 DLL，可删可替换） |
 | `history/YYYY-MM-DD/HH-mm-ss.json` | 每次脚本运行的完成状态（启动/结束时间、手动/自动、重试次数、最终状态：成功/部分失败/失败/已取消、每次尝试详情，纯状态不含日志内容） |
 | `history/YYYY-MM-DD/HH-mm-ss-{n}.log` | 第 n 次尝试的脚本日志全文（按尝试分批标号，与 `.json` 成组；旧版 `.console.log`/`runs-*.jsonl` 已废弃） |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器运行日志（含级别标记：DEBUG/INFO/WARN/ERROR/FATAL；审计行 `[审计] 来源 \| 操作（详情）`，来源分 web/manage/cli/scheduler/system） |

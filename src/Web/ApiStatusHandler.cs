@@ -22,6 +22,7 @@ internal static class ApiStatusHandler
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
         var next = RuntimeContext.Instance.Scheduler.NextTrigger();
+        DispatchCenter.PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
         return new
         {
             time = DateTime.Now,
@@ -31,6 +32,7 @@ internal static class ApiStatusHandler
             scriptCount = RuntimeContext.Instance.Scripts.Count,
             queueCount = RuntimeContext.Instance.Queues.Count,
             nextSchedule = next is null ? null : new { queueName = next.Value.QueueName, time = next.Value.TriggerTime },
+            systemAction = pending is null ? null : new { action = pending.Action, queueName = pending.QueueName, deadline = pending.Deadline },
             notifyStats = new
             {
                 enabledScripts = RuntimeContext.Instance.Scripts.Count(script => script.NotifyEnabled),
@@ -54,15 +56,15 @@ internal static class ApiStatusHandler
                 exec.CurrentMaxAttempts,
                 logTail = exec.LogTail(60),
             }),
-            plugins = RuntimeContext.Instance.Plugins.Plugins.Select(plugin => new
+            plugins = RuntimeContext.Instance.Plugins.PluginSummaries.Select(plugin => new
             {
                 plugin.Name,
                 plugin.DisplayName,
-                gameName = plugin is ISpecializedScriptPlugin specialized ? specialized.GameName : "",
+                gameName = plugin.GameName,
                 plugin.Description,
                 plugin.Version,
                 plugin.IsBuiltIn,
-                kind = plugin is ISpecializedScriptPlugin ? "specialized" : "general",
+                kind = plugin.Kind,
                 enabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),
         };

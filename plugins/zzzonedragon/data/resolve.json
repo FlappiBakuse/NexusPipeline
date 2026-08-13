@@ -1,0 +1,11 @@
+{
+  "require": [
+    { "var": "main", "file": "OneDragon-Launcher.exe" }
+  ],
+  "paths": {
+    "mainExe": "{main}",
+    "args": "-o -c",
+    "configPath": "config",
+    "logPath": ".log/log.txt"
+  }
+}

@@ -97,6 +97,26 @@ export function startCountdown(targetId, timeValue) {
   registerInterval(setInterval(update, 1000));
 }
 
+let systemActionTimer = null;
+
+/** 完成操作倒计时（v0.6.3+）：每秒更新卡片剩余秒数（「N 秒后将{动作}」，归零显示「即将执行」）。
+ *  注册前清理旧定时器（仪表盘每 3 秒重渲染会重复调用，避免累积）；路由切换由 disposePage 统一清理。 */
+export function startSystemActionCountdown() {
+  const card = document.querySelector('[data-testid="system-action-card"]');
+  if (!card) return;
+  const countdown = card.querySelector('[data-testid="system-action-countdown"]');
+  if (!countdown) return;
+  const deadline = new Date(countdown.dataset.deadline || "").getTime();
+  const verb = card.dataset.actionVerb || "执行";
+  if (systemActionTimer !== null) clearInterval(systemActionTimer);
+  const update = () => {
+    const remain = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+    countdown.textContent = remain > 0 ? `${remain} 秒后将${verb}` : `即将执行${verb}`;
+  };
+  update();
+  systemActionTimer = registerInterval(setInterval(update, 1000));
+}
+
 export function setNavOpen(open) {
   document.body.classList.toggle("nav-open", open);
   const sidebar = $("#sidebar");

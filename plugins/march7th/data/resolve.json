@@ -1,0 +1,12 @@
+{
+  "require": [
+    { "var": "launcher", "file": "March7th Launcher.exe" },
+    { "var": "assistant", "file": "March7th Assistant.exe", "searchUpward": true }
+  ],
+  "paths": {
+    "mainExe": "{launcher}",
+    "args": "{rel:assistant}",
+    "configPath": "config.yaml",
+    "logPath": "logs/{YYYY-MM-DD}.log"
+  }
+}

@@ -71,7 +71,23 @@ internal class RunningExecution
 
 internal class DispatchCenter
 {
+    /// <summary>待执行的系统操作（v0.6.3+）：队列全部完成后 Web 界面显示 60 秒倒计时卡片，可取消。</summary>
+    internal sealed class PendingSystemAction
+    {
+        public string Action { get; set; } = "";
+
+        public string QueueName { get; set; } = "";
+
+        public DateTime Deadline { get; set; }
+
+        public CancellationTokenSource Cts { get; set; } = new();
+    }
+
     private readonly List<RunningExecution> _active = new();
+
+    private readonly List<RunningExecution> _finished = new();
+
+    private PendingSystemAction? _pendingSystemAction;
 
     private readonly object _sync = new();
 
@@ -92,6 +108,69 @@ internal class DispatchCenter
         {
             return _active.FirstOrDefault(exec => exec.Id == id);
         }
+    }
+
+    /// <summary>查找运行任务（v0.6.3+）：先查运行中列表，再查已结束列表（CLI 轮询结果用；Find 保持只查运行中）。</summary>
+    public RunningExecution? FindAny(string id)
+    {
+        lock (_sync)
+        {
+            return _active.FirstOrDefault(exec => exec.Id == id)
+                ?? _finished.FirstOrDefault(exec => exec.Id == id);
+        }
+    }
+
+    /// <summary>当前待执行的系统操作（锁内返回拷贝，供 /api/status 展示倒计时卡片）；无则 null。</summary>
+    public PendingSystemAction? CurrentSystemAction
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _pendingSystemAction is null
+                    ? null
+                    : new PendingSystemAction
+                    {
+                        Action = _pendingSystemAction.Action,
+                        QueueName = _pendingSystemAction.QueueName,
+                        Deadline = _pendingSystemAction.Deadline,
+                    };
+            }
+        }
+    }
+
+    /// <summary>取消待执行的系统操作：sleep 取消应用内延迟；reboot/shutdown 执行 shutdown /a 取消 Windows 倒计时。返回是否取消成功。</summary>
+    public bool CancelSystemAction()
+    {
+        PendingSystemAction? pending;
+        lock (_sync)
+        {
+            pending = _pendingSystemAction;
+            if (pending is null)
+            {
+                return false;
+            }
+            _pendingSystemAction = null;
+        }
+        string action = pending.Action;
+        string queueName = pending.QueueName;
+        try
+        {
+            if (action == "sleep")
+            {
+                pending.Cts.Cancel();
+            }
+            else if (action is "reboot" or "shutdown")
+            {
+                SystemActions.CancelShutdown();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 取消系统操作「{action}」失败：{ex.Message}");
+        }
+        Audit.Log(Audit.Web, "取消系统操作", $"{action}（{queueName}）");
+        return true;
     }
 
     public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
@@ -120,7 +199,9 @@ internal class DispatchCenter
             TargetId = script.Id,
             TargetName = script.Name,
             Mode = mode,
-            TotalTasks = Math.Max(1, script.Users.Count(user => user.Enabled)),
+            TotalTasks = string.IsNullOrWhiteSpace(userName)
+                ? Math.Max(1, script.Users.Count(user => user.Enabled))
+                : 1,
             CurrentScriptName = script.Name,
         };
         Register(exec, source);
@@ -216,11 +297,85 @@ internal class DispatchCenter
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");
     }
 
+    /// <summary>运行结束出队：从运行中列表移入已结束列表（CLI 轮询可查询结果；超过 100 条移除最旧）。</summary>
     private void Unregister(RunningExecution exec)
     {
         lock (_sync)
         {
             _active.Remove(exec);
+            _finished.Add(exec);
+            if (_finished.Count > 100)
+            {
+                _finished.RemoveRange(0, _finished.Count - 100);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 登记待执行的系统操作（60 秒倒计时，Web 界面可取消）。
+    /// execute 非空（sleep）→ 延迟 60 秒后台执行（取消静默跳过，执行后清状态）；
+    /// execute 为空（reboot/shutdown，Windows 倒计时权威机制）→ 仅登记 pending，60 秒后清理状态（取消靠 shutdown /a）。
+    /// 倒计时 60 秒为用户可见的真实墙钟，不随 NEXUS_TIME_SCALE 缩放（加速档下保持可观测、可断言）。
+    /// </summary>
+    private void StartPendingSystemAction(string action, string queueName, Action? execute)
+    {
+        var pending = new PendingSystemAction
+        {
+            Action = action,
+            QueueName = queueName,
+            Deadline = DateTime.Now.AddSeconds(60),
+        };
+        lock (_sync)
+        {
+            _pendingSystemAction = pending;
+        }
+        if (execute is not null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(60000, pending.Cts.Token).ConfigureAwait(false);
+                    execute();
+                }
+                catch (OperationCanceledException)
+                {
+                    // 已取消，不执行
+                }
+                finally
+                {
+                    ClearPendingSystemAction(pending);
+                }
+            });
+        }
+        else
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(60000).ConfigureAwait(false);
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    ClearPendingSystemAction(pending);
+                }
+            });
+        }
+    }
+
+    /// <summary>清除待执行系统操作（引用相同才清，避免误清新登记的操作）。</summary>
+    private void ClearPendingSystemAction(PendingSystemAction pending)
+    {
+        lock (_sync)
+        {
+            if (ReferenceEquals(_pendingSystemAction, pending))
+            {
+                _pendingSystemAction = null;
+            }
         }
     }
 
@@ -422,16 +577,22 @@ internal class DispatchCenter
                 switch (queue.CompletionAction)
                 {
                     case "exit":
+                        // 退出软件保持立即执行不变（无倒计时、不可取消）。
                         SystemActions.ExitApp();
                         break;
                     case "sleep":
-                        SystemActions.Hibernate();
+                        // 休眠走应用内延迟：60 秒后执行 Hibernate()，期间 Web 界面可取消（Cts.Cancel 后不执行）。
+                        // 倒计时 60 秒为用户可见的真实墙钟，不随 NEXUS_TIME_SCALE 缩放（加速档下保持可观测、可断言）。
+                        StartPendingSystemAction("sleep", queue.Name, SystemActions.Hibernate);
                         break;
                     case "reboot":
-                        SystemActions.Reboot();
+                        // 重启走 Windows 倒计时（shutdown /r /t 60）：即使宿主崩溃仍会执行，取消靠 shutdown /a；pending 状态供 UI 展示取消路径。
+                        StartPendingSystemAction("reboot", queue.Name, null);
+                        SystemActions.Reboot(60);
                         break;
                     case "shutdown":
-                        SystemActions.Shutdown();
+                        StartPendingSystemAction("shutdown", queue.Name, null);
+                        SystemActions.Shutdown(60);
                         break;
                 }
             }

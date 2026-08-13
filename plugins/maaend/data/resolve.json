@@ -1,0 +1,11 @@
+{
+  "require": [
+    { "var": "main", "file": "MaaEnd.exe" }
+  ],
+  "paths": {
+    "mainExe": "{main}",
+    "args": "--autostart --quit-after-run",
+    "configPath": "config",
+    "logPath": "debug/{YYYY-MM-DD}-*.log"
+  }
+}

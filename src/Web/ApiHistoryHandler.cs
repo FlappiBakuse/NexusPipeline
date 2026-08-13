@@ -72,9 +72,9 @@ internal static class ApiHistoryHandler
         {
             days = 1;
         }
-        if (days > 31)
+        if (days > Limits.Current.MaxHistoryRetentionDays)
         {
-            days = 31;
+            days = Limits.Current.MaxHistoryRetentionDays;
         }
         List<RunRecord> records = RuntimeContext.Instance.History.Query(
             DateTime.Today.AddDays(-(days - 1)), DateTime.Now.AddMinutes(5),

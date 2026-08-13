@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate, restartService } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate, restartService, stopService, startService, waitForService } from "./helpers.mjs";
 
 test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编辑 / 删除", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -510,8 +510,8 @@ test("失败强制结束游戏进程 + 成功/取消按设置绑定", async () =
   pingProc();
   await new Promise(r => setTimeout(r, 1500));
   expect(pingRunning(), "游戏进程（ping）已启动作为前置").toBeTruthy();
-  const f1 = await api("POST", "/api/scripts", { name: "失败杀游戏脚本", mainExe: failBat.replace(/\\/g, "\\\\"), successMarkers: "NEVER-SEEN-MARKER", ...base });
-  expect(f1.ok, "创建失败杀游戏脚本（完成标志永不出现 → 任务失败需强制结束游戏）").toBeTruthy();
+  const f1 = await api("POST", "/api/scripts", { name: "失败杀游戏脚本", mainExe: failBat.replace(/\\/g, "\\\\"), successKeywords: "NEVER-SEEN-MARKER", ...base });
+  expect(f1.ok, "创建失败杀游戏脚本（完成关键字永不出现 → 任务失败需强制结束游戏）").toBeTruthy();
   const f1id = (await f1.json()).id;
   await api("POST", `/api/scripts/${f1id}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: f1id, mode: "manual" });
@@ -765,7 +765,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon").toBeTruthy();
   expect(profile.configPath.includes("NexusPipeline.json"), "probe 推导出配置文件路径（NexusPipeline.json）").toBeTruthy();
   expect(profile.logPath.endsWith("better-genshin-impact.log"), "probe 推导出日志路径（Serilog 当前文件 better-genshin-impact.log，带日期为归档）").toBeTruthy();
-  expect(profile.successMarkers === "", "probe 无完成标志（BetterGI 判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.successMarkers === undefined, "probe 不再返回完成标志字段（已废弃）").toBeTruthy();
   expect(profile.judgeScript && profile.judgeScript.includes("一条龙和配置组任务结束"), "probe 提供判断脚本（含运行结束关键字）").toBeTruthy();
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
   expect(probeBad.status === 400, "probe 对无法推导的根目录返回 400").toBeTruthy();
@@ -778,7 +778,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
   expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
   expect(got.configPath.includes("NexusPipeline.json") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
-  expect(got.successMarkers === "", "专项实例不再固化完成标志（判定由判断脚本驱动）").toBeTruthy();
+  expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
   expect(cfgGot && cfgGot.PluginType === "bettergi", "scripts.json 落盘 PluginType（PascalCase）").toBeTruthy();
@@ -965,4 +965,65 @@ test("数据目录命名迁移：旧名残留（config/cache/edit-hide）迁移�
   expect(!fs.existsSync(path.join(uDir, "original")) || fs.readdirSync(path.join(uDir, "original")).length === 0, "恢复后 original 已清空（内容已移回配置路径）").toBeTruthy();
 
   await api("DELETE", "/api/scripts/" + sid);
+});
+
+test("CLI run-script：服务运行时经 HTTP 提交并轮询结果（退出码 0 + 记录输出）", async () => {
+  const cliDir = path.join(runtimeDir, "cli-run");
+  fs.rmSync(cliDir, { recursive: true, force: true });
+  fs.mkdirSync(cliDir, { recursive: true });
+  const cliLog = path.join(cliDir, "cli.log");
+  const cliBat = path.join(cliDir, "nexustest-cli.bat");
+  fs.writeFileSync(cliBat, "@echo off\r\necho CLI-RAN >> \"" + cliLog + "\"\r\nexit /b 0\r\n", "ascii");
+  const created = await api("POST", "/api/scripts", {
+    name: "CLI脚本", rootPath: cliDir.replace(/\\/g, "\\\\"), mainExe: cliBat.replace(/\\/g, "\\\\"),
+    configPath: cliDir.replace(/\\/g, "\\\\"), logPath: cliLog.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  expect(created.ok, "创建 CLI 用例脚本").toBeTruthy();
+  const cliScript = await created.json();
+  await api("POST", `/api/scripts/${cliScript.id}/users`, { name: "默认", enabled: true });
+  try {
+    const r = spawnSync(runtimeExe, ["run-script", cliScript.id, "-manual"], { cwd: runtimeDir, encoding: "utf8", timeout: 90000 });
+    const out = r.stdout || "";
+    expect(r.status === 0, "CLI run-script 退出码 0（全部记录 success；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
+    expect(out.includes("===== CLI脚本 ====="), "CLI 输出含记录分隔行（===== CLI脚本 =====）").toBeTruthy();
+    expect(out.includes("状态：success"), "CLI 输出含 success 状态行").toBeTruthy();
+  } finally {
+    await api("DELETE", "/api/scripts/" + cliScript.id);
+  }
+});
+
+test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务", async () => {
+  const cliDir = path.join(runtimeDir, "cli-run2");
+  fs.rmSync(cliDir, { recursive: true, force: true });
+  fs.mkdirSync(cliDir, { recursive: true });
+  const cliLog = path.join(cliDir, "cli.log");
+  const cliBat = path.join(cliDir, "nexustest-cli.bat");
+  fs.writeFileSync(cliBat, "@echo off\r\necho CLI-RAN >> \"" + cliLog + "\"\r\nexit /b 0\r\n", "ascii");
+  const created = await api("POST", "/api/scripts", {
+    name: "CLI拉起脚本", rootPath: cliDir.replace(/\\/g, "\\\\"), mainExe: cliBat.replace(/\\/g, "\\\\"),
+    configPath: cliDir.replace(/\\/g, "\\\\"), logPath: cliLog.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  expect(created.ok, "创建 CLI 自动拉起用例脚本").toBeTruthy();
+  const cliScript = await created.json();
+  await api("POST", `/api/scripts/${cliScript.id}/users`, { name: "默认", enabled: true });
+  await stopService();
+  try {
+    const r = spawnSync(runtimeExe, ["run-script", cliScript.id], { cwd: runtimeDir, encoding: "utf8", timeout: 120000 });
+    const out = r.stdout || "";
+    expect(r.status === 0, "服务未运行时 CLI 自动拉起服务并完成任务（退出码 0；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
+    expect(out.includes("正在自动拉起"), "CLI 提示自动拉起常驻服务").toBeTruthy();
+    expect(out.includes("===== CLI拉起脚本 ====="), "CLI 输出含记录分隔行").toBeTruthy();
+  } finally {
+    // 清理 CLI 自动拉起的常驻服务（托盘模式，不写 pid 文件），再恢复标准测试服务
+    try {
+      spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+        { stdio: "ignore" });
+    } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
+    await startService();
+    await waitForService();
+    try { await api("DELETE", "/api/scripts/" + cliScript.id); } catch { /* 清理失败不阻塞 */ }
+  }
 });
