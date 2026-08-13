@@ -1,4 +1,4 @@
-﻿# AGENTS.md
+# AGENTS.md
 
 NexusPipeline（枢链）：C#/.NET 8 (net8.0-windows) WinForms 托盘 + 纯静态 Web UI（HttpListener，零前端构建）的脚本管理器。仓库公开、MIT 协议。
 
@@ -14,11 +14,17 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
 npx playwright test            # 全量 51 用例（发布前本地回归）；先跑 build.cmd，否则 globalSetup 中止
 $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：50 用例（剔除响应式外壳外观用例）
+# 时间加速（v0.6.2+，run-uitest.cmd 已默认内置）：NEXUS_TIME_SCALE=60 时宿主等待按比例缩放
+# （1 分钟 stall → 1 秒、周期触发 30 秒 → 1 秒、marker 宽限 60 秒 → 1 秒、监控循环 1 秒 → 16ms），
+# 三套测试合计从 20+ 分钟降到约 5 分钟；发布前用真实计时档（不设该变量）跑全量回归
+$env:NEXUS_TIME_SCALE = "60"; npx playwright test   # 加速档
+Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 ```
 
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 51 / 50（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
-- 专项稳定性测试 `uitest/judge-scenarios.mjs`：116 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。
-- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：171 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。
+- 专项稳定性测试 `uitest/judge-scenarios.mjs`：115 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
+- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：171 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\chaos-queue.mjs`。
+- **加速档测试契约**（v0.6.2+）：测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（`ping -n 75` → `ping -n 3`、`> 20000` → `> 20000 / scale` 等），保证场景语义（卡住时长仍远大于缩放后的周期触发间隔）；新增依赖真实墙钟的用例须同时给出加速与真实两档实现。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
@@ -83,9 +89,9 @@ $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：50 用例（�
 - **壳式 DI（v0.5.0+）**：`RuntimeContext` 组合根内建 `ServiceProvider`（注册 DispatchCenter/HistoryService/PluginManager/Scheduler），外部访问方式不变（`RuntimeContext.Instance.Xxx`）；新增服务注册进组合根构造，经 `RuntimeContext.Resolve<T>()` / 插件 `PluginContext.Resolve<T>()` 解析。
 - **public 仅限契约**：Program、插件契约（IPlugin/ISpecializedScriptPlugin/ScriptProfile/PluginContext/INotifyChannel）、插件签名需要的领域模型（AppSettings/ScriptInstance/ScriptUser/DispatchQueue/QueueTask/QueueTimeSet/RunRecord/RunAttempt）；其余一律 `internal`。
 - 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 类上 `[ApiRoute("资源名")]`（子路由标在方法上，如 cancel），`WebServer` 反射扫描自动注册（v0.5.0+）；新菜单：`src/Cli/` 对应菜单类；新服务：`src/Services/` 新增类 + 注册进 `RuntimeContext` 组合根容器。
-- **完成判定策略（v0.5.0 拆分）**：判定状态机内聚于 `SessionJudge`（`src/Services/SessionJudge.cs`）：关键字/完成标志/判断脚本三模式；`RunSession` 监控循环经 `judge.HandleLine/ApplyJudgeResult/IsFailure/IsMarker` 驱动，判定语义不变。
+- **完成判定策略（v0.5.0 拆分，v0.6.2 合并标志模式）**：判定状态机内聚于 `SessionJudge`（`src/Services/SessionJudge.cs`）：判断脚本/关键字两模式（完成标志 ≡ 只有成功组的关键字模式）；`RunSession` 监控循环经 `judge.HandleLine/ApplyJudgeResult/IsFailure/IsMarker` 驱动，判定语义不变。
 - 插件只能通过 `PluginContext` 与宿主交互（Log / Settings / ReloadSettings / `Resolve<T>` 服务解析 / **插件级配置 v0.5.1+：`GetConfig<T>/SetConfig<T>` 落盘 `config/plugins/&lt;插件名&gt;.json`（PascalCase）、`GetSecret/SetSecret` 密钥走 DPAPI（enc: 前缀，与普通配置同文件）**）；通知能力实现 `INotifyChannel`（`DispatchCenter` 经 `PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发，无静态委托）；专用插件实现 `ISpecializedScriptPlugin`（`Resolve(rootPath)` 推导主程序/参数/配置/日志与**完成标志**，保存专用脚本实例时固化快照，完成标志同步固化；`GameName` 提供中文游戏名，脚本卡片徽章显示「{GameName}专项」，**游戏名不得写入主程序**，仅由插件提供；外部插件默认启用，显式禁用记入 `DisabledPlugins`）。
-- **完成标志**：判定优先级（v0.4.0+）= 判断脚本（`JudgeScriptEnabled`+代码，脚本优先，忽略关键字）→ 成功/失败关键字（`SuccessKeywords`/`FailureKeywords`，行内逗号 AND、换行 OR，失败命中立即终止本次尝试，成功命中等待退出 60 秒）→ 专用插件固化标志（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`；MaaEnd 无关键字标志，判定完全由插件判断脚本驱动——MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾）→ 无任何配置时按「进程自行退出」判定成功；**专用插件脚本实例强制清空自定义关键字字段**（v0.6.0 起判断脚本由插件固化：`ApplyProfile` 每次保存覆盖 `JudgeScriptEnabled/Language=javascript/JudgeScript = profile.JudgeScript`，用户不可编辑；`HasJudgeScript()` 后判定走脚本模式，替代插件固化标志）。
+- **完成标志**：判定优先级 = 判断脚本（`JudgeScriptEnabled`+代码，脚本优先，忽略关键字）→ 成功/失败关键字（`SuccessKeywords`/`FailureKeywords`，行内逗号 AND、换行 OR，失败命中立即终止本次尝试，成功命中等待退出 60 秒）→ 通用完成标志（`SuccessMarkers`，与成功关键字同一行匹配机制：每个标志一个单元素成功组，命中等待退出 60 秒；v0.6.2 起无独立标志模式）→ 无任何配置时按「进程自行退出」判定成功；**专用插件脚本实例强制清空自定义关键字字段**（v0.6.0 起判断脚本由插件固化：`ApplyProfile` 每次保存覆盖 `JudgeScriptEnabled/Language=javascript/JudgeScript = profile.JudgeScript`，用户不可编辑，判定走脚本模式替代关键字/标志；v0.6.2 起随附插件不再返回 `ScriptProfile.SuccessMarkers`，专项实例固化 `successMarkers` 为空）。
 - **判断脚本契约（v0.4.0+）**：输入为临时 JSON（脚本字段+用户+`config`（运行时生效配置 ConfigPath，只读）与 `script`（`data/{脚本Id}/{用户名}/script`，可读写；无用户兜底 `data/{脚本Id}/script`）全递归文件清单+`scriptDir`+**本次尝试日志段**（v0.5.2+：判断脚本输入按尝试切片，只读当前尝试内容——上次尝试的失败/成功行不跨尝试污染判定；v0.4.3+：超过 4MB 仅提供尾部并置 `logTruncated`=true，防大日志拖垮内置引擎）），JS 用内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围、单文件 2MB）/`nexus.writeFile`（相对 script 目录、防 `../` 与绝对路径逃逸）/`nexus.listFiles()`/`console.log`，无 Node 库），Python 用系统 `python.exe`（`sys.argv[1]` 输入 JSON 路径，读写边界由文档约定）；输出 stdout 尾行 JSON `{"status":"success|failed","reason":"必填","notifyText":"可选","replaceConfigs":["相对script目录路径"]}`，无输出/非 JSON/缺 status 或 reason=继续运行（仍受无日志更新超时约束），单次执行 30 秒上限，执行错误=警告+继续运行；`notifyText` 替换脚本级通知正文（`RunRecord.CustomNotifyText`，不落盘）。
 - **插队替换配置（v0.4.0+）**：判断脚本返回 `failed` + `replaceConfigs` 时，宿主从 script 目录复制覆盖到 config 对应位置（首次替换前备份到 `data/{脚本Id}/{用户名}/swap-backup`，`.meta` 记录 configPath 与新增文件清单，还原时删除新增文件）；config 为单文件时 replaceConfigs 项须等于该文件名（忽略大小写）方可替换，其余目标拒绝；本次尝试失败后由重试循环自动用新配置重试（支持多轮替换，计入 MaxAttempts）；运行结束（成功或失败至最大次数）从 swap-backup 还原全部被替换文件并清空 script 目录与备份（有用户时配置交换机制亦会还原，备份为双保险）；启动崩溃恢复（`UserConfigManager.RecoverInterrupted`）扫描 swap-backup 残留自动还原。
 - **判断脚本触发时机（v0.4.0+）**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（拿最终判定，仅一次防循环；日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
@@ -125,4 +131,4 @@ $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：50 用例（�
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 51（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、extensions/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（116）+ `chaos-queue.mjs`（171）；**版本发布前**一律全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 51（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、extensions/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（116）+ `chaos-queue.mjs`（171），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

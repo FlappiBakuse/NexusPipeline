@@ -107,6 +107,13 @@ export function latestHistoryDay() {
 }
 
 export function setupRuntime() {
+  // 清理上次残留的测试服务（崩溃/中断遗留仍占用 58731）：仅杀 uitest/runtime 目录下的 nexus-pipeline.exe，
+  // 避免 e2e 服务落到 58732 而请求打向残留实例（先跑 judge/chaos 再跑 e2e 的常见工作流踩坑，v0.6.2 修复）。
+  try {
+    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      { stdio: "ignore" });
+  } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");

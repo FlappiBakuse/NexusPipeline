@@ -10,7 +10,13 @@ if errorlevel 1 (
     exit /b 0
 )
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-rem 旧参数 --ci 映射为 NEXUS_CI=1（核心回归集，剔除响应式外壳外观用例）
-if /i "%1"=="--ci" set NEXUS_CI=1
+rem 参数解析（v0.6.2+）：--ci = 核心回归集（NEXUS_CI=1，剔除响应式外壳外观用例）；
+rem --realtime = 关闭时间加速（真实计时档，发布前全量回归用）；其余情况默认 NEXUS_TIME_SCALE=60 加速档。
+set REALTIME=
+for %%a in (%*) do (
+    if /i "%%a"=="--ci" set NEXUS_CI=1
+    if /i "%%a"=="--realtime" set REALTIME=1
+)
+if not defined REALTIME set NEXUS_TIME_SCALE=60
 npx playwright test
 exit /b %errorlevel%

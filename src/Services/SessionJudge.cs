@@ -4,9 +4,10 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// 完成判定策略（v0.5.0 从 RunSession 拆出）：关键字 / 完成标志 / 判断脚本 三模式的判定状态机。
+/// 完成判定策略（v0.5.0 从 RunSession 拆出，v0.6.2 合并 Marker 模式）：关键字 / 判断脚本 两模式的判定状态机。
 /// 只维护判定状态与输入，不含 IO/日志/进程操作（由调用方经回调与返回值驱动，行为零变化）。
-/// 判定优先级：判断脚本（脚本优先）→ 成功/失败关键字（行内 AND、行间 OR）→ 专用插件固化标志 → 无配置按进程退出判定。
+/// 判定优先级：判断脚本（脚本优先）→ 成功/失败关键字（行内 AND、行间 OR）→ 通用完成标志
+/// （完成标志 ≡ 只有成功组的关键字模式：每个标志一个单元素成功组，行内出现即命中，与关键字行匹配同机制）→ 无配置按进程退出判定。
 /// </summary>
 internal sealed class SessionJudge
 {
@@ -14,17 +15,15 @@ internal sealed class SessionJudge
     {
         None,
         Keyword,
-        Marker,
         JudgeScript,
     }
 
-    /// <summary>日志行命中的判定类型（仅 Keyword/Marker 模式的日志行命中会返回非 None）。</summary>
+    /// <summary>日志行命中的判定类型（仅关键字模式的日志行命中会返回非 None；完成标志命中归为成功关键字）。</summary>
     public enum LineHit
     {
         None,
         SuccessKeyword,
         FailureKeyword,
-        Marker,
     }
 
     /// <summary>判断脚本结果应用结果。</summary>
@@ -41,8 +40,6 @@ internal sealed class SessionJudge
 
     private readonly List<List<string>> _failureGroups;
 
-    private readonly List<string> _markers;
-
     private DateTime? _markerSeenAt;
 
     private DateTime? _failureSeenAt;
@@ -55,20 +52,29 @@ internal sealed class SessionJudge
 
     public SessionJudge(ScriptInstance script)
     {
-        _markers = script.MarkerList();
         _successGroups = KeywordRule.Parse(script.SuccessKeywords);
         _failureGroups = KeywordRule.Parse(script.FailureKeywords);
+        if (_successGroups.Count == 0 && _failureGroups.Count == 0)
+        {
+            // 通用完成标志（successMarkers / 历史实例）：每个标志一个单元素成功组（行内出现即命中，与关键字行匹配同机制）
+            foreach (string marker in script.MarkerList())
+            {
+                if (!string.IsNullOrWhiteSpace(marker))
+                {
+                    _successGroups.Add(new List<string> { marker });
+                }
+            }
+        }
         bool scriptMode = script.HasJudgeScript();
-        bool keywordMode = !scriptMode && (_successGroups.Count > 0 || _failureGroups.Count > 0);
-        _mode = scriptMode ? JudgeMode.JudgeScript : keywordMode ? JudgeMode.Keyword : _markers.Count > 0 ? JudgeMode.Marker : JudgeMode.None;
+        _mode = scriptMode
+            ? JudgeMode.JudgeScript
+            : _successGroups.Count > 0 || _failureGroups.Count > 0 ? JudgeMode.Keyword : JudgeMode.None;
     }
 
     /// <summary>已配置任何完成判定（判断脚本/关键字/固化标志）。</summary>
     public bool IsConfigured => _mode != JudgeMode.None;
 
     public bool ScriptMode => _mode == JudgeMode.JudgeScript;
-
-    public bool KeywordMode => _mode == JudgeMode.Keyword;
 
     public DateTime? MarkerSeenAt => _markerSeenAt;
 
@@ -92,27 +98,18 @@ internal sealed class SessionJudge
         _lastJudgeAt = DateTime.Now;
     }
 
-    /// <summary>处理一行日志的判定输入：关键字模式匹配成功/失败组（行内 AND、行间 OR），标志模式匹配完成标志。返回命中类型。</summary>
+    /// <summary>处理一行日志的判定输入：关键字模式匹配成功/失败组（行内 AND、行间 OR）；完成标志已并入成功组。返回命中类型。</summary>
     public LineHit HandleLine(string line)
     {
-        if (KeywordMode)
-        {
-            if (_markerSeenAt is null && KeywordRule.LineHits(line, _successGroups))
-            {
-                _markerSeenAt = DateTime.Now;
-                return LineHit.SuccessKeyword;
-            }
-            if (_failureSeenAt is null && KeywordRule.LineHits(line, _failureGroups))
-            {
-                _failureSeenAt = DateTime.Now;
-                return LineHit.FailureKeyword;
-            }
-            return LineHit.None;
-        }
-        if (_markers.Count > 0 && _markerSeenAt is null && TextRules.LineHasCompletionMarker(line, _markers))
+        if (_markerSeenAt is null && KeywordRule.LineHits(line, _successGroups))
         {
             _markerSeenAt = DateTime.Now;
-            return LineHit.Marker;
+            return LineHit.SuccessKeyword;
+        }
+        if (_failureSeenAt is null && KeywordRule.LineHits(line, _failureGroups))
+        {
+            _failureSeenAt = DateTime.Now;
+            return LineHit.FailureKeyword;
         }
         return LineHit.None;
     }

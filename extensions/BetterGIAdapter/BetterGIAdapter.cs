@@ -43,7 +43,6 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
             Args = "--startOneDragon",
             ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "NexusPipeline.json"),
             LogPath = Path.Combine(rootPath, "log", "better-genshin-impact.log"),
-            SuccessMarkers = "一条龙和配置组任务结束",
             JudgeScript = DefaultJudgeScript,
             ConfigTemplate = MinimalConfigTemplate,
         };

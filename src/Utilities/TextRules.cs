@@ -15,22 +15,6 @@ internal static class TextRules
         return text.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
     }
 
-    public static bool LineHasCompletionMarker(string line, IEnumerable<string> markers)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return false;
-        }
-        foreach (string marker in markers)
-        {
-            if (!string.IsNullOrWhiteSpace(marker) && line.Contains(marker, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
     public static bool IsExecutable(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))

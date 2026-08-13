@@ -28,6 +28,12 @@ const JSON_HDR = { "Content-Type": "application/json" };
 const HOOK_PORT = 58888;
 const PING_SRC = "C:\\Windows\\System32\\PING.EXE";
 
+// 测试时间加速（v0.6.2+）：NEXUS_TIME_SCALE=60 时宿主等待按比例缩放，伪造脚本卡住时长同步缩放（仍远大于缩放后的 stall/周期）。
+const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
+const FAST = TIME_SCALE > 1;
+const STUCK_PINGS = FAST ? 3 : 75;   // 卡住轮：真实 75 秒，加速 ≈ 2s（stall 1 秒抢在脚本退出前判定失败）
+const CRASH_PINGS = FAST ? 1 : 25;   // crash 轮持续输出循环：日志写入间隔必须 < 加速后的 stall（1 秒），否则误判 stall
+
 const USERS = [
   { name: "甲", seed: 1, inst: "chaos-s1", game: "chaosgame-s1.exe" },
   { name: "乙", seed: 2, inst: "chaos-s2", game: "chaosgame-s2.exe" },
@@ -109,6 +115,12 @@ async function waitNoRunning(timeoutMs = 600000, intervalMs = 500) {
 /* ---------------- 准备阶段 ---------------- */
 
 function setupRuntime() {
+  // 清理上次残留的测试服务（占用 58731），仅杀 uitest/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
+  try {
+    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      { stdio: "ignore" });
+  } catch { /* 忽略 */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
@@ -217,12 +229,12 @@ const NEXUS_CHAOS_BAT = [
   "echo TASK 1 FAIL >> \"%~dp0logs\\log.txt\"",
   "exit /b 1",
   ":stuck",
-  "ping -n 75 127.0.0.1 >nul",
+  "ping -n " + STUCK_PINGS + " 127.0.0.1 >nul",
   "exit /b 0",
   ":crash",
   "echo TASK 1 START >> \"%~dp0logs\\log.txt\"",
   ":crashloop",
-  "ping -n 25 127.0.0.1 >nul",
+  "ping -n " + CRASH_PINGS + " 127.0.0.1 >nul",
   "echo TASK 1 RUNNING >> \"%~dp0logs\\log.txt\"",
   "goto crashloop",
   ":gamecrash",
@@ -230,7 +242,8 @@ const NEXUS_CHAOS_BAT = [
   ":waitgame",
   "tasklist /FI \"IMAGENAME eq !gameexe!\" | findstr /I \"!gameexe!\" >nul",
   "if errorlevel 1 goto gamegone",
-  "ping -n 2 127.0.0.1 >nul",
+  "ping -n 1 127.0.0.1 >nul",
+  "echo TASK 1 WAIT >> \"%~dp0logs\\log.txt\"",
   "goto waitgame",
   ":gamegone",
   "echo TASK 1 FAIL GAMECRASH >> \"%~dp0logs\\log.txt\"",
@@ -287,7 +300,7 @@ function readInstanceSeedLine(label) {
 
 async function createScript(extra) {
   const res = await api("POST", "/api/scripts", {
-    maxAttempts: 2, logStallTimeoutMinutes: 1, totalTimeoutMinutes: 30,
+    maxAttempts: 2, logStallTimeoutMinutes: 1, totalTimeoutMinutes: FAST ? 120 : 30,
     launchGame: true, gameWaitSeconds: 5, forceCloseGame: true,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript",
     notifyEnabled: false,
@@ -397,7 +410,7 @@ function interference(seed, attempt) {
   return (seed + attempt) % 5;
 }
 
-const INJECT_WAIT_MS = 4000;
+const INJECT_WAIT_MS = FAST ? 800 : 4000;
 
 /**
  * 运行中注入器：轮询 /api/status 定位当前用户与尝试，干扰为 2(crash) 时强杀脚本进程树，

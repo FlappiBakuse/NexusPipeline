@@ -1,5 +1,5 @@
 /**
- * judge-scenarios.mjs — v0.4.0 自定义完成标志稳定性专项测试（独立文件，断言计数见 AGENTS.md 与运行输出）
+ * judge-scenarios.mjs — 自定义完成标志稳定性专项测试（独立文件，断言计数见 AGENTS.md 与运行输出）
  *
  * 覆盖内容：
  *  - 用户场景 A：全部任务成功 → 一轮成功 + 通知「所有任务已全部完成」
@@ -7,7 +7,7 @@
  *  - 用户场景 C：任务卡住（曾输出日志）→ 周期触发替换 → 再卡 → 达到最大次数失败 + 通知「任务N运行失败」
  *  - 边缘场景：完全无日志卡住（判断脚本零触发，B-1）
  *  - BUG 验证：新文件残留（B-2）/ 路径逃逸（B-3）/ marker 后重复触发（B-4）/ PostRun 覆盖通知文本（B-5）/
- *    API 空代码保存（B-8）/ 判断脚本 30 秒超时与容错
+ *    API 空代码保存（B-8）/ 判断脚本超时与容错
  *
  * 运行：node uitest\judge-scenarios.mjs   （先跑 build.cmd）
  */
@@ -26,6 +26,14 @@ const baseUrl = "http://127.0.0.1:58731/";
 const JSON_HDR = { "Content-Type": "application/json" };
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 const HOOK_PORT = 58888;
+
+// 测试时间加速（v0.6.2+）：run-uitest 加速档设置 NEXUS_TIME_SCALE=60 时，宿主等待（stall/周期触发/宽限/超时）按比例缩放，
+// 伪造脚本的墙钟卡住时长与判断脚本内部墙钟常量同步缩放，保持场景语义（卡住时长仍远大于缩放后的周期触发间隔）。
+const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
+const FAST = TIME_SCALE > 1;
+const STUCK_PINGS = FAST ? 3 : 75;   // 卡住时长：真实 75 秒 ≈ 74s，加速 3 次 ping ≈ 2s（仍远大于周期触发 1s）
+const CRASH_PINGS = FAST ? 3 : 9;    // marker 后继续输出批次（重复触发验证）：真实 8s，加速 ≈ 2s
+const RESTART_WAIT_MS = FAST ? 1000 : 4000;   // 服务停止/重启静置等待
 
 let passed = 0;
 let failed = 0;
@@ -90,6 +98,12 @@ async function waitNoRunning(timeoutMs = 120000, intervalMs = 300) {
 }
 
 function setupRuntime() {
+  // 清理上次残留的测试服务（占用 58731），仅杀 uitest/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
+  try {
+    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      { stdio: "ignore" });
+  } catch { /* 忽略 */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
@@ -169,24 +183,23 @@ const MULTI_TASK_BAT = [
   "      ping -n 4 127.0.0.1 >nul",
   "      exit /b 1",
   "    )",
-  "    if \"%%c\"==\"game-crash\" (",
-  "      start \"\" /b ping -n 10 127.0.0.1 >nul",
-  "      echo TASK %%a START >> logs\\log.txt",
-  "      ping -n 3 127.0.0.1 >nul",
-  "      exit /b 1",
-  "    )",
-  "    if \"%%c\"==\"success\" echo TASK %%a DONE >> logs\\log.txt",
-  "    if \"%%c\"==\"fail\" echo TASK %%a FAIL >> logs\\log.txt",
-  "    if \"%%c\"==\"stuck-silent\" ping -n 75 127.0.0.1 >nul",
-  "    if \"%%c\"==\"stuck-alt\" (",
-  "      set /a n=0",
-  "      if exist \"%TEMP%\\%~n0-cnt.txt\" set /p n=<\"%TEMP%\\%~n0-cnt.txt\"",
-  "      set /a n+=1",
-  "      >\"%TEMP%\\%~n0-cnt.txt\" echo !n!",
-  "      set /a m=n%%2",
-  "      if \"!m!\"==\"1\" ping -n 75 127.0.0.1 >nul",
-  "      if \"!m!\"==\"0\" echo TASK %%a DONE >> logs\\log.txt",
-  "    )",
+    "    if \"%%c\"==\"game-crash\" (",
+    "      start \"\" /b ping -n 10 127.0.0.1 >nul",
+    "      echo TASK %%a START >> logs\\log.txt",
+    "      exit /b 1",
+    "    )",
+    "    if \"%%c\"==\"success\" echo TASK %%a DONE >> logs\\log.txt",
+    "    if \"%%c\"==\"fail\" echo TASK %%a FAIL >> logs\\log.txt",
+    "    if \"%%c\"==\"stuck-silent\" ping -n " + STUCK_PINGS + " 127.0.0.1 >nul",
+    "    if \"%%c\"==\"stuck-alt\" (",
+    "      set /a n=0",
+    "      if exist \"%TEMP%\\%~n0-cnt.txt\" set /p n=<\"%TEMP%\\%~n0-cnt.txt\"",
+    "      set /a n+=1",
+    "      >\"%TEMP%\\%~n0-cnt.txt\" echo !n!",
+    "      set /a m=n%%2",
+    "      if \"!m!\"==\"1\" ping -n " + STUCK_PINGS + " 127.0.0.1 >nul",
+    "      if \"!m!\"==\"0\" echo TASK %%a DONE >> logs\\log.txt",
+    "    )",
   "  )",
   ")",
   "exit /b 0",
@@ -206,13 +219,14 @@ function makeMultiTaskDir(label, taskLines) {
  *  - 读取 config/tasks.txt + 日志全文；
  *  - 全部启用任务均有 DONE → success + notifyText「所有任务已全部完成」；
  *  - 存在 FAIL → 生成新配置（已完成→disabled，失败任务→enabled+success 重试）→ failed + replaceConfigs；
- *  - 存在未完成任务且距上次触发 >20 秒 → 判定卡住（保持其模式，重试时 stuck-alt 会成功、stuck-silent 继续卡）→ failed + replaceConfigs；
+ *  - 存在未完成任务且距上次触发 >20 秒（NEXUS_TIME_SCALE 加速时按 input.timeScale 缩放）→ 判定卡住（保持其模式，重试时 stuck-alt 会成功、stuck-silent 继续卡）→ failed + replaceConfigs；
  *  - tick 文件记录每次触发时间（跨尝试保留，script 目录运行期间不清空）。
  */
 function defaultJudgeScript() {
   return `
 const input = JSON.parse(__NEXUS_INPUT__);
 const now = Date.now();
+const scale = input.timeScale || 1;
 const files = input.files || [];
 const tickFile = files.find(f => f.Root === "script" && f.Path === "tick");
 const last = tickFile ? Number(nexus.readFile(tickFile.Abs) || "0") : 0;
@@ -242,7 +256,7 @@ if (enabled.length > 0 && undone.length === 0 && failedTasks.length === 0) {
   }
   nexus.writeFile("tasks.txt", lines.join("\\r\\n"));
   console.log(JSON.stringify({ status: "failed", reason: "task-failed-" + failedTasks[0].id, notifyText: "任务" + failedTasks[0].id + "运行失败", replaceConfigs: ["tasks.txt"] }));
-} else if (undone.length > 0 && now - last > 20000) {
+} else if (undone.length > 0 && now - last > 20000 / scale) {
   const stuckId = undone[0].id;
   const lines = [];
   for (const t of enabled) {
@@ -256,7 +270,8 @@ if (enabled.length > 0 && undone.length === 0 && failedTasks.length === 0) {
 
 async function createJudgeScript(extra = {}) {
   const res = await api("POST", "/api/scripts", {
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    // 加速档下运行总时间超时也按比例缩小（10 分钟 → 10s），多轮重试场景需放大避免截断
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: FAST ? 60 : 10, gameExe: PING_GAME,
     ...extra,
   });
   if (!res.ok) {
@@ -510,7 +525,7 @@ async function testEdgeNoLogStuck() {
   const dir = path.join(runtimeDir, "mt-silent");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "nexusmt-silent.bat"), ["@echo off", "ping -n 200 127.0.0.1 >nul", "exit /b 0"].join("\r\n") + "\r\n", "ascii");
+  fs.writeFileSync(path.join(dir, "nexusmt-silent.bat"), ["@echo off", "ping -n " + (FAST ? 5 : 200) + " 127.0.0.1 >nul", "exit /b 0"].join("\r\n") + "\r\n", "ascii");
   const countJs = `
 const input = JSON.parse(__NEXUS_INPUT__);
 const countFile = (input.files || []).find(f => f.Root === "script" && f.Path === "count");
@@ -519,7 +534,7 @@ nexus.writeFile("count", String(n));`;
   const created = await createJudgeScript({
     name: "零日志卡住", rootPath: dir, mainExe: path.join(dir, "nexusmt-silent.bat"),
     configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
-    maxAttempts: 2, logStallTimeoutMinutes: 1, totalTimeoutMinutes: 5,
+    maxAttempts: 2, logStallTimeoutMinutes: 1, totalTimeoutMinutes: FAST ? 30 : 5,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: countJs,
   });
   assert(created.ok, "创建零日志卡住脚本（stall=1 分钟）");
@@ -528,13 +543,18 @@ nexus.writeFile("count", String(n));`;
   const scriptDir = userScriptDir(created.id);
   const countFile = path.join(scriptDir, "count");
   let maxCount = 0;
+  // 密集采样探针（v0.6.2 加速档）：每次尝试 stall 触发最终判定写入 count 的存活窗口仅 taskkill 耗时（数百毫秒），
+  // 采样间隔必须远小于窗口；running 为 0 时二次确认再 break，避免错过最后一次写入。
   const probeDeadline = Date.now() + 215000;
   while (Date.now() < probeDeadline) {
+    if ((await runningCount()) === 0) {
+      await sleep(300);
+      if ((await runningCount()) === 0) break;
+    }
     if (fs.existsSync(countFile)) {
       maxCount = Math.max(maxCount, Number(fs.readFileSync(countFile, "utf8").trim()) || 0);
     }
-    if ((await runningCount()) === 0) break;
-    await sleep(100);
+    await sleep(20);
   }
   const ended = await waitNoRunning(30000);
   const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
@@ -603,9 +623,9 @@ async function testBugMarkerReTrigger() {
   fs.writeFileSync(path.join(dir, "nexusmt-extra.bat"), [
     "@echo off",
     "echo TASK 1 DONE >> logs\\log.txt",
-    "ping -n 9 127.0.0.1 >nul",
+    "ping -n " + CRASH_PINGS + " 127.0.0.1 >nul",
     "echo EXTRA 1 >> logs\\log.txt",
-    "ping -n 9 127.0.0.1 >nul",
+    "ping -n " + CRASH_PINGS + " 127.0.0.1 >nul",
     "echo EXTRA 2 >> logs\\log.txt",
     "exit /b 0",
   ].join("\r\n") + "\r\n", "ascii");
@@ -672,7 +692,7 @@ async function testBugNotifyLostOnPostRun() {
 }
 
 async function testJudgeFaultTolerance() {
-  console.log("[用例] 容错：判断脚本 30 秒死循环超时 / 语法错误 / 非法 JSON 输出");
+  console.log("[用例] 容错：判断脚本死循环超时 / 语法错误 / 非法 JSON 输出");
 
   const d1 = path.join(runtimeDir, "mt-hang");
   fs.rmSync(d1, { recursive: true, force: true });
@@ -831,10 +851,10 @@ console.log(JSON.stringify({ status: "failed", reason: "crash-replace", replaceC
   assert(replaced, "配置替换已发生（cfg.txt=REPLACED）");
   assert(fs.existsSync(path.join(userBackupDir(created.id), "cfg.txt")), "swap-backup 已建立");
   await stopService();
-  await sleep(4000);
+  await sleep(RESTART_WAIT_MS);
   startService();
   await waitForService();
-  await sleep(800);
+  await sleep(FAST ? 300 : 800);
   const cfgPath = path.join(dir, "cfg.txt");
   const cfgAfter = fs.existsSync(cfgPath) ? fs.readFileSync(cfgPath, "utf8").trim() : "(缺失)";
   assert(cfgAfter === "ORIG", "重启后 RecoverInterrupted 自动还原配置（cfg.txt=" + cfgAfter + "）");
@@ -860,9 +880,9 @@ async function testSwapCrashRecovery() {
   const created = await createJudgeScript({
     name: "交换崩溃恢复", rootPath: dir, mainExe: path.join(dir, "nexusmt-swapcrash.bat"),
     configPath: dir, logPath: path.join(logDir, "log.txt"),
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
-    judgeScriptEnabled: true, judgeScriptLanguage: "javascript",
-    judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "ok" }));',
+    maxAttempts: 1, logStallTimeoutMinutes: FAST ? 30 : 5, totalTimeoutMinutes: FAST ? 60 : 10,
+    // 不提供判断脚本（通用无判定）：脚本存活期间宿主不结束运行（无 marker 宽限 1 秒提前 kill），
+    // 测试在脚本运行中（ping -n 20 约 19 秒）强杀服务 → 两档都走真实崩溃现场路径（v0.6.2 修复加速档假通过）。
   });
   assert(created.ok, "创建交换崩溃脚本（默认用户快照=ORIGINAL）");
   fs.writeFileSync(cfgFile, "MODIFIED", "utf8");
@@ -877,7 +897,7 @@ async function testSwapCrashRecovery() {
   }, 20000, 200);
   assert(swapped, "交换已完成（运行中 configPath=用户快照 ORIGINAL）");
   await stopService();
-  await sleep(4000);
+  await sleep(RESTART_WAIT_MS);
   startService();
   await waitForService();
   const restored = await waitFor(() => {
@@ -887,9 +907,19 @@ async function testSwapCrashRecovery() {
       return false;
     }
   }, 60000, 500);
-  assert(restored, "重启后配置交换自动还原现场（延迟重试，cfg.txt=MODIFIED）");
   const userDir = path.join(runtimeDir, "data", created.id, "默认");
-  assert(!fs.existsSync(path.join(userDir, ".session")), "恢复后 .session 标记已清除");
+  // 完整还原判定（v0.6.2）：还原含「cfg 落位 + .session 清除 + original 清空」三步（DoRestore 内部分步执行，
+  // 孤儿脚本 cwd 占用 config 目录时部分成功会提前满足 cfg 断言）；waitFor 必须等到完整还原，再断言各残留。
+  const fullyRestored = await waitFor(() => {
+    let cfgOk = false;
+    try {
+      cfgOk = fs.readFileSync(cfgFile, "utf8").trim() === "MODIFIED";
+    } catch { /* config 目录清理瞬间文件不存在 */ }
+    const sessionGone = !fs.existsSync(path.join(userDir, ".session"));
+    const originalEmpty = !fs.existsSync(path.join(userDir, "original")) || fs.readdirSync(path.join(userDir, "original")).length === 0;
+    return cfgOk && sessionGone && originalEmpty;
+  }, 90000, 500);
+  assert(fullyRestored, "重启后配置交换完整还原现场（cfg.txt=MODIFIED + .session 清除 + original 清空）");
   const originalDir = path.join(userDir, "original");
   assert(!fs.existsSync(originalDir) || fs.readdirSync(originalDir).length === 0, "恢复后 original 已清空");
   await api("DELETE", "/api/scripts/" + created.id);
@@ -963,7 +993,7 @@ async function testNoUserRejected() {
   const res = await api("POST", "/api/scripts", {
     name: "无用户脚本", rootPath: dir, mainExe: path.join(dir, "nexusmt-nouser.bat"),
     configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: FAST ? 60 : 10, gameExe: PING_GAME,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "x" }));',
   });
   assert(res.ok, "创建无用户脚本成功");
@@ -979,7 +1009,7 @@ async function testQueueSkipNoUser() {
   const res = await api("POST", "/api/scripts", {
     name: "队列跳过脚本", rootPath: dir, mainExe: path.join(dir, "nexusmt-qskip.bat"),
     configPath: dir, logPath: path.join(dir, "logs\\log.txt"),
-    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: FAST ? 60 : 10, gameExe: PING_GAME,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: 'console.log(JSON.stringify({ status: "success", reason: "x" }));',
   });
   assert(res.ok, "创建无用户脚本成功");
@@ -1006,7 +1036,7 @@ async function testQueueSkipNoUser() {
 /* ---------------- 主流程 ---------------- */
 
 async function main() {
-  console.log("NexusPipeline v0.4.0 自定义完成标志专项稳定性测试");
+  console.log("NexusPipeline 自定义完成标志专项稳定性测试");
   console.log("========== 准备阶段 ==========");
   setupRuntime();
   await startHookServer();

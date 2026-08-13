@@ -52,7 +52,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
 | `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换）；判断脚本输入按尝试切片（v0.5.2+） |
-| `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：关键字/完成标志/判断脚本三模式，判定状态与输入 |
+| `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分，v0.6.2 合并标志模式）：判断脚本/关键字两模式（完成标志 ≡ 只有成功组的关键字模式），判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（Length<position 从头重读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths` |
@@ -153,14 +153,15 @@ public sealed class BetterGenshinImpactAdapter : ISpecializedScriptPlugin
             Args = "--startOneDragon",
             ConfigPath = Path.Combine(rootPath, "User", "OneDragon", "NexusPipeline.json"),
             LogPath = Path.Combine(rootPath, "log", "better-genshin-impact.log"),  // Serilog 滚动：当前文件恒为无日期名，带日期为归档
-            SuccessMarkers = "一条龙和配置组任务结束",   // 完成标志由插件固化
+            JudgeScript = DefaultJudgeScript,   // v0.6.0+：判定由插件固化判断脚本驱动（不再提供 SuccessMarkers）
+            ConfigTemplate = MinimalConfigTemplate,   // 可选：编辑用户配置时 ConfigPath 不存在则生成
         };
     }
 }
 ```
 
 - 专用插件工程通过 `ProjectReference` 引用 `src/NexusPipeline.csproj`（契约类为 public），构建产物 DLL 放入 `release/plugins/`（见 `build.cmd`）。
-- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath/SuccessMarkers）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
+- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath/SuccessMarkers/JudgeScript 与 ConfigTemplate 派生字段）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
 - 元数据 + 生命周期：实现 `IPlugin`；通知能力：实现 `INotifyChannel`（NotifyScriptAsync / NotifyQueueAsync），宿主在运行结束时自动调用。
 - 宿主交互：只使用 `PluginContext`（Log / Settings / ReloadSettings / Resolve&lt;T&gt; / **插件级配置 GetConfig&lt;T&gt;/SetConfig&lt;T&gt;**（落盘 `config/plugins/&lt;插件名&gt;.json`，PascalCase）/ **密钥 GetSecret/SetSecret**（DPAPI 加密 `enc:` 前缀，与普通配置同文件）），**不要**引用 `RuntimeContext`。
 - 内置插件 `NotifyPlugin` 在 `PluginManager.DiscoverBuiltIn` 注册；外部插件与内置插件同契约。

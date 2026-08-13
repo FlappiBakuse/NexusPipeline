@@ -1,4 +1,4 @@
-﻿# NexusPipeline（枢链）
+# NexusPipeline（枢链）
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -17,7 +17,7 @@
   - 路径合规：保存脚本时校验脚本根目录/主程序/配置路径必须存在（主程序需可执行，日志路径仅校验格式），否则无法保存；脚本图标自动取主程序最高分辨率（含 256×256，无图标资源时回退系统关联图标）；
   - 运行设置：最大尝试次数（含首次，默认 3）、日志无更新超时（默认 5 分钟，脚本启动后未产生任何日志条目同样按此超时失败）、运行总时间超时（默认 120 分钟，按整个运行含全部重试计时）；
   - 自定义完成标志：成功/失败关键字（每行一组，组内逗号分隔为 AND、换行之间为 OR；命中失败关键字立即终止本次尝试，命中成功关键字等待脚本退出判定成功）；或使用判断脚本（JavaScript 内置引擎 / Python 系统解释器，日志新增/阻塞周期/进程退出时触发，输入为脚本实例字段+用户+config（只读）与 script（可读写）目录文件清单+**本次尝试日志段**的 JSON（上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 logTruncated=true），脚本输出 `{"status":"success|failed","reason":"原因","notifyText":"可选","replaceConfigs":["相对script目录路径"]}` 判定结果，无输出视为继续运行）；判断脚本优先于关键字；脚本返回 `replaceConfigs` 可在失败后替换配置文件并自动重试（运行结束还原），返回的自定义通知文本可替换通知正文；
-  - 完成标志：专用插件自动提供（BetterGI=`一条龙和配置组任务结束`、March7thAssistant=`游戏终止：StarRail`、ZenlessZoneZeroOneDragon=`关闭游戏成功`；MaaEnd 无关键字标志，判定完全由插件判断脚本驱动——MXU 日志最后一个启用任务的「任务完成/失败」判定行收尾，失败任务自动改写配置选择性重试）；通用脚本可配置自定义完成标志（关键字或判断脚本），均未配置时按「进程自行退出」判定成功。
+  - 完成标志：专用插件判断脚本由插件固化（用户不可编辑，判定完全由插件判断脚本驱动——BetterGI 以「一条龙和配置组任务结束」为结束关键字、失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 以「游戏终止：StarRail」为结束关键字、扫描任务级失败提示行；ZenlessZoneZeroOneDragon 以「关闭游戏成功/暂停运行」为结束、提取「指令[ X ] 执行失败」；MaaEnd 以 MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾、失败任务自动改写配置选择性重试）；通用脚本可配置自定义完成标志（关键字或判断脚本），均未配置时按「进程自行退出」判定成功。
 - **调度队列**：链式运行脚本实例
   - 自动运行方式：不运行（默认，仅手动调度）/ 启动时运行 / 定时运行；
   - 完成操作：无操作 / 退出软件 / 休眠 / 重启 / 关机（系统操作带 60 秒倒计时，可 `shutdown /a` 取消）；
@@ -54,7 +54,7 @@ nexus-pipeline.exe                    # 常驻服务模式（托盘 + 网页 + �
 nexus-pipeline.exe manage             # 交互式管理菜单（命令行操作）
 nexus-pipeline.exe status             # 查看状态
 nexus-pipeline.exe web                # 仅启动网页界面并打开浏览器
-nexus-pipeline.exe run-script <ID或名称> [-Auto|-Manual]   # 手动执行脚本并等待结果
+nexus-pipeline.exe run-script <ID或名称> [-Auto|-Manual] [-user <用户名>]   # 手动执行脚本并等待结果（-user 指定使用哪个用户的配置）
 nexus-pipeline.exe run-queue  <ID或名称> [-Auto|-Manual]   # 手动执行队列并等待结果
 nexus-pipeline.exe cancel <运行ID>    # 取消正在运行的脚本或队列
 nexus-pipeline.exe register           # 注册开机自启动（计划任务，登录时以最高权限运行）
@@ -103,10 +103,11 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；
+- **时间加速（v0.6.2+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=60` 加速档（宿主等待按比例缩放：1 分钟 stall → 1 秒，三套测试合计从 20+ 分钟降到约 5 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
 - CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（50 用例，剔除响应式外壳外观用例）；发布前本地跑全量（51 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
-- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（116 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；
-- 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；
+- 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\judge-scenarios.mjs`；
+- 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "60"; node uitest\chaos-queue.mjs`；
 - e2e 覆盖：仪表盘统计与插件卡片、响应式外壳（手机/平板/电脑）与响应式粗检、深浅主题、粒子层交互隔离、菜单切换防回弹、脚本/队列 新建-编辑-删除 全流程、必填校验、用户管理（多用户配置交换与独立储存、编辑配置会话）、门禁（运行中禁止编辑配置）、强制关闭游戏独立开关、调度中心执行与实时日志、历史文件夹结构与日志分离、审计日志、配置迁移、专用插件（BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon / MaaEnd 适配与完成标志固化、简化弹窗、图标）、日志路径格式（严格匹配 / 无条目超时 / 已有日志忽略 / 通配轮换）。
 
 ## 文件结构

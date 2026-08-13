@@ -46,7 +46,6 @@ public sealed class ZenlessZoneZeroOneDragonAdapterPlugin : ISpecializedScriptPl
             Args = "-o -c",
             ConfigPath = Path.Combine(rootPath, "config"),
             LogPath = Path.Combine(rootPath, ".log", "log.txt"),
-            SuccessMarkers = "关闭游戏成功",
             JudgeScript = DefaultJudgeScript,
         };
     }

@@ -2,6 +2,17 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## [v0.6.2]（2026-08-13）
+
+### 变更
+
+- **完成判定合并实现**：`SessionJudge` 完成标志模式并入关键字模式（完成标志 ≡ 只有成功组的关键字模式——每个标志一个单元素成功组，行内出现即命中，与关键字行匹配同机制；成功命中等待退出 60 秒语义不变）；判定优先级简化为 判断脚本 → 成功/失败关键字与通用完成标志（同一行匹配机制）→ 进程退出。通用脚本 `successMarkers` 与历史实例兼容不变。
+- **专用插件移除冗余完成标志**：BetterGI / March7thAssistant / ZenlessZoneZeroOneDragon 的 `ScriptProfile.SuccessMarkers` 不再提供（判定全部由插件固化判断脚本驱动，判断脚本内部已含结束关键字常量；`ApplyProfile` 固化 `successMarkers` 为空）；e2e 断言同步。
+- **测试时间加速钩子（v0.6.2，`NEXUS_TIME_SCALE`）**：宿主新增 `TestHooks`——设置 `NEXUS_TIME_SCALE=60` 时按比例缩放监控循环间隔 / 判断脚本周期触发（30 秒 → 1 秒）/ 成功标志等待退出宽限（60 秒 → 1 秒）/ 日志无更新超时（1 分钟 → 1 秒）/ 运行总时长 / 判断脚本执行超时；判断脚本输入 JSON 增加 `timeScale` 字段（测试判断脚本按它缩放内部墙钟常量）；生产不设置该变量 = 行为零变化。`run-uitest.cmd` 默认加速档（`--realtime` 切真实计时档）；三套测试（e2e 51 + judge 115 + chaos 171）合计从 25+ 分钟降到约 11 分钟；**版本发布前仍跑真实计时档全量**。
+- **测试基础设施加固**：三个测试套件的 `setupRuntime` 启动前清理 `uitest/runtime` 目录残留服务进程（防先跑 judge/chaos 再跑 e2e 时端口被残留实例占用、请求打向残留服务）；零日志探针改密集采样 + running 双确认（count 文件存活窗口仅 taskkill 耗时，原 100ms 采样会错过）；调度中心用例改固定时长伪脚本（加速档下瞬时退出使「运行中卡片」窗口小于 dispatch 面板 2 秒轮询）；chaos 卡住/崩溃轮日志写入间隔必须小于加速后 stall（1 秒）否则误判 stall、game-crash 等待循环加心跳行；配置交换崩溃恢复用例去除占位判断脚本（加速档下 1 秒宽限提前 kill 脚本导致「正常结束」假通过，两档现都真实走崩溃现场），断言等待「完整还原」（cfg 落位 + `.session` 清除 + original 清空）容忍孤儿进程 cwd 占用 config 目录的部分还原窗口（真实档暴露的既有时序脆弱性）。
+- **文档一致性修正与治理**：判定语义表述统一（README / DESIGN / AGENTS / ARCHITECTURE / extensions-README 移除「插件固化标志」旧语义，明确判定由插件固化判断脚本驱动）；extensions-README 契约表补全 `JudgeScript`/`ConfigTemplate`、March7th 表格主程序更正为 `March7th Launcher.exe`；`AppSettings.AllowRemoteAccess` 注释更正（绑定 `http://+:{port}/`，非 0.0.0.0）；README CLI 补 `-user <用户名>` 参数；judge-scenarios 横幅去除过时版本号；`docs/DESIGN.md` §5 为判定语义唯一权威，`docs/DEVELOPMENT.md` 发布流程新增旧语义关键词检索检查点；judge-scenarios 断言数 116 → 115（swap-crash 断言合并）。
+- 版本号 0.6.2。
+
 ## [v0.6.1]（2026-08-13）
 
 ### 新增

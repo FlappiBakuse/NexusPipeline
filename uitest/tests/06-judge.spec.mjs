@@ -221,14 +221,16 @@ if (n >= 2) {
   await api("DELETE", "/api/scripts/" + s1.id);
 });
 
-test("自定义完成标志：日志阻塞时周期触发判断脚本（30 秒）", async () => {
+test("自定义完成标志：日志阻塞时周期触发判断脚本", async () => {
   const dir = path.join(runtimeDir, "judge-periodic");
   fs.rmSync(dir, { recursive: true, force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  // NEXUS_TIME_SCALE 加速档下宿主周期触发间隔 30 秒 → 1 秒，脚本阻塞时长同步缩放（真实 64 秒 / 加速 4 秒）
+  const FAST = (Number(process.env.NEXUS_TIME_SCALE || "1") || 1) > 1;
   fs.writeFileSync(path.join(dir, "nexusjudge-periodic.bat"), [
     "@echo off",
     "echo ONLY-ONCE >> logs\\log.txt",
-    "ping -n 65 127.0.0.1 >nul",
+    "ping -n " + (FAST ? 5 : 65) + " 127.0.0.1 >nul",
     "exit /b 0",
   ].join("\r\n") + "\r\n", "ascii");
   const jsPeriodic = `
@@ -243,7 +245,7 @@ if (n >= 2) {
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10, gameExe: PING_GAME,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsPeriodic,
   });
-  expect(created.ok, "创建周期触发脚本（日志阻塞 65 秒，周期触发判定失败）").toBeTruthy();
+  expect(created.ok, "创建周期触发脚本（日志阻塞后周期触发判定失败）").toBeTruthy();
   const id = (await created.json()).id;
   await api("POST", `/api/scripts/${id}/users`, { name: "默认", enabled: true });
   const r = await judgeRunAndHistory(id);

@@ -765,7 +765,8 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon").toBeTruthy();
   expect(profile.configPath.includes("NexusPipeline.json"), "probe 推导出配置文件路径（NexusPipeline.json）").toBeTruthy();
   expect(profile.logPath.endsWith("better-genshin-impact.log"), "probe 推导出日志路径（Serilog 当前文件 better-genshin-impact.log，带日期为归档）").toBeTruthy();
-  expect(profile.successMarkers === "一条龙和配置组任务结束", "probe 推导完成标志（一条龙和配置组任务结束）").toBeTruthy();
+  expect(profile.successMarkers === "", "probe 无完成标志（BetterGI 判定由判断脚本驱动）").toBeTruthy();
+  expect(profile.judgeScript && profile.judgeScript.includes("一条龙和配置组任务结束"), "probe 提供判断脚本（含运行结束关键字）").toBeTruthy();
   const probeBad = await api("POST", "/api/scripts/probe", { rootPath: path.join(runtimeDir, "no-bgi"), pluginType: "bettergi" });
   expect(probeBad.status === 400, "probe 对无法推导的根目录返回 400").toBeTruthy();
 
@@ -777,7 +778,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
   expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
   expect(got.configPath.includes("NexusPipeline.json") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
-  expect(got.successMarkers === "一条龙和配置组任务结束", "完成标志由插件固化").toBeTruthy();
+  expect(got.successMarkers === "", "专项实例不再固化完成标志（判定由判断脚本驱动）").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
   expect(cfgGot && cfgGot.PluginType === "bettergi", "scripts.json 落盘 PluginType（PascalCase）").toBeTruthy();

@@ -40,6 +40,7 @@ internal class RunAttemptResult
 
 internal class RunSession
 {
+    /// <summary>成功判定后等待脚本自行退出的宽限秒数（NEXUS_TIME_SCALE 加速时按比例缩放）。</summary>
     private const int ExitGraceSecondsAfterMarker = 60;
 
     private const int MaxScriptLogBytes = 20 * 1024 * 1024;
@@ -325,7 +326,7 @@ internal class RunSession
         using var timeoutCts = new CancellationTokenSource();
         if (_script.TotalTimeoutMinutes > 0)
         {
-            double remainingSeconds = _script.TotalTimeoutMinutes * 60.0 - (DateTime.Now - _runStartedAt).TotalSeconds;
+            double remainingSeconds = TestHooks.ScaledSeconds(_script.TotalTimeoutMinutes * 60) - (DateTime.Now - _runStartedAt).TotalSeconds;
             if (remainingSeconds <= 0)
             {
                 SystemActions.KillTree(process.Id);
@@ -553,7 +554,7 @@ internal class RunSession
                 }
 
                 if (_script.TotalTimeoutMinutes > 0
-                    && (DateTime.Now - _runStartedAt).TotalMinutes >= _script.TotalTimeoutMinutes)
+                    && (DateTime.Now - _runStartedAt).TotalSeconds >= TestHooks.ScaledSeconds(_script.TotalTimeoutMinutes * 60))
                 {
                     result = RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
                     break;
@@ -612,10 +613,6 @@ internal class RunSession
                                 _statusChanged?.Invoke("已检测到失败关键字，任务判定失败");
                                 Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现失败关键字，任务判定失败。");
                                 break;
-                            case SessionJudge.LineHit.Marker:
-                                _statusChanged?.Invoke("已检测到完成标志，等待脚本退出...");
-                                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现完成标志。");
-                                break;
                         }
                     }
                 }
@@ -625,7 +622,7 @@ internal class RunSession
                     await TriggerJudgeAsync().ConfigureAwait(false);
                 }
                 else if (scriptMode && newContent.Length == 0 && result is null
-                    && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= 30)
+                    && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
                 {
                     _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
                     await TriggerJudgeAsync().ConfigureAwait(false);
@@ -685,10 +682,11 @@ internal class RunSession
                 {
                     bool stallHit = false;
                     string stallReason = "";
+                    double stallSeconds = TestHooks.ScaledSeconds(_script.LogStallTimeoutMinutes * 60);
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
-                        double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
-                        if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
+                        double waitSeconds = (DateTime.Now - attemptStart).TotalSeconds;
+                        if (_script.LogStallTimeoutMinutes > 0 && waitSeconds >= stallSeconds)
                         {
                             stallHit = true;
                             stallReason = $"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件）";
@@ -696,8 +694,8 @@ internal class RunSession
                     }
                     else if (monitor is not null && firstEntryAt is null)
                     {
-                        double waitMinutes = (DateTime.Now - attemptStart).TotalMinutes;
-                        if (_script.LogStallTimeoutMinutes > 0 && waitMinutes >= _script.LogStallTimeoutMinutes)
+                        double waitSeconds = (DateTime.Now - attemptStart).TotalSeconds;
+                        if (_script.LogStallTimeoutMinutes > 0 && waitSeconds >= stallSeconds)
                         {
                             stallHit = true;
                             stallReason = $"启动后 {_script.LogStallTimeoutMinutes} 分钟未产生日志条目";
@@ -705,8 +703,8 @@ internal class RunSession
                     }
                     else if (monitor is not null)
                     {
-                        double stallMinutes = (DateTime.Now - monitor.LastWrite).TotalMinutes;
-                        if (_script.LogStallTimeoutMinutes > 0 && stallMinutes >= _script.LogStallTimeoutMinutes)
+                        double stallSec = (DateTime.Now - monitor.LastWrite).TotalSeconds;
+                        if (_script.LogStallTimeoutMinutes > 0 && stallSec >= stallSeconds)
                         {
                             stallHit = true;
                             stallReason = $"日志超过 {_script.LogStallTimeoutMinutes} 分钟无更新";
@@ -725,7 +723,7 @@ internal class RunSession
                 }
 
                 if (judge.IsMarker
-                    && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= ExitGraceSecondsAfterMarker)
+                    && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
                     KillStartedScript();
                     result = RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功");
@@ -733,7 +731,7 @@ internal class RunSession
                     break;
                 }
 
-                await Task.Delay(1000, _token).ConfigureAwait(false);
+                await Task.Delay(TestHooks.ScaledMs(1000), _token).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -789,7 +787,7 @@ internal class RunSession
             {
                 return false;
             }
-            await Task.Delay(1000, _token).ConfigureAwait(false);
+            await Task.Delay(TestHooks.ScaledMs(1000), _token).ConfigureAwait(false);
         }
     }
 

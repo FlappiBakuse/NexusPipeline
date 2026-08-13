@@ -35,8 +35,8 @@
 | 接口/类 | 说明 |
 |---|---|
 | `IPlugin` | 元数据（Name/DisplayName/Description/Version/IsBuiltIn）+ 生命周期（Initialize/Shutdown） |
-| `ISpecializedScriptPlugin : IPlugin` | 专项脚本适配：`Resolve(rootPath)` 推导主程序/参数/配置/日志/完成标志；`GameName` 提供中文游戏名（脚本卡片徽章显示，不写入主程序） |
-| `ScriptProfile` | `Resolve` 返回的配置快照（MainExe/Args/ConfigPath/LogPath/SuccessMarkers） |
+| `ISpecializedScriptPlugin : IPlugin` | 专项脚本适配：`Resolve(rootPath)` 推导主程序/参数/配置/日志与判断脚本（可选完成标志）；`GameName` 提供中文游戏名（脚本卡片徽章显示，不写入主程序） |
+| `ScriptProfile` | `Resolve` 返回的配置快照（MainExe/Args/ConfigPath/LogPath/SuccessMarkers/JudgeScript/ConfigTemplate） |
 | `INotifyChannel` | 通知通道：`NotifyScriptAsync` / `NotifyQueueAsync`（多通道并存，单通道异常隔离） |
 | `PluginContext` | 插件与宿主的唯一交互入口（见下） |
 
@@ -65,6 +65,6 @@
 | 插件 | 游戏 | 主程序/启动参数 | 配置/日志 | 判定要点 |
 |---|---|---|---|---|
 | BetterGIAdapter | 原神 | `BetterGI.exe --startOneDragon` | `User\OneDragon\NexusPipeline.json` / `log\better-genshin-impact.log` | 「一条龙和配置组任务结束」结束关键字 + 失败任务改写 `TaskEnabledList` 选择性重试（+ 清空 NextTaskId） |
-| March7thAssistantAdapter | 崩坏：星穹铁道 | `StarRailAssistant.exe` | `config.yaml` / 日志目录 | 「游戏终止：StarRail」marker + 任务级失败提示行 |
+| March7thAssistantAdapter | 崩坏：星穹铁道 | `March7th Launcher.exe`（编辑配置）+ `.\March7th Assistant.exe` 显式相对路径（运行时启动目标） | `config.yaml` / `logs\{YYYY-MM-DD}.log` | 判断脚本：「游戏终止：StarRail」marker + 任务级失败提示行 |
 | ZenlessZoneZeroOneDragonAdapter | 绝区零 | `OneDragon-Launcher.exe -o -c` | `config/` / `.log\log.txt` | 「关闭游戏成功/暂停运行」结束 + 「指令[ X ] 执行失败」提取（成功 + notifyText） |
 | MaaEndAdapter | 明日方舟：终末地 | `MaaEnd.exe --autostart --quit-after-run` | `config/`（`mxu-MaaEnd.json`）/ `debug\{YYYY-MM-DD}-*.log` | 最后一个启用任务「任务完成/失败: X」判定行收尾 + 失败任务改写配置选择性重试（无运行记录机制） |

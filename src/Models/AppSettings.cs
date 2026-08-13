@@ -16,7 +16,7 @@ public class AppSettings
 
     public string LogLevel { get; set; } = "info";
 
-    /// <summary>允许远程访问（绑定 0.0.0.0 + 访问令牌校验；默认仅本地 127.0.0.1）。</summary>
+    /// <summary>允许远程访问（绑定 http.sys 强通配符 +，非 0.0.0.0——http.sys 不接受 0.0.0.0 前缀；远程请求需访问令牌；默认仅本地 127.0.0.1）。</summary>
     public bool AllowRemoteAccess { get; set; }
 
     /// <summary>远程访问令牌（DPAPI 加密存储 enc: 前缀；本地请求豁免校验）。</summary>

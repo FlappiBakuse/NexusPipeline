@@ -39,7 +39,7 @@ test("日志路径格式：严格匹配 / 无条目超时失败 / 已有日志�
   const aid = (await a.json()).id;
   await api("POST", `/api/scripts/${aid}/users`, { name: "默认", enabled: true });
   await api("POST", "/api/dispatch/script", { scriptId: aid, mode: "manual" });
-  expect(await waitNoRunning(120000), "无条目脚本运行结束（约 1 分钟后无日志条目超时）").toBeTruthy();
+  expect(await waitNoRunning(120000), "无条目脚本运行结束（无日志条目超时失败，真实档约 1 分钟/加速档 1 秒）").toBeTruthy();
   const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
   const rec = hist.filter(h => h.scriptInstanceId === aid).at(-1);
   expect(rec && rec.finalStatus === "failed" && (rec.resultDetail || "").includes("未产生日志条目"), "启动后无日志条目等待无更新超时后失败（FinalStatus=failed）").toBeTruthy();
@@ -245,6 +245,9 @@ test("定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10�
 
 test("调度中心执行 + 历史记录详情", async ({ page }) => {
   const dDir = makeScriptDir("dispatch");
+  // 加速档下脚本瞬时退出会使「正在运行任务卡片」窗口小于 dispatch 面板 2 秒轮询周期而观测不到；
+  // 改用固定时长伪脚本（两档一致约 3 秒），保证运行窗口内轮询可见（日志目录仍为空 → 未找到日志文件 → 失败详情断言不变）。
+  fs.writeFileSync(path.join(dDir.root, "nexustest-dispatch.bat"), "@echo off\r\nping -n 4 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
   const created = await createScript({ name: "跑批脚本", rootPath: dDir.root, mainExe: dDir.main, configPath: dDir.cfg, logPath: dDir.log, maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
   expect(created.ok, "通过 API 预创建调度中心用脚本").toBeTruthy();
 

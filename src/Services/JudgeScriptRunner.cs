@@ -36,15 +36,15 @@ internal class JudgeScriptInputFile
 
 /// <summary>
 /// 自定义完成标志判断脚本执行器：
-/// - 输入：脚本实例字段 + 当前用户 + config（运行时生效配置，只读）与 script（可读写）目录全递归文件清单 + 当前日志全文（超过 4MB 仅提供尾部并置 logTruncated=true），打包为 JSON；
+/// - 输入：脚本实例字段 + 当前用户 + config（运行时生效配置，只读）与 script（可读写）目录全递归文件清单 + 当前日志全文（超过 4MB 仅提供尾部并置 logTruncated=true）+ timeScale（测试加速因子，生产恒为 1），打包为 JSON；
 /// - JavaScript 用内置 Jint 引擎（无 Node 库，注入 __NEXUS_INPUT__ / nexus.readFile / nexus.writeFile（限 script 目录）/ nexus.listFiles / console.log）；
 /// - Python 用系统 python.exe（sys.argv[1] 为输入 JSON 路径；可读写约定由文档约束，进程权限无法技术限制）；
 /// - 输出契约：stdout 最后一行 JSON {"status":"success|failed","reason":"...","notifyText":"可选","replaceConfigs":["相对script目录路径"]}，status/reason 必填；
-/// - 单次执行 30 秒上限；任何执行错误均返回 JudgeError（继续运行，不误判失败）。
+/// - 单次执行 30 秒上限（NEXUS_TIME_SCALE 加速时按比例缩放）；任何执行错误均返回 JudgeError（继续运行，不误判失败）。
 /// </summary>
 internal static class JudgeScriptRunner
 {
-    private const int ScriptTimeoutSeconds = 30;
+    private static int ScriptTimeoutSeconds => TestHooks.ScaledSeconds(30);
 
     private const long MaxReadFileBytes = 2 * 1024 * 1024;
 
@@ -153,6 +153,7 @@ internal static class JudgeScriptRunner
             files = files.Select(file => new { file.Root, file.Path, file.Abs }).ToArray(),
             log = logText,
             logTruncated,
+            timeScale = TestHooks.TimeScale,
         });
     }
 
@@ -188,7 +189,7 @@ internal static class JudgeScriptRunner
         }
         catch (OperationCanceledException)
         {
-            result.JudgeError = "判断脚本执行超时（30 秒）或被取消";
+            result.JudgeError = $"判断脚本执行超时（{ScriptTimeoutSeconds} 秒）或被取消";
             return result;
         }
         catch (Exception ex)
@@ -364,7 +365,7 @@ internal static class JudgeScriptRunner
             catch (OperationCanceledException)
             {
                 SystemActions.KillTree(process.Id);
-                result.JudgeError = "判断脚本执行超时（30 秒）或被取消";
+                result.JudgeError = $"判断脚本执行超时（{ScriptTimeoutSeconds} 秒）或被取消";
                 return result;
             }
             ParseOutput(stdout, result);
