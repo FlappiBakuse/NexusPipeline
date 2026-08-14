@@ -3,7 +3,7 @@ import { $ } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { selectField, valueField } from "../core/forms.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
-import { isCurrent, state } from "../core/state.js";
+import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 export async function pageSettings(token) {
@@ -64,7 +64,7 @@ export async function restartConfirmed() {
 
 /** 每 1 秒探测候选端口（当前端口 / 保存端口 / 端口漂移 +1 补偿），服务恢复后刷新页面或跳转到新端口；60 秒超时提示手动刷新。 */
 function pollRestart(candidates, deadline) {
-  state.schedule(async () => {
+  schedule(async () => {
     const headers = {};
     const token = localStorage.getItem("nexus-token");
     if (token) headers["Authorization"] = "Bearer " + token;
@@ -87,7 +87,7 @@ function pollRestart(candidates, deadline) {
       closeModal();
       toast("服务重启超时，请手动刷新页面", "error");
     }
-  }, 1000);
+  }, 1000, "settings", state.routeToken);
 }
 
 export const actions = {

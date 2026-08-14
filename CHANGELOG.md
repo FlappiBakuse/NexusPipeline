@@ -2,6 +2,21 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.7（Pre-release）
+
+### 修复
+
+- **设置页「重启服务」前端卡死（严重 BUG）**：`views/settings.js` 误用 `state.schedule(...)`（`state` 对象无该方法，`schedule` 为独立导出函数）——首次轮询即抛 TypeError，而「服务重启中」为锁定弹窗（Esc/遮罩/× 不可关闭）导致页面永久卡死，只能手动刷新。改为导入独立 `schedule` 并绑定 settings 页生命周期（page/token 守卫）。e2e 05-settings 重启用例补充前端断言（锁定弹窗出现 + 服务恢复后自动关闭并刷新页面），此前该失败路径无任何测试覆盖。
+- **仪表盘轮询与定时器治理**：`startCountdown` 每次调用注册新 1 秒 interval 不清旧定时器（仪表盘 3 秒重渲染反复调用 → 停留期间累积数百个空转定时器）——仿 `startSystemActionCountdown` 增加模块级旧定时器清理，并新增 `stopCountdown` 导出；仪表盘 3 秒全页重渲染改**局部更新**（统计卡/系统操作卡/运行面板/插件面板按区域刷新，不再整页 render，避免重置滚动/焦点与反复重建倒计时）。
+- **CLI 体验 3 项**：`PollCliRun` 增加 6 小时总超时上限（此前可无限轮询挂死，超时后提示经 Web/manage 查看状态）；`run-script -user` 缺值时明确报错并提示用法（此前静默忽略）；提交成功但响应解析失败（非 JSON/缺 runId）时提示「任务已提交但无法轮询结果」而非误报「提交任务失败」。
+- **钉钉/飞书 Webhook 签名按官方规范修正**：钉钉签名此前为**秒级时间戳 + hex 摘要 + 签名参数放消息体**三重不合规（必失败）——改为毫秒时间戳 + HMAC-SHA256 Base64 签名追加到 Webhook URL 查询参数（`timestamp`/`sign`）；飞书签名由消息体移至请求头 `X-Lark-Request-Timestamp`/`X-Lark-Signature`（秒级时间戳 + Base64，算法不变）。签名算法本身（`timestamp\nsecret` 为 HMAC 密钥、空消息）正确保留。真机推送验证仍需真实机器人环境。
+- **前端小修**：脚本卡片/队列任务/调度中心下拉/历史详情 5 处属性插值补 `esc()`（`data-id`、`option value`，防属性注入）；用户删除原生 `confirm()` 改 `confirmModal`（统一 `role="dialog"` 弹窗规范）。
+- **测试治理**：e2e 01-core 版本断言改从 `/api/status` 的 version 字段动态读取（此前硬编码 0.6.6，发版漏改即误红）。
+
+### 变更
+
+- 版本号 0.6.7（测试用例数不变：e2e 57 / CI 56、judge 115、chaos 171、单测 58）。
+
 ## v0.6.6（Pre-release）
 
 ### 变更

@@ -298,7 +298,7 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .timeset-days, .timeset-time { display: flex; min-width: 0; flex-direction: column; }
 .timeset-time input[type=time] { flex: 0 0 auto; }
 .timeset-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 14px; }
-.timeset-actions .mode-toggle, .timeset-actions button.danger { width: 64px; min-height: 40px; margin-left: 0; }
+.timeset-actions .mode-toggle, .timeset-actions button.danger { width: 84px; min-height: 40px; margin-left: 0; }
 .dispatch-script-controls { grid-template-columns: minmax(0, 7fr) minmax(88px, 1fr); }
 .dispatch-queue-controls { grid-template-columns: minmax(0, 7fr) minmax(88px, 1fr); }
 .detail { font-size: 13px; line-height: 1.7; }

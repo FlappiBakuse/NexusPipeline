@@ -119,6 +119,9 @@ test("重启服务：确认卡片 → 自动重启并恢复（service 模式）"
   await page.click('[data-testid="restart-service"]');
   await page.waitForSelector('[data-action="restart-confirm"]', { timeout: 5000 });
   await page.click('[data-action="restart-confirm"]');
+  // v0.6.7+：断言前端「服务重启中」锁定弹窗出现（此前 settings.js 误用 state.schedule 导致首次轮询抛错、锁定弹窗卡死无法自动恢复）
+  await page.waitForSelector('.modal[data-locked]', { timeout: 5000 });
+  await page.waitForFunction(() => document.body.textContent.includes("服务重启中"), null, { timeout: 5000 });
   // 等待新进程完成重启并接管服务（旧进程响应后 ~1 秒退出，新进程等待互斥体后接管）
   const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
   const readLog = () => fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "");
@@ -135,6 +138,9 @@ test("重启服务：确认卡片 → 自动重启并恢复（service 模式）"
   const logText = readLog();
   expect(logText.includes("[审计] web | 重启服务"), "重启操作产生审计行").toBeTruthy();
   expect(logText.includes("[重启] 正在等待旧进程退出"), "新进程记录重启日志").toBeTruthy();
+  // v0.6.7+：服务恢复后前端应自动刷新并关闭锁定弹窗（此前会永久卡死在「服务重启中」）
+  await page.waitForFunction(() => !document.querySelector('.modal[data-locked]'), null, { timeout: 30000 });
+  await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
   // 清理：杀掉自重启拉起的进程（service 模式，未登记 PID 文件），恢复标准 web 模式测试环境
   await killRuntimeServices();
   startService("web");
@@ -165,4 +171,26 @@ test("重启服务：运行任务时 409 拒绝", async () => {
   startService("web");
   await waitForService();
   await sleep(500);
+});
+
+test("切换按钮文字状态：后缀「：开/：关」实时同步 + 豁免按钮", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#st-autostart");
+  expect((await page.textContent("#st-autostart")) === "开机自启：关", "设置页切换按钮初始带「：关」后缀").toBeTruthy();
+  await page.click("#st-autostart");
+  expect((await page.textContent("#st-autostart")) === "开机自启：开", "点击后按钮文字同步「：开」").toBeTruthy();
+  await page.click("#st-autostart");
+  expect((await page.textContent("#st-autostart")) === "开机自启：关", "再次点击恢复「：关」").toBeTruthy();
+
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("h2");
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector('[data-action="open-script-type"][data-plugin=""]');
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
+  await page.waitForSelector("#sm-mode-btn");
+  expect((await page.textContent("#sm-mode-btn")) === "使用判断脚本（脚本优先）", "判断脚本模式按钮豁免（不加「：开/关」后缀）").toBeTruthy();
+  expect((await page.textContent("#sm-launch")) === "启动游戏：关", "脚本弹窗切换按钮带「：关」后缀").toBeTruthy();
+  await page.click("#sm-launch");
+  expect((await page.textContent("#sm-launch")) === "启动游戏：开", "脚本弹窗点击后同步「：开」").toBeTruthy();
+  await page.click('[data-action="close-modal"]');
 });

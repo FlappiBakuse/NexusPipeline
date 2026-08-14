@@ -1,6 +1,6 @@
 import { initParticles } from "./effects/particles.js";
 import { closeModal } from "./core/modal.js";
-import { cancelSystemAction, cycleTheme, initTheme, setNavOpen } from "./core/ui.js";
+import { cancelSystemAction, cycleTheme, initTheme, setNavOpen, syncModeToggleText } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
 import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
 import { pagerNavigate } from "./core/pager.js";
@@ -61,6 +61,9 @@ document.addEventListener("click", event => {
   if (!target) return;
   const handler = allActions[target.dataset.action];
   if (handler) handler(target, event);
+  // v0.6.7+：切换按钮点击后同步「：开/：关」文字（handler 已移除节点时 closest 为 null 自动跳过）
+  const toggleBtn = event.target.closest(".mode-toggle");
+  if (toggleBtn) syncModeToggleText(toggleBtn);
 });
 
 document.addEventListener("input", event => {

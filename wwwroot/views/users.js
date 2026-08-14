@@ -4,7 +4,7 @@ import { esc } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
-import { closeModal, modalShell, showModal } from "../core/modal.js";
+import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
 
 let userModalScriptId = "";
@@ -99,8 +99,11 @@ export async function saveUser() {
   } catch (error) { toast(error.message, "error"); }
 }
 
-export async function deleteUser(scriptId, userName) {
-  if (!confirm("确定删除用户「" + userName + "」？（该用户保存的配置会一并删除）")) return;
+export function deleteUser(scriptId, userName) {
+  confirmModal("删除用户", `确定删除用户「${esc(userName)}」？（该用户保存的配置会一并删除）`, "confirm-delete-user", { id: scriptId, name: userName });
+}
+
+export async function confirmDeleteUser(scriptId, userName) {
   try { await api("DELETE", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}`); toast("用户已删除"); await pageScriptUsers(scriptId, state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
@@ -144,6 +147,7 @@ export const actions = {
   "edit-user": target => openUserModal(target.dataset.id, target.dataset.name),
   "save-user": () => saveUser(),
   "delete-user": target => deleteUser(target.dataset.id, target.dataset.name),
+  "confirm-delete-user": target => confirmDeleteUser(target.dataset.id, target.dataset.name),
   "move-user-up": target => moveUser(target.dataset.id, target.dataset.name, -1),
   "move-user-down": target => moveUser(target.dataset.id, target.dataset.name, 1),
   "edit-user-config": target => editUserConfig(target.dataset.id, target.dataset.name),

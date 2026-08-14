@@ -1,6 +1,6 @@
 import { $, $$ } from "./dom.js";
 import { esc } from "./format.js";
-import { initAutoScroll } from "./ui.js";
+import { initAutoScroll, syncAllModeToggles } from "./ui.js";
 
 let modalReturnFocus = null;
 
@@ -64,6 +64,7 @@ export function showModal(content, wide = false, locked = false) {
   });
   document.body.appendChild(mask);
   initAutoScroll(modal);
+  syncAllModeToggles(modal);
   requestAnimationFrame(() => {
     if (modal.contains(document.activeElement)) return;
     const first = $("input, select, textarea", modal) || $("button, a[href]", modal);

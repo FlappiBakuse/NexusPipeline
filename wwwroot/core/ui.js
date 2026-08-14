@@ -12,6 +12,23 @@ const SHAKE_WINDOW_MS = 2500;
 export function render(html) {
   view.innerHTML = html;
   initAutoScroll(view);
+  syncAllModeToggles(view);
+}
+
+/** 切换按钮文字状态同步（v0.6.7+）：.mode-toggle 按钮文字追加「：开/：关」后缀，让用户直接明了开关状态。
+ *  跳过星期按钮（data-day）与显式标记 data-toggle-text="false" 的按钮（如「使用判断脚本」模式切换）。
+ *  aria-pressed 仍为唯一状态权威，文字仅作展示。 */
+export function syncModeToggleText(btn) {
+  if (!btn || !btn.classList.contains("mode-toggle")) return;
+  if (btn.hasAttribute("data-day") || btn.dataset.toggleText === "false") return;
+  const base = btn.dataset.baseText || btn.textContent.trim();
+  btn.dataset.baseText = base;
+  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? "：开" : "：关");
+}
+
+/** 同步根节点内全部切换按钮文字（render/showModal/点击切换后调用）。 */
+export function syncAllModeToggles(root = view) {
+  root.querySelectorAll(".mode-toggle").forEach(syncModeToggleText);
 }
 
 /** 长文本滚动：内容溢出容器时启用往返滚动（否则保持省略号兜底）。</summary> */
@@ -79,8 +96,12 @@ export function toast(message, kind = "info") {
   toastTimer = setTimeout(() => element.classList.add("hidden"), 3200);
 }
 
+let countdownTimer = null;
+
+/** 下一调度倒计时（v0.6.7+ 清理旧定时器）：仪表盘 3 秒重渲染会重复调用，注册前清理模块级旧 interval，避免累积；路由切换由 disposePage 统一清理。 */
 export function startCountdown(targetId, timeValue) {
   const target = new Date(timeValue).getTime();
+  if (countdownTimer !== null) clearInterval(countdownTimer);
   const update = () => {
     const element = $("#" + targetId);
     if (!element) return;
@@ -96,7 +117,15 @@ export function startCountdown(targetId, timeValue) {
     element.textContent = `${hours}:${minutes}:${secs}`;
   };
   update();
-  registerInterval(setInterval(update, 1000));
+  countdownTimer = registerInterval(setInterval(update, 1000));
+}
+
+/** 停止下一调度倒计时（v0.6.7+，仪表盘局部更新时下一调度消失用）。 */
+export function stopCountdown() {
+  if (countdownTimer !== null) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
 }
 
 let systemActionTimer = null;

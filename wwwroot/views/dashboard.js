@@ -2,7 +2,7 @@ import { api } from "../core/api.js";
 import { systemActionCard } from "../core/forms.js";
 import { esc, statusBadge } from "../core/format.js";
 import { isCurrent, schedule } from "../core/state.js";
-import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown } from "../core/ui.js";
+import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown, stopCountdown } from "../core/ui.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>暂无运行任务</strong>当前没有正在运行的脚本或调度队列。</div>';
@@ -26,6 +26,23 @@ function pluginMarkup(status, stats) {
   </article>`).join("");
 }
 
+function statGridMarkup(status, next) {
+  return `<section class="stat-grid" aria-label="运行概览">
+    <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
+    <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
+    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl">下一调度队列</div></div>
+    <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
+  </section>`;
+}
+
+function runningPanelMarkup(status) {
+  return `<div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}`;
+}
+
+function pluginPanelMarkup(status, stats) {
+  return `<div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid">${pluginMarkup(status, stats) || '<div class="empty">暂无已加载插件</div>'}</div>`;
+}
+
 export async function pageDashboard(token) {
   if (!isCurrent("dashboard", token)) return;
   navActive("dashboard");
@@ -34,25 +51,43 @@ export async function pageDashboard(token) {
   try {
     status = await api("GET", "/api/status");
   } catch (error) {
-    if (isCurrent("dashboard", token)) render(`<div class="empty"><strong>无法连接服务</strong>${esc(error.message)}</div>`);
+    if (isCurrent("dashboard", token) && !document.querySelector('[data-testid="stat-scripts"]')) {
+      render(`<div class="empty"><strong>无法连接服务</strong>${esc(error.message)}</div>`);
+    }
     return;
   }
   if (!isCurrent("dashboard", token)) return;
   const next = status.nextSchedule;
   const stats = status.notifyStats || {};
-  render(`<div class="page-head">
-    <div><div class="eyebrow">OPERATIONS OVERVIEW</div><h2>仪表盘</h2><p class="page-kicker">查看当前运行状态、调度概览和通知能力。</p></div>
-  </div>
-  <section class="stat-grid" aria-label="运行概览">
-    <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
-    <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
-    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl">下一调度队列</div></div>
-    <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
-  </section>
-  <div id="system-action-area">${systemActionCard(status.systemAction)}</div>
-  <section class="card" data-testid="running-panel"><div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}</section>
-  <section class="card"><div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid">${pluginMarkup(status, stats) || '<div class="empty">暂无已加载插件</div>'}</div></section>`);
-  if (next) startCountdown("next-q", next.time);
+  if (!document.querySelector('[data-testid="stat-scripts"]')) {
+    render(`<div class="page-head">
+      <div><div class="eyebrow">OPERATIONS OVERVIEW</div><h2>仪表盘</h2><p class="page-kicker">查看当前运行状态、调度概览和通知能力。</p></div>
+    </div>
+    ${statGridMarkup(status, next)}
+    <div id="system-action-area">${systemActionCard(status.systemAction)}</div>
+    <section class="card" data-testid="running-panel">${runningPanelMarkup(status)}</section>
+    <section class="card" id="dashboard-plugin-panel">${pluginPanelMarkup(status, stats)}</section>`);
+  } else {
+    // 局部更新（v0.6.7+）：不整页重渲染，避免倒计时定时器反复重建与滚动/焦点重置；区域缺失时静默跳过。
+    const setNum = (selector, text) => {
+      const el = document.querySelector(selector);
+      if (el) el.textContent = text;
+    };
+    setNum('.stat[data-testid="stat-scripts"] .num', status.scriptCount ?? 0);
+    setNum('.stat[data-testid="stat-queues"] .num', status.queueCount ?? 0);
+    setNum('.stat[data-testid="stat-version"] .num', status.version || "0.0.0");
+    const nextEl = document.querySelector("#next-q");
+    if (nextEl) {
+      if (next) startCountdown("next-q", next.time);
+      else { stopCountdown(); nextEl.textContent = "无"; }
+    }
+    const sysArea = document.querySelector("#system-action-area");
+    if (sysArea) sysArea.innerHTML = systemActionCard(status.systemAction);
+    const runningPanel = document.querySelector('[data-testid="running-panel"]');
+    if (runningPanel) runningPanel.innerHTML = runningPanelMarkup(status);
+    const pluginPanel = document.querySelector("#dashboard-plugin-panel");
+    if (pluginPanel) pluginPanel.innerHTML = pluginPanelMarkup(status, stats);
+  }
   startSystemActionCountdown();
   schedule(() => pageDashboard(token), 3000, "dashboard", token);
 }

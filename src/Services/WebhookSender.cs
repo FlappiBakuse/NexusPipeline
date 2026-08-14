@@ -67,13 +67,18 @@ internal static class WebhookSender
             return false;
         }
         int timeout = settings.WebhookTimeout < 1 ? 30 : settings.WebhookTimeout;
-        string body = BuildBody(type, text, webhookSecret, template);
+        string body = BuildBody(type, text, template);
+        (string targetUrl, Dictionary<string, string> signatureHeaders) = ApplySignature(type, webhookUrl, webhookSecret);
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, webhookUrl)
+            using var request = new HttpRequestMessage(HttpMethod.Post, targetUrl)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
+            foreach (KeyValuePair<string, string> header in signatureHeaders)
+            {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
             using var response = await Http.SendAsync(request, cts.Token).ConfigureAwait(false);
             string responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
@@ -97,21 +102,13 @@ internal static class WebhookSender
         }
     }
 
-    private static string BuildBody(string type, string text, string? secret, string template)
+    private static string BuildBody(string type, string text, string template)
     {
         string literal = JsonLiteral(text);
         switch (type)
         {
             case "dingtalk":
-            {
-                string body = $"{{\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}";
-                if (!string.IsNullOrWhiteSpace(secret))
-                {
-                    string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-                    body = $"{{\"timestamp\":{JsonLiteral(timestamp)},\"sign\":{JsonLiteral(Sign(timestamp, secret, hex: true))},\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}";
-                }
-                return body + "}";
-            }
+                return $"{{\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}}}";
             case "wecom":
                 return $"{{\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}}}";
             case "slack":
@@ -122,24 +119,48 @@ internal static class WebhookSender
                 return string.IsNullOrWhiteSpace(template) ? literal : template.Replace("{text}", literal, StringComparison.Ordinal);
             case "feishu":
             default:
-            {
-                string body = $"{{\"msg_type\":\"text\",\"content\":{{\"text\":{literal}}}";
-                if (!string.IsNullOrWhiteSpace(secret))
-                {
-                    string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
-                    body = $"{{\"timestamp\":{JsonLiteral(timestamp)},\"sign\":{JsonLiteral(Sign(timestamp, secret, hex: false))},\"msg_type\":\"text\",\"content\":{{\"text\":{literal}}}";
-                }
-                return body + "}";
-            }
+                return $"{{\"msg_type\":\"text\",\"content\":{{\"text\":{literal}}}}}";
         }
     }
 
-    private static string Sign(string timestamp, string secret, bool hex)
+    /// <summary>
+    /// 签名注入（v0.6.7 按官方规范修正，此前签名参数误放消息体且钉钉签名格式错误）：
+    /// - 钉钉（自定义机器人加签）：timestamp 为毫秒时间戳，sign 为 HMAC-SHA256 的 Base64（URL 编码），追加到 Webhook URL 查询参数；
+    /// - 飞书（自定义机器人签名校验）：timestamp 为秒级时间戳，sign 为 Base64，放入请求头 X-Lark-Request-Timestamp / X-Lark-Signature。
+    /// 未配置密钥时原样返回（不附加签名）。真机验证仍待补充（需真实机器人环境）。
+    /// </summary>
+    private static (string Url, Dictionary<string, string> Headers) ApplySignature(string type, string url, string? secret)
+    {
+        if (string.IsNullOrWhiteSpace(secret))
+        {
+            return (url, new Dictionary<string, string>());
+        }
+        if (type == "dingtalk")
+        {
+            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            string sign = Uri.EscapeDataString(Sign(timestamp, secret));
+            string separator = url.Contains('?') ? "&" : "?";
+            return (url + separator + $"timestamp={timestamp}&sign={sign}", new Dictionary<string, string>());
+        }
+        if (type == "feishu")
+        {
+            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
+            return (url, new Dictionary<string, string>
+            {
+                ["X-Lark-Request-Timestamp"] = timestamp,
+                ["X-Lark-Signature"] = Sign(timestamp, secret),
+            });
+        }
+        return (url, new Dictionary<string, string>());
+    }
+
+    /// <summary>官方签名算法：HMAC-SHA256 以「timestamp\nsecret」为密钥对空消息计算，结果 Base64。</summary>
+    private static string Sign(string timestamp, string secret)
     {
         byte[] key = Encoding.UTF8.GetBytes($"{timestamp}\n{secret}");
         using var hmac = new HMACSHA256(key);
         byte[] digest = hmac.ComputeHash(Encoding.UTF8.GetBytes(""));
-        return hex ? Convert.ToHexString(digest).ToLowerInvariant() : Convert.ToBase64String(digest);
+        return Convert.ToBase64String(digest);
     }
 
     private static string JsonLiteral(string value)

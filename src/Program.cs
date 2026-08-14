@@ -376,8 +376,13 @@ public static class Program
             {
                 mode = "manual";
             }
-            if (args[i].Equals("-user", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            if (args[i].Equals("-user", StringComparison.OrdinalIgnoreCase))
             {
+                if (i + 1 >= args.Length)
+                {
+                    Console.WriteLine("[错误] -user 参数缺少用户名（用法：run-script <ID或名称> [-Auto|-Manual] [-user <用户名>]）");
+                    return 1;
+                }
                 userName = args[i + 1];
                 i++;
             }
@@ -436,10 +441,10 @@ public static class Program
                 Console.WriteLine($"[错误] {CliTransport.ReadError(resp)}");
                 return 1;
             }
-            string runId = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())?["runId"]?.ToString() ?? "";
+            string runId = ResolveRunId(resp);
             if (string.IsNullOrWhiteSpace(runId))
             {
-                Console.WriteLine("[错误] 服务未返回运行 ID。");
+                Console.WriteLine("[提示] 任务已提交成功，但未能解析服务响应中的运行 ID（无法轮询结果）。请通过 Web 界面或 manage 菜单查看运行状态。");
                 return 1;
             }
             return PollCliRun(port.Value, runId);
@@ -451,14 +456,33 @@ public static class Program
         }
     }
 
-    /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1。</summary>
+    /// <summary>从提交响应中解析运行 ID（v0.6.7+ 容错：响应非 JSON/字段缺失返回 null，交由调用方区分「已提交但无法轮询」）。</summary>
+    private static string? ResolveRunId(HttpResponseMessage resp)
+    {
+        try
+        {
+            return JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())?["runId"]?.ToString();
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1；总时长上限 6 小时（v0.6.7+，防挂死）。</summary>
     private static int PollCliRun(int port, string runId)
     {
         string lastStatus = "";
         int consecutiveFailures = 0;
         JsonNode? node = null;
+        DateTime deadline = DateTime.Now.AddHours(6);
         while (true)
         {
+            if (DateTime.Now >= deadline)
+            {
+                Console.WriteLine("[错误] 轮询运行结果超过 6 小时上限（任务可能仍在运行）。请通过 Web 界面或 manage 菜单查看状态。");
+                return 1;
+            }
             try
             {
                 HttpResponseMessage resp = CliTransport.Get(port, $"/api/dispatch/{runId}");

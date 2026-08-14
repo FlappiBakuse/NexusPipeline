@@ -8,7 +8,9 @@ test("仪表盘：统计卡片 + 版本 + 插件配置信息", async ({ page }) 
   expect(body.includes("通知推送"), "插件「通知推送」在页面可见").toBeTruthy();
   expect(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片").toBeTruthy();
   expect(body.includes("当前版本"), "首行含当前版本卡片").toBeTruthy();
-  expect(body.includes("0.6.6"), "版本显示 0.6.6（x.x.x 不带 v）").toBeTruthy();
+  // v0.6.7+：版本断言改从 /api/status 动态读取，消除发版漏改测试导致的误红
+  const status = await (await fetch(baseUrl + "api/status")).json();
+  expect(body.includes(status.version), `版本显示 ${status.version}（x.x.x 不带 v）`).toBeTruthy();
   expect(body.includes("下一调度队列"), "首行含下一调度队列卡片").toBeTruthy();
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   expect(nums.includes("无"), "无定时队列时下一调度显示「无」").toBeTruthy();

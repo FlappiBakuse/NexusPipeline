@@ -58,9 +58,9 @@ export async function pageScripts(token) {
           <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
         </div>
         <div class="script-ops">
-          <button class="sm" type="button" data-action="manage-users" data-id="${script.id}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
-          <button class="sm" type="button" data-action="edit-script" data-id="${script.id}">编辑脚本</button>
-          <button class="sm danger" type="button" data-action="delete-script" data-id="${script.id}" data-name="${esc(script.name)}">删除脚本</button>
+          <button class="sm" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
+          <button class="sm" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
+          <button class="sm danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
         </div>
       </article>`).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
@@ -197,7 +197,7 @@ export async function openScriptModal(id = "", plugin = "") {
         </div>
         <div class="judge-actions">
           <button class="ghost sm" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
-          <button class="sm mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本（脚本优先）</button>
+          <button class="sm mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本（脚本优先）</button>
         </div>
       </div>
     </div>`;
