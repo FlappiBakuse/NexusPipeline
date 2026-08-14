@@ -45,3 +45,13 @@ jobs:
           NEXUS_CI: "1"
           NEXUS_TIME_SCALE: "10"
         run: npx playwright test
+
+      - name: 上传诊断日志（e2e 失败时排查用）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics
+          path: |
+            uitest/runtime/logs/*.log
+            uitest/test-results/**
+          retention-days: 7
