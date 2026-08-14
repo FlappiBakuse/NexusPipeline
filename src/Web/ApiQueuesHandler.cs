@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -14,7 +15,7 @@ internal static class ApiQueuesHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询调度队列列表", $"{ctx.Queues.Count} 条");
-            var result = ctx.Queues.Select(queue => new
+            var result = ctx.Queues.OrderBy(queue => queue.Index).Select(queue => new
             {
                 queue.Id,
                 queue.Name,
@@ -26,6 +27,11 @@ internal static class ApiQueuesHandler
                 nextTrigger = RuntimeContext.Instance.Scheduler.NextTriggerFor(queue),
             }).ToList();
             await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
+            return;
+        }
+        if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleReorderQueuesAsync(context, body).ConfigureAwait(false);
             return;
         }
         if (method == "POST" && seg.Length == 1)
@@ -48,6 +54,10 @@ internal static class ApiQueuesHandler
             if (string.IsNullOrWhiteSpace(queue.Id) || ctx.FindQueue(queue.Id) is null)
             {
                 queue.Id = Guid.NewGuid().ToString("N");
+            }
+            if (ctx.Queues.Count > 0)
+            {
+                queue.Index = ctx.Queues.Max(item => item.Index) + 1;
             }
             NormalizeQueue(queue);
             ctx.Queues.Add(queue);
@@ -74,6 +84,7 @@ internal static class ApiQueuesHandler
                 return;
             }
             update.Id = existing.Id;
+            update.Index = existing.Index;
             NormalizeQueue(update);
             int index = ctx.Queues.IndexOf(existing);
             ctx.Queues[index] = update;
@@ -92,6 +103,37 @@ internal static class ApiQueuesHandler
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    /// <summary>队列顺序重排（v0.6.8+）：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
+    private static async Task HandleReorderQueuesAsync(HttpListenerContext context, string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        JsonNode? node = HttpHelper.ParseBody(body);
+        List<string>? ids = node?["ids"] is JsonArray array
+            ? array.Select(item => item?.ToString() ?? "").ToList()
+            : null;
+        if (ids is null || ids.Count != ctx.Queues.Count
+            || ids.Any(string.IsNullOrWhiteSpace)
+            || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "队列顺序名单缺失或与当前队列列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        HashSet<string> existing = new(ctx.Queues.Select(queue => queue.Id), StringComparer.Ordinal);
+        if (ids.Any(id => !existing.Contains(id)))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "队列顺序名单与当前队列列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        Dictionary<string, DispatchQueue> byId = ctx.Queues.ToDictionary(queue => queue.Id, StringComparer.Ordinal);
+        for (int i = 0; i < ids.Count; i++)
+        {
+            byId[ids[i]].Index = i;
+        }
+        DataStore.SaveQueues(ctx.Queues);
+        Audit.Log(Audit.Web, "调整队列顺序", $"{ids.Count} 个调度队列");
+        await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
     private static void NormalizeQueue(DispatchQueue queue)

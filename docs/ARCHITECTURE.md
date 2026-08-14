@@ -21,7 +21,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 57 用例 / NEXUS_CI 核心集 56；单元测试见 src/NexusPipeline.Tests/）
+└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 60 用例 / NEXUS_CI 核心集 59；单元测试见 src/NexusPipeline.Tests/）
 ```
 
 ## 后端分层（src/）
@@ -109,12 +109,14 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/settings） |
+| `core/dnd.js` | 通用拖拽排序组件（v0.6.8+，无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项（否则落位震荡） |
 
 ### 新增交互的落点
 
 1. 在对应域视图新增导出函数 + 加入该视图的 `actions` 对象（`data-action` 名与处理器映射）。
 2. 视图模板使用 `data-action` + 稳定的 `data-testid`（e2e 契约）。
 3. 需要路由的新页面：视图导出 `pageXxx(token)`，在 `app.js` 的 `routes` 表注册一行；二级路由在 `route()` 特判分支转发。
+4. 列表拖拽排序（v0.6.8+）：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）。
 
 ## 插件扩展指南
 

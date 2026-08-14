@@ -6,6 +6,7 @@ import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { initDndList } from "../core/dnd.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -51,7 +52,8 @@ export async function pageScripts(token) {
   const content = scripts.length === 0
     ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
     : `<section class="card"><div class="script-grid">
-      ${pageItems.map(script => `<article class="script-card" data-testid="script-card">
+      ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
+        <span class="drag-handle" aria-hidden="true" title="拖拽排序">⋮⋮</span>
         <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
         <div class="script-main">
           <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
@@ -67,6 +69,31 @@ export async function pageScripts(token) {
   render(pageHeader("SCRIPT CATALOG", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
   wireScriptIcons();
+  wireScriptDnd();
+}
+
+/** 拖拽排序（v0.6.8+）：页内重排可见项，其余项保持相对顺序追加；提交全量顺序落盘。 */
+function wireScriptDnd() {
+  const list = $dom(".script-grid");
+  if (!list) return;
+  initDndList(list, { onDrop: (ids) => reorderScripts(ids) });
+}
+
+/** 把可见项按拖拽后的顺序重排进全量列表（其余项保持原相对顺序），提交 PUT /api/scripts/order。 */
+async function reorderScripts(visibleIds) {
+  const visible = new Set(visibleIds);
+  const byId = new Map(state.scripts.map(item => [item.id, item]));
+  const ordered = visibleIds.map(id => byId.get(id)).filter(Boolean);
+  const rest = state.scripts.filter(item => !visible.has(item.id));
+  const full = [...ordered, ...rest];
+  try {
+    await api("PUT", "/api/scripts/order", { ids: full.map(item => item.id) });
+    toast("脚本顺序已保存");
+    await pageScripts(state.routeToken);
+  } catch (error) {
+    toast(error.message, "error");
+    await pageScripts(state.routeToken);
+  }
 }
 
 function wireScriptIcons() {

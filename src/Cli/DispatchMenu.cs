@@ -79,12 +79,12 @@ internal static class DispatchMenu
                 }
                 for (int i = 0; i < ctx.Scripts.Count; i++)
                 {
-                    Console.WriteLine($"  {i + 1}. {ctx.Scripts[i].Name}");
+                    Console.WriteLine($"  {i + 1}. {ctx.Scripts.OrderBy(script => script.Index).ElementAt(i).Name}");
                 }
                 string? number = Ui.Prompt("输入脚本编号：");
                 if (int.TryParse(number?.Trim(), out int index) && index >= 1 && index <= ctx.Scripts.Count)
                 {
-                    ScriptInstance script = ctx.Scripts[index - 1];
+                    ScriptInstance script = ctx.Scripts.OrderBy(script => script.Index).ElementAt(index - 1);
                     Submit("script", new { scriptId = script.Id, mode = "manual" }, $"脚本「{script.Name}」已提交运行");
                 }
                 break;
@@ -98,12 +98,12 @@ internal static class DispatchMenu
                 }
                 for (int i = 0; i < ctx.Queues.Count; i++)
                 {
-                    Console.WriteLine($"  {i + 1}. {ctx.Queues[i].Name}");
+                    Console.WriteLine($"  {i + 1}. {ctx.Queues.OrderBy(queue => queue.Index).ElementAt(i).Name}");
                 }
                 string? number = Ui.Prompt("输入队列编号：");
                 if (int.TryParse(number?.Trim(), out int index) && index >= 1 && index <= ctx.Queues.Count)
                 {
-                    DispatchQueue queue = ctx.Queues[index - 1];
+                    DispatchQueue queue = ctx.Queues.OrderBy(queue => queue.Index).ElementAt(index - 1);
                     string? blocked = DispatchCenter.QueueBlockedBy(queue);
                     if (blocked is not null)
                     {

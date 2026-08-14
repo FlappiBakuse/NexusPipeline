@@ -50,8 +50,9 @@ public static class Program
         {
             Console.OutputEncoding = new UTF8Encoding(false);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Debug($"设置控制台输出编码失败：{ex.Message}");
         }
         // v0.6.3：stdout 重定向（管道/文件）下 Console.OutputEncoding 不生效（实测仍按系统 ANSI 代码页写 GBK），
         // 显式用 UTF-8 流包装 stdout，保证 CLI 管道输出中文正确（e2e CLI 断言依赖；控制台模式不受影响）。
@@ -61,16 +62,18 @@ public static class Program
             {
                 Console.SetOut(new StreamWriter(Console.OpenStandardOutput(), new UTF8Encoding(false)) { AutoFlush = true });
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn($"stdout UTF-8 包装失败，管道输出中文可能乱码：{ex.Message}");
             }
         }
         try
         {
             Console.InputEncoding = new UTF8Encoding(false);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Debug($"设置控制台输入编码失败：{ex.Message}");
         }
 
         if (!IsAdministrator())
@@ -252,8 +255,9 @@ public static class Program
                     using var stale = new Mutex(false, name);
                     stale.ReleaseMutex();
                 }
-                catch
+                catch (Exception e)
                 {
+                    Logger.Debug($"释放遗弃互斥体失败：{e.Message}");
                 }
             }
         }
@@ -280,8 +284,9 @@ public static class Program
                         {
                             probe.ReleaseMutex();
                         }
-                        catch
+                        catch (Exception ex)
                         {
+                            Logger.Debug($"释放互斥体失败：{ex.Message}");
                         }
                         break;
                     }
@@ -332,8 +337,9 @@ public static class Program
                     UseShellExecute = true,
                 });
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn($"自动打开浏览器失败：{ex.Message}");
             }
         }
         // v0.6.6+：正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
@@ -494,8 +500,9 @@ public static class Program
                 }
                 node = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Logger.Debug($"轮询运行结果失败（第 {consecutiveFailures + 1} 次）：{ex.Message}");
                 consecutiveFailures++;
                 if (consecutiveFailures >= 3)
                 {

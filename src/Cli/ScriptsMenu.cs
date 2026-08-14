@@ -11,11 +11,11 @@ internal static class ScriptsMenu
         while (true)
         {
             Ui.ClearScreen();
+            var ordered = ctx.Scripts.OrderBy(script => script.Index).ToList();
             var lines = new List<string>();
-            for (int i = 0; i < ctx.Scripts.Count; i++)
+            foreach (ScriptInstance script in ordered)
             {
-                ScriptInstance script = ctx.Scripts[i];
-                lines.Add($"{i + 1}. {script.Name} | 主程序：{script.MainExe} | 重试：{script.MaxAttempts} | 通知：{(script.NotifyEnabled ? "开" : "关")}");
+                lines.Add($"{lines.Count + 1}. {script.Name} | 主程序：{script.MainExe} | 重试：{script.MaxAttempts} | 通知：{(script.NotifyEnabled ? "开" : "关")}");
             }
             string[] options =
             {
@@ -59,17 +59,17 @@ internal static class ScriptsMenu
                     }
                     if (choice.Trim() == "2")
                     {
-                        EditScript(ctx, ctx.Scripts[index - 1]);
+                        EditScript(ctx, ordered[index - 1]);
                     }
                     else
                     {
-                        string? answer = Ui.Prompt($"确定删除脚本实例「{ctx.Scripts[index - 1].Name}」吗？(Y/N)：");
+                        string? answer = Ui.Prompt($"确定删除脚本实例「{ordered[index - 1].Name}」吗？(Y/N)：");
                         if (Ui.IsYes(answer))
                         {
-                            string removedName = ctx.Scripts[index - 1].Name;
+                            string removedName = ordered[index - 1].Name;
                             if (Ui.TrySave(() =>
                             {
-                                ctx.Scripts.RemoveAt(index - 1);
+                                ctx.Scripts.Remove(ordered[index - 1]);
                                 DataStore.SaveScripts(ctx.Scripts);
                             }, "脚本实例"))
                             {
@@ -178,6 +178,10 @@ internal static class ScriptsMenu
         {
             if (current is null)
             {
+                if (ctx.Scripts.Count > 0)
+                {
+                    script.Index = ctx.Scripts.Max(item => item.Index) + 1;
+                }
                 ctx.Scripts.Add(script);
             }
             else

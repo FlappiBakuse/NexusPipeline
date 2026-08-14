@@ -62,7 +62,12 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            await HttpHelper.WriteJsonAsync(context, ctx.Scripts).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, ctx.Scripts.OrderBy(script => script.Index)).ConfigureAwait(false);
+            return;
+        }
+        if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleReorderScriptsAsync(context, body).ConfigureAwait(false);
             return;
         }
         if (method == "GET" && seg.Length == 2 && seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
@@ -104,6 +109,10 @@ internal static class ApiScriptsHandler
             if (string.IsNullOrWhiteSpace(script.Id) || ctx.FindScript(script.Id) is null)
             {
                 script.Id = Guid.NewGuid().ToString("N");
+            }
+            if (ctx.Scripts.Count > 0)
+            {
+                script.Index = ctx.Scripts.Max(item => item.Index) + 1;
             }
             NormalizePaths(script);
             string? pluginError = string.IsNullOrWhiteSpace(script.PluginType) ? null : ApplyProfile(script);
@@ -148,6 +157,7 @@ internal static class ApiScriptsHandler
                 return;
             }
             update.Id = existing.Id;
+            update.Index = existing.Index;
             update.Users = existing.Users;
             NormalizePaths(update);
             string? pluginError = string.IsNullOrWhiteSpace(update.PluginType) ? null : ApplyProfile(update);
@@ -623,6 +633,37 @@ internal static class ApiScriptsHandler
             }
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    /// <summary>脚本实例顺序重排（v0.6.8+）：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
+    private static async Task HandleReorderScriptsAsync(HttpListenerContext context, string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        JsonNode? node = HttpHelper.ParseBody(body);
+        List<string>? ids = node?["ids"] is JsonArray array
+            ? array.Select(item => item?.ToString() ?? "").ToList()
+            : null;
+        if (ids is null || ids.Count != ctx.Scripts.Count
+            || ids.Any(string.IsNullOrWhiteSpace)
+            || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "脚本顺序名单缺失或与当前脚本列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        HashSet<string> existing = new(ctx.Scripts.Select(script => script.Id), StringComparer.Ordinal);
+        if (ids.Any(id => !existing.Contains(id)))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "脚本顺序名单与当前脚本列表不一致" }, 400).ConfigureAwait(false);
+            return;
+        }
+        Dictionary<string, ScriptInstance> byId = ctx.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
+        for (int i = 0; i < ids.Count; i++)
+        {
+            byId[ids[i]].Index = i;
+        }
+        DataStore.SaveScripts(ctx.Scripts);
+        Audit.Log(Audit.Web, "调整脚本顺序", $"{ids.Count} 个脚本实例");
+        await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
     /// <summary>用户顺序重排：请求体携带完整用户名名单（忽略大小写），与现有用户集合完全一致时按新顺序落盘。</summary>

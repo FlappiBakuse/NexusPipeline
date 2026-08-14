@@ -6,6 +6,9 @@ public class ScriptInstance
 
     public string Name { get; set; } = "";
 
+    /// <summary>列表展示顺序（v0.6.8+ 拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
+    public int Index { get; set; }
+
     /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由专用插件在保存时固化。</summary>
     public string PluginType { get; set; } = "";
 

@@ -6,6 +6,7 @@ import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { initDndList } from "../core/dnd.js";
 
 let userModalScriptId = "";
 let userEditingName = null;
@@ -31,11 +32,10 @@ export async function pageScriptUsers(scriptId, token) {
   const totalPages = Math.max(1, Math.ceil(users.length / USER_PAGE_SIZE));
   if (userPage > totalPages) userPage = totalPages;
   const pageItems = users.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
-  const usersMarkup = users.length ? `<section class="card">${pageItems.map((user, pageIndex) => {
+  const usersMarkup = users.length ? `<section class="card dnd-list">${pageItems.map((user, pageIndex) => {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
-    const first = userIndex === 0;
-    const last = userIndex === users.length - 1;
-    return `<article class="user-card">
+    return `<article class="user-card" data-dnd-id="${esc(user.name)}">
+    <span class="drag-handle" aria-hidden="true" title="拖拽排序">⋮⋮</span>
     <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
       <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
       <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
@@ -44,9 +44,6 @@ export async function pageScriptUsers(scriptId, token) {
         <button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
         <button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
         <button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
-        <span class="user-actions-spacer" aria-hidden="true"></span>
-        <button class="sm" type="button" data-action="move-user-up" data-id="${script.id}" data-name="${esc(user.name)}" ${first ? "disabled" : ""} title="${first ? "已是第一位用户" : "上移用户"}">上移用户</button>
-        <button class="sm" type="button" data-action="move-user-down" data-id="${script.id}" data-name="${esc(user.name)}" ${last ? "disabled" : ""} title="${last ? "已是最后一位用户" : "下移用户"}">下移用户</button>
       </div></div>
     </div>
   </article>`;
@@ -54,6 +51,34 @@ export async function pageScriptUsers(scriptId, token) {
   render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
   restoreEditSessionCard(scriptId);
+  wireUserDnd(scriptId);
+}
+
+/** 拖拽排序（v0.6.8+，替代上/下移按钮）：页内重排可见用户，其余保持相对顺序追加；提交全量用户名名单。 */
+function wireUserDnd(scriptId) {
+  const list = $dom(".dnd-list");
+  if (!list) return;
+  initDndList(list, { onDrop: (names) => reorderUsers(scriptId, names) });
+}
+
+/** 把可见用户按拖拽后的顺序重排进全量列表（其余保持原相对顺序），提交 PUT users/order（names 协议）。 */
+async function reorderUsers(scriptId, visibleNames) {
+  const script = state.scripts.find(item => item.id === scriptId);
+  if (!script) return;
+  const users = script.users || [];
+  const visible = new Set(visibleNames);
+  const byName = new Map(users.map(user => [user.name, user]));
+  const ordered = visibleNames.map(name => byName.get(name)).filter(Boolean);
+  const rest = users.filter(user => !visible.has(user.name));
+  const full = [...ordered, ...rest];
+  try {
+    await api("PUT", `/api/scripts/${scriptId}/users/order`, { names: full.map(user => user.name) });
+    toast("用户顺序已保存");
+    await pageScriptUsers(scriptId, state.routeToken);
+  } catch (error) {
+    toast(error.message, "error");
+    await pageScriptUsers(scriptId, state.routeToken);
+  }
 }
 
 /** 刷新后恢复进行中的「配置编辑中」锁定卡片（后端会话仍在，用户可继续完成/取消）。 */
@@ -108,22 +133,6 @@ export async function confirmDeleteUser(scriptId, userName) {
   catch (error) { toast(error.message, "error"); }
 }
 
-export async function moveUser(scriptId, userName, direction) {
-  const script = state.scripts.find(item => item.id === scriptId);
-  if (!script) return;
-  const users = script.users || [];
-  const index = users.findIndex(user => user.name === userName);
-  const other = index + direction;
-  if (index < 0 || other < 0 || other >= users.length) return;
-  const names = users.map(user => user.name);
-  [names[index], names[other]] = [names[other], names[index]];
-  try {
-    await api("PUT", `/api/scripts/${scriptId}/users/order`, { names });
-    toast(direction < 0 ? "用户已上移" : "用户已下移");
-    await pageScriptUsers(scriptId, state.routeToken);
-  } catch (error) { toast(error.message, "error"); }
-}
-
 export async function editUserConfig(scriptId, userName) {
   try {
     await api("POST", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}/edit-config`, { action: "start" });
@@ -148,8 +157,6 @@ export const actions = {
   "save-user": () => saveUser(),
   "delete-user": target => deleteUser(target.dataset.id, target.dataset.name),
   "confirm-delete-user": target => confirmDeleteUser(target.dataset.id, target.dataset.name),
-  "move-user-up": target => moveUser(target.dataset.id, target.dataset.name, -1),
-  "move-user-down": target => moveUser(target.dataset.id, target.dataset.name, 1),
   "edit-user-config": target => editUserConfig(target.dataset.id, target.dataset.name),
   "edit-config-done": target => editConfigAction(target.dataset.id, target.dataset.name, "done"),
   "edit-config-cancel": target => editConfigAction(target.dataset.id, target.dataset.name, "cancel"),

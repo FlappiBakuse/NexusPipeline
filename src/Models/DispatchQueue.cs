@@ -28,6 +28,9 @@ public class DispatchQueue
 
     public string Name { get; set; } = "";
 
+    /// <summary>列表展示顺序（v0.6.8+ 拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
+    public int Index { get; set; }
+
     public string AutoRunMode { get; set; } = "none";
 
     public string CompletionAction { get; set; } = "none";

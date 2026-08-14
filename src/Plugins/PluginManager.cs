@@ -176,8 +176,9 @@ internal sealed class PluginManager
             {
                 plugin.Shutdown();
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn($"插件「{plugin.DisplayName}」关停失败：{ex.Message}");
             }
         }
     }

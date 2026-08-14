@@ -215,6 +215,8 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   });
   expect(created.ok, "创建排序测试脚本").toBeTruthy();
   const sid = (await created.json()).id;
+  let sid2 = null;
+  try {
   for (const name of ["甲", "乙", "丙"]) {
     await api("POST", `/api/scripts/${sid}/users`, { name, enabled: true, preRunScript: preBat(name) });
   }
@@ -246,7 +248,7 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
   });
   expect(created2.ok, "创建排序门禁脚本成功").toBeTruthy();
-  const sid2 = (await created2.json()).id;
+  sid2 = (await created2.json()).id;
   await api("POST", `/api/scripts/${sid2}/users`, { name: "甲", enabled: true });
   await api("POST", `/api/scripts/${sid2}/users`, { name: "乙", enabled: true });
   const dr2 = await api("POST", "/api/dispatch/script", { scriptId: sid2, mode: "manual" });
@@ -262,20 +264,51 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   await page.waitForFunction(() => document.body.textContent.includes("排序脚本"), null, { timeout: 10000 });
   await page.click(`[data-action="manage-users"][data-id="${sid}"]`);
   await page.waitForFunction(() => document.body.textContent.includes("添加用户") && document.body.textContent.includes("丙"), null, { timeout: 10000 });
-  await page.click('[data-action="move-user-up"][data-name="丙"]');
+
+  // 拖拽排序（v0.6.8+）：把手拖动到目标卡片顶部；re-render 竞态下 boundingBox 可能为 null，重试一次
+  const dragUser = async (name, toBox) => {
+    const handle = page.locator(`.user-card[data-dnd-id="${name}"] .drag-handle`);
+    await handle.waitFor({ timeout: 10000 });
+    await handle.scrollIntoViewIfNeeded();
+    let box = await handle.boundingBox();
+    if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
+    if (!box) throw new Error("拖拽把手不可见：" + name);
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + 2, { steps: 8 });
+    await page.mouse.up();
+  };
+
+  const targetBox = async (selector) => {
+    const locator = page.locator(selector);
+    await locator.waitFor({ timeout: 10000 });
+    let box = await locator.boundingBox();
+    if (!box) { await page.waitForTimeout(400); box = await locator.boundingBox(); }
+    if (!box) throw new Error("拖拽目标不可见：" + selector);
+    return box;
+  };
+
+  await dragUser("丙", await targetBox('.user-card[data-dnd-id="甲"]'));
   await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "丙"; }, null, { timeout: 10000 });
-  expect(true, "点击上移后 丙 成为第一位（卡片顺序更新）").toBeTruthy();
-  expect(await page.$eval('[data-action="move-user-up"][data-name="丙"]', el => el.disabled), "首位用户上移按钮禁用").toBeTruthy();
-  expect(await page.$eval('[data-action="move-user-down"][data-name="乙"]', el => el.disabled), "末位用户下移按钮禁用").toBeTruthy();
+  expect(true, "拖拽后 丙 成为第一位（卡片顺序更新）").toBeTruthy();
   list = await (await fetch(baseUrl + "api/scripts")).json();
   got = list.find(s => s.id === sid);
-  expect(got.users.map(u => u.name).join() === "丙,甲,乙", "UI 上移后顺序已落盘（丙,甲,乙）").toBeTruthy();
-  await page.click('[data-action="move-user-down"][data-name="丙"]');
-  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "甲"; }, null, { timeout: 10000 });
-  expect(true, "点击下移后 丙 回到第二位（卡片顺序更新）").toBeTruthy();
+  expect(got.users.map(u => u.name).join() === "丙,甲,乙", "UI 拖拽后顺序已落盘（丙,甲,乙）").toBeTruthy();
 
-  await api("DELETE", "/api/scripts/" + sid);
-  await api("DELETE", "/api/scripts/" + sid2);
+  await dragUser("乙", await targetBox('.user-card[data-dnd-id="丙"]'));
+  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "乙"; }, null, { timeout: 10000 });
+  expect(true, "拖拽后 乙 成为第一位（卡片顺序更新）").toBeTruthy();
+  list = await (await fetch(baseUrl + "api/scripts")).json();
+  got = list.find(s => s.id === sid);
+  expect(got.users.map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后顺序已落盘（乙,丙,甲）").toBeTruthy();
+  } finally {
+    // 删除带重试（并发请求下偶发 fetch 瞬断，重试兜底避免残留级联）
+    for (const target of [sid, sid2]) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { await api("DELETE", "/api/scripts/" + target); break; } catch { /* 重试 */ }
+      }
+    }
+  }
 });
 
 test("队列多用户依次运行 + 配置交换", async () => {
@@ -1084,5 +1117,59 @@ test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务
     await startService();
     await waitForService();
     try { await api("DELETE", "/api/scripts/" + cliScript.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});
+
+test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ page }) => {
+  // 清理先前用例失败残留的脚本（防御：残留会导致卡片数断言失准）
+  const stale = await (await fetch(baseUrl + "api/scripts")).json();
+  for (const item of stale) {
+    try { await api("DELETE", "/api/scripts/" + item.id); } catch { /* 清理失败不阻塞 */ }
+  }
+  const dirs = ["dnd-a", "dnd-b", "dnd-c"].map(name => makeScriptDir(name));
+  const ids = [];
+  for (const dir of dirs) {
+    const created = await api("POST", "/api/scripts", {
+      name: "拖拽脚本" + dirs.indexOf(dir), rootPath: dir.root, mainExe: dir.main,
+      configPath: dir.cfg, logPath: dir.log, gameExe: PING_GAME,
+      maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+    });
+    expect(created.ok, "创建拖拽排序脚本成功").toBeTruthy();
+    ids.push((await created.json()).id);
+  }
+  try {
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="script-card"]').length === 3, null, { timeout: 10000 });
+    const dragScript = async (fromIndex, toBox) => {
+      const cards = page.locator('[data-testid="script-card"]');
+      const handle = cards.nth(fromIndex).locator(".drag-handle");
+      await handle.waitFor({ timeout: 10000 });
+      let box = await handle.boundingBox();
+      if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
+      if (!box) throw new Error("拖拽把手不可见");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + 2, { steps: 8 });
+      await page.mouse.up();
+    };
+    // 第三张拖到第一张顶部 → 顺序变为 拖拽脚本2,拖拽脚本0,拖拽脚本1
+    const boxes = [];
+    for (let i = 0; i < 3; i++) boxes.push(await page.locator('[data-testid="script-card"]').nth(i).boundingBox());
+    await dragScript(2, boxes[0]);
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-testid="script-card"] .script-name-row strong')).every(el => el.textContent), null, { timeout: 10000 });
+    await page.waitForFunction(() => {
+      const cards = Array.from(document.querySelectorAll('[data-testid="script-card"]'));
+      return cards.length === 3 && cards[0].textContent.includes("拖拽脚本2");
+    }, null, { timeout: 10000 });
+    expect(true, "拖拽后 拖拽脚本2 成为第一张卡片").toBeTruthy();
+    const list = await (await fetch(baseUrl + "api/scripts")).json();
+    expect(list.map(s => s.name).join() === "拖拽脚本2,拖拽脚本0,拖拽脚本1", "拖拽后顺序已落盘（拖拽脚本2,拖拽脚本0,拖拽脚本1）").toBeTruthy();
+
+    // 名单校验：缺项 / 不存在 / 重复
+    expect((await api("PUT", "/api/scripts/order", { ids: ids.slice(0, 2) })).status === 400, "顺序名单缺项被拒（400）").toBeTruthy();
+    expect((await api("PUT", "/api/scripts/order", { ids: [...ids, "no-such-id"] })).status === 400, "顺序名单含不存在 id 被拒（400）").toBeTruthy();
+    expect((await api("PUT", "/api/scripts/order", { ids: [ids[0], ids[0], ids[1]] })).status === 400, "顺序名单含重复 id 被拒（400）").toBeTruthy();
+  } finally {
+    for (const id of ids) { try { await api("DELETE", "/api/scripts/" + id); } catch { /* 清理失败不阻塞 */ } }
   }
 });

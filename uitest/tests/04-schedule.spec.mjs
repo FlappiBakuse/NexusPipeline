@@ -391,3 +391,54 @@ test("完成操作倒计时卡片：队列完成后可取消（shutdown DRYRUN�
     await api("DELETE", "/api/scripts/" + created.id);
   }
 });
+
+test("队列卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ page }) => {
+  // 清理先前用例失败残留的队列（防御：残留会导致卡片数断言失准）
+  const staleQueues = await (await fetch(baseUrl + "api/queues")).json();
+  for (const item of staleQueues) {
+    try { await api("DELETE", "/api/queues/" + item.id); } catch { /* 清理失败不阻塞 */ }
+  }
+  const qDir = makeScriptDir("qdnd");
+  const created = await createScript({ name: "队列拖拽用脚本", rootPath: qDir.root, mainExe: qDir.main, configPath: qDir.cfg, logPath: qDir.log });
+  expect(created.ok, "创建队列拖拽用脚本").toBeTruthy();
+  const qids = [];
+  for (const name of ["拖拽队列甲", "拖拽队列乙", "拖拽队列丙"]) {
+    const createdQ = await api("POST", "/api/queues", { name, autoRunMode: "none", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
+    expect(createdQ.ok, "创建队列 " + name).toBeTruthy();
+    qids.push((await createdQ.json()).id);
+  }
+  try {
+    await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="queue-card"]').length === 3, null, { timeout: 10000 });
+    const dragQueue = async (fromIndex, toBox) => {
+      const cards = page.locator('[data-testid="queue-card"]');
+      const handle = cards.nth(fromIndex).locator(".drag-handle");
+      await handle.waitFor({ timeout: 10000 });
+      let box = await handle.boundingBox();
+      if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
+      if (!box) throw new Error("拖拽把手不可见");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + 2, { steps: 8 });
+      await page.mouse.up();
+    };
+    // 第三张拖到第一张顶部 → 顺序变为 拖拽队列丙,拖拽队列甲,拖拽队列乙
+    const boxes = [];
+    for (let i = 0; i < 3; i++) boxes.push(await page.locator('[data-testid="queue-card"]').nth(i).boundingBox());
+    await dragQueue(2, boxes[0]);
+    await page.waitForFunction(() => {
+      const cards = Array.from(document.querySelectorAll('[data-testid="queue-card"]'));
+      return cards.length === 3 && cards[0].textContent.includes("拖拽队列丙");
+    }, null, { timeout: 10000 });
+    expect(true, "拖拽后 拖拽队列丙 成为第一张卡片").toBeTruthy();
+    const list = await (await fetch(baseUrl + "api/queues")).json();
+    expect(list.map(q => q.name).join() === "拖拽队列丙,拖拽队列甲,拖拽队列乙", "拖拽后队列顺序已落盘（拖拽队列丙,拖拽队列甲,拖拽队列乙）").toBeTruthy();
+
+    expect((await api("PUT", "/api/queues/order", { ids: qids.slice(0, 2) })).status === 400, "顺序名单缺项被拒（400）").toBeTruthy();
+    expect((await api("PUT", "/api/queues/order", { ids: [...qids, "no-such-id"] })).status === 400, "顺序名单含不存在 id 被拒（400）").toBeTruthy();
+    expect((await api("PUT", "/api/queues/order", { ids: [qids[0], qids[0], qids[1]] })).status === 400, "顺序名单含重复 id 被拒（400）").toBeTruthy();
+  } finally {
+    for (const id of qids) { try { await api("DELETE", "/api/queues/" + id); } catch { /* 清理失败不阻塞 */ } }
+    try { await api("DELETE", "/api/scripts/" + created.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});

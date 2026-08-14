@@ -119,7 +119,7 @@ internal static class MainMenu
         Console.WriteLine($"通知渠道：Webhook {webhookReason} | SMTP {smtpReason}");
         Console.WriteLine($"渠道开关：Webhook {(s.WebhookEnabled ? "开" : "关")} / SMTP {(s.SmtpEnabled ? "开" : "关")}");
         Console.WriteLine();
-        foreach (DispatchQueue queue in ctx.Queues)
+        foreach (DispatchQueue queue in ctx.Queues.OrderBy(queue => queue.Index))
         {
             Console.WriteLine($"队列「{queue.Name}」：{QueueRule.AutoRunModeDesc(queue.AutoRunMode)}，{queue.Tasks.Count} 个任务，完成操作={QueueRule.CompletionActionDesc(queue.CompletionAction)}");
             if (queue.AutoRunMode == "scheduled")

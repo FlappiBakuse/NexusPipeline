@@ -190,8 +190,9 @@ internal static class ConfigSwapSession
                 }
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.Warn($".meta 替换清单解析失败（{metaPath}），新增文件可能无法清理：{ex.Message}");
         }
         return list;
     }
@@ -225,13 +226,15 @@ internal static class ConfigSwapSession
                     }
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Logger.Error($"[错误] 配置替换备份清单损坏（{metaPath}），已跳过还原并保留备份现场：{ex.Message}");
+                return;
             }
         }
         if (string.IsNullOrWhiteSpace(configPath))
         {
-            ConfigSwapPrimitives.TryDeleteDir(backupDir);
+            Logger.Error($"[错误] 配置替换备份清单缺少 configPath（{metaPath}），已跳过还原并保留备份现场。");
             return;
         }
         foreach (string file in Directory.GetFiles(backupDir, "*", SearchOption.AllDirectories))

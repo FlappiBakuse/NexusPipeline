@@ -64,8 +64,9 @@ internal class HistoryService
                     records.Add(record);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Debug($"历史记录文件解析失败已跳过（{file}）：{ex.Message}");
             }
         }
         return records;

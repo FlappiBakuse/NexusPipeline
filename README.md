@@ -16,6 +16,7 @@
   - 游戏配置：运行前是否启动游戏（PC 客户端）、游戏路径、启动参数、启动后等待秒数（默认 30）；游戏配置卡在弹窗内常驻显示（不与复选框绑定），勾选「运行脚本前启动游戏」时游戏路径必填且必须为可执行文件；「运行结束后强制关闭游戏」为**独立开关**（与是否启动游戏解绑）；**任务失败时无条件强制结束游戏进程**（不依赖开关）；
   - 路径合规：保存脚本时校验脚本根目录/主程序/配置路径必须存在（主程序需可执行，日志路径仅校验格式），否则无法保存；脚本图标自动取主程序最高分辨率（含 256×256，无图标资源时回退系统关联图标）；
   - 运行设置：最大尝试次数（含首次，默认 3）、日志无更新超时（默认 5 分钟，脚本启动后未产生任何日志条目同样按此超时失败）、运行总时间超时（默认 120 分钟，按整个运行含全部重试计时）；
+  - 列表排序（v0.6.8+）：脚本实例、调度队列与用户卡片均支持拖拽排序（卡片最左侧把手，顺序落盘持久化）。
   - 自定义完成标志：成功/失败关键字（每行一组，组内逗号分隔为 AND、换行之间为 OR；命中失败关键字立即终止本次尝试，命中成功关键字等待脚本退出判定成功）；或使用判断脚本（JavaScript 内置引擎 / Python 系统解释器，日志新增/阻塞周期/进程退出时触发，输入为脚本实例字段+用户+config（只读）与 script（可读写）目录文件清单+**本次尝试日志段**的 JSON（上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 logTruncated=true），脚本输出 `{"status":"success|failed","reason":"原因","notifyText":"可选","replaceConfigs":["相对script目录路径"]}` 判定结果，无输出视为继续运行）；判断脚本优先于关键字；脚本返回 `replaceConfigs` 可在失败后替换配置文件并自动重试（运行结束还原），返回的自定义通知文本可替换通知正文；
   - 完成判定：专用插件判断脚本由插件固化（用户不可编辑，判定完全由插件判断脚本驱动——BetterGI 以「一条龙和配置组任务结束」为结束关键字、失败任务自动改写 OneDragon 配置选择性重试；March7thAssistant 以「游戏终止：StarRail」为结束关键字、扫描任务级失败提示行；ZenlessZoneZeroOneDragon 以「关闭游戏成功/暂停运行」为结束、提取「指令[ X ] 执行失败」；MaaEnd 以 MXU 日志最后一个启用任务的「任务完成/失败: <显示名>」判定行收尾、失败任务自动改写配置选择性重试）；通用脚本可配置成功/失败关键字或判断脚本，均未配置时按「进程自行退出」判定成功。
 - **调度队列**：链式运行脚本实例
@@ -105,9 +106,9 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；build.cmd 为增量构建（src 未变时跳过 publish，仅同步 wwwroot/plugins）；
-- **时间加速（v0.6.4+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=10` 加速档（宿主等待按比例缩放：1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒；e2e 全量 58 用例约 3 分钟，三套测试合计约 10 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
+- **时间加速（v0.6.4+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=10` 加速档（宿主等待按比例缩放：1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒；e2e 全量 60 用例约 3 分钟，三套测试合计约 10 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
 - **单元测试（v0.6.4+）**：`dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj`（毫秒级，覆盖判定状态机/关键字规则/日志路径解析/模型规则校验，无需管理员）；
-- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（57 用例，剔除响应式外壳用例）；发布前本地跑全量（58 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；CI 与本地一致使用加速档；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（59 用例，剔除响应式外壳用例）；发布前本地跑全量（60 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；CI 与本地一致使用加速档；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；
 - 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`；
@@ -136,7 +137,7 @@ release/
 
 - 协作方式以 v1.0.0 为界：之前直接提交并推送 `main`（无分支保护，版本发布为 Pre-release）；正式版 v1.0.0 起仅通过 Pull Request 合入。规范见 [CONTRIBUTING.md](CONTRIBUTING.md) 与 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 核心设计理念与运行流程见 [docs/DESIGN.md](docs/DESIGN.md)；模块边界与功能定位指南见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；
-- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 58 + judge-scenarios 115 + chaos-queue 171 + 单元测试 58）。
+- 端到端测试：先 `build.cmd`，再运行 `uitest\run-uitest.cmd`（或 `npx playwright test`；发布前跑全量 60 + judge-scenarios 115 + chaos-queue 171 + 单元测试 58）。
 
 ## License
 

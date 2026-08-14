@@ -56,7 +56,7 @@ internal static class Logger
         {
             return;
         }
-        string line = $"[{DateTime.Now:HH:mm:ss}] [{level.ToString().ToUpperInvariant()}] {message}";
+        string line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level.ToString().ToUpperInvariant()}] {message}";
         WriteConsole(line, level);
         lock (Sync)
         {

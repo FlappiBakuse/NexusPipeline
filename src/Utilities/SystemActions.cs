@@ -49,8 +49,9 @@ internal static class SystemActions
         {
             candidate = absolute ? targetPart : Path.GetFullPath(Path.Combine(workingDir, targetPart));
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            Logger.Warn($"[警告] 脚本自启动参数含显式路径但解析异常，按普通参数传给主程序：{ex.Message}");
             return (mainExe, TextRules.SplitArgs(argsText));
         }
         if (TextRules.IsExecutable(candidate))
@@ -299,8 +300,9 @@ internal static class SystemActions
         {
             return string.Equals(Path.GetFileNameWithoutExtension(exeFile), baseName, StringComparison.OrdinalIgnoreCase);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warn($"进程名比对失败，按非游戏进程处理（{exeFile}）：{ex.Message}");
             return false;
         }
     }
@@ -385,8 +387,9 @@ internal static class SystemActions
         {
             return Process.GetProcessesByName(baseName).Length > 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warn($"进程检测失败（{exePath}），按未运行处理：{ex.Message}");
             return false;
         }
     }

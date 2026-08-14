@@ -6,6 +6,7 @@ import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { initDndList } from "../core/dnd.js";
 
 let queueDraft = null;
 let queuePage = 1;
@@ -37,6 +38,31 @@ export async function pageQueues(token) {
   nextTimer = setInterval(tickQueueNext, 1000);
   registerInterval(nextTimer);
   $domIcons();
+  wireQueueDnd();
+}
+
+/** 拖拽排序（v0.6.8+）：页内重排可见项，其余项保持相对顺序追加；提交全量顺序落盘。 */
+function wireQueueDnd() {
+  const list = $(".script-grid");
+  if (!list) return;
+  initDndList(list, { onDrop: (ids) => reorderQueues(ids) });
+}
+
+/** 把可见项按拖拽后的顺序重排进全量列表（其余项保持原相对顺序），提交 PUT /api/queues/order。 */
+async function reorderQueues(visibleIds) {
+  const visible = new Set(visibleIds);
+  const byId = new Map(state.queues.map(item => [item.id, item]));
+  const ordered = visibleIds.map(id => byId.get(id)).filter(Boolean);
+  const rest = state.queues.filter(item => !visible.has(item.id));
+  const full = [...ordered, ...rest];
+  try {
+    await api("PUT", "/api/queues/order", { ids: full.map(item => item.id) });
+    toast("队列顺序已保存");
+    await pageQueues(state.routeToken);
+  } catch (error) {
+    toast(error.message, "error");
+    await pageQueues(state.routeToken);
+  }
 }
 
 function queueCardMarkup(queue, scripts) {
@@ -52,7 +78,8 @@ function queueCardMarkup(queue, scripts) {
     ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">队列级通知：${queue.notifyEnabled ? "开" : "关"}</span>`
     : "";
   const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row">${timeBadge}${notifyBadge}</div>` : "";
-  return `<article class="script-card queue-card" data-testid="queue-card">
+  return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
+    <span class="drag-handle" aria-hidden="true" title="拖拽排序">⋮⋮</span>
     <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
     <div class="script-main">
       <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></strong></div>

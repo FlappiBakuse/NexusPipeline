@@ -16,6 +16,8 @@ test("审计日志：增删改/查询记录 + 轮询豁免", async ({ page }) =>
   expect(created.ok, "API 创建脚本").toBeTruthy();
   await new Promise(r => setTimeout(r, 400));
   expect(readLog().includes("[审计] web | 添加脚本实例（审计脚本"), "创建脚本产生审计行").toBeTruthy();
+  const auditLine = readLog().split("\n").reverse().find(line => line.includes("[审计] web | 添加脚本实例（审计脚本"));
+  expect(/^\[\d{2}:\d{2}:\d{2}\.\d{3}\]/.test(auditLine || ""), "审计行时间为毫秒级 [HH:mm:ss.fff]（" + (auditLine || "").slice(0, 24) + "）").toBeTruthy();
 
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const target = list.find(x => x.name === "审计脚本");

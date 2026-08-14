@@ -2,6 +2,17 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.8（Pre-release）
+
+### 新增
+
+- **拖拽排序（脚本实例 / 调度队列 / 用户卡片）**：新增通用拖拽组件 `core/dnd.js`（Pointer Events 统一鼠标/触屏，`[data-dnd-id]` 项 + `.drag-handle` 把手）；脚本实例与调度队列新增 `Index` 字段落盘 + `PUT /api/scripts/order` / `PUT /api/queues/order`（全量 id 名单一致校验，仿用户 order 协议）；CLI 菜单（scripts/queues/dispatch/status）同步按 Index 排序展示与新建追加；用户卡片废除「上移/下移」按钮改拖拽（沿用 `PUT users/order` names 协议）；拖拽结束视图提交全量顺序（可见项重排 + 其余项保持相对顺序），失败回滚重渲染。e2e 新增脚本/队列卡片拖拽用例、用户排序用例改写为拖拽语义（2 新增，全量 58 → **60**、CI 57 → **59**）。
+
+### 变更
+
+- **日志全量更新（操作级审计 + 错误补漏）**：`Logger` 时间戳毫秒化（`[HH:mm:ss]` → `[HH:mm:ss.fff]`）；全库静默 catch 清扫——17 处 A 类补齐 `Logger.Warn/Error`（含 `ResolveLaunchTarget` 路径解析异常回退警告、`IsExeRunning` 进程检测失败按未运行处理、`IsSameProcessName` 失败按非游戏进程处理、插件配置损坏与专项判断脚本读取失败、`.meta` 备份清单损坏**保留备份现场不再删除**、取消信号发送失败、HTTP 监听循环异常退出记录）等；Web 写操作审计覆盖核对（dispatch/cancel/system-action/plugins 均经由服务层记录，全部覆盖）。
+- 版本号 0.6.8。
+
 ## v0.6.7（Pre-release）
 
 ### 修复

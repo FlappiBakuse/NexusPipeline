@@ -176,8 +176,8 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .user-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; }
 .user-actions button { width: 100%; margin-left: 0; }
 .user-actions button:disabled { cursor: not-allowed; opacity: .45; }
-.user-actions-spacer { display: block; }
-.user-card { margin-bottom: 0; padding: 14px 8px; border-bottom: 1px solid var(--border); }
+.user-card { position: relative; margin-bottom: 0; padding: 14px 8px 14px 40px; border-bottom: 1px solid var(--border); }
+.user-card > .drag-handle { position: absolute; left: 8px; top: 12px; height: 36px; }
 .user-card:last-of-type { border-bottom: 0; }
 .user-card:hover { background: var(--hover-bg); }
 .user-card .qk-row { margin-top: 6px; }
@@ -252,6 +252,11 @@ tbody tr:hover td { background: var(--hover-bg); }
 .chooser-card strong { display: block; font-size: 14px; line-height: 1.4; }
 .chooser-card .muted { display: block; margin-top: 5px; font-size: 12px; line-height: 1.45; }
 .script-grid { display: flex; flex-direction: column; gap: 0; }
+.drag-handle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; align-self: stretch; width: 26px; min-height: 36px; margin-right: -6px; border-radius: 6px; color: var(--faint); font-size: 14px; letter-spacing: -1px; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
+.drag-handle:hover { background: var(--hover-bg); color: var(--muted); }
+.drag-handle:active { cursor: grabbing; }
+[data-dnd-id].dnd-dragging { opacity: .55; box-shadow: var(--shadow); background: var(--panel-solid); }
+[data-dnd-id].dnd-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
 .script-card { display: flex; align-items: center; gap: 14px; margin-bottom: 0; padding: 13px 8px; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
 .script-card:last-child { border-bottom: 0; }
 .script-card:hover { background: var(--hover-bg); }

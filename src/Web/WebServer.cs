@@ -156,8 +156,14 @@ internal sealed class WebServer : IDisposable
             {
                 context = await _listener.GetContextAsync().ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                // v0.6.8+：正常停止（_cts.Cancel → Stop 已先调用）时 token 已取消，属预期路径；
+                // 其余异常（如 http.sys 故障）时 Web 服务静默死亡不可接受，必须记录。
+                if (!token.IsCancellationRequested)
+                {
+                    Logger.Error($"[错误] HTTP 监听循环异常退出，Web 服务不可用：{ex.Message}");
+                }
                 return;
             }
             _ = Task.Run(() => HandleAsync(context, token));

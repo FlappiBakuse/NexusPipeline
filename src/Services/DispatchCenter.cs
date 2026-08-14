@@ -250,8 +250,9 @@ internal class DispatchCenter
         {
             exec.Cts.Cancel();
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warn($"取消信号发送失败（{exec.TargetName}），任务可能仍在运行：{ex.Message}");
         }
     }
 

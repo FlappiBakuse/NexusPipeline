@@ -112,8 +112,9 @@ internal class PluginContext
         {
             return JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOpts.Default);
         }
-        catch
+        catch (Exception ex)
         {
+            Logger.Warn($"插件配置解析失败（{path}），按无配置处理：{ex.Message}");
             return null;
         }
     }
@@ -164,8 +165,9 @@ internal class PluginContext
                     return obj;
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Warn($"插件配置文件损坏（{path}），继续写入可能覆盖丢失密钥：{ex.Message}");
             }
         }
         return new JsonObject();

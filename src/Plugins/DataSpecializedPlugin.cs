@@ -180,8 +180,9 @@ internal sealed class DataSpecializedPlugin
                 {
                     _judgeScript = File.ReadAllText(_judgeScriptPath);
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Logger.Warn($"专项判断脚本读取失败（{_judgeScriptPath}），判定将退化为进程退出语义：{ex.Message}");
                     _judgeScript = "";
                 }
             }

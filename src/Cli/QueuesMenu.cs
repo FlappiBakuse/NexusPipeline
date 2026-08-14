@@ -13,16 +13,16 @@ internal static class QueuesMenu
         while (true)
         {
             Ui.ClearScreen();
+            var ordered = ctx.Queues.OrderBy(queue => queue.Index).ToList();
             var lines = new List<string>();
-            for (int i = 0; i < ctx.Queues.Count; i++)
+            foreach (DispatchQueue queue in ordered)
             {
-                DispatchQueue queue = ctx.Queues[i];
                 string tasks = string.Join(" → ", queue.Tasks.OrderBy(task => task.Index).Select(task =>
                 {
                     ScriptInstance? script = ctx.FindScript(task.ScriptInstanceId);
                     return script?.Name ?? "(缺失)";
                 }));
-                lines.Add($"{i + 1}. {queue.Name} | {QueueRule.AutoRunModeDesc(queue.AutoRunMode)} | 完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)} | 任务：{(tasks.Length > 0 ? tasks : "无")}");
+                lines.Add($"{lines.Count + 1}. {queue.Name} | {QueueRule.AutoRunModeDesc(queue.AutoRunMode)} | 完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)} | 任务：{(tasks.Length > 0 ? tasks : "无")}");
             }
             string[] options =
             {
@@ -66,17 +66,17 @@ internal static class QueuesMenu
                     }
                     if (choice.Trim() == "2")
                     {
-                        EditQueue(ctx, ctx.Queues[index - 1]);
+                        EditQueue(ctx, ordered[index - 1]);
                     }
                     else
                     {
-                        string? answer = Ui.Prompt($"确定删除调度队列「{ctx.Queues[index - 1].Name}」吗？(Y/N)：");
+                        string? answer = Ui.Prompt($"确定删除调度队列「{ordered[index - 1].Name}」吗？(Y/N)：");
                         if (Ui.IsYes(answer))
                         {
-                            string removedName = ctx.Queues[index - 1].Name;
+                            string removedName = ordered[index - 1].Name;
                             if (Ui.TrySave(() =>
                             {
-                                ctx.Queues.RemoveAt(index - 1);
+                                ctx.Queues.Remove(ordered[index - 1]);
                                 DataStore.SaveQueues(ctx.Queues);
                             }, "调度队列"))
                             {
@@ -178,6 +178,10 @@ internal static class QueuesMenu
         {
             if (current is null)
             {
+                if (ctx.Queues.Count > 0)
+                {
+                    queue.Index = ctx.Queues.Max(item => item.Index) + 1;
+                }
                 ctx.Queues.Add(queue);
             }
             else
