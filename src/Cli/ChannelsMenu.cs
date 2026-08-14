@@ -69,8 +69,10 @@ internal static class ChannelsMenu
                         s.WebhookTemplate = "";
                         Audit.Log(Audit.Manage, "修改通知渠道", "generic 模板已清空");
                     }
-                    ConfigStore.Save(s);
-                    Console.WriteLine("[完成] 已保存。");
+                    if (Ui.TrySave(() => ConfigStore.Save(s), "通知渠道"))
+                    {
+                        Console.WriteLine("[完成] 已保存。");
+                    }
                     break;
                 }
                 case "6":
@@ -105,8 +107,10 @@ internal static class ChannelsMenu
                         s.SmtpTo = "";
                         Audit.Log(Audit.Manage, "修改通知渠道", "SMTP 收件人已清空");
                     }
-                    ConfigStore.Save(s);
-                    Console.WriteLine("[完成] 已保存。");
+                    if (Ui.TrySave(() => ConfigStore.Save(s), "通知渠道"))
+                    {
+                        Console.WriteLine("[完成] 已保存。");
+                    }
                     break;
                 }
                 case "9":
@@ -144,8 +148,10 @@ internal static class ChannelsMenu
             ctx.Settings.SmtpEnabled = smtpChoice.Trim() == "1";
             Audit.Log(Audit.Manage, "修改通知渠道", $"SMTP 开关→{(ctx.Settings.SmtpEnabled ? "开" : "关")}");
         }
-        ConfigStore.Save(ctx.Settings);
-        Console.WriteLine($"[完成] Webhook {(ctx.Settings.WebhookEnabled ? "开" : "关")} / SMTP {(ctx.Settings.SmtpEnabled ? "开" : "关")}");
+        if (Ui.TrySave(() => ConfigStore.Save(ctx.Settings), "通知渠道"))
+        {
+            Console.WriteLine($"[完成] Webhook {(ctx.Settings.WebhookEnabled ? "开" : "关")} / SMTP {(ctx.Settings.SmtpEnabled ? "开" : "关")}");
+        }
     }
 
     private static void SetWebhookType(RuntimeContext ctx)
@@ -170,9 +176,11 @@ internal static class ChannelsMenu
             return;
         }
         ctx.Settings.WebhookType = value;
-        ConfigStore.Save(ctx.Settings);
-        Audit.Log(Audit.Manage, "修改通知渠道", $"Webhook 类型→{value}");
-        Console.WriteLine($"[完成] Webhook 类型：{WebhookSender.TypeDisplay(value)}");
+        if (Ui.TrySave(() => ConfigStore.Save(ctx.Settings), "通知渠道"))
+        {
+            Audit.Log(Audit.Manage, "修改通知渠道", $"Webhook 类型→{value}");
+            Console.WriteLine($"[完成] Webhook 类型：{WebhookSender.TypeDisplay(value)}");
+        }
     }
 
     private static void SetSecret(RuntimeContext ctx, string key)
@@ -187,16 +195,20 @@ internal static class ChannelsMenu
         if (result == EditResult.Entered)
         {
             ApplySecret(ctx.Settings, key, SecretStore.Encrypt(value));
-            ConfigStore.Save(ctx.Settings);
-            Audit.Log(Audit.Manage, "修改通知渠道", $"{label}已设置");
-            Console.WriteLine($"[完成] {label}已加密保存（绑定当前电脑和用户）。");
+            if (Ui.TrySave(() => ConfigStore.Save(ctx.Settings), "通知渠道"))
+            {
+                Audit.Log(Audit.Manage, "修改通知渠道", $"{label}已设置");
+                Console.WriteLine($"[完成] {label}已加密保存（绑定当前电脑和用户）。");
+            }
         }
         else if (result == EditResult.Clear)
         {
             ApplySecret(ctx.Settings, key, "");
-            ConfigStore.Save(ctx.Settings);
-            Audit.Log(Audit.Manage, "修改通知渠道", $"{label}已清除");
-            Console.WriteLine($"[完成] {label}已清除。");
+            if (Ui.TrySave(() => ConfigStore.Save(ctx.Settings), "通知渠道"))
+            {
+                Audit.Log(Audit.Manage, "修改通知渠道", $"{label}已清除");
+                Console.WriteLine($"[完成] {label}已清除。");
+            }
         }
     }
 
@@ -238,8 +250,10 @@ internal static class ChannelsMenu
         {
             s.SmtpSecure = secureValue.Trim();
         }
-        ConfigStore.Save(s);
-        Audit.Log(Audit.Manage, "修改通知渠道", $"SMTP 服务器={s.SmtpHost}:{s.SmtpPort} {s.SmtpSecure}");
-        Console.WriteLine("[完成] 已更新 SMTP 服务器设置。");
+        if (Ui.TrySave(() => ConfigStore.Save(s), "通知渠道"))
+        {
+            Audit.Log(Audit.Manage, "修改通知渠道", $"SMTP 服务器={s.SmtpHost}:{s.SmtpPort} {s.SmtpSecure}");
+            Console.WriteLine("[完成] 已更新 SMTP 服务器设置。");
+        }
     }
 }

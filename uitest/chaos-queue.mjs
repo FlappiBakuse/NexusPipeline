@@ -153,7 +153,7 @@ function cleanupTempCounters() {
 }
 
 function startService() {
-  child = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: "ignore" });
+  child = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
 }
 
 async function stopService() {

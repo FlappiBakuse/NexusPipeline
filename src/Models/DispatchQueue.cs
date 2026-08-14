@@ -38,30 +38,16 @@ public class DispatchQueue
 
     public bool NotifyEnabled { get; set; }
 
+    private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
     public DispatchQueue Clone()
     {
-        return new DispatchQueue
-        {
-            Id = Id,
-            Name = Name,
-            AutoRunMode = AutoRunMode,
-            CompletionAction = CompletionAction,
-            TimeSets = TimeSets.Select(t => new QueueTimeSet
-            {
-                Id = t.Id,
-                Enabled = t.Enabled,
-                Days = new List<int>(t.Days),
-                Time = t.Time,
-            }).ToList(),
-            Tasks = Tasks.Select(t => new QueueTask
-            {
-                Id = t.Id,
-                Index = t.Index,
-                ScriptInstanceId = t.ScriptInstanceId,
-                UserName = t.UserName,
-            }).ToList(),
-            NotifyEnabled = NotifyEnabled,
-        };
+        return System.Text.Json.JsonSerializer.Deserialize<DispatchQueue>(
+            System.Text.Json.JsonSerializer.Serialize(this, CloneOptions), CloneOptions) ?? new DispatchQueue();
     }
 }
 

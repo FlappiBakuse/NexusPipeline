@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.6（Pre-release）
+
+### 变更
+
+- **修复配置交换残留（严重 BUG）**：编辑配置 done/cancel 自动结束脚本进程并确认退出（`KillAndConfirmExited` 改返回 bool，按启动目标名轮询强杀处理防崩溃自重启脚本如 BetterGI）——持续自重启杀不干净时拒绝执行文件交换并返回引导文案「请先在托盘退出脚本后重试」；文件交换成功后才移除编辑会话（失败可原地重试，`.session` 标记由自愈/后台重试兜底）；`TryRecoverItem` 检测脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」）时跳过恢复动作、进程退出后由后台重试自动完成（避免误删/误覆盖正在使用的配置）。
+- **修复游戏窗口前置未生效**：游戏由启动器延迟拉起时启动瞬间检测不到——`BringGameToFrontIfRunning` 改为监控循环内轮询检测（每轮按名检测，出现即前置，`_gameFronted` 标志只前置一次；复用 `BringToFront` 30 秒窗口覆盖「进程出现但窗口未建」）。
+- **修复 build.cmd 增量构建指纹失效**：for /f 对超长哈希（>8191 行缓冲）捕获为空导致指纹写坏（「ECHO 处于关闭状态。」，曾致发布旧 exe）；括号块内 `%VAR%` 解析时展开导致增量判断恒失败——改 PowerShell 内二次哈希（64 字符输出）+ goto 标签结构，内容变化必全量 publish、稳定态增量跳过。
+- **配置与日志维护**：`ConfigStore.Normalize` 历史保留天数上限改由 `limits.json` 约束（消除硬编码 180，`Limits.Load` 同步、加载顺序调整）；`ProtectedData` 10.0.10 → 8.0.0（net8 配套）；`Logger` 日志阈值改缓存（消除每次日志调用提前构造 DI 容器，设置加载/保存后刷新仍即时生效）。
+- **CLI/菜单一致性**：调度中心（manage 菜单）统一经常驻服务 HTTP 通道（`CliTransport`，与 CLI run-script 同通道——Web 端可见运行任务，消除进程内直调与 HTTP 通道割裂）；manage 启动时探测常驻服务在跑 → 提示菜单修改可能与 Web 端互相覆盖；菜单保存带异常兜底（`Ui.TrySave`，IO 失败不退出菜单）。
+- **启动与互斥加固**：崩溃恢复（`RecoverInterrupted`）仅服务类进程（service/web）执行（manage/status/CLI 由运行时自愈兜底，消除多进程并发恢复竞争）；web 模式抢单实例互斥（常驻服务在跑时直接退出防双写）；web 模式退出循环修复 stdin 重定向永久挂起（EOF 自动退出；无效 stdin 持续运行——e2e 服务启动方式相应改为 stdin pipe）。
+- **代码清理**：删除死代码 `LogMonitor.ResolveFile`；`ScriptInstance`/`DispatchQueue`/`RunRecord` 手工 `Clone()` 改序列化深拷贝（防新增字段漂移）；`PluginManager.LoadAll` 幂等（重复调用先清空）。
+- **测试**：e2e 新增 1 用例（编辑配置文件被占用时提交失败、释放后重试成功且无残留），全量 56 → **57**、CI 核心集 55 → **56**；`07-limits` 端口占用用例适配 web 模式互斥语义（停服务 + node 监听占端口）；数字同步 AGENTS/README/DEVELOPMENT/ARCHITECTURE。
+- 版本号 0.6.6。
+
 ## v0.6.5（Pre-release）
 
 ### 变更

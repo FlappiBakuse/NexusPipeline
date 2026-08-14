@@ -7,7 +7,38 @@ internal static class Logger
 {
     private static readonly object Sync = new();
 
-    private static LogLevel Threshold => LogLevelUtil.Parse(RuntimeContext.Instance.Settings.LogLevel);
+    /// <summary>日志阈值缓存（v0.6.6+：避免每次日志调用访问 RuntimeContext 提前构造 DI 容器；设置加载/保存后经 <see cref="RefreshLevel"/> 失效重解析）。</summary>
+    private static LogLevel? _levelCache;
+
+    /// <summary>设置加载/保存后调用：清空阈值缓存，下次日志调用按最新配置解析（保持「阈值即时生效」契约）。</summary>
+    public static void RefreshLevel()
+    {
+        lock (Sync)
+        {
+            _levelCache = null;
+        }
+    }
+
+    private static LogLevel Threshold
+    {
+        get
+        {
+            LogLevel? cached = _levelCache;
+            if (cached is null)
+            {
+                lock (Sync)
+                {
+                    cached = _levelCache;
+                    if (cached is null)
+                    {
+                        cached = LogLevelUtil.Parse(RuntimeContext.Instance.Settings.LogLevel);
+                        _levelCache = cached;
+                    }
+                }
+            }
+            return cached.Value;
+        }
+    }
 
     public static void Debug(string message) => Log(LogLevel.Debug, message);
 

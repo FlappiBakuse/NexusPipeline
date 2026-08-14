@@ -135,7 +135,8 @@ export function setupRuntime() {
 /** 启动测试服务（v0.6.5+ 支持 service 模式：自重启仅常驻服务模式支持，测试用无参数启动；默认 web 模式）。 */
 export function startService(mode = "web") {
   const args = mode === "service" ? [] : [mode];
-  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: "ignore" });
+  // v0.6.6+：stdin 用 pipe 保持打开（web 模式「按回车停止」阻塞等待；stdio:ignore 的 NUL/无效句柄会被视为 EOF 立即退出）。
+  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
   try {
     fs.writeFileSync(pidFile, String(child.pid));
   } catch { /* pid 文件仅作跨进程兜底，写失败不阻塞 */ }

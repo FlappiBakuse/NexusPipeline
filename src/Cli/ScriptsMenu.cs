@@ -67,10 +67,15 @@ internal static class ScriptsMenu
                         if (Ui.IsYes(answer))
                         {
                             string removedName = ctx.Scripts[index - 1].Name;
-                            ctx.Scripts.RemoveAt(index - 1);
-                            DataStore.SaveScripts(ctx.Scripts);
-                            Audit.Log(Audit.Manage, "删除脚本实例", removedName);
-                            Console.WriteLine("[完成] 已删除。");
+                            if (Ui.TrySave(() =>
+                            {
+                                ctx.Scripts.RemoveAt(index - 1);
+                                DataStore.SaveScripts(ctx.Scripts);
+                            }, "脚本实例"))
+                            {
+                                Audit.Log(Audit.Manage, "删除脚本实例", removedName);
+                                Console.WriteLine("[完成] 已删除。");
+                            }
                         }
                         else
                         {
@@ -169,17 +174,21 @@ internal static class ScriptsMenu
             return;
         }
 
-        if (current is null)
+        if (Ui.TrySave(() =>
         {
-            ctx.Scripts.Add(script);
-            Audit.Log(Audit.Manage, "添加脚本实例", script.Name);
-        }
-        else
+            if (current is null)
+            {
+                ctx.Scripts.Add(script);
+            }
+            else
+            {
+                ctx.Scripts[ctx.Scripts.IndexOf(current)] = script;
+            }
+            DataStore.SaveScripts(ctx.Scripts);
+        }, "脚本实例"))
         {
-            ctx.Scripts[ctx.Scripts.IndexOf(current)] = script;
-            Audit.Log(Audit.Manage, "修改脚本实例", script.Name);
+            Audit.Log(Audit.Manage, current is null ? "添加脚本实例" : "修改脚本实例", script.Name);
+            Console.WriteLine("[完成] 脚本实例已保存。");
         }
-        DataStore.SaveScripts(ctx.Scripts);
-        Console.WriteLine("[完成] 脚本实例已保存。");
     }
 }

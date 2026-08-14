@@ -147,7 +147,12 @@ test("约束警告：非法配置告警 + 前端卡片（知道了/不再提醒�
 });
 
 test("Web 端口占用自动 +1 重试（HttpListener 复用崩溃修复验证）", async () => {
-  const second = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: "ignore" });
+  // v0.6.6+：web 模式抢单实例互斥（常驻服务在跑时直接退出），先停服务、用 node 监听占 58731 验证端口 +1。
+  await stopService();
+  await new Promise(r => setTimeout(r, 400));
+  const blocker = spawn(process.execPath, ["-e", "require('net').createServer().listen(58731, '127.0.0.1')"], { stdio: "ignore" });
+  await new Promise(r => setTimeout(r, 800));
+  const second = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
   const ok = await waitFor(async () => {
     try {
       const res = await fetch("http://127.0.0.1:58732/api/status");
@@ -159,8 +164,11 @@ test("Web 端口占用自动 +1 重试（HttpListener 复用崩溃修复验证�
   expect(ok, "端口 58731 被占用时自动重试到 58732（/api/status 可达）").toBeTruthy();
   expect(second.exitCode === null, "重试成功且进程未崩溃（exitCode=null）").toBeTruthy();
   second.kill();
+  blocker.kill();
   await new Promise(r => setTimeout(r, 600));
-  expect(true, "第二个实例已清理").toBeTruthy();
+  await startService();
+  await waitForService();
+  expect(true, "已恢复常驻服务").toBeTruthy();
 });
 
 test("约束 FATAL：致命配置拒绝启动", async () => {

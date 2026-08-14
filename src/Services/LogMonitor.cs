@@ -212,31 +212,4 @@ internal class LogMonitor : IDisposable
         _stream?.Dispose();
         _stream = null;
     }
-
-    public static string? ResolveFile(string logPath)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(logPath))
-            {
-                return null;
-            }
-            if (File.Exists(logPath))
-            {
-                return logPath;
-            }
-            if (Directory.Exists(logPath))
-            {
-                string? newest = Directory.GetFiles(logPath)
-                    .OrderByDescending(File.GetLastWriteTime)
-                    .FirstOrDefault();
-                return newest;
-            }
-            return null;
-        }
-        catch (Exception)
-        {
-            return null;
-        }
-    }
 }

@@ -106,8 +106,11 @@ internal sealed class PluginManager
         return channel is IPlugin plugin ? plugin.DisplayName : channel.GetType().Name;
     }
 
+    /// <summary>加载全部插件（v0.6.6+ 幂等：重复调用先清空，避免重复注册）。</summary>
     public void LoadAll()
     {
+        _plugins.Clear();
+        _dataPlugins.Clear();
         foreach (IPlugin plugin in DiscoverBuiltIn())
         {
             _plugins.Add(plugin);

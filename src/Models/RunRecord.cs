@@ -54,34 +54,15 @@ public class RunRecord
 
     public List<RunAttempt> AttemptDetails { get; set; } = new();
 
+    private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移；CustomNotifyText 与历史行为一致不复制）。</summary>
     public RunRecord Clone()
     {
-        return new RunRecord
-        {
-            Id = Id,
-            ScriptInstanceId = ScriptInstanceId,
-            ScriptName = ScriptName,
-            QueueId = QueueId,
-            QueueName = QueueName,
-            Mode = Mode,
-            UserName = UserName,
-            StartTime = StartTime,
-            EndTime = EndTime,
-            Attempts = Attempts,
-            MaxAttempts = MaxAttempts,
-            Status = Status,
-            FinalStatus = FinalStatus,
-            ResultDetail = ResultDetail,
-            LogFile = LogFile,
-            AttemptDetails = AttemptDetails.Select(a => new RunAttempt
-            {
-                Number = a.Number,
-                StartTime = a.StartTime,
-                EndTime = a.EndTime,
-                Status = a.Status,
-                Reason = a.Reason,
-                LogFile = a.LogFile,
-            }).ToList(),
-        };
+        return System.Text.Json.JsonSerializer.Deserialize<RunRecord>(
+            System.Text.Json.JsonSerializer.Serialize(this, CloneOptions), CloneOptions) ?? new RunRecord();
     }
 }

@@ -74,10 +74,15 @@ internal static class QueuesMenu
                         if (Ui.IsYes(answer))
                         {
                             string removedName = ctx.Queues[index - 1].Name;
-                            ctx.Queues.RemoveAt(index - 1);
-                            DataStore.SaveQueues(ctx.Queues);
-                            Audit.Log(Audit.Manage, "删除调度队列", removedName);
-                            Console.WriteLine("[完成] 已删除。");
+                            if (Ui.TrySave(() =>
+                            {
+                                ctx.Queues.RemoveAt(index - 1);
+                                DataStore.SaveQueues(ctx.Queues);
+                            }, "调度队列"))
+                            {
+                                Audit.Log(Audit.Manage, "删除调度队列", removedName);
+                                Console.WriteLine("[完成] 已删除。");
+                            }
                         }
                         else
                         {
@@ -169,18 +174,22 @@ internal static class QueuesMenu
             return;
         }
 
-        if (current is null)
+        if (Ui.TrySave(() =>
         {
-            ctx.Queues.Add(queue);
-            Audit.Log(Audit.Manage, "添加调度队列", $"{queue.Name}（任务 {queue.Tasks.Count} 项）");
-        }
-        else
+            if (current is null)
+            {
+                ctx.Queues.Add(queue);
+            }
+            else
+            {
+                ctx.Queues[ctx.Queues.IndexOf(current)] = queue;
+            }
+            DataStore.SaveQueues(ctx.Queues);
+        }, "调度队列"))
         {
-            ctx.Queues[ctx.Queues.IndexOf(current)] = queue;
-            Audit.Log(Audit.Manage, "修改调度队列", $"{queue.Name}（任务 {queue.Tasks.Count} 项）");
+            Audit.Log(Audit.Manage, current is null ? "添加调度队列" : "修改调度队列", $"{queue.Name}（任务 {queue.Tasks.Count} 项）");
+            Console.WriteLine("[完成] 调度队列已保存。");
         }
-        DataStore.SaveQueues(ctx.Queues);
-        Console.WriteLine("[完成] 调度队列已保存。");
     }
 
     private static void EditTimeSets(DispatchQueue queue)

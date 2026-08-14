@@ -6,6 +6,14 @@ namespace NexusPipeline.Persistence;
 
 internal static class ConfigStore
 {
+    /// <summary>历史保留天数上限（v0.6.6+ 由 limits.json 约束，消除硬编码 180；Limits.Load 时同步，避免 Persistence 反向依赖 Services）。</summary>
+    private static int _maxHistoryRetentionDays = 180;
+
+    public static void ApplyMaxHistoryRetentionDays(int maxDays)
+    {
+        _maxHistoryRetentionDays = Math.Max(1, maxDays);
+    }
+
     public static AppSettings Load()
     {
         var settings = new AppSettings();
@@ -25,6 +33,8 @@ internal static class ConfigStore
             }
         }
         Normalize(settings);
+        // v0.6.6+：加载后刷新日志阈值缓存（即时生效）。
+        Logger.RefreshLevel();
         return settings;
     }
 
@@ -33,11 +43,13 @@ internal static class ConfigStore
         Normalize(settings);
         Directory.CreateDirectory(AppPaths.ConfigDir);
         JsonUtil.WriteAtomic(AppPaths.ConfigPath, JsonSerializer.Serialize(settings, JsonOpts.Indented));
+        // v0.6.6+：保存后刷新日志阈值缓存（即时生效）。
+        Logger.RefreshLevel();
     }
 
     private static void Normalize(AppSettings settings)
     {
-        if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > 180)
+        if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > _maxHistoryRetentionDays)
         {
             settings.HistoryRetentionDays = 7;
         }

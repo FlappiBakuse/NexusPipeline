@@ -11,6 +11,8 @@ internal static class MainMenu
         {
             Ui.ClearScreen();
             RuntimeContext ctx = RuntimeContext.Instance;
+            // v0.6.6+：常驻服务运行中时菜单直写配置可能与 Web 端修改互相覆盖，顶部提示。
+            bool serviceRunning = CliTransport.Probe(ctx.Settings.WebPort, 1500);
             string[] options =
             {
                 $"1. 脚本实例管理（当前：{ctx.Scripts.Count} 个）",
@@ -30,6 +32,11 @@ internal static class MainMenu
                 title,
                 new string('=', width),
             };
+            if (serviceRunning)
+            {
+                lines.Add("[提示] 检测到常驻服务正在运行：菜单修改可能与 Web 端修改互相覆盖，建议通过 Web 界面操作。");
+                width = Math.Max(width, lines[^1].Length);
+            }
             lines.AddRange(options);
             lines.Add(new string('=', width));
             Ui.Block(lines);

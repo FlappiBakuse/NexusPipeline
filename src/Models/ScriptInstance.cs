@@ -54,34 +54,16 @@ public class ScriptInstance
 
     public List<ScriptUser> Users { get; set; } = new();
 
+    private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
     public ScriptInstance Clone()
     {
-        return new ScriptInstance
-        {
-            Id = Id,
-            Name = Name,
-            PluginType = PluginType,
-            RootPath = RootPath,
-            MainExe = MainExe,
-            Args = Args,
-            ConfigPath = ConfigPath,
-            LogPath = LogPath,
-            LaunchGame = LaunchGame,
-            GameExe = GameExe,
-            GameArgs = GameArgs,
-            GameWaitSeconds = GameWaitSeconds,
-            ForceCloseGame = ForceCloseGame,
-            MaxAttempts = MaxAttempts,
-            LogStallTimeoutMinutes = LogStallTimeoutMinutes,
-            TotalTimeoutMinutes = TotalTimeoutMinutes,
-            SuccessKeywords = SuccessKeywords,
-            FailureKeywords = FailureKeywords,
-            JudgeScriptEnabled = JudgeScriptEnabled,
-            JudgeScriptLanguage = JudgeScriptLanguage,
-            JudgeScript = JudgeScript,
-            NotifyEnabled = NotifyEnabled,
-            Users = Users.Select(user => user.Clone()).ToList(),
-        };
+        return System.Text.Json.JsonSerializer.Deserialize<ScriptInstance>(
+            System.Text.Json.JsonSerializer.Serialize(this, CloneOptions), CloneOptions) ?? new ScriptInstance();
     }
 
     /// <summary>是否配置了判断脚本（开关开启且代码非空）。</summary>

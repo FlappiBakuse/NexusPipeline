@@ -107,6 +107,21 @@ internal static class Ui
         return answer is not null && answer.Trim().StartsWith("Y", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>菜单保存兜底（v0.6.6+）：执行保存动作，IO 异常时提示且不退出菜单；返回是否保存成功。</summary>
+    public static bool TrySave(Action save, string what)
+    {
+        try
+        {
+            save();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[错误] {what}保存失败：{ex.Message}（本次修改未落盘）");
+            return false;
+        }
+    }
+
     public static void ClearScreen()
     {
         try

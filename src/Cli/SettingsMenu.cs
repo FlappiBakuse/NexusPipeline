@@ -48,16 +48,20 @@ internal static class SettingsMenu
                     return;
                 case "1":
                     s.AutoStart = !s.AutoStart;
-                    ConfigStore.Save(s);
-                    TaskRegistration.SyncWithSettings(s);
-                    Audit.Log(Audit.Manage, "修改设置", $"开机自启动→{(s.AutoStart ? "开" : "关")}");
-                    Console.WriteLine($"[完成] 开机自启动已{(s.AutoStart ? "开启" : "关闭")}。");
+                    if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                    {
+                        TaskRegistration.SyncWithSettings(s);
+                        Audit.Log(Audit.Manage, "修改设置", $"开机自启动→{(s.AutoStart ? "开" : "关")}");
+                        Console.WriteLine($"[完成] 开机自启动已{(s.AutoStart ? "开启" : "关闭")}。");
+                    }
                     break;
                 case "2":
                     s.LightweightMode = !s.LightweightMode;
-                    ConfigStore.Save(s);
-                    Audit.Log(Audit.Manage, "修改设置", $"轻量运行模式→{(s.LightweightMode ? "开" : "关")}");
-                    Console.WriteLine($"[完成] 轻量运行模式已{(s.LightweightMode ? "开启" : "关闭")}（重启生效）。");
+                    if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                    {
+                        Audit.Log(Audit.Manage, "修改设置", $"轻量运行模式→{(s.LightweightMode ? "开" : "关")}");
+                        Console.WriteLine($"[完成] 轻量运行模式已{(s.LightweightMode ? "开启" : "关闭")}（重启生效）。");
+                    }
                     break;
                 case "3":
                 {
@@ -65,9 +69,11 @@ internal static class SettingsMenu
                     if (result == EditResult.Entered && int.TryParse(value.Trim(), out int days) && days >= 1)
                     {
                         s.HistoryRetentionDays = days;
-                        ConfigStore.Save(s);
-                        Audit.Log(Audit.Manage, "修改设置", $"历史保留天数→{days}");
-                        Console.WriteLine("[完成] 已保存。");
+                        if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                        {
+                            Audit.Log(Audit.Manage, "修改设置", $"历史保留天数→{days}");
+                            Console.WriteLine("[完成] 已保存。");
+                        }
                     }
                     break;
                 }
@@ -77,17 +83,21 @@ internal static class SettingsMenu
                     if (result == EditResult.Entered && int.TryParse(value.Trim(), out int port) && port is >= 1024 and <= 65535)
                     {
                         s.WebPort = port;
-                        ConfigStore.Save(s);
-                        Audit.Log(Audit.Manage, "修改设置", $"Web 端口→{port}");
-                        Console.WriteLine("[完成] 已保存（重启生效）。");
+                        if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                        {
+                            Audit.Log(Audit.Manage, "修改设置", $"Web 端口→{port}");
+                            Console.WriteLine("[完成] 已保存（重启生效）。");
+                        }
                     }
                     break;
                 }
                 case "5":
                     s.AutoOpenBrowser = !s.AutoOpenBrowser;
-                    ConfigStore.Save(s);
-                    Audit.Log(Audit.Manage, "修改设置", $"自动打开浏览器→{(s.AutoOpenBrowser ? "开" : "关")}");
-                    Console.WriteLine($"[完成] 自动打开浏览器已{(s.AutoOpenBrowser ? "开启" : "关闭")}。");
+                    if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                    {
+                        Audit.Log(Audit.Manage, "修改设置", $"自动打开浏览器→{(s.AutoOpenBrowser ? "开" : "关")}");
+                        Console.WriteLine($"[完成] 自动打开浏览器已{(s.AutoOpenBrowser ? "开启" : "关闭")}。");
+                    }
                     break;
                 case "6":
                 {
@@ -95,9 +105,11 @@ internal static class SettingsMenu
                     if (result == EditResult.Entered && LogLevelUtil.IsValid(value.Trim().ToLowerInvariant()))
                     {
                         s.LogLevel = value.Trim().ToLowerInvariant();
-                        ConfigStore.Save(s);
-                        Audit.Log(Audit.Manage, "修改设置", $"日志级别→{s.LogLevel}");
-                        Console.WriteLine("[完成] 已保存（即时生效）。");
+                        if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
+                        {
+                            Audit.Log(Audit.Manage, "修改设置", $"日志级别→{s.LogLevel}");
+                            Console.WriteLine("[完成] 已保存（即时生效）。");
+                        }
                     }
                     break;
                 }

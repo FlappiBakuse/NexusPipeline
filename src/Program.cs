@@ -90,9 +90,10 @@ public static class Program
 
         RuntimeContext ctx = RuntimeContext.Instance;
         MigrateLegacyConfig();
+        // v0.6.6+：先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
+        Limits.Load();
         ctx.ReloadSettings();
         ctx.ReloadData();
-        Limits.Load();
         if (Limits.Fatals.Count > 0)
         {
             foreach (string fatal in Limits.Fatals)
@@ -107,7 +108,6 @@ public static class Program
         {
             Logger.Warn(warning);
         }
-        UserConfigManager.RecoverInterrupted();
 
         if (args.Length == 0)
         {
@@ -193,6 +193,8 @@ public static class Program
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.ReloadSettings();
         ctx.ReloadData();
+        // v0.6.6+：崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底），避免多进程并发恢复竞争文件。
+        UserConfigManager.RecoverInterrupted();
         TaskRegistration.SyncWithSettings(ctx.Settings);
         Bootstrap.StartServices();
 
@@ -300,8 +302,18 @@ public static class Program
 
     private static int RunWebOnly(string[] args)
     {
+        // v0.6.6+：web 模式同样抢单实例互斥——常驻服务已在运行时直接退出（防两实例双写配置/数据）。
+        using Mutex? mutex = AcquireSingleInstanceMutex();
+        if (mutex is null)
+        {
+            Logger.Info("检测到 NexusPipeline 已在运行，仅网页模式退出（可在托盘图标打开管理页面）。");
+            Console.WriteLine("[错误] 检测到 NexusPipeline 已在运行，仅网页模式无法并存。请在托盘图标打开管理页面。");
+            return 1;
+        }
         IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
+        // v0.6.6+：崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
+        UserConfigManager.RecoverInterrupted();
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
         if (web is null)
@@ -324,19 +336,26 @@ public static class Program
             {
             }
         }
+        // v0.6.6+：正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
+        // 无效 stdin（spawn stdio:ignore，e2e 服务启动方式）Peek 抛异常 → 持续运行直到被外部终止。
         while (true)
         {
+            int peek;
             try
             {
-                if (Console.KeyAvailable && Console.ReadLine() is not null)
-                {
-                    break;
-                }
+                peek = Console.In.Peek();
             }
             catch
             {
+                Thread.Sleep(500);
+                continue;
             }
-            Thread.Sleep(200);
+            if (peek == -1)
+            {
+                break;
+            }
+            Console.ReadLine();
+            break;
         }
         Bootstrap.Shutdown(web);
         return 0;
@@ -404,20 +423,17 @@ public static class Program
     /// </summary>
     private static int RunCliViaHttp(string kind, object body, string displayName)
     {
-        int? port = EnsureCliService();
+        int? port = CliTransport.EnsureService();
         if (port is null)
         {
             return 1;
         }
-        using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(5);
         try
         {
-            HttpResponseMessage resp = client.PostAsync($"http://127.0.0.1:{port}/api/dispatch/{kind}",
-                new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+            HttpResponseMessage resp = CliTransport.Post(port.Value, $"/api/dispatch/{kind}", body);
             if (!resp.IsSuccessStatusCode)
             {
-                Console.WriteLine($"[错误] {ReadError(resp)}");
+                Console.WriteLine($"[错误] {CliTransport.ReadError(resp)}");
                 return 1;
             }
             string runId = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult())?["runId"]?.ToString() ?? "";
@@ -426,7 +442,7 @@ public static class Program
                 Console.WriteLine("[错误] 服务未返回运行 ID。");
                 return 1;
             }
-            return PollCliRun(client, port.Value, runId);
+            return PollCliRun(port.Value, runId);
         }
         catch (Exception ex)
         {
@@ -436,7 +452,7 @@ public static class Program
     }
 
     /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1。</summary>
-    private static int PollCliRun(HttpClient client, int port, string runId)
+    private static int PollCliRun(int port, string runId)
     {
         string lastStatus = "";
         int consecutiveFailures = 0;
@@ -445,11 +461,11 @@ public static class Program
         {
             try
             {
-                HttpResponseMessage resp = client.GetAsync($"http://127.0.0.1:{port}/api/dispatch/{runId}").GetAwaiter().GetResult();
+                HttpResponseMessage resp = CliTransport.Get(port, $"/api/dispatch/{runId}");
                 consecutiveFailures = 0;
                 if (!resp.IsSuccessStatusCode)
                 {
-                    Console.WriteLine($"[错误] 查询运行状态失败：HTTP {(int)resp.StatusCode}（{ReadError(resp)}）");
+                    Console.WriteLine($"[错误] 查询运行状态失败：HTTP {(int)resp.StatusCode}（{CliTransport.ReadError(resp)}）");
                     return 1;
                 }
                 node = JsonNode.Parse(resp.Content.ReadAsStringAsync().GetAwaiter().GetResult());
@@ -521,77 +537,6 @@ public static class Program
         return iso;
     }
 
-    /// <summary>确保常驻服务可达：探测失败时轻量模式报错退出，否则自动拉起服务进程并等待（最多 30 秒）。返回实际端口或 null。</summary>
-    private static int? EnsureCliService()
-    {
-        int port = RuntimeContext.Instance.Settings.WebPort;
-        if (ProbeService(port, 2000))
-        {
-            return port;
-        }
-        if (RuntimeContext.Instance.Settings.LightweightMode)
-        {
-            Console.WriteLine("[错误] 服务处于轻量运行模式，未启动 Web 接口，无法提交任务");
-            return null;
-        }
-        Console.WriteLine($"[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...");
-        try
-        {
-            string exePath = Environment.ProcessPath ?? "";
-            Process.Start(new ProcessStartInfo(exePath)
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[错误] 自动拉起常驻服务失败：{ex.Message}");
-            return null;
-        }
-        DateTime deadline = DateTime.Now.AddSeconds(30);
-        while (DateTime.Now < deadline)
-        {
-            Thread.Sleep(500);
-            if (ProbeService(port, 2000))
-            {
-                return port;
-            }
-        }
-        Console.WriteLine("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
-        return null;
-    }
-
-    /// <summary>GET /api/status 探测服务可达性（HTTP 2xx 视为可达）。</summary>
-    private static bool ProbeService(int port, int timeoutMs)
-    {
-        try
-        {
-            using var cts = new CancellationTokenSource(timeoutMs);
-            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
-            using HttpResponseMessage resp = client.GetAsync($"http://127.0.0.1:{port}/api/status", cts.Token).GetAwaiter().GetResult();
-            return resp.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>读取响应体 {error} 字段（失败时回退原文/状态码）。</summary>
-    private static string ReadError(HttpResponseMessage resp)
-    {
-        try
-        {
-            string text = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            return JsonNode.Parse(text)?["error"]?.ToString() ?? text;
-        }
-        catch
-        {
-            return $"服务返回错误（HTTP {(int)resp.StatusCode}）";
-        }
-    }
-
     private static int CancelCli(string[] args)
     {
         string runId = args.Length > 0 ? args[0] : "";
@@ -600,23 +545,20 @@ public static class Program
             Console.WriteLine("[错误] 用法：nexus-pipeline.exe cancel <运行ID>");
             return 1;
         }
-        int? port = EnsureCliService();
+        int? port = CliTransport.EnsureService();
         if (port is null)
         {
             return 1;
         }
         try
         {
-            using var client = new HttpClient();
-            client.Timeout = TimeSpan.FromSeconds(5);
-            HttpResponseMessage resp = client.PostAsync($"http://127.0.0.1:{port}/api/cancel",
-                new StringContent(JsonSerializer.Serialize(new { runId }, JsonOpts.Default), Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+            HttpResponseMessage resp = CliTransport.Post(port.Value, "/api/cancel", new { runId });
             if (resp.IsSuccessStatusCode)
             {
                 Console.WriteLine("[OK] 已发送取消请求。");
                 return 0;
             }
-            Console.WriteLine($"[错误] {ReadError(resp)}");
+            Console.WriteLine($"[错误] {CliTransport.ReadError(resp)}");
             return 1;
         }
         catch (Exception ex)

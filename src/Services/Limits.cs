@@ -53,6 +53,8 @@ internal static class Limits
         Warnings.AddRange(warnings);
         Fatals.Clear();
         Fatals.AddRange(fatals);
+        // v0.6.6+：同步历史保留天数上限到 ConfigStore（settings Normalize 使用，消除硬编码 180）。
+        ConfigStore.ApplyMaxHistoryRetentionDays(limits.MaxHistoryRetentionDays);
     }
 
     private static void CheckCount(int value, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals)
