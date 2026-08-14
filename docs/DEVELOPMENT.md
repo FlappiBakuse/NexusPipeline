@@ -196,6 +196,6 @@ SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
 
 - 每次改动后必须运行 `build.cmd` 与全量 e2e（`npx playwright test`，60 用例）与单元测试（`dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj`，58 断言），全绿方可提交；
 - 开发迭代快速验证可用 CI 核心回归集（`$env:NEXUS_CI = "1"; npx playwright test`，59 用例，剔除响应式外壳外观用例），并默认使用时间加速档（`NEXUS_TIME_SCALE=10`）；**推送与发布前必须真实计时档全量**（不设 `NEXUS_TIME_SCALE`）；
-- 专项稳定性测试：`node uitest\judge-scenarios.mjs`（115 断言）与混沌压力测试 `node uitest\chaos-queue.mjs`（171 断言，需管理员 shell），发布前一并运行（加速档为日常迭代档位）；
+- 专项稳定性测试：`node uitest\judge-scenarios.mjs`（115 断言）与混沌压力测试 `node uitest\chaos-queue.mjs`（166 断言，需管理员 shell），发布前一并运行（加速档为日常迭代档位）；
 - 新增或删除测试用例后，同步更新 AGENTS.md 中的断言数字；新增依赖真实墙钟的用例须同时提供加速档与真实档两档实现（见 AGENTS.md「加速档测试契约」）；
 - 永不提交：`release/`、`config/`、`history/`、`logs/`、`uitest/runtime/`、密钥与账号信息（含 DPAPI 加密值）。

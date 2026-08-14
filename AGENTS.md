@@ -17,7 +17,7 @@ npx playwright test            # 全量 60 用例（发布前本地回归）；�
 $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：59 用例（剔除响应式外壳外观用例）
 # 时间加速（v0.6.4+，唯一加速档 NEXUS_TIME_SCALE=10；run-uitest.cmd 已默认内置）：宿主等待按比例缩放
 # （1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms），
-# 三套测试（e2e 60 + judge 115 + chaos 171）合计约 10 分钟；发布前用真实计时档（不设该变量）跑全量回归
+# 三套测试（e2e 60 + judge 115 + chaos 166）合计约 10 分钟；发布前用真实计时档（不设该变量）跑全量回归
 $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 

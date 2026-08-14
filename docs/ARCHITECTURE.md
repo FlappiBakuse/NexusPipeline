@@ -54,7 +54,7 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换）；判断脚本输入按尝试切片（v0.5.2+） |
 | `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：判断脚本/关键字两模式，判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
-| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（Length<position 从头重读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（v0.6.9+：部分截断从新尾续读、归零从头读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths` |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试 |
@@ -62,8 +62,8 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduler.cs | 定时/启动时触发队列 |
 | `HistoryService` | src/Services/HistoryService.cs | 历史记录读写与清理 |
-| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+） |
-| `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
+| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |
+| `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体）；v0.6.9+ 移除 `ReadLogTail`（`/api/logs` 孤儿 API 删除） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册（v0.5.0+） |
 | `MainMenu` + 菜单类 | src/Cli/ | 命令行交互（主菜单/脚本/队列/调度/历史/插件/设置/通知渠道） |
 | `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关/能力查询（内置 NotifyPlugin + 数据化专项插件 DataSpecializedPlugin 扫描注册） |

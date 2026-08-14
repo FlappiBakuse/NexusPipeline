@@ -92,7 +92,7 @@ sequenceDiagram
 5. **监控循环（每 1 秒）**：
    - 重新解析日志路径；路径变化（日期轮换/通配取新）→ 重新监控；
    - 同路径文件被**替换**（move 归档后重建/删除重建，`LogMonitor.FileReplaced` 对比卷序列号+文件索引）→ 重开从头读；
-   - 文件被**截断**（同文件长度归零，`ReadNew` 检测 `Length < position`）→ 自动从头重读；
+   - 文件被**截断**（`ReadNew` 检测 `Length < position`）→ v0.6.9+：部分截断（缩短未归零）从新文件尾续读（避免已读旧行重复进入判定）；长度归零从头重读；
     - 读取新增内容 → 逐行送入判定（关键字）→ 追加运行日志与 UI 日志。
 6. **判定分支**：
    - 失败关键字命中 → 立即终止本次尝试（杀进程树）；
@@ -100,8 +100,8 @@ sequenceDiagram
    - 判断脚本模式 → 批次触发/周期触发/最终触发（见第 5 节）；
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：启动后 `LogStallTimeoutMinutes` 无任何日志条目、或日志超过该时长无更新、或未找到日志文件 → 失败；`TotalTimeoutMinutes` 按**整个运行（含全部重试与前置/后置脚本）**计时，超时判定失败且不再重试。
-8. **尝试结束清理**：无条件 `taskkill /T /F` 杀本次启动的进程树；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
-9. **重试**：失败且未达 `MaxAttempts` → 下一次尝试（每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 已在上一次尝试失败时应用）。
+8. **尝试结束清理**：进程树清理（v0.6.5+ 自实现 Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
+9. **重试**：失败且未达 `MaxAttempts` → 下一次尝试（每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 在**尝试收尾、杀进程确认退出后**应用（v0.6.9+ P6），供重试轮使用）。
 10. **运行收尾（finally）**：还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）——顺序固定，避免替换还原覆盖交换还原的现场（v0.5.2 BUG #1 修复）。
 
 ### 3.2 队列执行链路
@@ -172,14 +172,14 @@ flowchart LR
 
 ### 4.3 插队替换配置（replaceConfigs）
 
-- 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
+- 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置——**v0.6.9+（P6）在尝试收尾、杀进程确认退出后应用**（此前判断脚本触发时进程可能仍在运行，复制覆盖 config 存在文件占用/半写窗口）；**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
-- 本次尝试失败后重试循环自动用新配置重试（可多轮替换，计入 MaxAttempts）。
+- 本次尝试失败后重试循环自动用新配置重试（重试轮不重新 PrepareForRun，直接使用收尾后的 config；可多轮替换，计入 MaxAttempts）。
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
 
-- **启动恢复（RecoverInterrupted）**：扫描全部残留 `.session` 标记与 swap-backup，自动还原；original 为空则仅清标记（现场未动）。
+- **启动恢复（RecoverInterrupted）**：扫描全部残留 `.session` 标记与 swap-backup，自动还原；cache（原配置区）为空时——`GeneratedTemplate`（编辑会话模板产物）执行 `DoRestore` 清理（恢复编辑前状态），非模板会话仅清标记、现场未动（v0.6.9+ P2 语义对齐）。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
 - 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 original 完整还原现场。
 - **数据目录命名迁移（v0.6.0）**：启动恢复前将旧版残留目录名迁移到新名（`config`→`store`、`cache`→`original`、`edit-hide`→`edit-hidden`、`replace-backup`→`swap-backup`，幂等；目标名已存在则跳过），保证旧版本崩溃现场仍可完整恢复。

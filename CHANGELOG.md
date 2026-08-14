@@ -2,6 +2,40 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.6.9（Pre-release）
+
+### 修复
+
+- **测试 flake 治理（本版首要目标）**：
+  - **服务「无日志死亡」级联失败根治（F1/F4）**：`killRuntimeServices` 固定 600ms 等待改为**轮询确认 runtime 进程完全消失**再启动新服务——旧进程单实例互斥体未释放时 web 模式静默退出（仅 Info 日志、stdio ignore 丢弃），曾致 02 文件末尾用例后 03-05 全部 ECONNREFUSED；`Program.cs` web 模式互斥失败日志升级 Warn 并附诊断；`waitForService` 失败自动输出进程/端口/服务日志尾部现场；
+  - **flake 监控采样器 `uitest/flake-monitor.mjs`**：500ms 采样 nexus-pipeline 进程存在性与 58731 监听状态（进程名+端口判定，测试监控进程无管理员权限也能用），日志与停止信号在 `uitest/flake-monitor-logs/`（独立目录，playwright 每轮清空 test-results 不受影响）；flake 台账 `uitest/FLAKE-LEDGER.md`（现象/复现条件/根因/处置/回归记录，每次全量回归更新直至清零）；
+  - **级联隔离兜底（A5）**：7 个 spec 文件模块加载时 `ensureService`——服务不可达自动强杀残留并重拉 web 模式，单文件失败不再带崩后续文件；
+  - **重启服务前端恢复加固（F3）**：05 重启用例加 pageerror/console.error 探针，「正在连接本地服务...」loading 滞留时重载页面重试（3 次），失败输出探针现场；
+  - **用例删除残留根治（F2）**：02 排序用例 finally 删除改「res.ok + 轮询确认列表消失 + sid2 未赋值跳过」（此前不检查响应且可能删 null，残留导致后续卡片数断言失准），用例开头按名防御清理；
+  - **chaos 采样断言治理（F5）**：乙/丙快速成功轮（判定→收尾仅数百毫秒）`seen` 采样缺失时以历史记录 + 日志文件采样佐证（复用 `maxDone` noSkip 先例），其余用户保持严格断言。
+- **技术债清理（P1-P16）**：
+  - **P1 移除 `QueueTask.UserName` 死字段**：队列任务级指定用户名从未生效（运行时静默跑全部启用用户），前端弹窗/后端模型全链路移除；
+  - **P3/P10 Logger 依赖环与跨午夜日志滚动**：`Logger` 不再依赖 `Persistence.AppPaths`（Utilities→Persistence 反向依赖解除），日志文件路径按天实时求值（跨午夜自动滚动）；
+  - **P2 配置交换自愈语义对齐**：`RecoverIfNeeded`/`TryRecoverItem` 的 cache 空分支统一——`GeneratedTemplate`（编辑会话模板产物）必须 `DoRestore` 清理（恢复编辑前状态），非模板会话仅清标记（防窄窗口误删用户新写入的 config）；
+  - **P5 Python 判断脚本 stderr 可观测**：stderr 独立收集，无合法 JSON 输出时尾部（最多 10 行/800 字符）放入 JudgeError + Logger.Warn（stdout 无结果时保持宽容回退 stderr 解析）；
+  - **P6 配置替换延迟到杀进程确认退出后应用**：判断脚本 `failed`+`replaceConfigs` 不再在进程运行时复制覆盖 config（文件占用/半写窗口），改在尝试收尾应用、供重试轮使用（重试轮不重新 PrepareForRun）；judge 单文件 config 用例断言同步（服务日志佐证）；
+  - **P7 exit 完成操作收尾竞态**：`Application.Exit()` 延迟到队列 `finally`（FinishedAt/Unregister）之后，CLI 轮询不再查不到结果；
+  - **P4 HistoryService 清理加锁**：`Cleanup` 与 `Save` 共享 Sync 锁（删除中的 dayDir 被重建后历史丢失）；
+  - **P9 定时时间格式校验**：API 保存时严格 `HH:mm` 校验（"8:00" → 400 报错），Normalize 回退保留给旧数据兼容；
+  - **P12 token 输入层无障碍**：token-mask 自绘遮罩（内联 style + 硬编码色值 + 无 dialog/焦点陷阱）改为复用 `showModal(..., locked)` 模态组件（role=dialog/aria-modal/焦点陷阱/焦点恢复）；
+  - **P13 安全加固**：令牌比较改 `CryptographicOperations.FixedTimeEquals`（常量时间，防时序侧信道）；`/api/logs` 孤儿 API 移除（无任何前端/测试引用，`AppPaths.LogFile` 随之删除）；静态文件补 `X-Content-Type-Options`/`Referrer-Policy`/CSP 安全头；
+  - **P8 日志截断重读重复行**：部分截断（缩短未归零）从新文件尾续读，长度归零仍从头读（契约不变）；
+  - **P11 轻量模式托盘**：「打开管理页面」菜单项禁用 + tooltip 说明，`OpenWeb` 防御提示（不再打开 404）；
+  - **P14/P15 文档**：`plugins/README.md` 明示 resolve.json 占位符仅整体替换；AGENTS.md 审计豁免措辞修正（审计行 INFO 随阈值过滤、无豁免）。
+
+### 测试
+
+- e2e 全量 60（加速档 3 轮连续回归 + 发布前真实计时档）、judge-scenarios 115、chaos-queue 166（断言数字以发布前真实计时档为准；加速档分支差异 ±1）、单测 58 全绿。
+
+### 变更
+
+- 版本号 0.6.9。
+
 ## v0.6.8（Pre-release）
 
 ### 新增
