@@ -3,13 +3,12 @@ setlocal
 cd /d "%~dp0"
 rem 增量构建（v0.6.4+）：src 无变化时跳过 dotnet publish，仅同步 wwwroot/plugins（前端改动无需重编）；
 rem 指纹文件 .build-src-hash 在项目根（不入库），CI 全新检出无此文件 = 全量构建。
-for /f "usebackq delims=" %%h in (`powershell -NoProfile -Command "(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''"`) do set SRC_HASH=%%h
-if exist "%~dp0release\nexus-pipeline.exe" (
-    if exist "%~dp0.build-src-hash" (
-        set /p OLD_HASH=<"%~dp0.build-src-hash"
-        if "%OLD_HASH%"=="%SRC_HASH%" goto sync_web
-    )
-)
+for /f "usebackq delims=" %%h in (`powershell -NoProfile -Command "$h=(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''; $b=[System.Text.Encoding]::UTF8.GetBytes($h); $d=[System.Security.Cryptography.SHA256]::Create().ComputeHash($b); [System.BitConverter]::ToString($d).Replace('-','')"`) do set SRC_HASH=%%h
+if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
+if not exist "%~dp0.build-src-hash" goto do_publish
+set /p OLD_HASH=<"%~dp0.build-src-hash"
+if "%OLD_HASH%"=="%SRC_HASH%" goto sync_web
+:do_publish
 if exist "%~dp0release" rmdir /s /q "%~dp0release"
 dotnet publish "%~dp0src\NexusPipeline.csproj" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o "%~dp0release"
 if errorlevel 1 goto build_failed

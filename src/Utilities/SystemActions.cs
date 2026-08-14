@@ -429,17 +429,18 @@ internal static class SystemActions
     /// 清理脚本进程并确认退出（v0.6.0+）：进程树清理后轮询同名进程，处理「被杀后自重启」的脚本
     /// （如 BetterGI 防崩溃机制，日志曾出现强杀两轮才干净）——每轮仍存在则按名强杀，直至确认退出或轮数耗尽。
     /// 确保配置交换还原前脚本进程已完全退出，消除文件占用导致的还原失败窗口。
+    /// 返回 true=已确认退出；false=轮数耗尽后仍在运行（疑似持续自重启，调用方应拒绝执行依赖该进程退出的后续动作）。
     /// excludeProcessBaseName（v0.6.5+）：与 GameExe 同名的进程不视为脚本树成员（见 <see cref="KillTree"/>），
     /// 游戏进程由游戏管理逻辑（ForceCloseGame/失败路径按名关闭）处理。
     /// </summary>
-    public static void KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800, string? excludeProcessBaseName = null)
+    public static bool KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800, string? excludeProcessBaseName = null)
     {
         KillTree(pid, excludeProcessBaseName);
         for (int round = 1; round <= rounds; round++)
         {
             if (!IsExeRunning(exePath))
             {
-                return;
+                return true;
             }
             Logger.Info($"[提示] {display}进程仍在运行（第 {round}/{rounds} 轮按名清理，含自重启产物）。");
             KillByName(exePath, display);
@@ -451,7 +452,9 @@ internal static class SystemActions
         if (IsExeRunning(exePath))
         {
             Logger.Warn($"[警告] {display}进程清理后仍在运行（疑似持续自重启），请手动检查：{exePath}");
+            return false;
         }
+        return true;
     }
 
     /// <summary>

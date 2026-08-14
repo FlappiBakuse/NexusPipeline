@@ -78,6 +78,9 @@ internal class RunSession
     /// <summary>每尝试脚本日志段（v0.5.3+ 按尝试分批落盘，运行结束随历史保存）。</summary>
     private readonly List<string> _attemptLogSegments = new();
 
+    /// <summary>游戏窗口已发起前置（v0.6.6+ 轮询检测防重复；启动瞬间检测到或运行期间延迟出现均只前置一次）。</summary>
+    private bool _gameFronted;
+
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
     {
@@ -557,6 +560,9 @@ internal class RunSession
             {
                 _token.ThrowIfCancellationRequested();
 
+                // v0.6.6+：游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
+                BringGameToFrontIfRunning();
+
                 if (judge.IsFailure)
                 {
                     KillStartedScript();
@@ -849,12 +855,14 @@ internal class RunSession
         }
     }
 
-    /// <summary>统一游戏窗口前置（v0.6.5+）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）存在即后台前置其可见主窗口。
+    /// <summary>统一游戏窗口前置（v0.6.5+，v0.6.6+ 轮询检测）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）
+    /// 存在即后台前置其可见主窗口。游戏由启动器延迟拉起时启动瞬间检测不到——监控循环每轮调用本方法，
+    /// 游戏出现即前置（复用 BringToFront 30 秒窗口覆盖「进程出现但窗口未建」），前置一次后由 _gameFronted 停止重复。
     /// 游戏启动方式复杂（启动器常驻/必须以启动器启动等）由脚本专门适配，宿主不重复启动游戏；此处仅做窗口前置。
     /// 找不到窗口（游戏未启动/无窗口）由 BringToFront 内部静默跳过。</summary>
     private void BringGameToFrontIfRunning()
     {
-        if (string.IsNullOrWhiteSpace(_script.GameExe))
+        if (_gameFronted || string.IsNullOrWhiteSpace(_script.GameExe))
         {
             return;
         }
@@ -866,6 +874,7 @@ internal class RunSession
                 if (procs.Length > 0)
                 {
                     SystemActions.BringToFrontFireAndForget(procs[0].Id, "游戏");
+                    _gameFronted = true;
                 }
             }
             finally

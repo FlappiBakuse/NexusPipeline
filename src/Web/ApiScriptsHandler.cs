@@ -782,16 +782,21 @@ internal static class ApiScriptsHandler
         }
         if (action == "done" || action == "cancel")
         {
-            if (!UserConfigManager.EditSessions.TryRemove(scriptId, out EditSession? session))
+            if (!UserConfigManager.EditSessions.TryGetValue(scriptId, out EditSession? session))
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "没有进行中的编辑配置会话" }, 409).ConfigureAwait(false);
                 return;
             }
             try
             {
-                if (session.Process is not null && !session.Process.HasExited)
+                // v0.6.6+：done/cancel 自动结束脚本进程并确认退出（按启动目标名轮询强杀，处理防崩溃自重启脚本），
+                // 确保配置交换还原前进程已完全退出，消除文件占用导致的交换失败窗口；
+                // 持续自重启杀不干净时拒绝执行文件交换（会话与标记保留，由下次重试自愈）。
+                string launchExe = ResolveLaunchTargetExe(session.Script);
+                if (!SystemActions.KillAndConfirmExited(session.Process?.Id ?? 0, launchExe, "脚本"))
                 {
-                    SystemActions.KillTree(session.Process.Id);
+                    await HttpHelper.WriteJsonAsync(context, new { error = "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试" }, 400).ConfigureAwait(false);
+                    return;
                 }
                 string? swapError = action == "done"
                     ? UserConfigManager.CommitEdit(scriptId, user.Name, script.ConfigPath)
@@ -806,6 +811,8 @@ internal static class ApiScriptsHandler
                     DeleteGeneratedTemplateFiles(session.Mark);
                 }
                 UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
+                // 文件交换成功后才移除会话（失败保留，可原地重试；.session 标记由自愈/后台重试兜底）。
+                UserConfigManager.EditSessions.TryRemove(scriptId, out _);
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             }

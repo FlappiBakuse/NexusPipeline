@@ -344,6 +344,14 @@ internal static class ConfigSwapSession
     /// <summary>尝试恢复一个脚本/用户的全部残留（配置替换 + 配置交换）；返回是否已完全恢复，失败记入待办。</summary>
     private static bool TryRecoverItem(string scriptId, string? userName)
     {
+        // v0.6.6+：脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
+        // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
+        if (ScriptProcessRunning(scriptId))
+        {
+            Logger.Info($"[恢复] 脚本 {scriptId} 进程仍在运行，等待其退出后恢复配置。");
+            EnqueuePendingRecover(scriptId, userName);
+            return false;
+        }
         bool ok = true;
         if (HasBackupResidue(scriptId, userName) && !RecoverBackupQuiet(scriptId, userName))
         {
@@ -371,6 +379,21 @@ internal static class ConfigSwapSession
             EnqueuePendingRecover(scriptId, userName);
         }
         return ok;
+    }
+
+    /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false（保持旧恢复行为）。</summary>
+    private static bool ScriptProcessRunning(string scriptId)
+    {
+        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
+        {
+            return false;
+        }
+        string workingDir = string.IsNullOrWhiteSpace(script.RootPath)
+            ? Path.GetDirectoryName(script.MainExe) ?? ""
+            : script.RootPath;
+        string launchExe = SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
+        return SystemActions.IsExeRunning(launchExe);
     }
 
     private static bool HasBackupResidue(string scriptId, string? userName)

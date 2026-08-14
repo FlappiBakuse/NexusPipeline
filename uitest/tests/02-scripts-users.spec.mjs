@@ -891,6 +891,51 @@ test("专项脚本编辑配置：模板生成/隐藏默认配置/cancel 恢复/d
   await api("DELETE", "/api/scripts/" + sp.id);
 });
 
+test("编辑配置：文件被占用时提交失败、释放后重试成功且无残留", async () => {
+  const root = path.join(runtimeDir, "sim-bgi-hold");
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(path.join(root, "User", "OneDragon"), { recursive: true });
+  fs.copyFileSync("C:\\Windows\\System32\\cmd.exe", path.join(root, "BetterGI.exe"));
+  fs.writeFileSync(path.join(root, "User", "OneDragon", "默认配置.json"), JSON.stringify({ Name: "默认配置", TaskEnabledList: {} }), "utf8");
+  const created = await api("POST", "/api/scripts", { name: "编辑占用重试", pluginType: "bettergi", rootPath: root.replace(/\\/g, "\\\\"), gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
+  const sp = await created.json();
+  await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
+  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
+  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
+
+  const start = await api("POST", editBase, { action: "start" });
+  expect(start.ok, "编辑配置 start 成功（生成模板）").toBeTruthy();
+  fs.writeFileSync(cfgPath, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }), "utf8");
+
+  // PowerShell 持只读共享句柄（FileShare.Read：允许复制、阻止删除——复现「复制成功、删除源失败」路径）；
+  // READY 信号确认句柄已建立后再提交。
+  const holder = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+    `Write-Output 'READY'; $fs = [System.IO.File]::Open('${cfgPath}', [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read); Start-Sleep 30`],
+    { stdio: ["ignore", "pipe", "ignore"] });
+  await new Promise(resolve => holder.stdout.once("data", resolve));
+  await new Promise(r => setTimeout(r, 300));
+  const done1 = await api("POST", editBase, { action: "done" });
+  expect(done1.status === 400, "文件被占用时提交失败（400）").toBeTruthy();
+  const errBody = await done1.json();
+  expect(errBody.error.includes("提交失败"), "失败原因含「提交失败」（复制成功但删除源失败）").toBeTruthy();
+  expect(fs.existsSync(cfgPath), "提交失败后配置文件仍在（未被误删）").toBeTruthy();
+  expect(fs.existsSync(path.join(runtimeDir, "data", sp.id, "默认", ".session")), "提交失败后 .session 标记保留（自愈前提）").toBeTruthy();
+
+  spawnSync("taskkill", ["/PID", String(holder.pid), "/F"], { stdio: "ignore" });
+  await new Promise(r => setTimeout(r, 500));
+  const done2 = await api("POST", editBase, { action: "done" });
+  expect(done2.ok, "释放占用后重试提交成功").toBeTruthy();
+  expect(!fs.existsSync(cfgPath), "提交成功后 config 位置无残留").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "提交成功后默认配置恢复").toBeTruthy();
+  const store = path.join(runtimeDir, "data", sp.id, "默认", "store");
+  expect(fs.readFileSync(path.join(store, "NexusPipeline.json"), "utf8").includes("用户配置"), "编辑产物已入库用户快照").toBeTruthy();
+  expect(!fs.existsSync(path.join(runtimeDir, "data", sp.id, "默认", ".session")), "提交成功后 .session 已清除").toBeTruthy();
+
+  await api("DELETE", "/api/scripts/" + sp.id);
+});
+
 test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启后配置恢复", async ({ page }) => {
   const root = path.join(runtimeDir, "sim-bgi-lock");
   fs.rmSync(root, { recursive: true, force: true });
@@ -923,6 +968,9 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   const start2 = await api("POST", editBase, { action: "start" });
   expect(start2.ok, "再次 start 成功（重启恢复前置）").toBeTruthy();
   expect(fs.existsSync(cfgPath), "模板已生成").toBeTruthy();
+  // v0.6.6+：恢复逻辑等待脚本进程退出；重启前清理孤儿进程（cmd 副本不随服务退出，会挡住启动恢复）。
+  spawnSync("taskkill", ["/IM", "BetterGI.exe", "/F"], { stdio: "ignore" });
+  await new Promise(r => setTimeout(r, 400));
   await restartService();
   expect(!fs.existsSync(cfgPath), "重启后编辑会话生成的模板已清理（恢复编辑前状态）").toBeTruthy();
   expect(fs.existsSync(defaultCfg), "重启后隐藏的默认配置已恢复").toBeTruthy();

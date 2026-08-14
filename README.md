@@ -105,9 +105,9 @@ release/
 `uitest/` 目录内置 Playwright 端到端测试（环境已装入项目文件夹，浏览器复用系统 Edge，全程无窗口静默运行，无需额外下载）：
 
 - 先运行 `build.cmd` 生成 `release/`（提权版，本地 UAC 从不通知时自动提权无弹窗），再运行 `uitest\run-uitest.cmd`（或 `uitest\` 下 `npx playwright test`）即可；build.cmd 为增量构建（src 未变时跳过 publish，仅同步 wwwroot/plugins）；
-- **时间加速（v0.6.4+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=10` 加速档（宿主等待按比例缩放：1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒；e2e 全量 56 用例约 3 分钟，三套测试合计约 10 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
+- **时间加速（v0.6.4+）**：`run-uitest.cmd` 默认 `NEXUS_TIME_SCALE=10` 加速档（宿主等待按比例缩放：1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒；e2e 全量 57 用例约 3 分钟，三套测试合计约 10 分钟）；发布前用真实计时档全量回归（`run-uitest.cmd --realtime`；专项测试不设 `NEXUS_TIME_SCALE` 环境变量直接运行）；
 - **单元测试（v0.6.4+）**：`dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj`（毫秒级，覆盖判定状态机/关键字规则/日志路径解析/模型规则校验，无需管理员）；
-- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（55 用例，剔除响应式外壳用例）；发布前本地跑全量（56 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；CI 与本地一致使用加速档；
+- CI 与推送前回归跑核心集：`$env:NEXUS_CI = "1"; npx playwright test`（56 用例，剔除响应式外壳用例）；发布前本地跑全量（57 用例，@playwright/test 框架，tests/ 按域 7 个 spec 文件）；CI 与本地一致使用加速档；
 - 测试自建隔离运行区 `uitest/runtime/`（复制 release 版 exe + wwwroot + plugins），不污染项目目录；
 - 专项稳定性测试 `node uitest/judge-scenarios.mjs`（115 断言）：自定义完成标志场景 A/B/C/D（全成功 / 失败替换重试 / 卡住周期替换 / 极端崩溃）、MaaEnd 专项判断脚本（失败任务选择性重试 / 全成功 / 未知失败名保守不改写）、零日志 stall、判断脚本容错与边界（超时/语法/非法输出/路径逃逸）、配置替换多轮还原与崩溃恢复、配置交换崩溃恢复（延迟重试自动还原）；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；
 - 混沌调度队列压力测试 `node uitest/chaos-queue.mjs`（171 断言，需管理员 shell）：固定/随机种子轮队列串行进度、多用户配置交换、五种干扰判定 reason（fail/stuck/crash/game-crash/success）、崩溃注入、通知双模式、运行结束还原与无残留；加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`；
