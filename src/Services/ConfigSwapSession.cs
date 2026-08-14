@@ -292,7 +292,16 @@ internal static class ConfigSwapSession
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
-            ConfigSessionMark.Clear(scriptId, userName);
+            // v0.6.9+（P2）：语义对齐 TryRecoverItem——GeneratedTemplate（编辑会话模板产物）仍需 DoRestore
+            // 清理（恢复编辑前状态）；非模板会话 cache 空 = 现场已还原，仅清标记（避免窄窗口误删用户新写入的 config）。
+            if (mark.GeneratedTemplate)
+            {
+                DoRestore(scriptId, userName, mark);
+            }
+            else
+            {
+                ConfigSessionMark.Clear(scriptId, userName);
+            }
             return;
         }
         Logger.Info($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
@@ -369,7 +378,18 @@ internal static class ConfigSwapSession
                 string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
                 if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
                 {
-                    DoRestore(scriptId, userName, mark);
+                    // v0.6.9+（P2）：与 RecoverIfNeeded 语义对齐——GeneratedTemplate（编辑会话模板产物）仍需
+                    // DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；非模板会话 cache 空 =
+                    // 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」删除
+                    // config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
+                    if (mark.GeneratedTemplate)
+                    {
+                        DoRestore(scriptId, userName, mark);
+                    }
+                    else
+                    {
+                        ConfigSessionMark.Clear(scriptId, userName);
+                    }
                 }
                 else if (!RecoverSwapQuiet(scriptId, userName, mark))
                 {

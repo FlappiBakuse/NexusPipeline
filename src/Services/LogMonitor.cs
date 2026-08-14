@@ -137,7 +137,9 @@ internal class LogMonitor : IDisposable
         {
             if (_stream.Length < _position)
             {
-                _position = 0;
+                // v0.6.9+（P8）：部分截断（缩短但未归零，如脚本循环 > 重定向）时从新文件尾续读——此前归零从头读
+                // 会把截断点之前的已读旧行重新输出（判定输入重复污染）；长度归零（Length=0）时仍从头读（契约不变）。
+                _position = Math.Max(0, _stream.Length);
             }
             _stream.Seek(_position, SeekOrigin.Begin);
             using var reader = new StreamReader(_stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);

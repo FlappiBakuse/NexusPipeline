@@ -2,7 +2,9 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, api, waitFor, waitNoRunning } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, api, waitFor, waitNoRunning, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 /** 构造判断脚本目录：bat 写日志到 logs\log.txt（ASCII 关键字规避 bat 中文编码问题）。 */
 function makeJudgeDir(label, logLines, delaySecs = 2) {

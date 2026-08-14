@@ -29,7 +29,12 @@ internal static class HttpHelper
             _ => "application/octet-stream",
         };
         context.Response.ContentType = contentType;
+        // v0.6.9+（P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data: 内联图标）；
+        // 缓存保持 no-cache（零构建无版本号，浏览器每次校验）。
         context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' data:";
         byte[] data = File.ReadAllBytes(filePath);
         context.Response.ContentLength64 = data.Length;
         context.Response.OutputStream.Write(data, 0, data.Length);
@@ -86,14 +91,5 @@ internal static class HttpHelper
         {
             return default;
         }
-    }
-
-    public static List<string> ReadLogTail(int lines)
-    {
-        if (!File.Exists(AppPaths.LogFile))
-        {
-            return new List<string>();
-        }
-        return File.ReadAllLines(AppPaths.LogFile).TakeLast(lines).ToList();
     }
 }

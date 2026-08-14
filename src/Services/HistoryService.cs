@@ -198,6 +198,10 @@ internal class HistoryService
         DateTime cutoff = DateTime.Today.AddDays(-(retentionDays - 1));
         int removed = 0;
 
+        // v0.6.9+（P4）：与 Save 共享 Sync 锁——此前无锁时删除中的 dayDir 若被 Save 的 CreateDirectory 重建，
+        // 递归删除会清掉刚写入的历史文件（历史丢失）。
+        lock (Sync)
+        {
         if (Directory.Exists(AppPaths.HistoryDir))
         {
             foreach (string directory in Directory.GetDirectories(AppPaths.HistoryDir))
@@ -248,6 +252,7 @@ internal class HistoryService
                     }
                 }
             }
+        }
         }
         Logger.Info($"清理完成，共删除 {removed} 个过期项。");
     }

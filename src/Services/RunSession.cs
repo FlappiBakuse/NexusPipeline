@@ -81,6 +81,9 @@ internal class RunSession
     /// <summary>游戏窗口已发起前置（v0.6.6+ 轮询检测防重复；启动瞬间检测到或运行期间延迟出现均只前置一次）。</summary>
     private bool _gameFronted;
 
+    /// <summary>判断脚本请求的待替换配置（v0.6.9+ P6）：触发时仅记录，尝试收尾杀进程确认退出后应用（避免进程仍运行时复制覆盖 config）。</summary>
+    private List<string>? _pendingReplaceConfigs;
+
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
     {
@@ -517,8 +520,10 @@ internal class RunSession
             }
             SessionJudge.JudgeOutcome outcome = judge.ApplyJudgeResult(status, reason, notifyText, replaceConfigs, replace =>
             {
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本请求替换配置（{replace.Count} 个文件），应用后重试。");
-                UserConfigManager.ApplyConfigReplacements(_script.Id, _activeUser?.Name, _script.ConfigPath, replace);
+                // v0.6.9+（P6）：仅记录待替换配置，不立即应用——应用推迟到尝试收尾（杀进程确认退出后），
+                // 消除进程仍运行时复制覆盖 config 的文件占用/半写窗口。
+                _pendingReplaceConfigs = replace;
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本请求替换配置（{replace.Count} 个文件），收尾后应用并重试。");
             });
             if (outcome == SessionJudge.JudgeOutcome.Success)
             {
@@ -765,6 +770,15 @@ internal class RunSession
         monitor = null;
 
         KillStartedScript();
+
+        // v0.6.9+（P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
+        // 复制覆盖 config 存在文件占用/半写窗口）；仅本次尝试失败时应用，重试循环将使用新配置。
+        if (_pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
+        {
+            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
+            UserConfigManager.ApplyConfigReplacements(_script.Id, _activeUser?.Name, _script.ConfigPath, _pendingReplaceConfigs);
+        }
+        _pendingReplaceConfigs = null;
 
         // v0.6.5+：运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
         process?.Dispose();

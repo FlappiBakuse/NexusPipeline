@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, api, localDate, startService, stopService, restartService, waitForService, waitFor, waitNoRunning, runningCount, createScript, killRuntimeServices, sleep } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, api, localDate, startService, stopService, restartService, waitForService, waitFor, waitNoRunning, runningCount, createScript, killRuntimeServices, sleep, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 test("审计日志：增删改/查询记录 + 轮询豁免", async ({ page }) => {
   const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
@@ -111,6 +113,10 @@ test("远程访问设置（令牌加密存储 + 本地豁免）与历史保留�
 });
 
 test("重启服务：确认卡片 → 自动重启并恢复（service 模式）", async ({ page }) => {
+  // v0.6.9+ F3 治理：页面错误探针，失败时输出 pageerror/console.error 现场
+  const pageErrors = [];
+  page.on("pageerror", e => pageErrors.push("pageerror: " + e.message));
+  page.on("console", m => { if (m.type() === "error") pageErrors.push("console.error: " + m.text()); });
   // 自重启仅常驻服务模式支持；测试基建默认以 web 模式启动服务，此用例切换为 service 模式。
   // 注意：本机若同时运行着其他 nexus-pipeline 常驻服务，单实例互斥体冲突会导致启动失败。
   await stopService();
@@ -142,7 +148,19 @@ test("重启服务：确认卡片 → 自动重启并恢复（service 模式）"
   expect(logText.includes("[重启] 正在等待旧进程退出"), "新进程记录重启日志").toBeTruthy();
   // v0.6.7+：服务恢复后前端应自动刷新并关闭锁定弹窗（此前会永久卡死在「服务重启中」）
   await page.waitForFunction(() => !document.querySelector('.modal[data-locked]'), null, { timeout: 30000 });
-  await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
+  // v0.6.9+ F3 治理：重启后页面滞留「正在连接本地服务...」（reload 后模块加载/服务接管首个请求竞态）
+  // 时重载页面重试（服务已恢复，重载即可正常加载）；失败输出 pageerror/console.error 现场
+  let restored = false;
+  for (let attempt = 0; attempt < 3 && !restored; attempt++) {
+    try {
+      await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
+      restored = true;
+    } catch {
+      await page.waitForTimeout(500);
+      await page.reload({ waitUntil: "domcontentloaded" });
+    }
+  }
+  expect(restored, "重启后前端恢复（restart-service 按钮可见；页面错误现场：" + (pageErrors.join(" | ") || "无") + "）").toBeTruthy();
   // 清理：杀掉自重启拉起的进程（service 模式，未登记 PID 文件），恢复标准 web 模式测试环境
   await killRuntimeServices();
   startService("web");

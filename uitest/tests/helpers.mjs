@@ -54,7 +54,34 @@ export async function waitForService(timeoutMs = 30000) {
     } catch { /* retry */ }
     await sleep(500);
   }
-  throw new Error("服务未在 " + timeoutMs + "ms 内启动");
+  throw new Error("服务未在 " + timeoutMs + "ms 内启动\n" + serviceDiagnostics());
+}
+
+/** 服务启动失败诊断（v0.6.9+，F1/F4 治理）：runtime 进程状态 + 58731 监听 + 服务日志尾部，直接给出「启动即死」现场。 */
+function serviceDiagnostics() {
+  const lines = ["—— 服务启动诊断 ——"];
+  try {
+    const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
+      { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+    lines.push("runtime nexus-pipeline 进程：" + ((r.stdout || "").trim() || "（无）"));
+  } catch { lines.push("runtime nexus-pipeline 进程：查询失败"); }
+  try {
+    const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+      "$c = Get-NetTCPConnection -LocalPort 58731 -State Listen -ErrorAction SilentlyContinue; if ($c) { 'LISTENING' } else { 'not-listening' }"],
+      { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+    lines.push("端口 58731 监听：" + ((r.stdout || "").trim() || "查询失败"));
+  } catch { lines.push("端口 58731 监听：查询失败"); }
+  const logFile = path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log");
+  try {
+    const text = fs.readFileSync(logFile, "utf8").replace(/^\uFEFF/, "");
+    const rows = text.split(/\r?\n/).filter(Boolean);
+    lines.push("服务日志尾部（" + rows.length + " 行）：");
+    lines.push(rows.slice(-25).join("\n"));
+  } catch {
+    lines.push("服务日志：不存在或读取失败（" + logFile + "）");
+  }
+  return lines.join("\n");
 }
 
 export async function api(method, pathName, body) {
@@ -171,13 +198,41 @@ export async function restartService() {
   await sleep(500);
 }
 
-/** 强杀 uitest/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。 */
-export async function killRuntimeServices() {
+/** spec 文件级服务兜底（v0.6.9+，A5 级联隔离）：各 spec 文件模块加载时调用。
+ *  上一文件尾部服务死亡（F1/F4 级联）时，本文件自动强杀残留并重拉 web 模式服务，把整场级联失败隔离为单文件失败。 */
+export async function ensureService() {
+  try {
+    const res = await fetch(baseUrl + "api/status");
+    if (res.ok) return;
+  } catch { /* 不可达，进入重拉 */ }
+  console.warn("[helpers] ensureService：服务不可达，强杀残留并重拉 web 模式服务（级联隔离兜底）");
+  await killRuntimeServices();
+  await startService("web");
+  await waitForService();
+}
+
+/** 强杀 uitest/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。
+ *  v0.6.9+：杀后轮询确认进程完全消失（Stop-Process 异步，固定 600ms 等待存在旧进程互斥体未释放的竞态窗口，
+ *  曾致后续 startService("web") 因互斥体被占直接退出——F1/F4 级联 flake），确认消失后才返回。 */
+export async function killRuntimeServices(timeoutMs = 15000) {
+  const runtimePids = () => {
+    try {
+      const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
+        { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+      return (r.stdout || "").trim();
+    } catch {
+      return "";
+    }
+  };
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
       "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 清理失败不阻塞 */ }
-  await sleep(600);
+  const gone = await waitFor(() => runtimePids() === "", timeoutMs, 300);
+  if (!gone) {
+    console.warn("[helpers] killRuntimeServices：轮询 " + Math.round(timeoutMs / 1000) + "s 后仍有 runtime 进程残留（" + runtimePids() + "），继续执行");
+  }
   child = null;
 }

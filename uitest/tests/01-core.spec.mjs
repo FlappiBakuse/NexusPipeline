@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
-import { baseUrl, CI_MODE } from "./helpers.mjs";
+import { baseUrl, CI_MODE, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 test("仪表盘：统计卡片 + 版本 + 插件配置信息", async ({ page }) => {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });

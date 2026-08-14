@@ -399,8 +399,10 @@ internal static class JudgeScriptRunner
             }
             Logger.Info($"[判断脚本] Python 解释器已启动：{pythonExe}（PID {process.Id}）");
             var stdout = new List<string>();
+            var stderr = new List<string>();
             process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.Add(e.Data); };
-            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stdout.Add(e.Data); };
+            // v0.6.9+（P5）：stderr 独立收集——此前并入 stdout 被静默吞掉，无合法 JSON 输出时无法观测 traceback
+            process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.Add(e.Data); };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(ScriptTimeoutSeconds));
@@ -416,6 +418,21 @@ internal static class JudgeScriptRunner
                 return result;
             }
             ParseOutput(stdout, result);
+            if (result.Status.Length == 0)
+            {
+                // 宽容保持：stdout 无合法结果时再尝试 stderr（历史行为容忍 print 到 stderr 的 JSON）
+                ParseOutput(stderr, result);
+            }
+            if (result.Status.Length == 0 && stderr.Count > 0)
+            {
+                string tail = string.Join("\n", stderr.Skip(Math.Max(0, stderr.Count - 10)));
+                if (tail.Length > 800)
+                {
+                    tail = tail.Substring(tail.Length - 800);
+                }
+                result.JudgeError = "判断脚本无合法输出（stderr 尾部）：" + tail;
+                Logger.Warn($"[判断脚本] Python 无合法 JSON 输出（stderr 尾部）：\n{tail}");
+            }
             return result;
         }
         catch (Exception ex)

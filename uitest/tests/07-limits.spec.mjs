@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, api, waitFor, localDate, restartService, stopService, startService, waitForService } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, api, waitFor, localDate, restartService, stopService, startService, waitForService, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 test("约束体系：API 默认值 + 数量上限", async () => {
   const limits = await (await fetch(baseUrl + "api/limits")).json();

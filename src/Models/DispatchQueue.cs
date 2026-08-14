@@ -18,8 +18,6 @@ public class QueueTask
     public int Index { get; set; }
 
     public string ScriptInstanceId { get; set; } = "";
-
-    public string UserName { get; set; } = "";
 }
 
 public class DispatchQueue

@@ -1,5 +1,4 @@
 ﻿using System.Text;
-using NexusPipeline.Persistence;
 
 namespace NexusPipeline.Utilities;
 
@@ -62,8 +61,12 @@ internal static class Logger
         {
             try
             {
-                Directory.CreateDirectory(AppPaths.LogDir);
-                File.AppendAllText(AppPaths.LogFile, line + Environment.NewLine, new UTF8Encoding(false));
+                // v0.6.9+（P3/P10）：不依赖 Persistence.AppPaths（解除 Utilities→Persistence 反向依赖环）；
+                // 日志文件按天实时求值，跨午夜自动滚动（原 static readonly 启动时固定，跨午夜写入错误文件）。
+                string logDir = Path.Combine(AppContext.BaseDirectory, "logs");
+                string logFile = Path.Combine(logDir, $"nexus-pipeline-{DateTime.Now:yyyy-MM-dd}.log");
+                Directory.CreateDirectory(logDir);
+                File.AppendAllText(logFile, line + Environment.NewLine, new UTF8Encoding(false));
             }
             catch
             {

@@ -22,7 +22,14 @@ internal class TrayApp : ApplicationContext
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        menu.Items.Add("打开管理页面", null, (_, _) => OpenWeb());
+        // v0.6.9+（P11）：轻量模式未启动 Web 服务，禁用「打开管理页面」避免打开 404 页面
+        var openWebItem = new ToolStripMenuItem("打开管理页面", null, (_, _) => OpenWeb());
+        if (RuntimeContext.Instance.Settings.LightweightMode)
+        {
+            openWebItem.Enabled = false;
+            openWebItem.ToolTipText = "轻量运行模式未启动 Web 服务，请使用「命令行管理菜单」";
+        }
+        menu.Items.Add(openWebItem);
         menu.Items.Add("命令行管理菜单", null, (_, _) => OpenConsole("manage"));
         menu.Items.Add("查看状态", null, (_, _) => OpenConsole("status"));
         menu.Items.Add(new ToolStripSeparator());
@@ -36,6 +43,12 @@ internal class TrayApp : ApplicationContext
 
     public static void OpenWeb()
     {
+        // v0.6.9+（P11）：轻量模式防御（双击图标同样走此入口）
+        if (RuntimeContext.Instance.Settings.LightweightMode)
+        {
+            Logger.Warn("[警告] 轻量运行模式未启动 Web 服务，无法打开管理页面（请使用「命令行管理菜单」）。");
+            return;
+        }
         OpenWeb(RuntimeContext.Instance.Settings.WebPort);
     }
 

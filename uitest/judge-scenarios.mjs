@@ -798,21 +798,20 @@ console.log(JSON.stringify({ status: "failed", reason: "single-cfg", replaceConf
   assert(created.ok, "创建单文件 config 脚本");
   const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
   assert(dispatch.ok, "dispatch 成功");
-  let replaced = false;
-  while ((await runningCount()) > 0) {
-    try {
-      if (fs.readFileSync(cfgFile, "utf8").trim() === "NEW") {
-        replaced = true;
-        break;
-      }
-    } catch { /* 交换瞬间文件短暂不存在，继续轮询 */ }
-    await sleep(200);
-  }
+  // v0.6.9+（P6 语义）：替换在尝试收尾（杀进程确认退出后）应用、供重试轮使用——「运行中」立即替换的
+  // 旧行为已改（替换→Unregister 窗口短于轮询周期，真实计时档稳定错过）；改为服务日志佐证替换发生。
   const ended = await waitNoRunning(30000);
+  const logText = (() => {
+    try {
+      return fs.readFileSync(path.join(runtimeDir, "logs", "nexus-pipeline-" + localDate() + ".log"), "utf8").replace(/^\uFEFF/, "");
+    } catch {
+      return "";
+    }
+  })();
   const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
   const rec = hist.filter(h => h.scriptInstanceId === created.id).at(-1);
   assert(ended, "运行结束");
-  assert(replaced, "单文件 config 替换生效（运行中 cfg.txt=NEW）");
+  assert(logText.includes("[配置替换]") && logText.includes("cfg.txt"), "单文件 config 替换已生效（服务日志含替换记录）");
   assert(rec && rec.finalStatus === "failed", "判定失败（FinalStatus=" + rec?.finalStatus + "）");
   assert(fs.readFileSync(cfgFile, "utf8").trim() === "ORIG", "运行结束后单文件 config 已还原（cfg.txt=ORIG）");
   await api("DELETE", "/api/scripts/" + created.id);

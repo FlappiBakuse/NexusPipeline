@@ -1,5 +1,5 @@
 import { initParticles } from "./effects/particles.js";
-import { closeModal } from "./core/modal.js";
+import { closeModal, showModal, modalShell } from "./core/modal.js";
 import { cancelSystemAction, cycleTheme, initTheme, setNavOpen, syncModeToggleText } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
 import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
@@ -118,21 +118,16 @@ async function ensureAccessToken() {
 }
 
 function showTokenPrompt() {
-  if (document.querySelector(".token-mask")) return;
-  const mask = document.createElement("div");
-  mask.className = "token-mask";
-  mask.style.cssText = "position:fixed;inset:0;background:var(--mask,#0008);display:flex;align-items:center;justify-content:center;z-index:1000;";
-  mask.innerHTML = `<form class="card token-panel" style="width:min(420px,90vw);padding:24px;display:flex;flex-direction:column;gap:12px;">
-    <h3 style="margin:0;">需要访问令牌</h3>
-    <p class="muted" style="margin:0;">该 NexusPipeline 已开启远程访问，请输入访问令牌（可在本机「设置 → 远程访问」中查看或重置）。</p>
-    <input id="token-input" type="password" autocomplete="off" placeholder="访问令牌" style="padding:10px 12px;border:1px solid var(--border,#d3d1cb);border-radius:8px;background:var(--panel,#fff);color:var(--text,#37352f);">
-    <button type="submit" style="padding:10px 14px;border-radius:8px;background:var(--accent,#2eaadc);color:#fff;border:none;">进入管理界面</button>
-    <div class="token-error muted" style="color:#d9534f;min-height:1.2em;"></div>
-  </form>`;
-  document.body.appendChild(mask);
-  const input = mask.querySelector("#token-input");
-  const errorEl = mask.querySelector(".token-error");
-  mask.querySelector("form").addEventListener("submit", async event => {
+  if (document.querySelector("#token-input")) return;
+  // v0.6.9+（P12）：复用 modal 组件（role=dialog/aria-modal/aria-labelledby/焦点陷阱，locked 锁定不可 Esc/遮罩关闭），
+  // 移除内联 style 与硬编码色值（此前 token-mask 自绘遮罩违反前端自约束）。
+  showModal(modalShell("需要访问令牌",
+    `<form id="token-form"><p class="modal-copy">该 NexusPipeline 已开启远程访问，请输入访问令牌（可在本机「设置 → 远程访问」中查看或重置）。</p><input id="token-input" type="password" autocomplete="off" placeholder="访问令牌" aria-label="访问令牌"><div id="token-error" class="req" role="alert" aria-live="polite"></div></form>`,
+    `<button type="submit" form="token-form">进入管理界面</button>`), false, true);
+  const form = document.querySelector("#token-form");
+  const input = document.querySelector("#token-input");
+  const errorEl = document.querySelector("#token-error");
+  form.addEventListener("submit", async event => {
     event.preventDefault();
     const value = input.value.trim();
     if (!value) {
@@ -148,7 +143,6 @@ function showTokenPrompt() {
       errorEl.textContent = "令牌无效，请重试";
     }
   });
-  input.focus();
 }
 
 window.__showTokenPrompt = showTokenPrompt;

@@ -2,7 +2,9 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate, restartService, stopService, startService, waitForService } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, createScript, api, waitFor, waitNoRunning, waitAbsent, localDate, restartService, stopService, startService, waitForService, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编辑 / 删除", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -191,6 +193,13 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
 });
 
 test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移下移 / 执行顺序准确", async ({ page }) => {
+  // 防御清理（v0.6.9+ F2）：先前失败残留的「排序脚本/排序门禁脚本」按名称删除，避免用户数/卡片断言失准
+  const staleList = await (await fetch(baseUrl + "api/scripts")).json();
+  for (const s of staleList) {
+    if (s.name === "排序脚本" || s.name === "排序门禁脚本") {
+      try { await api("DELETE", "/api/scripts/" + s.id); } catch { /* 清理失败不阻塞 */ }
+    }
+  }
   const ordDir = makeScriptDir("ordering");
   const ordCfg = path.join(runtimeDir, "order-cfg");
   fs.rmSync(ordCfg, { recursive: true, force: true });
@@ -302,10 +311,21 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   got = list.find(s => s.id === sid);
   expect(got.users.map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后顺序已落盘（乙,丙,甲）").toBeTruthy();
   } finally {
-    // 删除带重试（并发请求下偶发 fetch 瞬断，重试兜底避免残留级联）
-    for (const target of [sid, sid2]) {
+    // v0.6.9+ F2 根治：删除需确认成功（res.ok）+ 轮询确认从列表消失（此前仅「请求无异常」即 break，
+    // DELETE 返回非 2xx 时残留导致后续卡片数断言失准）；sid2 未赋值（try 内提前失败）时跳过，避免删 null。
+    const targets = [sid, sid2].filter(id => !!id);
+    for (const target of targets) {
       for (let attempt = 0; attempt < 3; attempt++) {
-        try { await api("DELETE", "/api/scripts/" + target); break; } catch { /* 重试 */ }
+        try {
+          const res = await api("DELETE", "/api/scripts/" + target);
+          if (!res.ok) { await new Promise(r => setTimeout(r, 300)); continue; }
+          const gone = await waitFor(async () => {
+            const list = await (await fetch(baseUrl + "api/scripts")).json();
+            return !list.some(s => s.id === target);
+          }, 5000, 300);
+          if (gone) break;
+        } catch { /* 重试 */ }
+        await new Promise(r => setTimeout(r, 300));
       }
     }
   }

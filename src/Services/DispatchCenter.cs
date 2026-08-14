@@ -488,6 +488,9 @@ internal class DispatchCenter
 
     private async Task RunQueueAsync(RunningExecution exec, DispatchQueue queue)
     {
+        // v0.6.9+（P7）：exit 完成操作延迟到 finally 收尾（FinishedAt/Unregister）后执行——此前
+        // Application.Exit() 立即终止消息循环，队列收尾来不及执行（CLI 轮询查不到结果/状态未出队）。
+        bool exitAfterQueue = false;
         try
         {
             var records = new List<RunRecord>();
@@ -584,8 +587,8 @@ internal class DispatchCenter
                 switch (queue.CompletionAction)
                 {
                     case "exit":
-                        // 退出软件保持立即执行不变（无倒计时、不可取消）。
-                        SystemActions.ExitApp();
+                        // 退出软件保持立即执行语义（无倒计时、不可取消），但延迟到队列收尾（finally）后真正退出。
+                        exitAfterQueue = true;
                         break;
                     case "sleep":
                         // 休眠走应用内延迟：60 秒后执行 Hibernate()，期间 Web 界面可取消（Cts.Cancel 后不执行）。
@@ -617,6 +620,10 @@ internal class DispatchCenter
         {
             exec.FinishedAt = DateTime.Now;
             Unregister(exec);
+            if (exitAfterQueue)
+            {
+                SystemActions.ExitApp();
+            }
         }
     }
 }

@@ -2,7 +2,9 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "@playwright/test";
-import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, createScript, api, waitFor, waitNoRunning, localDate } from "./helpers.mjs";
+import { baseUrl, PING_GAME, runtimeDir, makeScriptDir, createScript, api, waitFor, waitNoRunning, localDate, ensureService } from "./helpers.mjs";
+
+await ensureService();
 
 function findHistoryRecord(scriptId) {
   const historyRoot = path.join(runtimeDir, "history");

@@ -45,6 +45,7 @@ internal static class ApiQueuesHandler
             string? limitError = Limits.CheckQueueCount(ctx.Queues.Count)
                 ?? Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
                 ?? Limits.CheckTimeSets(queue.TimeSets.Count)
+                ?? CheckTimeFormat(queue)
                 ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue));
             if (limitError is not null)
             {
@@ -77,6 +78,7 @@ internal static class ApiQueuesHandler
             }
             string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
                 ?? Limits.CheckTimeSets(update.TimeSets.Count)
+                ?? CheckTimeFormat(update)
                 ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update));
             if (limitError is not null)
             {
@@ -134,6 +136,20 @@ internal static class ApiQueuesHandler
         DataStore.SaveQueues(ctx.Queues);
         Audit.Log(Audit.Web, "调整队列顺序", $"{ids.Count} 个调度队列");
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+    }
+
+    /// <summary>定时时间严格 HH:mm 校验（v0.6.9+ P9）：「8:00」无前导零会被 Scheduler 解析失败静默跳过（定时不触发）。
+    /// 保存即 400 报错，避免静默回退掩盖输入错误（NormalizeQueue 的回退保留给旧数据兼容）。</summary>
+    private static string? CheckTimeFormat(DispatchQueue queue)
+    {
+        foreach (QueueTimeSet timeSet in queue.TimeSets)
+        {
+            if (!TimeOnly.TryParseExact(timeSet.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _))
+            {
+                return $"定时时间格式不正确（{timeSet.Time}），须为 HH:mm（如 08:00）";
+            }
+        }
+        return null;
     }
 
     private static void NormalizeQueue(DispatchQueue queue)

@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Net;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
@@ -301,7 +302,8 @@ internal sealed class WebServer : IDisposable
             token = plain;
         }
         string? auth = context.Request.Headers["Authorization"];
-        bool ok = token is not null && auth is not null && auth.Equals("Bearer " + token, StringComparison.Ordinal);
+        // v0.6.9+（P13）：令牌比较改常量时间（此前字符串 Ordinal 比较非常量时间，可被时序侧信道探测）。
+        bool ok = token is not null && auth is not null && TokenEquals(auth, "Bearer " + token);
         if (ok)
         {
             AuthFails.TryRemove(ip, out _);
@@ -321,6 +323,14 @@ internal sealed class WebServer : IDisposable
             detail = $"远程请求 {remote}，令牌不匹配/缺失（失败 {current.Fails}/{MaxAuthFailsBeforeLock}）";
         }
         return false;
+    }
+
+    /// <summary>常量时间令牌比较（v0.6.9+ P13）：FixedTimeEquals 要求等长字节，先比较长度再定长比较。</summary>
+    private static bool TokenEquals(string left, string right)
+    {
+        byte[] a = Encoding.UTF8.GetBytes(left);
+        byte[] b = Encoding.UTF8.GetBytes(right);
+        return a.Length == b.Length && CryptographicOperations.FixedTimeEquals(a, b);
     }
 
     private static async Task HandleApiAsync(HttpListenerContext context, string method, string path, CancellationToken token)

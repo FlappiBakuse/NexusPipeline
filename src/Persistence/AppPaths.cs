@@ -25,6 +25,4 @@ internal static class AppPaths
     public static readonly string PluginsDir = Path.Combine(AppRoot, "plugins");
 
     public static readonly string DataDir = Path.Combine(AppRoot, "data");
-
-    public static readonly string LogFile = Path.Combine(LogDir, $"nexus-pipeline-{DateTime.Now:yyyy-MM-dd}.log");
 }
