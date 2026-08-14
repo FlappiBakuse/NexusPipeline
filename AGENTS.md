@@ -28,7 +28,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 58 �
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 57 / 56（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：115 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
 - 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：171 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
-- **加速档测试契约**（v0.6.2+，v0.6.4 统一 scale=10）：测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（`ping -n 75` → 加速档 `ping -n 6`（judge，卡住 5s > 周期 3s）/ `ping -n 8`（chaos，卡住 7s > stall 6s）、`> 20000` → `> 20000 / scale` 等），保证场景语义（卡住时长仍远大于缩放后的周期触发间隔）；新增依赖真实墙钟的用例须同时给出加速与真实两档实现。
+- **加速档测试契约**（v0.6.2+，v0.6.4 统一 scale=10）：测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（`ping -n 75` → 加速档 `ping -n 6`（judge，卡住 5s > 周期 3s）/ `ping -n 8`（chaos，卡住 7s > stall 6s）、`> 20000` → `> 20000 / scale` 等），保证场景语义（卡住时长仍远大于缩放后的周期触发间隔）；新增依赖真实墙钟的用例须同时给出加速与真实两档实现。**判断脚本单次执行 30 秒上限不随加速缩放**（v0.6.6+：外部进程冷启动（Python 首次运行）可达数秒，缩放（30s→3s）会把真实执行误判为超时——曾致 CI e2e 失败）；判断脚本解释器解析：PATH 跳过 WindowsApps Store 别名 + 常见安装位置兜底，stdin 显式重定向（避免继承服务管道句柄挂起）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
 - 新建后的 UI 断言用 `waitForFunction` 轮询文本，不要立即 `textContent`（CI 慢速环境偶发时序失败）。
 
