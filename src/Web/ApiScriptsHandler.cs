@@ -826,6 +826,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "没有进行中的编辑配置会话" }, 409).ConfigureAwait(false);
                 return;
             }
+            bool sessionRemoved = false;
             try
             {
                 // v0.6.6+：done/cancel 自动结束脚本进程并确认退出（按启动目标名轮询强杀，处理防崩溃自重启脚本），
@@ -851,7 +852,7 @@ internal static class ApiScriptsHandler
                 }
                 UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
                 // 文件交换成功后才移除会话（失败保留，可原地重试；.session 标记由自愈/后台重试兜底）。
-                UserConfigManager.EditSessions.TryRemove(scriptId, out _);
+                sessionRemoved = UserConfigManager.EditSessions.TryRemove(scriptId, out _);
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             }
@@ -861,7 +862,13 @@ internal static class ApiScriptsHandler
             }
             finally
             {
-                gate.Release();
+                // v0.6.10 修复：仅会话成功移除（提交/取消成功）才释放门禁——失败路径会话保留（可原地重试），
+                // 门禁随之保持；此前无条件 Release 导致重试成功路径 finally 二次 Release，
+                // SemaphoreSlim(1,1) 溢出「Adding the specified count...」（CI 曾现）。
+                if (sessionRemoved)
+                {
+                    gate.Release();
+                }
             }
             return;
         }

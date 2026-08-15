@@ -1182,8 +1182,12 @@ test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
       return cards.length === 3 && cards[0].textContent.includes("拖拽脚本2");
     }, null, { timeout: 10000 });
     expect(true, "拖拽后 拖拽脚本2 成为第一张卡片").toBeTruthy();
-    const list = await (await fetch(baseUrl + "api/scripts")).json();
-    expect(list.map(s => s.name).join() === "拖拽脚本2,拖拽脚本0,拖拽脚本1", "拖拽后顺序已落盘（拖拽脚本2,拖拽脚本0,拖拽脚本1）").toBeTruthy();
+    // v0.6.10 修复：dnd onDrop 不等待 PUT 落盘完成，立即 fetch 存在竞态——轮询等待服务端顺序生效
+    const orderOk = await waitFor(async () => {
+      const l = await (await fetch(baseUrl + "api/scripts")).json();
+      return l.map(s => s.name).join() === "拖拽脚本2,拖拽脚本0,拖拽脚本1";
+    }, 10000);
+    expect(orderOk, "拖拽后顺序已落盘（拖拽脚本2,拖拽脚本0,拖拽脚本1）").toBeTruthy();
 
     // 名单校验：缺项 / 不存在 / 重复
     expect((await api("PUT", "/api/scripts/order", { ids: ids.slice(0, 2) })).status === 400, "顺序名单缺项被拒（400）").toBeTruthy();
