@@ -18,7 +18,7 @@
 前置检查 → 启动游戏（可选，轮询确认 GameWaitSeconds）→ 启动主程序（已在运行仅监控）→ 日志监控初始化（严格 fresh：尝试开始前不存在的文件才从头读，否则按尝试开始长度续读）→ 1 秒监控循环（路径轮换/FileId 替换/截断检测 → 逐行判定）→ 判定分支（关键字/判断脚本/进程退出六分支）→ 超时（LogStallTimeout / TotalTimeout 整个运行计时）→ 尝试结束清理（KillAndConfirmExited 进程树 + 按名轮询强杀防自重启）→ 重试循环（replaceConfigs 已应用）→ finally 收尾（替换还原 → 清脚本区 → 配置交换还原，顺序固定）。
 
 ### 2.2 完成判定（SessionJudge）
-- 优先级：判断脚本（启用即忽略关键字）→ 成功/失败关键字（行内逗号 AND、换行 OR）→ 进程自行退出。
+- 优先级：判断脚本（启用即忽略关键字）→ 成功/失败关键字（组内逗号 AND——整个尝试日志中分别出现即命中（v0.7.1+）、换行 OR）→ 进程自行退出。
 - 状态机：失败优先（`_failureSeenAt <= _markerSeenAt`），成功/失败各只记首次命中。
 - 判断脚本契约：输入 JSON（脚本字段+用户+config 只读/script 可读写文件清单+本次尝试日志段+timeScale）、输出 stdout 尾行 JSON（status/reason/notifyText/replaceConfigs）、30 秒上限（不随加速缩放）、Jint 沙箱（readFile 限 2MB 范围、writeFile 防 `../` 逃逸）。
 

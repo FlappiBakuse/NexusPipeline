@@ -29,6 +29,13 @@ internal static class Ui
     public static (EditResult Result, string Value) PromptEdit(string label)
     {
         Console.Write(label);
+        if (Console.IsInputRedirected)
+        {
+            // v0.7.1+（KN-56）：输入重定向（管道/自动化）时 ReadKey 抛 InvalidOperationException（Cannot read keys...），
+            // 降级 ReadLine——空行/null = 不变（与「回车=不变」语义一致），非空 = 输入值；Esc 清空仅交互终端可用。
+            string? line = Console.ReadLine();
+            return string.IsNullOrEmpty(line) ? (EditResult.Keep, "") : (EditResult.Entered, line);
+        }
         var sb = new StringBuilder();
         while (true)
         {
@@ -67,6 +74,12 @@ internal static class Ui
     public static (EditResult Result, string Value) PromptEditMasked(string label)
     {
         Console.Write(label);
+        if (Console.IsInputRedirected)
+        {
+            // v0.7.1+（KN-56）：同 PromptEdit 重定向降级（ReadKey 在输入重定向下抛异常）。
+            string? line = Console.ReadLine();
+            return string.IsNullOrEmpty(line) ? (EditResult.Keep, "") : (EditResult.Entered, line);
+        }
         var sb = new StringBuilder();
         while (true)
         {

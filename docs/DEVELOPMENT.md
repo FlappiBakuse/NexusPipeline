@@ -71,9 +71,9 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 套件 | 命令 | 断言数 | 耗时 | 管理员 |
 |---|---|---|---|---|
-| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 96 | 毫秒级 | 否 |
-| e2e（全量） | `npx playwright test`（先 build.cmd） | 74 | 加速档约 4 分钟 | 是 |
-| e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 73 | 加速档约 4 分钟 | 是 |
+| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 95 | 毫秒级 | 否 |
+| e2e（全量） | `npx playwright test`（先 build.cmd） | 75 | 加速档约 4 分钟 | 是 |
+| e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 74 | 加速档约 4 分钟 | 是 |
 | 专项稳定性 | `node uitest\judge-scenarios.mjs` | 115 | 加速档数分钟 | 是 |
 | 混沌压力 | `node uitest\chaos-queue.mjs` | 166 | 加速档数分钟 | 是 |
 
@@ -93,8 +93,8 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 74（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
-| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ `dotnet test`（96），默认加速档 |
+| 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 75（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
+| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ `dotnet test`（95），默认加速档 |
 | 版本发布前 | 真实计时档全量（e2e + judge + chaos）+ 单测 |
 
 > 新增或删除测试用例/断言后，同步更新 AGENTS.md / CONTRIBUTING.md / README.md 中的数字。

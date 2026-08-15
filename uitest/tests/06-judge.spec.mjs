@@ -64,8 +64,16 @@ test("自定义完成标志：成功/失败关键字判定（顺序、AND/OR、�
   expect(s3.ok, "创建 AND 跨行关键字脚本").toBeTruthy();
   r = await judgeRunAndHistory(s3.id);
   expect(r.dispatchOk && r.ended, "AND 跨行关键字脚本运行结束").toBeTruthy();
-  expect(r.rec && r.rec.finalStatus === "failed", "AND 词跨行不命中，进程退出判定失败（FinalStatus=failed）").toBeTruthy();
+  expect(r.rec && r.rec.finalStatus === "success", "AND 词跨行分别出现命中成功（v0.7.1 跨日志 AND，FinalStatus=success）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + s3.id);
+
+  const d3b = makeJudgeDir("and3", ["TASK DONE", "TASK DONE AGAIN"]);
+  const s3b = await judgeCreate("关键字AND单词脚本", d3b, "and3", { successKeywords: "DONE, COMPLETED", failureKeywords: "" });
+  expect(s3b.ok, "创建 AND 单词脚本（整个日志只出现一个词）").toBeTruthy();
+  r = await judgeRunAndHistory(s3b.id);
+  expect(r.dispatchOk && r.ended, "AND 单词脚本运行结束").toBeTruthy();
+  expect(r.rec && r.rec.finalStatus === "failed", "AND 词只出现其一不命中，进程退出判定失败（FinalStatus=failed）").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + s3b.id);
 
   const d4 = makeJudgeDir("fail", ["TASK FAIL"]);
   const s4 = await judgeCreate("失败关键字脚本", d4, "fail", { successKeywords: "", failureKeywords: "FAIL", maxAttempts: 2 });

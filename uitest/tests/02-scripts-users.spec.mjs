@@ -54,6 +54,25 @@ test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编�
   expect(!(await page.textContent("body")).includes("测试脚本A-改"), "删除后列表不再显示该脚本").toBeTruthy();
 });
 
+test("POST 注入已存在 Id：新建一律重新生成，不产生重复记录（v0.7.1 KN-02）", async () => {
+  const dir = makeScriptDir("dupid");
+  const post = (name, id, logName) => api("POST", "/api/scripts", {
+    id, name, rootPath: dir.root, mainExe: dir.main, configPath: dir.cfg,
+    logPath: path.join(dir.log, logName), gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const first = await (await post("dup-id-first", "", "run1.log")).json();
+  const injected = await post("dup-id-injected", first.id, "run2.log");
+  expect(injected.ok, "注入已存在 Id 的新建请求被接受").toBeTruthy();
+  const second = await injected.json();
+  expect(second.id, "新建脚本 Id 重新生成，不等于注入的已存在 Id").not.toBe(first.id);
+  const scripts = await (await api("GET", "/api/scripts")).json();
+  expect(scripts.filter(s => s.id === first.id).length, "集合中不存在重复 Id 记录").toBe(1);
+  for (const s of scripts.filter(s => s.name.startsWith("dup-id-"))) {
+    await api("DELETE", "/api/scripts/" + s.id);
+  }
+});
+
 test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交换 / 运行选用户 / 队列用户下拉", async ({ page }) => {
   const cfgDir = path.join(runtimeDir, "user-cfg");
   const cfgFile = path.join(cfgDir, "configA.txt");

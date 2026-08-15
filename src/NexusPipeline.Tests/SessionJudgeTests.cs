@@ -60,12 +60,48 @@ public class SessionJudgeTests
     }
 
     [Fact]
-    public void KeywordMode_LineGroup_And_MissingOneWord_NotHit()
+    public void KeywordMode_CrossLine_And_AccumulatesAcrossLines()
     {
+        // v0.7.1+：组内 AND 跨整个日志——各关键字在不同行分别出现（间隔任意长）即命中成功。
         var judge = new SessionJudge(MakeScript(s => s.SuccessKeywords = "任务完成,全部成功"));
 
         Assert.Equal(SessionJudge.LineHit.None, judge.HandleLine("[INFO] 任务完成，部分失败"));
         Assert.False(judge.IsMarker);
+        Assert.Equal(SessionJudge.LineHit.SuccessKeyword, judge.HandleLine("[INFO] 最终进度 100%，全部成功！"));
+        Assert.True(judge.IsMarker);
+    }
+
+    [Fact]
+    public void KeywordMode_CrossLine_And_OrderIndependent()
+    {
+        // 与出现顺序无关：后出现的词先命中，前出现的词后续补上。
+        var judge = new SessionJudge(MakeScript(s => s.SuccessKeywords = "任务完成,全部成功"));
+
+        Assert.Equal(SessionJudge.LineHit.None, judge.HandleLine("[INFO] 全部成功"));
+        Assert.False(judge.IsMarker);
+        Assert.Equal(SessionJudge.LineHit.SuccessKeyword, judge.HandleLine("[INFO] 任务完成"));
+        Assert.True(judge.IsMarker);
+    }
+
+    [Fact]
+    public void KeywordMode_CrossLine_And_MissingOneWord_NeverHit()
+    {
+        // 整个日志只有一个词出现 → 永不命中（进程退出判定失败）。
+        var judge = new SessionJudge(MakeScript(s => s.SuccessKeywords = "任务完成,全部成功"));
+
+        Assert.Equal(SessionJudge.LineHit.None, judge.HandleLine("[INFO] 任务完成，部分失败"));
+        Assert.Equal(SessionJudge.LineHit.None, judge.HandleLine("[INFO] 任务完成，再次部分失败"));
+        Assert.False(judge.IsMarker);
+    }
+
+    [Fact]
+    public void KeywordMode_CrossLine_And_CaseInsensitive()
+    {
+        var judge = new SessionJudge(MakeScript(s => s.SuccessKeywords = "DONE,COMPLETED"));
+
+        Assert.Equal(SessionJudge.LineHit.None, judge.HandleLine("task done"));
+        Assert.Equal(SessionJudge.LineHit.SuccessKeyword, judge.HandleLine("all completed"));
+        Assert.True(judge.IsMarker);
     }
 
     [Fact]

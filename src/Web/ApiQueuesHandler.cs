@@ -53,10 +53,8 @@ internal static class ApiQueuesHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(queue.Id) || ctx.FindQueue(queue.Id) is null)
-            {
-                queue.Id = Guid.NewGuid().ToString("N");
-            }
+            // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
+            queue.Id = Guid.NewGuid().ToString("N");
             if (ctx.Queues.Count > 0)
             {
                 queue.Index = ctx.Queues.Max(item => item.Index) + 1;

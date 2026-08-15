@@ -86,9 +86,16 @@ internal sealed class WebServer : IDisposable
 
     public int Port => _port;
 
+    /// <summary>
+    /// 当前已启动的 Web 服务实例（v0.7.1+，KN-51）：托盘「打开管理页面」等需用实际监听端口
+    /// （设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
+    /// </summary>
+    public static WebServer? Current { get; private set; }
+
     public void Start(int port)
     {
         _port = port;
+        Current = this;
         bool remote = RuntimeContext.Instance.Settings.AllowRemoteAccess;
         // 远程访问绑定 http.sys 强通配符 +（所有接口）；0.0.0.0 不是合法前缀主机（绑定必失败）。
         string prefix = remote ? $"http://+:{port}/" : $"http://127.0.0.1:{port}/";
@@ -132,6 +139,10 @@ internal sealed class WebServer : IDisposable
 
     public void Stop()
     {
+        if (ReferenceEquals(Current, this))
+        {
+            Current = null;
+        }
         try
         {
             _cts?.Cancel();

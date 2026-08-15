@@ -152,8 +152,8 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端 | `build.cmd` + e2e 全量 74（局部迭代可按域筛选） |
-| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ 单元测试（96），默认加速档 |
+| 仅前端 | `build.cmd` + e2e 全量 75（局部迭代可按域筛选） |
+| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ 单元测试（95），默认加速档 |
 | 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
 
 常用命令：
@@ -168,8 +168,8 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 # 3. e2e（先 build.cmd；加速档为日常迭代默认）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
 $env:NEXUS_TIME_SCALE = "10"
-npx playwright test                            # 全量 74（发布前回归）
-$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集 73
+npx playwright test                            # 全量 75（发布前回归）
+$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集 74
 Remove-Item Env:NEXUS_TIME_SCALE               # 切回真实计时档
 
 # 4. 专项测试（需管理员 shell；先 build.cmd）

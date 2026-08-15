@@ -66,8 +66,15 @@ internal static class SettingsMenu
                 case "3":
                 {
                     (EditResult result, string value) = Ui.PromptEdit($"保留天数（当前：{s.HistoryRetentionDays}，回车=不变）：");
-                    if (result == EditResult.Entered && int.TryParse(value.Trim(), out int days) && days >= 1)
+                    if (result == EditResult.Entered && int.TryParse(value.Trim(), out int days))
                     {
+                        // v0.7.1+（KN-52）：与 Web 端 Limits.CheckRetentionDays 口径一致（1-上限），
+                        // 此前仅校验 >= 1，越界输入被 ConfigStore.Normalize 静默重置为 7。
+                        if (days < 1 || days > Limits.Current.MaxHistoryRetentionDays)
+                        {
+                            Console.WriteLine($"[错误] 历史保留天数须在 1-{Limits.Current.MaxHistoryRetentionDays} 天之间，未保存。");
+                            break;
+                        }
                         s.HistoryRetentionDays = days;
                         if (Ui.TrySave(() => ConfigStore.Save(s), "设置"))
                         {

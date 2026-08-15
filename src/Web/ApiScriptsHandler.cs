@@ -105,10 +105,8 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
-            if (string.IsNullOrWhiteSpace(script.Id) || ctx.FindScript(script.Id) is null)
-            {
-                script.Id = Guid.NewGuid().ToString("N");
-            }
+            // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
+            script.Id = Guid.NewGuid().ToString("N");
             if (ctx.Scripts.Count > 0)
             {
                 script.Index = ctx.Scripts.Max(item => item.Index) + 1;

@@ -68,7 +68,7 @@ internal static class TextRules
     }
 }
 
-/// <summary>自定义完成标志关键字规则：每行一组，组内逗号分隔为 AND（同一行内全部词出现才命中），换行之间为 OR。</summary>
+/// <summary>自定义完成标志关键字规则：每行一组，组内逗号分隔为 AND（v0.7.1+：整个日志中分别出现即命中，跨行累积），换行之间为 OR。</summary>
 internal static class KeywordRule
 {
     public static List<List<string>> Parse(string text)
@@ -94,31 +94,5 @@ internal static class KeywordRule
             }
         }
         return groups;
-    }
-
-    /// <summary>单行是否命中任一组：组内 AND（全部词都出现在该行），组间 OR（任一组命中即命中）。</summary>
-    public static bool LineHits(string line, List<List<string>> groups)
-    {
-        if (string.IsNullOrWhiteSpace(line) || groups.Count == 0)
-        {
-            return false;
-        }
-        foreach (List<string> words in groups)
-        {
-            bool all = true;
-            foreach (string word in words)
-            {
-                if (!line.Contains(word, StringComparison.OrdinalIgnoreCase))
-                {
-                    all = false;
-                    break;
-                }
-            }
-            if (all)
-            {
-                return true;
-            }
-        }
-        return false;
     }
 }

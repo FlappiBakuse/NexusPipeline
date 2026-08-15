@@ -15,7 +15,7 @@
 | 编号 | 问题 | 位置 | 建议版本 |
 |---|---|---|---|
 | KN-01 | **损坏配置被静默覆盖（数据丢失）**：scripts/queues.json 解析失败仅 Warn 并返回空列表，用户任意一次保存即整体覆盖损坏文件，原数据不可恢复 | `src/Persistence/JsonStore.cs:82-85`、`src/Persistence/ConfigStore.cs:30-33` | v0.7.x |
-| KN-02 | **POST 可注入已存在 Id 造成重复记录**：客户端提交已存在 Id 时保留（仅空/不存在才重新生成），集合出现两条同 Id 记录 | `src/Web/ApiScriptsHandler.cs:109-112`、`src/Web/ApiQueuesHandler.cs:55-58` | v0.7.x |
+| KN-02 | **POST 可注入已存在 Id 造成重复记录**：客户端提交已存在 Id 时保留（仅空/不存在才重新生成），集合出现两条同 Id 记录 | `src/Web/ApiScriptsHandler.cs:109-112`、`src/Web/ApiQueuesHandler.cs:55-58` | ✅ v0.7.1 已修复（新建一律重新生成 Id） |
 | KN-03 | **队列重复触发**：`Register` 仅对 script 查重，手动 + 定时并发触发同一队列会双跑（重复历史/通知/系统操作，如双关机命令）；Scheduler 的 `_runningQueueIds` 挡不住手动入口 | `src/Services/DispatchCenter.cs:292-305` | v0.7.x |
 | KN-04 | **共享集合无锁并发**：`RuntimeContext.Scripts/Queues` 与 `RunningExecution.Records` 被 Web 请求线程与后台线程并发读写，远程模式下可抛 `ArgumentOutOfRangeException`/`InvalidOperationException: 集合已修改`（前端轮询 500） | `src/RuntimeContext.cs:28-30`、`src/Services/DispatchCenter.cs:37`、`src/Web/ApiStatusHandler.cs:41-58` | v0.7.x |
 | KN-05 | **CLI 删除脚本/队列不清理**：删除仅移除列表并保存，不清理 `data/{脚本Id}` 目录、不释放 ScriptConfigGate/Mutex、不检查运行状态（Web 端有完整清理，行为不一致，静态字典泄漏） | `src/Cli/ScriptsMenu.cs:70-78`、`src/Cli/QueuesMenu.cs:77-85` | v0.7.x |
@@ -71,13 +71,14 @@
 | KN-45 | `ui.js` localStorage 写入无异常保护（隐私模式/禁用存储下白屏） | `wwwroot/core/ui.js:183` |
 | KN-46 | 队列任务用户数估算与后端校验口径不一致（先加任务后选脚本时估算偏低） | `wwwroot/views/queues.js:168-188` |
 | KN-47 | 设置页双「保存设置」按钮（语义重复）；侧栏「本地服务 · 127.0.0.1」硬编码文案远程模式不准确 | `wwwroot/views/settings.js:22`、`wwwroot/index.html:30` |
-| KN-51 | 托盘「打开管理页面」用 `Settings.WebPort` 而非实际监听端口——设置页改端口未重启服务时打开新端口 404（`WebServer.Port` 实际值未被引用） | `src/TrayApp.cs:52`、`src/Web/WebServer.cs:87` |
-| KN-52 | CLI 设置菜单历史保留天数仅校验 `>= 1`（越界输入被 `ConfigStore.Normalize` 静默重置为 7），与 Web 端 `Limits.CheckRetentionDays` 校验不一致 | `src/Cli/SettingsMenu.cs:69`、`src/Persistence/ConfigStore.cs:52-55` |
-| KN-53 | CLI 脚本菜单未做超时 -1 成对校验（stall=-1 而 total 正常值可通过），Web 端会拒绝——两入口行为不一致 | `src/Cli/ScriptsMenu.cs:149-158` |
+| KN-51 | 托盘「打开管理页面」用 `Settings.WebPort` 而非实际监听端口——设置页改端口未重启服务时打开新端口 404（`WebServer.Port` 实际值未被引用） | `src/TrayApp.cs:52`、`src/Web/WebServer.cs:87` | ✅ v0.7.1 已修复（`WebServer.Current.Port` 优先，回退 Settings.WebPort） |
+| KN-52 | CLI 设置菜单历史保留天数仅校验 `>= 1`（越界输入被 `ConfigStore.Normalize` 静默重置为 7），与 Web 端 `Limits.CheckRetentionDays` 校验不一致 | `src/Cli/SettingsMenu.cs:69`、`src/Persistence/ConfigStore.cs:52-55` | ✅ v0.7.1 已修复（上限校验 + 非法输入提示） |
+| KN-53 | CLI 脚本菜单未做超时 -1 成对校验（stall=-1 而 total 正常值可通过），Web 端会拒绝——两入口行为不一致 | `src/Cli/ScriptsMenu.cs:149-158` | ✅ 已修复（v0.7.1 核验：保存前已调用 `Limits.CheckScriptTimeouts` 含成对校验，台账过时） |
 | KN-48 | DESIGN.md 过时：截断表格（P8 部分截断尾续读）、fresh 判定（LastWriteTime → 长度快照）、保留上限 180（→ limits.json 动态，默认 180/上限 365） | `docs/DESIGN.md:91/222/226/261` |
 | KN-49 | ARCHITECTURE.md 依赖方向描述与实现不符：Services→Plugins（UserConfigManager/DispatchCenter）、Plugins→Services（PluginManager/NotifyPlugin）、Logger→RuntimeContext | `docs/ARCHITECTURE.md:40-43`、`src/Services/UserConfigManager.cs:4`、`src/Plugins/PluginManager.cs:3`、`src/Utilities/Logger.cs:33` |
 | KN-50 | 文档断言数字/表述残留：DEVELOPMENT.md 旧版 chaos「171」、AGENTS/README 数字同步检查 | `docs/DEVELOPMENT.md`（2026-08-15 重构时修正） |
-| KN-54 | 队列完成操作在任务失败（非取消）时仍执行 exit/sleep/reboot/shutdown——语义已与用户确认保留，待文档化说明 | `src/Services/DispatchCenter.cs:573-618` |
-| KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` |
+| KN-54 | 队列完成操作在任务失败（非取消）时仍执行 exit/sleep/reboot/shutdown——语义已与用户确认保留，待文档化说明 | `src/Services/DispatchCenter.cs:573-618` | ✅ v0.7.1 已文档化（README + DESIGN，语义保留） |
+| KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` | v0.7.x（修复需兼容旧文件读取，收益低） |
+| KN-56 | CLI `Ui.PromptEdit`/`PromptEditMasked` 用 `Console.ReadKey`，stdin 重定向（管道/自动化）时抛 `InvalidOperationException` 未处理异常直接崩溃（2026-08-15 KN-52 复现时发现） | `src/Cli/Ui.cs:29-103` | ✅ v0.7.1 已修复（重定向下降级 `ReadLine`：空行=不变） |
 
 > 注：`docs/DEVELOPMENT.md`、`docs/ASSESSMENT.md` 已于 2026-08-15 文档体系重组中重构/更新（KN-48/KN-49/KN-50 涉及项在重组时一并修正，台账状态以实际为准）。

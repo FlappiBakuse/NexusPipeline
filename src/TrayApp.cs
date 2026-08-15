@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using NexusPipeline.Utilities;
+using NexusPipeline.Web;
 
 namespace NexusPipeline;
 
@@ -49,7 +50,9 @@ internal class TrayApp : ApplicationContext
             Logger.Warn("[警告] 轻量运行模式未启动 Web 服务，无法打开管理页面（请使用「命令行管理菜单」）。");
             return;
         }
-        OpenWeb(RuntimeContext.Instance.Settings.WebPort);
+        // v0.7.1+（KN-51）：用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
+        int port = WebServer.Current?.Port ?? RuntimeContext.Instance.Settings.WebPort;
+        OpenWeb(port);
     }
 
     public static void OpenWeb(int port)

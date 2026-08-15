@@ -208,9 +208,10 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="-1 = 不超时（长时脚本）"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="-1 = 不超时（长时脚本）"`)}
       </div>
+      <p class="muted helper-copy">两个超时均填 -1 即为长时脚本（无限等待）；两者须同为 -1 才能保存，且长时脚本不能与普通脚本编排进同一调度队列。</p>
     </div>`
     : `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
@@ -238,13 +239,14 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="-1 = 不超时（长时脚本）"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="-1 = 不超时（长时脚本）"`)}
       </div>
+      <p class="muted helper-copy">两个超时均填 -1 即为长时脚本（无限等待）；两者须同为 -1 才能保存，且长时脚本不能与普通脚本编排进同一调度队列。</p>
       <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
           <label class="field-label" for="sm-succ-kw">成功关键字</label>
-          <textarea id="sm-succ-kw" placeholder="每行一组：组内逗号分隔为 AND（同一行内全部出现才命中），换行之间为 OR；留空表示不判定成功">${esc(d.successKeywords)}</textarea>
+          <textarea id="sm-succ-kw" placeholder="每行一组：组内逗号分隔为 AND（整个日志中分别出现即命中），换行之间为 OR；留空表示不判定成功">${esc(d.successKeywords)}</textarea>
           <label class="field-label" for="sm-fail-kw">失败关键字</label>
           <textarea id="sm-fail-kw" placeholder="命中即判定失败并终止本次尝试，按最大尝试次数重试；语法同成功关键字">${esc(d.failureKeywords)}</textarea>
         </div>
