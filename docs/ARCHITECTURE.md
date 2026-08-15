@@ -1,6 +1,6 @@
 ﻿# NexusPipeline 架构说明
 
-本文件是开发者与大模型的导航地图：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
+本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
 ## 总体结构
@@ -21,7 +21,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 64 用例 / NEXUS_CI 核心集 63；单元测试见 src/NexusPipeline.Tests/）
+└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；用例数与分层见 AGENTS.md「构建与测试」；单元测试见 src/NexusPipeline.Tests/）
 ```
 
 ## 后端分层（src/）

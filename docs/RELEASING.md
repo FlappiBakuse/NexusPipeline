@@ -1,6 +1,6 @@
 # NexusPipeline 发布流程手册（Releasing）
 
-本文件是版本发布（tag / release / 资产）的**权威操作手册**，仅核心维护者使用。开发环境搭建见 [DEVELOPMENT.md](DEVELOPMENT.md)；协作规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)；版本路线见 [ROADMAP.md](ROADMAP.md)。
+本文件是版本发布（tag / release / 资产）的操作手册，供维护者使用。开发环境搭建见 [DEVELOPMENT.md](DEVELOPMENT.md)；协作规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)；版本路线见 [ROADMAP.md](ROADMAP.md)。
 
 > **发布权（最高优先级）**：commit / push / pull request / release 的创建与发布，必须先经用户明确同意，未经同意不得执行（含 git commit、push、gh pr、gh release、打 tag）。
 
@@ -34,8 +34,8 @@
 
 1. 确认本地构建与测试全绿：
    - `build.cmd`（提权版）；
-   - 单元测试 `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`（58 断言）；
-   - **真实计时档**（不设 `NEXUS_TIME_SCALE`）全量回归：e2e 60 + judge-scenarios 115 + chaos-queue 166。
+   - 单元测试 `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`（96 断言）；
+   - **真实计时档**（不设 `NEXUS_TIME_SCALE`）全量回归：e2e 74 + judge-scenarios 115 + chaos-queue 166。
 2. **文档一致性自检（v0.6.2+）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/plugins-README 只做简引）。
 3. 核对 ROADMAP 勾选状态与 KNOWN-ISSUES 台账（本版应修项状态）。
 

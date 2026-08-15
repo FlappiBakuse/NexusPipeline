@@ -46,6 +46,9 @@ internal static class HttpHelper
         byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOpts.Web));
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json; charset=utf-8";
+        // v0.7.0+：API 响应补 no-cache（与静态文件一致；此前缺失致浏览器启发式缓存 /api/status，
+        // 插件状态变更后刷新页面仍读到旧值——复现：禁用「模拟器适配」后前端选择器残留）。
+        context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.ContentLength64 = data.Length;
         await context.Response.OutputStream.WriteAsync(data).ConfigureAwait(false);
         context.Response.OutputStream.Close();

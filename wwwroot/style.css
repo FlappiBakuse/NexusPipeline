@@ -289,7 +289,12 @@ tbody tr:hover td { background: var(--hover-bg); }
 .run-log { height: 170px; margin-top: 10px; }
 pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--log-bg); color: var(--log-text); font-family: Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 
-.plugin-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.plugin-grid { display: block; columns: 3; column-gap: 12px; }
+.plugin-grid .plugin-card { margin-bottom: 12px; break-inside: avoid; }
+.game-mode-row { display: flex; align-items: flex-end; gap: 15px; }
+.game-mode-row > :first-child { flex: 1 1 0; min-width: 0; }
+.game-mode-row > .game-wait-field { flex: 1 1 0; min-width: 0; }
+.game-mode-row > .game-wait-field > div { min-width: 0; }
 .pager { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
 .pager .pager-info { margin-right: auto; color: var(--muted); font-size: 12px; }
 .pager button + button { margin-left: 0; }
@@ -407,7 +412,10 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .dispatch-script-controls, .dispatch-queue-controls { grid-template-columns: minmax(0, 1fr); }
   .list-item-head { align-items: stretch; flex-direction: column; }
   .list-item-head button { align-self: flex-start; }
-  .plugin-grid { grid-template-columns: minmax(0, 1fr); }
+  .plugin-grid { columns: 1; }
+  .game-mode-row { flex-direction: column; align-items: stretch; gap: 12px; }
+  .game-mode-row > :first-child { flex: none; }
+  .game-mode-row > .game-wait-field { flex: none; width: 280px; max-width: 100%; }
   .stats-inline { grid-template-columns: minmax(0, 1fr); }
   .detail .kv { grid-template-columns: 78px minmax(0, 1fr); }
   .toast { left: 50%; right: auto; top: 12px; width: max-content; max-width: 50vw; min-width: 0; transform: translateX(-50%); }

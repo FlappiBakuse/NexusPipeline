@@ -352,6 +352,25 @@ async function historyByQueue(queueId) {
   return hist.filter(h => h.queueId === queueId);
 }
 
+/**
+ * F5 兜底补充（v0.7.0+）：快速成功轮窗口短于采样间隔（丙实测 162ms < 300ms，负载下运行期间采样可全丢）时，
+ * 以宿主归档的尝试日志（history/{day}/{LogFile}，按次保存永久保留）证明脚本确实写入日志；
+ * 语义与 logSeen 等价（宿主监控读到的就是该文件内容）。
+ */
+function archivedLogWritten(userName, hist) {
+  const rec = hist.find(h => h.userName === userName);
+  const lf = rec && rec.attemptDetails && rec.attemptDetails[0] && rec.attemptDetails[0].logFile;
+  if (!lf) return false;
+  const day = (rec.startTime || "").slice(0, 10);
+  try {
+    // 服务端磁盘日志带 UTF-8 BOM（既有约定，读测试 JSON 前先 .replace(/^\uFEFF/, "")），须剥离再匹配首行
+    const first = fs.readFileSync(path.join(runtimeDir, "history", day, lf), "utf8").replace(/^\uFEFF/, "").split(/\r?\n/)[0] || "";
+    return first.startsWith("DBG seed=") || first.startsWith("TASK 1");
+  } catch {
+    return false;
+  }
+}
+
 /* ---------------- 进程工具（PowerShell / taskkill） ---------------- */
 
 function psOut(script) {
@@ -660,11 +679,12 @@ async function fixedSeedRound() {
     assert(matched, `${r.userName} reason 序列匹配（实际 ${JSON.stringify(reasons)}）`);
   }
 
-  // 日志文件存在性采样（区分「bat 未写入」与「宿主监控读不到」）
+  // 日志文件存在性采样（区分「bat 未写入」与「宿主监控读不到」）；采样全丢时归档日志兜底
   for (const u of USERS) {
     const l = [...(logSeen[u.name] || [])];
-    assert(l.some(x => x.startsWith("DBG seed=") || x.startsWith("TASK 1")),
-      `${u.name} 运行期间 logs/log.txt 被脚本写入（测试端文件系统采样：${JSON.stringify(l)}）`);
+    const archOk = archivedLogWritten(u.name, hist);
+    assert(l.some(x => x.startsWith("DBG seed=") || x.startsWith("TASK 1")) || archOk,
+      `${u.name} 运行期间 logs/log.txt 被脚本写入（测试端文件系统采样：${JSON.stringify(l)}${archOk ? "；归档日志兜底命中" : ""}）`);
   }
 
   // 运行中 config 交换采样断言
@@ -680,12 +700,14 @@ async function fixedSeedRound() {
       // v0.6.9+ F5 治理：乙/丙快速成功轮（判定→宿主收尾仅数百毫秒）窗口短于 100ms 采样间隔时 seen 可能缺失，
       // 以历史记录（上方 EXPECT 断言已严格校验 finalStatus/attempts/reason）+ 日志文件采样佐证通过，
       // 复用 maxDone 的 noSkip 佐证先例；其余用户（多轮慢窗口）保持严格断言。
+      // v0.7.0+ F5 兜底：采样可全丢（丙实测窗口 162ms < 300ms 轮询间隔），归档日志兜底证明脚本已写入。
       const rec = hist.find(h => h.userName === u.name);
       const logHits = (logSeen[u.name] || []).length;
-      const fastOk = (u.name === "乙" && rec && rec.finalStatus === "partial" && logHits > 0) ||
-        (u.name === "丙" && rec && rec.finalStatus === "success" && rec.attempts === 1 && logHits > 0);
+      const archOk = archivedLogWritten(u.name, hist);
+      const fastOk = (u.name === "乙" && rec && rec.finalStatus === "partial" && (logHits > 0 || archOk)) ||
+        (u.name === "丙" && rec && rec.finalStatus === "success" && rec.attempts === 1 && (logHits > 0 || archOk));
       assert(fastOk,
-        `${u.name} 运行中 config=用户快照 ${expLine}（观测：${JSON.stringify(snapshots)}；历史佐证：${rec ? rec.finalStatus + "/" + rec.attempts : "无"}；日志采样 ${logHits} 条）`);
+        `${u.name} 运行中 config=用户快照 ${expLine}（观测：${JSON.stringify(snapshots)}；历史佐证：${rec ? rec.finalStatus + "/" + rec.attempts : "无"}；日志采样 ${logHits} 条${archOk ? "；归档兜底命中" : ""}）`);
     }
   }
 

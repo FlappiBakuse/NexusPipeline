@@ -130,6 +130,7 @@ internal static class JudgeScriptRunner
                 script.ConfigPath,
                 script.LogPath,
                 script.LaunchGame,
+                script.GameMode,
                 script.GameExe,
                 script.GameArgs,
                 script.GameWaitSeconds,

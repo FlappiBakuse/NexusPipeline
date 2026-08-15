@@ -8,7 +8,7 @@ namespace NexusPipeline.Plugins;
 /// <summary>插件统一元数据投影（前端插件列表 / 新建专项脚本选择卡片）。</summary>
 internal sealed record PluginSummary(
     string Name, string DisplayName, string GameName, string Description,
-    string Version, bool IsBuiltIn, string Kind);
+    string Version, bool IsBuiltIn, string Kind, bool SupportsEmulator);
 
 /// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
 internal sealed class PluginManager
@@ -36,14 +36,21 @@ internal sealed class PluginManager
             var list = new List<PluginSummary>();
             foreach (IPlugin plugin in _plugins)
             {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general"));
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general", false));
             }
             foreach (DataSpecializedPlugin plugin in _dataPlugins)
             {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized"));
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized", plugin.SupportsEmulator));
             }
             return list;
         }
+    }
+
+    /// <summary>专项插件是否支持安卓模拟器启动方式（v0.7.0+，由 plugin.json 的 supportsEmulator 声明，缺省 false）。</summary>
+    public bool SupportsEmulator(string pluginName)
+    {
+        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        return plugin?.SupportsEmulator ?? false;
     }
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
@@ -228,6 +235,7 @@ internal sealed class PluginManager
         return new List<IPlugin>
         {
             new NotifyPlugin(),
+            new EmulatorAdapterPlugin(),
         };
     }
 

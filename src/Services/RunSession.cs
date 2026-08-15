@@ -372,6 +372,14 @@ internal class RunSession
             {
                 Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」未填写游戏路径，跳过游戏启动。");
             }
+            else if (EmulatorSupport.IsEmulator(_script))
+            {
+                RunAttemptResult? emuError = await LaunchEmulatorGameAsync(modeText).ConfigureAwait(false);
+                if (emuError is not null)
+                {
+                    return emuError;
+                }
+            }
             else
             {
                 if (!TextRules.IsExecutable(_script.GameExe))
@@ -439,7 +447,10 @@ internal class RunSession
             }
             // 进程树清理 + 轮询按名强杀直至确认退出（处理「被杀后自重启」的脚本），确保配置还原前进程已完全退出。
             // v0.6.5+：与 GameExe 同名的进程（脚本自启动的游戏）不属于脚本树，树清理排除，由游戏管理逻辑按名处理。
-            string? excludeGame = string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe);
+            // v0.7.0+：模拟器模式无 PC 游戏进程概念，不做按名排除。
+            string? excludeGame = EmulatorSupport.IsEmulator(_script)
+                ? null
+                : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe));
             SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
         }
 
@@ -477,7 +488,11 @@ internal class RunSession
 
         // v0.6.5+：统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
         // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
-        BringGameToFrontIfRunning();
+        // v0.7.0+：模拟器模式跳过（adb 命令行工具，无窗口前置需求）。
+        if (!EmulatorSupport.IsEmulator(_script))
+        {
+            BringGameToFrontIfRunning();
+        }
 
         void OnConsoleData(string? data)
         {
@@ -566,7 +581,11 @@ internal class RunSession
                 _token.ThrowIfCancellationRequested();
 
                 // v0.6.6+：游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
-                BringGameToFrontIfRunning();
+                // v0.7.0+：模拟器模式跳过窗口前置。
+                if (!EmulatorSupport.IsEmulator(_script))
+                {
+                    BringGameToFrontIfRunning();
+                }
 
                 if (judge.IsFailure)
                 {
@@ -785,7 +804,37 @@ internal class RunSession
         process = null;
 
         string resultStatus = result?.Status ?? "failed";
-        if (resultStatus == "failed")
+        if (EmulatorSupport.IsEmulator(_script))
+        {
+            // 模拟器模式收尾（v0.7.0+）：
+            // 失败 → 无条件关闭模拟器当前前台应用（供重试轮重新 am start 干净启动）；
+            // 运行结束（成功/最终失败）且 ForceCloseGame → 关闭整个模拟器（MuMu 专项适配，回退 reboot -p）；取消不处理。
+            string? adbExe = EmulatorSupport.ResolveAdbExe();
+            if (adbExe is null)
+            {
+                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」未找到 adb 可执行文件，跳过模拟器收尾处理。");
+            }
+            else if (resultStatus == "failed")
+            {
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」任务失败，关闭模拟器前台应用（重试将重新启动应用）。");
+                await EmulatorSupport.ForceStopForegroundAppAsync(adbExe, _script.GameExe, _token).ConfigureAwait(false);
+            }
+            bool runEnded = resultStatus == "success" || (result?.IsFatal ?? false) || attempt.Number >= Math.Max(1, _script.MaxAttempts);
+            if (adbExe is not null && _script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
+            {
+                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
+                (bool shutdownOk, string shutdownMsg) = await EmulatorSupport.ShutdownEmulatorAsync(adbExe, _script.GameExe, _token).ConfigureAwait(false);
+                if (shutdownOk)
+                {
+                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{shutdownMsg}。");
+                }
+                else
+                {
+                    Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」{shutdownMsg}");
+                }
+            }
+        }
+        else if (resultStatus == "failed")
         {
             if (!string.IsNullOrWhiteSpace(_script.GameExe))
             {
@@ -816,6 +865,85 @@ internal class RunSession
         while (true)
         {
             if (SystemActions.IsExeRunning(_script.GameExe))
+            {
+                return true;
+            }
+            if (DateTime.Now >= deadline)
+            {
+                return false;
+            }
+            await Task.Delay(TestHooks.ScaledMs(1000), _token).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// 模拟器模式游戏启动（v0.7.0+）：连接模拟器 → am start 启动应用 → 前台确认。
+    /// 目标包名从启动参数 -n 解析；解析不到时仅确认 adb connect 与 am start 命令成功（宽松兜底）。
+    /// 返回 null = 成功，否则为失败结果。
+    /// </summary>
+    private async Task<RunAttemptResult?> LaunchEmulatorGameAsync(string modeText)
+    {
+        if (!RuntimeContext.Instance.Plugins.IsEnabled(AppSettings.EmulatorAdapterPlugin))
+        {
+            return RunAttemptResult.Failed("模拟器适配已禁用，请到「插件」页启用后重试");
+        }
+        string? adb = EmulatorSupport.ResolveAdbExe();
+        if (adb is null)
+        {
+            return RunAttemptResult.Failed("未找到 adb 可执行文件（请安装 Android 平台工具或 MuMu 等模拟器）");
+        }
+        if (!EmulatorSupport.IsValidAdbAddress(_script.GameExe))
+        {
+            return RunAttemptResult.Failed($"模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）：{_script.GameExe}");
+        }
+        _statusChanged?.Invoke("正在连接模拟器...");
+        (bool connectOk, string connectOutput) = await EmulatorSupport.AdbConnectAsync(adb, _script.GameExe, _token).ConfigureAwait(false);
+        if (!connectOk)
+        {
+            return RunAttemptResult.Failed($"模拟器连接失败（{_script.GameExe}）：{connectOutput.Trim()}");
+        }
+        string[] startArgs = TextRules.SplitArgs(_script.GameArgs).ToArray();
+        if (startArgs.Length == 0)
+        {
+            return RunAttemptResult.Failed("模拟器模式未填写启动参数（am start 参数，如 -n 包名/Activity）");
+        }
+        _statusChanged?.Invoke("正在启动模拟器应用...");
+        // v0.7.0+：GameArgs 为 am start 参数（如 -n 包名/Activity），宿主拼接 am start 前缀执行。
+        // am start 对 Activity 不存在等错误退出码仍为 0（实测），须按输出 Error 标记识别失败，避免白等前台确认。
+        var shellArgs = new List<string> { "am", "start" };
+        shellArgs.AddRange(startArgs);
+        (bool startOk, string startOutput) = await EmulatorSupport.AdbShellAsync(adb, _script.GameExe, shellArgs.ToArray(), 30, _token).ConfigureAwait(false);
+        if (!startOk || EmulatorSupport.AmStartFailed(startOutput))
+        {
+            return RunAttemptResult.Failed($"模拟器应用启动失败：{startOutput.Trim()}");
+        }
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」模拟器应用启动命令已执行（{_script.GameExe}，等待 {_script.GameWaitSeconds} 秒确认前台）。");
+        string? targetPkg = EmulatorSupport.ParseAmStartPackage(_script.GameArgs);
+        bool confirmed = targetPkg is null
+            ? true
+            : await WaitForEmulatorAppAsync(TimeSpan.FromSeconds(Math.Max(0, _script.GameWaitSeconds)), targetPkg).ConfigureAwait(false);
+        if (!confirmed)
+        {
+            return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后模拟器前台未出现应用（{targetPkg}），应用可能启动失败");
+        }
+        _statusChanged?.Invoke("已确认模拟器应用启动");
+        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认模拟器应用启动，继续运行脚本。");
+        return null;
+    }
+
+    /// <summary>等待并确认模拟器前台应用为目标包名：每 1 秒轮询 dumpsys window 前台，上限为超时时间。</summary>
+    private async Task<bool> WaitForEmulatorAppAsync(TimeSpan timeout, string targetPackage)
+    {
+        string? adb = EmulatorSupport.ResolveAdbExe();
+        if (adb is null)
+        {
+            return false;
+        }
+        DateTime deadline = DateTime.Now + timeout;
+        while (true)
+        {
+            string? foreground = await EmulatorSupport.GetForegroundPackageAsync(adb, _script.GameExe, _token).ConfigureAwait(false);
+            if (string.Equals(foreground, targetPackage, StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }

@@ -1,7 +1,7 @@
 import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
-import { scrollField, valueField, pageHeader } from "../core/forms.js";
+import { scrollField, selectField, valueField, pageHeader } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
@@ -16,6 +16,41 @@ const FALLBACK_ICON = scriptFallbackIcon;
 
 function specializedPlugins() {
   return (state.plugins || []).filter(p => p.kind === "specialized" && p.enabled);
+}
+
+/** 启动方式选择是否可用（v0.7.0+）：「模拟器适配」插件需已启用（全局能力开关）；通用脚本恒可用；专用插件按 plugin.json 的 supportsEmulator 声明（缺省不支持）。 */
+function emulatorAllowed(pluginType) {
+  const adapter = (state.plugins || []).find(p => p.name === "emulator-adapter");
+  if (adapter && !adapter.enabled) return false;
+  if (!pluginType) return true;
+  const meta = (state.plugins || []).find(p => p.name === pluginType);
+  return !!meta && !!meta.supportsEmulator;
+}
+
+/** 游戏配置卡（v0.7.0+）：启动方式选择器（仅支持时渲染）+ ADB 地址/游戏路径按模式切换 + 启动参数 + 等待秒数。 */
+function gameBoxHtml(d, emulatorOk) {
+  const isEmu = emulatorOk && d.gameMode === "emulator";
+  const modeRow = emulatorOk
+    ? `<div class="form-grid game-mode-row">${selectField("sm-mode", "启动方式", isEmu ? "emulator" : "pc", [{ value: "pc", label: "PC 客户端" }, { value: "emulator", label: "安卓模拟器" }], 'data-action="change-sm-mode"')}<div class="game-wait-field">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div></div>`
+    : `<div class="form-grid game-mode-row">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}<div class="game-wait-field" aria-hidden="true"></div></div>`;
+  const exeField = isEmu
+    ? valueField("sm-game-exe", "模拟器ADB地址 <span class='req'>*</span>", d.gameExe, "text", 'placeholder="例如 127.0.0.1:16384"')
+    : valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe, "text", 'placeholder="请填写游戏可执行文件路径"');
+  const argsField = isEmu
+    ? valueField("sm-game-args", "启动参数", d.gameArgs, "text", 'placeholder="am start 参数，如 -n 包名/.MainActivity"')
+    : valueField("sm-game-args", "启动参数", d.gameArgs);
+  return `<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
+}
+
+/** 启动方式切换（v0.7.0+）：更新游戏路径/ADB 地址字段的标签与提示。 */
+export function changeGameMode() {
+  const isEmu = $dom("#sm-mode")?.value === "emulator";
+  const exe = $dom("#sm-game-exe");
+  const args = $dom("#sm-game-args");
+  const exeLabel = $dom('label[for="sm-game-exe"]');
+  if (exeLabel) exeLabel.innerHTML = isEmu ? "模拟器ADB地址 <span class='req'>*</span>" : "游戏路径 <span class='req'>*</span>";
+  if (exe) exe.placeholder = isEmu ? "例如 127.0.0.1:16384" : "请填写游戏可执行文件路径";
+  if (args) args.placeholder = isEmu ? "am start 参数，如 -n 包名/.MainActivity" : "";
 }
 
 function pluginDisplay(name) {
@@ -140,7 +175,7 @@ export async function openScriptModal(id = "", plugin = "") {
   scriptDraft = {
     id: value.id || "", pluginType, name: value.name || "", rootPath: value.rootPath || "",
     mainExe: value.mainExe || "", args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
-    launchGame: !!value.launchGame, gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
+    launchGame: !!value.launchGame, gameMode: value.gameMode === "emulator" ? "emulator" : "pc", gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
     gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
     totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
@@ -167,8 +202,7 @@ export async function openScriptModal(id = "", plugin = "") {
       </div>
       <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
-        <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
-        <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+        ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
@@ -198,8 +232,7 @@ export async function openScriptModal(id = "", plugin = "") {
       </div>
       <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
-        <div class="form-grid">${valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe)}${valueField("sm-game-args", "启动参数", d.gameArgs)}</div>
-        <div class="form-grid single-narrow">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div>
+        ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
@@ -387,13 +420,22 @@ export async function saveScript() {
     return;
   }
   const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
+  const gameMode = $dom("#sm-mode")?.value === "emulator" ? "emulator" : "pc";
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
-    toast("请填写游戏路径", "error");
+    toast(gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径", "error");
     $dom("#sm-game-exe")?.focus();
     return;
   }
-  if (ILLEGAL_PATH.test(gameExe)) {
+  if (gameMode === "emulator") {
+    const colon = gameExe.lastIndexOf(":");
+    const port = parseInt(gameExe.slice(colon + 1), 10);
+    if (colon <= 0 || !(port >= 1 && port <= 65535)) {
+      toast("模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）", "error");
+      $dom("#sm-game-exe")?.focus();
+      return;
+    }
+  } else if (ILLEGAL_PATH.test(gameExe)) {
     toast("游戏路径包含非法字符", "error");
     $dom("#sm-game-exe")?.focus();
     return;
@@ -402,7 +444,7 @@ export async function saveScript() {
     id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: stripQuotes($dom("#sm-root")?.value),
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
-    launchGame, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
+    launchGame, gameMode, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
     forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
@@ -434,6 +476,7 @@ export const actions = {
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "confirm-delete-script": target => confirmDeleteScript(target.dataset.id, target.dataset.name),
   "save-script": () => saveScript(),
+  "change-sm-mode": () => changeGameMode(),
   "upload-judge-script": () => uploadJudgeScript(),
   "toggle-judge-mode": () => toggleJudgeMode(),
   "toggle-sm-flag": target => toggleSmFlag(target.dataset.flag),

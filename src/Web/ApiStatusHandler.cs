@@ -65,6 +65,7 @@ internal static class ApiStatusHandler
                 plugin.Version,
                 plugin.IsBuiltIn,
                 kind = plugin.Kind,
+                plugin.SupportsEmulator,
                 enabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),
         };

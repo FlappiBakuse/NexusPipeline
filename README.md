@@ -4,7 +4,7 @@
 [![CI](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/FlappiBakuse/NexusPipeline/actions)
 [![Release](https://img.shields.io/github/v/release/FlappiBakuse/NexusPipeline?include_prereleases)](https://github.com/FlappiBakuse/NexusPipeline/releases)
 
-**本地游戏自动化脚本管家**：一个常驻 Windows 托盘的小程序，按计划替你启动、监控、重试、收尾游戏自动化脚本（BetterGI、March7th Assistant、绝区零一条龙、MaaEnd 等），多账号配置自动切换，跑完推送到你的手机（飞书/钉钉/企业微信/邮件），还能在全部任务结束后自动关机、休眠或重启。
+**本地游戏自动化脚本管家**：一个常驻 Windows 托盘的小程序，按计划替你启动、监控、重试、收尾游戏自动化脚本（BetterGI、March7th Assistant、绝区零一条龙、MaaEnd 等）。支持多账号配置自动切换，跑完把结果推送到手机（飞书/钉钉/企业微信/邮件），全部任务结束后还能自动关机、休眠或重启。
 
 - 网页管理界面：浏览器打开即用，手机也能操作
 - 纯本地运行：不需要任何云平台、数据库，解压即用，配置全部留在你自己的电脑上
@@ -23,12 +23,13 @@
 ## 核心特性
 
 - **脚本实例**：一个脚本 = 主程序 + 参数 + 配置文件 + 日志路径 + 运行规则。可同时管理多个脚本。
-- **专项插件（开箱即用）**：自带 BetterGI（原神）、March7th Assistant（崩坏：星穹铁道）、ZenlessZoneZeroOneDragon（绝区零）、MaaEnd（明日方舟：终末地）四个专项适配——新建脚本时选「专项」，自动推导主程序/配置/日志路径，判断脚本由插件固化，无需手工配置。
+- **专项插件**：自带 BetterGI（原神）、March7th Assistant（崩坏：星穹铁道）、ZenlessZoneZeroOneDragon（绝区零）、MaaEnd（明日方舟：终末地）四个专项适配——新建脚本时选「专项」，自动推导主程序/配置/日志路径，判断脚本由插件固化，无需手工配置。
 - **多账号配置隔离**：每个账号一份独立配置，运行前自动切换、运行后自动还原，互不干扰。
 - **智能完成判定**：通过监控脚本日志判断任务成功/失败（而非只看进程是否退出）。支持自定义「成功/失败关键字」，也支持用 JavaScript/Python 写判断脚本（可读写文件、可改写配置后自动重试）。
 - **调度队列**：多个脚本按顺序链式执行；定时（按星期/时间）或启动时自动触发；全部跑完后可执行：退出软件 / 休眠 / 重启 / 关机（执行前 60 秒倒计时可取消）。
 - **历史记录**：每次运行完整留档（状态 + 按尝试分批的脚本日志），默认保留 7 天（可调，最长 180 天）。
 - **游戏联动**：可选在脚本前启动游戏、运行中自动把游戏窗口置前（防截图识别被遮挡）、失败时强制结束游戏进程。
+- **安卓模拟器适配（v0.7.0+）**：脚本实例可选择「安卓模拟器」启动方式——填模拟器 ADB 地址（如 `127.0.0.1:16384`）+ am start 参数，运行前自动连接模拟器、启动/关闭应用、失败重试时关闭前台应用、运行结束可按设置关闭整个模拟器（MuMu 专项适配，其他模拟器回退 adb 标准命令）；专用插件是否支持模拟器由插件声明（目前仅 MaaEnd 专项支持）。不需要时可在「插件」页禁用「模拟器适配」。
 - **通知推送**：Webhook / SMTP 双通道并行，密钥本地加密存储（DPAPI）。
 - **命令行**：不开网页也能全功能管理（`manage` 交互菜单）；支持 `run-script`、`run-queue`、`cancel` 等脚本化调用。
 
@@ -45,7 +46,7 @@
 
 ## 快速上手（以 BetterGI 原神专项为例）
 
-假设你已安装 [BetterGI](https://github.com/babalae/better-genshin-impact)（原神自动拾取/日常工具）：
+假设你已安装 [BetterGI](https://github.com/babalae/better-genshin-impact)：
 
 1. **启动服务**：双击 `nexus-pipeline.exe`，浏览器打开 `http://127.0.0.1:58731/`；
 2. **新建脚本**：进入「脚本实例」→ 点击「新建 BetterGI 专项脚本实例」卡片；

@@ -24,6 +24,9 @@ public class ScriptInstance
 
     public bool LaunchGame { get; set; }
 
+    /// <summary>启动方式（v0.7.0+）：""/"pc" = PC 客户端（默认，游戏按可执行文件启动），"emulator" = 安卓模拟器（GameExe 为 ADB 地址、GameArgs 为 am start 参数）。</summary>
+    public string GameMode { get; set; } = "";
+
     public string GameExe { get; set; } = "";
 
     public string GameArgs { get; set; } = "";

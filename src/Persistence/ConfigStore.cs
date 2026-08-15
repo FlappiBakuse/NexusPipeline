@@ -65,6 +65,13 @@ internal static class ConfigStore
         {
             settings.SendStrategy = "parallel";
         }
+        // v0.7.0+：旧配置升级时补默认启用的内置插件（模拟器适配），保证升级后默认可用；
+        // 已在 DisabledPlugins 显式禁用的不补回（SetEnabled 禁用会写入 DisabledPlugins）。
+        if (!settings.EnabledPlugins.Contains(AppSettings.EmulatorAdapterPlugin, StringComparer.OrdinalIgnoreCase)
+            && !settings.DisabledPlugins.Contains(AppSettings.EmulatorAdapterPlugin, StringComparer.OrdinalIgnoreCase))
+        {
+            settings.EnabledPlugins.Add(AppSettings.EmulatorAdapterPlugin);
+        }
         if (settings.WebhookType is not ("feishu" or "dingtalk" or "wecom" or "slack" or "discord" or "generic"))
         {
             settings.WebhookType = "feishu";

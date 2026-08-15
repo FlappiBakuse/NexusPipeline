@@ -71,9 +71,9 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 套件 | 命令 | 断言数 | 耗时 | 管理员 |
 |---|---|---|---|---|
-| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 62 | 毫秒级 | 否 |
-| e2e（全量） | `npx playwright test`（先 build.cmd） | 60 | 加速档约 3 分钟 | 是 |
-| e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 59 | 加速档约 2 分钟 | 是 |
+| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 96 | 毫秒级 | 否 |
+| e2e（全量） | `npx playwright test`（先 build.cmd） | 74 | 加速档约 4 分钟 | 是 |
+| e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 73 | 加速档约 4 分钟 | 是 |
 | 专项稳定性 | `node uitest\judge-scenarios.mjs` | 115 | 加速档数分钟 | 是 |
 | 混沌压力 | `node uitest\chaos-queue.mjs` | 166 | 加速档数分钟 | 是 |
 
@@ -93,8 +93,8 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 64（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
-| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ `dotnet test`（62），默认加速档 |
+| 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 74（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
+| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ `dotnet test`（96），默认加速档 |
 | 版本发布前 | 真实计时档全量（e2e + judge + chaos）+ 单测 |
 
 > 新增或删除测试用例/断言后，同步更新 AGENTS.md / CONTRIBUTING.md / README.md 中的数字。
@@ -116,14 +116,15 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 系统操作（休眠/重启/关机）仅记录日志不真正执行——e2e global-setup 设置，防止 CI 真关机 |
 | `NEXUS_CI=1` | e2e 核心回归集（剔除响应式外壳外观用例） |
 
-### 5.3 Windows 环境陷阱（曾踩坑，勿重蹈）
+### 5.3 Windows 环境陷阱（曾踩坑，勿重蹈；pwsh 7 + 系统 UTF-8 后大部分已消除）
 
-- `Set-Content` 破坏 UTF-8 中文：写文件用编辑工具或 `[IO.File]::WriteAllText(..., [Text.Encoding]::UTF8)`。
+- **工具链基线（v0.7.0 起）**：系统级 UTF-8 默认（ACP/OEMCP/MACCP=65001）+ opencode 使用 pwsh 7（profile 强制控制台/管道 UTF-8、`PYTHONUTF8=1`）；控制台/管道/文件写入默认 UTF-8，GBK 乱码与有损往返坑已根治。**Python 优先**：测试/批量文件操作/数据处理/临时脚本一律用 `python`（本机 Python 3.13），必须用 pwsh 的场景才用 pwsh。
+- `Set-Content` 破坏 UTF-8 中文的坑（5.1 时代）已消除；稳妥起见写中文文件仍用编辑工具或 `[IO.File]::WriteAllText(..., [Text.Encoding]::UTF8)`（无 BOM）。
 - **0x800700E8**：无控制台父进程启动 cmd/bat 必须带有效 stdio（`CreateProcess + RedirectStandardOutput/Error=true` 并消费）；**禁止**对 bat 用 `UseShellExecute`、禁止无重定向启动 cmd。
 - **Win32Exception 740**：目标程序要求管理员——程序已强制管理员运行，仍出现时明确报错失败；**禁止 runas 降级提权**。
 - `build.cmd` / `run-uitest.cmd` 不得加入无条件 `pause`（CI/PowerShell 调用会挂死）。
 - 脚本自启动参数（Args）以显式路径开头（`X:\`、`\\`、`.\`、`..\`）= 运行时启动目标（管理端/执行端分离），`?` 后为参数；**Args 一律禁止引号**。
-- gh/PowerShell 中文操作三坑（发布流程专用，见 RELEASING.md）。
+- gh 中文操作（曾踩坑）：修改已发布 release 前先备份原正文；含中文的 gh 写操作建议走文件（`--notes-file`，UTF-8 无 BOM）。
 
 ### 5.4 单元测试
 

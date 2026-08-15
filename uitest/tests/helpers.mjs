@@ -13,6 +13,12 @@ export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 export const CI_MODE = process.env.NEXUS_CI === "1";
 
+// v0.7.0+：模拟器 e2e 用 stub adb。global-setup 设置的 env 不进入 spec worker 进程（独立进程），
+// 且 spec 级 ensureService 重拉的服务需要它——这里在 worker 侧兜底注入（setupRuntime 会在该路径重建 stub）。
+if (!process.env.NEXUS_ADB_EXE) {
+  process.env.NEXUS_ADB_EXE = path.join(__dirname, "..", "runtime", "adb-stub", "adb-stub.cmd");
+}
+
 let child = null;
 
 const pidFile = path.join(runtimeDir, "service.pid");
@@ -154,16 +160,25 @@ export function setupRuntime() {
   } else {
     fs.mkdirSync(path.join(runtimeDir, "plugins"), { recursive: true });
   }
+  // v0.7.0+：模拟器 e2e 用 stub adb（fixtures 复制到隔离目录，经 NEXUS_ADB_EXE 注入服务进程）。
+  const stubDir = path.join(runtimeDir, "adb-stub");
+  fs.mkdirSync(stubDir, { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "fixtures", "adb-stub.cmd"), path.join(stubDir, "adb-stub.cmd"));
+  fs.writeFileSync(path.join(stubDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
+  try {
+    fs.rmSync(path.join(stubDir, "calls.log"), { force: true });
+  } catch { /* 忽略 */ }
   if (!fs.existsSync(runtimeExe)) {
     throw new Error("runtime exe 拷贝失败，拒绝运行（避免测试数据写入项目根）");
   }
 }
 
-/** 启动测试服务（v0.6.5+ 支持 service 模式：自重启仅常驻服务模式支持，测试用无参数启动；默认 web 模式）。 */
-export function startService(mode = "web") {
+/** 启动测试服务（v0.6.5+ 支持 service 模式：自重启仅常驻服务模式支持，测试用无参数启动；默认 web 模式）。
+ *  extraEnv（v0.7.0+）：额外注入的环境变量（如 NEXUS_ADB_EXE 指向 stub adb）。 */
+export function startService(mode = "web", extraEnv = {}) {
   const args = mode === "service" ? [] : [mode];
   // v0.6.6+：stdin 用 pipe 保持打开（web 模式「按回车停止」阻塞等待；stdio:ignore 的 NUL/无效句柄会被视为 EOF 立即退出）。
-  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
+  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"], env: { ...process.env, ...extraEnv } });
   try {
     fs.writeFileSync(pidFile, String(child.pid));
   } catch { /* pid 文件仅作跨进程兜底，写失败不阻塞 */ }
@@ -199,7 +214,8 @@ export async function restartService() {
 }
 
 /** spec 文件级服务兜底（v0.6.9+，A5 级联隔离）：各 spec 文件模块加载时调用。
- *  上一文件尾部服务死亡（F1/F4 级联）时，本文件自动强杀残留并重拉 web 模式服务，把整场级联失败隔离为单文件失败。 */
+ *  上一文件尾部服务死亡（F1/F4 级联）时，本文件自动强杀残留并重拉 web 模式服务，把整场级联失败隔离为单文件失败。
+ *  v0.7.0+：重拉时继承 NEXUS_ADB_EXE（stub adb），避免回退到本机真实模拟器 adb。 */
 export async function ensureService() {
   try {
     const res = await fetch(baseUrl + "api/status");
@@ -207,7 +223,7 @@ export async function ensureService() {
   } catch { /* 不可达，进入重拉 */ }
   console.warn("[helpers] ensureService：服务不可达，强杀残留并重拉 web 模式服务（级联隔离兜底）");
   await killRuntimeServices();
-  await startService("web");
+  await startService("web", { NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || "" });
   await waitForService();
 }
 

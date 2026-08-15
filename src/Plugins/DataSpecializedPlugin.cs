@@ -22,6 +22,9 @@ internal sealed class DataSpecializedPlugin
 
     public string Version { get; private set; } = "";
 
+    /// <summary>是否支持安卓模拟器启动方式（v0.7.0+，plugin.json 的 supportsEmulator 声明，缺省 false）。</summary>
+    public bool SupportsEmulator { get; private set; }
+
     public bool IsBuiltIn => false;
 
     private string _pluginDir = "";
@@ -56,6 +59,7 @@ internal sealed class DataSpecializedPlugin
                 GameName = node?["gameName"]?.ToString() ?? "",
                 Description = node?["description"]?.ToString() ?? "",
                 Version = node?["version"]?.ToString() ?? "",
+                SupportsEmulator = node?["supportsEmulator"]?.GetValue<bool>() ?? false,
                 _pluginDir = pluginDir,
                 _resolvePath = node?["resolve"]?.ToString() ?? "",
                 _judgeScriptPath = node?["judgeScript"]?.ToString() ?? "",

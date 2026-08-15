@@ -71,8 +71,13 @@
 | KN-45 | `ui.js` localStorage 写入无异常保护（隐私模式/禁用存储下白屏） | `wwwroot/core/ui.js:183` |
 | KN-46 | 队列任务用户数估算与后端校验口径不一致（先加任务后选脚本时估算偏低） | `wwwroot/views/queues.js:168-188` |
 | KN-47 | 设置页双「保存设置」按钮（语义重复）；侧栏「本地服务 · 127.0.0.1」硬编码文案远程模式不准确 | `wwwroot/views/settings.js:22`、`wwwroot/index.html:30` |
+| KN-51 | 托盘「打开管理页面」用 `Settings.WebPort` 而非实际监听端口——设置页改端口未重启服务时打开新端口 404（`WebServer.Port` 实际值未被引用） | `src/TrayApp.cs:52`、`src/Web/WebServer.cs:87` |
+| KN-52 | CLI 设置菜单历史保留天数仅校验 `>= 1`（越界输入被 `ConfigStore.Normalize` 静默重置为 7），与 Web 端 `Limits.CheckRetentionDays` 校验不一致 | `src/Cli/SettingsMenu.cs:69`、`src/Persistence/ConfigStore.cs:52-55` |
+| KN-53 | CLI 脚本菜单未做超时 -1 成对校验（stall=-1 而 total 正常值可通过），Web 端会拒绝——两入口行为不一致 | `src/Cli/ScriptsMenu.cs:149-158` |
 | KN-48 | DESIGN.md 过时：截断表格（P8 部分截断尾续读）、fresh 判定（LastWriteTime → 长度快照）、保留上限 180（→ limits.json 动态，默认 180/上限 365） | `docs/DESIGN.md:91/222/226/261` |
 | KN-49 | ARCHITECTURE.md 依赖方向描述与实现不符：Services→Plugins（UserConfigManager/DispatchCenter）、Plugins→Services（PluginManager/NotifyPlugin）、Logger→RuntimeContext | `docs/ARCHITECTURE.md:40-43`、`src/Services/UserConfigManager.cs:4`、`src/Plugins/PluginManager.cs:3`、`src/Utilities/Logger.cs:33` |
 | KN-50 | 文档断言数字/表述残留：DEVELOPMENT.md 旧版 chaos「171」、AGENTS/README 数字同步检查 | `docs/DEVELOPMENT.md`（2026-08-15 重构时修正） |
+| KN-54 | 队列完成操作在任务失败（非取消）时仍执行 exit/sleep/reboot/shutdown——语义已与用户确认保留，待文档化说明 | `src/Services/DispatchCenter.cs:573-618` |
+| KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` |
 
 > 注：`docs/DEVELOPMENT.md`、`docs/ASSESSMENT.md` 已于 2026-08-15 文档体系重组中重构/更新（KN-48/KN-49/KN-50 涉及项在重组时一并修正，台账状态以实际为准）。

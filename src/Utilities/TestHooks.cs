@@ -32,4 +32,7 @@ internal static class TestHooks
     {
         return Math.Max(1, seconds / TimeScale);
     }
+
+    /// <summary>测试用 adb 可执行文件路径（v0.7.0+，env NEXUS_ADB_EXE）：e2e 用 stub adb 模拟模拟器命令，生产不设置。</summary>
+    public static string? AdbExe => Environment.GetEnvironmentVariable("NEXUS_ADB_EXE");
 }

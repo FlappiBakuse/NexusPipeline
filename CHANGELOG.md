@@ -2,6 +2,41 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.0（Pre-release）
+
+### 新增
+
+- **安卓模拟器启动方式（GameMode）**：脚本实例新增「启动方式」——PC 客户端 / 安卓模拟器（旧配置兼容默认 pc）；模拟器模式复用 `GameExe`=ADB 地址（`host:port`）、`GameArgs`=am start 参数（`-n 包名/.Activity`）：
+  - **运行链路**（`RunSession` 分叉）：插件启用检查 → adb 解析（测试钩子 `NEXUS_ADB_EXE` 优先 / PATH / MuMu 安装目录兜底）→ `adb connect` → `am start` → 前台确认（`dumpsys window` 解析 mCurrentFocus，目标包名从 `-n` 解析，解析不到宽松通过）→ 脚本运行；尝试失败收尾 `am force-stop` 当前前台应用（桌面/系统界面跳过）；运行结束（成功/最终失败）且「强制关闭」开启 → 关闭整个模拟器；取消不处理；窗口前置/进程树排除对模拟器模式跳过；
+  - **模拟器关闭（MuMu 专项）**：`adb emu kill` 对 MuMu 12 无效（实测）——`MuMuManager info -v all` 按 adb 端口反查 vmindex → `control -v <idx> shutdown`（官方优雅关闭）→ 回退 `adb shell reboot -p`（实测有效）→ 轮询确认离线，失败降级明确告警；
+  - **内置能力插件「模拟器适配」**（`emulator-adapter`，默认启用，可禁用不可删）：禁用后前端不渲染「启动方式」选择器 + 模拟器运行被拒；专用插件按 `plugin.json` 的 `supportsEmulator` 声明（缺省 false，仅 maaend=true），声明缺失的专项用模拟器启动 → 400；
+  - **前端**：游戏卡「启动方式」选择器（插在「启动后等待秒数」左侧，两格等宽同行）；选模拟器后游戏路径变「模拟器ADB地址」、启动参数 placeholder 提示 `-n 包名/.MainActivity`；保存时 ADB 地址格式前端校验；
+  - **判断脚本输入**：`JudgeScriptRunner.BuildInput` 补 `gameMode` 字段；`Limits.CheckScriptPaths` 分叉（模拟器=ADB 地址格式校验，PC=可执行文件）。
+
+### 修复
+
+- **adb connect 假成功**：`adb connect` 对拒绝连接目标退出码仍为 0（实测 10061），按输出失败标记（cannot/failed/unable to connect）识别——连接失败信息从误导的「模拟器应用启动失败」纠正为「模拟器连接失败」，不再多绕一次 am start。
+- **am start 错误码不可靠**：无效 Activity 时 am 输出 `Error: ...` 但退出码为 0（实测），按输出 `error` 标记立即失败并携带原始错误，不再白等 `GameWaitSeconds` 前台确认轮询。
+- **关闭模拟器「虚假成功」**：`ShutdownEmulatorAsync` 此前丢弃离线轮询结果，MuMuManager 返回 0 但未实际关闭时会误报成功；现每条关闭路径均以确认离线为成功凭据，超时降级失败并告警。
+- **API 响应缺 `Cache-Control: no-cache`**：`/api/status` 等 API 响应此前无缓存头，浏览器启发式缓存致插件状态变更后刷新页面仍读到旧值（如禁用「模拟器适配」后选择器残留）；与静态文件（v0.6.9 P13）对齐补齐。
+
+### 变更
+
+- **「启动后等待秒数」宽度统一**：游戏卡「启动方式 + 等待秒数」行统一为双格等宽布局（各约半宽）；模拟器适配不可用时（专项/插件禁用）等待秒数顶替选择框位置、右格空出——三种场景排版一致。
+- **插件能力卡片瀑布流**：仪表盘插件卡片从 3 列 grid（行内矮卡片留空隙）改为 CSS columns 瀑布流——卡片保持高度自适应、列内紧密排列无行空隙，手机单列。
+- 文档措辞优化（README/DESIGN/ARCHITECTURE/AGENTS/CHANGELOG/RELEASING 等）。
+
+### 测试
+
+- 单测 **62 → 96**（+34：ADB 地址/`-n` 解析/dumpsys 前台/MuMuManager 反查/am start 错误识别）；e2e 全量 **64 → 74**（+10：模拟器前端联动/专项声明/非法地址拦截/后端拒绝/全链路/失败重试 force-stop/不关开关/插件禁用/连接失败与 am start 失败立即判定；08-emulator.spec 10 用例）、CI 核心集 63 → 73；judge 115、chaos 166 不变。
+- **真实模拟器实测（MuMu 16384）**：成功链路 / 失败重试 force-stop / 桌面跳过 / `ForceCloseGame=true` 真实关闭（MuMuManager 反查实例 0 → shutdown 1.6s 离线 → launch 15s 重启恢复）/ 不关开关——全部通过；dumpsys 与 MuMuManager 真实输出格式与解析代码完全匹配。
+- **测试基建**：`WaitEmulatorOfflineAsync` 60 秒上限补 `NEXUS_TIME_SCALE` 缩放（v0.6.4 加速基建遗漏，加速档每关机场景白等 60s——08 spec 从 2.3m 降到 21s）；chaos F5 采样兜底补归档日志证据（含 UTF-8 BOM 剥离），F5 关闭。
+- 真实计时档发布门禁：e2e 74/74 + judge 115/0 + chaos 166/0 全绿（2026-08-15）。
+
+### 变更
+
+- 版本号 0.7.0。
+
 ## v0.6.10（Pre-release）
 
 ### 新增
@@ -16,7 +51,7 @@
 
 ### 变更
 
-- 文档体系重组：README 大众化重写（面向普通用户，快速上手以专项插件为例）、CONTRIBUTING 扩充为协作圣经、docs/DEVELOPMENT 重构为开发环境指南、新增 docs/RELEASING（发布流程）与 docs/KNOWN-ISSUES（已知问题台账）、开发清单入库 docs/ROADMAP、ci.yml 混合编码修复为 UTF-8、DESIGN/ARCHITECTURE 过时内容修正。
+- 文档体系重组：README 大众化重写（面向普通用户，快速上手以专项插件为例）、CONTRIBUTING 大幅扩充、docs/DEVELOPMENT 重构为开发环境指南、新增 docs/RELEASING（发布流程）与 docs/KNOWN-ISSUES（已知问题台账）、开发清单入库 docs/ROADMAP、ci.yml 混合编码修复为 UTF-8、DESIGN/ARCHITECTURE 过时内容修正。
 - 长时脚本卡片取消 accent 底色高亮（仅保留「长时」徽章，用户决策）。
 
 ### 测试

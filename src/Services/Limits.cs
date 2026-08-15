@@ -189,7 +189,8 @@ internal static class Limits
     /// 脚本实例路径校验（Web + CLI 共用）：
     /// 通用脚本——根目录/主程序/配置文件必须存在（主程序还需可执行），日志路径仅格式合规（不查存在性，支持日期占位符与通配符）；
     /// 专项脚本——仅校验根目录存在（主程序/配置/日志由插件固化，不做存在性校验）；
-    /// 游戏路径一律必填且必须为存在的可执行文件（运行前启动游戏、运行后强制关闭游戏均与填写解绑）。返回错误信息或 null。
+    /// 游戏配置（v0.7.0+ 按启动方式分叉）——PC 客户端：游戏路径一律必填且必须为存在的可执行文件；安卓模拟器：ADB 地址必填且格式合法（主机:端口）。
+    /// 返回错误信息或 null。
     /// </summary>
     public static string? CheckScriptPaths(ScriptInstance script)
     {
@@ -198,6 +199,11 @@ internal static class Limits
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
         {
             return $"脚本根目录不存在或不是文件夹：{root}";
+        }
+        if (EmulatorSupport.IsEmulator(script) && specialized
+            && !RuntimeContext.Instance.Plugins.SupportsEmulator(script.PluginType))
+        {
+            return "该专项插件不支持安卓模拟器启动方式（专用插件需在 plugin.json 声明 supportsEmulator）";
         }
         if (!specialized)
         {
@@ -215,7 +221,14 @@ internal static class Limits
                 return $"日志路径格式不合法（不允许包含 引号/尖括号/竖线/问号）：{script.LogPath}";
             }
         }
-        if (!TextRules.IsExecutable(script.GameExe))
+        if (EmulatorSupport.IsEmulator(script))
+        {
+            if (!EmulatorSupport.IsValidAdbAddress(script.GameExe))
+            {
+                return $"模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）：{script.GameExe}";
+            }
+        }
+        else if (!TextRules.IsExecutable(script.GameExe))
         {
             return $"游戏路径必须为存在的可执行文件：{script.GameExe}";
         }

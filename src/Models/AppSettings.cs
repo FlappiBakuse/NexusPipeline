@@ -56,8 +56,11 @@ public class AppSettings
 
     public int SmtpTimeout { get; set; } = 30;
 
-    /// <summary>启用的内置插件白名单（默认 notify）；外部插件默认启用，禁用记录在 <see cref="DisabledPlugins"/>。</summary>
-    public List<string> EnabledPlugins { get; set; } = new() { "notify" };
+    /// <summary>模拟器适配内置插件名（v0.7.0+）：禁用后模拟器启动方式不可用。</summary>
+    public const string EmulatorAdapterPlugin = "emulator-adapter";
+
+    /// <summary>启用的内置插件白名单（默认 notify + 模拟器适配）；外部插件默认启用，禁用记录在 <see cref="DisabledPlugins"/>。</summary>
+    public List<string> EnabledPlugins { get; set; } = new() { "notify", EmulatorAdapterPlugin };
 
     /// <summary>显式禁用的外部插件列表（持久化；删除后该插件重新默认启用）。</summary>
     public List<string> DisabledPlugins { get; set; } = new();
