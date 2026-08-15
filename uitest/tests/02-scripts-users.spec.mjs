@@ -1193,3 +1193,41 @@ test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
     for (const id of ids) { try { await api("DELETE", "/api/scripts/" + id); } catch { /* 清理失败不阻塞 */ } }
   }
 });
+
+test("长时脚本：-1 成对校验 / 保存 / 长时徽章", async ({ page }) => {
+  const dir = makeScriptDir("longrun");
+  try {
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("h2");
+    await page.click('[data-testid="new-script"]');
+    await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+    await page.click('[data-action="open-script-type"][data-plugin=""]');
+    await page.waitForSelector(".modal-mask");
+
+    await page.fill("#sm-name", "长时脚本测试");
+    await page.fill("#sm-root", dir.root.replace(/\\/g, "\\\\"));
+    await page.fill("#sm-exe", dir.main.replace(/\\/g, "\\\\"));
+    await page.fill("#sm-config", dir.cfg.replace(/\\/g, "\\\\"));
+    await page.fill("#sm-log", dir.log.replace(/\\/g, "\\\\"));
+    await page.fill("#sm-game-exe", dir.main.replace(/\\/g, "\\\\"));
+    await page.fill("#sm-stall", "-1");
+    await page.fill("#sm-total", "120");
+    await page.click(".modal button:has-text('保存')");
+    await page.waitForTimeout(400);
+    expect(await page.$(".modal-mask"), "半 -1（stall=-1 而 total 正常）保存被拒（弹窗保留）").toBeTruthy();
+    expect((await page.textContent("body")).includes("长时脚本需将"), "半 -1 提示长时成对语义（两个超时都设为 -1）").toBeTruthy();
+
+    await page.fill("#sm-total", "-1");
+    await page.click(".modal button:has-text('保存')");
+    await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+    await page.waitForFunction(() => document.body.textContent.includes("长时脚本测试"), null, { timeout: 5000 });
+    expect(await page.$('[data-testid="script-long-badge"]'), "长时脚本卡片显示「长时」徽章").toBeTruthy();
+    const list = await (await api("GET", "/api/scripts")).json();
+    const saved = list.find(s => s.name === "长时脚本测试");
+    expect(!!saved && saved.logStallTimeoutMinutes === -1 && saved.totalTimeoutMinutes === -1, "长时脚本两个超时均已落盘为 -1").toBeTruthy();
+  } finally {
+    const list = await (await api("GET", "/api/scripts")).json();
+    const target = list.find(s => s.name === "长时脚本测试");
+    if (target) { try { await api("DELETE", "/api/scripts/" + target.id); } catch { /* 清理失败不阻塞 */ } }
+  }
+});

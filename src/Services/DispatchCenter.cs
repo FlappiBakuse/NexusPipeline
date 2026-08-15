@@ -218,6 +218,12 @@ internal class DispatchCenter
         {
             throw new InvalidOperationException($"调度队列不存在：{queueId}");
         }
+        // v0.7.0：长时/普通混排运行期防御（保存时已校验，此处兜底手工改配置/旧数据场景）。
+        string? mixError = Limits.CheckQueueMix(RuntimeContext.Instance, queue);
+        if (mixError is not null)
+        {
+            throw new InvalidOperationException(mixError);
+        }
         int totalTasks = 0;
         foreach (QueueTask queueTask in queue.Tasks)
         {

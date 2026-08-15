@@ -57,7 +57,7 @@ export async function pageScripts(token) {
         <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
         <div class="script-main">
           <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
-          <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
+          <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
         </div>
         <div class="script-ops">
           <button class="sm" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
@@ -174,8 +174,8 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
       </div>
     </div>`
     : `<div class="form-grid">
@@ -205,8 +205,8 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
+        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="填入 -1 表示不超时（长时脚本）"`)}
       </div>
       <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
@@ -364,11 +364,18 @@ export async function saveScript() {
     toast(`最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`, "error");
     return;
   }
-  if (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60))) {
+  // v0.7.0：-1 = 不超时（长时脚本），必须成对出现
+  const longStall = stall === -1;
+  const longTotal = total === -1;
+  if (longStall !== longTotal) {
+    toast("长时脚本需将「日志无更新超时」与「运行总时间超时」都设为 -1（-1 = 不超时）", "error");
+    return;
+  }
+  if (!longStall && (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60)))) {
     toast(`日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`, "error");
     return;
   }
-  if (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720))) {
+  if (!longTotal && (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720)))) {
     toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
     return;
   }

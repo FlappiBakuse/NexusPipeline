@@ -1,39 +1,184 @@
-# 贡献指南
+# 贡献指南（Contribution Guidelines）
 
-感谢参与 NexusPipeline（枢链）开发。**完整规范见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**（提交信息、版本号、Release 分发规则）。本文为快速入门索引。
+感谢参与 NexusPipeline（枢链）开发。本文件是**协作规范**：如何提交 Issue、如何提交 PR/推送、Commit Message 格式、代码风格要求与测试流程。
 
-## 快速开始
+- 版本发布（tag / release / 资产）见 [docs/RELEASING.md](docs/RELEASING.md)；
+- 开发环境搭建与调试见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
+- 版本路线与后续开发清单见 [docs/ROADMAP.md](docs/ROADMAP.md)；
+- 已知问题台账见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)。
 
-1. 同步最新代码：`git checkout main && git pull`；
-2. 本地验证：`build.cmd` → 全量 e2e（`npx playwright test`，60 用例）全绿 + 单元测试（`dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj`，58 断言）；CI 跑核心回归集（`$env:NEXUS_CI = "1"; npx playwright test`，59 用例）；专项测试 `node uitest\judge-scenarios.mjs`（115 断言）与 `node uitest\chaos-queue.mjs`（166 断言，需管理员 shell）；
-3. 提交并推送（v1.0.0 之前直接 push `main`，禁止 force push；发布操作须先经用户同意）。
+## 目录
 
-## 协作模式（以 v1.0.0 为界）
+1. [版本与发布权](#1-版本与发布权)
+2. [协作模式（以 v1.0.0 为界）](#2-协作模式以-v100-为界)
+3. [如何提交 Issue](#3-如何提交-issue)
+4. [如何提交代码（PR / push）](#4-如何提交代码pr--push)
+5. [提交信息规范（Conventional Commits）](#5-提交信息规范conventional-commits)
+6. [代码风格要求](#6-代码风格要求)
+7. [测试流程（质量门禁）](#7-测试流程质量门禁)
 
-- **v1.0.0 之前**：`main` 无分支保护，直接 push main，不走 PR；版本发布一律 **Pre-release**。
-- **v1.0.0 起**：所有改动只能通过 Pull Request 合入 `main`（CI 构建 + e2e 全绿后 squash 合并）。
+---
 
-## 提交信息规范（摘要）
+## 1. 版本与发布权
 
-采用 **Conventional Commits**，type / scope 英文，描述中文：`<type>[<scope>][!]: <描述>`。
+- **commit / push / pull request / release 的创建与发布，必须先经用户明确同意**，未经同意不得执行（含 git commit、push、gh pr、gh release、打 tag）。
+- 同一版本内的多轮对话修改，全部累积为同一版本的一部分；未经用户要求，不得中途拆分提交或单独发布。
+- 版本号（bump）仅随用户要求的版本开发进行，不得擅自递增。
+- 不得提交运行产物、用户配置、日志、密钥；配置与用户数据永不进入版本库。
 
-| type | 用途 |
+## 2. 协作模式（以 v1.0.0 为界）
+
+| 阶段 | 模式 |
 |---|---|
-| `feat` | 新功能 |
-| `fix` | 缺陷修复 |
-| `docs` / `refactor` / `perf` / `test` | 文档 / 重构 / 优化 / 测试 |
-| `build` / `ci` / `chore` / `style` / `revert` | 构建 / CI / 杂务 / 样式 / 还原 |
+| **v1.0.0 之前** | `main` 无分支保护，**直接 push main**，不走 PR；提交前先 `git pull` 避免分叉，**禁止 force push**；版本发布一律 **Pre-release** |
+| **v1.0.0 起** | 所有改动**只能通过 Pull Request** 合入 `main`（CI「构建 + e2e 测试」全绿后 squash 合并），禁止直接 push / force push main |
 
-示例：
+如确需开分支协作，按前缀命名：`feat/`、`fix/`、`docs/`、`refactor/`、`test/`、`chore/`。
 
-- `feat(dispatch): 新增调度中心批量执行`
-- `fix(history): 修复历史详情时区错位`
-- `feat(plugins)!: 变更插件契约签名`（破坏性变更须标注）
+## 3. 如何提交 Issue
 
-## 发布流程（摘要）
+缺陷报告请包含：
 
-1. 构建与测试全绿；
-2. 打 tag `vX.Y.Z` → `gh release create --prerelease`（标题 `vX.Y.Z`，notes 参考 v0.3.1 分组格式）；
-3. 资产：`NexusPipeline-vX.Y.Z-win-x64.zip`（exe + wwwroot + plugins + README + LICENSE，排除 config/）+ 同名 `.sha256`（内容纯 hash，遵守 v0.2.1 及之前规则）。
+1. **版本号**：`nexus-pipeline.exe status` 或 `/api/status` 的 `version` 字段（或 Release 标题）；
+2. **复现步骤**：尽量具体（脚本实例配置要点、触发方式、日志路径）；
+3. **现场信息**：
+   - 管理器日志：`logs/nexus-pipeline-YYYY-MM-DD.log`（含审计行）；
+   - 历史记录：`history/YYYY-MM-DD/` 下对应 `.json` + 按尝试分批 `.log`；
+   - 配置现场（注意脱敏：`config/` 含加密密钥，请勿直接粘贴密文）。
+4. **预期行为 vs 实际行为**。
 
-详见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)。
+功能建议请说明：场景、期望行为、与现有功能（脚本实例/调度队列/判断脚本/通知）的关系。
+
+## 4. 如何提交代码（PR / push）
+
+1. 同步最新代码：`git checkout main && git pull`（提交前必做）；
+2. 在 `main` 上完成改动（v1.0.0 前阶段；确需协作时开前缀分支）；
+3. 本地验证全绿（见第 7 节）；
+4. 按第 5 节规范提交（小改动一条提交，大改动分多条逻辑提交）；
+5. 推送：`git push origin main`（禁止 force push；v1.0.0 起走 PR + squash）；
+6. 涉及发布：按 [docs/RELEASING.md](docs/RELEASING.md) 执行。
+
+## 5. 提交信息规范（Conventional Commits）
+
+采用 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/zh-hans/v1.0.0/)，type / scope 用英文，描述用中文。
+
+### 5.1 格式
+
+```
+<type>[<scope>][!]: <描述>
+
+[可选 正文]          ← 空行分隔，说明变更原因与影响
+
+[可选 脚注]          ← 空行分隔，token 用 - 连字符（如 Refs: #123）
+```
+
+- `<type>[<scope>][!]:` 后必须有英文半角冒号 + 一个空格；
+- `<scope>`：圆括号内的名词，描述变更范围（见 5.3）；
+- `!`：破坏性变更标记，放在冒号前（如 `feat!:`）；
+- `<描述>`：中文，动词开头（新增 / 修复 / 优化 / 抽取 / 移除…），简短、不带结尾句号；
+- 正文与脚注可选；正文必须起始于描述后的空行。
+
+### 5.2 type 表
+
+| type | 含义 | SemVer 对应 |
+|---|---|---|
+| `feat` | 新功能 | MINOR |
+| `fix` | 缺陷修复 | PATCH |
+| `docs` | 文档（README / 架构 / 规范） | 无 |
+| `refactor` | 重构（不改变行为） | 无 |
+| `perf` | 性能优化 | 无 |
+| `test` | 测试用例增改 | 无 |
+| `build` | 构建系统、依赖变更 | 无 |
+| `ci` | CI 工作流变更 | 无 |
+| `chore` | 杂务（版本号、脚本、工具配置） | 无 |
+| `style` | 代码样式（缩进、空格、空行，不改变逻辑） | 无 |
+| `revert` | 还原提交，脚注 `Refs: <被还原提交>` | 无 |
+
+### 5.3 scope 表（可选）
+
+| scope | 范围 |
+|---|---|
+| `core` | 核心域（调度、进程、日志、存储） |
+| `web` | Web API / 路由 / Handler |
+| `cli` | 命令行菜单 |
+| `plugins` | 插件契约与插件管理器 |
+| `dispatch` | 调度中心 / 队列执行 |
+| `history` | 历史记录 |
+| `e2e` | Playwright 端到端测试 |
+| `release` | 发布流程相关（打包 / 版本号） |
+
+### 5.4 破坏性变更
+
+- 必须在提交信息中标记：`<type>(<scope>)!:` 或脚注 `BREAKING CHANGE: <描述>`（大写的 BREAKING CHANGE + 冒号 + 空格 + 描述）；
+- 影响范围大、会破坏既有配置 / API / 契约的改动**先询问用户**再动手。
+
+### 5.5 示例
+
+```
+feat(dispatch): 新增调度中心批量执行
+
+fix(history): 修复历史详情时区错位
+docs: 补充文件结构说明
+refactor(core): 抽取运行会话状态机
+test(e2e): 增加调度队列端到端用例
+chore(release): 更新 build.cmd 发布脚本
+feat(plugins)!: 变更插件契约签名
+
+BREAKING CHANGE: IPlugin.Init 改为异步签名
+```
+
+## 6. 代码风格要求
+
+### 6.1 后端（C#）
+
+- **分层与命名空间**：`NexusPipeline`（入口/组合根）/ `Models` / `Services` / `Persistence` / `Utilities` / `Web` / `Cli` / `Plugins`；依赖方向 Models → Services → Persistence → Utilities（详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。
+- **public 仅限契约**：仅 `Program` 与领域模型（`AppSettings`/`ScriptInstance`/`ScriptUser`/`DispatchQueue`/`QueueTask`/`QueueTimeSet`/`RunRecord`/`RunAttempt`）为 public；其余一律 internal。
+- 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 类上 `[ApiRoute("资源名")]`（子路由标在方法上），`WebServer` 反射扫描自动注册。
+- 日志：一律显式调用 `Logger.Debug/Info/Warn/Error/Fatal(msg)`，禁止 `Logger.Log`。
+
+### 6.2 前端（wwwroot，强约束）
+
+- **零构建、零 CDN**：原生 ES modules，浏览器直接加载；不引入打包框架或外置字体。
+- 模块边界固定：`app.js`（路由/注册表分发）+ `core/`（通用能力）+ `views/`（业务视图，一域一文件）+ `effects/`。
+- 交互统一 `data-action` + 事件委托；禁止 inline `onclick`/`onchange`、禁止内联 `style`、颜色一律 CSS 变量。
+- 主题 light/dark/system 三态 + localStorage 持久化；弹窗/Toast 无障碍（role=dialog、aria-modal、焦点陷阱、焦点恢复）。
+- 响应式三档（360 / 768 / 1280 视口）；触控目标 ≥ 40px；Notion 风格基线（米色浅色系、小圆角、轻阴影、禁渐变/玻璃态/uppercase eyebrow）。
+- 轮询页面必须经 `state.js` 注册 timer/AbortController，路由切换时清理。
+- 完整强约束见根目录 `AGENTS.md`「前端开发强约束」——**与本文冲突时以 AGENTS.md 为准**。
+
+## 7. 测试流程（质量门禁）
+
+**每次改动后必须运行**，全绿方可提交：
+
+| 改动范围 | 必跑 |
+|---|---|
+| 仅前端 | `build.cmd` + e2e 全量 64（局部迭代可按域筛选） |
+| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ 单元测试（62），默认加速档 |
+| 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
+
+常用命令：
+
+```powershell
+# 1. 构建
+build.cmd                                     # 提权版（增量构建：src 未变仅同步 wwwroot/plugins）
+
+# 2. 单元测试（毫秒级，无管理员）
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
+
+# 3. e2e（先 build.cmd；加速档为日常迭代默认）
+$env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
+$env:NEXUS_TIME_SCALE = "10"
+npx playwright test                            # 全量 64（发布前回归）
+$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集 63
+Remove-Item Env:NEXUS_TIME_SCALE               # 切回真实计时档
+
+# 4. 专项测试（需管理员 shell；先 build.cmd）
+$env:NEXUS_TIME_SCALE = "10"
+node uitest\judge-scenarios.mjs                # 115 断言
+node uitest\chaos-queue.mjs                    # 166 断言
+```
+
+- 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`uitest\run-uitest.cmd` 已默认内置；
+- 新增或删除测试用例/断言后，同步更新 AGENTS.md / README.md / CONTRIBUTING.md 中的数字；
+- 发布前真实计时档全量回归 + flake 台账（`uitest/FLAKE-LEDGER.md`）更新；
+- 永不提交：`release/`、`config/`、`history/`、`logs/`、`uitest/runtime/`、密钥与账号信息。

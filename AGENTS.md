@@ -13,8 +13,8 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口；@playwright/test 框架，tests/ 按域 7 个 spec 文件）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-npx playwright test            # 全量 60 用例（发布前本地回归）；先跑 build.cmd，否则 globalSetup 中止
-$env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：59 用例（剔除响应式外壳外观用例）
+npx playwright test            # 全量 64 用例（发布前本地回归）；先跑 build.cmd，否则 globalSetup 中止
+$env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：63 用例（剔除响应式外壳外观用例）
 # 时间加速（v0.6.4+，唯一加速档 NEXUS_TIME_SCALE=10；run-uitest.cmd 已默认内置）：宿主等待按比例缩放
 # （1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms），
 # 三套测试（e2e 60 + judge 115 + chaos 166）合计约 10 分钟；发布前用真实计时档（不设该变量）跑全量回归
@@ -22,10 +22,10 @@ $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
 # 3. 单元测试（v0.6.4+，毫秒级，无管理员）：判定状态机/关键字规则/日志路径解析/模型规则校验等纯逻辑
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 58 断言；CI 每次必跑
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 62 断言；CI 每次必跑
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 60 / 59（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 63 / 62（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：115 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
 - 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：166 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
 - **flake 治理基建（v0.6.9+）**：`uitest/flake-monitor.mjs` 进程/端口监控采样器（500ms 采样 nexus-pipeline 进程存在性 + 58731 监听，日志在 `uitest/flake-monitor-logs/`，stop 信号文件同名目录下 flake-monitor.stop）；flake 台账 `uitest/FLAKE-LEDGER.md`（现象/复现条件/根因/处置，每次全量回归更新直至清零）；spec 文件级 `ensureService` 兜底（服务不可达自动强杀残留重拉，隔离级联失败）；`killRuntimeServices` 轮询确认进程完全消失后才返回（消除强杀→重启竞态窗口）。
@@ -35,11 +35,12 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 58 �
 
 ## Git 协作规范（强制）
 
+- **版本范围与已知问题**：版本开发清单见 `docs/ROADMAP.md`（开工前打 `backup/vX.Y.Z-dev` 本地备份 tag + 同步 csproj `<Version>`）；已知问题台账见 `docs/KNOWN-ISSUES.md`（版本修复项核对）；发布流程见 `docs/RELEASING.md`；协作规范见 `CONTRIBUTING.md`。
 - **v1.0.0 之前（早期开发阶段）**：`main` 无分支保护（仓库无 ruleset），**直接 push main**，不走 PR；提交前先 `git pull` 避免分叉，**禁止 force push**；版本发布一律 **Pre-release**。
 - **v1.0.0 起（正式版本）**：所有改动**只能通过 Pull Request** 合入 `main`（CI「构建 + e2e 测试」全绿后 squash 合并），禁止直接 push/force push main。
 - 分支：`feat/`、`fix/`、`docs/`、`refactor/`、`test/`、`chore/` 前缀。
-- 提交标题：Conventional Commits（完整规范见 `docs/DEVELOPMENT.md`），type/scope 英文 + 描述中文（如 `fix: 修复历史详情时区错位`、`feat(plugins)!: ...`）；type 表含 feat/fix/docs/refactor/perf/test/build/ci/chore/style/revert。
-- 版本发布（规则见 `docs/DEVELOPMENT.md` §5-§6）：tag `vX.Y.Z` + `gh release create --prerelease --title vX.Y.Z --notes-file`；release 标题与 notes 格式参考 v0.3.1（`## vX.Y.Z（Pre-release）` + `###` 功能分组 + 要点列表）。
+- 提交标题：Conventional Commits（完整规范见 `CONTRIBUTING.md`），type/scope 英文 + 描述中文（如 `fix: 修复历史详情时区错位`、`feat(plugins)!: ...`）；type 表含 feat/fix/docs/refactor/perf/test/build/ci/chore/style/revert。
+- 版本发布（规则见 `docs/RELEASING.md`）：tag `vX.Y.Z` + `gh release create --prerelease --title vX.Y.Z --notes-file`；release 标题与 notes 格式参考 v0.3.1（`## vX.Y.Z（Pre-release）` + `###` 功能分组 + 要点列表）。
 - **资产与 SHA（强制）**：zip 资产 `NexusPipeline-vX.Y.Z-win-x64.zip`（exe+wwwroot+plugins+README+LICENSE，**排除 config/**）；SHA 资产为与 zip **同名成对的 `.sha256`** 文件（`NexusPipeline-vX.Y.Z-win-x64.zip.sha256`），**内容为纯 hash、不含文件名**（遵守 v0.2.1 及之前规则），禁止 v0.3.1 的 `SHA256.txt` 汇总格式。
 
 ## 运行时数据（易混淆，勿改错）
@@ -83,7 +84,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 58 �
 - `src/Program.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）+ 配置迁移；启动编排见 `src/Bootstrap.cs`。**web 模式（v0.6.6+）抢单实例互斥**：常驻服务在跑时直接退出（防双写）；退出循环按回车停止 / stdin 重定向 EOF 自动退出 / 无效 stdin 持续运行。
 - `src/Web/WebServer.cs`：HTTP 骨架 + **特性路由表**（v0.5.0+：`[ApiRoute("资源名")]` 标注在 handler 类/方法上，`WebServer.Routes` 启动反射扫描注册，新增 API 无需改路由表；每个 `/api/*` 资源一个 `ApiXxxHandler`，见 `src/Web/`）；`GET /api/status` 不记审计（轮询豁免）。
 - `src/Cli/`：命令行菜单（MainMenu + 脚本/队列/调度/历史/插件/设置/通知渠道 7 个菜单类）；**调度中心（v0.6.6+）统一经常驻服务 HTTP 通道**（`CliTransport`，与 CLI run-script 同通道，Web 端可见运行任务）；manage 启动时探测常驻服务在跑 → 提示菜单修改可能与 Web 端互相覆盖；菜单保存带异常兜底（`Ui.TrySave`）。
-- `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知切换按钮同行（启动游戏｜强制关闭｜运行通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。**拖拽排序（v0.6.8+）**：脚本实例/调度队列/用户卡片最左侧 `.drag-handle` 把手拖拽重排（`core/dnd.js` 通用组件，Pointer Events 统一鼠标/触屏，触屏依赖 `.drag-handle` 的 `touch-action: none`），拖拽结束视图提交全量顺序（脚本/队列 `PUT /api/{scripts|queues}/order` body `{ids}`、用户沿用 `PUT users/order` `{names}`）；用户卡片已废除上/下移按钮。
+- `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知切换按钮同行（启动游戏｜强制关闭｜运行通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。**拖拽排序（v0.6.8+）**：脚本实例/调度队列/用户卡片最左侧 `.drag-handle` 把手拖拽重排（`core/dnd.js` 通用组件，Pointer Events 统一鼠标/触屏，触屏依赖 `.drag-handle` 的 `touch-action: none`），拖拽结束视图提交全量顺序（脚本/队列 `PUT /api/{scripts|queues}/order` body `{ids}`、用户沿用 `PUT users/order` `{names}`）；用户卡片已废除上/下移按钮。**弹窗内拖拽（v0.6.10）**：队列编辑弹窗的定时列表与任务列表同样以 `.drag-handle` 拖拽排序（`data-dnd-id`=渲染下标；`syncQueueDraftFromDom` 按元素携带的 `data-ts-idx`/`data-task-idx` 写回原数组项——DOM 顺序与数组顺序脱钩后仍正确），任务列表上/下移按钮已废除。
 - 模块边界与定位指南见 `docs/ARCHITECTURE.md`（v0.2.0+）。
 - CI：`.github/workflows/ci.yml`（windows-latest，build.cmd + npm ci + e2e）。
 
@@ -136,4 +137,4 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 58 �
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 60（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（115）+ `chaos-queue.mjs`（166）+ `dotnet test`（58 单测），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 64（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（115）+ `chaos-queue.mjs`（166）+ `dotnet test`（62 单测），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

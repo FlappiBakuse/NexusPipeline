@@ -444,3 +444,140 @@ test("队列卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
     try { await api("DELETE", "/api/scripts/" + created.id); } catch { /* 清理失败不阻塞 */ }
   }
 });
+
+test("长时脚本运行：-1 超时不触发日志无更新超时失败", async () => {
+  const dir = makeScriptDir("longrun");
+  const logFile = path.join(dir.root, "logs", "long.log");
+  const longBat = path.join(dir.root, "long-run.bat");
+  fs.writeFileSync(longBat, [
+    "@echo off",
+    "echo [SCRIPT] LONG-START >> \"" + logFile + "\"",
+    "ping 127.0.0.1 -n 8 >nul",
+    "echo [SCRIPT] LONG-END >> \"" + logFile + "\"",
+    "exit /b 0",
+  ].join("\r\n"), "ascii");
+  const res = await api("POST", "/api/scripts", {
+    name: "长时运行脚本", rootPath: dir.root, mainExe: longBat.replace(/\\/g, "\\\\"),
+    configPath: dir.cfg, logPath: logFile.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: -1,
+  });
+  expect(res.ok, "长时脚本（两个超时 -1）保存成功").toBeTruthy();
+  const sid = (await res.json()).id;
+  try {
+    await api("POST", `/api/scripts/${sid}/users`, { name: "默认", enabled: true });
+    await api("POST", "/api/dispatch/script", { scriptId: sid, mode: "manual" });
+    expect(await waitNoRunning(90000), "长时脚本运行结束（卡住 7 秒超过加速档 stall 6 秒仍不触发无更新超时）").toBeTruthy();
+    const hist = await (await fetch(baseUrl + "api/history?days=7")).json();
+    const rec = hist.filter(h => h.scriptInstanceId === sid).at(-1);
+    expect(rec && rec.finalStatus === "success", "长时脚本卡住超过加速档 stall 时长仍判定成功（-1 不触发日志无更新超时，进程退出判成功）").toBeTruthy();
+    expect(rec.attempts === 1, "长时脚本一次尝试成功（无超时重试）").toBeTruthy();
+  } finally {
+    try { await api("DELETE", "/api/scripts/" + sid); } catch { /* 清理失败不阻塞 */ }
+    fs.rmSync(dir.root, { recursive: true, force: true });
+  }
+});
+
+test("调度队列：长时/普通混排拒绝，纯长时队列通过", async () => {
+  const longDir = makeScriptDir("mixlong");
+  const normDir = makeScriptDir("mixnorm");
+  const longRes = await api("POST", "/api/scripts", {
+    name: "混排长时脚本", rootPath: longDir.root, mainExe: longDir.main,
+    configPath: longDir.cfg, logPath: longDir.log, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: -1,
+  });
+  const longId = (await longRes.json()).id;
+  const normRes = await api("POST", "/api/scripts", {
+    name: "混排普通脚本", rootPath: normDir.root, mainExe: normDir.main,
+    configPath: normDir.cfg, logPath: normDir.log, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const normId = (await normRes.json()).id;
+  let mixQueueId = "";
+  try {
+    const mix = await api("POST", "/api/queues", {
+      name: "混排队列", autoRunMode: "none", completionAction: "none", timeSets: [], notifyEnabled: false,
+      tasks: [{ id: "", index: 0, scriptInstanceId: longId }, { id: "", index: 1, scriptInstanceId: normId }],
+    });
+    expect(mix.status === 400, "长时 + 普通混排队列保存被拒（400）").toBeTruthy();
+    const mixErr = await mix.json();
+    expect((mixErr.error || "").includes("长时"), "混排拒绝提示含长时语义").toBeTruthy();
+
+    const okRes = await api("POST", "/api/queues", {
+      name: "纯长时队列", autoRunMode: "none", completionAction: "none", timeSets: [], notifyEnabled: false,
+      tasks: [{ id: "", index: 0, scriptInstanceId: longId }],
+    });
+    expect(okRes.ok, "纯长时队列保存成功").toBeTruthy();
+    mixQueueId = (await okRes.json()).id;
+  } finally {
+    if (mixQueueId) { try { await api("DELETE", "/api/queues/" + mixQueueId); } catch { /* 清理失败不阻塞 */ } }
+    try { await api("DELETE", "/api/scripts/" + longId); } catch { /* 清理失败不阻塞 */ }
+    try { await api("DELETE", "/api/scripts/" + normId); } catch { /* 清理失败不阻塞 */ }
+  }
+});
+
+test("队列编辑弹窗：定时列表/任务列表拖拽排序", async ({ page }) => {
+  const dir = makeScriptDir("dndq");
+  const a = await createScript({ name: "拖拽任务甲", rootPath: dir.root, mainExe: dir.main, configPath: dir.cfg, logPath: dir.log });
+  const b = await createScript({ name: "拖拽任务乙", rootPath: dir.root, mainExe: dir.main, configPath: dir.cfg, logPath: dir.log });
+  expect(a.ok && b.ok, "创建拖拽用脚本成功").toBeTruthy();
+  let qid = "";
+  try {
+    await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("h2");
+    await page.click("button:has-text('新建调度队列')");
+    await page.waitForSelector("#qm-name");
+    await page.fill("#qm-name", "拖拽排序队列");
+    await page.click("text=+ 添加任务");
+    await page.selectOption('[data-task-idx="0"]', { label: "拖拽任务甲" });
+    await page.click("text=+ 添加任务");
+    await page.selectOption('[data-task-idx="1"]', { label: "拖拽任务乙" });
+    await page.click("button:has-text('+ 添加定时')");
+    await page.fill('[data-ts-time="0"]', "08:00");
+    await page.fill('[data-ts-time="1"]', "08:30");
+
+    const dragToTop = async (itemLocator, targetLocator) => {
+      const handle = itemLocator.locator(".drag-handle");
+      await handle.waitFor({ timeout: 10000 });
+      // v0.7.0：弹窗内容较高时把手可能在视口外（Playwright 会把越界坐标 clamp 到视口边缘导致事件落空），先滚入视口
+      await handle.scrollIntoViewIfNeeded();
+      let box = await handle.boundingBox();
+      if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
+      if (!box) throw new Error("拖拽把手不可见");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      // 目标行顶部（滚动后动态取，防止坐标失效）
+      const target = await targetLocator.boundingBox();
+      const tx = target ? target.x + target.width / 2 : box.x;
+      const ty = target ? target.y + 2 : box.y - 12;
+      await page.mouse.move(tx, ty, { steps: 8 });
+      await page.mouse.up();
+    };
+
+    const taskRows = page.locator("#qm-tasks .task-row");
+    expect((await taskRows.count()) === 2, "任务列表两条").toBeTruthy();
+    await dragToTop(taskRows.nth(1), taskRows.nth(0));
+    await page.waitForTimeout(500);
+    expect((await taskRows.nth(0).locator("select").inputValue()) !== "", "拖拽重渲染后第一行 select 值保留").toBeTruthy();
+
+    const tsCards = page.locator("#qm-timesets .timeset-card");
+    expect((await tsCards.count()) === 2, "定时列表两条").toBeTruthy();
+    await dragToTop(tsCards.nth(1), tsCards.nth(0));
+    await page.waitForTimeout(500);
+
+    await page.click(".modal button:has-text('保存')");
+    await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+    const qList = await (await fetch(baseUrl + "api/queues")).json();
+    const q = qList.find(item => item.name === "拖拽排序队列");
+    expect(!!q, "队列已保存").toBeTruthy();
+    qid = q.id;
+    const scripts = await (await fetch(baseUrl + "api/scripts")).json();
+    const nameOf = id => (scripts.find(s => s.id === id) || {}).name || "?";
+    const taskNames = q.tasks.slice().sort((x, y) => x.index - y.index).map(t => nameOf(t.scriptInstanceId));
+    expect(taskNames.join() === "拖拽任务乙,拖拽任务甲", "任务列表拖拽后顺序已落盘（乙在前，index 重排）").toBeTruthy();
+    expect(q.timeSets[0].time === "08:30" && q.timeSets[1].time === "08:00", "定时列表拖拽后顺序已落盘（08:30 在前）").toBeTruthy();
+  } finally {
+    if (qid) { try { await api("DELETE", "/api/queues/" + qid); } catch { /* 清理失败不阻塞 */ } }
+    try { await api("DELETE", "/api/scripts/" + a.id); } catch { /* 清理失败不阻塞 */ }
+    try { await api("DELETE", "/api/scripts/" + b.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});

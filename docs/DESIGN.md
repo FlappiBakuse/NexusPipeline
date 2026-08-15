@@ -88,7 +88,7 @@ sequenceDiagram
 1. **前置检查**：`IsScriptRunning` 检测运行时启动目标是否已在运行（按解析后的进程名，含自重启产物兜底）；已运行 → 直接监控日志，不重复启动。
 2. **启动游戏（可选）**：`LaunchGame=true` 且已填游戏路径时，校验可执行 → 启动（bat 经 cmd 包装并接管输出）→ 每 1 秒轮询 `GameWaitSeconds` 秒确认进程出现 → 超时本次尝试失败。未填写路径则跳过并提示。
 3. **启动主程序**：`ResolveLaunchTarget` 解析运行时启动目标（Args 以显式路径开头时=管理端/执行端分离场景，`?` 后为参数）→ CreateProcess 重定向 stdio（无窗口）→ bat 自动 `cmd /d /s /c` 包装（规避 0x800700E8）→ 740（要求管理员）明确报错、禁止降级提权。
-4. **日志监控初始化**：脚本启动后按 `LogPath` 格式严格解析（`LogPattern.ResolveFile`，文件不存在返回 null）；文件存在时按**严格 fresh** 判定（`LastWriteTime ≥ 本次尝试开始时间`，无松弛窗口——残留必早于、新文件必晚于，无歧义）从头读，否则末尾读（忽略运行前已有内容）。
+4. **日志监控初始化**：脚本启动后按 `LogPath` 格式严格解析（`LogPattern.ResolveFile`，文件不存在返回 null）；文件存在时按**尝试开始前长度快照**判定（v0.6.5+：尝试开始前不存在的文件才从头读；已存在残留从「尝试开始时长度」续读，残留被启动后追加写刷新 LastWriteTime 不再误判从头读，旧内容不进入判定输入）——无松弛窗口，忽略运行前已有内容。
 5. **监控循环（每 1 秒）**：
    - 重新解析日志路径；路径变化（日期轮换/通配取新）→ 重新监控；
    - 同路径文件被**替换**（move 归档后重建/删除重建，`LogMonitor.FileReplaced` 对比卷序列号+文件索引）→ 重开从头读；
@@ -219,11 +219,11 @@ LogMonitor 持有文件句柄（`FileShare.ReadWrite | FileShare.Delete`）按 p
 | 文件形态 | 场景 | 检测机制 | 处理 |
 |---|---|---|---|
 | 追加 | 脚本持续写入 | 正常 ReadNew | 增量读取 |
-| 截断 | `type nul > log.txt` / 脚本自清空 | `_stream.Length < _position` | position 归零，从头重读 |
+| 截断 | `type nul > log.txt` / 脚本自清空 | `_stream.Length < _position` | v0.6.9+（P8）：部分截断（缩短未归零）从新文件尾续读（避免已读旧行重复进入判定）；长度归零从头重读 |
 | **替换** | move 归档后重建 / 删除重建 | `FileReplaced`：`GetFileInformationByHandle` 对比**卷序列号+文件索引（FileId）**；FileId 不可用时回退创建时间 | 重开文件从头读 |
 
 - **为什么不用创建时间（FileStamp）检测替换**：实测 move+重建后新文件 CreationTime 可能与旧文件相同，检测失效导致监控句柄指向被改名的旧文件、ReadNew 恒空（v0.5.2 根因 RC-1）。FileId 是文件的唯一身份，追加写不改变、替换必然改变，无歧义。
-- **忽略运行前已有内容**：脚本启动后解析到的文件可能是上一尝试残留——仅当文件在本次尝试开始后写过（严格 `LastWriteTime ≥ attemptStart`，无松弛窗口）才从头读，否则末尾读；残留内容不进入判定输入与运行日志。
+- **忽略运行前已有内容**：尝试开始前记录日志文件快照（存在性 + 长度，v0.6.5+）——尝试开始前不存在的文件才从头读；已存在的残留日志从「尝试开始时长度」续读（残留被启动后追加写刷新 LastWriteTime 不再误判从头读），残留内容不进入判定输入与运行日志。
 - **监控循环检测顺序**：路径变化（轮换）→ FileId 替换 → 截断 → 读新增。
 
 ### 6.3 超时语义
@@ -258,7 +258,7 @@ flowchart LR
   - `history/YYYY-MM-DD/HH-mm-ss-{尝试号}.log`：**每次尝试一个独立日志文件**（脚本日志全文，20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）——重试失败按尝试分批标号，排查清晰；
   - 控制台输出（stdout/stderr）**不再落盘**（运行中实时显示仍保留）；历史详情按尝试展示各日志文件尾部。
 - `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled。
-- 保留天数 `HistoryRetentionDays`（默认 7、上限 180）每日清理一次（启动时 + 调度器每日首次 tick）；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
+- 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限由 `config/limits.json` 的 `MaxHistoryRetentionDays` 约束（v0.6.6+，默认 180、允许 1-365）；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
 
 ## 8. 已知行为与边界
@@ -276,8 +276,12 @@ flowchart LR
 
 ## 9. 相关文档
 
-- [README.md](../README.md)：用户操作说明（功能、运行要求、部署、命令、测试）
+- [README.md](../README.md)：用户文档（功能、安装、快速上手、常见问题）
 - [ARCHITECTURE.md](ARCHITECTURE.md)：开发者导航（模块边界、依赖方向、扩展落点）
-- [DEVELOPMENT.md](DEVELOPMENT.md)：开发与提交规范（Conventional Commits、版本、Release 分发、质量门禁）
+- [DEVELOPMENT.md](DEVELOPMENT.md)：开发环境搭建与调试指南（编译、测试、Debug）
+- [RELEASING.md](RELEASING.md)：发布流程手册（tag / release / 资产）
+- [CONTRIBUTING.md](../CONTRIBUTING.md)：协作规范（Issue / PR / 提交信息 / 测试流程）
+- [ROADMAP.md](ROADMAP.md)：版本路线与后续开发清单
+- [KNOWN-ISSUES.md](KNOWN-ISSUES.md)：已知问题台账
 - [CHANGELOG.md](../CHANGELOG.md)：版本历史
 - [plugins/README.md](../plugins/README.md)：专项插件（数据化形态）开发指南

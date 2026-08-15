@@ -172,6 +172,26 @@ internal class Scheduler : IDisposable
 
     private void TriggerQueue(DispatchQueue queue)
     {
+        // v0.7.0：长时/普通混排防御（保存时已校验，此处兜底手工改配置/旧数据场景）——跳过并记录失败历史。
+        string? mixError = Limits.CheckQueueMix(RuntimeContext.Instance, queue);
+        if (mixError is not null)
+        {
+            Logger.Error($"[错误] 自动运行队列「{queue.Name}」{mixError}，已跳过该队列。");
+            var skipped = new RunRecord
+            {
+                ScriptName = queue.Name,
+                QueueId = queue.Id,
+                QueueName = queue.Name,
+                Mode = "auto",
+                StartTime = DateTime.Now,
+                EndTime = DateTime.Now,
+                Status = "failed",
+                FinalStatus = "failed",
+                ResultDetail = mixError,
+            };
+            RuntimeContext.Instance.History.Save(skipped, new List<string>());
+            return;
+        }
         string? blocked = DispatchCenter.QueueBlockedBy(queue);
         if (blocked is not null)
         {

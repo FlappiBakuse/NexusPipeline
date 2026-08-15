@@ -21,7 +21,7 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 60 用例 / NEXUS_CI 核心集 59；单元测试见 src/NexusPipeline.Tests/）
+└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；tests/ 按域 7 文件共 64 用例 / NEXUS_CI 核心集 63；单元测试见 src/NexusPipeline.Tests/）
 ```
 
 ## 后端分层（src/）
@@ -37,10 +37,11 @@ NexusPipeline.Cli（命令行适配层）
 NexusPipeline.Plugins（插件契约 + 内置插件）
 ```
 
-- **核心域不得引用 Web/Cli/Plugins**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
+- **核心域不得引用 Web/Cli**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
-- **Plugins 通过宿主内置契约接口（IPlugin / INotifyChannel / PluginContext）交互**，不得反向引用宿主实现细节；数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
-- **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities；Utilities 不依赖业务层。
+- **Plugins 通过宿主内置契约接口（IPlugin / INotifyChannel / PluginContext）交互**；数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
+- **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
+- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.6.3 插件契约内置后，`Services` 与 `Plugins` 存在双向依赖（`UserConfigManager`/`DispatchCenter` 引用 Plugins 调用 `ResolveProfile`/通知分发；`PluginManager`/`NotifyPlugin` 引用 Services 使用 Audit/发送器）；`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）。均经 `RuntimeContext` 组合根协调，无跨适配层引用；后续重构目标为收敛为单向依赖。
 
 ### 关键类职责
 
@@ -116,7 +117,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 1. 在对应域视图新增导出函数 + 加入该视图的 `actions` 对象（`data-action` 名与处理器映射）。
 2. 视图模板使用 `data-action` + 稳定的 `data-testid`（e2e 契约）。
 3. 需要路由的新页面：视图导出 `pageXxx(token)`，在 `app.js` 的 `routes` 表注册一行；二级路由在 `route()` 特判分支转发。
-4. 列表拖拽排序（v0.6.8+）：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）。
+4. 列表拖拽排序（v0.6.8+，弹窗内 v0.6.10+）：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）；**弹窗内（队列编辑弹窗的定时列表/任务列表）**：onDrop 按 `data-dnd-id`（渲染下标）重排 `queueDraft` 数组即可（时间卡无 Index 字段、任务卡重排时同步重设 `index`），sync 按元素携带下标（`data-ts-idx`/`data-task-idx`）写回原数组项，DOM 顺序与数组顺序脱钩后仍正确。
 
 ## 插件扩展指南
 

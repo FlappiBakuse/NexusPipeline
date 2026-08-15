@@ -46,7 +46,8 @@ internal static class ApiQueuesHandler
                 ?? Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
                 ?? Limits.CheckTimeSets(queue.TimeSets.Count)
                 ?? CheckTimeFormat(queue)
-                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue));
+                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue))
+                ?? Limits.CheckQueueMix(ctx, queue);
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
@@ -79,7 +80,8 @@ internal static class ApiQueuesHandler
             string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
                 ?? Limits.CheckTimeSets(update.TimeSets.Count)
                 ?? CheckTimeFormat(update)
-                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update));
+                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update))
+                ?? Limits.CheckQueueMix(ctx, update);
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);

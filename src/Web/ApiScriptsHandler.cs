@@ -99,8 +99,7 @@ internal static class ApiScriptsHandler
             string? limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
                 ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
                 ?? Limits.CheckAttempts(script.MaxAttempts)
-                ?? Limits.CheckStallMinutes(script.LogStallTimeoutMinutes)
-                ?? Limits.CheckTotalMinutes(script.TotalTimeoutMinutes);
+                ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
@@ -149,8 +148,7 @@ internal static class ApiScriptsHandler
             }
             string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
                 ?? Limits.CheckAttempts(update.MaxAttempts)
-                ?? Limits.CheckStallMinutes(update.LogStallTimeoutMinutes)
-                ?? Limits.CheckTotalMinutes(update.TotalTimeoutMinutes);
+                ?? Limits.CheckScriptTimeouts(update.LogStallTimeoutMinutes, update.TotalTimeoutMinutes);
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);

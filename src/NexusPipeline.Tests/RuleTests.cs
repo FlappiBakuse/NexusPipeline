@@ -1,4 +1,5 @@
 using NexusPipeline.Models;
+using NexusPipeline.Services;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -89,5 +90,42 @@ public class RuleTests
         Assert.Single(clone.Users);
         Assert.NotSame(original.Users[0], clone.Users[0]);
         Assert.NotSame(original, clone);
+    }
+
+    [Fact]
+    public void ScriptInstance_IsLongRunning_OnlyWhenBothTimeoutsAreMinusOne()
+    {
+        Assert.False(new ScriptInstance().IsLongRunning);
+        Assert.False(new ScriptInstance { LogStallTimeoutMinutes = -1 }.IsLongRunning);
+        Assert.False(new ScriptInstance { TotalTimeoutMinutes = -1 }.IsLongRunning);
+        Assert.True(new ScriptInstance { LogStallTimeoutMinutes = -1, TotalTimeoutMinutes = -1 }.IsLongRunning);
+    }
+
+    [Fact]
+    public void Limits_CheckStallMinutes_AcceptsMinusOne()
+    {
+        Assert.Null(Limits.CheckStallMinutes(-1));
+        Assert.Null(Limits.CheckStallMinutes(5));
+        Assert.NotNull(Limits.CheckStallMinutes(0));
+        Assert.NotNull(Limits.CheckStallMinutes(61));
+    }
+
+    [Fact]
+    public void Limits_CheckTotalMinutes_AcceptsMinusOne()
+    {
+        Assert.Null(Limits.CheckTotalMinutes(-1));
+        Assert.Null(Limits.CheckTotalMinutes(120));
+        Assert.NotNull(Limits.CheckTotalMinutes(4));
+        Assert.NotNull(Limits.CheckTotalMinutes(721));
+    }
+
+    [Fact]
+    public void Limits_CheckScriptTimeouts_RequiresPairwiseMinusOne()
+    {
+        Assert.Null(Limits.CheckScriptTimeouts(-1, -1));
+        Assert.Null(Limits.CheckScriptTimeouts(5, 120));
+        Assert.NotNull(Limits.CheckScriptTimeouts(-1, 120));
+        Assert.NotNull(Limits.CheckScriptTimeouts(5, -1));
+        Assert.NotNull(Limits.CheckScriptTimeouts(0, 0));
     }
 }

@@ -234,10 +234,15 @@ tbody tr:hover td { background: var(--hover-bg); }
 .list-item-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .list-item-head > div { min-width: 0; }
 .list-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
-.task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) repeat(3, 52px); align-items: center; gap: 8px; }
+.task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 84px; align-items: center; gap: 8px; }
 .task-row select { min-width: 0; }
-.task-row button { width: 52px; min-width: 52px; min-height: 40px; margin-left: 0; padding: 0 8px; }
-.task-number { width: 20px; text-align: center; }
+.task-row button { width: 84px; min-width: 84px; min-height: 40px; margin-left: 0; padding: 0 8px; }
+.task-row > .drag-handle { width: 28px; min-height: 40px; margin-right: 0; }
+.timeset-card { display: flex; gap: 10px; }
+.timeset-card > .drag-handle { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; margin-right: 0; }
+.timeset-body { flex: 1; min-width: 0; }
+.tasks-card { display: flex; gap: 10px; }
+.tasks-body { flex: 1; min-width: 0; }
 .badge { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 9px; border-radius: 6px; background: var(--panel-soft); color: var(--muted); font-size: 11px; font-weight: 650; white-space: nowrap; }
 .badge.ok { background: rgba(78,211,154,.14); color: var(--ok); }
 .badge.bad { background: rgba(255,114,123,.14); color: var(--bad); }

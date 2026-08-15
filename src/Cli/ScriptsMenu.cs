@@ -146,13 +146,13 @@ internal static class ScriptsMenu
         {
             script.MaxAttempts = maxAttempts;
         }
-        string? stall = Ui.PromptText("日志无更新超时（分钟，默认 5）", script.LogStallTimeoutMinutes.ToString());
-        if (stall is not null && int.TryParse(stall, out int stallMinutes) && stallMinutes >= 1)
+        string? stall = Ui.PromptText("日志无更新超时（分钟，默认 5；-1 = 不超时）", script.LogStallTimeoutMinutes.ToString());
+        if (stall is not null && int.TryParse(stall, out int stallMinutes) && stallMinutes >= -1 && stallMinutes != 0)
         {
             script.LogStallTimeoutMinutes = stallMinutes;
         }
-        string? total = Ui.PromptText("运行总时间超时（分钟，默认 120）", script.TotalTimeoutMinutes.ToString());
-        if (total is not null && int.TryParse(total, out int totalMinutes) && totalMinutes >= 1)
+        string? total = Ui.PromptText("运行总时间超时（分钟，默认 120；-1 = 不超时）", script.TotalTimeoutMinutes.ToString());
+        if (total is not null && int.TryParse(total, out int totalMinutes) && totalMinutes >= -1 && totalMinutes != 0)
         {
             script.TotalTimeoutMinutes = totalMinutes;
         }
@@ -165,8 +165,7 @@ internal static class ScriptsMenu
         string? limitError = current is null ? Limits.CheckScriptCount(ctx.Scripts.Count) : null;
         limitError ??= Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称");
         limitError ??= Limits.CheckAttempts(script.MaxAttempts);
-        limitError ??= Limits.CheckStallMinutes(script.LogStallTimeoutMinutes);
-        limitError ??= Limits.CheckTotalMinutes(script.TotalTimeoutMinutes);
+        limitError ??= Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
         limitError ??= Limits.CheckScriptPaths(script);
         if (limitError is not null)
         {

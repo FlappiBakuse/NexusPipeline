@@ -122,11 +122,11 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
     const row = document.querySelector(".task-row");
     if (!row) return false;
     const parts = Array.from(row.querySelectorAll("select, button"));
-    if (parts.length < 4) return false;
+    if (parts.length < 2) return false;
     const tops = parts.map(x => x.getBoundingClientRect().top);
     return Math.max(...tops) - Math.min(...tops) <= 4;
   });
-  expect(taskRowInline, "手机端任务列表选择器与上移/下移/删除按钮同一行").toBeTruthy();
+  expect(taskRowInline, "手机端任务列表选择器与删除按钮同一行").toBeTruthy();
   await page.click(".modal button:has-text('取消')");
 
   await page.setViewportSize({ width: 1280, height: 900 });

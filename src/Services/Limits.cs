@@ -123,12 +123,61 @@ internal static class Limits
 
     public static string? CheckStallMinutes(int value)
     {
-        return value >= Current.MinStallMinutes && value <= Current.MaxStallMinutes ? null : $"日志无更新超时须在 {Current.MinStallMinutes}-{Current.MaxStallMinutes} 分钟之间";
+        if (value == -1)
+        {
+            return null;
+        }
+        return value >= Current.MinStallMinutes && value <= Current.MaxStallMinutes ? null : $"日志无更新超时须在 {Current.MinStallMinutes}-{Current.MaxStallMinutes} 分钟之间（-1 为不超时）";
     }
 
     public static string? CheckTotalMinutes(int value)
     {
-        return value >= Current.MinTotalMinutes && value <= Current.MaxTotalMinutes ? null : $"运行总时间超时须在 {Current.MinTotalMinutes}-{Current.MaxTotalMinutes} 分钟之间";
+        if (value == -1)
+        {
+            return null;
+        }
+        return value >= Current.MinTotalMinutes && value <= Current.MaxTotalMinutes ? null : $"运行总时间超时须在 {Current.MinTotalMinutes}-{Current.MaxTotalMinutes} 分钟之间（-1 为不超时）";
+    }
+
+    /// <summary>
+    /// 超时成对校验（v0.7.0 长时脚本）：-1（不超时）必须成对出现——任一为 -1 而另一为正常值 → 拒绝（避免半长时语义歧义）；
+    /// 均正常时回退各自区间校验。
+    /// </summary>
+    public static string? CheckScriptTimeouts(int stallMinutes, int totalMinutes)
+    {
+        if (stallMinutes == -1 && totalMinutes == -1)
+        {
+            return null;
+        }
+        if (stallMinutes == -1 || totalMinutes == -1)
+        {
+            return "长时脚本需将「日志无更新超时」与「运行总时间超时」都设为 -1（-1 = 不超时）";
+        }
+        return CheckStallMinutes(stallMinutes) ?? CheckTotalMinutes(totalMinutes);
+    }
+
+    /// <summary>
+    /// 队列长时/普通混排校验（v0.7.0）：队列链式串行执行，长时脚本（两个超时均为 -1）会无限阻塞后续任务——
+    /// 长时脚本实例不能与普通脚本实例编排进同一队列。任务不足两项或全部同类时通过。
+    /// </summary>
+    public static string? CheckQueueMix(RuntimeContext ctx, DispatchQueue queue)
+    {
+        List<ScriptInstance> tasks = queue.Tasks
+            .Select(task => ctx.FindScript(task.ScriptInstanceId))
+            .Where(script => script is not null)
+            .Cast<ScriptInstance>()
+            .ToList();
+        if (tasks.Count < 2)
+        {
+            return null;
+        }
+        bool hasLong = tasks.Any(script => script.IsLongRunning);
+        bool hasNormal = tasks.Any(script => !script.IsLongRunning);
+        if (hasLong && hasNormal)
+        {
+            return "队列不能混合编排长时脚本（两个超时均为 -1）与普通脚本实例，请分开建立队列";
+        }
+        return null;
     }
 
     public static string? CheckRetentionDays(int value)

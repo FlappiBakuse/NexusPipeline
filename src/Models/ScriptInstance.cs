@@ -80,4 +80,7 @@ public class ScriptInstance
     {
         return !string.IsNullOrWhiteSpace(SuccessKeywords) || !string.IsNullOrWhiteSpace(FailureKeywords);
     }
+
+    /// <summary>是否长时脚本（v0.7.0）：日志无更新超时与运行总时间超时均为 -1（无限超时，挂机场景）。</summary>
+    public bool IsLongRunning => LogStallTimeoutMinutes == -1 && TotalTimeoutMinutes == -1;
 }
