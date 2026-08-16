@@ -73,6 +73,45 @@ plugins/
 - 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|failed","reason":"…","notifyText":"…","replaceConfigs":[…]}`；宿主固化 `JudgeScriptEnabled=true` 且用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
 
+## 配置还原描述（config-restore.json，v0.7.6）
+
+**自动更新配置**（专项恒开）下，判断脚本插队文件（`replaceConfigs` 目标）在运行收尾同步快照前，宿主会按还原描述把任务启停字段还原为初始值，再连同运行后计数/其他字段一并写入用户快照 store（保留游戏脚本自身写入的完成记录/计数/新任务）。
+
+- **写入时机**：判断脚本**首次触发**时（任意判定前）用 `nexus.writeFile("config-restore.json", ...)` 写入 script 目录根；跨尝试只写一次（以 `nexus.listFiles()` 检查存在性）。文件随运行结束自动清空。
+- **提取内容**：读取 config 中「初始任务启停映射」——array 型取任务数组全部 `keyField → enabled`；map 型取启停对象全部键值。
+- **契约格式**：
+
+```json
+{
+  "files": [
+    {
+      "file": "mxu-MaaEnd.json",
+      "toggles": [
+        {
+          "type": "array",
+          "path": "instances[0].tasks",
+          "keyField": "id",
+          "enabledField": "enabled",
+          "initial": { "t1": true, "t2": true, "t3": true }
+        }
+      ]
+    },
+    {
+      "file": "NexusPipeline.json",
+      "toggles": [
+        { "type": "map", "path": "TaskEnabledList", "initial": { "<guid>": true } }
+      ]
+    }
+  ]
+}
+```
+
+- `file`：相对 config 的路径（目录型 ConfigPath 相对路径；文件型 = 文件名，须与 `replaceConfigs` 项一致）。
+- array 型：按 `path` 定位 JSON 数组（DSL 限 `标识符[下标].标识符` 链），元素取 `keyField` 查 `initial`，命中则设 `enabledField` 为对应布尔；**未覆盖元素保持当前值**（脚本更新新增的任务不被误改）。
+- map 型：`path` 为 JSON 对象键，遍历 `initial` 逐键设布尔；**未覆盖键保持当前值**。
+- 仅作用于插队文件（`replaceConfigs` 清单内）；还原描述缺失/解析失败/应用失败时，该文件按「无还原描述」处理（不写入快照）。
+- 现有专项实现参考：`maaend/data/judge.js`（array 型，`instances[{index}].tasks`）、`bettergi/data/judge.js`（map 型，`TaskEnabledList`）。
+
 ## 默认配置模板（config-template/）
 
 - 编辑用户配置会话 start 时若 `ConfigPath` 不存在且插件提供 `config-template/` 目录 → 目录内容**整体复制**到配置位置（configPath 父目录），cancel 时按复制清单精确清理（清单随 `.session` 标记持久化，重启崩溃恢复同样生效）。

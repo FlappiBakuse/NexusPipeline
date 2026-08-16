@@ -304,6 +304,7 @@ async function createScript(extra) {
     launchGame: true, gameWaitSeconds: 5, forceCloseGame: true,
     judgeScriptEnabled: true, judgeScriptLanguage: "javascript",
     notifyEnabled: false,
+    autoUpdateConfig: false,
     ...extra,
   });
   if (!res.ok) {

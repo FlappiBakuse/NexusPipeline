@@ -447,6 +447,13 @@ internal static class UserConfigManager
         ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
     }
 
+    /// <summary>自动更新配置同步（v0.7.6）：把运行生效的 config 当前内容全量镜像到用户快照 store。
+    /// 插队文件按还原描述还原启停后写入；失败仅告警不阻断运行收尾。</summary>
+    public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
+    {
+        ConfigSwapSession.SyncConfigToStore(scriptId, userName, configPath, firstCheck);
+    }
+
     /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
     public static void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {

@@ -100,7 +100,7 @@ export async function api(method, pathName, body) {
 }
 
 export async function createScript(body) {
-  const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, gameExe: PING_GAME, ...body });
+  const res = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, gameExe: PING_GAME, autoUpdateConfig: false, ...body });
   if (!res.ok) {
     return { ok: false, id: "" };
   }

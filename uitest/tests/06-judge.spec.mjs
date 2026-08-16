@@ -345,6 +345,61 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("仪表盘"), null, { timeout: 5000 });
 });
 
+test("自动更新配置开关：通用弹窗默认开/切换/保存/回显；专项不渲染（v0.7.6）", async ({ page }) => {
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin=""]');
+  await page.waitForSelector("#sm-autoupdate", { timeout: 5000 });
+
+  expect((await page.$eval("#sm-autoupdate", el => el.getAttribute("aria-pressed"))) === "true", "自动更新配置按钮默认开").toBeTruthy();
+  expect((await page.textContent("#sm-autoupdate")).includes("自动更新配置"), "按钮含主文案").toBeTruthy();
+
+  await page.click('[data-action="toggle-sm-flag"][data-flag="autoupdate"]');
+  expect((await page.$eval("#sm-autoupdate", el => el.getAttribute("aria-pressed"))) === "false", "点击后切换为关").toBeTruthy();
+
+  const dir = path.join(runtimeDir, "au-ui");
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "cfg"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "nexusjudge-au.bat"), "@echo off\r\nexit /b 0\r\n", "ascii");
+  await page.fill("#sm-name", "自动更新配置脚本");
+  await page.fill("#sm-root", dir.replace(/\\/g, "\\\\"));
+  await page.fill("#sm-exe", path.join(dir, "nexusjudge-au.bat").replace(/\\/g, "\\\\"));
+  await page.fill("#sm-config", path.join(dir, "cfg").replace(/\\/g, "\\\\"));
+  await page.fill("#sm-log", path.join(dir, "logs\\log.txt").replace(/\\/g, "\\\\"));
+  await page.fill("#sm-game-exe", PING_GAME);
+  await page.click(".modal button:has-text('保存')");
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+
+  const list = await (await api("GET", "api/scripts")).json();
+  const s = list.find(x => x.name === "自动更新配置脚本");
+  expect(s && s.autoUpdateConfig === false, "保存后字段落盘（autoUpdateConfig=false）").toBeTruthy();
+
+  await page.click(`[data-action="edit-script"][data-id="${s.id}"]`);
+  await page.waitForSelector("#sm-autoupdate", { timeout: 5000 });
+  await page.waitForFunction(() => document.querySelector("#sm-autoupdate")?.getAttribute("aria-pressed") === "false", null, { timeout: 5000 });
+  expect((await page.$eval("#sm-autoupdate", el => el.getAttribute("aria-pressed"))) === "false", "编辑弹窗回显为关").toBeTruthy();
+  await page.click('[data-action="close-modal"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  await api("DELETE", "/api/scripts/" + s.id);
+
+  const bgiRoot = path.join(runtimeDir, "sim-bettergi-au");
+  fs.rmSync(bgiRoot, { recursive: true, force: true });
+  fs.mkdirSync(bgiRoot, { recursive: true });
+  fs.writeFileSync(path.join(bgiRoot, "BetterGI.exe"), "");
+  await page.click('[data-testid="new-script"]');
+  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
+  await page.click('[data-action="open-script-type"][data-plugin="bettergi"]');
+  await page.waitForSelector("#sm-root", { timeout: 5000 });
+  expect(!(await page.$("#sm-autoupdate")), "专项弹窗不渲染自动更新配置按钮").toBeTruthy();
+  await page.click('[data-action="close-modal"]');
+
+  await page.evaluate(() => { location.hash = "#/dashboard"; });
+  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("仪表盘"), null, { timeout: 5000 });
+});
+
 test("Missing 形态还原：运行前配置位置不存在，运行结束（自然结束/运行中取消）后不残留 store 快照", async () => {
   // ---- 变体 A：专项脚本 + 快速退出进程（ping 冒充 BetterGI）→ 自然结束 ----
   const rootA = path.join(runtimeDir, "sim-bgi-missing-a");

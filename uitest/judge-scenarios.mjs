@@ -272,6 +272,7 @@ async function createJudgeScript(extra = {}) {
   const res = await api("POST", "/api/scripts", {
     // 加速档下运行总时间超时也按比例缩小（10 分钟 → 10s），多轮重试场景需放大避免截断
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: FAST ? 60 : 10, gameExe: PING_GAME,
+    autoUpdateConfig: false,
     ...extra,
   });
   if (!res.ok) {
@@ -408,6 +409,14 @@ let n = 0;
 try { n = Number(fs.readFileSync(cntFile, "utf8").trim()) || 0; } catch (e) { n = 0; }
 n += 1;
 fs.writeFileSync(cntFile, String(n));
+// v0.7.6：模拟游戏脚本自身向 config 写运行计数（自动更新配置收尾同步应保留该字段到快照）。
+const cfgPath = path.join(__dirname, "config", "mxu-MaaEnd.json");
+try {
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  cfg.stats = cfg.stats || { runCount: 0 };
+  cfg.stats.runCount = (cfg.stats.runCount || 0) + 1;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
+} catch (e) { /* 配置缺失/损坏时跳过计数 */ }
 fs.mkdirSync(path.dirname(logFile), { recursive: true });
 const odd = [
   "任务开始: 🛒售卖产品", "任务完成: 🛒售卖产品",
@@ -432,6 +441,7 @@ setTimeout(() => process.exit(0), 1200);
 /** MaaEnd 模拟配置（真实 mxu-MaaEnd.json 结构：instances[].tasks + settings.autoStartInstanceId）。 */
 const MAAEND_CFG = {
   version: "1.0",
+  stats: { runCount: 0 },
   instances: [
     {
       id: "automas",
@@ -515,6 +525,155 @@ async function testMaaEndJudgeScript() {
   assert(r3.rec && r3.rec.attempts === 1, "保守分支不再重试（attempts=1，实际 " + r3.rec?.attempts + "）");
   assert(fs.readFileSync(s3.cfgPath, "utf8") === s3.cfgBefore, "无法映射时配置未被改写（mxu-MaaEnd.json 原样）");
   await api("DELETE", "/api/scripts/" + c3.id);
+
+  // 子场景 4（v0.7.6）：自动更新配置开——失败重试 + 启停还原后快照同步（enabled=初始、runCount=最终时点）
+  const s4 = makeMaaEndDir("autoupdate");
+  const c4 = await createJudgeScript({
+    name: "MaaEnd自动更新配置", rootPath: s4.dir,
+    mainExe: path.join(s4.dir, "fake-node.exe").replace(/\\/g, "\\\\"), args: "fake-maaend.js retry",
+    configPath: path.join(s4.dir, "config"), logPath: path.join(s4.dir, "logs\\log.txt"),
+    maxAttempts: 3, judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: maaendJudgeScript(),
+    autoUpdateConfig: true,
+  });
+  assert(c4.ok, "创建 MaaEnd 自动更新配置脚本");
+  const r4 = await runScript(c4.id);
+  assert(r4.dispatchOk && r4.ended, "MaaEnd 自动更新配置运行结束");
+  assert(r4.rec && r4.rec.attempts === 2, "失败重试（attempts=2，实际 " + r4.rec?.attempts + "）");
+  assert(fs.readFileSync(s4.cfgPath, "utf8") === s4.cfgBefore, "运行结束后 config/mxu-MaaEnd.json 还原为运行前状态");
+  const store4 = path.join(runtimeDir, "data", c4.id, "默认", "store", "mxu-MaaEnd.json");
+  assert(fs.existsSync(store4), "运行结束后 store 快照存在 mxu-MaaEnd.json");
+  const stored4 = JSON.parse(fs.readFileSync(store4, "utf8"));
+  assert((stored4.instances[0].tasks || []).every(t => t.enabled === true),
+    "store 快照启停还原为初始（全部 enabled=true）");
+  assert(stored4.stats && stored4.stats.runCount === 2,
+    "store 快照保留运行后计数（runCount=2，实际 " + (stored4.stats?.runCount ?? "无") + "）");
+  await api("DELETE", "/api/scripts/" + c4.id);
+}
+
+/* ---------------- 自动更新配置（v0.7.6） ---------------- */
+
+/** 计数脚本目录：config/count.txt 初始 "0"；batLines 由调用方指定（延迟写计数 / 立即写计数+长卡住）。 */
+function makeCounterDir(label, batLines) {
+  const dir = path.join(runtimeDir, "mt-au-" + label);
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, "config"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "config", "count.txt"), "0", "ascii");
+  fs.writeFileSync(path.join(dir, "nexusmt-au-" + label + ".bat"), batLines.join("\r\n") + "\r\n", "ascii");
+  return dir;
+}
+
+async function testAutoUpdateConfig() {
+  console.log("[用例] 自动更新配置（v0.7.6）：开=收尾同步（成功/cancelled）/ 关=仅首次同步 / 通用判断脚本插队文件不写快照");
+
+  // 1. 开 + 关键字模式：收尾同步（store 保留运行后计数），config 还原
+  //    脚本延迟写计数（先 ping 4s）→ 首次检测（1s）捕获写前状态，收尾同步（~4s）覆盖为最终计数。
+  const d1 = makeCounterDir("on", [
+    "@echo off", 'cd /d "%~dp0"',
+    "ping -n " + (FAST ? 5 : 40) + " 127.0.0.1 >nul",
+    "> config\\count.txt echo 1",
+    "echo DONE >> logs\\log.txt",
+    "exit /b 0",
+  ]);
+  const c1 = await createJudgeScript({
+    name: "自动更新配置开", rootPath: d1,
+    mainExe: path.join(d1, "nexusmt-au-on.bat"),
+    configPath: path.join(d1, "config"), logPath: path.join(d1, "logs\\log.txt"),
+    successKeywords: "DONE", autoUpdateConfig: true,
+  });
+  assert(c1.ok, "创建自动更新配置开脚本");
+  const r1 = await runScript(c1.id);
+  assert(r1.dispatchOk && r1.ended, "开：运行结束");
+  assert(r1.rec && r1.rec.finalStatus === "success", "开：判定成功（FinalStatus=" + r1.rec?.finalStatus + "）");
+  const store1 = path.join(runtimeDir, "data", c1.id, "默认", "store", "count.txt");
+  assert(fs.existsSync(store1) && fs.readFileSync(store1, "utf8").trim() === "1",
+    "开：收尾同步 → store/count.txt=1（运行后计数入库）");
+  assert(fs.readFileSync(path.join(d1, "config", "count.txt"), "utf8") === "0",
+    "开：config 还原为运行前（count=0）");
+  await api("DELETE", "/api/scripts/" + c1.id);
+
+  // 2. 关 + 关键字模式：收尾不同步（store 保持首次检测后的写前计数 0）
+  const d2 = makeCounterDir("off", [
+    "@echo off", 'cd /d "%~dp0"',
+    "ping -n " + (FAST ? 5 : 40) + " 127.0.0.1 >nul",
+    "> config\\count.txt echo 1",
+    "echo DONE >> logs\\log.txt",
+    "exit /b 0",
+  ]);
+  const c2 = await createJudgeScript({
+    name: "自动更新配置关", rootPath: d2,
+    mainExe: path.join(d2, "nexusmt-au-off.bat"),
+    configPath: path.join(d2, "config"), logPath: path.join(d2, "logs\\log.txt"),
+    successKeywords: "DONE", autoUpdateConfig: false,
+  });
+  assert(c2.ok, "创建自动更新配置关脚本");
+  const r2 = await runScript(c2.id);
+  assert(r2.dispatchOk && r2.ended, "关：运行结束");
+  assert(r2.rec && r2.rec.finalStatus === "success", "关：判定成功（FinalStatus=" + r2.rec?.finalStatus + "）");
+  const store2 = path.join(runtimeDir, "data", c2.id, "默认", "store", "count.txt");
+  assert(fs.existsSync(store2) && fs.readFileSync(store2, "utf8") === "0",
+    "关：收尾不同步 → store/count.txt 保持 0（首次检测在写计数前，运行计数不入库）");
+  await api("DELETE", "/api/scripts/" + c2.id);
+
+  // 3. 开 + cancelled：收尾同步包含取消（脚本先写计数再长卡住，取消后计数入库）
+  const d3 = makeCounterDir("cancel", [
+    "@echo off", 'cd /d "%~dp0"',
+    "> config\\count.txt echo 1",
+    "ping -n " + (FAST ? 120 : 600) + " 127.0.0.1 >nul",
+    "exit /b 0",
+  ]);
+  const c3 = await createJudgeScript({
+    name: "自动更新配置取消", rootPath: d3,
+    mainExe: path.join(d3, "nexusmt-au-cancel.bat"),
+    configPath: path.join(d3, "config"), logPath: path.join(d3, "logs\\log.txt"),
+    autoUpdateConfig: true,
+  });
+  assert(c3.ok, "创建自动更新配置取消脚本");
+  const dispatch3 = await api("POST", "/api/dispatch/script", { scriptId: c3.id, mode: "manual" });
+  assert(dispatch3.ok, "取消用例 dispatch 成功");
+  const runId3 = (await dispatch3.json()).runId;
+  await waitFor(async () => (await runningCount()) > 0, 15000);
+  await sleep(1500);
+  const cancel3 = await api("POST", "/api/cancel", { runId: runId3 });
+  assert(cancel3.ok, "取消提交成功");
+  const ended3 = await waitNoRunning(30000);
+  assert(ended3, "取消后运行结束");
+  const store3 = path.join(runtimeDir, "data", c3.id, "默认", "store", "count.txt");
+  assert(fs.existsSync(store3) && fs.readFileSync(store3, "utf8").trim() === "1",
+    "开+cancelled：收尾同步 → store/count.txt=1（含取消）");
+  await api("DELETE", "/api/scripts/" + c3.id);
+
+  // 4. 开 + 通用判断脚本插队文件：无还原描述 → 不写快照；非插队文件照常同步
+  const d4 = path.join(runtimeDir, "mt-au-swap");
+  fs.rmSync(d4, { recursive: true, force: true });
+  fs.mkdirSync(path.join(d4, "config"), { recursive: true });
+  fs.mkdirSync(path.join(d4, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(d4, "config", "cfg.txt"), "ORIG", "ascii");
+  fs.writeFileSync(path.join(d4, "config", "other.txt"), "O", "ascii");
+  fs.writeFileSync(path.join(d4, "nexusmt-au-swap.bat"),
+    ["@echo off", 'cd /d "%~dp0"',
+      "> config\\other.txt echo N",
+      "echo RUN >> logs\\log.txt",
+      "exit /b 0"].join("\r\n") + "\r\n", "ascii");
+  const jsSwap = `
+nexus.writeFile("cfg.txt", "SWAPPED");
+console.log(JSON.stringify({ status: "failed", reason: "swap-requested", replaceConfigs: ["cfg.txt"] }));`;
+  const c4 = await createJudgeScript({
+    name: "通用插队快照", rootPath: d4,
+    mainExe: path.join(d4, "nexusmt-au-swap.bat"),
+    configPath: path.join(d4, "config"), logPath: path.join(d4, "logs\\log.txt"),
+    judgeScriptEnabled: true, judgeScriptLanguage: "javascript", judgeScript: jsSwap,
+    maxAttempts: 1, autoUpdateConfig: true,
+  });
+  assert(c4.ok, "创建通用插队脚本");
+  const r4 = await runScript(c4.id);
+  assert(r4.dispatchOk && r4.ended, "通用插队：运行结束");
+  const store4 = path.join(runtimeDir, "data", c4.id, "默认", "store");
+  assert(fs.readFileSync(path.join(store4, "cfg.txt"), "utf8") === "ORIG",
+    "通用插队文件无还原描述 → store/cfg.txt 保持 ORIG（不写插队编排）");
+  assert(fs.readFileSync(path.join(store4, "other.txt"), "utf8").trim() === "N",
+    "非插队文件照常同步 → store/other.txt=N");
+  await api("DELETE", "/api/scripts/" + c4.id);
 }
 
 async function testEdgeNoLogStuck() {
@@ -1053,6 +1212,7 @@ async function main() {
   await testScenarioC();
   await testScenarioD();
   await testMaaEndJudgeScript();
+  await testAutoUpdateConfig();
   await testEdgeNoLogStuck();
   await testBugNewFileResidue();
   await testBugPathEscape();

@@ -28,6 +28,24 @@ if (log.indexOf(DONE_MARKER) < 0) {
     if (!cfg) {
       console.log(JSON.stringify({ status: "failed", reason: "无法读取或解析 BetterGI 配置文件，已终止重试" }));
     } else {
+      // v0.7.6：首次触发时提取初始任务启停映射（TaskEnabledList 全量）写 config-restore.json
+      //（宿主收尾按描述还原启停后再同步快照）；跨尝试只写一次（script 目录运行期间不清空）。
+      const restoreExists = nexus.listFiles().some(p => p.toLowerCase().endsWith("config-restore.json"));
+      if (!restoreExists) {
+        const initial = {};
+        const enabledMap = cfg.TaskEnabledList || {};
+        for (const guid of Object.keys(enabledMap)) initial[guid] = enabledMap[guid] === true;
+        nexus.writeFile("config-restore.json", JSON.stringify({
+          files: [{
+            file: "NexusPipeline.json",
+            toggles: [{
+              type: "map",
+              path: "TaskEnabledList",
+              initial: initial
+            }]
+          }]
+        }));
+      }
       const defs = cfg.TaskDefinitions || {};
       const nameToGuid = {};
       for (const guid of Object.keys(defs)) nameToGuid[defs[guid]] = guid;

@@ -181,6 +181,7 @@ export async function openScriptModal(id = "", plugin = "") {
     successKeywords: value.successKeywords || "", failureKeywords: value.failureKeywords || "",
     judgeScriptEnabled: !!value.judgeScriptEnabled, judgeScriptLanguage: value.judgeScriptLanguage || "", judgeScript: value.judgeScript || "",
     notifyEnabled: !!value.notifyEnabled,
+    autoUpdateConfig: isSpecial ? true : (value.autoUpdateConfig ?? true),
   };
   const d = scriptDraft;
   const l = state.limits || {};
@@ -259,6 +260,7 @@ export async function openScriptModal(id = "", plugin = "") {
         <div class="judge-actions">
           <button class="ghost sm" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
           <button class="sm mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本（脚本优先）</button>
+          <button class="sm mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="autoupdate" id="sm-autoupdate" data-testid="sm-autoupdate" aria-pressed="${d.autoUpdateConfig ? "true" : "false"}">自动更新配置</button>
         </div>
       </div>
     </div>`;
@@ -456,6 +458,7 @@ export async function saveScript() {
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
     notifyEnabled: $dom("#sm-notify")?.getAttribute("aria-pressed") === "true" || !!scriptDraft.notifyEnabled,
+    autoUpdateConfig: isSpecial ? true : ($dom("#sm-autoupdate")?.getAttribute("aria-pressed") === "true"),
   };
   try {
     if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);

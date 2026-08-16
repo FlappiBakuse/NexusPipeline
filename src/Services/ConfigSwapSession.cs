@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Models;
@@ -284,6 +285,428 @@ internal static class ConfigSwapSession
             }
         }
         ConfigSwapPrimitives.TryDeleteDir(backupDir);
+    }
+
+    /* ---------------- 自动更新配置（v0.7.6）：config → store 全量镜像同步 ---------------- */
+
+    /// <summary>自动更新配置同步（v0.7.6）：把运行生效的 config 当前内容全量镜像到用户快照 store。
+    /// 插队文件（swap-backup/.meta 清单内）有还原描述（script/config-restore.json）时先还原启停字段再写入；
+    /// 无还原描述时跳过（store 保持原样）。失败仅告警不阻断运行收尾；不改 .session 标记、不清 swap-backup。</summary>
+    public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
+    {
+        try
+        {
+            ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+            {
+                // 1. 会话有效性：同步仅当运行交换会话仍处于活动状态（防 15s 首次检测与收尾还原的时序异常）。
+                ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                if (mark is null || !string.Equals(mark.Phase, "run", StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」无进行中的运行会话（{SyncPhaseText(firstCheck)}）。");
+                    return;
+                }
+                string store = ConfigSwapPaths.StoreDir(scriptId, userName);
+                // 2. 基础有效性校验：config 缺失/为空/文件数骤降 → 跳过（防坏态入库永久污染快照）。
+                if (!ValidForSync(configPath, store)) return;
+                // 3. 稳定性检查（仅首次检测）：短间隔两次采样不一致 = 脚本仍在写配置 → 跳过，等待下次运行。
+                if (firstCheck && !StableConfig(configPath))
+                {
+                    Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」配置仍在变化（首次检测，等待下次运行）。");
+                    return;
+                }
+                // 4. 插队清单 + 还原描述。
+                HashSet<string> swapFiles = ReadSwapFiles(ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
+                ConfigRestoreDescriptor? descriptor = ReadRestoreDescriptor(ConfigSwapPaths.ScriptDir(scriptId, userName));
+                // 5. 全量镜像（copy-then-prune）。
+                (int written, int deleted) = MirrorToStore(configPath, store, swapFiles, descriptor);
+                Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，删除 {deleted}，{SyncPhaseText(firstCheck)}）");
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[配置同步] 失败（脚本「{scriptId}」用户「{userName}」）：{ex.Message}");
+        }
+    }
+
+    private static string SyncPhaseText(bool firstCheck)
+    {
+        return firstCheck ? "首次检测" : "运行收尾";
+    }
+
+    /// <summary>基础有效性校验：config 缺失/为空/文件数骤降时跳过同步（防脚本写坏/清空中被入库）。</summary>
+    internal static bool ValidForSync(string configPath, string store)
+    {
+        PathKind kind = PathKindUtil.KindOf(configPath);
+        if (kind == PathKind.Missing)
+        {
+            Logger.Warn($"[配置同步] 跳过：配置位置不存在（{configPath}）。");
+            return false;
+        }
+        if (kind == PathKind.File)
+        {
+            if (new FileInfo(configPath).Length == 0)
+            {
+                Logger.Warn($"[配置同步] 跳过：配置文件为空（{configPath}）。");
+                return false;
+            }
+            return true;
+        }
+        string[] files = Directory.GetFiles(configPath, "*", SearchOption.AllDirectories);
+        if (files.Length == 0)
+        {
+            Logger.Warn($"[配置同步] 跳过：配置目录为空（{configPath}）。");
+            return false;
+        }
+        if (Directory.Exists(store))
+        {
+            int storeCount = Directory.GetFiles(store, "*", SearchOption.AllDirectories).Length;
+            if (storeCount > 0 && files.Length * 2 < storeCount)
+            {
+                Logger.Warn($"[配置同步] 跳过：配置文件数骤降（config {files.Length} < store {storeCount} 一半），疑似脚本写坏/清空中，保留旧快照。");
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>稳定性检查：短间隔两次采样 config 文件清单/长度/修改时间，不一致视为仍在写入。</summary>
+    internal static bool StableConfig(string configPath)
+    {
+        string first = SampleConfig(configPath);
+        Thread.Sleep(TestHooks.ScaledMs(800));
+        string second = SampleConfig(configPath);
+        return string.Equals(first, second, StringComparison.Ordinal);
+    }
+
+    internal static string SampleConfig(string configPath)
+    {
+        PathKind kind = PathKindUtil.KindOf(configPath);
+        if (kind == PathKind.File)
+        {
+            var info = new FileInfo(configPath);
+            return $"F|{info.Length}|{info.LastWriteTimeUtc.Ticks}";
+        }
+        var sb = new StringBuilder();
+        foreach (string file in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories).OrderBy(f => f, StringComparer.OrdinalIgnoreCase))
+        {
+            var info = new FileInfo(file);
+            sb.Append(Path.GetRelativePath(configPath, file)).Append('|').Append(info.Length).Append('|').Append(info.LastWriteTimeUtc.Ticks).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>读取插队文件清单：swap-backup 内备份的被替换文件（排除 .meta）+ .meta 记录的新增文件。相对 config 定位。</summary>
+    internal static HashSet<string> ReadSwapFiles(string backupDir)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (Directory.Exists(backupDir))
+        {
+            foreach (string file in Directory.GetFiles(backupDir, "*", SearchOption.AllDirectories))
+            {
+                string rel = Path.GetRelativePath(backupDir, file);
+                if (!rel.Equals(".meta", StringComparison.OrdinalIgnoreCase))
+                {
+                    set.Add(rel);
+                }
+            }
+            set.UnionWith(ReadMetaNewFiles(Path.Combine(backupDir, ".meta")));
+        }
+        return set;
+    }
+
+    /// <summary>还原描述：判断脚本首次触发写入 script/config-restore.json，宿主仅执行、不解析插件语义。
+    /// 契约见 plugins/README.md（v0.7.6）。</summary>
+    internal sealed class ConfigRestoreDescriptor
+    {
+        public List<FileRestore> Files { get; set; } = new();
+    }
+
+    internal sealed class FileRestore
+    {
+        public string File { get; set; } = "";
+
+        public List<ToggleRestore> Toggles { get; set; } = new();
+    }
+
+    internal sealed class ToggleRestore
+    {
+        public string Type { get; set; } = "";
+
+        public string Path { get; set; } = "";
+
+        public string KeyField { get; set; } = "";
+
+        public string EnabledField { get; set; } = "";
+
+        public Dictionary<string, bool> Initial { get; set; } = new();
+    }
+
+    internal static ConfigRestoreDescriptor? ReadRestoreDescriptor(string scriptDir)
+    {
+        string file = Path.Combine(scriptDir, "config-restore.json");
+        if (!File.Exists(file))
+        {
+            return null;
+        }
+        try
+        {
+            JsonNode? node = JsonNode.Parse(File.ReadAllText(file));
+            var descriptor = new ConfigRestoreDescriptor();
+            if (node?["files"] is JsonArray files)
+            {
+                foreach (JsonNode? item in files)
+                {
+                    if (item is null)
+                    {
+                        continue;
+                    }
+                    var fr = new FileRestore { File = item["file"]?.ToString() ?? "" };
+                    if (item["toggles"] is JsonArray toggles)
+                    {
+                        foreach (JsonNode? t in toggles)
+                        {
+                            if (t is null)
+                            {
+                                continue;
+                            }
+                            var tr = new ToggleRestore
+                            {
+                                Type = t["type"]?.ToString() ?? "",
+                                Path = t["path"]?.ToString() ?? "",
+                                KeyField = t["keyField"]?.ToString() ?? "",
+                                EnabledField = t["enabledField"]?.ToString() ?? "",
+                            };
+                            if (t["initial"] is JsonObject initial)
+                            {
+                                foreach (KeyValuePair<string, JsonNode?> kv in initial)
+                                {
+                                    if (kv.Value is not null && bool.TryParse(kv.Value.ToString(), out bool b))
+                                    {
+                                        tr.Initial[kv.Key] = b;
+                                    }
+                                }
+                            }
+                            if (!string.IsNullOrWhiteSpace(tr.Type) && !string.IsNullOrWhiteSpace(tr.Path) && tr.Initial.Count > 0)
+                            {
+                                fr.Toggles.Add(tr);
+                            }
+                        }
+                    }
+                    if (!string.IsNullOrWhiteSpace(fr.File) && fr.Toggles.Count > 0)
+                    {
+                        descriptor.Files.Add(fr);
+                    }
+                }
+            }
+            return descriptor.Files.Count > 0 ? descriptor : null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[配置同步] 还原描述解析失败（{file}）：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>全量镜像（copy-then-prune）：先复制 config → store（插队文件分类处理），全部成功后再删除 store 中 config 已无的文件，
+    /// 避免「先清后拷」中途失败留下空 store。</summary>
+    internal static (int Written, int Deleted) MirrorToStore(string configPath, string store, HashSet<string> swapFiles, ConfigRestoreDescriptor? descriptor)
+    {
+        Directory.CreateDirectory(store);
+        int written = 0;
+        int deleted = 0;
+        PathKind kind = PathKindUtil.KindOf(configPath);
+        var configRels = new List<string>();
+        if (kind == PathKind.File)
+        {
+            string rel = Path.GetFileName(configPath);
+            configRels.Add(rel);
+            if (CopyMirrorFile(configPath, Path.Combine(store, rel), rel, swapFiles, descriptor))
+            {
+                written++;
+            }
+        }
+        else if (kind == PathKind.Dir)
+        {
+            foreach (string file in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories))
+            {
+                string rel = Path.GetRelativePath(configPath, file);
+                configRels.Add(rel);
+                if (CopyMirrorFile(file, Path.Combine(store, rel), rel, swapFiles, descriptor))
+                {
+                    written++;
+                }
+            }
+        }
+        foreach (string file in Directory.GetFiles(store, "*", SearchOption.AllDirectories))
+        {
+            string rel = Path.GetRelativePath(store, file);
+            if (configRels.Contains(rel, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            try
+            {
+                File.Delete(file);
+                deleted++;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[配置同步] 删除 store 多余文件失败（{file}）：{ex.Message}");
+            }
+        }
+        return (written, deleted);
+    }
+
+    /// <summary>镜像单个文件到 store：插队文件有还原描述 → 还原启停后写入；无还原描述 → 跳过（store 保留原样）；其余复制覆盖。</summary>
+    internal static bool CopyMirrorFile(string source, string dest, string rel, HashSet<string> swapFiles, ConfigRestoreDescriptor? descriptor)
+    {
+        try
+        {
+            if (swapFiles.Contains(rel))
+            {
+                FileRestore? fr = descriptor?.Files.FirstOrDefault(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase));
+                if (fr is null)
+                {
+                    Logger.Info($"[配置同步] 插队文件无还原描述，跳过镜像：{rel}（store 保持原样）");
+                    return false;
+                }
+                string content = File.ReadAllText(source);
+                foreach (ToggleRestore toggle in fr.Toggles)
+                {
+                    if (!ApplyToggle(ref content, toggle))
+                    {
+                        Logger.Warn($"[配置同步] 还原描述应用失败（{rel}），该文件按无还原描述处理：{toggle.Path}");
+                        return false;
+                    }
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                File.WriteAllText(dest, content);
+                Logger.Info($"[配置同步] 插队文件已还原启停并镜像：{rel}");
+                return true;
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.Copy(source, dest, overwrite: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[配置同步] 镜像文件失败（{rel}）：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>应用单个还原描述 toggle：array 型按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）；map 型逐键设布尔（未覆盖键不动）。</summary>
+    internal static bool ApplyToggle(ref string content, ToggleRestore toggle)
+    {
+        try
+        {
+            JsonNode? root = JsonNode.Parse(content);
+            if (root is null)
+            {
+                return false;
+            }
+            if (toggle.Type == "array")
+            {
+                JsonNode? node = LocateNode(root, toggle.Path);
+                if (node is not JsonArray array)
+                {
+                    return false;
+                }
+                foreach (JsonNode? element in array)
+                {
+                    if (element is null)
+                    {
+                        continue;
+                    }
+                    string? key = element[toggle.KeyField]?.ToString();
+                    if (string.IsNullOrWhiteSpace(key) || !toggle.Initial.TryGetValue(key, out bool value))
+                    {
+                        continue;
+                    }
+                    element[toggle.EnabledField] = value;
+                }
+            }
+            else if (toggle.Type == "map")
+            {
+                JsonNode? node = LocateNode(root, toggle.Path);
+                if (node is not JsonObject obj)
+                {
+                    return false;
+                }
+                foreach (KeyValuePair<string, bool> kv in toggle.Initial)
+                {
+                    obj[kv.Key] = kv.Value;
+                }
+            }
+            else
+            {
+                return false;
+            }
+            content = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>还原描述路径 DSL 定位：标识符[下标].标识符 链（如 instances[0].tasks），不支持通用 JSONPath。</summary>
+    internal static JsonNode? LocateNode(JsonNode root, string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+        JsonNode? node = root;
+        foreach (string segment in path.Split('.'))
+        {
+            string name = segment;
+            int index = -1;
+            int bracket = segment.IndexOf('[');
+            if (bracket >= 0 && segment.EndsWith(']'))
+            {
+                name = segment.Substring(0, bracket);
+                if (!int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out index))
+                {
+                    return null;
+                }
+            }
+            if (node is JsonObject obj)
+            {
+                if (string.IsNullOrEmpty(name))
+                {
+                    return null;
+                }
+                node = obj[name];
+            }
+            else if (node is JsonArray arr)
+            {
+                if (index < 0 || index >= arr.Count)
+                {
+                    return null;
+                }
+                node = arr[index];
+                index = -1;
+            }
+            else
+            {
+                return null;
+            }
+            if (node is null)
+            {
+                return null;
+            }
+            if (index >= 0)
+            {
+                if (node is not JsonArray arr2 || index >= arr2.Count)
+                {
+                    return null;
+                }
+                node = arr2[index];
+            }
+        }
+        return node;
     }
 
     /* ---------------- 会话与恢复 ---------------- */

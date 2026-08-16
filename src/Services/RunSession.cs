@@ -84,6 +84,12 @@ internal class RunSession
     /// <summary>判断脚本请求的待替换配置（v0.6.9+ P6）：触发时仅记录，尝试收尾杀进程确认退出后应用（避免进程仍运行时复制覆盖 config）。</summary>
     private List<string>? _pendingReplaceConfigs;
 
+    /// <summary>配置交换已准备（v0.7.6）：用户存在且 ConfigPath 非空时运行开始前 PrepareForRun 成功。</summary>
+    private bool _configPrepared;
+
+    /// <summary>自动更新配置首次检测已完成（v0.7.6）：仅第 1 次尝试、运行开始 15 秒后同步一次。</summary>
+    private bool _firstSyncDone;
+
     public RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
     {
@@ -105,6 +111,12 @@ internal class RunSession
         {
             return _attemptLogSegments;
         }
+    }
+
+    /// <summary>自动更新配置首次检测时机判定（v0.7.6，纯函数便于单测）：elapsed 到达缩放后的阈值即触发。</summary>
+    internal static bool ShouldRunFirstSync(double elapsedSeconds, double thresholdSeconds)
+    {
+        return elapsedSeconds >= thresholdSeconds;
     }
 
     private void AppendScriptLog(string line)
@@ -172,6 +184,7 @@ internal class RunSession
                 return record;
             }
             configPrepared = true;
+            _configPrepared = true;
         }
 
         int maxAttempts = Math.Max(1, _script.MaxAttempts);
@@ -271,6 +284,20 @@ internal class RunSession
         }
         finally
         {
+            // v0.7.6：自动更新配置收尾同步——在插队还原与配置交换还原之前（config 此刻为脚本最终态），
+            // config → store 全量镜像（专项插队文件按还原描述还原启停后写入，保留运行后计数/完成记录）。
+            // 含 cancelled 与全部自然收尾；失败仅告警，不阻断后续还原。
+            if (configPrepared && _script.AutoUpdateConfig)
+            {
+                try
+                {
+                    UserConfigManager.SyncConfigToStore(_script.Id, user!.Name, _script.ConfigPath, firstCheck: false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[警告] 脚本「{_script.Name}」用户「{user!.Name}」自动更新配置收尾同步失败：{ex.Message}");
+                }
+            }
             if (_script.HasJudgeScript())
             {
                 // 先还原配置替换（swap-backup → config 恢复为替换前快照内容），
@@ -580,6 +607,17 @@ internal class RunSession
             while (result is null)
             {
                 _token.ThrowIfCancellationRequested();
+
+                // v0.7.6：自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
+                // config → store（捕获脚本启动后自行更新的任务配置；重试轮不检测）。
+                // 并入主循环避免后台任务与收尾还原的竞态；关/开模式共有。
+                if (!_firstSyncDone && attempt.Number == 1 && _configPrepared
+                    && ShouldRunFirstSync((DateTime.Now - _runStartedAt).TotalSeconds, TestHooks.ScaledSeconds(15)))
+                {
+                    _firstSyncDone = true;
+                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」自动更新配置首次检测（运行开始 15 秒后）。");
+                    UserConfigManager.SyncConfigToStore(_script.Id, _activeUser!.Name, _script.ConfigPath, firstCheck: true);
+                }
 
                 // v0.6.6+：游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
                 // v0.7.0+：模拟器模式跳过窗口前置。

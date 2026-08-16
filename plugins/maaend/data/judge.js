@@ -86,6 +86,28 @@ if (!cfg || !cfg.settings || !Array.isArray(cfg.instances)) {
   if (!inst || !Array.isArray(inst.tasks)) {
     // 实例定位失败：保守无输出
   } else {
+    // v0.7.6：首次触发时提取初始任务启停映射写 config-restore.json（宿主收尾按描述还原启停后再同步快照，
+    // 插队文件以「初始启停 + 运行后计数/其他字段」写入 store）；跨尝试只写一次（script 目录运行期间不清空）。
+    const restoreExists = nexus.listFiles().some(p => p.toLowerCase().endsWith("config-restore.json"));
+    if (!restoreExists) {
+      const instIndex = cfg.instances.indexOf(inst);
+      const initial = {};
+      for (const t of inst.tasks) {
+        if (t.id) initial[t.id] = t.enabled === true;
+      }
+      nexus.writeFile("config-restore.json", JSON.stringify({
+        files: [{
+          file: "mxu-MaaEnd.json",
+          toggles: [{
+            type: "array",
+            path: "instances[" + instIndex + "].tasks",
+            keyField: "id",
+            enabledField: "enabled",
+            initial: initial
+          }]
+        }]
+      }));
+    }
     // 3. 已启用任务（与 MXU 运行分发一致：只按 enabled 过滤）
     const enabledTasks = inst.tasks.filter(t => t.enabled === true);
     if (enabledTasks.length === 0) {
