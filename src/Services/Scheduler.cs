@@ -55,7 +55,13 @@ internal class Scheduler : IDisposable
     {
         DateTime now = DateTime.Now;
         var candidates = new List<(string Name, DateTime Time)>();
-        foreach (DispatchQueue queue in RuntimeContext.Instance.Queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
+        // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 修改并发冲突（调度线程每秒枚举）。
+        List<DispatchQueue> queues;
+        lock (RuntimeContext.Instance.DataLock)
+        {
+            queues = RuntimeContext.Instance.Queues.ToList();
+        }
+        foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             DateTime? time = NextTriggerFor(queue, now);
             if (time is not null)
@@ -137,10 +143,17 @@ internal class Scheduler : IDisposable
             RuntimeContext.Instance.History.Cleanup(RuntimeContext.Instance.Settings.HistoryRetentionDays);
         }
 
+        // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 请求线程并发修改冲突（调度线程每秒枚举）。
+        List<DispatchQueue> queues;
+        lock (RuntimeContext.Instance.DataLock)
+        {
+            queues = RuntimeContext.Instance.Queues.ToList();
+        }
+
         if (!_startupRunsIssued)
         {
             _startupRunsIssued = true;
-            foreach (DispatchQueue queue in RuntimeContext.Instance.Queues.Where(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0))
+            foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0))
             {
                 Audit.Log(Audit.Scheduler, "启动时触发队列", queue.Name);
                 TriggerQueue(queue);
@@ -149,7 +162,7 @@ internal class Scheduler : IDisposable
 
         DateTime now = DateTime.Now;
         string clock = now.ToString("HH:mm");
-        foreach (DispatchQueue queue in RuntimeContext.Instance.Queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
+        foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             bool hit = queue.TimeSets.Any(timeSet =>
                 timeSet.Enabled

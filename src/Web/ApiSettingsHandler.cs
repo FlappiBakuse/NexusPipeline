@@ -56,6 +56,12 @@ internal static class ApiSettingsHandler
                 foreach (KeyValuePair<string, JsonNode?> pair in json)
                 {
                     string field = pair.Key;
+                    // v0.7.2+（KN-32）：空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
+                    if (string.IsNullOrEmpty(field))
+                    {
+                        await HttpHelper.WriteJsonAsync(context, new { error = "请求体包含空字段名" }, 400).ConfigureAwait(false);
+                        return;
+                    }
                     if (field is "secretKey" or "secretValue")
                     {
                         continue;
@@ -276,22 +282,24 @@ internal static class ApiSettingsHandler
             settings.WebhookEnabled,
             settings.SmtpEnabled,
             settings.WebhookType,
-            webhookUrl = SecretStore.IsEncrypted(settings.WebhookUrl) ? "enc:***" : settings.WebhookUrl,
-            webhookSecret = SecretStore.IsEncrypted(settings.WebhookSecret) ? "enc:***" : settings.WebhookSecret,
+            // v0.7.2+（KN-10）：密钥一律不回显明文——空=未设置；非空（无论是否 DPAPI 加密，含旧版明文遗留
+            // 与手工编辑的明文）统一返回占位符，杜绝明文泄露；前端协议为「非空=已设置，留空不变」。
+            webhookUrl = string.IsNullOrWhiteSpace(settings.WebhookUrl) ? "" : "enc:***",
+            webhookSecret = string.IsNullOrWhiteSpace(settings.WebhookSecret) ? "" : "enc:***",
             settings.WebhookTemplate,
             settings.WebhookTimeout,
             settings.SmtpHost,
             settings.SmtpPort,
             settings.SmtpSecure,
             settings.SmtpUser,
-            smtpPassword = SecretStore.IsEncrypted(settings.SmtpPassword) ? "enc:***" : settings.SmtpPassword,
+            smtpPassword = string.IsNullOrWhiteSpace(settings.SmtpPassword) ? "" : "enc:***",
             settings.SmtpFrom,
             settings.SmtpTo,
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
             settings.LogLevel,
             settings.AllowRemoteAccess,
-            accessToken = settings.AccessToken.StartsWith("enc:", StringComparison.Ordinal) ? "enc:***" : settings.AccessToken,
+            accessToken = string.IsNullOrWhiteSpace(settings.AccessToken) ? "" : "enc:***",
         };
     }
 

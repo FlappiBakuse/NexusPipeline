@@ -13,19 +13,19 @@ build.cmd                      # 提权版（requireAdministrator，唯一构建
 
 # 2. 端到端测试（headless，系统 Edge，无窗口；@playwright/test 框架，tests/ 按域 8 个 spec 文件）
 $env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
-npx playwright test            # 全量 75 用例（发布前本地回归）；先跑 build.cmd，否则 globalSetup 中止
-$env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：74 用例（剔除响应式外壳外观用例）
+npx playwright test            # 全量 76 用例（发布前本地回归）；先跑 build.cmd，否则 globalSetup 中止
+$env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：75 用例（剔除响应式外壳外观用例）
 # 时间加速（v0.6.4+，唯一加速档 NEXUS_TIME_SCALE=10；run-uitest.cmd 已默认内置）：宿主等待按比例缩放
 # （1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms），
-# 三套测试（e2e 75 + judge 115 + chaos 166）合计约 9 分钟；发布前用真实计时档（不设该变量）跑全量回归
+# 三套测试（e2e 76 + judge 115 + chaos 166）合计约 9 分钟；发布前用真实计时档（不设该变量）跑全量回归
 $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
 # 3. 单元测试（v0.6.4+，毫秒级，无管理员）：判定状态机/关键字规则/日志路径解析/模型规则校验等纯逻辑
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 95 断言；CI 每次必跑
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 97 断言；CI 每次必跑
 ```
 
-- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 75 / 74（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
+- e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 76 / 75（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：115 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
 - 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：166 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
 - **flake 治理基建（v0.6.9+）**：`uitest/flake-monitor.mjs` 进程/端口监控采样器（500ms 采样 nexus-pipeline 进程存在性 + 58731 监听，日志在 `uitest/flake-monitor-logs/`，stop 信号文件同名目录下 flake-monitor.stop）；flake 台账 `uitest/FLAKE-LEDGER.md`（现象/复现条件/根因/处置，每次全量回归更新直至清零）；spec 文件级 `ensureService` 兜底（服务不可达自动强杀残留重拉，隔离级联失败）；`killRuntimeServices` 轮询确认进程完全消失后才返回（消除强杀→重启竞态窗口）。
@@ -172,4 +172,4 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 95 �
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 75（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（115）+ `chaos-queue.mjs`（166）+ `dotnet test`（95 单测），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 76（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（115）+ `chaos-queue.mjs`（166）+ `dotnet test`（97 单测），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

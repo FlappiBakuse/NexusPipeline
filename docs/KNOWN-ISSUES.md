@@ -14,10 +14,10 @@
 
 | 编号 | 问题 | 位置 | 建议版本 |
 |---|---|---|---|
-| KN-01 | **损坏配置被静默覆盖（数据丢失）**：scripts/queues.json 解析失败仅 Warn 并返回空列表，用户任意一次保存即整体覆盖损坏文件，原数据不可恢复 | `src/Persistence/JsonStore.cs:82-85`、`src/Persistence/ConfigStore.cs:30-33` | v0.7.x |
+| KN-01 | **损坏配置被静默覆盖（数据丢失）**：scripts/queues.json 解析失败仅 Warn 并返回空列表，用户任意一次保存即整体覆盖损坏文件，原数据不可恢复 | `src/Persistence/JsonStore.cs:82-85`、`src/Persistence/ConfigStore.cs:30-33` | ✅ v0.7.2 已修复（解析失败原文件改名保留 `*.corrupt-时间戳`，不再被覆盖） |
 | KN-02 | **POST 可注入已存在 Id 造成重复记录**：客户端提交已存在 Id 时保留（仅空/不存在才重新生成），集合出现两条同 Id 记录 | `src/Web/ApiScriptsHandler.cs:109-112`、`src/Web/ApiQueuesHandler.cs:55-58` | ✅ v0.7.1 已修复（新建一律重新生成 Id） |
-| KN-03 | **队列重复触发**：`Register` 仅对 script 查重，手动 + 定时并发触发同一队列会双跑（重复历史/通知/系统操作，如双关机命令）；Scheduler 的 `_runningQueueIds` 挡不住手动入口 | `src/Services/DispatchCenter.cs:292-305` | v0.7.x |
-| KN-04 | **共享集合无锁并发**：`RuntimeContext.Scripts/Queues` 与 `RunningExecution.Records` 被 Web 请求线程与后台线程并发读写，远程模式下可抛 `ArgumentOutOfRangeException`/`InvalidOperationException: 集合已修改`（前端轮询 500） | `src/RuntimeContext.cs:28-30`、`src/Services/DispatchCenter.cs:37`、`src/Web/ApiStatusHandler.cs:41-58` | v0.7.x |
+| KN-03 | **队列重复触发**：`Register` 仅对 script 查重，手动 + 定时并发触发同一队列会双跑（重复历史/通知/系统操作，如双关机命令）；Scheduler 的 `_runningQueueIds` 挡不住手动入口 | `src/Services/DispatchCenter.cs:292-305` | ✅ v0.7.2 已修复（Register 对队列对称查重，手动/定时统一拒绝） |
+| KN-04 | **共享集合无锁并发**：`RuntimeContext.Scripts/Queues` 与 `RunningExecution.Records` 被 Web 请求线程与后台线程并发读写，远程模式下可抛 `ArgumentOutOfRangeException`/`InvalidOperationException: 集合已修改`（前端轮询 500） | `src/RuntimeContext.cs:28-30`、`src/Services/DispatchCenter.cs:37`、`src/Web/ApiStatusHandler.cs:41-58` | ✅ v0.7.2 已修复（DataLock + Records 锁 + 深拷贝快照） |
 | KN-05 | **CLI 删除脚本/队列不清理**：删除仅移除列表并保存，不清理 `data/{脚本Id}` 目录、不释放 ScriptConfigGate/Mutex、不检查运行状态（Web 端有完整清理，行为不一致，静态字典泄漏） | `src/Cli/ScriptsMenu.cs:70-78`、`src/Cli/QueuesMenu.cs:77-85` | v0.7.x |
 | KN-06 | **远程访问下脚本图标全部 401**：`<img src="/api/scripts/{id}/icon">` 无法携带 `Authorization: Bearer` 头，远程模式图标请求必失败（有占位图兜底不崩溃，功能失效） | `wwwroot/views/scripts.js:57`、`wwwroot/views/queues.js:83`、`src/Web/WebServer.cs:197-203` | v0.7.x |
 
@@ -28,7 +28,7 @@
 | KN-07 | **resolve.json 多占位符静默丢弃**：`ResolveArgs/ResolvePath` 命中第一个占位符即 return，`{launcher} --config {assistant}` 之类的模板会丢掉后续全部内容（文档已声明「仅整体替换」，但应显式校验或报错而非静默丢弃） | `src/Plugins/DataSpecializedPlugin.cs:219-262` | 随版 |
 | KN-08 | **bat 游戏启动器等待不随测试加速缩放**：`WaitForGameProcessAsync` 对 bat 用真实 `Task.Delay(timeout)`，加速档（scale=10）下白等 GameWaitSeconds 真实秒数 | `src/Services/RunSession.cs:808-828` | 随版 |
 | KN-09 | **日志截断后立即写入的内容漏判窗口**：`ReadNew` 长度检查在 `Length < position` 时把 position 置为新尾——若截断后、下次读取前已写入新内容，截断后新写内容不进入判定输入（失败关键字可能漏判） | `src/Services/LogMonitor.cs:138-143` | 随版 |
-| KN-10 | **明文旧密钥直接回显**：settings.json 中未加密（旧版明文或手工编辑）的 Webhook 地址/密钥在 GET /api/settings 时明文完整返回，违反「已设置的密钥不回显明文」契约 | `src/Web/ApiSettingsHandler.cs:279-294` | 随版 |
+| KN-10 | **明文旧密钥直接回显**：settings.json 中未加密（旧版明文或手工编辑）的 Webhook 地址/密钥在 GET /api/settings 时明文完整返回，违反「已设置的密钥不回显明文」契约 | `src/Web/ApiSettingsHandler.cs:279-294` | ✅ v0.7.2 已修复（非空一律占位符，判定统一） |
 | KN-11 | **Python 判断脚本尾行 JSON 丢失竞态**：`BeginOutputReadLine` + `WaitForExitAsync` 时进程退出瞬间异步输出事件可能未投递完，契约规定的 stdout 尾行 JSON 有丢失风险（误判「无合法输出」） | `src/Services/JudgeScriptRunner.cs:403-420` | 随版 |
 | KN-12 | **modal 焦点陷阱空白点击后失效**：点击弹窗内非焦点区域后 `activeElement` 落到 body，Tab 焦点逃逸到弹窗外（locked 弹窗同样受影响）；建议 mask 补 focusout 兜底 | `wwwroot/core/modal.js:45-64` | 随版 |
 | KN-13 | **limits 警告层无障碍缺失**：`role="alertdialog"` 遮罩无 `aria-labelledby`、无初始焦点、无焦点陷阱、无焦点恢复（不走 modal 组件） | `wwwroot/views/limits.js:32-48` | 随版 |
@@ -55,17 +55,17 @@
 | KN-29 | `SessionJudge` 三个嵌套 enum 显式 public（外层 internal，实际无暴露风险，但违背「其余一律 internal」声明） | `src/Services/SessionJudge.cs:13/21/29` |
 | KN-30 | `ApiSettingsHandler` PUT 同一请求双次 Save + 双次 Normalize/RefreshLevel | `src/Web/ApiSettingsHandler.cs:80-85` |
 | KN-31 | `AuthFails` 静态字典按远端 IP 累积永不清理（远程模式下内存缓慢增长） | `src/Web/WebServer.cs:33` |
-| KN-32 | 请求体空键 `""` 时 `field[0]` 抛 IndexOutOfRange（应为 400） | `src/Web/ApiSettingsHandler.cs:247` |
+| KN-32 | 请求体空键 `""` 时 `field[0]` 抛 IndexOutOfRange（应为 400）——✅ v0.7.2 已修复（空键显式 400「请求体包含空字段名」） | `src/Web/ApiSettingsHandler.cs:247` |
 | KN-33 | Webhook 成功判定只看 body `code==0` 忽略 HTTP 状态码 | `src/Services/WebhookSender.cs:85-87` |
 | KN-34 | `JsonLiteral` 手写转义未处理 `\b`/`\f` 等控制字符 | `src/Services/WebhookSender.cs:166-175` |
 | KN-35 | 历史详情固定查 31 天窗口与列表保留天数（上限 365）不一致，180 天前记录点详情 404 | `src/Web/ApiHistoryHandler.cs:129`、`src/Services/HistoryService.cs` |
-| KN-36 | `RemoveMutex` 与 `WithSwapLock` 并发时 `WaitOne` 抛 ObjectDisposedException（无 catch，KN-05 同源分支） | `src/Services/ConfigSwapPrimitives.cs:86-104` |
+| KN-36 | `RemoveMutex` 与 `WithSwapLock` 并发时 `WaitOne` 抛 ObjectDisposedException（无 catch，KN-05 同源分支）——✅ v0.7.2 已修复（捕获后移除条目重建互斥体重试） | `src/Services/ConfigSwapPrimitives.cs:86-104` |
 | KN-37 | 用户改名/删除大小写敏感（`==`）与 users/order 的 OrdinalIgnoreCase 不一致 | `src/Web/ApiScriptsHandler.cs:544` |
 | KN-38 | `else if (!queue.NotifyEnabled)` 冗余非运算 | `src/Services/DispatchCenter.cs:574-582` |
 | KN-39 | Python 解释器多安装时 `candidates[0]` 选中不确定（Directory.GetFiles 顺序未定义） | `src/Services/JudgeScriptRunner.cs:365` |
 | KN-40 | `/api/plugins/{name}/enable` 之外任意字符串都按 disable 处理（应校验 enable/disable） | `src/Web/ApiPluginsHandler.cs:17` |
 | KN-41 | `PromptEdit`/`PromptEditMasked` 高度重复可合并 | `src/Cli/Ui.cs:29-103` |
-| KN-42 | 编辑会话 start 的 catch 把 `ex.Message` 直接回给客户端；`keepGate=true` 后写响应异常不释放 gate | `src/Web/ApiScriptsHandler.cs:811-814` |
+| KN-42 | 编辑会话 start 的 catch 把 `ex.Message` 直接回给客户端；`keepGate=true` 后写响应异常不释放 gate——✅ v0.7.2 已修复（keepGate 后异常主动清理现场并释放门禁） | `src/Web/ApiScriptsHandler.cs:811-814` |
 | KN-43 | 前端死代码：`core/format.js` 的 `dayDesc/actionLabel`、`core/pager.js` 的 `unregisterPager`、`views/scripts.js` 的 `FALLBACK_ICON` 冗余别名 | `wwwroot/core/format.js:25-35`、`wwwroot/core/pager.js:18-20`、`wwwroot/views/scripts.js:15` |
 | KN-44 | 前端 `select` 的 click 与 change 双触发（当前调用点均幂等，属隐患模式）；`selectField` option 未走 `esc()` | `wwwroot/app.js:59-67`、`wwwroot/core/forms.js:20` |
 | KN-45 | `ui.js` localStorage 写入无异常保护（隐私模式/禁用存储下白屏） | `wwwroot/core/ui.js:183` |

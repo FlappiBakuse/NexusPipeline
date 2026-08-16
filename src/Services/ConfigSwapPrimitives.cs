@@ -115,6 +115,22 @@ internal static class ConfigSwapPrimitives
         {
             acquired = true;
         }
+        catch (ObjectDisposedException)
+        {
+            // v0.7.2+（KN-36）：删除脚本（RemoveMutex）与配置交换并发时互斥体被 Dispose，WaitOne 抛
+            // ObjectDisposedException——移除条目重取一次（条目已删除则重建新互斥体；极端并发下可能误删
+            // 重建条目，下一次 WaitOne 仍可恢复，不影响正确性）。
+            Mutexes.TryRemove(scriptId, out _);
+            mutex = OpenMutex(scriptId);
+            try
+            {
+                acquired = mutex.WaitOne(TimeSpan.FromSeconds(30));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+        }
         if (!acquired)
         {
             throw new IOException($"等待配置交换锁超时（脚本 {scriptId}）");

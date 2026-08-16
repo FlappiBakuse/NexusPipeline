@@ -29,7 +29,8 @@ internal static class ConfigStore
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}");
+                string backup = JsonStore.PreserveCorruptFile(AppPaths.ConfigPath);
+                Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}（可手动恢复，不再被后续保存覆盖）");
             }
         }
         Normalize(settings);

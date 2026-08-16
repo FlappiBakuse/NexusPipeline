@@ -91,7 +91,7 @@ internal static class ApiDispatchHandler
             exec.CurrentAttempt,
             exec.CurrentMaxAttempts,
             logTail = exec.LogTail(60),
-            records = exec.Records,
+            records = exec.SnapshotRecords(),
         }).ConfigureAwait(false);
     }
 

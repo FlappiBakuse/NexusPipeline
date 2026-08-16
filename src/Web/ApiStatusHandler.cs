@@ -23,20 +23,29 @@ internal static class ApiStatusHandler
         AppSettings settings = RuntimeContext.Instance.Settings;
         var next = RuntimeContext.Instance.Scheduler.NextTrigger();
         DispatchCenter.PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
+        // v0.7.2+（KN-04）：锁内读取计数，避免与并发修改冲突（「集合已修改」）。
+        int scriptCount, queueCount, enabledScripts, enabledQueues;
+        lock (RuntimeContext.Instance.DataLock)
+        {
+            scriptCount = RuntimeContext.Instance.Scripts.Count;
+            queueCount = RuntimeContext.Instance.Queues.Count;
+            enabledScripts = RuntimeContext.Instance.Scripts.Count(script => script.NotifyEnabled);
+            enabledQueues = RuntimeContext.Instance.Queues.Count(queue => queue.NotifyEnabled);
+        }
         return new
         {
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,
             version = typeof(WebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
-            scriptCount = RuntimeContext.Instance.Scripts.Count,
-            queueCount = RuntimeContext.Instance.Queues.Count,
+            scriptCount,
+            queueCount,
             nextSchedule = next is null ? null : new { queueName = next.Value.QueueName, time = next.Value.TriggerTime },
             systemAction = pending is null ? null : new { action = pending.Action, queueName = pending.QueueName, deadline = pending.Deadline },
             notifyStats = new
             {
-                enabledScripts = RuntimeContext.Instance.Scripts.Count(script => script.NotifyEnabled),
-                enabledQueues = RuntimeContext.Instance.Queues.Count(queue => queue.NotifyEnabled),
+                enabledScripts,
+                enabledQueues,
             },
             running = RuntimeContext.Instance.Center.Active.Select(exec => new
             {

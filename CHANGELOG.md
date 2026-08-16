@@ -2,6 +2,28 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.2（Pre-release）
+
+### 修复
+
+- **KN-01 损坏配置被静默覆盖（数据丢失）**：scripts/queues/settings.json 解析失败时原文件自动改名保留（`*.corrupt-时间戳`），后续任意一次保存不再覆盖损坏数据；日志与审计明确提示保留位置，可手动恢复。
+- **KN-03 队列重复触发（双跑）**：DispatchCenter 注册锁内对调度队列对称查重——手动（Web/CLI/manage）与定时并发触发同一队列时后者 400 拒绝；此前仅定时入口有 `_runningQueueIds` 防重，手动入口可双跑致双历史/双通知/双完成操作（如双关机命令）。
+- **KN-04 共享集合无锁并发**：`RuntimeContext.Scripts/Queues` 引入 `DataLock`——修改侧锁内完成「读-改-写」整段、读取侧锁内枚举或深拷贝快照（`SnapshotScripts/SnapshotQueues`）；`RunningExecution.Records` 锁内追加/快照；调度器每秒枚举与 Web 请求并发修改不再抛「集合已修改」/越界异常（本地/远程均生效）。
+- **KN-10 明文旧密钥回显**：GET /api/settings 对未加密（旧版明文或手工编辑）的 Webhook/SMTP 授权码/访问令牌一律返回占位符，不再回显明文；accessToken 判定与其余密钥统一。
+- **KN-32 PUT /api/settings 空字段名 500**：请求体含空键时显式 400「请求体包含空字段名」（此前 `field[0]` 抛 IndexOutOfRange → 500）。
+- **KN-36 删除脚本与配置交换并发崩溃**：`WithSwapLock` 的 `WaitOne` 补捕获 `ObjectDisposedException`（`RemoveMutex` 并发 Dispose 触发），移除条目重建互斥体重试一次。
+- **KN-42 编辑配置会话门禁泄漏**：会话已注册（keepGate）后写响应异常/客户端断开时主动清理现场——结束已启动的编辑进程、还原配置交换与隐藏配置、移除会话并释放门禁；清理失败保留标记交由自愈/后台重试兜底，不再占住脚本直到重启。
+- 顺手：`ScriptInstance` 成功关键字注释过时修正（v0.7.1 跨行 AND 语义）；FLAKE-LEDGER F1/F2/F3 状态列同步为已关闭（多轮全量含发布门禁未复现）并修正回归记录行序；AGENTS/DEVELOPMENT/RELEASING 断言数字同步。
+
+### 测试
+
+- 单测 **95 → 97**（+2：KN-01 损坏配置改名保留 / 合法文件正常加载且不产生保留文件）；e2e 全量 **75 → 76**（+1：KN-03 队列运行中重复触发被拒——首次触发进入运行中后再次触发断言 400 拒绝）；judge 115、chaos 166 不变。
+- 加速档全量回归：e2e 76/76（4.1m）+ judge 115/0 + chaos 166/0 + 单测 97/97 全绿（2026-08-16）。
+
+### 变更
+
+- 版本号 0.7.2。
+
 ## v0.7.1（Pre-release）
 
 ### 修复

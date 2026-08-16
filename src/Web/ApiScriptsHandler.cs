@@ -62,7 +62,9 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            await HttpHelper.WriteJsonAsync(context, ctx.Scripts.OrderBy(script => script.Index)).ConfigureAwait(false);
+            // v0.7.2+（KN-04）：深拷贝快照后序列化——避免枚举/序列化与并发修改冲突（「集合已修改」/越界异常）。
+            List<ScriptInstance> snapshot = ctx.SnapshotScripts().OrderBy(script => script.Index).ToList();
+            await HttpHelper.WriteJsonAsync(context, snapshot).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -96,20 +98,28 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "脚本名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            string? limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
-                ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
-                ?? Limits.CheckAttempts(script.MaxAttempts)
-                ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
+            string? limitError;
+            lock (ctx.DataLock)
+            {
+                // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/后台线程冲突。
+                limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
+                    ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+                    ?? Limits.CheckAttempts(script.MaxAttempts)
+                    ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
+                if (limitError is null)
+                {
+                    // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
+                    script.Id = Guid.NewGuid().ToString("N");
+                    if (ctx.Scripts.Count > 0)
+                    {
+                        script.Index = ctx.Scripts.Max(item => item.Index) + 1;
+                    }
+                }
+            }
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
-            }
-            // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
-            script.Id = Guid.NewGuid().ToString("N");
-            if (ctx.Scripts.Count > 0)
-            {
-                script.Index = ctx.Scripts.Max(item => item.Index) + 1;
             }
             NormalizePaths(script);
             string? pluginError = string.IsNullOrWhiteSpace(script.PluginType) ? null : ApplyProfile(script);
@@ -129,8 +139,11 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
                 return;
             }
-            ctx.Scripts.Add(script);
-            DataStore.SaveScripts(ctx.Scripts);
+            lock (ctx.DataLock)
+            {
+                ctx.Scripts.Add(script);
+                DataStore.SaveScripts(ctx.Scripts);
+            }
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
             await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
             return;
@@ -177,9 +190,23 @@ internal static class ApiScriptsHandler
             {
                 IconCache.Remove(existing.Id);
             }
-            int index = ctx.Scripts.IndexOf(existing);
-            ctx.Scripts[index] = update;
-            DataStore.SaveScripts(ctx.Scripts);
+            // v0.7.2+（KN-04）：锁内完成「查找-替换-保存」整段，避免并发修改导致 IndexOf 落空/越界；锁内不做 await。
+            bool notFound;
+            lock (ctx.DataLock)
+            {
+                int index = ctx.Scripts.IndexOf(existing);
+                notFound = index < 0;
+                if (!notFound)
+                {
+                    ctx.Scripts[index] = update;
+                    DataStore.SaveScripts(ctx.Scripts);
+                }
+            }
+            if (notFound)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
             Audit.Log(Audit.Web, "修改脚本实例", $"{update.Name}（id={update.Id}）");
             await HttpHelper.WriteJsonAsync(context, update).ConfigureAwait(false);
             return;
@@ -204,12 +231,16 @@ internal static class ApiScriptsHandler
                     gate.Release();
                 }
             }
-            ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
+            // v0.7.2+（KN-04）：锁内完成删除与保存，避免与并发请求/后台线程冲突。
+            lock (ctx.DataLock)
+            {
+                ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
+                DataStore.SaveScripts(ctx.Scripts);
+            }
             lock (IconSync)
             {
                 IconCache.Remove(seg[1]);
             }
-            DataStore.SaveScripts(ctx.Scripts);
             ScriptConfigGate.Remove(seg[1]);
             ConfigSwapPrimitives.RemoveMutex(seg[1]);
             Audit.Log(Audit.Web, "删除脚本实例", removed is null ? $"id={seg[1]}（不存在）" : $"{removed.Name}（id={seg[1]}）");
@@ -501,19 +532,27 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
                     return;
                 }
-                string? userLimit = Limits.CheckUserCount(script.Users.Count);
+                // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/运行线程冲突；锁内不做 await。
+                string? userLimit;
+                lock (ctx.DataLock)
+                {
+                    userLimit = Limits.CheckUserCount(script.Users.Count);
+                    if (userLimit is null
+                        && script.Users.Any(existing => string.Equals(existing.Name, user.Name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        userLimit = "用户名重复：该脚本已存在同名用户";
+                    }
+                    if (userLimit is null)
+                    {
+                        script.Users.Add(user);
+                        DataStore.SaveScripts(ctx.Scripts);
+                    }
+                }
                 if (userLimit is not null)
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = userLimit }, 400).ConfigureAwait(false);
                     return;
                 }
-                if (script.Users.Any(existing => string.Equals(existing.Name, user.Name, StringComparison.OrdinalIgnoreCase)))
-                {
-                    await HttpHelper.WriteJsonAsync(context, new { error = "用户名重复：该脚本已存在同名用户" }, 400).ConfigureAwait(false);
-                    return;
-                }
-                script.Users.Add(user);
-                DataStore.SaveScripts(ctx.Scripts);
                 string? snapError = UserConfigManager.SnapshotOnAddUser(script, user.Name);
                 Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 if (snapError is not null)
@@ -549,10 +588,20 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
                     return;
                 }
-                if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase)
-                    && script.Users.Any(u => !ReferenceEquals(u, existing) && string.Equals(u.Name, update.Name, StringComparison.OrdinalIgnoreCase)))
+                // v0.7.2+（KN-04）：锁内完成「查重-改名-保存」整段（改名仅指集合内对象字段更新，数据目录迁移在锁外做）；
+                // 锁内不做 await。
+                string? userError = null;
+                lock (ctx.DataLock)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = "用户名重复：该脚本已存在同名用户" }, 400).ConfigureAwait(false);
+                    if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase)
+                        && script.Users.Any(u => !ReferenceEquals(u, existing) && string.Equals(u.Name, update.Name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        userError = "用户名重复：该脚本已存在同名用户";
+                    }
+                }
+                if (userError is not null)
+                {
+                    await HttpHelper.WriteJsonAsync(context, new { error = userError }, 400).ConfigureAwait(false);
                     return;
                 }
                 if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase))
@@ -577,13 +626,16 @@ internal static class ApiScriptsHandler
                         gate.Release();
                     }
                 }
-                existing.Name = update.Name;
-                existing.Enabled = update.Enabled;
-                existing.PreRunScript = update.PreRunScript;
-                existing.PreRunOnceOnly = update.PreRunOnceOnly;
-                existing.PostRunScript = update.PostRunScript;
-                existing.PostRunOnFinalOnly = update.PostRunOnFinalOnly;
-                DataStore.SaveScripts(ctx.Scripts);
+                lock (ctx.DataLock)
+                {
+                    existing.Name = update.Name;
+                    existing.Enabled = update.Enabled;
+                    existing.PreRunScript = update.PreRunScript;
+                    existing.PreRunOnceOnly = update.PreRunOnceOnly;
+                    existing.PostRunScript = update.PostRunScript;
+                    existing.PostRunOnFinalOnly = update.PostRunOnFinalOnly;
+                    DataStore.SaveScripts(ctx.Scripts);
+                }
                 Audit.Log(Audit.Web, "编辑用户", $"{script.Name} / {oldName} → {existing.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
@@ -616,8 +668,12 @@ internal static class ApiScriptsHandler
                 {
                     gate.Release();
                 }
-                script.Users.RemoveAll(u => u.Name == userName);
-                DataStore.SaveScripts(ctx.Scripts);
+                // v0.7.2+（KN-04）：锁内删除与保存，避免与并发请求/运行线程冲突。
+                lock (ctx.DataLock)
+                {
+                    script.Users.RemoveAll(u => u.Name == userName);
+                    DataStore.SaveScripts(ctx.Scripts);
+                }
                 Audit.Log(Audit.Web, "删除用户", $"{script.Name} / {userName}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
                 return;
@@ -639,26 +695,40 @@ internal static class ApiScriptsHandler
         List<string>? ids = node?["ids"] is JsonArray array
             ? array.Select(item => item?.ToString() ?? "").ToList()
             : null;
-        if (ids is null || ids.Count != ctx.Scripts.Count
-            || ids.Any(string.IsNullOrWhiteSpace)
-            || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+        // v0.7.2+（KN-04）：锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await，结果在锁外响应。
+        string? error = null;
+        lock (ctx.DataLock)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "脚本顺序名单缺失或与当前脚本列表不一致" }, 400).ConfigureAwait(false);
+            if (ids is null || ids.Count != ctx.Scripts.Count
+                || ids.Any(string.IsNullOrWhiteSpace)
+                || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+            {
+                error = "脚本顺序名单缺失或与当前脚本列表不一致";
+            }
+            else
+            {
+                HashSet<string> existing = new(ctx.Scripts.Select(script => script.Id), StringComparer.Ordinal);
+                if (ids.Any(id => !existing.Contains(id)))
+                {
+                    error = "脚本顺序名单与当前脚本列表不一致";
+                }
+                else
+                {
+                    Dictionary<string, ScriptInstance> byId = ctx.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
+                    for (int i = 0; i < ids.Count; i++)
+                    {
+                        byId[ids[i]].Index = i;
+                    }
+                    DataStore.SaveScripts(ctx.Scripts);
+                }
+            }
+        }
+        if (error is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
             return;
         }
-        HashSet<string> existing = new(ctx.Scripts.Select(script => script.Id), StringComparer.Ordinal);
-        if (ids.Any(id => !existing.Contains(id)))
-        {
-            await HttpHelper.WriteJsonAsync(context, new { error = "脚本顺序名单与当前脚本列表不一致" }, 400).ConfigureAwait(false);
-            return;
-        }
-        Dictionary<string, ScriptInstance> byId = ctx.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
-        for (int i = 0; i < ids.Count; i++)
-        {
-            byId[ids[i]].Index = i;
-        }
-        DataStore.SaveScripts(ctx.Scripts);
-        Audit.Log(Audit.Web, "调整脚本顺序", $"{ids.Count} 个脚本实例");
+        Audit.Log(Audit.Web, "调整脚本顺序", $"{ids!.Count} 个脚本实例");
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
@@ -676,19 +746,6 @@ internal static class ApiScriptsHandler
         List<string>? names = node?["names"] is JsonArray array
             ? array.Select(item => item?.ToString() ?? "").ToList()
             : null;
-        if (names is null || names.Count != script.Users.Count
-            || names.Any(string.IsNullOrWhiteSpace)
-            || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
-        {
-            await HttpHelper.WriteJsonAsync(context, new { error = "用户顺序名单缺失或与当前用户列表不一致" }, 400).ConfigureAwait(false);
-            return;
-        }
-        HashSet<string> existing = new(script.Users.Select(user => user.Name), StringComparer.OrdinalIgnoreCase);
-        if (names.Any(name => !existing.Contains(name)))
-        {
-            await HttpHelper.WriteJsonAsync(context, new { error = "用户顺序名单与当前用户列表不一致" }, 400).ConfigureAwait(false);
-            return;
-        }
         SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
         if (!gate.Wait(0))
         {
@@ -697,14 +754,41 @@ internal static class ApiScriptsHandler
         }
         try
         {
-            Dictionary<string, ScriptUser> byName = script.Users.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
-            script.Users.Clear();
-            foreach (string name in names)
+            // v0.7.2+（KN-04）：锁内完成「重排-保存」整段，避免与并发请求/运行线程冲突；锁内不做 await。
+            string? reorderError = null;
+            lock (ctx.DataLock)
             {
-                script.Users.Add(byName[name]);
+                if (names is null || names.Count != script.Users.Count
+                    || names.Any(string.IsNullOrWhiteSpace)
+                    || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
+                {
+                    reorderError = "用户顺序名单缺失或与当前用户列表不一致";
+                }
+                else
+                {
+                    HashSet<string> existing = new(script.Users.Select(user => user.Name), StringComparer.OrdinalIgnoreCase);
+                    if (names.Any(name => !existing.Contains(name)))
+                    {
+                        reorderError = "用户顺序名单与当前用户列表不一致";
+                    }
+                    else
+                    {
+                        Dictionary<string, ScriptUser> byName = script.Users.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
+                        script.Users.Clear();
+                        foreach (string name in names)
+                        {
+                            script.Users.Add(byName[name]);
+                        }
+                        DataStore.SaveScripts(ctx.Scripts);
+                    }
+                }
             }
-            DataStore.SaveScripts(ctx.Scripts);
-            Audit.Log(Audit.Web, "调整用户顺序", $"{script.Name} / {names.Count} 个用户");
+            if (reorderError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = reorderError }, 400).ConfigureAwait(false);
+                return;
+            }
+            Audit.Log(Audit.Web, "调整用户顺序", $"{script.Name} / {names!.Count} 个用户");
             await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
         }
         finally
@@ -725,7 +809,12 @@ internal static class ApiScriptsHandler
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
         }
-        ScriptUser? user = script.Users.FirstOrDefault(u => u.Name == userName);
+        ScriptUser? user;
+        lock (ctx.DataLock)
+        {
+            // v0.7.2+（KN-04）：锁内枚举用户集合，避免与并发修改冲突。
+            user = script.Users.FirstOrDefault(u => u.Name == userName);
+        }
         if (user is null)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -806,6 +895,30 @@ internal static class ApiScriptsHandler
             }
             catch (Exception ex)
             {
+                if (keepGate)
+                {
+                    // v0.7.2+（KN-42）：会话已注册（keepGate=true）后发生异常（如响应写入失败/客户端断开）时
+                    // 主动清理现场——结束已启动的编辑进程、还原配置交换与隐藏配置、移除会话并释放门禁，
+                    // 避免门禁永久占住脚本直到重启；清理失败保留标记交由自愈/后台重试兜底。
+                    try
+                    {
+                        if (UserConfigManager.EditSessions.TryGetValue(scriptId, out EditSession? registered))
+                        {
+                            if (registered.Process is not null)
+                            {
+                                SystemActions.KillAndConfirmExited(registered.Process.Id, ResolveLaunchTargetExe(script), "脚本");
+                            }
+                            UserConfigManager.CancelEdit(script.Id, user.Name, script.ConfigPath);
+                            UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
+                            UserConfigManager.EditSessions.TryRemove(scriptId, out _);
+                        }
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Logger.Error($"[错误] 编辑配置会话异常后的现场清理失败（交由自愈兜底）：{cleanupEx.Message}");
+                    }
+                    keepGate = false;
+                }
                 await HttpHelper.WriteJsonAsync(context, new { error = ex.Message }, 400).ConfigureAwait(false);
             }
             finally

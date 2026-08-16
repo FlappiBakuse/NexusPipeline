@@ -41,7 +41,7 @@ public class ScriptInstance
 
     public int TotalTimeoutMinutes { get; set; } = 120;
 
-    /// <summary>成功关键字（自定义完成标志）：每行一组，组内逗号分隔为 AND（同一行内全部出现才命中），换行之间为 OR；留空表示不启用。</summary>
+    /// <summary>成功关键字（自定义完成标志）：每行一组，组内逗号分隔为 AND（v0.7.1 起在整个尝试日志中跨行累积、与顺序无关），换行之间为 OR；留空表示不启用。</summary>
     public string SuccessKeywords { get; set; } = "";
 
     /// <summary>失败关键字：语法同成功关键字；留空表示不启用。</summary>

@@ -66,6 +66,26 @@ internal static class JsonUtil
 
 internal static class JsonStore
 {
+    /// <summary>
+    /// 损坏配置文件改名保留（v0.7.2+，KN-01）：解析失败时先把原文件改名为 {path}.corrupt-{时间戳}，
+    /// 避免后续任意一次保存静默覆盖损坏文件导致原数据不可恢复；用户可手动用保留文件恢复。
+    /// 返回保留路径；改名失败返回空字符串（不中断加载流程）。
+    /// </summary>
+    public static string PreserveCorruptFile(string path)
+    {
+        try
+        {
+            string backup = $"{path}.corrupt-{DateTime.Now:yyyyMMddHHmmss}";
+            File.Move(path, backup);
+            return backup;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 保留损坏配置失败（{path}）：{ex.Message}");
+            return "";
+        }
+    }
+
     public static List<T> LoadList<T>(string path) where T : new()
     {
         var list = new List<T>();
@@ -81,7 +101,8 @@ internal static class JsonStore
             }
             catch (Exception ex)
             {
-                Logger.Warn($"[警告] 解析 {Path.GetFileName(path)} 失败：{ex.Message}");
+                string backup = PreserveCorruptFile(path);
+                Logger.Warn($"[警告] 解析 {Path.GetFileName(path)} 失败：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}（可手动恢复，不再被后续保存覆盖）");
             }
         }
         return list;

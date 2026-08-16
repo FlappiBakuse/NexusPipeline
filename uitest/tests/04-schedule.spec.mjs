@@ -394,6 +394,39 @@ test("完成操作倒计时卡片：队列完成后可取消（shutdown DRYRUN�
   }
 });
 
+test("队列防重入：运行中重复触发被拒（KN-03）", async () => {
+  // 自建 ping 脚本保证队列运行窗口（~3 秒真实）内可完成第二次触发；
+  // 修复前 Register 仅对脚本查重，运行中再次触发队列会双跑（双历史/双通知/双完成操作）。
+  const dDir = makeScriptDir("kn03");
+  fs.writeFileSync(path.join(dDir.root, "nexustest-kn03.bat"), "@echo off\r\nping -n 4 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  const created = await api("POST", "/api/scripts", {
+    name: "KN03脚本", rootPath: dDir.root, mainExe: path.join(dDir.root, "nexustest-kn03.bat").replace(/\\/g, "\\\\"),
+    configPath: dDir.cfg, logPath: dDir.log, gameExe: PING_GAME,
+    maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const sid = (await created.json()).id;
+  await api("POST", `/api/scripts/${sid}/users`, { name: "默认", enabled: true });
+  const q = await api("POST", "/api/queues", { name: "KN03队列", autoRunMode: "none", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: sid }] });
+  const qid = (await q.json()).id;
+
+  const first = await api("POST", "/api/dispatch/queue", { queueId: qid, mode: "manual" });
+  expect(first.ok, "第一次触发队列成功").toBeTruthy();
+  const inRunning = await waitFor(async () => {
+    const status = await (await fetch(baseUrl + "api/status")).json();
+    return (status.running || []).some(r => r.kind === "queue" && r.targetId === qid);
+  }, 10000, 200);
+  expect(inRunning, "队列进入运行中状态").toBeTruthy();
+
+  const second = await api("POST", "/api/dispatch/queue", { queueId: qid, mode: "manual" });
+  expect(!second.ok && second.status === 400, "运行中重复触发被拒（HTTP 400，实际 " + second.status + "）").toBeTruthy();
+  const errBody = await second.json();
+  expect((errBody.error || "").includes("运行"), "拒绝原因含「运行」（" + JSON.stringify(errBody) + "）").toBeTruthy();
+
+  expect(await waitNoRunning(120000), "队列运行结束").toBeTruthy();
+  await api("DELETE", "/api/scripts/" + sid);
+  await api("DELETE", "/api/queues/" + qid);
+});
+
 test("队列卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ page }) => {
   // 清理先前用例失败残留的队列（防御：残留会导致卡片数断言失准）
   const staleQueues = await (await fetch(baseUrl + "api/queues")).json();

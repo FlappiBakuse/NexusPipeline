@@ -69,7 +69,8 @@ internal static class ApiFsHandler
         {
             return false;
         }
-        foreach (ScriptInstance script in RuntimeContext.Instance.Scripts)
+        // v0.7.2+（KN-04）：快照后遍历，避免与并发修改冲突。
+        foreach (ScriptInstance script in RuntimeContext.Instance.SnapshotScripts())
         {
             foreach (string prefix in AllowedPrefixes(script))
             {

@@ -63,7 +63,11 @@ internal static class UserConfigManager
         {
             return null;
         }
-        return script.Users.FirstOrDefault(user => user.Enabled && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
+        // v0.7.2+（KN-04）：锁内枚举用户集合，避免与 Web 请求线程的并发修改冲突。
+        lock (RuntimeContext.Instance.DataLock)
+        {
+            return script.Users.FirstOrDefault(user => user.Enabled && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     /* ---------------- 对外操作 ---------------- */

@@ -5,9 +5,9 @@
 
 | # | 现象 | 复现条件 | 根因 | 处置（v0.6.9） | 状态 |
 |---|---|---|---|---|---|
-| F1/F4 | 服务「无日志死亡」：02 文件末尾用例后 03-05 全部 ECONNREFUSED；单跑 02 偶发全失败（服务启动后数秒内死亡） | 全量跑（02 CLI 自动拉起用例 finally 的强杀+重启链）；拖拽用例修复前稳定复现 | `killRuntimeServices` 固定 600ms sleep 后 `startService("web")`，旧进程互斥体未释放 → web 模式互斥失败**静默退出**（仅 Info 日志，stdio ignore 丢弃） | ① `killRuntimeServices` 轮询确认进程完全消失；② `Program.cs` 互斥失败日志升级 Warn 带诊断；③ `waitForService` 失败 dump 进程/端口/日志尾部；④ `flake-monitor.mjs` 采样器抓现场；⑤ spec 级 `ensureService` 兜底隔离级联 | 待回归验证 |
-| F2 | 02:193「排序门禁脚本」删除偶发失败（无审计，残留致后续卡片数断言失准）；曾现 ReferenceError: sid2 | 组合/全量跑稳定、单跑通过 | finally 删除不检查 `res.ok`、不确认消失；`sid2` 为 null（try 内提前失败）时删 `null` | ① finally 重写：`res.ok` + 轮询确认列表消失 + null 跳过；② 用例开头按名防御清理 | 待回归验证 |
-| F3 | 05:113 重启服务后页面滞留「正在连接本地服务...」，restart-service 按钮 15s 不出现 | 3 次中 1 过 2 挂（17.9s/18.6s），复跑通过 | reload 后模块/静态资源加载竞态或服务接管首个请求慢 | 页面错误探针（pageerror/console.error）+ loading 滞留时重载页面重试（3 次） | 待回归验证 |
+| F1/F4 | 服务「无日志死亡」：02 文件末尾用例后 03-05 全部 ECONNREFUSED；单跑 02 偶发全失败（服务启动后数秒内死亡） | 全量跑（02 CLI 自动拉起用例 finally 的强杀+重启链）；拖拽用例修复前稳定复现 | `killRuntimeServices` 固定 600ms sleep 后 `startService("web")`，旧进程互斥体未释放 → web 模式互斥失败**静默退出**（仅 Info 日志，stdio ignore 丢弃） | ① `killRuntimeServices` 轮询确认进程完全消失；② `Program.cs` 互斥失败日志升级 Warn 带诊断；③ `waitForService` 失败 dump 进程/端口/日志尾部；④ `flake-monitor.mjs` 采样器抓现场；⑤ spec 级 `ensureService` 兜底隔离级联 | 已关闭（v0.7.1：多轮全量含发布门禁未复现） |
+| F2 | 02:193「排序门禁脚本」删除偶发失败（无审计，残留致后续卡片数断言失准）；曾现 ReferenceError: sid2 | 组合/全量跑稳定、单跑通过 | finally 删除不检查 `res.ok`、不确认消失；`sid2` 为 null（try 内提前失败）时删 `null` | ① finally 重写：`res.ok` + 轮询确认列表消失 + null 跳过；② 用例开头按名防御清理 | 已关闭（v0.7.1：多轮全量含发布门禁未复现） |
+| F3 | 05:113 重启服务后页面滞留「正在连接本地服务...」，restart-service 按钮 15s 不出现 | 3 次中 1 过 2 挂（17.9s/18.6s），复跑通过 | reload 后模块/静态资源加载竞态或服务接管首个请求慢 | 页面错误探针（pageerror/console.error）+ loading 滞留时重载页面重试（3 次） | 已关闭（v0.7.1：多轮全量含发布门禁未复现） |
 | F5 | chaos 采样断言 flake：丙单次成功轮窗口在负载下偶发丢失 | 长期存在；2026-08-15 两次复现（丙窗口实测 162ms < 300ms 采样轮询间隔，连日志采样也全丢） | 判定→宿主收尾窗口（数百毫秒）短于 100ms 采样间隔 | v0.6.9：乙/丙 seen 缺失时以历史记录 + 日志文件采样佐证（复用 maxDone noSkip 先例）；其余用户保持严格。v0.7.0 补两处缺口：① 运行期间采样全丢时以宿主归档尝试日志（history/{day}/{LogFile}）兜底证明脚本写入（`archivedLogWritten`）；② 归档日志首行带 UTF-8 BOM（服务端既有写盘约定），兜底读取须先 `.replace(/^\uFEFF/, "")` 再匹配首行（初版漏剥离致兜底失效复现） | 已关闭（v0.7.0） |
 
 ## 回归记录
@@ -26,6 +26,6 @@
 | 2026-08-15 | 真实计时档全量（第 2 轮，发布前） | e2e 64/64 ✓；judge 115/0 ✓；chaos 166/0 ✓ | 无 | 发布 v0.6.10 门禁通过 |
 | 2026-08-15 | CI e2e（v0.6.10 提交 2e9c1b6，加速档核心集） | 1 败（04:397 页内队列拖拽落盘断言） | **确定性竞态（非 flake）**：dnd `onDrop` 不等待异步 `PUT /api/queues/order` 完成（`reorderQueues` 为 async 但 `onDrop?.(ids)` 不 await），用例拖拽后立即 fetch API 断言 → PUT 未落盘返回旧顺序。服务端日志证实 PUT 实际执行成功（「调整队列顺序（3 个调度队列）」）。本地快机器偶发通过，CI 稳定复现。另：服务日志出现 `SemaphoreSlim 溢出（Adding the specified count...）`——编辑配置 done/cancel 失败路径（会话保留可重试）释放门禁、重试成功路径 finally 二次 Release（真 bug，随本修复一并处理） | ① 04:397/02:1143 拖拽落盘断言改 `waitFor` 轮询等待服务端顺序生效；② `ApiScriptsHandler` done/cancel 仅会话成功移除才 `gate.Release()`；重跑 CI 验证 |
 | 2026-08-15 | 修复提交 4aaca0f 后：本地 e2e 全量 64/64（加速档）+ CI e2e（核心集） | 全绿 | 无复现 | 竞态与 SemaphoreSlim 双修复验证通过，关闭 |
-| 2026-08-15 | v0.7.1 发布前真实计时档全量 | e2e 75/75 ✓；judge 115/0 ✓；chaos 166/0 ✓ | 无 | 发布 v0.7.1 门禁通过（commit a0938f9 + tag v0.7.1 + gh release prerelease） |
 | 2026-08-15 | v0.7.0 发布前真实计时档全量 | e2e 74/74 ✓；judge 115/0 ✓；chaos 166/0 ✓ | 无 | 发布 v0.7.0 门禁通过（commit 84b5aba + tag v0.7.0 + gh release prerelease） |
+| 2026-08-15 | v0.7.1 发布前真实计时档全量 | e2e 75/75 ✓；judge 115/0 ✓；chaos 166/0 ✓ | 无 | 发布 v0.7.1 门禁通过（commit a0938f9 + tag v0.7.1 + gh release prerelease） |
 | 2026-08-15 | v0.7.0 真实模拟器测试与修复（本会话）：单测 96/96；e2e 74/74（加速档，4.0m）；judge 115/0；chaos 首轮 165/2 → 修复后 166/0 → BOM 兜底修复后 167/0；08 spec 10/10（21.4s，原 2.3m） | chaos 首轮 2 败（丙采样全丢，F5 佐证 logHits=0 缺口）；第二轮 2 败（归档兜底漏剥离 UTF-8 BOM 致 startsWith 失效）；e2e 08 运行链路首轮超时（关机离线轮询 60s 未缩放拖垮用例） | F5 补归档日志兜底 + BOM 剥离；`WaitEmulatorOfflineAsync` 60s 上限补 `NEXUS_TIME_SCALE` 缩放（v0.6.4 加速基建遗漏） | 双修复后全绿，F5 关闭 |

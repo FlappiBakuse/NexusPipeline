@@ -44,6 +44,25 @@ internal class RunningExecution
 
     private readonly List<string> _logLines = new();
 
+    /// <summary>运行记录读写锁（v0.7.2+，KN-04）：运行后台线程追加记录与 Web 请求线程序列化并发时保护集合。</summary>
+    private readonly object _recordsSync = new();
+
+    public void AddRecord(RunRecord record)
+    {
+        lock (_recordsSync)
+        {
+            Records.Add(record);
+        }
+    }
+
+    public List<RunRecord> SnapshotRecords()
+    {
+        lock (_recordsSync)
+        {
+            return Records.ToList();
+        }
+    }
+
     public void AppendLog(string line)
     {
         if (string.IsNullOrWhiteSpace(line))
@@ -193,15 +212,21 @@ internal class DispatchCenter
         {
             throw new InvalidOperationException($"脚本「{script.Name}」未配置启用用户，无法运行");
         }
+        int totalTasks;
+        lock (RuntimeContext.Instance.DataLock)
+        {
+            // v0.7.2+（KN-04）：锁内读取用户集合，避免与 Web 请求线程的并发修改冲突。
+            totalTasks = string.IsNullOrWhiteSpace(userName)
+                ? Math.Max(1, script.Users.Count(user => user.Enabled))
+                : 1;
+        }
         var exec = new RunningExecution
         {
             Kind = "script",
             TargetId = script.Id,
             TargetName = script.Name,
             Mode = mode,
-            TotalTasks = string.IsNullOrWhiteSpace(userName)
-                ? Math.Max(1, script.Users.Count(user => user.Enabled))
-                : 1,
+            TotalTasks = totalTasks,
             CurrentScriptName = script.Name,
         };
         Register(exec, source);
@@ -227,7 +252,12 @@ internal class DispatchCenter
         int totalTasks = 0;
         foreach (QueueTask queueTask in queue.Tasks)
         {
-            ScriptInstance? script = RuntimeContext.Instance.FindScript(queueTask.ScriptInstanceId);
+            ScriptInstance? script;
+            lock (RuntimeContext.Instance.DataLock)
+            {
+                // v0.7.2+（KN-04）：锁内读取，避免与 Web 请求线程的并发修改冲突。
+                script = RuntimeContext.Instance.FindScript(queueTask.ScriptInstanceId);
+            }
             totalTasks += script is null ? 1 : script.Users.Count(user => user.Enabled);
         }
         var exec = new RunningExecution
@@ -299,11 +329,17 @@ internal class DispatchCenter
     {
         lock (_sync)
         {
-            // 原子防重入（v0.6.5+）：并发触发（如双击）可能在进程检测通过后同时注册同一脚本实例，
-            // 锁内按脚本查重拒绝后者，避免双会话同时运行。
+            // 原子防重入（v0.6.5+ 脚本 / v0.7.2+ 队列，KN-03）：并发触发（双击/手动 + 定时/多入口同时提交）
+            // 可能在进程检测通过后同时注册同一目标，锁内按目标查重拒绝后者——
+            // 队列双跑曾致双历史/双通知/双完成操作（如双关机命令）；Scheduler 的 _runningQueueIds 只挡定时入口，
+            // 手动入口（Web/CLI/manage）统一由此处兜底。
             if (exec.Kind == "script" && _active.Any(active => active.Kind == "script" && active.TargetId == exec.TargetId))
             {
                 throw new InvalidOperationException($"脚本「{exec.TargetName}」正在运行，请先退出后再执行");
+            }
+            if (exec.Kind == "queue" && _active.Any(active => active.Kind == "queue" && active.TargetId == exec.TargetId))
+            {
+                throw new InvalidOperationException($"调度队列「{exec.TargetName}」正在运行，请先完成后再执行");
             }
             _active.Add(exec);
         }
@@ -403,7 +439,13 @@ internal class DispatchCenter
             }
             else
             {
-                runUsers = script.Users.Where(user => user.Enabled).Select(user => user.Name).Cast<string?>().ToList();
+                // v0.7.2+（KN-04）：锁内快照启用用户名单（运行线程与 Web 用户编辑并发时避免枚举冲突）。
+                List<string> enabledNames;
+                lock (RuntimeContext.Instance.DataLock)
+                {
+                    enabledNames = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
+                }
+                runUsers = enabledNames.Cast<string?>().ToList();
                 if (runUsers.Count == 0)
                 {
                     runUsers.Add(null);
@@ -478,7 +520,7 @@ internal class DispatchCenter
 
                 RunRecord record = await session.RunAsync().ConfigureAwait(false);
                 records.Add(record);
-                exec.Records.Add(record);
+                exec.AddRecord(record);
                 exec.DoneTasks++;
                 exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
                 Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
@@ -526,7 +568,7 @@ internal class DispatchCenter
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
                     records.Add(missing);
-                    exec.Records.Add(missing);
+                    exec.AddRecord(missing);
                     exec.DoneTasks++;
                     RuntimeContext.Instance.History.Save(missing, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
@@ -537,7 +579,13 @@ internal class DispatchCenter
                 exec.CurrentAttempt = 0;
                 exec.CurrentStatus = "等待开始";
 
-                List<string?> runUsers = script.Users.Where(user => user.Enabled).Select(user => user.Name).Cast<string?>().ToList();
+                // v0.7.2+（KN-04）：锁内快照启用用户名单（运行线程与 Web 用户编辑并发时避免枚举冲突）。
+                List<string> enabledNames;
+                lock (RuntimeContext.Instance.DataLock)
+                {
+                    enabledNames = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
+                }
+                List<string?> runUsers = enabledNames.Cast<string?>().ToList();
                 if (runUsers.Count == 0)
                 {
                     var skipped = new RunRecord
@@ -553,7 +601,7 @@ internal class DispatchCenter
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
                     records.Add(skipped);
-                    exec.Records.Add(skipped);
+                    exec.AddRecord(skipped);
                     exec.DoneTasks++;
                     RuntimeContext.Instance.History.Save(skipped, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");

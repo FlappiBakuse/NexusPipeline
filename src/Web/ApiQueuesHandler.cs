@@ -15,7 +15,9 @@ internal static class ApiQueuesHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询调度队列列表", $"{ctx.Queues.Count} 条");
-            var result = ctx.Queues.OrderBy(queue => queue.Index).Select(queue => new
+            // v0.7.2+（KN-04）：深拷贝快照后序列化——避免枚举/序列化与并发修改冲突。
+            List<DispatchQueue> snapshot = ctx.SnapshotQueues();
+            var result = snapshot.OrderBy(queue => queue.Index).Select(queue => new
             {
                 queue.Id,
                 queue.Name,
@@ -42,26 +44,37 @@ internal static class ApiQueuesHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "队列名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            string? limitError = Limits.CheckQueueCount(ctx.Queues.Count)
-                ?? Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
-                ?? Limits.CheckTimeSets(queue.TimeSets.Count)
-                ?? CheckTimeFormat(queue)
-                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue))
-                ?? Limits.CheckQueueMix(ctx, queue);
+            // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/后台线程冲突；锁内不做 await。
+            string? limitError;
+            lock (ctx.DataLock)
+            {
+                limitError = Limits.CheckQueueCount(ctx.Queues.Count)
+                    ?? Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                    ?? Limits.CheckTimeSets(queue.TimeSets.Count)
+                    ?? CheckTimeFormat(queue)
+                    ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue))
+                    ?? Limits.CheckQueueMix(ctx, queue);
+                if (limitError is null)
+                {
+                    // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
+                    queue.Id = Guid.NewGuid().ToString("N");
+                    if (ctx.Queues.Count > 0)
+                    {
+                        queue.Index = ctx.Queues.Max(item => item.Index) + 1;
+                    }
+                }
+            }
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
-            // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
-            queue.Id = Guid.NewGuid().ToString("N");
-            if (ctx.Queues.Count > 0)
-            {
-                queue.Index = ctx.Queues.Max(item => item.Index) + 1;
-            }
             NormalizeQueue(queue);
-            ctx.Queues.Add(queue);
-            DataStore.SaveQueues(ctx.Queues);
+            lock (ctx.DataLock)
+            {
+                ctx.Queues.Add(queue);
+                DataStore.SaveQueues(ctx.Queues);
+            }
             Audit.Log(Audit.Web, "添加调度队列", $"{queue.Name}（id={queue.Id}，任务 {queue.Tasks.Count} 项）");
             await HttpHelper.WriteJsonAsync(context, queue).ConfigureAwait(false);
             return;
@@ -69,28 +82,43 @@ internal static class ApiQueuesHandler
         if (method == "PUT" && seg.Length == 2)
         {
             DispatchQueue? update = HttpHelper.ParseBody<DispatchQueue>(body);
-            DispatchQueue? existing = ctx.FindQueue(seg[1]);
-            if (update is null || existing is null)
+            if (update is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
-                ?? Limits.CheckTimeSets(update.TimeSets.Count)
-                ?? CheckTimeFormat(update)
-                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update))
-                ?? Limits.CheckQueueMix(ctx, update);
+            DispatchQueue? existing;
+            string? limitError;
+            lock (ctx.DataLock)
+            {
+                // v0.7.2+（KN-04）：锁内完成「查找-校验-替换-保存」整段，避免并发修改导致 IndexOf 落空/越界；锁内不做 await。
+                existing = ctx.FindQueue(seg[1]);
+                limitError = existing is null ? null
+                    : Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                        ?? Limits.CheckTimeSets(update.TimeSets.Count)
+                        ?? CheckTimeFormat(update)
+                        ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update))
+                        ?? Limits.CheckQueueMix(ctx, update);
+                if (existing is not null && limitError is null)
+                {
+                    update.Id = existing.Id;
+                    update.Index = existing.Index;
+                    NormalizeQueue(update);
+                    int index = ctx.Queues.IndexOf(existing);
+                    ctx.Queues[index] = update;
+                    DataStore.SaveQueues(ctx.Queues);
+                }
+            }
+            if (existing is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
             if (limitError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
-            update.Id = existing.Id;
-            update.Index = existing.Index;
-            NormalizeQueue(update);
-            int index = ctx.Queues.IndexOf(existing);
-            ctx.Queues[index] = update;
-            DataStore.SaveQueues(ctx.Queues);
             Audit.Log(Audit.Web, "修改调度队列", $"{update.Name}（id={update.Id}，任务 {update.Tasks.Count} 项）");
             await HttpHelper.WriteJsonAsync(context, update).ConfigureAwait(false);
             return;
@@ -98,8 +126,12 @@ internal static class ApiQueuesHandler
         if (method == "DELETE" && seg.Length == 2)
         {
             DispatchQueue? removed = ctx.FindQueue(seg[1]);
-            ctx.Queues.RemoveAll(queue => queue.Id == seg[1]);
-            DataStore.SaveQueues(ctx.Queues);
+            // v0.7.2+（KN-04）：锁内删除与保存，避免与并发请求/后台线程冲突。
+            lock (ctx.DataLock)
+            {
+                ctx.Queues.RemoveAll(queue => queue.Id == seg[1]);
+                DataStore.SaveQueues(ctx.Queues);
+            }
             Audit.Log(Audit.Web, "删除调度队列", removed is null ? $"id={seg[1]}（不存在）" : $"{removed.Name}（id={seg[1]}）");
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             return;
@@ -115,26 +147,40 @@ internal static class ApiQueuesHandler
         List<string>? ids = node?["ids"] is JsonArray array
             ? array.Select(item => item?.ToString() ?? "").ToList()
             : null;
-        if (ids is null || ids.Count != ctx.Queues.Count
-            || ids.Any(string.IsNullOrWhiteSpace)
-            || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+        // v0.7.2+（KN-04）：锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await。
+        string? error = null;
+        lock (ctx.DataLock)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "队列顺序名单缺失或与当前队列列表不一致" }, 400).ConfigureAwait(false);
+            if (ids is null || ids.Count != ctx.Queues.Count
+                || ids.Any(string.IsNullOrWhiteSpace)
+                || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+            {
+                error = "队列顺序名单缺失或与当前队列列表不一致";
+            }
+            else
+            {
+                HashSet<string> existing = new(ctx.Queues.Select(queue => queue.Id), StringComparer.Ordinal);
+                if (ids.Any(id => !existing.Contains(id)))
+                {
+                    error = "队列顺序名单与当前队列列表不一致";
+                }
+                else
+                {
+                    Dictionary<string, DispatchQueue> byId = ctx.Queues.ToDictionary(queue => queue.Id, StringComparer.Ordinal);
+                    for (int i = 0; i < ids.Count; i++)
+                    {
+                        byId[ids[i]].Index = i;
+                    }
+                    DataStore.SaveQueues(ctx.Queues);
+                }
+            }
+        }
+        if (error is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
             return;
         }
-        HashSet<string> existing = new(ctx.Queues.Select(queue => queue.Id), StringComparer.Ordinal);
-        if (ids.Any(id => !existing.Contains(id)))
-        {
-            await HttpHelper.WriteJsonAsync(context, new { error = "队列顺序名单与当前队列列表不一致" }, 400).ConfigureAwait(false);
-            return;
-        }
-        Dictionary<string, DispatchQueue> byId = ctx.Queues.ToDictionary(queue => queue.Id, StringComparer.Ordinal);
-        for (int i = 0; i < ids.Count; i++)
-        {
-            byId[ids[i]].Index = i;
-        }
-        DataStore.SaveQueues(ctx.Queues);
-        Audit.Log(Audit.Web, "调整队列顺序", $"{ids.Count} 个调度队列");
+        Audit.Log(Audit.Web, "调整队列顺序", $"{ids!.Count} 个调度队列");
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
