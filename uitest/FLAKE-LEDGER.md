@@ -30,3 +30,4 @@
 | 2026-08-15 | v0.7.1 发布前真实计时档全量 | e2e 75/75 ✓；judge 115/0 ✓；chaos 166/0 ✓ | 无 | 发布 v0.7.1 门禁通过（commit a0938f9 + tag v0.7.1 + gh release prerelease） |
 | 2026-08-15 | v0.7.0 真实模拟器测试与修复（本会话）：单测 96/96；e2e 74/74（加速档，4.0m）；judge 115/0；chaos 首轮 165/2 → 修复后 166/0 → BOM 兜底修复后 167/0；08 spec 10/10（21.4s，原 2.3m） | chaos 首轮 2 败（丙采样全丢，F5 佐证 logHits=0 缺口）；第二轮 2 败（归档兜底漏剥离 UTF-8 BOM 致 startsWith 失效）；e2e 08 运行链路首轮超时（关机离线轮询 60s 未缩放拖垮用例） | F5 补归档日志兜底 + BOM 剥离；`WaitEmulatorOfflineAsync` 60s 上限补 `NEXUS_TIME_SCALE` 缩放（v0.6.4 加速基建遗漏） | 双修复后全绿，F5 关闭 |
 | 2026-08-16 | v0.7.2 发布前真实计时档全量 | e2e 76/76（8.7m）✓；judge 115/0 ✓；chaos 166/0 ✓（首轮被外部操作中止，重跑全绿） | 无 | 发布 v0.7.2 门禁通过（commit 26dfdab + tag v0.7.2 + gh release prerelease） |
+| 2026-08-16 | v0.7.3 发布前真实计时档全量 | e2e 76/76（8.3m）✓；judge 115/0 ✓；chaos 166/0 ✓ | 无（首轮脚本遗漏 call 致 judge/chaos 未启动，工具脚本修正后重跑全绿，非代码问题） | 发布 v0.7.3 门禁通过（commit bc1a2ca + tag v0.7.3 + gh release prerelease） |
