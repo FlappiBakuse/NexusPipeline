@@ -17,7 +17,8 @@ export function scrollField(id, label, value, placeholder = "") {
 }
 
 export function selectField(id, label, value, options, extra = "") {
-  return `<div><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${v}" ${v === value ? "selected" : ""}>${t}</option>`; }).join("")}</select></div>`;
+  // v0.7.4（KN-44）：option 的 value 与文本经 esc() 转义（此前值含引号/尖括号会破坏 HTML 结构）。
+  return `<div><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(t)}</option>`; }).join("")}</select></div>`;
 }
 
 /** 完成操作倒计时卡片（v0.6.3+）：队列全部完成后 60 秒倒计时窗口，可取消；无待执行操作返回空串。 */

@@ -12,7 +12,7 @@ namespace NexusPipeline.Services;
 /// </summary>
 internal sealed class SessionJudge
 {
-    public enum JudgeMode
+    internal enum JudgeMode
     {
         None,
         Keyword,
@@ -20,7 +20,7 @@ internal sealed class SessionJudge
     }
 
     /// <summary>日志行命中的判定类型（仅关键字模式的日志行命中会返回非 None）。</summary>
-    public enum LineHit
+    internal enum LineHit
     {
         None,
         SuccessKeyword,
@@ -28,7 +28,7 @@ internal sealed class SessionJudge
     }
 
     /// <summary>判断脚本结果应用结果。</summary>
-    public enum JudgeOutcome
+    internal enum JudgeOutcome
     {
         None,
         Success,

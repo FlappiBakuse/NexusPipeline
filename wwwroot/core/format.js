@@ -22,17 +22,5 @@ export function finalStatusOf(record) {
   return record.finalStatus || record.status;
 }
 
-export function dayDesc(days = []) {
-  const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-  if (days.length >= 7) return "每天";
-  return days.map(day => names[day]).join("/");
-}
-
-export function actionLabel(action) {
-  return {
-    none: "无操作", exit: "退出软件", sleep: "休眠", reboot: "重启", shutdown: "关机",
-  }[action] || action;
-}
-
 /** 脚本主程序图标加载失败时的通用占位图（内联 SVG，主题无关）。 */
 export const scriptFallbackIcon = "data:image/svg+xml;charset=utf-8," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40"><rect width="40" height="40" rx="9" fill="#000" opacity=".07"/><path d="M11 9h13l6 6v16H11z" fill="none" stroke="#000" stroke-opacity=".38" stroke-width="2" stroke-linejoin="round"/><path d="M24 9v6h6" fill="none" stroke="#000" stroke-opacity=".38" stroke-width="2" stroke-linejoin="round"/></svg>');

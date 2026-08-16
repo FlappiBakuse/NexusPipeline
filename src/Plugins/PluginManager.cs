@@ -19,14 +19,9 @@ internal sealed class PluginManager
 
     /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
     public IReadOnlyList<INotifyChannel> NotifyChannels =>
-        _plugins.OfType<IPlugin>()
-            .Where(p => p is INotifyChannel && IsEnabled(p.Name))
+        _plugins.Where(p => p is INotifyChannel && IsEnabled(p.Name))
             .Cast<INotifyChannel>()
             .ToList();
-
-    /// <summary>已启用的数据化专项插件（专项脚本实例的适配能力来源）。</summary>
-    public IReadOnlyList<DataSpecializedPlugin> SpecializedPlugins =>
-        _dataPlugins.Where(p => IsEnabled(p.Name)).ToList();
 
     /// <summary>插件统一元数据投影（内置 general + 数据化 specialized）。</summary>
     public IReadOnlyList<PluginSummary> PluginSummaries
@@ -208,6 +203,17 @@ internal sealed class PluginManager
     public void SetEnabled(string name, bool enabled, string source = Audit.System)
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
+        // v0.7.4（KN-24）：插件不存在时显式拒绝（此前静默写入配置，待下次 LoadAll 的 PruneUnknownPluginSettings 才清理）。
+        bool isBuiltIn = _plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        bool isDataPlugin = _dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (!isBuiltIn && !isDataPlugin)
+        {
+            Logger.Warn($"[插件] 插件「{name}」不存在，已忽略启用开关操作。");
+            return;
+        }
+        // 内置插件禁用同样写入 DisabledPlugins——非纯冗余：ConfigStore.Normalize 的
+        // 「旧配置补默认内置插件（emulator-adapter）」判据依赖它标记「用户显式禁用过」，迁移时不再补回；
+        // IsEnabled 对内置插件只查 EnabledPlugins 白名单。
         bool exists = settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
         if (enabled && !exists)
         {

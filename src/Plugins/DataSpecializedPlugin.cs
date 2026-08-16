@@ -154,6 +154,24 @@ internal sealed class DataSpecializedPlugin
         {
             return null;
         }
+        // v0.7.4（KN-07）：多占位符模板（如 `{launcher} --config {assistant}`）解析只替换第一个占位符、
+        // 其余内容静默丢弃——显式校验并整体推导失败（Warn 可观测），禁止静默截断。
+        string[] pathFields = { "mainExe", "configPath", "logPath" };
+        string argsTemplate = paths["args"]?.ToString() ?? "";
+        foreach (string field in pathFields)
+        {
+            string template = paths[field]?.ToString() ?? "";
+            if (CountPlaceholders(template) > 1)
+            {
+                Logger.Warn($"[插件] resolve.json 路径字段「{field}」包含多个占位符（仅支持单个占位符整体替换），推导失败：{Name}");
+                return null;
+            }
+        }
+        if (CountPlaceholders(argsTemplate) > 1)
+        {
+            Logger.Warn($"[插件] resolve.json 参数模板「args」包含多个占位符（仅支持单个占位符整体替换），推导失败：{Name}");
+            return null;
+        }
         var profile = new ScriptProfile
         {
             MainExe = ResolvePath(paths["mainExe"]?.ToString(), rootPath, bindings),
@@ -271,5 +289,31 @@ internal sealed class DataSpecializedPlugin
         string from = fromDir.EndsWith("\\", StringComparison.Ordinal) ? fromDir : fromDir + "\\";
         string rel = Uri.UnescapeDataString(new Uri(from).MakeRelativeUri(new Uri(toFile)).ToString()).Replace('/', '\\');
         return rel.StartsWith(".\\", StringComparison.Ordinal) || rel.StartsWith("..\\", StringComparison.Ordinal) ? rel : ".\\" + rel;
+    }
+
+    /// <summary>统计模板中的占位符数量（{var} / {rel:var} 形式；v0.7.4 KN-07 多占位符显式校验用）。</summary>
+    private static int CountPlaceholders(string template)
+    {
+        int count = 0;
+        int index = 0;
+        while (index < template.Length)
+        {
+            int start = template.IndexOf('{', index);
+            if (start < 0)
+            {
+                break;
+            }
+            int end = template.IndexOf('}', start);
+            if (end < 0)
+            {
+                break;
+            }
+            if (end > start + 1)
+            {
+                count++;
+            }
+            index = end + 1;
+        }
+        return count;
     }
 }

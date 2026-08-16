@@ -224,8 +224,23 @@ internal static class UserConfigManager
         {
             return new List<string>();
         }
-        // 防御自愈（仅模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
-        // 避免复制对目录写文件报拒绝访问；通用脚本目录型 config 不进入此分支。
+        bool dirKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath));
+        string? parentDir = Path.GetDirectoryName(script.ConfigPath);
+        // 目录型 ConfigPath（无扩展名，如 MaaEnd 的 config\）：目录为合法配置形态，绝不递归删除——
+        // 第二次编辑会话时目录是刚从 store 还原的用户配置快照，误删会造成用户数据损失（v0.7.4 修复）。
+        // 目录非空即视为用户已有配置，直接跳过模板生成；空目录仍复制模板兜底。
+        if (dirKind && Directory.Exists(script.ConfigPath))
+        {
+            if (string.IsNullOrWhiteSpace(parentDir))
+            {
+                return new List<string>();
+            }
+            return Directory.EnumerateFileSystemEntries(script.ConfigPath).Any()
+                ? new List<string>()
+                : TryCopyTemplateFiles(profile.ConfigTemplateDir, script.ConfigPath, parentDir);
+        }
+        // 防御自愈（仅文件型 + 模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
+        // 避免复制对目录写文件报拒绝访问。
         if (Directory.Exists(script.ConfigPath))
         {
             try
@@ -241,18 +256,29 @@ internal static class UserConfigManager
         }
         try
         {
-            string? parentDir = Path.GetDirectoryName(script.ConfigPath);
             if (string.IsNullOrWhiteSpace(parentDir))
             {
                 return new List<string>();
             }
-            // 目录型 ConfigPath（无扩展名，如 MaaEnd 的 config\）模板整体复制到 ConfigPath 本身；
-            // 文件型（如 BetterGI 的 NexusPipeline.json）复制到父目录（文件落在 ConfigPath 位置）。
+            // 目录型 ConfigPath 模板整体复制到 ConfigPath 本身；文件型（如 BetterGI 的 NexusPipeline.json）复制到父目录（文件落在 ConfigPath 位置）。
             // 复制清单相对 ConfigPath 父目录记录（与 DoRestore 清理基准一致），目录型恢复时按 "config\mxu-MaaEnd.json" 精确清理。
-            bool dirKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath));
             string targetDir = dirKind ? script.ConfigPath : parentDir;
             Directory.CreateDirectory(targetDir);
             return CopyTemplateFiles(profile.ConfigTemplateDir, targetDir, parentDir);
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
+            return new List<string>();
+        }
+    }
+
+    /// <summary>复制模板目录内容到目标目录（异常兜底记 Error，返回空清单）。</summary>
+    private static List<string> TryCopyTemplateFiles(string templateDir, string targetDir, string relBaseDir)
+    {
+        try
+        {
+            return CopyTemplateFiles(templateDir, targetDir, relBaseDir);
         }
         catch (Exception ex)
         {

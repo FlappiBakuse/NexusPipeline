@@ -45,7 +45,7 @@ internal static class ChannelsMenu
                 case "0":
                     return;
                 case "1":
-                    SetSendStrategy(ctx);
+                    SetChannelToggles(ctx);
                     break;
                 case "2":
                     SetSecret(ctx, "webhookUrl");
@@ -134,7 +134,7 @@ internal static class ChannelsMenu
         }
     }
 
-    private static void SetSendStrategy(RuntimeContext ctx)
+    private static void SetChannelToggles(RuntimeContext ctx)
     {
         string? webhookChoice = Ui.Prompt($"Webhook 开关（当前：{(ctx.Settings.WebhookEnabled ? "开" : "关")}，输入 1 开 / 2 关 / 回车不变）：");
         if (webhookChoice?.Trim() is "1" or "2")

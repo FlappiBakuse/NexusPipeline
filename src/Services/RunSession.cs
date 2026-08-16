@@ -189,6 +189,9 @@ internal class RunSession
                     StartTime = DateTime.Now,
                 };
                 record.AttemptDetails.Add(attempt);
+                // v0.7.4（KN-25）：段起点设置在「开始」头之前——此前段含「结束」头不含「开始」头（首尾不对称），
+                // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
+                _attemptLogStart = _scriptFullLog.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
@@ -363,7 +366,6 @@ internal class RunSession
 
     private async Task<RunAttemptResult> RunAttemptAsync(RunAttempt attempt)
     {
-        _attemptLogStart = _scriptFullLog.Length;
         string modeText = _mode == "auto" ? "自动" : "手动";
 
         if (_script.LaunchGame)

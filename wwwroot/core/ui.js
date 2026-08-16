@@ -181,14 +181,24 @@ export async function cancelSystemAction() {
 }
 
 export function initTheme() {
-  const stored = localStorage.getItem("nexus-theme") || "system";
+  // v0.7.4（KN-45）：localStorage 读取加异常保护——隐私模式/禁用存储下 getItem 抛异常会导致白屏。
+  let stored = "system";
+  try {
+    stored = localStorage.getItem("nexus-theme") || "system";
+  } catch {
+    stored = "system";
+  }
   applyTheme(stored);
 }
 
 export function applyTheme(theme) {
   const value = ["light", "dark", "system"].includes(theme) ? theme : "system";
   document.body.dataset.theme = value;
-  localStorage.setItem("nexus-theme", value);
+  try {
+    localStorage.setItem("nexus-theme", value);
+  } catch {
+    // 存储不可用（隐私模式/禁用存储）：主题仅本次会话生效。
+  }
   const icon = value === "light" ? "☼" : value === "dark" ? "☾" : "◐";
   $$('[data-theme-icon]').forEach(element => element.textContent = icon);
   $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", `当前${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}，点击切换主题`));

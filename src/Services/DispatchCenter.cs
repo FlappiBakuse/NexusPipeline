@@ -376,6 +376,19 @@ internal class DispatchCenter
         };
         lock (_sync)
         {
+            // v0.7.4：新操作登记前先取消旧 pending 的后台任务——单槽位覆盖时旧 sleep 的
+            // Task.Delay 若继续运行，到期仍会执行休眠（60 秒窗口内多个队列先后完成的双系统操作真实触发）。
+            if (_pendingSystemAction is not null)
+            {
+                try
+                {
+                    _pendingSystemAction.Cts.Cancel();
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[警告] 取消旧系统操作后台任务失败：{ex.Message}");
+                }
+            }
             _pendingSystemAction = pending;
         }
         if (execute is not null)
@@ -440,16 +453,13 @@ internal class DispatchCenter
             else
             {
                 // v0.7.2+（KN-04）：锁内快照启用用户名单（运行线程与 Web 用户编辑并发时避免枚举冲突）。
+                // v0.7.4（KN-22）：StartScript 门禁已保证至少一个启用用户，无用户兜底（Add(null)）不可达，已删除。
                 List<string> enabledNames;
                 lock (RuntimeContext.Instance.DataLock)
                 {
                     enabledNames = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
                 }
                 runUsers = enabledNames.Cast<string?>().ToList();
-                if (runUsers.Count == 0)
-                {
-                    runUsers.Add(null);
-                }
             }
             List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
             if (records.Count > 0 && records[^1].Status == "cancelled")
@@ -623,8 +633,9 @@ internal class DispatchCenter
             {
                 await RuntimeContext.Instance.Plugins.NotifyQueueAsync(queue, records).ConfigureAwait(false);
             }
-            else if (!queue.NotifyEnabled)
+            else
             {
+                // v0.7.4（KN-38）：else 分支已隐含 NotifyEnabled=false，原 else if (!queue.NotifyEnabled) 冗余。
                 foreach (RunRecord record in records)
                 {
                     ScriptInstance? script = RuntimeContext.Instance.FindScript(record.ScriptInstanceId);

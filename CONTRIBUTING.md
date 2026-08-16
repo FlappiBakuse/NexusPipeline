@@ -153,7 +153,7 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 | 改动范围 | 必跑 |
 |---|---|
 | 仅前端 | `build.cmd` + e2e 全量 75（局部迭代可按域筛选） |
-| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（166）+ 单元测试（95），默认加速档 |
+| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（115）+ chaos-queue（167）+ 单元测试（97），默认加速档 |
 | 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
 
 常用命令：
@@ -175,7 +175,7 @@ Remove-Item Env:NEXUS_TIME_SCALE               # 切回真实计时档
 # 4. 专项测试（需管理员 shell；先 build.cmd）
 $env:NEXUS_TIME_SCALE = "10"
 node uitest\judge-scenarios.mjs                # 115 断言
-node uitest\chaos-queue.mjs                    # 166 断言
+node uitest\chaos-queue.mjs                    # 167 断言
 ```
 
 - 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`uitest\run-uitest.cmd` 已默认内置；

@@ -62,10 +62,6 @@ internal static class ConfigStore
         {
             settings.LogLevel = "info";
         }
-        if (settings.SendStrategy is not ("parallel" or "webhook_primary" or "email_primary" or "single"))
-        {
-            settings.SendStrategy = "parallel";
-        }
         // v0.7.0+：旧配置升级时补默认启用的内置插件（模拟器适配），保证升级后默认可用；
         // 已在 DisabledPlugins 显式禁用的不补回（SetEnabled 禁用会写入 DisabledPlugins）。
         if (!settings.EnabledPlugins.Contains(AppSettings.EmulatorAdapterPlugin, StringComparer.OrdinalIgnoreCase)
@@ -73,7 +69,8 @@ internal static class ConfigStore
         {
             settings.EnabledPlugins.Add(AppSettings.EmulatorAdapterPlugin);
         }
-        if (settings.WebhookType is not ("feishu" or "dingtalk" or "wecom" or "slack" or "discord" or "generic"))
+        // v0.7.4（KN-26）：Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
+        if (!AppSettings.WebhookTypes.Contains(settings.WebhookType))
         {
             settings.WebhookType = "feishu";
         }

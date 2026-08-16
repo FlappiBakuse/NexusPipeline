@@ -54,11 +54,6 @@ internal static class JudgeScriptRunner
 
     private static readonly string[] JudgeExtensions = { ".js", ".py" };
 
-    public static bool IsSupportedLanguage(string language)
-    {
-        return language is "javascript" or "python";
-    }
-
     public static bool IsJudgeExtension(string path)
     {
         return JudgeExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
@@ -411,6 +406,9 @@ internal static class JudgeScriptRunner
             try
             {
                 await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
+                // v0.7.4（KN-11）：进程退出瞬间异步输出事件可能未投递完（stdout 尾行 JSON 契约有丢失风险），
+                // 同步 WaitForExit 排空输出缓冲——进程已退出，仅等待事件排空，无阻塞风险。
+                process.WaitForExit();
             }
             catch (OperationCanceledException)
             {

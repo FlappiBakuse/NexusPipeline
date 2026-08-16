@@ -22,13 +22,14 @@ public class AppSettings
     /// <summary>远程访问令牌（DPAPI 加密存储 enc: 前缀；本地请求豁免校验）。</summary>
     public string AccessToken { get; set; } = "";
 
-    public string SendStrategy { get; set; } = "parallel";
-
     public bool WebhookEnabled { get; set; } = true;
 
     public bool SmtpEnabled { get; set; }
 
     public string WebhookType { get; set; } = "feishu";
+
+    /// <summary>Webhook 类型白名单（v0.7.4 单源化，KN-26）：ConfigStore.Normalize 校验与 WebhookSender 状态/映射共用，避免双份维护漂移。</summary>
+    public static readonly string[] WebhookTypes = { "feishu", "dingtalk", "wecom", "slack", "discord", "generic" };
 
     public string WebhookUrl { get; set; } = "";
 

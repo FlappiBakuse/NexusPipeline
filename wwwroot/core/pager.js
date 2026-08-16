@@ -17,10 +17,6 @@ export function registerPager(key, onChange) {
   pagers.set(key, onChange);
 }
 
-export function unregisterPager(key) {
-  pagers.delete(key);
-}
-
 export function pagerNavigate(key, action, target) {
   const onChange = pagers.get(key);
   if (!onChange) return;

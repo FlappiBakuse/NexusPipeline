@@ -83,11 +83,7 @@ internal static class ApiSettingsHandler
                     }
                 }
             }
-            ConfigStore.Save(current);
-            if (node.Get("allowRemoteAccess") is not null)
-            {
-                current.AllowRemoteAccess = node.Get("allowRemoteAccess").Bool(current.AllowRemoteAccess);
-            }
+            // v0.7.4（KN-30）：allowRemoteAccess 已在上方 BindField 通用反射路径绑定，此处不再二次绑定/二次保存。
             ConfigStore.Save(current);
             if (current.AllowRemoteAccess)
             {
@@ -278,7 +274,6 @@ internal static class ApiSettingsHandler
             settings.AutoOpenBrowser,
             settings.HistoryRetentionDays,
             settings.WebPort,
-            settings.SendStrategy,
             settings.WebhookEnabled,
             settings.SmtpEnabled,
             settings.WebhookType,

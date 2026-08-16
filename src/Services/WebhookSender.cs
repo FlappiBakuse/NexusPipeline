@@ -11,7 +11,8 @@ internal static class WebhookSender
 {
     private static readonly HttpClient Http = new();
 
-    private static readonly string[] Types = { "feishu", "dingtalk", "wecom", "slack", "discord", "generic" };
+    /// <summary>Webhook 类型白名单（v0.7.4 单源化，KN-26）：引用 AppSettings.WebhookTypes，不再独立维护副本。</summary>
+    private static readonly string[] Types = AppSettings.WebhookTypes;
 
     public static string TypeDisplay(string type)
     {
@@ -165,12 +166,14 @@ internal static class WebhookSender
 
     private static string JsonLiteral(string value)
     {
-        string escaped = value
-            .Replace("\\", "\\\\")
-            .Replace("\"", "\\\"")
-            .Replace("\r", "\\r")
-            .Replace("\n", "\\n")
-            .Replace("\t", "\\t");
-        return "\"" + escaped + "\"";
+        // v0.7.4（KN-34）：改用 System.Text.Json 序列化字符串字面量——手写转义此前漏 \b/\f 等控制字符，
+        // 含此类字符的通知文本会使 Webhook 端 JSON 解析失败。UnsafeRelaxedJsonEscaping：保留中文等非 ASCII
+        // 原样输出（默认编码器会转义为 \uXXXX，与既有通知契约/测试断言不兼容）；控制字符仍正确转义。
+        return System.Text.Json.JsonSerializer.Serialize(value, JsonLiteralOptions);
     }
+
+    private static readonly System.Text.Json.JsonSerializerOptions JsonLiteralOptions = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 }

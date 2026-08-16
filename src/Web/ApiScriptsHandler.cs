@@ -576,7 +576,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                     return;
                 }
-                ScriptUser? existing = script.Users.FirstOrDefault(u => u.Name == oldName);
+                ScriptUser? existing = script.Users.FirstOrDefault(u => u.Name.Equals(oldName, StringComparison.OrdinalIgnoreCase));
                 if (existing is null)
                 {
                     await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -649,7 +649,8 @@ internal static class ApiScriptsHandler
                     await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                     return;
                 }
-                if (script.Users.All(u => u.Name != userName))
+                // v0.7.4（KN-37）：用户匹配统一 OrdinalIgnoreCase，与重名查重/顺序接口口径一致。
+                if (script.Users.All(u => !u.Name.Equals(userName, StringComparison.OrdinalIgnoreCase)))
                 {
                     await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                     return;
@@ -669,9 +670,10 @@ internal static class ApiScriptsHandler
                     gate.Release();
                 }
                 // v0.7.2+（KN-04）：锁内删除与保存，避免与并发请求/运行线程冲突。
+                // v0.7.4（KN-37）：按名匹配忽略大小写，与上方存在性校验口径一致。
                 lock (ctx.DataLock)
                 {
-                    script.Users.RemoveAll(u => u.Name == userName);
+                    script.Users.RemoveAll(u => u.Name.Equals(userName, StringComparison.OrdinalIgnoreCase));
                     DataStore.SaveScripts(ctx.Scripts);
                 }
                 Audit.Log(Audit.Web, "删除用户", $"{script.Name} / {userName}");

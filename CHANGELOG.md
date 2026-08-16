@@ -2,6 +2,42 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.4（Pre-release）
+
+### 修复（已知问题批量：稳定复现 + 无严重副作用项 + 台账外新发现）
+
+- **目录型专项二次编辑误删用户配置（台账外 KN-65，数据风险）**：`EnsureConfigForEdit` 对目录型 ConfigPath（如 MaaEnd `config\`）的目录不再当「误建残留」递归删除——第二次编辑会话时目录是刚从 store 还原的用户配置快照，此前被删并改用默认模板覆盖（提交则 store 被模板污染）；现目录非空即视为已有配置跳过模板生成、空目录仍复制模板兜底，文件型误建目录保留原自愈清理。
+- **pending 系统操作叠加双执行（台账外 KN-66）**：60 秒窗口内多个队列先后完成时，新 pending 覆盖旧 pending 前先取消旧任务的 Cts——此前旧 sleep 的 `Task.Delay` 未取消，到期仍执行休眠（双系统操作真实触发）。
+- **KN-05 CLI 删除脚本/队列不清理**：脚本删除对齐 Web 端——运行中拒绝、清理 `data/{脚本Id}` 目录、释放 ScriptConfigGate 与跨进程互斥体（此前仅移除列表，磁盘残留 + 静态字典累积）；队列删除增加运行中拒绝。
+- **KN-11 Python 判断脚本尾行 JSON 丢失竞态**：`WaitForExitAsync` 后补同步 `WaitForExit()` 排空输出缓冲——进程退出瞬间异步输出事件未投递完时契约规定的 stdout 尾行 JSON 不再丢失。
+- **KN-37 用户改名/删除大小写敏感**：查询/存在性校验/删除统一 `OrdinalIgnoreCase`，与重名查重和 users/order 口径一致（此前 `ABC` 用户用 `abc` 删除 404，语义矛盾）。
+- **KN-34 Webhook 文本转义不完整**：`JsonLiteral` 改 System.Text.Json 序列化（`UnsafeRelaxedJsonEscaping` 保留中文原样、`\b`/`\f` 等控制字符正确转义）——含控制字符的通知文本不再致 Webhook 端 JSON 解析失败。
+- **KN-30 settings PUT 双次 Save**：`allowRemoteAccess` 已在通用反射路径绑定，删除冗余二次绑定与二次保存（双次 Normalize/写盘副作用消除）。
+- **KN-40 插件开关任意串按 disable 处理**：`/api/plugins/{name}` 显式校验 enable/disable，其余 400。
+- **KN-07 resolve.json 多占位符静默丢弃**：路径/参数模板含多个占位符时显式校验并整体推导失败（Warn 可观测），不再静默截断。
+- **KN-26 Webhook 类型白名单双份维护**：单源化至 `AppSettings.WebhookTypes`（`ConfigStore.Normalize` 与 `WebhookSender` 共用，消除漂移）。
+- **KN-24 插件开关静默写入不存在插件名**：`SetEnabled` 显式拒绝不存在的插件（此前静默写配置待下次加载清理）；DisabledPlugins 写入保留（实为 `ConfigStore.Normalize`「旧配置补默认内置插件」判据，非纯冗余）。
+- **KN-25 尝试日志段首尾不对称**：段起点移至「开始」头之前，与「结束」头对称（判断脚本输入与按尝试分批归档日志现在包含完整尝试边界）。
+- **KN-14 基础按钮触控目标补修**：基础 `button` min-height 38px → 40px（v0.7.3 台账漏报缺口，`.sm`/drag-handle/侧栏按钮已达标）。
+- **KN-47 侧栏地址硬编码**：`/api/status` 补 `actualPort`（实际监听端口，端口漂移/未重启时与配置不同），侧栏「服务 · host:port」动态化。
+
+### 清理（低优先级死代码全量）
+
+- 后端：`SendStrategy` 死配置（KN-17，字段/Normalize/回显/CLI 菜单全链路移除）、`Audit.Cli`（KN-18）、`IsSupportedLanguage`（KN-19）、`LogLevel.ToSetting`（KN-20）、`SpecializedPlugins`（KN-21）、`runUsers.Add(null)` 不可达兜底（KN-22）、`OfType<IPlugin>()` 恒真过滤（KN-23）、`KillTree` 文案误导（KN-28）、`SessionJudge` 嵌套 enum 改 internal（KN-29）、`else if (!queue.NotifyEnabled)` 冗余（KN-38）、`PromptEdit`/`PromptEditMasked` 合并（KN-41）。
+- 前端：`dayDesc`/`actionLabel`/`unregisterPager`/`FALLBACK_ICON` 死代码（KN-43）、select click+change 双触发（click 委托跳过 select/option，change 唯一分发）与 `selectField` option 转义（KN-44）、localStorage 读写异常保护（KN-45，主题/token/重启轮询全量 try/catch——隐私模式/禁用存储下不再白屏）。
+- **KN-46 台账核验**：前端 `queueTotalUsers` 与后端 `Limits.QueueTotalUsers` 逐行对应（未选脚本计 1、启用用户 `Math.max(1,…)`、保存前空任务已过滤）——两端口径实际一致，台账表述过时。
+- **KN-14/KN-47 台账表述修正**（KN-14 v0.7.3 时未含基础按钮缺口、KN-47 双按钮已随 v0.7.3 自动保存消失）。
+
+### 测试
+
+- 断言数字：单测 97、e2e 76 不变；**chaos-queue 166 → 167**（AGENTS/DEVELOPMENT/RELEASING/CONTRIBUTING 数字同步；F5 归档兜底 `archivedLogWritten` 兼容 KN-25 后归档日志「开始」头首行——此前兜底失效属测试侧未随语义同步）。
+- 加速档全量回归：e2e 76/76（4.1m）+ judge 115/0 + chaos 167/0 + 单测 97/97 全绿（2026-08-16）。
+- 首轮发现与修复：judge 5 项通知断言失败——KN-34 初版 `JsonSerializer.Serialize` 默认编码器将中文转义为 `\uXXXX`（合法 JSON 但破坏既有通知契约与原始字符串断言），改 `UnsafeRelaxedJsonEscaping` 后恢复全绿；chaos 2 项失败——KN-25 后归档日志首行为「开始」头致 F5 兜底失效，断言同步后全绿。
+
+### 变更
+
+- 版本号 0.7.4。
+
 ## v0.7.3（Pre-release）
 
 ### 新增（前端设计全面重构，对照 Web Interface Guidelines）

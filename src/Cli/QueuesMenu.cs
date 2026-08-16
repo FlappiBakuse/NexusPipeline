@@ -70,13 +70,20 @@ internal static class QueuesMenu
                     }
                     else
                     {
-                        string? answer = Ui.Prompt($"确定删除调度队列「{ordered[index - 1].Name}」吗？(Y/N)：");
+                        DispatchQueue removing = ordered[index - 1];
+                        string? answer = Ui.Prompt($"确定删除调度队列「{removing.Name}」吗？(Y/N)：");
                         if (Ui.IsYes(answer))
                         {
-                            string removedName = ordered[index - 1].Name;
-                            if (Ui.TrySave(() =>
+                            string removedName = removing.Name;
+                            // v0.7.4（KN-05）：运行中队列拒绝删除，避免运行状态悬挂在运行面板。
+                            bool queueRunning = ctx.Center.Active.Any(exec => exec.Kind == "queue" && exec.TargetId == removing.Id);
+                            if (queueRunning)
                             {
-                                ctx.Queues.Remove(ordered[index - 1]);
+                                Console.WriteLine("[错误] 调度队列正在运行中，无法删除。");
+                            }
+                            else if (Ui.TrySave(() =>
+                            {
+                                ctx.Queues.Remove(removing);
                                 DataStore.SaveQueues(ctx.Queues);
                             }, "调度队列"))
                             {

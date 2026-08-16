@@ -13,7 +13,6 @@ let queuePage = 1;
 let nextTimer = null;
 let queuePendingMerged = false;
 const QUEUE_PAGE_SIZE = 20;
-const FALLBACK_ICON = scriptFallbackIcon;
 
 export async function pageQueues(token) {
   if (!isCurrent("queues", token)) return;
@@ -80,7 +79,7 @@ function queueCardMarkup(queue, scripts) {
   const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row">${timeBadge}${notifyBadge}</div>` : "";
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
-    <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
+    <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(scriptFallbackIcon)}">
     <div class="script-main">
       <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></strong></div>
       ${badgesRow}

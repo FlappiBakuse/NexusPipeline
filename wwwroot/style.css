@@ -183,7 +183,7 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .user-card .qk-row { margin-top: 6px; }
 .back-row { margin: -10px 0 16px; }
 
-button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 38px; padding: 0 15px; border: 1px solid transparent; border-radius: 8px; background: var(--accent-strong); color: #fff; font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; transition: filter .15s, background .15s; }
+button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 15px; border: 1px solid transparent; border-radius: 8px; background: var(--accent-strong); color: #fff; font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; transition: filter .15s, background .15s; }
 button:hover, .btn:hover { filter: brightness(1.1); }
 button:active, .btn:active { filter: brightness(.95); }
 button.busy { cursor: wait; opacity: .65; }

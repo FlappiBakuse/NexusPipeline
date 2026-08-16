@@ -28,6 +28,17 @@ internal static class Ui
 
     public static (EditResult Result, string Value) PromptEdit(string label)
     {
+        return PromptEditCore(label, masked: false);
+    }
+
+    public static (EditResult Result, string Value) PromptEditMasked(string label)
+    {
+        return PromptEditCore(label, masked: true);
+    }
+
+    /// <summary>行编辑通用实现（v0.7.4 合并，KN-41）：Esc=放弃（Clear），回车空=不变（Keep）；masked=true 时输入显示为 *。</summary>
+    private static (EditResult Result, string Value) PromptEditCore(string label, bool masked)
+    {
         Console.Write(label);
         if (Console.IsInputRedirected)
         {
@@ -66,51 +77,7 @@ internal static class Ui
             if (!char.IsControl(key.KeyChar))
             {
                 sb.Append(key.KeyChar);
-                Console.Write(key.KeyChar);
-            }
-        }
-    }
-
-    public static (EditResult Result, string Value) PromptEditMasked(string label)
-    {
-        Console.Write(label);
-        if (Console.IsInputRedirected)
-        {
-            // v0.7.1+（KN-56）：同 PromptEdit 重定向降级（ReadKey 在输入重定向下抛异常）。
-            string? line = Console.ReadLine();
-            return string.IsNullOrEmpty(line) ? (EditResult.Keep, "") : (EditResult.Entered, line);
-        }
-        var sb = new StringBuilder();
-        while (true)
-        {
-            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
-            if (key.Key == ConsoleKey.Escape)
-            {
-                Console.WriteLine();
-                return (EditResult.Clear, "");
-            }
-            if (key.Key == ConsoleKey.Enter)
-            {
-                Console.WriteLine();
-                if (sb.Length == 0)
-                {
-                    return (EditResult.Keep, "");
-                }
-                return (EditResult.Entered, sb.ToString());
-            }
-            if (key.Key == ConsoleKey.Backspace)
-            {
-                if (sb.Length > 0)
-                {
-                    sb.Length--;
-                    Console.Write("\b \b");
-                }
-                continue;
-            }
-            if (!char.IsControl(key.KeyChar))
-            {
-                sb.Append(key.KeyChar);
-                Console.Write('*');
+                Console.Write(masked ? '*' : key.KeyChar);
             }
         }
     }

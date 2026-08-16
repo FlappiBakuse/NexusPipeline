@@ -63,14 +63,37 @@ internal static class ScriptsMenu
                     }
                     else
                     {
-                        string? answer = Ui.Prompt($"确定删除脚本实例「{ordered[index - 1].Name}」吗？(Y/N)：");
+                        ScriptInstance removing = ordered[index - 1];
+                        string? answer = Ui.Prompt($"确定删除脚本实例「{removing.Name}」吗？(Y/N)：");
                         if (Ui.IsYes(answer))
                         {
-                            string removedName = ordered[index - 1].Name;
-                            if (Ui.TrySave(() =>
+                            string removedName = removing.Name;
+                            // v0.7.4（KN-05）：运行中脚本拒绝删除，避免删掉正在使用的配置现场。
+                            if (DispatchCenter.IsScriptRunning(removing))
                             {
-                                ctx.Scripts.Remove(ordered[index - 1]);
+                                Console.WriteLine("[错误] 脚本正在运行中，无法删除。");
+                            }
+                            else if (Ui.TrySave(() =>
+                            {
+                                // v0.7.4（KN-05）：与 Web 端删除对齐——清理 data 目录、释放门禁与跨进程互斥体
+                                // （此前仅移除列表，data 残留 + 静态字典条目随增删累积）。
+                                SemaphoreSlim gate = ScriptConfigGate.Get(removing.Id);
+                                if (!gate.Wait(0))
+                                {
+                                    throw new InvalidOperationException("脚本正在运行或编辑配置中，无法删除");
+                                }
+                                try
+                                {
+                                    UserConfigManager.RemoveScriptData(removing.Id);
+                                }
+                                finally
+                                {
+                                    gate.Release();
+                                }
+                                ctx.Scripts.Remove(removing);
                                 DataStore.SaveScripts(ctx.Scripts);
+                                ScriptConfigGate.Remove(removing.Id);
+                                ConfigSwapPrimitives.RemoveMutex(removing.Id);
                             }, "脚本实例"))
                             {
                                 Audit.Log(Audit.Manage, "删除脚本实例", removedName);

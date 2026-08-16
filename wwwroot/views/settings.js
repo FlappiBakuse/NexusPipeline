@@ -109,7 +109,13 @@ export async function restartConfirmed() {
 function pollRestart(candidates, deadline) {
   schedule(async () => {
     const headers = {};
-    const token = localStorage.getItem("nexus-token");
+    // v0.7.4（KN-45）：存储不可用（隐私模式）时按无令牌处理，避免 getItem 抛异常中断重启轮询。
+    let token = null;
+    try {
+      token = localStorage.getItem("nexus-token");
+    } catch {
+      token = null;
+    }
     if (token) headers["Authorization"] = "Bearer " + token;
     for (const port of candidates) {
       try {

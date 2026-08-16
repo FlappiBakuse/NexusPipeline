@@ -64,6 +64,9 @@ document.addEventListener("click", event => {
   }
   const target = event.target.closest("[data-action]");
   if (!target) return;
+  // v0.7.4（KN-44）：原生 select 的 data-action 由 change 事件唯一分发——select 上点击（打开/选项变更）同样会
+  // 触发本 click 委托，与 change 委托叠加即双触发（当前调用点幂等未暴露，属隐患模式）。
+  if (target.matches("select") || target.matches("option")) return;
   const handler = allActions[target.dataset.action];
   if (handler) handler(target, event);
   // v0.6.7+：切换按钮点击后同步「：开/：关」文字（handler 已移除节点时 closest 为 null 自动跳过）
@@ -89,15 +92,37 @@ window.addEventListener("resize", () => {
 window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   if (!(await ensureAccessToken())) return;
+  updateLocalAddr();
   initParticles();
   await loadLimits();
   showWarning();
   route();
 });
 
+/** v0.7.4（KN-47）：侧栏服务地址按实际监听端口/访问主机显示（此前硬编码 127.0.0.1，端口漂移或远程访问时不准确）。 */
+async function updateLocalAddr() {
+  const el = document.getElementById("local-addr");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    const data = await res.json();
+    const port = data.actualPort || data.webPort || "";
+    el.textContent = port ? `服务 · ${location.hostname}:${port}` : "服务";
+  } catch {
+    el.textContent = "服务";
+  }
+}
+
 /** 远程访问令牌层：API 需要令牌（401 / 探测超时）时显示输入界面；本地访问自动豁免。认证先行，令牌层出现后不再执行后续初始化。 */
 async function ensureAccessToken() {
-  if (localStorage.getItem("nexus-token")) return true;
+  // v0.7.4（KN-45）：存储不可用（隐私模式/禁用存储）时按「无已存令牌」处理，避免 getItem 抛异常中断初始化白屏。
+  let storedToken = null;
+  try {
+    storedToken = localStorage.getItem("nexus-token");
+  } catch {
+    storedToken = null;
+  }
+  if (storedToken) return true;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
@@ -139,12 +164,19 @@ function showTokenPrompt() {
       errorEl.textContent = "请输入令牌";
       return;
     }
-    localStorage.setItem("nexus-token", value);
+    try {
+      localStorage.setItem("nexus-token", value);
+    } catch {
+      // 存储不可用：令牌仅本次请求使用，刷新后需重输。
+    }
     const check = await fetch("/api/status", { headers: { Authorization: "Bearer " + value } });
     if (check.ok) {
       location.reload();
     } else {
-      localStorage.removeItem("nexus-token");
+      try {
+        localStorage.removeItem("nexus-token");
+      } catch {
+      }
       errorEl.textContent = "令牌无效，请重试";
     }
   });

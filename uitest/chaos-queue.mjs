@@ -364,8 +364,10 @@ function archivedLogWritten(userName, hist) {
   const day = (rec.startTime || "").slice(0, 10);
   try {
     // 服务端磁盘日志带 UTF-8 BOM（既有约定，读测试 JSON 前先 .replace(/^\uFEFF/, "")），须剥离再匹配首行
-    const first = fs.readFileSync(path.join(runtimeDir, "history", day, lf), "utf8").replace(/^\uFEFF/, "").split(/\r?\n/)[0] || "";
-    return first.startsWith("DBG seed=") || first.startsWith("TASK 1");
+    const lines = fs.readFileSync(path.join(runtimeDir, "history", day, lf), "utf8").replace(/^\uFEFF/, "").split(/\r?\n/);
+    // v0.7.4：尝试日志段自「开始」头起算（KN-25 首尾对称），归档日志首行为「===== 第 N/M 次尝试 开始 =====」头，实际内容自第二行起。
+    const contentLine = (lines[0] || "").startsWith("===== 第") ? lines[1] || "" : lines[0] || "";
+    return contentLine.startsWith("DBG seed=") || contentLine.startsWith("TASK 1");
   } catch {
     return false;
   }

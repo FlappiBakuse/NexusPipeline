@@ -11,19 +11,6 @@ internal enum LogLevel
 
 internal static class LogLevelUtil
 {
-    public static string ToSetting(this LogLevel level)
-    {
-        return level switch
-        {
-            LogLevel.Debug => "debug",
-            LogLevel.Info => "info",
-            LogLevel.Warn => "warn",
-            LogLevel.Error => "error",
-            LogLevel.Fatal => "fatal",
-            _ => "info",
-        };
-    }
-
     public static LogLevel Parse(string? value)
     {
         return value?.Trim().ToLowerInvariant() switch

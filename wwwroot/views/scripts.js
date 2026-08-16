@@ -12,8 +12,6 @@ let scriptDraft = null;
 let scriptPage = 1;
 const SCRIPT_PAGE_SIZE = 20;
 
-const FALLBACK_ICON = scriptFallbackIcon;
-
 function specializedPlugins() {
   return (state.plugins || []).filter(p => p.kind === "specialized" && p.enabled);
 }
@@ -89,7 +87,7 @@ export async function pageScripts(token) {
     : `<section class="card"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
         <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
-        <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(FALLBACK_ICON)}">
+        <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(scriptFallbackIcon)}">
         <div class="script-main">
           <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
           <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>

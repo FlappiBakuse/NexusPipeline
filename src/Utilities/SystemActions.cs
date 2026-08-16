@@ -187,7 +187,8 @@ internal static class SystemActions
             }
             if (targets.Count == 0)
             {
-                Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
+                // v0.7.4（KN-28）：根进程仍存在但树为空——可能被排除进程名（游戏）跳过，文案不再误称「PID 已不存在」。
+                Logger.Info($"进程树无需清理（PID {pid} 下无待清理进程，或进程与排除名单同名被跳过）。");
             }
             else if (killed == targets.Count)
             {
