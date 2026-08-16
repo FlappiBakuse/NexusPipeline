@@ -6,7 +6,7 @@ import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCou
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>暂无运行任务</strong>当前没有正在运行的脚本或调度队列。</div>';
-  return `<div class="table-scroll"><table class="data-table"><thead><tr><th>任务</th><th>类型</th><th>模式</th><th>进度</th><th>状态</th></tr></thead><tbody>
+  return `<div class="table-scroll"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">模式</th><th scope="col">进度</th><th scope="col">状态</th></tr></thead><tbody>
     ${running.map(record => `<tr>
       <td><strong>${esc(record.targetName)}</strong></td>
       <td>${record.kind === "queue" ? "调度队列" : "脚本实例"}</td>
@@ -61,7 +61,7 @@ export async function pageDashboard(token) {
   const stats = status.notifyStats || {};
   if (!document.querySelector('[data-testid="stat-scripts"]')) {
     render(`<div class="page-head">
-      <div><div class="eyebrow">OPERATIONS OVERVIEW</div><h2>仪表盘</h2><p class="page-kicker">查看当前运行状态、调度概览和通知能力。</p></div>
+      <div><div class="eyebrow">运行概览</div><h2>仪表盘</h2><p class="page-kicker">查看当前运行状态、调度概览和通知能力。</p></div>
     </div>
     ${statGridMarkup(status, next)}
     <div id="system-action-area">${systemActionCard(status.systemAction)}</div>

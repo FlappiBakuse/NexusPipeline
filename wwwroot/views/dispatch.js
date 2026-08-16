@@ -3,16 +3,19 @@ import { $, $$ } from "../core/dom.js";
 import { systemActionCard } from "../core/forms.js";
 import { esc } from "../core/format.js";
 import { isCurrent, schedule, state } from "../core/state.js";
-import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast } from "../core/ui.js";
+import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
+
+/** 单个运行任务卡片 HTML（新任务插入用；已有任务走 updateRunningItem 局部更新，不重建 DOM）。 */
+function runningItemMarkup(record) {
+  return `<div class="list-item-head"><div><div class="list-item-title"><strong>${esc(record.targetName)}</strong><span class="badge ${record.kind === "queue" ? "blue" : "muted"}">${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span class="badge muted">${record.mode === "auto" ? "自动" : "手动"}</span>${record.kind === "queue" ? `<span class="muted done-count">${record.doneTasks}/${record.totalTasks} 项</span>` : ""}</div></div><button class="sm danger" type="button" data-action="cancel-run" data-id="${record.id}">取消</button></div>
+    <div class="qk-row">当前：${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</div>
+    <div class="progress-line"><div data-progress="0"></div></div>
+    <pre class="logbox run-log">${esc((record.logTail || []).join("\n")) || "(暂无日志输出)"}</pre>`;
+}
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>当前没有正在运行的任务</strong>选择脚本或队列后，可以在这里查看实时状态。</div>';
-  return running.map(record => `<article class="list-item running-item">
-    <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(record.targetName)}</strong><span class="badge ${record.kind === "queue" ? "blue" : "muted"}">${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span class="badge muted">${record.mode === "auto" ? "自动" : "手动"}</span>${record.kind === "queue" ? `<span class="muted">${record.doneTasks}/${record.totalTasks} 项</span>` : ""}</div></div><button class="sm danger" type="button" data-action="cancel-run" data-id="${record.id}">取消</button></div>
-    <div class="qk-row">当前：${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</div>
-    <div class="progress-line"><div data-progress="${record.kind === "queue" && record.totalTasks ? Math.round(record.doneTasks / record.totalTasks * 100) : record.currentAttempt ? Math.round(record.currentAttempt / record.currentMaxAttempts * 100) : 0}"></div></div>
-    <pre class="logbox run-log">${esc((record.logTail || []).join("\n")) || "(暂无日志输出)"}</pre>
-  </article>`).join("");
+  return running.map(record => `<article class="list-item running-item" data-run-id="${esc(record.id)}">${runningItemMarkup(record)}</article>`).join("");
 }
 
 function applyProgress(root = document) {
@@ -21,13 +24,68 @@ function applyProgress(root = document) {
   });
 }
 
+/** 判定日志框是否贴近底部（贴底时跟随自动滚动；用户上翻阅读时不打扰）。 */
+function nearBottom(element) {
+  return element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+}
+
+/** 局部更新单个运行任务（v0.7.3，KN-16）：只更新状态行/进度/日志文本，不重建 DOM——保留取消按钮焦点与日志选区。 */
+function updateRunningItem(el, record) {
+  const qk = el.querySelector(".qk-row");
+  if (qk) qk.textContent = `当前：${record.currentScriptName || "-"} ${record.currentStatus || ""} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次`;
+  const counter = el.querySelector(".done-count");
+  if (counter && record.kind === "queue") counter.textContent = `${record.doneTasks}/${record.totalTasks} 项`;
+  const prog = el.querySelector("[data-progress]");
+  if (prog) {
+    prog.dataset.progress = String(record.kind === "queue" && record.totalTasks
+      ? Math.round(record.doneTasks / record.totalTasks * 100)
+      : record.currentAttempt ? Math.round(record.currentAttempt / record.currentMaxAttempts * 100) : 0);
+    prog.style.width = `${Math.max(0, Math.min(100, Number(prog.dataset.progress) || 0))}%`;
+  }
+  const logbox = el.querySelector(".run-log");
+  if (logbox) {
+    const stick = nearBottom(logbox);
+    const text = (record.logTail || []).join("\n");
+    logbox.textContent = text || "(暂无日志输出)";
+    if (stick) logbox.scrollTop = logbox.scrollHeight;
+  }
+}
+
+/** 运行面板局部更新（v0.7.3，KN-16）：按 runId 增删改任务卡片，标题计数经 aria-live 播报，替代整块 innerHTML。 */
 function updateRunning(status) {
   const panel = $("#dispatch-running");
   if (!panel) return;
   const running = status.running || [];
-  panel.innerHTML = `<div class="section-heading"><h3>正在运行（${running.length}）</h3><span class="muted">每 2 秒更新</span></div>${runningMarkup(running)}`;
-  applyProgress(panel);
-  $$(".run-log", panel).forEach(log => { log.scrollTop = log.scrollHeight; });
+  const head = panel.querySelector(".section-heading h3");
+  if (head) head.textContent = `正在运行（${running.length}）`;
+  const list = $("#running-list", panel);
+  if (!list) return;
+  const existing = new Map();
+  list.querySelectorAll(".running-item").forEach(item => existing.set(item.dataset.runId, item));
+  const seen = new Set();
+  const empty = list.querySelector(".empty");
+  running.forEach(record => {
+    seen.add(record.id);
+    const prev = existing.get(record.id);
+    if (prev) {
+      updateRunningItem(prev, record);
+    } else {
+      const el = document.createElement("article");
+      el.className = "list-item running-item";
+      el.dataset.runId = record.id;
+      el.innerHTML = runningItemMarkup(record);
+      applyProgress(el);
+      if (empty) empty.remove();
+      list.appendChild(el);
+    }
+  });
+  existing.forEach((item, id) => { if (!seen.has(id)) item.remove(); });
+  if (!running.length && !list.querySelector(".empty")) {
+    const emptyEl = document.createElement("div");
+    emptyEl.className = "empty";
+    emptyEl.innerHTML = '<strong>当前没有正在运行的任务</strong>选择脚本或队列后，可以在这里查看实时状态。';
+    list.appendChild(emptyEl);
+  }
 }
 
 function updateSystemAction(status) {
@@ -45,9 +103,9 @@ export async function pageDispatch(token) {
   catch (error) { render(`<div class="empty"><strong>加载调度中心失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("dispatch", token)) return;
   state.scripts = scripts; state.queues = queues;
-  render(`<div class="page-head"><div><div class="eyebrow">RUN CONTROL</div><h2>调度中心</h2><p class="page-kicker">手动启动任务，观察实时输出并及时取消运行。</p></div></div>
+  render(`<div class="page-head"><div><div class="eyebrow">调度中心</div><h2>调度中心</h2><p class="page-kicker">手动启动任务，观察实时输出并及时取消运行。</p></div></div>
     <div id="system-action-area"></div>
-    <section class="card" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div>${runningMarkup(status.running || [])}</section>
+    <section class="card" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
     <div class="dispatch-cards">
     <section class="card"><div class="section-heading"><h3>手动执行脚本实例</h3><span class="muted">启用用户将自动依次运行</span></div><div class="form-grid dispatch-controls dispatch-script-controls"><div><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}">${esc(script.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-script">执行</button></div></div></section>
     <section class="card"><div class="section-heading"><h3>手动执行调度队列</h3><span class="muted">按队列内顺序运行</span></div><div class="form-grid dispatch-controls dispatch-queue-controls"><div><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div><div class="control-action"><button type="button" data-action="dispatch-queue">执行</button></div></div></section>
@@ -84,7 +142,7 @@ export async function cancelRun(runId) {
 }
 
 export const actions = {
-  "dispatch-script": () => dispatchScript(),
-  "dispatch-queue": () => dispatchQueue(),
+  "dispatch-script": target => withBusy(target, () => dispatchScript()),
+  "dispatch-queue": target => withBusy(target, () => dispatchQueue()),
   "cancel-run": target => cancelRun(target.dataset.id),
 };

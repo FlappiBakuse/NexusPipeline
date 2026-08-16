@@ -57,6 +57,11 @@ function route() {
 }
 
 document.addEventListener("click", event => {
+  // v0.7.3+（P1-3）：移动端导航遮罩（含铺满遮罩的关闭按钮）点击即关闭。
+  if (event.target.closest(".nav-backdrop")) {
+    setNavOpen(false);
+    return;
+  }
   const target = event.target.closest("[data-action]");
   if (!target) return;
   const handler = allActions[target.dataset.action];

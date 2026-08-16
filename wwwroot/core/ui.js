@@ -13,6 +13,9 @@ export function render(html) {
   view.innerHTML = html;
   initAutoScroll(view);
   syncAllModeToggles(view);
+  // v0.7.3+（P1-2）：路由渲染后焦点移到主内容区（tabindex=-1 的 #view），键盘用户切页后从页面开头继续导航；
+  // preventScroll 避免打断视口位置。
+  view.focus({ preventScroll: true });
 }
 
 /** 切换按钮文字状态同步（v0.6.7+）：.mode-toggle 按钮文字追加「：开/：关」后缀，让用户直接明了开关状态。
@@ -152,6 +155,11 @@ export function setNavOpen(open) {
   document.body.classList.toggle("nav-open", open);
   const sidebar = $("#sidebar");
   if (sidebar) sidebar.setAttribute("aria-hidden", String(!open && window.innerWidth <= 820));
+  // v0.7.3+（P1-3）：菜单按钮展开态反馈（aria-expanded/aria-controls）。
+  $$('[data-action="open-nav"]').forEach(button => {
+    button.setAttribute("aria-expanded", String(open));
+    button.setAttribute("aria-controls", "sidebar");
+  });
 }
 
 /** 取消完成操作倒计时（v0.6.4+ 全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
@@ -190,4 +198,51 @@ export function cycleTheme() {
   const current = document.body.dataset.theme || "system";
   applyTheme(current === "system" ? "light" : current === "light" ? "dark" : "system");
   toast(`主题：${document.body.dataset.theme === "system" ? "跟随系统" : document.body.dataset.theme === "light" ? "浅色" : "深色"}`);
+}
+
+/** 字段内联错误（v0.7.3+，P2-1）：高亮 + 字段旁错误文字（role=alert）+ aria-invalid + 聚焦；代替仅 toast 提示。 */
+export function setFieldError(id, message) {
+  const element = $(`#${id}`);
+  if (!element) return;
+  element.classList.add("field-error");
+  element.setAttribute("aria-invalid", "true");
+  const wrap = element.closest("div");
+  if (wrap) {
+    let err = wrap.querySelector(".field-error-text");
+    if (!err) {
+      err = document.createElement("span");
+      err.className = "field-error-text";
+      err.setAttribute("role", "alert");
+      wrap.appendChild(err);
+    }
+    err.textContent = message;
+  }
+  element.focus();
+}
+
+/** 清除字段内联错误（无错误时无操作）。 */
+export function clearFieldError(id) {
+  const element = $(`#${id}`);
+  if (!element) return;
+  element.classList.remove("field-error");
+  element.removeAttribute("aria-invalid");
+  element.closest("div")?.querySelector(".field-error-text")?.remove();
+}
+
+/** 批量清除（弹窗关闭/保存成功后调用，防止残留高亮）。 */
+export function clearFieldErrors(ids) {
+  ids.forEach(id => clearFieldError(id));
+}
+
+/** 提交按钮忙碌态（v0.7.3+，P2-2）：请求期间禁用按钮并显示 spinner，防止重复提交；按钮随弹窗销毁时安全。 */
+export async function withBusy(button, fn) {
+  if (!button || button.disabled) return;
+  button.disabled = true;
+  button.classList.add("busy");
+  try {
+    await fn();
+  } finally {
+    button.disabled = false;
+    button.classList.remove("busy");
+  }
 }

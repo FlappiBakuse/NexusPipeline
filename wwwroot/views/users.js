@@ -5,7 +5,7 @@ import { pageHeader, valueField } from "../core/forms.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
-import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 
 let userModalScriptId = "";
@@ -35,7 +35,7 @@ export async function pageScriptUsers(scriptId, token) {
   const usersMarkup = users.length ? `<section class="card dnd-list">${pageItems.map((user, pageIndex) => {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
     return `<article class="user-card" data-dnd-id="${esc(user.name)}">
-    <span class="drag-handle" aria-hidden="true" title="拖拽排序">⋮⋮</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
     <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
       <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
       <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
@@ -48,7 +48,7 @@ export async function pageScriptUsers(scriptId, token) {
     </div>
   </article>`;
   }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
-  render(pageHeader("SCRIPT USERS", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
+  render(pageHeader("用户管理", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
   restoreEditSessionCard(scriptId);
   wireUserDnd(scriptId);
@@ -112,7 +112,8 @@ export function openUserModal(scriptId, userName = "") {
 
 export async function saveUser() {
   const name = $dom("#um-name")?.value.trim();
-  if (!name) { toast("请填写用户名", "error"); $dom("#um-name")?.focus(); return; }
+  if (!name) { setFieldError("um-name", "请填写用户名"); toast("请填写用户名", "error"); return; }
+  clearFieldError("um-name");
   const payload = { name, enabled: $dom("#um-enabled")?.getAttribute("aria-pressed") === "true", preRunScript: $dom("#um-pre").value.trim(), preRunOnceOnly: $dom("#um-pre-once")?.getAttribute("aria-pressed") === "true", postRunScript: $dom("#um-post").value.trim(), postRunOnFinalOnly: $dom("#um-post-final")?.getAttribute("aria-pressed") === "true" };
   try {
     const base = "/api/scripts/" + userModalScriptId + "/users";
@@ -154,11 +155,11 @@ export const actions = {
   "manage-users": target => { location.hash = "#/scripts/" + target.dataset.id + "/users"; },
   "open-user-modal": target => openUserModal(target.dataset.id),
   "edit-user": target => openUserModal(target.dataset.id, target.dataset.name),
-  "save-user": () => saveUser(),
+  "save-user": target => withBusy(target, () => saveUser()),
   "delete-user": target => deleteUser(target.dataset.id, target.dataset.name),
-  "confirm-delete-user": target => confirmDeleteUser(target.dataset.id, target.dataset.name),
+  "confirm-delete-user": target => withBusy(target, () => confirmDeleteUser(target.dataset.id, target.dataset.name)),
   "edit-user-config": target => editUserConfig(target.dataset.id, target.dataset.name),
-  "edit-config-done": target => editConfigAction(target.dataset.id, target.dataset.name, "done"),
-  "edit-config-cancel": target => editConfigAction(target.dataset.id, target.dataset.name, "cancel"),
+  "edit-config-done": target => withBusy(target, () => editConfigAction(target.dataset.id, target.dataset.name, "done")),
+  "edit-config-cancel": target => withBusy(target, () => editConfigAction(target.dataset.id, target.dataset.name, "cancel")),
   "toggle-um-flag": target => { const btn = $dom("#" + target.dataset.flag); if (btn) btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true"); },
 };

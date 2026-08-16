@@ -74,6 +74,26 @@ export function initDndList(container, { onDrop } = {}) {
     s.item.style.transform = "";
     s.item.style.zIndex = "";
   });
+
+  // v0.7.3+（P2-3）：键盘替代——焦点在 .drag-handle 上时按 ↑/↓ 移动该项并提交新顺序
+  // （拖拽对键盘用户不可用，此为其等价的键控重排）。
+  container.addEventListener("keydown", event => {
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    const handle = event.target?.closest?.(".drag-handle");
+    if (!handle || !container.contains(handle)) return;
+    const item = handle.closest("[data-dnd-id]");
+    if (!item) return;
+    event.preventDefault();
+    const items = Array.from(container.querySelectorAll("[data-dnd-id]"));
+    const index = items.indexOf(item);
+    const target = event.key === "ArrowUp" ? index - 1 : index + 1;
+    if (target < 0 || target >= items.length) return;
+    container.insertBefore(item, event.key === "ArrowUp" ? items[target] : items[target].nextSibling);
+    const ids = Array.from(container.querySelectorAll("[data-dnd-id]"))
+      .map(el => el.dataset.dndId)
+      .filter(Boolean);
+    onDrop?.(ids, item.dataset.dndId);
+  });
 }
 
 /** 计算插入位置：鼠标越过哪一项的垂直中点，就插到它前面；没有则插到末尾。 */

@@ -30,11 +30,11 @@
 | KN-09 | **日志截断后立即写入的内容漏判窗口**：`ReadNew` 长度检查在 `Length < position` 时把 position 置为新尾——若截断后、下次读取前已写入新内容，截断后新写内容不进入判定输入（失败关键字可能漏判） | `src/Services/LogMonitor.cs:138-143` | 随版 |
 | KN-10 | **明文旧密钥直接回显**：settings.json 中未加密（旧版明文或手工编辑）的 Webhook 地址/密钥在 GET /api/settings 时明文完整返回，违反「已设置的密钥不回显明文」契约 | `src/Web/ApiSettingsHandler.cs:279-294` | ✅ v0.7.2 已修复（非空一律占位符，判定统一） |
 | KN-11 | **Python 判断脚本尾行 JSON 丢失竞态**：`BeginOutputReadLine` + `WaitForExitAsync` 时进程退出瞬间异步输出事件可能未投递完，契约规定的 stdout 尾行 JSON 有丢失风险（误判「无合法输出」） | `src/Services/JudgeScriptRunner.cs:403-420` | 随版 |
-| KN-12 | **modal 焦点陷阱空白点击后失效**：点击弹窗内非焦点区域后 `activeElement` 落到 body，Tab 焦点逃逸到弹窗外（locked 弹窗同样受影响）；建议 mask 补 focusout 兜底 | `wwwroot/core/modal.js:45-64` | 随版 |
-| KN-13 | **limits 警告层无障碍缺失**：`role="alertdialog"` 遮罩无 `aria-labelledby`、无初始焦点、无焦点陷阱、无焦点恢复（不走 modal 组件） | `wwwroot/views/limits.js:32-48` | 随版 |
-| KN-14 | **触控目标 < 40px**：基础按钮 38px、`.sm` 按钮 32px（≤600px 才升 40px）、侧栏主题按钮 32px、drag-handle 36px，违反「触控目标不得小于 40px」约束 | `wwwroot/style.css:119/180/186/192/255/391` | 随版 |
-| KN-15 | **style.css 硬编码色值 + uppercase eyebrow**：`.badge.*` rgba 背景、`.field-error` box-shadow、`color:#fff` 未走 CSS 变量；`.nav-caption` 与 `.eyebrow` 大写英文小字违反 Notion 基线 | `wwwroot/style.css:111/129/186/191/220/242-245`、`wwwroot/index.html:36` | 随版 |
-| KN-16 | **dispatch 面板轮询整块替换打断交互**：2 秒轮询整块替换运行面板 innerHTML，打断用户滚动/选中日志文本（dashboard 已改局部更新，dispatch 未同步） | `wwwroot/views/dispatch.js:24-31` | 随版 |
+| KN-12 | **modal 焦点陷阱空白点击后失效**：点击弹窗内非焦点区域后 `activeElement` 落到 body，Tab 焦点逃逸到弹窗外（locked 弹窗同样受影响）；建议 mask 补 focusout 兜底 | `wwwroot/core/modal.js:45-64` | ✅ v0.7.3 已修复（mask focusout 兜底拉回） |
+| KN-13 | **limits 警告层无障碍缺失**：`role="alertdialog"` 遮罩无 `aria-labelledby`、无初始焦点、无焦点陷阱、无焦点恢复（不走 modal 组件） | `wwwroot/views/limits.js:32-48` | ✅ v0.7.3 已修复（四件套补齐 + Esc 关闭） |
+| KN-14 | **触控目标 < 40px**：基础按钮 38px、`.sm` 按钮 32px（≤600px 才升 40px）、侧栏主题按钮 32px、drag-handle 36px，违反「触控目标不得小于 40px」约束 | `wwwroot/style.css:119/180/186/192/255/391` | ✅ v0.7.3 已修复（.sm/drag-handle/侧栏按钮统一 ≥40px） |
+| KN-15 | **style.css 硬编码色值 + uppercase eyebrow**：`.badge.*` rgba 背景、`.field-error` box-shadow、`color:#fff` 未走 CSS 变量；`.nav-caption` 与 `.eyebrow` 大写英文小字违反 Notion 基线 | `wwwroot/style.css:111/129/186/191/220/242-245`、`wwwroot/index.html:36` | ✅ v0.7.3 已修复（badge 背景/field-error 环改 CSS 变量；uppercase 移除、8 处英文 eyebrow 中文化） |
+| KN-16 | **dispatch 面板轮询整块替换打断交互**：2 秒轮询整块替换运行面板 innerHTML，打断用户滚动/选中日志文本（dashboard 已改局部更新，dispatch 未同步） | `wwwroot/views/dispatch.js:24-31` | ✅ v0.7.3 已修复（按 runId 增删改局部更新 + 贴底才自动滚 + 标题 aria-live） |
 
 ## 低优先级（死代码 / 冗余 / 文档）
 
@@ -80,5 +80,12 @@
 | KN-54 | 队列完成操作在任务失败（非取消）时仍执行 exit/sleep/reboot/shutdown——语义已与用户确认保留，待文档化说明 | `src/Services/DispatchCenter.cs:573-618` | ✅ v0.7.1 已文档化（README + DESIGN，语义保留） |
 | KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` | v0.7.x（修复需兼容旧文件读取，收益低） |
 | KN-56 | CLI `Ui.PromptEdit`/`PromptEditMasked` 用 `Console.ReadKey`，stdin 重定向（管道/自动化）时抛 `InvalidOperationException` 未处理异常直接崩溃（2026-08-15 KN-52 复现时发现） | `src/Cli/Ui.cs:29-103` | ✅ v0.7.1 已修复（重定向下降级 `ReadLine`：空行=不变） |
+| KN-58 | 表单校验错误仅 toast+高亮，无内联错误文字、无 `aria-invalid`、无修复指引 | `wwwroot/views/scripts.js:369-442`、`users.js:115`、`queues.js:223-235` | ✅ v0.7.3 已修复（`setFieldError`/`clearFieldError`：内联文字 role=alert + aria-invalid + 聚焦） |
+| KN-59 | 提交按钮无请求中忙碌态——保存/执行/删除请求期间不禁用、无 spinner，重复点击可双提交 | `wwwroot/core/api.js`（无状态钩子） | ✅ v0.7.3 已修复（`withBusy`：请求期间禁用 + spinner，7 个视图提交类 actions 全覆盖） |
+| KN-60 | 拖拽排序无键盘替代——脚本/队列/用户/弹窗定时/弹窗任务 5 处列表对键盘用户不可用 | `wwwroot/core/dnd.js:16-77` | ✅ v0.7.3 已修复（drag-handle 可聚焦 + ↑/↓ 键控重排 + focus-visible 环） |
+| KN-61 | 路由切换焦点不重置——`#view` 已备 `tabindex=-1` 但从未 focus，键盘用户切页后焦点留在 body | `wwwroot/app.js:42-57` | ✅ v0.7.3 已修复（`render()` 统一 `view.focus({ preventScroll: true })`） |
+| KN-62 | 分页/菜单/表格 ARIA 缺失：pager 当前页无 `aria-current`；菜单按钮无 `aria-expanded/aria-controls`；表格 `th` 无 `scope`；`nav-backdrop` 为可点击 div | `wwwroot/core/pager.js:9`、`index.html:32-35`、`views/dashboard.js:9` 等 | ✅ v0.7.3 已修复（aria-current + aria-expanded/controls + th scope + backdrop 改 button + panel-toggle aria-controls） |
+| KN-63 | 交互态 hover 反馈缺失：`.list-item`（调度运行行/任务行）、`.plugin-card`、`.timeset-card` 无 hover 背景（Notion 基线要求）；plugin-card 描述行超长可溢出 | `wwwroot/style.css:232/309` | ✅ v0.7.3 已修复（hover 背景补齐 + p-ver line-clamp 2） |
+| KN-64 | 队列任务下拉 `<select data-task-idx>` 无 label/aria-label（全库唯一裸控件） | `wwwroot/views/queues.js:165` | ✅ v0.7.3 已修复（aria-label「第 N 个任务：脚本实例」） |
 
 > 注：`docs/DEVELOPMENT.md`、`docs/ASSESSMENT.md` 已于 2026-08-15 文档体系重组中重构/更新（KN-48/KN-49/KN-50 涉及项在重组时一并修正，台账状态以实际为准）。

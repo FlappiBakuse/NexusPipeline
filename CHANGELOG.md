@@ -2,6 +2,31 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.3（Pre-release）
+
+### 新增（前端设计全面重构，对照 Web Interface Guidelines）
+
+- **内联表单错误**（KN-58）：`setFieldError`/`clearFieldError` 通用组件——校验失败字段内联错误文字（`role=alert`）+ `aria-invalid` + 聚焦，替代仅 toast；覆盖脚本/用户/队列保存全部校验路径。
+- **提交按钮忙碌态**（KN-59）：`withBusy` 通用组件——保存/执行/删除/重启/完成编辑等请求期间禁用按钮 + spinner（防重复提交），7 个视图提交类 actions 全覆盖。
+- **拖拽键盘替代**（KN-60）：drag-handle 改为可聚焦（`role=button` + `tabindex=0` + aria-label），聚焦后 ↑/↓ 键控重排并提交（脚本/队列/用户/弹窗定时/弹窗任务 5 处自动生效）+ focus-visible 焦点环。
+- **dispatch 运行面板局部更新**（KN-16）：2 秒轮询改为按 runId 增删改任务卡片（不重建 DOM，保留取消按钮焦点与日志选区）；日志仅「贴底时」自动滚动（用户上翻阅读不再被打断）；标题计数 aria-live 播报。
+- **limits 警告层无障碍四件套**（KN-13）：`aria-labelledby` + 初始焦点 + 焦点陷阱 + 关闭后焦点恢复 + Esc 关闭。
+- **ARIA 全量补全**（KN-62）：pager 当前页 `aria-current="page"`；移动端菜单按钮 `aria-expanded/aria-controls`；三处表格 `th scope="col"`；`nav-backdrop` 由可点击 div 改 `<button>`（点击遮罩关闭保留）；panel-toggle 补 `aria-controls`；队列任务下拉补 `aria-label`（KN-64）。
+- **路由焦点重置**（KN-61）：视图渲染后统一 `#view.focus({ preventScroll: true })`，键盘用户切页从内容区继续导航。
+- **交互态与文案**：`.list-item`/`.plugin-card`/`.timeset-card` hover 背景补齐（KN-63）、plugin-card 描述 line-clamp 2 防溢出；8 处英文大写 eyebrow 中文化 + `text-transform: uppercase` 移除（KN-15）；触控目标统一 ≥40px（`.sm`/drag-handle/侧栏主题按钮，KN-14）；modal 焦点陷阱 focusout 兜底（KN-12）；`img` 显式尺寸、统计数字 `tabular-nums`、placeholder `…` 规范化、`.fs-item` 死代码清理。
+- **设置页自动保存（用户需求）**：取消「保存设置」按钮（含卡片内分隔横线）——四个切换开关点击即存、输入/下拉失焦即存、生成令牌即存；保存串行化防并发乱序、成功静默更新内存状态（不整页重渲染）、失败 toast；远程访问开关切换后局域网地址列表局部刷新。
+- **重启服务按钮移位（用户需求）**：移至页面右上角（同调度队列页新建按钮位置，主色样式），`data-testid="restart-service"` 保留；点击前等待挂起的自动保存完成，移除「端口未保存拒绝重启」校验（自动保存已即时落库）。
+- **分页按需显示（用户需求）**：脚本/队列/历史/用户分页条仅在超过一页时渲染（`pagerMarkup` 单页返回空）。
+
+### 测试
+
+- e2e 全量 **76**、单测 **97** 不变（纯前端改动，用例数与断言数无增减）。
+- 加速档全量回归：e2e 76/76（4.0m）+ 单测 97/97 全绿（2026-08-16）。
+
+### 变更
+
+- 版本号 0.7.3。
+
 ## v0.7.2（Pre-release）
 
 ### 修复
