@@ -243,4 +243,65 @@ public class ConfigSwapSyncTests
         }
         Assert.False(ConfigSwapSession.ValidForSync(cfg, store));
     }
+
+    /* ---------------- 内容有效性探测（v0.7.6 评估加强：半写/损坏不入库） ---------------- */
+
+    [Fact]
+    public void ValidForSync_BrokenJsonFile_Skips()
+    {
+        string broken = Path.Combine(MakeTempDir(), "cfg.json");
+        File.WriteAllText(broken, "{\"tasks\":[{\"id\":\"t1\",\"enabled\":true");
+        Assert.False(ConfigSwapSession.ValidForSync(broken, MakeTempDir()));
+
+        string valid = Path.Combine(MakeTempDir(), "cfg.json");
+        File.WriteAllText(valid, "{\"tasks\":[{\"id\":\"t1\",\"enabled\":true}]}");
+        Assert.True(ConfigSwapSession.ValidForSync(valid, MakeTempDir()));
+
+        string nonJson = Path.Combine(MakeTempDir(), "count.txt");
+        File.WriteAllText(nonJson, "42");
+        Assert.True(ConfigSwapSession.ValidForSync(nonJson, MakeTempDir()));
+    }
+
+    [Fact]
+    public void ValidForSync_DirWithBrokenJson_Skips()
+    {
+        string cfg = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg, "ok.txt"), "OK");
+        File.WriteAllText(Path.Combine(cfg, "broken.json"), "{\"a\":");
+        Assert.False(ConfigSwapSession.ValidForSync(cfg, MakeTempDir()));
+    }
+
+    [Fact]
+    public void ValidForSync_DirMixedValidJsonAndText_Passes()
+    {
+        string cfg = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg, "ok.json"), "{\"a\":1}");
+        File.WriteAllText(Path.Combine(cfg, "log.txt"), "plain text");
+        Assert.True(ConfigSwapSession.ValidForSync(cfg, MakeTempDir()));
+    }
+
+    [Fact]
+    public void ValidForSync_EmptyJsonInDir_Skips_ButEmptyOtherFile_Passes()
+    {
+        string cfg = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg, "empty.json"), "");
+        Assert.False(ConfigSwapSession.ValidForSync(cfg, MakeTempDir()));
+
+        string cfg2 = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg2, "empty.txt"), "");
+        File.WriteAllText(Path.Combine(cfg2, "ok.json"), "{}");
+        Assert.True(ConfigSwapSession.ValidForSync(cfg2, MakeTempDir()));
+    }
+
+    [Fact]
+    public void ValidForSync_JsonContentWithoutJsonExtension_Validated()
+    {
+        string cfg = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg, "data.cfg"), "{\"a\":");
+        Assert.False(ConfigSwapSession.ValidForSync(cfg, MakeTempDir()));
+
+        string cfg2 = MakeTempDir();
+        File.WriteAllText(Path.Combine(cfg2, "data.cfg"), "{\"a\":1}");
+        Assert.True(ConfigSwapSession.ValidForSync(cfg2, MakeTempDir()));
+    }
 }

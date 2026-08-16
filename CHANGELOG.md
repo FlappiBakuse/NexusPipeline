@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.7（未发布）
+
+### 修复（v0.7.6 全面评估产出）
+
+- **KN-77 自动更新配置收尾同步内容有效性守护（数据风险）**：此前收尾同步对单文件 config 只查「非空」——脚本被取消/超时强杀瞬间正在写配置（半写/损坏 JSON）时，坏内容直接被镜像进用户快照 store 永久污染，下次运行脚本解析失败。现新增：
+  - **JSON 型内容有效性探测**（`ConfigSwapSession.ValidForSync` → `ContentValidForSync`/`JsonContentValid`）：`.json` 扩展名或内容以 `{`/`[` 开头的文件必须可解析，0 字节 `.json` = 半写坏态，非 JSON 文本不校验，单文件 32MB 上限跳过探测；探测失败 → 跳过整个同步（宁可保留旧快照也不入库坏态）；
+  - **收尾同步同样执行稳定性双采样**（此前仅首次检测）：外部守护进程仍在写配置时跳过本次回写，保留旧快照。
+- **文档全面对齐 v0.7.6**：KNOWN-ISSUES 台账移除全部已修复项（仅留未修复 KN-09/73-76/78/79/82/83 与语义保留 KN-80/81）；ROADMAP 基线更新 v0.7.6 并删除已发布详章；DESIGN 新增「自动更新配置」说明（4.5 节）；README/ARCHITECTURE/DEVELOPMENT/ASSESSMENT 同步 v0.7.6 语义；FLAKE-LEDGER 补本次回归记录。
+
+### 测试
+
+- 单测 **174 → 183 断言**（+9：坏 JSON 文件/目录跳过、混合合法通过、空 .json 跳过但空 txt 通过、无扩展名 JSON 内容校验）；judge-scenarios **140 → 150**（+10：半写 JSON 不入库 + config 还原、合法 JSON 照常入库 + config 还原）。
+- 加速档全量回归全绿：e2e 77/77 + judge 150/0 + chaos 167/0 + 单测 183（2026-08-16）。
+
+### 变更
+
+- 版本号 0.7.7（未发布，版本归属以用户要求为准）。
+
 ## v0.7.6（Pre-release）
 
 ### 功能：自动更新配置（AutoUpdateConfig）

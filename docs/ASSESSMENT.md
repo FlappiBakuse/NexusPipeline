@@ -1,6 +1,7 @@
-# NexusPipeline 全面评估报告（2026-08-14）
+# NexusPipeline 全面评估报告
 
 > 编制背景：v0.6.8 开工前对项目（LLM 全程开发）的一次完整评估，含核心业务/功能板块设计逻辑核对、潜在问题清单与后续开发方向。对齐结论已与用户确认。
+> **评估记录**：① 2026-08-14（v0.6.8 前）首版（下文第 1-6 节）；② 2026-08-16（v0.7.6 交付后）破坏性更新专项评估 + 内容守护修复（第 7 节）。
 
 ## 1. 对齐结论（与用户确认）
 
@@ -44,46 +45,20 @@
 ### 2.7 Web 层
 特性路由（[ApiRoute] 反射扫描）、远程 Bearer 令牌 + Origin 校验（CSRF/rebinding）+ 每 IP 5 次失败锁 60 秒、/api/fs 白名单、请求体 10MB 上限、GET /api/status 审计豁免。
 
-## 3. 潜在问题清单（P1-P16）
+## 3. 潜在问题清单（P1-P16，已归档）
 
-> 全部纳入 v0.6.9 技术债版本（用户确认）。高优先级已在开发清单 v0.6.9 章节登记，此处为完整记录。
-> **处置状态（2026-08-14 v0.6.9 已交付）**：P1-P15 全部完成（详见 CHANGELOG v0.6.9 与开发清单 v0.6.9 章节）；P16 钉钉/飞书签名真机验证延后（需真实机器人环境）。
+> 首版评估产出 P1-P16（高优先 7 项：死字段/自愈语义不一致/依赖环/历史清理并发/判断脚本 stderr/P6 替换时机/P7 完成操作收尾；中优先 9 项：日志截断/时间格式/跨午夜滚动/轻量托盘/token 弹窗/安全加固/占位符文档/审计措辞/Webhook 状态码）。**全部已随 v0.6.9 修复**（详见 CHANGELOG v0.6.9；P16 钉钉/飞书签名真机验证延后至真实机器人环境），本节不再保留条目明细。后续评估产出见 KNOWN-ISSUES.md 台账（仅未修复项）与本节第 7 节（v0.7.6 专项）。
 
-### 高优先级
-| # | 问题 | 位置 |
-|---|---|---|
-| P1 | `QueueTask.UserName` 死字段——队列任务级指定用户名被静默忽略（用户决策：移除） | src/Models/DispatchQueue.cs:22 |
-| P2 | `RecoverIfNeeded`（cache 空→仅清标记）与 `TryRecoverItem`（cache 空→DoRestore）语义不一致，窄窗口下 store 快照固化到 config | src/Services/ConfigSwapSession.cs:290 / :366 |
-| P3 | Utilities→Persistence 反向依赖（Logger→AppPaths），形成环 | src/Utilities/Logger.cs:2 |
-| P4 | HistoryService.Cleanup 不加锁，与运行中 Save 并发可致历史丢失 | src/Services/HistoryService.cs:190 |
-| P5 | Python 判断脚本 traceback 被静默吞掉，调试无线索 | src/Services/JudgeScriptRunner.cs:402 |
-| P6 | replaceConfigs 在脚本进程仍运行时复制覆盖 config（占用/半写窗口） | src/Services/SessionJudge.cs:120 |
-| P7 | exit 完成操作立即退出，队列收尾（FinishedAt/Unregister）来不及执行 | src/Services/DispatchCenter.cs:585 |
-
-### 中优先级
-| # | 问题 | 位置 |
-|---|---|---|
-| P8 | 日志截断重读产生重复行（轻微内容污染） | src/Services/LogMonitor.cs:138 |
-| P9 | 定时时间 "8:00"（无前导零）静默不触发且无校验 | src/Services/Scheduler.cs:84 |
-| P10 | 跨午夜服务日志文件名不滚动（static readonly 启动时求值） | src/Persistence/AppPaths.cs:29 |
-| P11 | 轻量模式托盘「打开管理页面」→ 404 | src/TrayApp.cs:25 |
-| P12 | token 输入层内联 style + 硬编码色值 + 无 dialog/焦点陷阱（违反自约束） | wwwroot/app.js:124 |
-| P13 | 令牌比较非常量时间；/api/logs 孤儿 API；静态文件无缓存/安全头 | src/Web/WebServer.cs:298 |
-| P14 | resolve.json 占位符仅整体替换（多占位符/文本混排不支持），README 未明示 | src/Plugins/DataSpecializedPlugin.cs:218 |
-| P15 | 「审计行不过滤豁免」文档措辞与实现（随阈值过滤）矛盾 | AGENTS.md:60 vs src/Utilities/Logger.cs:53 |
-| P16 | 钉钉/飞书签名真机验证缺失；Webhook 非 JSON 响应与网络失败混淆 | src/Services/WebhookSender.cs:85 |
-
-## 4. 后续开发方向（与后续开发清单对应）
+## 4. 后续开发方向（与 ROADMAP 对应，当前基线 v0.7.6）
 
 | 版本 | 主题 | 难度 | 建议 |
 |---|---|---|---|
-| v0.6.8 | 日志全量更新 + 拖拽排序 | ⭐⭐ | 按清单执行；毫秒时间戳先 grep 测试依赖；排序后端存顺序数组防 Index 漂移 |
-| v0.6.9 | 技术债清理 P1-P16 | ⭐ | 高优先级 7 项必做，中优先级 4 项，低优先级视余力 |
-| v0.6.10 | 长时脚本（-1 无限超时）+ 队列弹窗拖拽 + 任务卡片化 + 文档体系重组 | ⭐⭐⭐ | ✅ 已交付（2026-08-15）；模拟器部分剥离至 v0.7.0 |
-| v0.7.0 | 安卓模拟器（adb） | ⭐⭐⭐ | 技术验证（MuMu 实测 adb 启停/前台检测/路径解析）先行，验证通过再立项；模拟器进程治理复用 KillTree 原语 |
-| v0.7.0+ | 并行调度队列 | ⭐⭐⭐⭐ | 维持暂缓；先出资格矩阵设计文档 + README 明确队列间并行现状 |
+| v0.7.7 | KN-77 自动更新配置内容守护修复（已交付未发布）；台账 KN-78~83 随版项按用户意愿排期 | ⭐ | 版本号待用户确认；修复与测试已全绿 |
+| v0.7.0+ | 并行调度队列（v0.7.0 已交付后立项） | ⭐⭐⭐⭐ | 先出资格矩阵设计文档 + README 明确队列间并行现状 |
 | v0.8.0 | 自动签到通用插件 | ⭐⭐⭐ | 前置 API 调研；需新增队列外独立定时通道 |
 | v0.8.0+ | 桌面分身 | ⭐⭐⭐⭐⭐ | 维持暂缓，三块 demo 评估先行 |
+
+> 已交付版本（v0.6.8~v0.7.6）的开发明细见 [CHANGELOG.md](../CHANGELOG.md) 与 [ROADMAP.md](ROADMAP.md)。
 
 ## 5. 架构符合性核查
 
@@ -93,3 +68,60 @@
 ## 6. 工程治理亮点（评估顺带确认）
 
 崩溃安全设计（标记先行 + 双保险 + 自愈重试）、日志续读语义、失败优先判定、原子防重入、Jint 沙箱边界、Windows 环境陷阱规避（0x800700E8/740/进程树排除游戏）、可测试性（NEXUS_TIME_SCALE/NEXUS_SYSTEM_ACTION_DRYRUN）、按尝试分批落盘、安全纵深（Origin+令牌+锁定+白名单）。
+
+---
+
+## 7. v0.7.6 自动更新配置专项评估（2026-08-16）
+
+> 背景：v0.7.6 引入「自动更新配置」（AutoUpdateConfig，默认开）——运行产生的配置更改反向同步回用户快照 store（config → store 全量镜像），属**破坏性更新**（老用户升级后首次运行即开始回写 store，此前永不回写）。本节为专项评估：功能机制还原、可复现 BUG 清单、处置与修复。
+
+### 7.1 功能机制还原（代码验证）
+
+- **触发点 1（首次检测）**：运行开始 `ScaledSeconds(15)` 后主监控循环内一次性同步，`attempt.Number==1` 才执行，**开关关/开共有**（`src/Services/RunSession.cs:614-620`）。
+- **触发点 2（收尾同步）**：finally 中、插队还原与配置交换还原**之前**，仅开关开时（`src/Services/RunSession.cs:290-300`）——config 此刻为脚本最终态；含 cancelled。
+- **同步语义**（`ConfigSwapSession.SyncConfigToStore` → `MirrorToStore`）：`WithSwapLock` 内 copy-then-prune 全量镜像；插队文件（swap-backup/.meta 清单内）有还原描述（`config-restore.json`，array/map 两型、未覆盖键保持）先还原启停再写入、无描述跳过（store 保持原样）。
+- **守护**：`.session` Phase=run 校验；config 缺失/为空/文件数骤降一半跳过；首次检测前置双采样稳定性检查（800ms 间隔）。
+
+### 7.2 对齐结论（与用户确认，2026-08-16）
+
+| 决策项 | 用户选择 | 影响 |
+|---|---|---|
+| 开关「关」的语义 | **维持现状**（关 = 仅首次检测同步，收尾不同步） | KN-80 文档化语义保留 |
+| 失败/取消/超时收尾回写 | **照常回写但加强校验**（内容有效性探测 + 收尾同步稳定性检查） | 已实施（7.4） |
+| 专项脚本恒开 | **合理**（前端不渲染开关、后端不强设） | KN-79 防御性建议待办 |
+| 首次检测时机（15 秒 + 仅第 1 次尝试） | **符合设想** | KN-81 文档化保留 |
+| 配置交换代价（运行期间脚本写入 config 的文件被删除） | **接受现状**，不加排除清单 | — |
+| 评估产出 | **更新 ASSESSMENT.md** | 本节 |
+
+### 7.3 可复现 BUG 清单与处置
+
+| 编号 | 问题（可复现） | 位置 | 状态 |
+|---|---|---|---|
+| KN-77 | **单文件 config 半写入库（高，数据风险）**：脚本被取消/超时强杀瞬间正在写 config 时，半写 JSON 被收尾同步直接镜像进 store 永久污染快照（单文件形态无骤降检查兜底）；通用脚本（无判断脚本）无任何内容校验 | `ConfigSwapSession.cs:337-370` | ✅ 已修复（7.4） |
+| KN-78 | **`ApplyToggle` 整树重写丢格式/BOM/编码**：ReadAllText 剥离 BOM + ToJsonString 重排 + 无 BOM 写入；GBK/UTF-16 源文件重写后编码变化 | `ConfigSwapSession.cs:646-659` | 随版 |
+| KN-79 | **专项恒 true 仅前端保证**：curl/CLI 直连可构造专项脚本 `autoUpdateConfig=false` | `ApiScriptsHandler.cs:254-272` | 随版（防御性） |
+| KN-80 | **「关」仍执行首次检测回写**（与直觉相悖，语义经用户确认保留） | `RunSession.cs:614-620` | 文档化 |
+| KN-81 | **快速失败脚本（<15 秒）首次检测永不触发**（开关关时零同步；经用户确认可接受） | `RunSession.cs:614-620` | 文档化 |
+| KN-82 | **首次检测同步阻塞主监控循环**（跨进程锁竞争最长 30 秒判定延迟） | `ConfigSwapSession.cs:299-331` | 随版 |
+| KN-83 | **多轮替换后还原描述 index 漂移**（maaend `instances[下标]` 固化） | `plugins/maaend/data/judge.js:93-109` | 随版（低概率） |
+
+### 7.4 本版已实施修复（随评估交付）
+
+**KN-77 内容有效性守护**（`src/Services/ConfigSwapSession.cs`）：
+
+1. **收尾同步同样执行稳定性检查**：`StableConfig` 从「仅首次检测」扩展为全部同步——短间隔两次采样不一致（外部守护进程仍在写）→ 跳过本次，保留旧快照。
+2. **JSON 型内容有效性探测**（`ValidForSync` 内新增 `ContentValidForSync`/`JsonContentValid`）：`.json` 扩展名或内容以 `{`/`[` 开头的文件必须可解析，0 字节 `.json` = 半写坏态；非 JSON 文本不校验；单文件 32MB 上限跳过探测（防内存开销）；探测失败 → 跳过整个同步（宁可保留旧快照也不入库坏态）。
+
+**测试**：单测 +6 方法/9 断言（坏 JSON 文件/目录跳过、混合合法通过、空 .json 跳过但空 txt 通过、无扩展名 JSON 内容校验）；judge-scenarios +1 用例/10 断言（半写 JSON 不入库 + config 还原、合法 JSON 照常入库 + config 还原）。
+
+### 7.5 测试与断言数字（加速档，2026-08-16）
+
+| 套件 | v0.7.6 | 本次后 |
+|---|---|---|
+| 单元测试 | 174 断言 | **183 断言**（+9） |
+| judge-scenarios | 140 | **150**（+10） |
+| e2e / chaos | 77 / 166 | 77 / 166（回归验证中） |
+
+### 7.6 升级破坏性提示（用户须知）
+
+老用户升级 v0.7.6 后首次运行即开始回写 store（默认开）——建议 CHANGELOG 升级说明显著标注行为变化；本次 KN-77 修复已大幅降低「失败/取消收尾把半写配置永久写入快照」的数据风险。

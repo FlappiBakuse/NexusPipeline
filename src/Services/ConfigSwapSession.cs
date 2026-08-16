@@ -308,10 +308,12 @@ internal static class ConfigSwapSession
                 string store = ConfigSwapPaths.StoreDir(scriptId, userName);
                 // 2. 基础有效性校验：config 缺失/为空/文件数骤降 → 跳过（防坏态入库永久污染快照）。
                 if (!ValidForSync(configPath, store)) return;
-                // 3. 稳定性检查（仅首次检测）：短间隔两次采样不一致 = 脚本仍在写配置 → 跳过，等待下次运行。
-                if (firstCheck && !StableConfig(configPath))
+                // 3. 稳定性检查（v0.7.6 评估后扩展为全部同步）：短间隔两次采样不一致 = 脚本（含外部守护进程）
+                //    仍在写配置 → 跳过本次，保留旧快照（收尾同步同样执行——进程确认退出后仍不一致说明有
+                //    外部写入者在半写，此时入库存在污染风险）。
+                if (!StableConfig(configPath))
                 {
-                    Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」配置仍在变化（首次检测，等待下次运行）。");
+                    Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」配置仍在变化（{SyncPhaseText(firstCheck)}，保留旧快照）。");
                     return;
                 }
                 // 4. 插队清单 + 还原描述。
@@ -333,7 +335,7 @@ internal static class ConfigSwapSession
         return firstCheck ? "首次检测" : "运行收尾";
     }
 
-    /// <summary>基础有效性校验：config 缺失/为空/文件数骤降时跳过同步（防脚本写坏/清空中被入库）。</summary>
+    /// <summary>基础有效性校验：config 缺失/为空/文件数骤降/JSON 型内容损坏时跳过同步（防脚本写坏/清空中被入库）。</summary>
     internal static bool ValidForSync(string configPath, string store)
     {
         PathKind kind = PathKindUtil.KindOf(configPath);
@@ -347,6 +349,11 @@ internal static class ConfigSwapSession
             if (new FileInfo(configPath).Length == 0)
             {
                 Logger.Warn($"[配置同步] 跳过：配置文件为空（{configPath}）。");
+                return false;
+            }
+            if (!ContentValidForSync(configPath, kind))
+            {
+                Logger.Warn($"[配置同步] 跳过：配置文件内容有效性校验失败（{configPath}），疑似写入中断/半写，保留旧快照。");
                 return false;
             }
             return true;
@@ -366,7 +373,79 @@ internal static class ConfigSwapSession
                 return false;
             }
         }
+        if (!ContentValidForSync(configPath, kind))
+        {
+            Logger.Warn($"[配置同步] 跳过：配置目录内容有效性校验失败（{configPath}），疑似脚本写入中断/半写，保留旧快照。");
+            return false;
+        }
         return true;
+    }
+
+    /// <summary>内容有效性探测（v0.7.6 评估加强）：JSON 型文件（.json 扩展名或内容以 {/[ 开头）必须可解析；
+    /// 非 JSON 型文本不校验。单文件 32MB 上限跳过探测（超大文件不可能为常见配置半写场景，防内存开销）。
+    /// 只读探测不重写；解析失败视为写入中断（脚本被杀瞬间半写），跳过同步保留旧快照。</summary>
+    internal static bool ContentValidForSync(string configPath, PathKind kind)
+    {
+        try
+        {
+            if (kind == PathKind.File)
+            {
+                return JsonContentValid(configPath);
+            }
+            foreach (string file in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories))
+            {
+                if (!JsonContentValid(file))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[配置同步] 内容有效性探测失败（{configPath}）：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>单个文件是否 JSON 型且可解析：满足型条件（.json 扩展名或内容以 {/[ 开头）但解析失败 = 损坏；
+    /// 非 JSON 型一律通过。0 字节 .json = 半写坏态；0 字节其他扩展名不校验。</summary>
+    private static bool JsonContentValid(string path)
+    {
+        var info = new FileInfo(path);
+        bool jsonExt = string.Equals(Path.GetExtension(path), ".json", StringComparison.OrdinalIgnoreCase);
+        if (info.Length == 0)
+        {
+            return !jsonExt;
+        }
+        if (info.Length > 32L * 1024 * 1024)
+        {
+            return true;
+        }
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+        string trimmed = text.TrimStart(' ', '\t', '\r', '\n', '\uFEFF');
+        bool jsonLike = jsonExt || trimmed.StartsWith('{') || trimmed.StartsWith('[');
+        if (!jsonLike)
+        {
+            return true;
+        }
+        try
+        {
+            _ = JsonNode.Parse(text);
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>稳定性检查：短间隔两次采样 config 文件清单/长度/修改时间，不一致视为仍在写入。</summary>

@@ -676,6 +676,69 @@ console.log(JSON.stringify({ status: "failed", reason: "swap-requested", replace
   await api("DELETE", "/api/scripts/" + c4.id);
 }
 
+/** v0.7.6 评估（ASSESSMENT 更新）：收尾同步内容有效性守护——单文件 JSON 半写/损坏不入库（保留旧快照），合法 JSON 照常入库。 */
+async function testAutoUpdateConfigContentGuard() {
+  console.log("[用例] 自动更新配置内容守护：半写 JSON 不入库 / 合法 JSON 照常入库");
+
+  // 1. 脚本写坏 JSON（模拟写入中断半写）→ 收尾同步跳过 → store 保持初始快照
+  const d1 = path.join(runtimeDir, "mt-au-badjson");
+  fs.rmSync(d1, { recursive: true, force: true });
+  fs.mkdirSync(path.join(d1, "config"), { recursive: true });
+  fs.mkdirSync(path.join(d1, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(d1, "config", "cfg.json"), '{"count":0}', "ascii");
+  fs.writeFileSync(path.join(d1, "nexusmt-au-badjson.bat"),
+    ["@echo off", 'cd /d "%~dp0"',
+      "ping -n " + (FAST ? 5 : 40) + " 127.0.0.1 >nul",
+      "> config\\cfg.json echo {\"count\":",
+      "echo DONE >> logs\\log.txt",
+      "exit /b 0"].join("\r\n") + "\r\n", "ascii");
+  const c1 = await createJudgeScript({
+    name: "半写JSON不入库", rootPath: d1,
+    mainExe: path.join(d1, "nexusmt-au-badjson.bat"),
+    configPath: path.join(d1, "config", "cfg.json"), logPath: path.join(d1, "logs\\log.txt"),
+    successKeywords: "DONE", autoUpdateConfig: true,
+  });
+  assert(c1.ok, "创建半写 JSON 脚本");
+  const r1 = await runScript(c1.id);
+  assert(r1.dispatchOk && r1.ended, "半写：运行结束");
+  assert(r1.rec && r1.rec.finalStatus === "success", "半写：判定成功（FinalStatus=" + r1.rec?.finalStatus + "）");
+  const store1 = path.join(runtimeDir, "data", c1.id, "默认", "store", "cfg.json");
+  assert(fs.existsSync(store1) && fs.readFileSync(store1, "utf8").trim() === '{"count":0}',
+    "半写：store/cfg.json 保持初始快照（损坏内容未入库，实际：" + (fs.existsSync(store1) ? fs.readFileSync(store1, "utf8").trim() : "无") + "）");
+  assert(fs.readFileSync(path.join(d1, "config", "cfg.json"), "utf8").trim() === '{"count":0}',
+    "半写：config 还原为运行前（count=0）");
+  await api("DELETE", "/api/scripts/" + c1.id);
+
+  // 2. 脚本写合法 JSON → 收尾同步照常入库（运行后计数保留）
+  const d2 = path.join(runtimeDir, "mt-au-goodjson");
+  fs.rmSync(d2, { recursive: true, force: true });
+  fs.mkdirSync(path.join(d2, "config"), { recursive: true });
+  fs.mkdirSync(path.join(d2, "logs"), { recursive: true });
+  fs.writeFileSync(path.join(d2, "config", "cfg.json"), '{"count":0}', "ascii");
+  fs.writeFileSync(path.join(d2, "nexusmt-au-goodjson.bat"),
+    ["@echo off", 'cd /d "%~dp0"',
+      "ping -n " + (FAST ? 5 : 40) + " 127.0.0.1 >nul",
+      "> config\\cfg.json echo {\"count\":5}",
+      "echo DONE >> logs\\log.txt",
+      "exit /b 0"].join("\r\n") + "\r\n", "ascii");
+  const c2 = await createJudgeScript({
+    name: "合法JSON入库", rootPath: d2,
+    mainExe: path.join(d2, "nexusmt-au-goodjson.bat"),
+    configPath: path.join(d2, "config", "cfg.json"), logPath: path.join(d2, "logs\\log.txt"),
+    successKeywords: "DONE", autoUpdateConfig: true,
+  });
+  assert(c2.ok, "创建合法 JSON 脚本");
+  const r2 = await runScript(c2.id);
+  assert(r2.dispatchOk && r2.ended, "合法：运行结束");
+  assert(r2.rec && r2.rec.finalStatus === "success", "合法：判定成功（FinalStatus=" + r2.rec?.finalStatus + "）");
+  const store2 = path.join(runtimeDir, "data", c2.id, "默认", "store", "cfg.json");
+  assert(fs.existsSync(store2) && fs.readFileSync(store2, "utf8").trim() === '{"count":5}',
+    "合法：store/cfg.json 更新为运行后计数（实际：" + (fs.existsSync(store2) ? fs.readFileSync(store2, "utf8").trim() : "无") + "）");
+  assert(fs.readFileSync(path.join(d2, "config", "cfg.json"), "utf8").trim() === '{"count":0}',
+    "合法：config 还原为运行前（count=0）");
+  await api("DELETE", "/api/scripts/" + c2.id);
+}
+
 async function testEdgeNoLogStuck() {
   console.log("[用例] 边缘：完全无日志卡住 → 日志超时后最终触发一次判断脚本");
   const dir = path.join(runtimeDir, "mt-silent");
@@ -1213,6 +1276,7 @@ async function main() {
   await testScenarioD();
   await testMaaEndJudgeScript();
   await testAutoUpdateConfig();
+  await testAutoUpdateConfigContentGuard();
   await testEdgeNoLogStuck();
   await testBugNewFileResidue();
   await testBugPathEscape();
