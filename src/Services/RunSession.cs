@@ -659,6 +659,11 @@ internal class RunSession
                     }
                 }
 
+                // v0.7.5（台账外，修正）：周期触发与退出/stall 最终触发同轮先后命中时跳过最终触发——
+                // 周期触发输入为「无新内容」状态，同轮内日志段不变，最终触发属完全重复执行；
+                // 批次触发（有新内容）后的同轮最终触发**必须保留**（进程退出是新事实，判断脚本可能
+                // 基于自身状态文件在第二次执行给出最终判定，如计数器——06 spec「进程退出时最终触发」用例）。
+                bool skipFinalJudge = false;
                 if (scriptMode && newContent.Length > 0 && result is null && !judge.IsMarker)
                 {
                     await TriggerJudgeAsync().ConfigureAwait(false);
@@ -667,13 +672,10 @@ internal class RunSession
                     && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
                 {
                     _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
+                    skipFinalJudge = true;
                     await TriggerJudgeAsync().ConfigureAwait(false);
                 }
 
-                // v0.7.5（台账外）：距上次判断脚本触发不足 1 秒（同一轮）判定为「刚触发过」——
-                // 退出/stall 最终触发与周期触发同轮先后命中时跳过最终触发，避免判断脚本重复执行
-                // （判定语义不变，复用周期触发结果；无结果时由 result ??= 按未判定处理）。
-                bool judgeJustRan = (DateTime.Now - judge.LastJudgeAt).TotalSeconds < 1;
                 bool scriptExited = process is null
                     ? !SystemActions.IsExeRunning(launchExe)
                     : process.HasExited && !SystemActions.IsExeRunning(launchExe);
@@ -681,7 +683,7 @@ internal class RunSession
                 {
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
-                        if (scriptMode && !judgeJustRan)
+                        if (scriptMode && !skipFinalJudge)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -690,7 +692,7 @@ internal class RunSession
                     }
                     else if (monitor is null)
                     {
-                        if (scriptMode && !judgeJustRan)
+                        if (scriptMode && !skipFinalJudge)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -710,7 +712,7 @@ internal class RunSession
                     }
                     else if (judgeConfigured)
                     {
-                        if (scriptMode && !judgeJustRan)
+                        if (scriptMode && !skipFinalJudge)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -758,7 +760,7 @@ internal class RunSession
                     }
                     if (stallHit)
                     {
-                        if (scriptMode && !judgeJustRan)
+                        if (scriptMode && !skipFinalJudge)
                         {
                             _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);

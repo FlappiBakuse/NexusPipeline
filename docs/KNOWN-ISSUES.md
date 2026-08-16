@@ -105,7 +105,7 @@
 | KN-68 | **CSP `connect-src 'self'` 与重启跨端口轮询冲突**：改端口重启服务后前端跨端口探测被 CSP 拦截（端口不同即不同 origin），自动跳转新端口分支永远走不到，60 秒后只提示手动刷新 | `src/Web/HttpHelper.cs:37`、`wwwroot/views/settings.js:109-134` | ✅ v0.7.5 已修复（connect-src 放行 `http://127.0.0.1:*`，仅回环不扩大攻击面） |
 | KN-69 | **maaend 模板直出配置判定失灵**：`config-template/mxu-MaaEnd.json` 无 `settings.autoStartInstanceId`（MXU 运行分发字段），judge.js 实例定位失败 → 保守无输出 → 判定退化为超时/退出兜底 | `plugins/maaend/data/judge.js:71-75`、`plugins/maaend/data/config-template/mxu-MaaEnd.json` | ✅ v0.7.5 已修复（定位回退链：autoStartInstanceId → lastActiveInstanceId → 唯一实例；多实例无标记仍保守无输出） |
 | KN-70 | **编辑 start 模板标记补写孤儿窗口**：模板生成（EnsureConfigForEdit）与 `Mark.Write()`（补 GeneratedTemplate/TemplateFiles）之间崩溃/启动失败时，标记无模板信息，文件型 config 的模板兄弟文件无清单记录永久残留；且 `DoRestore` cache 非空路径不消费 TemplateFiles | `src/Web/ApiScriptsHandler.cs:857-892`、`src/Services/ConfigSwapSession.cs:631-634` | ✅ v0.7.5 已修复（标记在模板生成后立即持久化；`DoRestore` 两路径统一先按清单删除模板文件） |
-| KN-71 | **进程退出轮判断脚本双触发**：脚本最后 30 秒无日志且恰好退出时，同一轮先命中周期触发再命中退出最终触发——判断脚本被重复完整执行（含 writeFile 副作用；判定语义不变） | `src/Services/RunSession.cs:663-772` | ✅ v0.7.5 已修复（退出/stall 最终触发加「距上次触发 < 1 秒」守卫，复用周期触发结果） |
+| KN-71 | **进程退出轮判断脚本双触发**：脚本最后 30 秒无日志且恰好退出时，同一轮先命中周期触发再命中退出最终触发——判断脚本被重复完整执行（含 writeFile 副作用；判定语义不变） | `src/Services/RunSession.cs:663-772` | ✅ v0.7.5 已修复（周期触发后同轮的退出/stall 最终触发跳过——周期触发输入为「无新内容」状态、同轮日志段不变属完全重复执行；**批次触发后的同轮最终触发保留**——进程退出是新事实，判断脚本可能基于自身状态文件二次执行给出最终判定（06 spec「进程退出时最终触发」用例回归验证） |
 | KN-72 | **KillByName 连带杀游戏子进程**：`KillAndConfirmExited` 自重启轮 `KillByName` 用 `Process.Kill(entireProcessTree: true)`——脚本自启动且与 GameExe 同名的子孙游戏进程被连带杀死，与「游戏生杀归游戏管理」声明不一致 | `src/Utilities/SystemActions.cs:398-430` | ✅ v0.7.5 已修复（自重启轮按名清理携带排除名单走 Toolhelp 树清理；游戏关闭/失败路径语义不变） |
 
 ## v0.7.5 评估遗留新增登记（2026-08-16 v0.7.5 交付后全面评估，低概率/低影响边界项，未排期）
