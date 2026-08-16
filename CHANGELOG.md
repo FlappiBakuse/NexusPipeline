@@ -2,7 +2,7 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
-## v0.7.7（未发布）
+## v0.7.7（Pre-release）
 
 ### 修复（v0.7.6 全面评估产出）
 
@@ -18,7 +18,7 @@
 
 ### 变更
 
-- 版本号 0.7.7（未发布，版本归属以用户要求为准）。
+- 版本号 0.7.7。
 
 ## v0.7.6（Pre-release）
 
