@@ -23,14 +23,39 @@ internal sealed class WebServer : IDisposable
 
     private const int AuthLockSeconds = 60;
 
+    /// <summary>v0.7.5（KN-31）：无活动条目保留宽限（超过即清理，防远端 IP 字典无限增长）。</summary>
+    private const int AuthFailIdlePruneSeconds = 600;
+
     private sealed class AuthFailState
     {
         public int Fails;
 
         public long LockedUntil;
+
+        public long LastActive;
     }
 
     private static readonly ConcurrentDictionary<string, AuthFailState> AuthFails = new();
+
+    private static long _lastAuthPruneTicks;
+
+    /// <summary>v0.7.5（KN-31）：每 60 秒清理一次「超过宽限无活动」的远端认证失败条目（锁定中条目保留至锁定过期）。
+    /// 仅在远程访问开启且收到请求时触发，避免后台空闲轮询。</summary>
+    private static void PruneAuthFails(long now)
+    {
+        if (now - Interlocked.Read(ref _lastAuthPruneTicks) < TimeSpan.FromSeconds(60).Ticks)
+        {
+            return;
+        }
+        Interlocked.Exchange(ref _lastAuthPruneTicks, now);
+        foreach (KeyValuePair<string, AuthFailState> pair in AuthFails)
+        {
+            if (now - pair.Value.LastActive > TimeSpan.FromSeconds(AuthFailIdlePruneSeconds).Ticks)
+            {
+                AuthFails.TryRemove(pair.Key, out _);
+            }
+        }
+    }
 
     /// <summary>API 路由表：启动时反射扫描带 [ApiRoute] 的 handler 类/方法注册；新增 API 无需改路由表。</summary>
     private static readonly Dictionary<string, ApiRouteHandler> Routes = BuildRoutes();
@@ -302,6 +327,7 @@ internal sealed class WebServer : IDisposable
         }
         string ip = remote.ToString();
         long now = DateTime.UtcNow.Ticks;
+        PruneAuthFails(now);
         if (AuthFails.TryGetValue(ip, out AuthFailState? state) && state.LockedUntil > now)
         {
             detail = $"失败次数过多，已锁定（剩余 {TimeSpan.FromTicks(state.LockedUntil - now).TotalSeconds:F0} 秒）";
@@ -322,6 +348,7 @@ internal sealed class WebServer : IDisposable
             return true;
         }
         AuthFailState current = AuthFails.GetOrAdd(ip, _ => new AuthFailState());
+        current.LastActive = now;
         current.Fails++;
         if (current.Fails >= MaxAuthFailsBeforeLock)
         {

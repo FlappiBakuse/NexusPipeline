@@ -83,9 +83,9 @@ internal static class WebhookSender
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
             using var response = await Http.SendAsync(request, cts.Token).ConfigureAwait(false);
             string responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            bool ok = type is "feishu" or "dingtalk"
-                ? (JsonNode.Parse(responseText).Get("code").Int(-1) == 0)
-                : response.IsSuccessStatusCode;
+            // v0.7.5（KN-33）：成功判定补 HTTP 状态码——此前飞书/钉钉只看 body code==0，HTTP 500 但 code==0 误判成功。
+            bool ok = response.IsSuccessStatusCode
+                && (type is not ("feishu" or "dingtalk") || JsonNode.Parse(responseText).Get("code").Int(-1) == 0);
             if (ok)
             {
                 Logger.Info($"{TypeDisplay(type)} Webhook 发送成功。");

@@ -320,6 +320,9 @@ internal static class ApiScriptsHandler
         context.Response.StatusCode = 200;
         context.Response.ContentType = "image/png";
         context.Response.Headers["Cache-Control"] = "no-cache";
+        // v0.7.5（KN-27）：icon 响应补安全头（此前手工写响应漏 nosniff/CSP 等，与静态文件不一致）。
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
         context.Response.ContentLength64 = icon.Length;
         await context.Response.OutputStream.WriteAsync(icon).ConfigureAwait(false);
         context.Response.OutputStream.Close();
@@ -858,6 +861,20 @@ internal static class ApiScriptsHandler
                 }
                 List<string> generatedTemplateFiles = UserConfigManager.EnsureConfigForEdit(script);
                 bool generatedTemplate = generatedTemplateFiles.Count > 0;
+                // v0.7.5（台账外）：模板生成后立即持久化标记（GeneratedTemplate/TemplateFiles）——此前补写发生在
+                // 主程序启动之后（StartVisible 失败路径的 CancelEdit 与崩溃窗口内标记仍为 PrepareForRun 的无模板版本，
+                // 文件型 config 的模板兄弟文件无清单记录永久残留）。
+                var editMark = new ConfigSessionMark
+                {
+                    ScriptId = script.Id,
+                    UserName = user.Name,
+                    ConfigPath = script.ConfigPath,
+                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)),
+                    Phase = "edit",
+                    GeneratedTemplate = generatedTemplate,
+                    TemplateFiles = generatedTemplateFiles,
+                };
+                editMark.Write();
                 UserConfigManager.HideOtherConfigs(script, script.Id, user.Name);
                 Process? proc;                try
                 {
@@ -878,18 +895,8 @@ internal static class ApiScriptsHandler
                     User = user,
                     Process = proc,
                     GeneratedConfigTemplate = generatedTemplate,
-                    Mark = new ConfigSessionMark
-                    {
-                        ScriptId = script.Id,
-                        UserName = user.Name,
-                        ConfigPath = script.ConfigPath,
-                        OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)),
-                        Phase = "edit",
-                    },
+                    Mark = editMark,
                 };
-                editSession.Mark.GeneratedTemplate = generatedTemplate;
-                editSession.Mark.TemplateFiles = generatedTemplateFiles;
-                editSession.Mark.Write();
                 UserConfigManager.EditSessions[scriptId] = editSession;
                 keepGate = true;
                 Audit.Log(Audit.Web, "开始编辑配置", $"{script.Name} / {user.Name}（主程序已启动）");

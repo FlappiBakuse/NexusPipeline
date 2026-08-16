@@ -395,7 +395,7 @@ internal static class SystemActions
         }
     }
 
-    public static void KillByName(string exeName, string display)
+    public static void KillByName(string exeName, string display, string? excludeProcessBaseName = null)
     {
         if (string.IsNullOrWhiteSpace(exeName))
         {
@@ -414,7 +414,16 @@ internal static class SystemActions
             {
                 try
                 {
-                    process.Kill(entireProcessTree: true);
+                    if (excludeProcessBaseName is not null)
+                    {
+                        // v0.7.5（台账外）：按名清理携带排除名单时走 Toolhelp 树清理——此前 Process.Kill(entireProcessTree: true)
+                        // 会把脚本自启动的游戏子孙进程一并杀死，与「游戏进程不属脚本树、生杀归游戏管理」的声明不一致。
+                        KillTree(process.Id, excludeProcessBaseName);
+                    }
+                    else
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -447,7 +456,8 @@ internal static class SystemActions
                 return true;
             }
             Logger.Info($"[提示] {display}进程仍在运行（第 {round}/{rounds} 轮按名清理，含自重启产物）。");
-            KillByName(exePath, display);
+            // v0.7.5（台账外）：自重启轮按名清理同样携带排除名单（游戏名），避免 Process.Kill 全树连带杀死游戏子孙进程。
+            KillByName(exePath, display, excludeProcessBaseName);
             if (round < rounds)
             {
                 Thread.Sleep(intervalMs);

@@ -1,4 +1,4 @@
-import { api } from "../core/api.js";
+import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { scrollField, selectField, valueField, pageHeader } from "../core/forms.js";
@@ -87,7 +87,7 @@ export async function pageScripts(token) {
     : `<section class="card"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
         <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
-        <img class="script-ico" src="/api/scripts/${script.id}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(scriptFallbackIcon)}">
+        <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
         <div class="script-main">
           <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
           <div class="script-name-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
@@ -102,6 +102,7 @@ export async function pageScripts(token) {
   render(pageHeader("脚本实例", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
   wireScriptIcons();
+  hydrateIcons($dom("#view"));
   wireScriptDnd();
 }
 

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Jint;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
@@ -358,7 +359,44 @@ internal static class JudgeScriptRunner
         catch (Exception)
         {
         }
-        return candidates.Count > 0 ? candidates[0] : "python.exe";
+        // v0.7.5（KN-39）：多 Python 安装时 Directory.GetFiles 顺序未定义——按目录名解析版本号降序取最新
+        // （Python313 > Python312；Python39 与 Python310 按数值比较 3.9 < 3.10，避免字符串序误判）；解析失败排最后。
+        return candidates.Count > 0
+            ? candidates.OrderByDescending(candidate => candidate, PythonVersionComparer.Instance).First()
+            : "python.exe";
+    }
+
+    /// <summary>按安装目录名解析 Python 主次版本（数值比较，无法解析视为 0.0 排最后）。</summary>
+    private sealed class PythonVersionComparer : IComparer<string>
+    {
+        public static readonly PythonVersionComparer Instance = new();
+
+        public int Compare(string? a, string? b)
+        {
+            (int, int) va = Parse(a);
+            (int, int) vb = Parse(b);
+            if (va.Item1 != vb.Item1)
+            {
+                return va.Item1.CompareTo(vb.Item1);
+            }
+            return va.Item2.CompareTo(vb.Item2);
+        }
+
+        private static (int, int) Parse(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return (0, 0);
+            }
+            var match = Regex.Match(Path.GetFileName(path), @"(\d+)(?:\.(\d+))?");
+            if (!match.Success)
+            {
+                return (0, 0);
+            }
+            int major = int.TryParse(match.Groups[1].Value, out int m) ? m : 0;
+            int minor = match.Groups[2].Success && int.TryParse(match.Groups[2].Value, out int n) ? n : 0;
+            return (major, minor);
+        }
     }
 
     private static async Task<JudgeScriptResult> RunPythonAsync(string code, string inputJson, CancellationToken token)

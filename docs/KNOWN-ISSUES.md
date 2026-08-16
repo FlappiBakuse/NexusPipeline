@@ -1,6 +1,6 @@
 # 已知问题台账（Known Issues）
 
-**建立日期**：2026-08-15（v0.6.9 全面代码评估产出）｜ **状态**：登记中，按版本分步修复（用户决策：全部记录，按版本分开修复）｜ **v0.6.10 交付**：文档不一致项（KN-48/49/50 涉及项）已随文档体系重组修正 ｜ **v0.7.4 交付**：稳定复现无严重副作用项批量修复（CLI 删除清理/判定竞态/大小写一致/死代码全量清理），台账过时表述修正（KN-14/KN-46/KN-47）
+**建立日期**：2026-08-15（v0.6.9 全面代码评估产出）｜ **状态**：登记中，按版本分步修复（用户决策：全部记录，按版本分开修复）｜ **v0.6.10 交付**：文档不一致项（KN-48/49/50 涉及项）已随文档体系重组修正 ｜ **v0.7.4 交付**：稳定复现无严重副作用项批量修复（CLI 删除清理/判定竞态/大小写一致/死代码全量清理），台账过时表述修正（KN-14/KN-46/KN-47）｜ **v0.7.5 交付**：剩余项收尾（远程图标/历史窗口/AuthFails 清理/Python 候选排序/Webhook 状态码/bat 等待缩放/.meta 序列化/icon 安全头）+ 台账外 5 项（CSP 跨端口/maaend 实例回退/编辑孤儿窗口/退出轮双触发/KillByName 连带杀游戏）
 
 > 本台账登记项目已确认的已知问题（潜在 BUG / 死代码 / 文档不一致 / 约束违规），不包含已修复项（见 [CHANGELOG.md](../CHANGELOG.md)）。修复版本排期建议见 [ROADMAP.md](ROADMAP.md)；代码定位指引见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -19,14 +19,14 @@
 | KN-03 | **队列重复触发**：`Register` 仅对 script 查重，手动 + 定时并发触发同一队列会双跑（重复历史/通知/系统操作，如双关机命令）；Scheduler 的 `_runningQueueIds` 挡不住手动入口 | `src/Services/DispatchCenter.cs:292-305` | ✅ v0.7.2 已修复（Register 对队列对称查重，手动/定时统一拒绝） |
 | KN-04 | **共享集合无锁并发**：`RuntimeContext.Scripts/Queues` 与 `RunningExecution.Records` 被 Web 请求线程与后台线程并发读写，远程模式下可抛 `ArgumentOutOfRangeException`/`InvalidOperationException: 集合已修改`（前端轮询 500） | `src/RuntimeContext.cs:28-30`、`src/Services/DispatchCenter.cs:37`、`src/Web/ApiStatusHandler.cs:41-58` | ✅ v0.7.2 已修复（DataLock + Records 锁 + 深拷贝快照） |
 | KN-05 | **CLI 删除脚本/队列不清理**：删除仅移除列表并保存，不清理 `data/{脚本Id}` 目录、不释放 ScriptConfigGate/Mutex、不检查运行状态（Web 端有完整清理，行为不一致，静态字典泄漏） | `src/Cli/ScriptsMenu.cs:70-78`、`src/Cli/QueuesMenu.cs:77-85` | ✅ v0.7.4 已修复（脚本删除对齐 Web 端：运行中拒绝 + 清理 data 目录 + 释放门禁/互斥体；队列删除增加运行中拒绝） |
-| KN-06 | **远程访问下脚本图标全部 401**：`<img src="/api/scripts/{id}/icon">` 无法携带 `Authorization: Bearer` 头，远程模式图标请求必失败（有占位图兜底不崩溃，功能失效） | `wwwroot/views/scripts.js:57`、`wwwroot/views/queues.js:83`、`src/Web/WebServer.cs:197-203` | v0.7.5（需设计 token 传递方案，涉及 icon 断言同步） |
+| KN-06 | **远程访问下脚本图标全部 401**：`<img src="/api/scripts/{id}/icon">` 无法携带 `Authorization: Bearer` 头，远程模式图标请求必失败（有占位图兜底不崩溃，功能失效） | `wwwroot/views/scripts.js:57`、`wwwroot/views/queues.js:83`、`src/Web/WebServer.cs:197-203` | ✅ v0.7.5 已修复（`hydrateIcons`：渲染后经 fetch（带 Bearer）取 blob 转 ObjectURL 替换，按脚本 Id 缓存；本地模式行为不变） |
 
 ## 中优先级
 
 | 编号 | 问题 | 位置 | 建议版本 |
 |---|---|---|---|
 | KN-07 | **resolve.json 多占位符静默丢弃**：`ResolveArgs/ResolvePath` 命中第一个占位符即 return，`{launcher} --config {assistant}` 之类的模板会丢掉后续全部内容（文档已声明「仅整体替换」，但应显式校验或报错而非静默丢弃） | `src/Plugins/DataSpecializedPlugin.cs:219-262` | ✅ v0.7.4 已修复（多占位符模板显式校验并整体推导失败，Warn 可观测，不再静默截断） |
-| KN-08 | **bat 游戏启动器等待不随测试加速缩放**：`WaitForGameProcessAsync` 对 bat 用真实 `Task.Delay(timeout)`，加速档（scale=10）下白等 GameWaitSeconds 真实秒数 | `src/Services/RunSession.cs:808-828` | v0.7.5 |
+| KN-08 | **bat 游戏启动器等待不随测试加速缩放**：`WaitForGameProcessAsync` 对 bat 用真实 `Task.Delay(timeout)`，加速档（scale=10）下白等 GameWaitSeconds 真实秒数 | `src/Services/RunSession.cs:808-828` | ✅ v0.7.5 已修复（等待经 `TestHooks.ScaledMs` 缩放） |
 | KN-09 | **日志截断后立即写入的内容漏判窗口**：`ReadNew` 长度检查在 `Length < position` 时把 position 置为新尾——若截断后、下次读取前已写入新内容，截断后新写内容不进入判定输入（失败关键字可能漏判） | `src/Services/LogMonitor.cs:138-143` | 随版（两难问题：补漏判需知截断点，文件系统不提供；改从头读复活旧行重复污染，实际影响小于已修问题，建议文档化保留） |
 | KN-10 | **明文旧密钥直接回显**：settings.json 中未加密（旧版明文或手工编辑）的 Webhook 地址/密钥在 GET /api/settings 时明文完整返回，违反「已设置的密钥不回显明文」契约 | `src/Web/ApiSettingsHandler.cs:279-294` | ✅ v0.7.2 已修复（非空一律占位符，判定统一） |
 | KN-11 | **Python 判断脚本尾行 JSON 丢失竞态**：`BeginOutputReadLine` + `WaitForExitAsync` 时进程退出瞬间异步输出事件可能未投递完，契约规定的 stdout 尾行 JSON 有丢失风险（误判「无合法输出」） | `src/Services/JudgeScriptRunner.cs:403-420` | ✅ v0.7.4 已修复（退出后补同步 `WaitForExit()` 排空输出缓冲） |
@@ -50,19 +50,19 @@
 | KN-24 | `SetEnabled` 对内置插件同时写 `DisabledPlugins`（冗余写入，`IsEnabled` 只查 `EnabledPlugins`）；传入不存在的插件名也静默写入 | `src/Plugins/PluginManager.cs:213-220` | ✅ v0.7.4 已修复（插件不存在显式拒绝；DisabledPlugins 写入保留——实为 `ConfigStore.Normalize`「旧配置补默认内置插件」判据，非纯冗余） |
 | KN-25 | `RunSession` 尝试日志段首尾不对称（段含「结束」头不含「开始」头） | `src/Services/RunSession.cs:227-229` | ✅ v0.7.4 已修复（段起点移至「开始」头之前，首尾对称；归档日志首行为「开始」头，chaos 归档兜底断言同步兼容） |
 | KN-26 | `WebhookSender.Types` 与 `ConfigStore.Normalize` 的 WebhookType 白名单双份维护 | `src/Services/WebhookSender.cs:14`、`src/Persistence/ConfigStore.cs:68-71` | ✅ v0.7.4 已修复（白名单单源化至 `AppSettings.WebhookTypes`） |
-| KN-27 | icon 响应未走 `HttpHelper.ServeFile`，漏 CSP 等安全头 | `src/Web/ApiScriptsHandler.cs`（icon 分支） | v0.7.5 |
+| KN-27 | icon 响应未走 `HttpHelper.ServeFile`，漏 CSP 等安全头 | `src/Web/ApiScriptsHandler.cs`（icon 分支） | ✅ v0.7.5 已修复（补 nosniff/Referrer-Policy 头；CSP 仅静态 HTML 需要） |
 | KN-28 | `KillTree` 排除游戏名进程时日志文案误导（「PID 已不存在」实为被排除） | `src/Utilities/SystemActions.cs:188-191` | ✅ v0.7.4 已修复（文案区分「被排除/无子进程」） |
 | KN-29 | `SessionJudge` 三个嵌套 enum 显式 public（外层 internal，实际无暴露风险，但违背「其余一律 internal」声明） | `src/Services/SessionJudge.cs:13/21/29` | ✅ v0.7.4 已修复（改 internal） |
 | KN-30 | `ApiSettingsHandler` PUT 同一请求双次 Save + 双次 Normalize/RefreshLevel | `src/Web/ApiSettingsHandler.cs:80-85` | ✅ v0.7.4 已修复（allowRemoteAccess 冗余二次绑定/保存删除，单次 Save） |
-| KN-31 | `AuthFails` 静态字典按远端 IP 累积永不清理（远程模式下内存缓慢增长） | `src/Web/WebServer.cs:33` | v0.7.5 |
+| KN-31 | `AuthFails` 静态字典按远端 IP 累积永不清理（远程模式下内存缓慢增长） | `src/Web/WebServer.cs:33` | ✅ v0.7.5 已修复（条目加 LastActive，每 60 秒清理超 10 分钟无活动条目；锁定中条目保留至锁定过期） |
 | KN-32 | 请求体空键 `""` 时 `field[0]` 抛 IndexOutOfRange（应为 400）——✅ v0.7.2 已修复（空键显式 400「请求体包含空字段名」） | `src/Web/ApiSettingsHandler.cs:247` | ✅ v0.7.2 已修复 |
-| KN-33 | Webhook 成功判定只看 body `code==0` 忽略 HTTP 状态码 | `src/Services/WebhookSender.cs:85-87` | v0.7.5（钉钉/飞书真机验证待决） |
+| KN-33 | Webhook 成功判定只看 body `code==0` 忽略 HTTP 状态码 | `src/Services/WebhookSender.cs:85-87` | ✅ v0.7.5 已修复（HTTP 非 2xx 直接失败，飞书/钉钉再校验 code==0） |
 | KN-34 | `JsonLiteral` 手写转义未处理 `\b`/`\f` 等控制字符 | `src/Services/WebhookSender.cs:166-175` | ✅ v0.7.4 已修复（改 System.Text.Json 序列化，`UnsafeRelaxedJsonEscaping` 保留中文原样、控制字符正确转义） |
-| KN-35 | 历史详情固定查 31 天窗口与列表保留天数（上限 365）不一致，180 天前记录点详情 404 | `src/Web/ApiHistoryHandler.cs:129`、`src/Services/HistoryService.cs` | v0.7.5 |
+| KN-35 | 历史详情固定查 31 天窗口与列表保留天数（上限 365）不一致，180 天前记录点详情 404 | `src/Web/ApiHistoryHandler.cs:129`、`src/Services/HistoryService.cs` | ✅ v0.7.5 已修复（`FindById` 默认窗口改取保留天数上限，显式传参语义保留） |
 | KN-36 | `RemoveMutex` 与 `WithSwapLock` 并发时 `WaitOne` 抛 ObjectDisposedException（无 catch，KN-05 同源分支）——✅ v0.7.2 已修复（捕获后移除条目重建互斥体重试） | `src/Services/ConfigSwapPrimitives.cs:86-104` | ✅ v0.7.2 已修复 |
 | KN-37 | 用户改名/删除大小写敏感（`==`）与 users/order 的 OrdinalIgnoreCase 不一致 | `src/Web/ApiScriptsHandler.cs:544` | ✅ v0.7.4 已修复（查询/校验/删除统一 OrdinalIgnoreCase） |
 | KN-38 | `else if (!queue.NotifyEnabled)` 冗余非运算 | `src/Services/DispatchCenter.cs:574-582` | ✅ v0.7.4 已修复（改 else） |
-| KN-39 | Python 解释器多安装时 `candidates[0]` 选中不确定（Directory.GetFiles 顺序未定义） | `src/Services/JudgeScriptRunner.cs:365` | v0.7.5 |
+| KN-39 | Python 解释器多安装时 `candidates[0]` 选中不确定（Directory.GetFiles 顺序未定义） | `src/Services/JudgeScriptRunner.cs:365` | ✅ v0.7.5 已修复（按目录名解析主次版本号数值降序取最新，如 3.10 > 3.9，解析失败排最后） |
 | KN-40 | `/api/plugins/{name}/enable` 之外任意字符串都按 disable 处理（应校验 enable/disable） | `src/Web/ApiPluginsHandler.cs:17` | ✅ v0.7.4 已修复（显式白名单，其余 400） |
 | KN-41 | `PromptEdit`/`PromptEditMasked` 高度重复可合并 | `src/Cli/Ui.cs:29-103` | ✅ v0.7.4 已修复（合并为 `PromptEditCore(label, masked)`） |
 | KN-42 | 编辑会话 start 的 catch 把 `ex.Message` 直接回给客户端；`keepGate=true` 后写响应异常不释放 gate——✅ v0.7.2 已修复（keepGate 后异常主动清理现场并释放门禁） | `src/Web/ApiScriptsHandler.cs:811-814` | ✅ v0.7.2 已修复 |
@@ -78,7 +78,7 @@
 | KN-49 | ARCHITECTURE.md 依赖方向描述与实现不符：Services→Plugins（UserConfigManager/DispatchCenter）、Plugins→Services（PluginManager/NotifyPlugin）、Logger→RuntimeContext | `docs/ARCHITECTURE.md:40-43`、`src/Services/UserConfigManager.cs:4`、`src/Plugins/PluginManager.cs:3`、`src/Utilities/Logger.cs:33` |
 | KN-50 | 文档断言数字/表述残留：DEVELOPMENT.md 旧版 chaos「171」、AGENTS/README 数字同步检查 | `docs/DEVELOPMENT.md`（2026-08-15 重构时修正） |
 | KN-54 | 队列完成操作在任务失败（非取消）时仍执行 exit/sleep/reboot/shutdown——语义已与用户确认保留，待文档化说明 | `src/Services/DispatchCenter.cs:573-618` | ✅ v0.7.1 已文档化（README + DESIGN，语义保留） |
-| KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` | v0.7.x（修复需兼容旧文件读取，收益低） |
+| KN-55 | `.session` 标记与 swap-backup `.meta` 用 camelCase 序列化，与「磁盘 JSON = PascalCase」约定相悖（内部瞬态文件，风险低） | `src/Services/ConfigSwapSession.cs:31-35/165` | ✅ v0.7.5 已修复（写盘改 PascalCase；读取 PropertyNameCaseInsensitive / 双键兼容旧版 camelCase，旧崩溃现场无需迁移） |
 | KN-56 | CLI `Ui.PromptEdit`/`PromptEditMasked` 用 `Console.ReadKey`，stdin 重定向（管道/自动化）时抛 `InvalidOperationException` 未处理异常直接崩溃（2026-08-15 KN-52 复现时发现） | `src/Cli/Ui.cs:29-103` | ✅ v0.7.1 已修复（重定向下降级 `ReadLine`：空行=不变） |
 | KN-58 | 表单校验错误仅 toast+高亮，无内联错误文字、无 `aria-invalid`、无修复指引 | `wwwroot/views/scripts.js:369-442`、`users.js:115`、`queues.js:223-235` | ✅ v0.7.3 已修复（`setFieldError`/`clearFieldError`：内联文字 role=alert + aria-invalid + 聚焦） |
 | KN-59 | 提交按钮无请求中忙碌态——保存/执行/删除请求期间不禁用、无 spinner，重复点击可双提交 | `wwwroot/core/api.js`（无状态钩子） | ✅ v0.7.3 已修复（`withBusy`：请求期间禁用 + spinner，7 个视图提交类 actions 全覆盖） |
@@ -97,3 +97,22 @@
 | KN-65 | **`EnsureConfigForEdit` 误删目录型模板配置**：目录型 ConfigPath（如 MaaEnd `config\`）第二次编辑会话时，`PrepareForRun` 刚从 store 还原的用户配置目录被当「误建残留」递归删除并改用默认模板覆盖——用户上次编辑成果从编辑面消失，提交则 store 被模板覆盖（数据损失） | `src/Services/UserConfigManager.cs:229-241` | ✅ v0.7.4 已修复（目录型 ConfigPath 的目录为合法形态：非空=已有配置跳过模板生成，空=复制模板兜底；文件型误建目录保留原清理语义） |
 | KN-66 | **pending 系统操作叠加双执行**：60 秒窗口内两个队列先后完成时新 pending 覆盖旧 pending，但旧 sleep 的后台 `Task.Delay` 未取消，到期仍执行休眠（真实系统副作用）；旧 Cts 也不再可从 UI 取消 | `src/Services/DispatchCenter.cs:369-417` | ✅ v0.7.4 已修复（覆盖前先取消旧 pending 的 Cts；`ClearPendingSystemAction` 引用校验已防误清新操作） |
 | KN-67 | **尝试日志段首行变化影响归档兜底断言**：KN-25 段对称后归档日志首行为「开始」头，chaos `archivedLogWritten` 首行 `startsWith("DBG seed=")` 失效（测试侧未随语义同步） | `uitest/chaos-queue.mjs:360-372` | ✅ v0.7.4 已修复（兜底取「开始」头之后的实际内容行匹配） |
+
+## v0.7.5 台账外新增登记（2026-08-16 v0.7.5 开发，已随 v0.7.5 修复）
+
+| 编号 | 问题 | 位置 | 状态 |
+|---|---|---|---|
+| KN-68 | **CSP `connect-src 'self'` 与重启跨端口轮询冲突**：改端口重启服务后前端跨端口探测被 CSP 拦截（端口不同即不同 origin），自动跳转新端口分支永远走不到，60 秒后只提示手动刷新 | `src/Web/HttpHelper.cs:37`、`wwwroot/views/settings.js:109-134` | ✅ v0.7.5 已修复（connect-src 放行 `http://127.0.0.1:*`，仅回环不扩大攻击面） |
+| KN-69 | **maaend 模板直出配置判定失灵**：`config-template/mxu-MaaEnd.json` 无 `settings.autoStartInstanceId`（MXU 运行分发字段），judge.js 实例定位失败 → 保守无输出 → 判定退化为超时/退出兜底 | `plugins/maaend/data/judge.js:71-75`、`plugins/maaend/data/config-template/mxu-MaaEnd.json` | ✅ v0.7.5 已修复（定位回退链：autoStartInstanceId → lastActiveInstanceId → 唯一实例；多实例无标记仍保守无输出） |
+| KN-70 | **编辑 start 模板标记补写孤儿窗口**：模板生成（EnsureConfigForEdit）与 `Mark.Write()`（补 GeneratedTemplate/TemplateFiles）之间崩溃/启动失败时，标记无模板信息，文件型 config 的模板兄弟文件无清单记录永久残留；且 `DoRestore` cache 非空路径不消费 TemplateFiles | `src/Web/ApiScriptsHandler.cs:857-892`、`src/Services/ConfigSwapSession.cs:631-634` | ✅ v0.7.5 已修复（标记在模板生成后立即持久化；`DoRestore` 两路径统一先按清单删除模板文件） |
+| KN-71 | **进程退出轮判断脚本双触发**：脚本最后 30 秒无日志且恰好退出时，同一轮先命中周期触发再命中退出最终触发——判断脚本被重复完整执行（含 writeFile 副作用；判定语义不变） | `src/Services/RunSession.cs:663-772` | ✅ v0.7.5 已修复（退出/stall 最终触发加「距上次触发 < 1 秒」守卫，复用周期触发结果） |
+| KN-72 | **KillByName 连带杀游戏子进程**：`KillAndConfirmExited` 自重启轮 `KillByName` 用 `Process.Kill(entireProcessTree: true)`——脚本自启动且与 GameExe 同名的子孙游戏进程被连带杀死，与「游戏生杀归游戏管理」声明不一致 | `src/Utilities/SystemActions.cs:398-430` | ✅ v0.7.5 已修复（自重启轮按名清理携带排除名单走 Toolhelp 树清理；游戏关闭/失败路径语义不变） |
+
+## v0.7.5 评估遗留新增登记（2026-08-16 v0.7.5 交付后全面评估，低概率/低影响边界项，未排期）
+
+| 编号 | 问题 | 位置 | 状态 |
+|---|---|---|---|
+| KN-73 | **Mutex「持有中销毁」窗口**：`RemoveMutex` 在 `WaitOne` 成功之后、action 执行期间 Dispose 时，finally 的 `ReleaseMutex` 异常被吞、互斥体所有权丢失，同进程重建同名 Mutex 后理论上双线程可同时进临界区（KN-36 修复仅覆盖「WaitOne 时已 Dispose」窗口） | `src/Services/ConfigSwapPrimitives.cs:106-152` | 随版（Web 删除路径有 `gate.Wait(0)` 前置保护，实际窗口极小） |
+| KN-74 | **.meta 损坏 → 永久待办无限重试**：`RestoreConfigReplacements` 遇 .meta 损坏/缺 configPath 时保留备份现场 return → `HasBackupResidue` 恒真 → 后台恢复循环每 10 秒无限重试同一项直至进程退出（符合「保留现场」意图，但日志持续刷 Error，无退出机制） | `src/Services/ConfigSwapSession.cs:229-239`、`ConfigSwapSession.cs:539-582` | 随版（建议：损坏 .meta 时告警并改名保留以解除待办，或跳过该待办） |
+| KN-75 | **MigrateLegacyLayout 用户目录名碰撞**：脚本级旧布局重命名（config→store 等）不校验目标是否为「用户目录」——用户恰巧名为 `config`/`cache`/`edit-hide`/`replace-backup` 时其数据目录被误当旧布局迁移改名，用户数据错位（低概率） | `src/Services/ConfigSwapPaths.cs:76-119` | 随版（建议：迁移前排除含数据目录子结构/加保留名单） |
+| KN-76 | **PrepareForRun 失败回滚形态不一致**：`!prepared` 回滚分支固定按目录还原（未用 `RestoreKind(mark)`），单文件原配置在「复制成功、删源失败」窄窗口下被还原成「目录/同名文件」形态且立即清标记（无恢复标记；`prepared` 分支的 `DoRestore` 处理正确） | `src/Services/UserConfigManager.cs:158-168` | 随版（窄窗口：MoveAs 删源失败才触发） |

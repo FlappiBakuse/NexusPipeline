@@ -1,4 +1,4 @@
-﻿import { api } from "../core/api.js";
+﻿import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
@@ -37,6 +37,7 @@ export async function pageQueues(token) {
   nextTimer = setInterval(tickQueueNext, 1000);
   registerInterval(nextTimer);
   $domIcons();
+  hydrateIcons($("#view"));
   wireQueueDnd();
 }
 
@@ -79,7 +80,7 @@ function queueCardMarkup(queue, scripts) {
   const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row">${timeBadge}${notifyBadge}</div>` : "";
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
-    <img class="script-ico" src="/api/scripts/${firstScript ? firstScript.id : "none"}/icon" alt="" width="36" height="36" loading="lazy" data-fallback="${esc(scriptFallbackIcon)}">
+    <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
       <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></strong></div>
       ${badgesRow}

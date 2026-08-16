@@ -529,8 +529,7 @@ internal class RunSession
         async Task<bool> TriggerJudgeAsync()
         {
             judge.TouchJudge();
-            (string status, string reason, string notifyText, List<string> replaceConfigs, string? error) = await RunJudgeOnceAsync().ConfigureAwait(false);
-            if (error is not null)
+            (string status, string reason, string notifyText, List<string> replaceConfigs, string? error) = await RunJudgeOnceAsync().ConfigureAwait(false);            if (error is not null)
             {
                 Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」判断脚本执行错误（视为继续运行）：{error}");
                 return false;
@@ -671,6 +670,10 @@ internal class RunSession
                     await TriggerJudgeAsync().ConfigureAwait(false);
                 }
 
+                // v0.7.5（台账外）：距上次判断脚本触发不足 1 秒（同一轮）判定为「刚触发过」——
+                // 退出/stall 最终触发与周期触发同轮先后命中时跳过最终触发，避免判断脚本重复执行
+                // （判定语义不变，复用周期触发结果；无结果时由 result ??= 按未判定处理）。
+                bool judgeJustRan = (DateTime.Now - judge.LastJudgeAt).TotalSeconds < 1;
                 bool scriptExited = process is null
                     ? !SystemActions.IsExeRunning(launchExe)
                     : process.HasExited && !SystemActions.IsExeRunning(launchExe);
@@ -678,7 +681,7 @@ internal class RunSession
                 {
                     if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
                     {
-                        if (scriptMode)
+                        if (scriptMode && !judgeJustRan)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -687,7 +690,7 @@ internal class RunSession
                     }
                     else if (monitor is null)
                     {
-                        if (scriptMode)
+                        if (scriptMode && !judgeJustRan)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -707,7 +710,7 @@ internal class RunSession
                     }
                     else if (judgeConfigured)
                     {
-                        if (scriptMode)
+                        if (scriptMode && !judgeJustRan)
                         {
                             _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -755,7 +758,7 @@ internal class RunSession
                     }
                     if (stallHit)
                     {
-                        if (scriptMode)
+                        if (scriptMode && !judgeJustRan)
                         {
                             _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
                             await FinalJudgeOnceAsync().ConfigureAwait(false);
@@ -860,7 +863,8 @@ internal class RunSession
     {
         if (SystemActions.IsCommandFile(_script.GameExe))
         {
-            await Task.Delay(timeout, _token).ConfigureAwait(false);
+            // v0.7.5（KN-08）：bat/cmd 启动器等待随加速缩放（此前真实 Task.Delay 在加速档白等 GameWaitSeconds 真实秒数）。
+            await Task.Delay(TestHooks.ScaledMs((int)timeout.TotalMilliseconds), _token).ConfigureAwait(false);
             return true;
         }
         DateTime deadline = DateTime.Now + timeout;

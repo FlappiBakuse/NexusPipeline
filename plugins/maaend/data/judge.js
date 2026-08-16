@@ -68,8 +68,21 @@ for (const f of files) {
 if (!cfg || !cfg.settings || !Array.isArray(cfg.instances)) {
   // 配置缺失/解析失败：保守无输出（宿主超时/进程退出判 failed）
 } else {
-  // 2. 按 settings.autoStartInstanceId 定位实例（MXU --autostart 按实例 id 匹配）
-  const inst = cfg.instances.find(i => i.id === cfg.settings.autoStartInstanceId);
+  // 2. 按 settings.autoStartInstanceId 定位实例（MXU --autostart 按实例 id 匹配）；
+  // v0.7.5（台账外）：模板直出配置无 autoStartInstanceId 字段（MXU 运行分发用），回退 lastActiveInstanceId，
+  // 再回退「唯一实例」（模板为单实例场景兜底）；多实例且无标记时保持保守无输出。
+  let inst = null;
+  const autoId = cfg.settings.autoStartInstanceId;
+  const lastId = cfg.settings.lastActiveInstanceId;
+  if (autoId) {
+    inst = cfg.instances.find(i => i.id === autoId) || null;
+  }
+  if (!inst && lastId) {
+    inst = cfg.instances.find(i => i.id === lastId) || null;
+  }
+  if (!inst && cfg.instances.length === 1) {
+    inst = cfg.instances[0];
+  }
   if (!inst || !Array.isArray(inst.tasks)) {
     // 实例定位失败：保守无输出
   } else {

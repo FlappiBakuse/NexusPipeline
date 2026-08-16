@@ -30,7 +30,9 @@ internal sealed class ConfigSessionMark
 
     private static readonly JsonSerializerOptions Options = new()
     {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // v0.7.5（KN-55）：写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；PropertyNameCaseInsensitive
+        // 兼容读取旧版 camelCase 标记（旧版本崩溃现场仍可完整恢复，无需迁移）。
+        PropertyNameCaseInsensitive = true,
         WriteIndented = true,
     };
 
@@ -162,7 +164,8 @@ internal static class ConfigSwapSession
         if (newFiles.Count > 0 || (Directory.Exists(backupDir) && Directory.EnumerateFileSystemEntries(backupDir).Any()))
         {
             Directory.CreateDirectory(backupDir);
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(new { configPath, newFiles }));
+            // v0.7.5（KN-55）：.meta 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取侧兼容旧版 camelCase。
+            File.WriteAllText(metaPath, JsonSerializer.Serialize(new { ConfigPath = configPath, NewFiles = newFiles }));
         }
         return null;
     }
@@ -178,9 +181,11 @@ internal static class ConfigSwapSession
         try
         {
             JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-            if (node?["newFiles"] is JsonArray arr)
+            // v0.7.5（KN-55）：兼容旧版 camelCase 键（旧版本崩溃现场）。
+            JsonArray? files = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
+            if (files is not null)
             {
-                foreach (JsonNode? item in arr)
+                foreach (JsonNode? item in files)
                 {
                     string? text = item?.ToString();
                     if (!string.IsNullOrWhiteSpace(text))
@@ -213,10 +218,12 @@ internal static class ConfigSwapSession
             try
             {
                 JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-                configPath = node?["configPath"]?.ToString();
-                if (node?["newFiles"] is JsonArray arr)
+                // v0.7.5（KN-55）：兼容旧版 camelCase 键（旧版本崩溃现场）。
+                configPath = node?["ConfigPath"]?.ToString() ?? node?["configPath"]?.ToString();
+                JsonArray? metaFiles = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
+                if (metaFiles is not null)
                 {
-                    foreach (JsonNode? item in arr)
+                    foreach (JsonNode? item in metaFiles)
                     {
                         string? text = item?.ToString();
                         if (!string.IsNullOrWhiteSpace(text))
@@ -598,28 +605,7 @@ internal static class ConfigSwapSession
                 if (current != PathKind.Missing)
                 {
                     // 模板目录形态（v0.6.3+）：先按清单删除复制生成的模板文件，再对 configPath 位置兜底清理（防残留）
-                    if (mark.TemplateFiles.Count > 0)
-                    {
-                        string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
-                        if (!string.IsNullOrWhiteSpace(baseDir))
-                        {
-                            foreach (string rel in mark.TemplateFiles)
-                            {
-                                try
-                                {
-                                    string dest = Path.Combine(baseDir, rel);
-                                    if (File.Exists(dest))
-                                    {
-                                        File.Delete(dest);
-                                    }
-                                }
-                                catch
-                                {
-                                    // 删除失败保留标记，交由调用方（自愈/后台延迟重试）再次尝试
-                                }
-                            }
-                        }
-                    }
+                    DeleteTemplateFiles(mark);
                     // 删除失败自然抛出（ClearPath 带重试），标记保留，交由调用方（自愈/后台延迟重试）再次尝试
                     ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
                     Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");
@@ -628,9 +614,41 @@ internal static class ConfigSwapSession
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
+        // v0.7.5（台账外）：cache 非空路径同样先按清单删除模板兄弟文件——StartVisible 失败/CancelEdit 且原配置存在时，
+        // 文件型 config 模板复制到父目录的非 ConfigPath 同名文件（如 maa_option.json）此前残留。
+        DeleteTemplateFiles(mark);
         PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
         ConfigSwapPrimitives.ClearPath(mark.ConfigPath, currentState);
         ConfigSwapPrimitives.MoveAs(cache, mark.ConfigPath, ConfigSwapPrimitives.RestoreKind(mark));
         ConfigSessionMark.Clear(scriptId, userName);
+    }
+
+    /// <summary>按 TemplateFiles 清单删除编辑会话生成的模板文件（相对 ConfigPath 父目录）；删除失败保留标记交自愈重试。</summary>
+    private static void DeleteTemplateFiles(ConfigSessionMark mark)
+    {
+        if (mark.TemplateFiles.Count == 0)
+        {
+            return;
+        }
+        string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            return;
+        }
+        foreach (string rel in mark.TemplateFiles)
+        {
+            try
+            {
+                string dest = Path.Combine(baseDir, rel);
+                if (File.Exists(dest))
+                {
+                    File.Delete(dest);
+                }
+            }
+            catch
+            {
+                // 删除失败保留标记，交由调用方（自愈/后台延迟重试）再次尝试
+            }
+        }
     }
 }

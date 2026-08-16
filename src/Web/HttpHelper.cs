@@ -31,10 +31,12 @@ internal static class HttpHelper
         context.Response.ContentType = contentType;
         // v0.6.9+（P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data: 内联图标）；
         // 缓存保持 no-cache（零构建无版本号，浏览器每次校验）。
+        // v0.7.5（台账外）：connect-src 放行 http://127.0.0.1:* ——设置页「重启服务」跨端口探测（端口漂移 +1）与 CSP 'self'
+        // （端口不同即不同 origin）冲突，原被 CSP 拦截致自动跳转新端口分支永远走不到；仅放行本机回环，不扩大攻击面。
         context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
-        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self' data:";
+        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:*; font-src 'self' data:";
         byte[] data = File.ReadAllBytes(filePath);
         context.Response.ContentLength64 = data.Length;
         context.Response.OutputStream.Write(data, 0, data.Length);

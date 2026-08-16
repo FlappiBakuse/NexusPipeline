@@ -2,6 +2,33 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.5（Pre-release）
+
+### 修复（已知问题台账收尾 + 台账外 5 项）
+
+- **KN-06 远程访问下脚本图标 401**：新增 `hydrateIcons`（core/api.js）——图标渲染后经 fetch（自动携带 Bearer）取 blob 转 ObjectURL 替换 `[data-icon-id]` 元素，按脚本 Id 缓存；本地模式行为不变，远程模式图标恢复可用。
+- **KN-35 历史详情 31 天窗口**：`HistoryService.FindById` 默认窗口改取保留天数上限（默认 180/可配 365），超出 31 天的记录点详情不再 404；显式传参语义保留。
+- **KN-31 AuthFails 字典累积**：远端认证失败条目加 LastActive 时间戳，每 60 秒清理超 10 分钟无活动条目（锁定中保留至锁定过期）。
+- **KN-39 Python 多安装候选不确定**：安装目录候选按解析的主次版本号数值降序取最新（`Python310` > `Python39`，避免字符串序误判），无法解析排最后。
+- **KN-33 Webhook 成功判定**：补 HTTP 状态码——HTTP 非 2xx 直接失败，飞书/钉钉再校验 body `code==0`（此前 HTTP 500 + code==0 误判成功）。
+- **KN-08 bat 游戏启动器等待**：随测试加速缩放（`TestHooks.ScaledMs`），加速档不再白等真实秒数。
+- **KN-55 .session/.meta 序列化**：写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取 `PropertyNameCaseInsensitive`/双键兼容旧版 camelCase，旧崩溃现场无需迁移。
+- **KN-27 icon 响应安全头**：补 `X-Content-Type-Options: nosniff` / `Referrer-Policy`，与静态文件响应一致。
+- **台账外 KN-68 CSP 跨端口轮询冲突**：`connect-src` 放行 `http://127.0.0.1:*`——设置页改端口重启后跨端口探测不再被 CSP 拦截，自动跳转新端口恢复可用（仅回环，不扩大攻击面）。
+- **台账外 KN-69 maaend 模板直出判定失灵**：judge.js 实例定位回退链 `autoStartInstanceId` → `lastActiveInstanceId` → 唯一实例（模板直出配置单实例场景可正常判定；多实例无标记仍保守无输出）。
+- **台账外 KN-70 编辑 start 模板标记孤儿窗口**：`Mark.Write()`（含 GeneratedTemplate/TemplateFiles）提前到模板生成后立即持久化——StartVisible 失败/崩溃窗口不再产生无清单的模板孤儿；`DoRestore` 两路径统一先按清单删除模板兄弟文件（cache 非空路径此前不消费清单）。
+- **台账外 KN-71 进程退出轮判断脚本双触发**：退出/stall 最终触发加「距上次触发 < 1 秒」守卫——周期触发与退出判定同轮先后命中时判断脚本只执行一次（判定语义不变，消除重复执行副作用）。
+- **台账外 KN-72 KillByName 连带杀游戏**：自重启轮按名清理携带游戏排除名单走 Toolhelp 树清理——不再 `Process.Kill(entireProcessTree: true)` 连带杀死脚本自启动的游戏子孙进程（游戏关闭/失败路径语义不变）。
+
+### 测试
+
+- 断言数字不变（单测 97、e2e 76、judge 115、chaos 166）。
+- 加速档全量回归：e2e 76/76（4.0m）+ judge 115/0 + chaos 166/0 + 单测 97/97 全绿（2026-08-16）。
+
+### 变更
+
+- 版本号 0.7.5。
+
 ## v0.7.4（Pre-release）
 
 ### 修复（已知问题批量：稳定复现 + 无严重副作用项 + 台账外新发现）
