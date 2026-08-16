@@ -30,8 +30,9 @@
 
 ### 测试
 
-- 断言数字：单测 97、e2e 76 不变；**chaos-queue 166 → 167**（AGENTS/DEVELOPMENT/RELEASING/CONTRIBUTING 数字同步；F5 归档兜底 `archivedLogWritten` 兼容 KN-25 后归档日志「开始」头首行——此前兜底失效属测试侧未随语义同步）。
+- 断言数字：单测 97、e2e 76、chaos 166 不变（chaos 加速档实测 167 / 真实档 166——固定轮 config 采样对丙的 `fastOk` 兜底断言随「采样直接命中与否」动态触发，口径取真实档发布门禁值 166）；F5 归档兜底 `archivedLogWritten` 兼容 KN-25 后归档日志「开始」头首行——此前兜底失效属测试侧未随语义同步。
 - 加速档全量回归：e2e 76/76（4.1m）+ judge 115/0 + chaos 167/0 + 单测 97/97 全绿（2026-08-16）。
+- 真实计时档全量回归（发布门禁）：e2e 76/76（8.4m）+ judge 115/0 + chaos 166/0 + 单测 97/97 全绿（2026-08-16）。
 - 首轮发现与修复：judge 5 项通知断言失败——KN-34 初版 `JsonSerializer.Serialize` 默认编码器将中文转义为 `\uXXXX`（合法 JSON 但破坏既有通知契约与原始字符串断言），改 `UnsafeRelaxedJsonEscaping` 后恢复全绿；chaos 2 项失败——KN-25 后归档日志首行为「开始」头致 F5 兜底失效，断言同步后全绿。
 
 ### 变更

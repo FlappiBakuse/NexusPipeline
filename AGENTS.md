@@ -17,7 +17,7 @@ npx playwright test            # 全量 76 用例（发布前本地回归）；�
 $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：75 用例（剔除响应式外壳外观用例）
 # 时间加速（v0.6.4+，唯一加速档 NEXUS_TIME_SCALE=10；run-uitest.cmd 已默认内置）：宿主等待按比例缩放
 # （1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms），
-# 三套测试（e2e 76 + judge 115 + chaos 167）合计约 9 分钟；发布前用真实计时档（不设该变量）跑全量回归
+# 三套测试（e2e 76 + judge 115 + chaos 166）合计约 9 分钟；发布前用真实计时档（不设该变量）跑全量回归
 $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
@@ -27,7 +27,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 97 �
 
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 76 / 75（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：115 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
-- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：167 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
+- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：166 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
 - **flake 治理基建（v0.6.9+）**：`uitest/flake-monitor.mjs` 进程/端口监控采样器（500ms 采样 nexus-pipeline 进程存在性 + 58731 监听，日志在 `uitest/flake-monitor-logs/`，stop 信号文件同名目录下 flake-monitor.stop）；flake 台账 `uitest/FLAKE-LEDGER.md`（现象/复现条件/根因/处置，每次全量回归更新直至清零）；spec 文件级 `ensureService` 兜底（服务不可达自动强杀残留重拉，隔离级联失败）；`killRuntimeServices` 轮询确认进程完全消失后才返回（消除强杀→重启竞态窗口）。
 - **加速档测试契约**（v0.6.2+，v0.6.4 统一 scale=10）：测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（`ping -n 75` → 加速档 `ping -n 6`（judge，卡住 5s > 周期 3s）/ `ping -n 8`（chaos，卡住 7s > stall 6s）、`> 20000` → `> 20000 / scale` 等），保证场景语义（卡住时长仍远大于缩放后的周期触发间隔）；新增依赖真实墙钟的用例须同时给出加速与真实两档实现。
 - **判断脚本执行上限与解释器解析**：判断脚本单次执行 30 秒上限**不随加速缩放**（v0.6.6+：外部进程冷启动可达数秒，如 Python 首次运行；缩放 30s→3s 会把真实执行误判为超时——曾致 CI e2e 失败）；解释器解析：PATH 跳过 WindowsApps Store 别名 + 常见安装位置兜底，stdin 显式重定向（避免继承服务管道句柄挂起）。
