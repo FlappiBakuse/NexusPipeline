@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using NexusPipeline.Cli;
 using NexusPipeline.Utilities;
 using NexusPipeline.Web;
 
@@ -51,7 +52,9 @@ internal class TrayApp : ApplicationContext
             return;
         }
         // v0.7.1+（KN-51）：用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
-        int port = WebServer.Current?.Port ?? RuntimeContext.Instance.Settings.WebPort;
+        int port = WebServer.Current?.Port
+            ?? CliTransport.FindServicePort(RuntimeContext.Instance.Settings.WebPort)
+            ?? RuntimeContext.Instance.Settings.WebPort;
         OpenWeb(port);
     }
 

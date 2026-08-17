@@ -12,7 +12,7 @@ internal static class MainMenu
             Ui.ClearScreen();
             RuntimeContext ctx = RuntimeContext.Instance;
             // v0.6.6+：常驻服务运行中时菜单直写配置可能与 Web 端修改互相覆盖，顶部提示。
-            bool serviceRunning = CliTransport.Probe(ctx.Settings.WebPort, 1500);
+            bool serviceRunning = CliTransport.FindServicePort(ctx.Settings.WebPort) is not null;
             string[] options =
             {
                 $"1. 脚本实例管理（当前：{ctx.Scripts.Count} 个）",
@@ -97,7 +97,8 @@ internal static class MainMenu
         Console.WriteLine("===== NexusPipeline 枢链 状态 =====");
         Console.WriteLine($"脚本实例：{ctx.Scripts.Count} 个 | 调度队列：{ctx.Queues.Count} 个");
         Console.WriteLine($"开机自启动：{(TaskRegistration.IsRegistered() ? "已注册" : "未注册")} | 轻量模式：{(s.LightweightMode ? "开" : "关")}");
-        Console.WriteLine($"Web 界面：http://127.0.0.1:{s.WebPort}/（未检测是否运行）");
+        int? actualPort = CliTransport.FindServicePort(s.WebPort);
+        Console.WriteLine($"Web 界面：http://127.0.0.1:{actualPort ?? s.WebPort}/" + (actualPort is null ? "（未检测到服务）" : ""));
         Console.WriteLine($"日志级别：{s.LogLevel}");
         Console.WriteLine();
         List<RunningExecution> active = ctx.Center.Active.ToList();

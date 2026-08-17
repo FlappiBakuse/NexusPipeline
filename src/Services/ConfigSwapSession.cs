@@ -166,7 +166,7 @@ internal static class ConfigSwapSession
         {
             Directory.CreateDirectory(backupDir);
             // v0.7.5（KN-55）：.meta 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取侧兼容旧版 camelCase。
-            File.WriteAllText(metaPath, JsonSerializer.Serialize(new { ConfigPath = configPath, NewFiles = newFiles }));
+            JsonUtil.WriteAtomic(metaPath, JsonSerializer.Serialize(new { ConfigPath = configPath, NewFiles = newFiles }));
         }
         return null;
     }
@@ -203,13 +203,13 @@ internal static class ConfigSwapSession
         return list;
     }
 
-    /// <summary>还原配置替换：从 swap-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
-    public static void RestoreConfigReplacements(string scriptId, string? userName)
+    /// <summary>还原配置替换：成功时清理备份，任一文件失败时保留备份现场供恢复循环继续处理。</summary>
+    public static bool RestoreConfigReplacements(string scriptId, string? userName)
     {
         string backupDir = ConfigSwapPaths.ReplaceBackupDir(scriptId, userName);
         if (!Directory.Exists(backupDir))
         {
-            return;
+            return true;
         }
         string metaPath = Path.Combine(backupDir, ".meta");
         string? configPath = null;
@@ -237,14 +237,15 @@ internal static class ConfigSwapSession
             catch (Exception ex)
             {
                 Logger.Error($"[错误] 配置替换备份清单损坏（{metaPath}），已跳过还原并保留备份现场：{ex.Message}");
-                return;
+                return false;
             }
         }
         if (string.IsNullOrWhiteSpace(configPath))
         {
             Logger.Error($"[错误] 配置替换备份清单缺少 configPath（{metaPath}），已跳过还原并保留备份现场。");
-            return;
+            return false;
         }
+        bool restored = true;
         foreach (string file in Directory.GetFiles(backupDir, "*", SearchOption.AllDirectories))
         {
             string rel = Path.GetRelativePath(backupDir, file);
@@ -255,6 +256,7 @@ internal static class ConfigSwapSession
             string? target = ResolveConfigTarget(configPath, rel);
             if (target is null)
             {
+                restored = false;
                 continue;
             }
             try
@@ -264,6 +266,7 @@ internal static class ConfigSwapSession
             }
             catch (Exception ex)
             {
+                restored = false;
                 Logger.Warn($"[警告] 还原配置替换失败（{target}）：{ex.Message}");
             }
         }
@@ -272,6 +275,10 @@ internal static class ConfigSwapSession
             string? target = ResolveConfigTarget(configPath, rel);
             if (target is null || !File.Exists(target))
             {
+                if (target is null)
+                {
+                    restored = false;
+                }
                 continue;
             }
             try
@@ -281,10 +288,24 @@ internal static class ConfigSwapSession
             }
             catch (Exception ex)
             {
+                restored = false;
                 Logger.Warn($"[警告] 清理替换新增文件失败（{target}）：{ex.Message}");
             }
         }
-        ConfigSwapPrimitives.TryDeleteDir(backupDir);
+        if (!restored)
+        {
+            return false;
+        }
+        try
+        {
+            Directory.Delete(backupDir, recursive: true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理配置替换备份失败，保留备份现场：{backupDir}（{ex.Message}）");
+            return false;
+        }
     }
 
     /* ---------------- 自动更新配置（v0.7.6）：config → store 全量镜像同步 ---------------- */
@@ -316,18 +337,76 @@ internal static class ConfigSwapSession
                     Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」配置仍在变化（{SyncPhaseText(firstCheck)}，保留旧快照）。");
                     return;
                 }
+                string stableSample = SampleConfig(configPath);
                 // 4. 插队清单 + 还原描述。
                 HashSet<string> swapFiles = ReadSwapFiles(ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
                 ConfigRestoreDescriptor? descriptor = ReadRestoreDescriptor(ConfigSwapPaths.ScriptDir(scriptId, userName));
-                // 5. 全量镜像（copy-then-prune）。
-                (int written, int deleted) = MirrorToStore(configPath, store, swapFiles, descriptor);
-                Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，删除 {deleted}，{SyncPhaseText(firstCheck)}）");
+                // 5. 全量镜像到临时目录并原子替换，源配置在复制期间再次变化则整次放弃。
+                (int written, int preserved) = MirrorToStoreAtomic(configPath, store, swapFiles, descriptor, stableSample);
+                Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，保留插队 {preserved}，{SyncPhaseText(firstCheck)}）");
             });
         }
         catch (Exception ex)
         {
             Logger.Warn($"[配置同步] 失败（脚本「{scriptId}」用户「{userName}」）：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 失败重试前重新执行一次完整配置交换：当前尝试的最终 config 先保存到 retry-store，
+    /// 再把 original 现场恢复并重新移入 original，最后从 retry-store 复制下一轮配置到 config。
+    /// retry-store 只服务本次运行，不等同于用户永久快照 store。
+    /// </summary>
+    public static string? PrepareForRetry(string scriptId, string userName, string configPath)
+    {
+        string? error = null;
+        try
+        {
+            ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+            {
+                ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                if (mark is null || !string.Equals(mark.Phase, "run", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new IOException("未找到有效的运行配置交换会话");
+                }
+                string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
+                string retryStore = ConfigSwapPaths.RetryStoreDir(scriptId, userName);
+                PathKind currentKind = PathKindUtil.KindOf(configPath);
+                ConfigSwapPrimitives.ClearPath(retryStore, PathKindUtil.KindOf(retryStore));
+                if (currentKind != PathKind.Missing)
+                {
+                    ConfigSwapPrimitives.CopyAs(configPath, retryStore, PathKind.Dir);
+                }
+
+                if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
+                {
+                    ConfigSwapPrimitives.ClearPath(configPath, currentKind);
+                    ConfigSwapPrimitives.MoveAs(cache, configPath, ConfigSwapPrimitives.RestoreKind(mark));
+                    ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
+                    ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
+                }
+                else
+                {
+                    ConfigSwapPrimitives.ClearPath(configPath, currentKind);
+                }
+
+                if (Directory.Exists(retryStore) && Directory.EnumerateFileSystemEntries(retryStore).Any())
+                {
+                    ConfigSwapPrimitives.CopyAs(retryStore, configPath, ConfigSwapPrimitives.RestoreKind(mark));
+                }
+                else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
+                {
+                    Directory.CreateDirectory(configPath);
+                }
+                Logger.Info($"[配置交换] 脚本「{scriptId}」用户「{userName}」已重新准备重试配置。");
+            });
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            Logger.Error($"[错误] 重新准备重试配置失败（脚本 {scriptId} / 用户 {userName}）：{error}");
+        }
+        return error;
     }
 
     private static string SyncPhaseText(bool firstCheck)
@@ -367,7 +446,7 @@ internal static class ConfigSwapSession
         if (Directory.Exists(store))
         {
             int storeCount = Directory.GetFiles(store, "*", SearchOption.AllDirectories).Length;
-            if (storeCount > 0 && files.Length * 2 < storeCount)
+            if (storeCount > 0 && files.Length * 2 <= storeCount)
             {
                 Logger.Warn($"[配置同步] 跳过：配置文件数骤降（config {files.Length} < store {storeCount} 一半），疑似脚本写坏/清空中，保留旧快照。");
                 return false;
@@ -381,8 +460,8 @@ internal static class ConfigSwapSession
         return true;
     }
 
-    /// <summary>内容有效性探测（v0.7.6 评估加强）：JSON 型文件（.json 扩展名或内容以 {/[ 开头）必须可解析；
-    /// 非 JSON 型文本不校验。单文件 32MB 上限跳过探测（超大文件不可能为常见配置半写场景，防内存开销）。
+    /// <summary>内容有效性探测（v0.7.8）：JSON 型文件（.json 扩展名或明确 JSON 内容）必须可解析；
+    /// 非 JSON 型文本不校验。大文件不再直接视为有效，避免半写内容绕过保护。
     /// 只读探测不重写；解析失败视为写入中断（脚本被杀瞬间半写），跳过同步保留旧快照。</summary>
     internal static bool ContentValidForSync(string configPath, PathKind kind)
     {
@@ -418,10 +497,6 @@ internal static class ConfigSwapSession
         {
             return !jsonExt;
         }
-        if (info.Length > 32L * 1024 * 1024)
-        {
-            return true;
-        }
         string text;
         try
         {
@@ -432,20 +507,29 @@ internal static class ConfigSwapSession
             return false;
         }
         string trimmed = text.TrimStart(' ', '\t', '\r', '\n', '\uFEFF');
-        bool jsonLike = jsonExt || trimmed.StartsWith('{') || trimmed.StartsWith('[');
+        bool jsonLike = jsonExt || trimmed.StartsWith('{') || IsJsonArrayLike(trimmed);
         if (!jsonLike)
         {
             return true;
         }
         try
         {
-            _ = JsonNode.Parse(text);
-            return true;
+            return JsonNode.Parse(text) is not null;
         }
         catch (Exception)
         {
             return false;
         }
+    }
+
+    private static bool IsJsonArrayLike(string text)
+    {
+        if (text.Length == 0 || text[0] != '[')
+        {
+            return false;
+        }
+        string rest = text[1..].TrimStart();
+        return rest.Length == 0 || "[{\"-0123456789tfn".Contains(rest[0]);
     }
 
     /// <summary>稳定性检查：短间隔两次采样 config 文件清单/长度/修改时间，不一致视为仍在写入。</summary>
@@ -485,10 +569,13 @@ internal static class ConfigSwapSession
                 string rel = Path.GetRelativePath(backupDir, file);
                 if (!rel.Equals(".meta", StringComparison.OrdinalIgnoreCase))
                 {
-                    set.Add(rel);
+                    set.Add(NormalizeRelative(rel));
                 }
             }
-            set.UnionWith(ReadMetaNewFiles(Path.Combine(backupDir, ".meta")));
+            foreach (string rel in ReadMetaNewFiles(Path.Combine(backupDir, ".meta")))
+            {
+                set.Add(NormalizeRelative(rel));
+            }
         }
         return set;
     }
@@ -636,6 +723,231 @@ internal static class ConfigSwapSession
         return (written, deleted);
     }
 
+    /// <summary>
+    /// 事务化全量镜像：先写 store.tmp，复制期间源配置发生变化则放弃；成功后将旧 store 保留为
+    /// store.previous，再把临时目录移动为 store。store.previous 用于进程崩溃后的恢复。
+    /// 无还原描述的插队文件从旧 store 保留，不参与本轮内容覆盖或清理。
+    /// </summary>
+    internal static (int Written, int Preserved) MirrorToStoreAtomic(
+        string configPath,
+        string store,
+        HashSet<string> swapFiles,
+        ConfigRestoreDescriptor? descriptor,
+        string expectedSample)
+    {
+        string temp = store + ".tmp";
+        string previous = store + ".previous";
+        int written = 0;
+        int preserved = 0;
+        try
+        {
+            if (Directory.Exists(temp))
+            {
+                Directory.Delete(temp, recursive: true);
+            }
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+            Directory.CreateDirectory(temp);
+
+            PathKind kind = PathKindUtil.KindOf(configPath);
+            if (kind == PathKind.Missing)
+            {
+                throw new IOException("配置位置在镜像期间消失");
+            }
+            var configRels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (kind == PathKind.File)
+            {
+                string rel = Path.GetFileName(configPath);
+                configRels.Add(rel);
+                    written += StageMirrorFile(configPath, Path.Combine(temp, rel), rel, store, temp, swapFiles, descriptor, ref preserved);
+            }
+            else
+            {
+                foreach (string source in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories))
+                {
+                    string rel = NormalizeRelative(Path.GetRelativePath(configPath, source));
+                    configRels.Add(rel);
+                    written += StageMirrorFile(source, Path.Combine(temp, rel), rel, store, temp, swapFiles, descriptor, ref preserved);
+                }
+                if (configRels.Count == 0)
+                {
+                    throw new IOException("配置目录在镜像期间变为空");
+                }
+            }
+
+            foreach (string rel in swapFiles)
+            {
+                string normalized = NormalizeRelative(rel);
+                if (configRels.Contains(normalized))
+                {
+                    continue;
+                }
+                if (CopyExistingStoreFile(store, temp, normalized))
+                {
+                    preserved++;
+                }
+            }
+
+            if (!string.Equals(expectedSample, SampleConfig(configPath), StringComparison.Ordinal))
+            {
+                throw new IOException("配置在镜像期间发生变化，保留旧快照");
+            }
+            CommitStagedStore(temp, store, previous);
+            return (written, preserved);
+        }
+        catch
+        {
+            ConfigSwapPrimitives.TryDeleteDir(temp);
+            throw;
+        }
+    }
+
+    private static int StageMirrorFile(
+        string source,
+        string dest,
+        string rel,
+        string store,
+        string stageRoot,
+        HashSet<string> swapFiles,
+        ConfigRestoreDescriptor? descriptor,
+        ref int preserved)
+    {
+        if (swapFiles.Contains(rel))
+        {
+            FileRestore? restore = FindRestoreFile(descriptor, rel);
+            if (restore is null)
+            {
+                Logger.Info($"[配置同步] 插队文件无还原描述，保留旧快照：{rel}");
+                if (CopyExistingStoreFile(store, stageRoot, rel))
+                {
+                    preserved++;
+                }
+                return 0;
+            }
+            (string content, Encoding encoding) = ReadTextPreservingEncoding(source);
+            foreach (ToggleRestore toggle in restore.Toggles)
+            {
+                if (!ApplyToggle(ref content, toggle))
+                {
+                    throw new IOException($"插队文件还原描述应用失败：{rel} / {toggle.Path}");
+                }
+            }
+            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+            File.WriteAllText(dest, content, encoding);
+            return 1;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+        File.Copy(source, dest, overwrite: true);
+        return 1;
+    }
+
+    private static (string Content, Encoding Encoding) ReadTextPreservingEncoding(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        byte[] prefix = new byte[4];
+        int read = stream.Read(prefix, 0, prefix.Length);
+        bool hasBom = (read >= 3 && prefix[0] == 0xEF && prefix[1] == 0xBB && prefix[2] == 0xBF)
+            || (read >= 2 && prefix[0] == 0xFF && prefix[1] == 0xFE)
+            || (read >= 2 && prefix[0] == 0xFE && prefix[1] == 0xFF)
+            || (read >= 4 && prefix[0] == 0xFF && prefix[1] == 0xFE && prefix[2] == 0x00 && prefix[3] == 0x00)
+            || (read >= 4 && prefix[0] == 0x00 && prefix[1] == 0x00 && prefix[2] == 0xFE && prefix[3] == 0xFF);
+        stream.Position = 0;
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        string content = reader.ReadToEnd();
+        Encoding detected = reader.CurrentEncoding;
+        Encoding output = detected.CodePage switch
+        {
+            65001 => new UTF8Encoding(hasBom),
+            1200 => new UnicodeEncoding(false, hasBom),
+            1201 => new UnicodeEncoding(true, hasBom),
+            12000 => new UTF32Encoding(false, hasBom),
+            12001 => new UTF32Encoding(true, hasBom),
+            _ => detected,
+        };
+        return (content, output);
+    }
+
+    private static bool CopyExistingStoreFile(string store, string targetRoot, string rel)
+    {
+        string? source = JudgeScriptRunner.ResolveWithin(store, rel);
+        if (source is null || !File.Exists(source))
+        {
+            return false;
+        }
+        string dest = Path.Combine(targetRoot, rel);
+        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+        File.Copy(source, dest, overwrite: true);
+        return true;
+    }
+
+    private static void CommitStagedStore(string temp, string store, string previous)
+    {
+        if (File.Exists(store) || File.Exists(previous))
+        {
+            throw new IOException("用户快照路径形态不正确");
+        }
+        if (Directory.Exists(previous))
+        {
+            Directory.Delete(previous, recursive: true);
+        }
+        bool oldMoved = false;
+        try
+        {
+            if (Directory.Exists(store))
+            {
+                Directory.Move(store, previous);
+                oldMoved = true;
+            }
+            Directory.Move(temp, store);
+        }
+        catch
+        {
+            if (oldMoved && !Directory.Exists(store) && Directory.Exists(previous))
+            {
+                Directory.Move(previous, store);
+            }
+            throw;
+        }
+    }
+
+    /// <summary>将编辑后的配置先完整复制到临时快照，再以目录事务替换用户 store。</summary>
+    public static void CommitStoreSnapshot(string configPath, string store)
+    {
+        string temp = store + ".tmp";
+        try
+        {
+            if (Directory.Exists(temp))
+            {
+                Directory.Delete(temp, recursive: true);
+            }
+            if (File.Exists(temp))
+            {
+                File.Delete(temp);
+            }
+            ConfigSwapPrimitives.CopyAs(configPath, temp, PathKind.Dir);
+            CommitStagedStore(temp, store, store + ".previous");
+        }
+        catch
+        {
+            ConfigSwapPrimitives.TryDeleteDir(temp);
+            throw;
+        }
+    }
+
+    private static FileRestore? FindRestoreFile(ConfigRestoreDescriptor? descriptor, string rel)
+    {
+        return descriptor?.Files.FirstOrDefault(file =>
+            string.Equals(NormalizeRelative(file.File), NormalizeRelative(rel), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string NormalizeRelative(string value)
+    {
+        return value.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
+    }
+
     /// <summary>镜像单个文件到 store：插队文件有还原描述 → 还原启停后写入；无还原描述 → 跳过（store 保留原样）；其余复制覆盖。</summary>
     internal static bool CopyMirrorFile(string source, string dest, string rel, HashSet<string> swapFiles, ConfigRestoreDescriptor? descriptor)
     {
@@ -730,7 +1042,7 @@ internal static class ConfigSwapSession
         }
     }
 
-    /// <summary>还原描述路径 DSL 定位：标识符[下标].标识符 链（如 instances[0].tasks），不支持通用 JSONPath。</summary>
+    /// <summary>还原描述路径 DSL 定位：支持标识符[下标]或标识符[key=value]选择数组元素（如 instances[id=main].tasks）。</summary>
     internal static JsonNode? LocateNode(JsonNode root, string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -742,13 +1054,23 @@ internal static class ConfigSwapSession
         {
             string name = segment;
             int index = -1;
+            string? selectorKey = null;
+            string? selectorValue = null;
             int bracket = segment.IndexOf('[');
-            if (bracket >= 0 && segment.EndsWith(']'))
+            if (bracket >= 0 && segment.Length > bracket + 1 && segment[^1] == ']')
             {
                 name = segment.Substring(0, bracket);
-                if (!int.TryParse(segment.Substring(bracket + 1, segment.Length - bracket - 2), out index))
+                string selector = segment.Substring(bracket + 1, segment.Length - bracket - 2);
+                if (!int.TryParse(selector, out index))
                 {
-                    return null;
+                    index = -1;
+                    int equal = selector.IndexOf('=');
+                    if (equal <= 0 || equal >= selector.Length - 1)
+                    {
+                        return null;
+                    }
+                    selectorKey = selector[..equal];
+                    selectorValue = selector[(equal + 1)..];
                 }
             }
             if (node is JsonObject obj)
@@ -758,6 +1080,28 @@ internal static class ConfigSwapSession
                     return null;
                 }
                 node = obj[name];
+                if (selectorKey is not null)
+                {
+                    if (node is not JsonArray selectedArray)
+                    {
+                        return null;
+                    }
+                    JsonNode? selectedNode = null;
+                    foreach (JsonNode? item in selectedArray)
+                    {
+                        if (item is not JsonObject selected)
+                        {
+                            continue;
+                        }
+                        string? actual = selected[selectorKey!]?.ToString()?.Trim('"');
+                        if (string.Equals(actual, selectorValue, StringComparison.Ordinal))
+                        {
+                            selectedNode = selected;
+                            break;
+                        }
+                    }
+                    node = selectedNode;
+                }
             }
             else if (node is JsonArray arr)
             {
@@ -811,6 +1155,7 @@ internal static class ConfigSwapSession
             {
                 ConfigSessionMark.Clear(scriptId, userName);
             }
+            ConfigSwapPrimitives.TryDeleteDir(ConfigSwapPaths.RetryStoreDir(scriptId, userName));
             return;
         }
         Logger.Info($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
@@ -833,6 +1178,7 @@ internal static class ConfigSwapSession
         try
         {
             ConfigSwapPaths.MigrateLegacyLayout();
+            RecoverStoreTransactions();
             if (!Directory.Exists(AppPaths.DataDir))
             {
                 return;
@@ -851,6 +1197,33 @@ internal static class ConfigSwapSession
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 扫描未完成配置交换失败：{ex.Message}");
+        }
+    }
+
+    /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store.previous，临时目录只作为未完成事务清理。</summary>
+    private static void RecoverStoreTransactions()
+    {
+        if (!Directory.Exists(AppPaths.DataDir))
+        {
+            return;
+        }
+        foreach (string temp in Directory.GetDirectories(AppPaths.DataDir, "store.tmp", SearchOption.AllDirectories))
+        {
+            string store = temp[..^4];
+            string previous = store + ".previous";
+            try
+            {
+                if (!Directory.Exists(store) && Directory.Exists(previous))
+                {
+                    Directory.Move(previous, store);
+                    Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复旧用户快照：{store}");
+                }
+                ConfigSwapPrimitives.TryDeleteDir(temp);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
+            }
         }
     }
 
@@ -881,6 +1254,11 @@ internal static class ConfigSwapSession
         if (ok && !string.IsNullOrWhiteSpace(userName))
         {
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+            if (mark is null && File.Exists(ConfigSessionMark.MarkFile(scriptId, userName)))
+            {
+                ok = RecoverCorruptMark(scriptId, userName);
+            }
+            mark = ok ? ConfigSessionMark.TryRead(scriptId, userName) : null;
             if (mark is not null)
             {
                 RestoreHiddenQuiet(scriptId, userName, mark.ConfigPath);
@@ -913,6 +1291,46 @@ internal static class ConfigSwapSession
         return ok;
     }
 
+    /// <summary>会话标记损坏时，使用当前脚本固化的 ConfigPath 和 original 目录形态做保守恢复。</summary>
+    private static bool RecoverCorruptMark(string scriptId, string userName)
+    {
+        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        if (script is null || string.IsNullOrWhiteSpace(script.ConfigPath))
+        {
+            Logger.Error($"[错误] 配置会话标记损坏且无法找到脚本配置路径：脚本 {scriptId} / 用户 {userName}");
+            EnqueuePendingRecover(scriptId, userName);
+            return false;
+        }
+        string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
+        var mark = new ConfigSessionMark
+        {
+            ScriptId = scriptId,
+            UserName = userName,
+            ConfigPath = script.ConfigPath,
+            OriginalKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath)) ? "dir" : "file",
+            Phase = "run",
+        };
+        try
+        {
+            if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
+            {
+                DoRestore(scriptId, userName, mark);
+            }
+            else
+            {
+                ConfigSessionMark.Clear(scriptId, userName);
+            }
+            Logger.Warn($"[恢复] 配置会话标记损坏，已按当前脚本配置路径完成保守恢复：脚本 {scriptId} / 用户 {userName}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[错误] 配置会话标记损坏，保守恢复失败（脚本 {scriptId} / 用户 {userName}）：{ex.Message}");
+            EnqueuePendingRecover(scriptId, userName);
+            return false;
+        }
+    }
+
     /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false（保持旧恢复行为）。</summary>
     private static bool ScriptProcessRunning(string scriptId)
     {
@@ -939,9 +1357,9 @@ internal static class ConfigSwapSession
         Logger.Info($"[恢复] 检测到未还原的配置替换，还原脚本 {scriptId} 用户 {userName ?? "(无用户)"} 的配置。");
         try
         {
-            RestoreConfigReplacements(scriptId, userName);
+            bool restored = RestoreConfigReplacements(scriptId, userName);
             Audit.Log(Audit.System, "启动恢复配置替换", $"脚本 {scriptId} / 用户 {userName ?? "(无用户)"}");
-            return true;
+            return restored;
         }
         catch (Exception ex)
         {
@@ -999,6 +1417,7 @@ internal static class ConfigSwapSession
         try
         {
             DoRestore(scriptId, userName!, mark);
+            ConfigSwapPrimitives.TryDeleteDir(ConfigSwapPaths.RetryStoreDir(scriptId, userName!));
             Audit.Log(Audit.System, "启动恢复配置交换", $"脚本 {scriptId} / 用户 {userName}（{mark.ConfigPath}）");
             return true;
         }

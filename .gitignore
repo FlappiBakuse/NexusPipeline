@@ -19,5 +19,7 @@ uitest/test-results/
 uitest/flake-monitor-logs/
 playwright-report/
 .build-src-hash
+web.port
+web.port.tmp
 NexusPipeline-*-win-x64.zip
 NexusPipeline-*-win-x64.zip.sha256

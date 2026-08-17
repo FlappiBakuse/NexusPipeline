@@ -25,4 +25,7 @@ internal static class AppPaths
     public static readonly string PluginsDir = Path.Combine(AppRoot, "plugins");
 
     public static readonly string DataDir = Path.Combine(AppRoot, "data");
+
+    /// <summary>常驻 Web 服务实际监听端口（服务启动时写入，停止时删除；CLI 用于复用端口漂移后的服务）。</summary>
+    public static readonly string WebPortPath = Path.Combine(AppRoot, "web.port");
 }

@@ -257,9 +257,9 @@ internal static class EmulatorSupport
     /// adb connect 对拒绝连接的目标（模拟器未开/地址错误）退出码仍为 0（实测 10061 拒绝 exit 0），
     /// 须按输出失败标记识别（"cannot connect" 前缀固定英文，错误描述本地化不依赖）。
     /// </summary>
-    public static async Task<(bool Ok, string Output)> AdbConnectAsync(string adbExe, string address, CancellationToken token)
+    public static async Task<(bool Ok, string Output)> AdbConnectAsync(string adbExe, string address, CancellationToken token, int timeoutSeconds = 30)
     {
-        (bool ok, string output) = await RunCommandAsync(adbExe, new[] { "connect", address }, 30, token).ConfigureAwait(false);
+        (bool ok, string output) = await RunCommandAsync(adbExe, new[] { "connect", address }, timeoutSeconds, token).ConfigureAwait(false);
         if (ok && ConnectFailed(output))
         {
             return (false, output);
@@ -286,9 +286,9 @@ internal static class EmulatorSupport
     }
 
     /// <summary>查询模拟器当前前台应用包名（dumpsys window）；查询失败返回 null。</summary>
-    public static async Task<string?> GetForegroundPackageAsync(string adbExe, string address, CancellationToken token)
+    public static async Task<string?> GetForegroundPackageAsync(string adbExe, string address, CancellationToken token, int timeoutSeconds = 30)
     {
-        (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "dumpsys", "window" }, 30, token).ConfigureAwait(false);
+        (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "dumpsys", "window" }, timeoutSeconds, token).ConfigureAwait(false);
         return ok ? ParseForegroundPackage(output) : null;
     }
 

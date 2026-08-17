@@ -95,40 +95,68 @@ internal sealed class SessionJudge
     /// <summary>处理一行日志的判定输入：关键字模式跨行累积匹配成功/失败组（组内 AND 跨整个日志、组间 OR）。返回命中类型。</summary>
     public LineHit HandleLine(string line)
     {
-        if (_markerSeenAt is null && HitAnyGroup(line, _successPending))
+        if (_mode != JudgeMode.Keyword)
         {
-            _markerSeenAt = DateTime.Now;
-            return LineHit.SuccessKeyword;
+            return LineHit.None;
         }
-        if (_failureSeenAt is null && HitAnyGroup(line, _failurePending))
+
+        int? successPosition = ConsumeAnyGroup(line, _successPending);
+        int? failurePosition = ConsumeAnyGroup(line, _failurePending);
+        if (successPosition is null && failurePosition is null)
         {
-            _failureSeenAt = DateTime.Now;
+            return LineHit.None;
+        }
+        if (failurePosition is not null && (successPosition is null || failurePosition.Value <= successPosition.Value))
+        {
+            if (_failureSeenAt is null)
+            {
+                _failureSeenAt = DateTime.Now;
+            }
             return LineHit.FailureKeyword;
         }
-        return LineHit.None;
+        if (_markerSeenAt is null)
+        {
+            _markerSeenAt = DateTime.Now;
+        }
+        return LineHit.SuccessKeyword;
     }
 
     /// <summary>
-    /// 跨行 AND 匹配（v0.7.1+）：本行出现的词从对应组移除，任一组清空即命中；
-    /// 已清空的组保持命中（后续行不改变已判定结果）。组间 OR 语义由此天然成立。
+    /// 跨行 AND 匹配并返回本行完成该组的文本位置。多个组仍为 OR；返回位置用于同一行同时出现
+    /// 成功/失败关键字时按日志文本先后顺序决定事件，而不是固定成功优先。
     /// </summary>
-    private static bool HitAnyGroup(string line, List<HashSet<string>> pendingGroups)
+    private static int? ConsumeAnyGroup(string line, List<HashSet<string>> pendingGroups)
     {
-        bool any = false;
+        int? firstCompletion = null;
         foreach (HashSet<string> pending in pendingGroups)
         {
             if (pending.Count == 0)
             {
-                any = true;
                 continue;
             }
-            pending.RemoveWhere(word => line.Contains(word, StringComparison.OrdinalIgnoreCase));
-            if (pending.Count == 0)
+
+            var hits = new List<(string Word, int Position)>();
+            foreach (string word in pending)
             {
-                any = true;
+                int position = line.IndexOf(word, StringComparison.OrdinalIgnoreCase);
+                if (position >= 0)
+                {
+                    hits.Add((word, position));
+                }
+            }
+            foreach ((string word, _) in hits)
+            {
+                pending.Remove(word);
+            }
+            if (pending.Count == 0 && hits.Count > 0)
+            {
+                int completion = hits.Max(hit => hit.Position);
+                firstCompletion = firstCompletion is null
+                    ? completion
+                    : Math.Min(firstCompletion.Value, completion);
             }
         }
-        return any;
+        return firstCompletion;
     }
 
     /// <summary>应用判断脚本结果：success → 成功标记；failed → 失败标记并（首次）执行配置替换回调。返回是否设置了判定。</summary>

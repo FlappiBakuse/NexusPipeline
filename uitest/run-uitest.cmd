@@ -1,17 +1,21 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem 提权版（requireAdministrator）无法在无管理员权限下由 node 启动（CreateProcess 报 740），
-rem 非管理员终端自动以管理员身份重启本脚本（UAC 从不通知 + 管理员账户时静默提权，无弹窗）。
+rem 锟斤拷权锟芥（requireAdministrator锟斤拷锟睫凤拷锟斤拷锟睫癸拷锟斤拷员权锟斤拷锟斤拷锟斤拷 node 锟斤拷锟斤拷锟斤拷CreateProcess 锟斤拷 740锟斤拷锟斤拷
+rem 锟角癸拷锟斤拷员锟秸讹拷锟皆讹拷锟皆癸拷锟斤拷员锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟脚憋拷锟斤拷UAC 锟接诧拷通知 + 锟斤拷锟斤拷员锟剿伙拷时锟斤拷默锟斤拷权锟斤拷锟睫碉拷锟斤拷锟斤拷锟斤拷
 net session >nul 2>&1
 if errorlevel 1 (
-    echo [提示] 当前终端无管理员权限，正在以管理员身份重新启动测试（UAC 从不通知时无弹窗）...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~dp0run-uitest.cmd' -ArgumentList '%*' -Verb RunAs -WorkingDirectory '%~dp0'"
+    echo [锟斤拷示] 锟斤拷前锟秸讹拷锟睫癸拷锟斤拷员权锟睫ｏ拷锟斤拷锟斤拷锟皆癸拷锟斤拷员锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟皆ｏ拷UAC 锟接诧拷通知时锟睫碉拷锟斤拷锟斤拷...
+    if "%*"=="" (
+        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-uitest.cmd' -Verb RunAs -WorkingDirectory '%~dp0'"
+    ) else (
+        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-uitest.cmd' -ArgumentList '%*' -Verb RunAs -WorkingDirectory '%~dp0'"
+    )
     exit /b 0
 )
 set PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers
-rem 参数解析（v0.6.4+）：--ci = 核心回归集（NEXUS_CI=1，剔除响应式外壳外观用例）；
-rem --realtime = 关闭时间加速（真实计时档，发布前最终回归用）；其余情况默认 NEXUS_TIME_SCALE=10 加速档。
+rem 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷v0.6.4+锟斤拷锟斤拷--ci = 锟斤拷锟侥回归集锟斤拷NEXUS_CI=1锟斤拷锟睫筹拷锟斤拷应式锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
+rem --realtime = 锟截憋拷时锟斤拷锟斤拷伲锟斤拷锟绞碉拷锟绞憋拷锟斤拷锟斤拷锟斤拷锟角帮拷锟斤拷栈毓锟斤拷茫锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷默锟斤拷 NEXUS_TIME_SCALE=10 锟斤拷锟劫碉拷锟斤拷
 set REALTIME=
 for %%a in (%*) do (
     if /i "%%a"=="--ci" set NEXUS_CI=1

@@ -21,6 +21,12 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userName), "original");
     }
 
+    /// <summary>当前运行重试轮使用的临时配置快照；不等同于用户永久 store。</summary>
+    public static string RetryStoreDir(string scriptId, string userName)
+    {
+        return Path.Combine(UserDir(scriptId, userName), "retry-store");
+    }
+
     /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
     public static string HiddenConfigDir(string scriptId, string userName)
     {
@@ -62,7 +68,10 @@ internal static class ConfigSwapPaths
     public static void CleanupScriptArea(string scriptId, string? userName)
     {
         ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
-        ConfigSwapPrimitives.TryDeleteDir(ReplaceBackupDir(scriptId, userName));
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            ConfigSwapPrimitives.TryDeleteDir(RetryStoreDir(scriptId, userName));
+        }
     }
 
     /// <summary>数据目录命名迁移（v0.6.0）：旧名 → 新名（config→store、cache→original、edit-hide→edit-hidden、replace-backup→swap-backup）。

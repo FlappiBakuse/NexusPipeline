@@ -109,6 +109,8 @@ internal sealed class WebServer : IDisposable
 
     private int _port;
 
+    private static volatile bool RemoteAccessBound;
+
     public int Port => _port;
 
     /// <summary>
@@ -122,6 +124,7 @@ internal sealed class WebServer : IDisposable
         _port = port;
         Current = this;
         bool remote = RuntimeContext.Instance.Settings.AllowRemoteAccess;
+        RemoteAccessBound = remote;
         // 远程访问绑定 http.sys 强通配符 +（所有接口）；0.0.0.0 不是合法前缀主机（绑定必失败）。
         string prefix = remote ? $"http://+:{port}/" : $"http://127.0.0.1:{port}/";
         _listener.Prefixes.Clear();
@@ -130,9 +133,18 @@ internal sealed class WebServer : IDisposable
         try
         {
             _listener.Start();
+            try
+            {
+                JsonUtil.WriteAtomic(AppPaths.WebPortPath, port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 写入 Web 实际端口标记失败，将依靠端口探测复用服务：{ex.Message}");
+            }
         }
         catch
         {
+            RemoteAccessBound = false;
             // HttpListener.Start 失败后实例不可复用（再次访问抛 ObjectDisposedException），立即关闭，由调用方重建。
             try
             {
@@ -168,6 +180,7 @@ internal sealed class WebServer : IDisposable
         {
             Current = null;
         }
+        RemoteAccessBound = false;
         try
         {
             _cts?.Cancel();
@@ -175,6 +188,17 @@ internal sealed class WebServer : IDisposable
         }
         catch
         {
+        }
+        try
+        {
+            if (File.Exists(AppPaths.WebPortPath))
+            {
+                File.Delete(AppPaths.WebPortPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理 Web 实际端口标记失败：{ex.Message}");
         }
         Logger.Info("Web 服务已停止。");
     }
@@ -314,7 +338,8 @@ internal sealed class WebServer : IDisposable
     private static bool AuthorizeRequest(HttpListenerContext context, out string? detail)
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
-        if (!settings.AllowRemoteAccess)
+        // 监听器是否绑定通配符是启动时决定的；即使运行中关闭设置但未重启，也必须继续保护远程请求。
+        if (!RemoteAccessBound)
         {
             detail = "未开启远程访问";
             return true;

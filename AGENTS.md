@@ -17,17 +17,17 @@ npx playwright test            # 全量 77 用例（发布前本地回归）；�
 $env:NEXUS_CI = "1"; npx playwright test   # CI 核心回归集：76 用例（剔除响应式外壳外观用例）
 # 时间加速（v0.6.4+，唯一加速档 NEXUS_TIME_SCALE=10；run-uitest.cmd 已默认内置）：宿主等待按比例缩放
 # （1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms），
-# 三套测试（e2e 77 + judge 150 + chaos 166）合计约 9 分钟；发布前用真实计时档（不设该变量）跑全量回归
+# 三套测试（e2e 77 + judge 150 + chaos 166）合计约 9 分钟；加速档 chaos 采样兜底可能为 167；发布前用真实计时档（不设该变量）跑全量回归
 $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
 # 3. 单元测试（v0.6.4+，毫秒级，无管理员）：判定状态机/关键字规则/日志路径解析/模型规则校验等纯逻辑
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 183 断言；CI 每次必跑
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 204 断言；CI 每次必跑
 ```
 
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 77 / 76（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
 - 专项稳定性测试 `uitest/judge-scenarios.mjs`：150 项断言（场景 A/B/C/D、MaaEnd 专项判断脚本选择性重试、零日志 stall、修复验证 12 项、配置交换崩溃恢复、自动更新配置开关/插队快照/启停还原/内容守护（半写 JSON 不入库），v0.7.6+），发布前与全量 e2e 一并运行；先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\judge-scenarios.mjs`；发布前真实计时档不设该变量。
-- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：166 项断言（固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
+- 混沌调度队列压力测试 `uitest/chaos-queue.mjs`：166 项真实计时档断言（加速档采样兜底可能为 167；固定/随机种子轮：队列串行进度、多用户配置交换、五种干扰判定 reason、崩溃注入、通知双模式、无残留；需管理员 shell），先跑 build.cmd。加速档：`$env:NEXUS_TIME_SCALE = "10"; node uitest\chaos-queue.mjs`。
 - **flake 治理基建（v0.6.9+）**：`uitest/flake-monitor.mjs` 进程/端口监控采样器（500ms 采样 nexus-pipeline 进程存在性 + 58731 监听，日志在 `uitest/flake-monitor-logs/`，stop 信号文件同名目录下 flake-monitor.stop）；flake 台账 `uitest/FLAKE-LEDGER.md`（现象/复现条件/根因/处置，每次全量回归更新直至清零）；spec 文件级 `ensureService` 兜底（服务不可达自动强杀残留重拉，隔离级联失败）；`killRuntimeServices` 轮询确认进程完全消失后才返回（消除强杀→重启竞态窗口）。
 - **加速档测试契约**（v0.6.2+，v0.6.4 统一 scale=10）：测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（`ping -n 75` → 加速档 `ping -n 6`（judge，卡住 5s > 周期 3s）/ `ping -n 8`（chaos，卡住 7s > stall 6s）、`> 20000` → `> 20000 / scale` 等），保证场景语义（卡住时长仍远大于缩放后的周期触发间隔）；新增依赖真实墙钟的用例须同时给出加速与真实两档实现。
 - **判断脚本执行上限与解释器解析**：判断脚本单次执行 30 秒上限**不随加速缩放**（v0.6.6+：外部进程冷启动可达数秒，如 Python 首次运行；缩放 30s→3s 会把真实执行误判为超时——曾致 CI e2e 失败）；解释器解析：PATH 跳过 WindowsApps Store 别名 + 常见安装位置兜底，stdin 显式重定向（避免继承服务管道句柄挂起）。
@@ -83,7 +83,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 183 
 
 ## 主要入口
 
-- `src/Program.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）+ 配置迁移；启动编排见 `src/Bootstrap.cs`。**web 模式（v0.6.6+）抢单实例互斥**：常驻服务在跑时直接退出（防双写）；退出循环按回车停止 / stdin 重定向 EOF 自动退出 / 无效 stdin 持续运行。
+- `src/Program.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）+ 配置迁移；启动编排见 `src/Bootstrap.cs`。**web 模式（v0.7.8+）复用已有服务**：常驻服务在跑时发现实际端口并打开已有 Web，不再重复启动；退出循环按回车停止 / stdin 重定向 EOF 自动退出 / 无效 stdin 持续运行。
 - `src/Web/WebServer.cs`：HTTP 骨架 + **特性路由表**（v0.5.0+：`[ApiRoute("资源名")]` 标注在 handler 类/方法上，`WebServer.Routes` 启动反射扫描注册，新增 API 无需改路由表；每个 `/api/*` 资源一个 `ApiXxxHandler`，见 `src/Web/`）；`GET /api/status` 不记审计（轮询豁免）。
 - `src/Cli/`：命令行菜单（MainMenu + 脚本/队列/调度/历史/插件/设置/通知渠道 7 个菜单类）；**调度中心（v0.6.6+）统一经常驻服务 HTTP 通道**（`CliTransport`，与 CLI run-script 同通道，Web 端可见运行任务）；manage 启动时探测常驻服务在跑 → 提示菜单修改可能与 Web 端互相覆盖；菜单保存带异常兜底（`Ui.TrySave`）。
 - `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知切换按钮同行（启动游戏｜强制关闭｜运行通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。
@@ -112,13 +112,13 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 183 
   - **输出契约**：stdout 尾行 JSON `{"status":"success|failed","reason":"必填","notifyText":"可选","replaceConfigs":["相对script目录路径"]}`；无输出/非 JSON/缺 status 或 reason = 继续运行（仍受无日志更新超时约束），单次执行 30 秒上限，执行错误=警告+继续运行；`notifyText` 替换脚本级通知正文（`RunRecord.CustomNotifyText`，不落盘）。
 - **插队替换配置（v0.4.0+）**：
   - **替换时机（v0.6.9+（P6））**：判断脚本返回 `failed` + `replaceConfigs` 时，宿主从 script 目录复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后**应用——此前判断脚本触发时进程可能仍在运行，复制覆盖 config 存在文件占用/半写窗口。
-  - **重试衔接**：替换供重试轮使用，本次尝试失败后由重试循环自动用新配置重试（重试轮不重新 PrepareForRun，直接使用收尾后的 config）；首次替换前备份到 `data/{脚本Id}/{用户名}/swap-backup`，`.meta` 记录 configPath 与新增文件清单，还原时删除新增文件；config 为单文件时 replaceConfigs 项须等于该文件名（忽略大小写）方可替换，其余目标拒绝。
+  - **重试衔接（v0.7.8）**：替换供重试轮使用，本次尝试失败后先保存到运行期 `retry-store`，恢复 original 真实现场，再重新执行完整配置交换加载下一轮；用户永久 `store` 只由自动更新配置收尾同步决定。首次替换前备份到 `data/{脚本Id}/{用户名}/swap-backup`，`.meta` 记录 configPath 与新增文件清单，还原时删除新增文件；config 为单文件时 replaceConfigs 项须等于该文件名（忽略大小写）方可替换，其余目标拒绝。
   - **运行结束还原**：成功或失败至最大次数后从 swap-backup 还原全部被替换文件并清空 script 目录与备份（有用户时配置交换机制亦会还原，备份为双保险）；启动崩溃恢复（`UserConfigManager.RecoverInterrupted`，v0.6.6+ 仅服务类进程（service/web）执行，manage/status/CLI 由运行时自愈兜底）扫描 swap-backup 残留自动还原。
-- **自动更新配置（v0.7.6）**：`ScriptInstance.AutoUpdateConfig`（**默认开**，专项由前端固化恒 true、后端不强设）允许运行产生的配置更改反向同步回用户快照 store（config → store 全量镜像，保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）。
+- **自动更新配置（v0.7.6+）**：`ScriptInstance.AutoUpdateConfig`（**默认开**，专项由后端强制恒 true）允许运行产生的配置更改反向同步回用户快照 store（config → store 全量镜像，保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）。v0.7.8 起先写入 `store.tmp`，源配置在复制期间变化则放弃，成功后以目录事务替换 `store` 并保留 `store.previous`；启动恢复会处理未完成的临时事务。
   - **触发时机**：① 首次检测——运行开始 `TestHooks.ScaledSeconds(15)` 后监控主循环一次性同步（关/开共有，仅第 1 次尝试；并入主循环避免与收尾还原竞态）；② 收尾同步——每次运行收尾（成功/失败/达最大次数/cancelled/总超时）在 finally 中、**插队还原与配置交换还原之前**执行（config 此刻为脚本最终态），仅 `AutoUpdateConfig=true` 时。
-  - **同步语义**（`UserConfigManager.SyncConfigToStore` → `ConfigSwapSession`，`WithSwapLock` 内）：全量镜像（copy-then-prune，先复制后删除防中途失败留空 store）；插队文件（swap-backup/.meta 清单内）有还原描述（script/config-restore.json）时先还原启停字段再写入（初始启停 + 运行后计数/其他字段），无还原描述时跳过（store 保持原样）；还原描述仅作用于插队文件。
+  - **同步语义**（`UserConfigManager.SyncConfigToStore` → `ConfigSwapSession`，`WithSwapLock` 内）：全量镜像到临时目录并目录级替换；插队文件（swap-backup/.meta 清单内）有还原描述（script/config-restore.json）时先还原启停字段再写入（初始启停 + 运行后计数/其他字段），无还原描述时保留旧快照；还原描述仅作用于插队文件。
   - **守护**：会话校验（`.session` 存在且 Phase=run，防时序异常）；基础有效性校验（config 缺失/为空/文件数骤降一半以上 → 告警跳过，防坏态入库永久污染快照）；首次检测前置稳定性检查（短间隔两次采样不一致 = 脚本仍在写配置 → 跳过）；失败仅告警不阻断收尾还原。
-  - **还原描述契约**（专项判断脚本首次触发写入，跨尝试只写一次，随 CleanupScriptArea 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[0].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`；array 按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）、map 逐键设布尔（未覆盖键不动）；路径 DSL 限 `标识符[下标].标识符` 链。契约全文见 `plugins/README.md`。
+  - **还原描述契约**（专项判断脚本首次触发写入，跨尝试只写一次，随 CleanupScriptArea 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`；array 按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）、map 逐键设布尔（未覆盖键不动）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`，后者用于避免实例数组重排导致定位漂移。契约全文见 `plugins/README.md`。
 - **判断脚本触发时机（v0.4.0+）**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（拿最终判定，仅一次防循环；日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
 - **运行前置（v0.4.2+）**：脚本实例运行必须至少有一个启用用户；手动运行（Web/CLI/调度中心）无启用用户时拒绝启动并报错，调度队列运行时跳过该脚本实例并记录 failed 历史（「脚本实例未配置启用用户，已跳过」），队列进度不计入该任务。
 - **运行超时（v0.4.3+）**：`TotalTimeoutMinutes`（运行总时间超时）按**整个运行**（含全部重试与前置/后置用户脚本）计时，超时判定失败且不再重试；单次尝试时长由日志无更新超时控制。
@@ -168,7 +168,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 183 
   - 运行脚本实例/调度队列时：脚本主窗口**最小化**（`SystemActions.MinimizeWindow`，命令行/日志已接管输出；GUI 脚本启动后窗口让位，控制台脚本无窗口自动跳过）；游戏进程**统一前置**（`BringGameToFrontIfRunning`：与 `LaunchGame` 配置无关，检测到游戏进程存在即前置其窗口——v0.6.6+ 启动瞬间检测保留，并改为**运行期间轮询检测**：监控循环每轮按名检测，启动器延迟拉起的游戏出现即前置（复用 `BringToFront` 30 秒窗口覆盖「进程出现但窗口未建」），`_gameFronted` 标志保证只前置一次；游戏启动方式复杂（启动器常驻等）由脚本专门适配，宿主不重复启动游戏，`LaunchGame=true` 的宿主启动保留为用户可选能力）。
   - 编辑用户配置时：主程序窗口**前置**（用户在窗口内编辑配置）。
   - **前置实现**（`SystemActions.BringToFront`）：轮询可见主窗口后组合前置——还原最小化 + `AttachThreadInput` 模拟前台线程输入（绕过 Windows 前台锁定，后台常驻服务进程直接 `SetForegroundWindow` 几乎必然失败）+ `BringWindowToTop` 置顶 + `SetForegroundWindow` 激活，失败每 1 秒重试至 30 秒超时（超时 Warn 可观测）；找不到可见窗口静默跳过。均仅前置一次，后台 fire-and-forget 且观察异常。
-- **数据目录命名（v0.6.0+）**：`data/{脚本Id}/{用户}/` 下为 `store/`（配置快照）、`original/`（原配置暂存）、`script/`、`swap-backup/`、`edit-hidden/`、`.session`；启动恢复前 `MigrateLegacyLayout` 将旧名残留（config/cache/edit-hide/replace-backup）幂等迁移到新名，旧版本崩溃现场仍可完整恢复。
+- **数据目录命名（v0.6.0+）**：`data/{脚本Id}/{用户}/` 下为 `store/`（配置快照）、`store.previous/`（上一份完整快照）、`store.tmp`（同步临时目录）、`retry-store/`（当前运行重试快照）、`original/`（原配置暂存）、`script/`、`swap-backup/`、`edit-hidden/`、`.session`；启动恢复前 `MigrateLegacyLayout` 将旧名残留（config/cache/edit-hide/replace-backup）幂等迁移到新名，旧版本崩溃现场仍可完整恢复。
 - **切换按钮（v0.5.4+，全部开关控件统一形态）**：所有开关一律 `.mode-toggle` 切换按钮（`data-action` 切换 + `aria-pressed`，激活态 accent 高亮，状态读取用 `getAttribute("aria-pressed") === "true"`）；**按钮文字带状态后缀「：开/：关」**（v0.6.7+：由 `core/ui.js` 的 `syncAllModeToggles`/`syncModeToggleText` 统一维护——`render()`/`showModal()` 初始化时与 app.js 全局 click 委托点击后同步，模板只写主文案，`aria-pressed` 为唯一状态权威）；**豁免**：星期按钮（`data-day`）与显式标记 `data-toggle-text="false"` 的按钮（如「使用判断脚本（脚本优先）」模式切换）。
 - **布局与间距**：长语义说明移入按钮旁 `muted` 小字（`.toggle-row`，`align-items: flex-end` 与按钮底部对齐）；`.toggle-row`/`.toggle-grid`/`.field-btn-row` 自带 `margin: 12px 0` 与上下内容间距一致（`panel-body` 内由 gap 管理、`margin: 0` 覆盖；modal 内 `.toggle-row` 与上方填写框统一 20px）；按钮与输入框同行时高度一致（40px，`.field-btn-row`），同一行内按钮等宽（定时卡片「启用/删除」84px、任务行 ↑/↓/删除 52px）。
 - **周期按钮排版**：星期周期按钮 `.days-btn-grid` 桌面/平板 7 个等宽一行、手机（≤600px）4+3 两行；`.toggle-grid` 桌面 3 等宽一行、手机 2 列换行。
@@ -177,4 +177,4 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 183 
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 77（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（167）+ `dotnet test`（183 单测），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 77（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（167）+ `dotnet test`（204 单测断言），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

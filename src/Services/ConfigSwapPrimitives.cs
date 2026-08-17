@@ -284,12 +284,16 @@ internal static class ConfigSwapPrimitives
         }
     }
 
-    /// <summary>还原目标形态：单文件内容还原为文件，否则还原为目录。Missing（配置路径不存在，仅专项文件型配置首次会话）按文件处理，
-    /// 避免把文件快照以目录形态落位（曾致 NexusPipeline.json 被复制成「目录/同名文件」残留）。</summary>
+    /// <summary>还原目标形态：单文件内容还原为文件，否则还原为目录。Missing 形态按 ConfigPath 扩展名推断，
+    /// 同时支持专项单文件与目录型配置首次会话。</summary>
     public static PathKind RestoreKind(ConfigSessionMark mark)
     {
         PathKind original = PathKindUtil.Parse(mark.OriginalKind);
         if (original == PathKind.Dir)
+        {
+            return PathKind.Dir;
+        }
+        if (original == PathKind.Missing && string.IsNullOrWhiteSpace(Path.GetExtension(mark.ConfigPath)))
         {
             return PathKind.Dir;
         }

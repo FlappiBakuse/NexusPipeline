@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Cli;
@@ -15,9 +16,10 @@ internal static class CliTransport
     public static int? EnsureService()
     {
         int port = RuntimeContext.Instance.Settings.WebPort;
-        if (Probe(port, 2000))
+        int? existing = FindServicePort(port);
+        if (existing is not null)
         {
-            return port;
+            return existing;
         }
         if (RuntimeContext.Instance.Settings.LightweightMode)
         {
@@ -43,13 +45,77 @@ internal static class CliTransport
         while (DateTime.Now < deadline)
         {
             Thread.Sleep(500);
-            if (Probe(port, 2000))
+            int? discovered = FindServicePort(port);
+            if (discovered is not null)
             {
-                return port;
+                return discovered;
             }
         }
         Console.WriteLine("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
         return null;
+    }
+
+    /// <summary>只探测已有服务，不自动启动。优先读取实际端口标记，再探测配置端口及其漂移范围。</summary>
+    public static int? FindServicePort(int configuredPort)
+    {
+        foreach (int port in CandidatePorts(configuredPort))
+        {
+            int? actual = ProbeActualPort(port, 250);
+            if (actual is not null)
+            {
+                return actual;
+            }
+        }
+        return null;
+    }
+
+    private static IEnumerable<int> CandidatePorts(int configuredPort)
+    {
+        var seen = new HashSet<int>();
+        int marked = 0;
+        try
+        {
+            if (File.Exists(AppPaths.WebPortPath))
+            {
+                int.TryParse(File.ReadAllText(AppPaths.WebPortPath), out marked);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"读取 Web 实际端口标记失败：{ex.Message}");
+        }
+        if (marked is >= 1024 and <= 65535 && seen.Add(marked))
+        {
+            yield return marked;
+        }
+        for (int offset = 0; offset < 20; offset++)
+        {
+            int port = configuredPort + offset;
+            if (port is >= 1024 and <= 65535 && seen.Add(port))
+            {
+                yield return port;
+            }
+        }
+    }
+
+    private static int? ProbeActualPort(int port, int timeoutMs)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(timeoutMs);
+            using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(timeoutMs) };
+            using HttpResponseMessage response = client.GetAsync($"http://127.0.0.1:{port}/api/status", cts.Token).GetAwaiter().GetResult();
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+            JsonNode? node = JsonNode.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            return int.TryParse(node?["actualPort"]?.ToString(), out int actual) ? actual : port;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>GET /api/status 探测服务可达性（HTTP 2xx 视为可达）。</summary>

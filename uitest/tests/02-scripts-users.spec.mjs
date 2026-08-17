@@ -529,9 +529,12 @@ test("游戏进程确认：未勾选启动游戏跳过 / 填写路径检测双�
 test("强制关闭游戏独立于启动游戏：后端保留 + 前端复选框解绑", async ({ page }) => {
   const exitBat = path.join(runtimeDir, "exit-ok.bat");
   fs.writeFileSync(exitBat, "@echo off\r\nexit /b 0\r\n");
+  const safeConfig = path.join(runtimeDir, "force-close-config");
+  fs.rmSync(safeConfig, { recursive: true, force: true });
+  fs.mkdirSync(safeConfig, { recursive: true });
   const created = await api("POST", "/api/scripts", {
     name: "强制关闭解绑脚本", rootPath: runtimeDir, mainExe: exitBat.replace(/\\/g, "\\\\"),
-    configPath: runtimeDir, logPath: runtimeDir, launchGame: false, gameExe: PING_GAME, forceCloseGame: true,
+    configPath: safeConfig, logPath: path.join(safeConfig, "log.txt"), launchGame: false, gameExe: PING_GAME, forceCloseGame: true,
     maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 10,
   });
   expect(created.ok, "API 提交 launchGame=false / forceCloseGame=true / gameExe 必填 成功").toBeTruthy();

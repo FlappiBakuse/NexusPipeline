@@ -33,6 +33,11 @@ internal static class UserConfigManager
         return ConfigSwapPaths.CacheDir(scriptId, userName);
     }
 
+    public static string RetryStoreDir(string scriptId, string userName)
+    {
+        return ConfigSwapPaths.RetryStoreDir(scriptId, userName);
+    }
+
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
     public static string ScriptDir(string scriptId, string? userName)
     {
@@ -122,13 +127,16 @@ internal static class UserConfigManager
                 };
                 string cache = CacheDir(scriptId, userName);
                 string store = StoreDir(scriptId, userName);
+                string retryStore = RetryStoreDir(scriptId, userName);
                 // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——original 空时恢复仅清标记（现场未动），original 有内容时完整还原。
                 mark.Write();
                 ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
+                ConfigSwapPrimitives.ClearPath(retryStore, PathKindUtil.KindOf(retryStore));
                 ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
                 if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
                 {
                     ConfigSwapPrimitives.CopyAs(store, configPath, ConfigSwapPrimitives.RestoreKind(mark));
+                    ConfigSwapPrimitives.CopyAs(store, retryStore, PathKind.Dir);
                 }
                 else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
                 {
@@ -160,9 +168,13 @@ internal static class UserConfigManager
                         string cache = CacheDir(scriptId, userName);
                         if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
                         {
-                            PathKind original = PathKindUtil.KindOf(configPath);
-                            ConfigSwapPrimitives.ClearPath(configPath, original);
-                            ConfigSwapPrimitives.MoveAs(cache, configPath, PathKind.Dir);
+                            PathKind current = PathKindUtil.KindOf(configPath);
+                            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                            ConfigSwapPrimitives.ClearPath(configPath, current);
+                            ConfigSwapPrimitives.MoveAs(cache, configPath,
+                                mark is null
+                                    ? (string.IsNullOrWhiteSpace(Path.GetExtension(configPath)) ? PathKind.Dir : PathKind.File)
+                                    : ConfigSwapPrimitives.RestoreKind(mark));
                             ConfigSessionMark.Clear(scriptId, userName);
                         }
                     }
@@ -393,13 +405,8 @@ internal static class UserConfigManager
                     throw new IOException("未找到配置编辑会话");
                 }
                 string store = StoreDir(scriptId, userName);
-                string cache = CacheDir(scriptId, userName);
-                ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
-                ConfigSwapPrimitives.MoveAs(configPath, store, PathKind.Dir);
-                if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
-                {
-                    ConfigSwapPrimitives.MoveAs(cache, configPath, ConfigSwapPrimitives.RestoreKind(mark));
-                }
+                ConfigSwapSession.CommitStoreSnapshot(configPath, store);
+                ConfigSwapSession.DoRestore(scriptId, userName, mark);
                 ConfigSessionMark.Clear(scriptId, userName);
             });
         }
@@ -442,9 +449,9 @@ internal static class UserConfigManager
     }
 
     /// <summary>还原配置替换：从 swap-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
-    public static void RestoreConfigReplacements(string scriptId, string? userName)
+    public static bool RestoreConfigReplacements(string scriptId, string? userName)
     {
-        ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
+        return ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
     }
 
     /// <summary>自动更新配置同步（v0.7.6）：把运行生效的 config 当前内容全量镜像到用户快照 store。
@@ -452,6 +459,12 @@ internal static class UserConfigManager
     public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
     {
         ConfigSwapSession.SyncConfigToStore(scriptId, userName, configPath, firstCheck);
+    }
+
+    /// <summary>失败重试前重新交换配置：当前尝试配置保存到 retry-store，真实现场先恢复再重新加载下一轮配置。</summary>
+    public static string? PrepareForRetry(string scriptId, string userName, string configPath)
+    {
+        return ConfigSwapSession.PrepareForRetry(scriptId, userName, configPath);
     }
 
     /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>

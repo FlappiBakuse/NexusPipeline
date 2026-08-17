@@ -311,11 +311,15 @@ public static class Program
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
         {
-            // v0.6.9+：Info → Warn（含诊断）：测试端「强杀旧服务后立即启动 web」时旧进程互斥体未释放会导致本路径，
-            // 此前仅 Info 日志 + 控制台输出（测试 stdio ignore 丢弃），表现为「服务进程消失、日志戛然而止」（F1/F4 flake）。
-            Logger.Warn("[错误] 检测到 NexusPipeline 已在运行（单实例互斥体被占用），仅网页模式退出；" +
-                        "若刚强杀过旧进程，请确认旧进程完全退出后再启动。可在托盘图标打开管理页面。");
-            Console.WriteLine("[错误] 检测到 NexusPipeline 已在运行，仅网页模式无法并存。请在托盘图标打开管理页面。");
+            int? existingPort = CliTransport.FindServicePort(RuntimeContext.Instance.Settings.WebPort);
+            if (existingPort is not null)
+            {
+                Logger.Info($"检测到已有 NexusPipeline 服务，复用 Web 端口 {existingPort.Value}。");
+                TrayApp.OpenWeb(existingPort.Value);
+                return 0;
+            }
+            Logger.Warn("[错误] 检测到 NexusPipeline 已在运行，但未能发现其 Web 端口；本次网页模式退出。");
+            Console.WriteLine("[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。");
             return 1;
         }
         IsWebOnly = true;

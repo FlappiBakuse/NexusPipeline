@@ -341,6 +341,10 @@ internal class DispatchCenter
             {
                 throw new InvalidOperationException($"调度队列「{exec.TargetName}」正在运行，请先完成后再执行");
             }
+            if (exec.Kind == "queue" && _active.Any(active => active.Kind == "queue"))
+            {
+                throw new InvalidOperationException($"已有其他调度队列正在运行，当前队列「{exec.TargetName}」暂不能并行执行");
+            }
             _active.Add(exec);
         }
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");

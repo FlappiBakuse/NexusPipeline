@@ -157,6 +157,15 @@ internal static class ApiScriptsHandler
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
+            SemaphoreSlim scriptGate = ScriptConfigGate.Get(existing.Id);
+            if (!scriptGate.Wait(0))
+            {
+                context.Response.StatusCode = 409;
+                await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法修改" }, 409).ConfigureAwait(false);
+                return;
+            }
+            try
+            {
             string? limitError = Limits.CheckNameBytes(update.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
                 ?? Limits.CheckAttempts(update.MaxAttempts)
                 ?? Limits.CheckScriptTimeouts(update.LogStallTimeoutMinutes, update.TotalTimeoutMinutes);
@@ -210,6 +219,11 @@ internal static class ApiScriptsHandler
             Audit.Log(Audit.Web, "修改脚本实例", $"{update.Name}（id={update.Id}）");
             await HttpHelper.WriteJsonAsync(context, update).ConfigureAwait(false);
             return;
+            }
+            finally
+            {
+                scriptGate.Release();
+            }
         }
         if (method == "DELETE" && seg.Length == 2)
         {
@@ -264,6 +278,7 @@ internal static class ApiScriptsHandler
         script.LogPath = profile.LogPath;
         script.SuccessKeywords = "";
         script.FailureKeywords = "";
+        script.AutoUpdateConfig = true;
         // v0.6.0+：专项脚本判断脚本由插件固化（用户不可编辑），语言按数据化插件判断脚本扩展名（.js 内置引擎 / .py 系统解释器）。
         script.JudgeScriptEnabled = !string.IsNullOrWhiteSpace(profile.JudgeScript);
         script.JudgeScriptLanguage = string.IsNullOrWhiteSpace(profile.JudgeScriptLanguage) ? "javascript" : profile.JudgeScriptLanguage;
@@ -535,6 +550,14 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
                     return;
                 }
+                SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
+                if (!gate.Wait(0))
+                {
+                    await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法新增用户" }, 409).ConfigureAwait(false);
+                    return;
+                }
+                try
+                {
                 // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/运行线程冲突；锁内不做 await。
                 string? userLimit;
                 lock (ctx.DataLock)
@@ -548,7 +571,15 @@ internal static class ApiScriptsHandler
                     if (userLimit is null)
                     {
                         script.Users.Add(user);
-                        DataStore.SaveScripts(ctx.Scripts);
+                        try
+                        {
+                            DataStore.SaveScripts(ctx.Scripts);
+                        }
+                        catch
+                        {
+                            script.Users.Remove(user);
+                            throw;
+                        }
                     }
                 }
                 if (userLimit is not null)
@@ -557,13 +588,25 @@ internal static class ApiScriptsHandler
                     return;
                 }
                 string? snapError = UserConfigManager.SnapshotOnAddUser(script, user.Name);
-                Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 if (snapError is not null)
                 {
                     Logger.Warn($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
+                    lock (ctx.DataLock)
+                    {
+                        script.Users.RemoveAll(existing => ReferenceEquals(existing, user));
+                        DataStore.SaveScripts(ctx.Scripts);
+                    }
+                    await HttpHelper.WriteJsonAsync(context, new { error = "初始配置快照失败：" + snapError }, 400).ConfigureAwait(false);
+                    return;
                 }
+                Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
+                }
+                finally
+                {
+                    gate.Release();
+                }
             }
             if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
             {
@@ -869,7 +912,8 @@ internal static class ApiScriptsHandler
                     ScriptId = script.Id,
                     UserName = user.Name,
                     ConfigPath = script.ConfigPath,
-                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)),
+                    OriginalKind = ConfigSessionMark.TryRead(script.Id, user.Name)?.OriginalKind
+                        ?? PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)),
                     Phase = "edit",
                     GeneratedTemplate = generatedTemplate,
                     TemplateFiles = generatedTemplateFiles,

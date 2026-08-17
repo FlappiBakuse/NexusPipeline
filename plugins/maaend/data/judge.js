@@ -90,7 +90,6 @@ if (!cfg || !cfg.settings || !Array.isArray(cfg.instances)) {
     // 插队文件以「初始启停 + 运行后计数/其他字段」写入 store）；跨尝试只写一次（script 目录运行期间不清空）。
     const restoreExists = nexus.listFiles().some(p => p.toLowerCase().endsWith("config-restore.json"));
     if (!restoreExists) {
-      const instIndex = cfg.instances.indexOf(inst);
       const initial = {};
       for (const t of inst.tasks) {
         if (t.id) initial[t.id] = t.enabled === true;
@@ -100,7 +99,7 @@ if (!cfg || !cfg.settings || !Array.isArray(cfg.instances)) {
           file: "mxu-MaaEnd.json",
           toggles: [{
             type: "array",
-            path: "instances[" + instIndex + "].tasks",
+            path: "instances[id=" + inst.id + "].tasks",
             keyField: "id",
             enabledField: "enabled",
             initial: initial

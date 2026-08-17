@@ -146,6 +146,33 @@ public class SessionJudgeTests
     }
 
     [Fact]
+    public void KeywordMode_SameLine_UsesTextOrder_SuccessFirst()
+    {
+        var judge = new SessionJudge(MakeScript(s =>
+        {
+            s.SuccessKeywords = "完成";
+            s.FailureKeywords = "失败";
+        }));
+
+        Assert.Equal(SessionJudge.LineHit.SuccessKeyword, judge.HandleLine("任务完成，随后失败"));
+        Assert.False(judge.IsFailure);
+        Assert.True(judge.IsMarker);
+    }
+
+    [Fact]
+    public void KeywordMode_SameLine_UsesTextOrder_FailureFirst()
+    {
+        var judge = new SessionJudge(MakeScript(s =>
+        {
+            s.SuccessKeywords = "完成";
+            s.FailureKeywords = "失败";
+        }));
+
+        Assert.Equal(SessionJudge.LineHit.FailureKeyword, judge.HandleLine("任务失败，随后完成"));
+        Assert.True(judge.IsFailure);
+    }
+
+    [Fact]
     public void ApplyJudgeResult_Failure_TriggersReplace_OnceOnly()
     {
         int replaceCalls = 0;

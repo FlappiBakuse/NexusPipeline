@@ -37,6 +37,13 @@ public class ConfigSwapSyncTests
         Assert.True(RunSession.ShouldRunFirstSync(1, 1));
     }
 
+    [Fact]
+    public void RestoreKind_MissingInfersFileOrDirectoryFromConfigPath()
+    {
+        Assert.Equal(PathKind.File, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\state.json", OriginalKind = "missing" }));
+        Assert.Equal(PathKind.Dir, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\config", OriginalKind = "missing" }));
+    }
+
     /* ---------------- 还原描述路径 DSL（LocateNode） ---------------- */
 
     [Fact]
@@ -57,6 +64,18 @@ public class ConfigSwapSyncTests
         Assert.Null(ConfigSwapSession.LocateNode(root, "missing.tasks"));
         Assert.Null(ConfigSwapSession.LocateNode(root, "instances[0].missing"));
         Assert.Null(ConfigSwapSession.LocateNode(root, "instances[abc].tasks"));
+    }
+
+    [Fact]
+    public void LocateNode_ArraySelector_ResolvesByStableId()
+    {
+        JsonNode root = JsonNode.Parse("{\"instances\":[{\"id\":\"first\",\"tasks\":[]},{\"id\":\"second\",\"tasks\":[{\"id\":\"t2\"}]}]}")!;
+        Assert.NotNull(ConfigSwapSession.LocateNode(root, "instances"));
+        Assert.NotNull(ConfigSwapSession.LocateNode(root, "instances[id=second]"));
+        JsonNode? tasks = ConfigSwapSession.LocateNode(root, "instances[id=second].tasks");
+        Assert.NotNull(tasks);
+        Assert.Single((JsonArray)tasks!);
+        Assert.Equal("t2", ((JsonArray)tasks!)[0]!["id"]!.ToString());
     }
 
     /* ---------------- 还原描述执行器（ApplyToggle） ---------------- */
@@ -146,6 +165,49 @@ public class ConfigSwapSyncTests
         Assert.Equal("A", File.ReadAllText(Path.Combine(store, "a.txt")));
         Assert.Equal("B", File.ReadAllText(Path.Combine(store, "sub", "b.txt")));
         Assert.False(File.Exists(Path.Combine(store, "stale.txt")));
+    }
+
+    [Fact]
+    public void MirrorToStoreAtomic_CommitsAndKeepsPreviousSnapshot()
+    {
+        string cfg = MakeTempDir();
+        string store = Path.Combine(MakeTempDir(), "store");
+        Directory.CreateDirectory(store);
+        File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
+        File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
+
+        (int written, int preserved) = ConfigSwapSession.MirrorToStoreAtomic(
+            cfg,
+            store,
+            new HashSet<string>(),
+            null,
+            ConfigSwapSession.SampleConfig(cfg));
+
+        Assert.Equal(1, written);
+        Assert.Equal(0, preserved);
+        Assert.Equal("NEW", File.ReadAllText(Path.Combine(store, "state.txt")));
+        Assert.Equal("OLD", File.ReadAllText(Path.Combine(store + ".previous", "state.txt")));
+        Assert.False(Directory.Exists(store + ".tmp"));
+    }
+
+    [Fact]
+    public void MirrorToStoreAtomic_SourceChangedAbortsAndKeepsOldStore()
+    {
+        string cfg = MakeTempDir();
+        string store = Path.Combine(MakeTempDir(), "store");
+        Directory.CreateDirectory(store);
+        File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
+        File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
+
+        Assert.Throws<IOException>(() => ConfigSwapSession.MirrorToStoreAtomic(
+            cfg,
+            store,
+            new HashSet<string>(),
+            null,
+            "stale-sample"));
+
+        Assert.Equal("OLD", File.ReadAllText(Path.Combine(store, "state.txt")));
+        Assert.False(Directory.Exists(store + ".tmp"));
     }
 
     [Fact]

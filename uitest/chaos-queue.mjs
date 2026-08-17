@@ -11,7 +11,7 @@
  *
  * 运行：node uitest\chaos-queue.mjs   （先跑 build.cmd；管理员 shell）
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import fs from "node:fs";
 import os from "node:os";

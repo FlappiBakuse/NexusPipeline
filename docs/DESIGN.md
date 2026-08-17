@@ -76,7 +76,7 @@ sequenceDiagram
         alt 成功或达到最大次数
             S-->>DC: 返回 RunRecord
         else 失败且未达上限
-            S->>S: replaceConfigs 已应用 → 继续下一次尝试
+            S->>S: 当前 config → retry-store → 还原 original → 重新配置交换 → 下一次尝试
         end
     end
     S->>S: 还原替换配置 → 清空脚本区 → 配置交换还原现场
@@ -85,7 +85,7 @@ sequenceDiagram
 
 **分步细节（RunAttemptAsync 内）：**
 
-1. **前置检查**：`IsScriptRunning` 检测运行时启动目标是否已在运行（按解析后的进程名，含自重启产物兜底）；已运行 → 直接监控日志，不重复启动。
+1. **前置检查**：`IsScriptRunning` 检测运行时启动目标是否已在运行（按解析后的进程名，含自重启产物兜底）；已运行 → 先按启动目标强制结束并确认退出，再重新启动监管。
 2. **启动游戏（可选）**：`LaunchGame=true` 且已填游戏路径时，校验可执行 → 启动（bat 经 cmd 包装并接管输出）→ 每 1 秒轮询 `GameWaitSeconds` 秒确认进程出现 → 超时本次尝试失败。未填写路径则跳过并提示。
 3. **启动主程序**：`ResolveLaunchTarget` 解析运行时启动目标（Args 以显式路径开头时=管理端/执行端分离场景，`?` 后为参数）→ CreateProcess 重定向 stdio（无窗口）→ bat 自动 `cmd /d /s /c` 包装（规避 0x800700E8）→ 740（要求管理员）明确报错、禁止降级提权。
 4. **日志监控初始化**：脚本启动后按 `LogPath` 格式严格解析（`LogPattern.ResolveFile`，文件不存在返回 null）；文件存在时按**尝试开始前长度快照**判定（v0.6.5+：尝试开始前不存在的文件才从头读；已存在残留从「尝试开始时长度」续读，残留被启动后追加写刷新 LastWriteTime 不再误判从头读，旧内容不进入判定输入）——无松弛窗口，忽略运行前已有内容。
@@ -101,7 +101,7 @@ sequenceDiagram
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：启动后 `LogStallTimeoutMinutes` 无任何日志条目、或日志超过该时长无更新、或未找到日志文件 → 失败；`TotalTimeoutMinutes` 按**整个运行（含全部重试与前置/后置脚本）**计时，超时判定失败且不再重试。
 8. **尝试结束清理**：进程树清理（v0.6.5+ 自实现 Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
-9. **重试**：失败且未达 `MaxAttempts` → 下一次尝试（每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 在**尝试收尾、杀进程确认退出后**应用（v0.6.9+ P6），供重试轮使用）。
+9. **重试**：失败且未达 `MaxAttempts` → 将最终 config 保存到运行期 `retry-store`，恢复 original 真实现场，再重新执行完整配置交换；每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 在**尝试收尾、杀进程确认退出后**应用（v0.6.9+ P6），供下一轮工作快照使用。
 10. **运行收尾（finally）**：自动更新配置收尾同步（config → store 全量镜像，v0.7.6，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）——顺序固定：同步先于插队还原与配置交换还原（config 此刻为脚本最终态），再避免替换还原覆盖交换还原的现场（v0.5.2 BUG #1 修复；同步语义与时序见 4.5）。
 
 ### 3.2 队列执行链路
@@ -125,14 +125,14 @@ flowchart TD
     M --> O[执行完成操作 exit/sleep/reboot/shutdown]
 ```
 
-- 队列任务按 `Index` 升序；每脚本实例内按**启用用户添加顺序**串行轮换；任一用户取消则中断后续。
+- 队列任务按 `Index` 升序；每脚本实例内按**启用用户添加顺序**串行轮换；不同队列当前也必须全局串行，任一用户取消则中断后续。
 - 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送（忽略实例级）；`false` 时逐脚本按各自 `NotifyEnabled` 发送。
 - 完成操作（退出/休眠/重启/关机）仅在无取消时执行（v0.7.1+ 文档化，KN-54：**任务失败（failed）不跳过完成操作**——队列全部任务执行完毕即视为完成，仅存在「取消」才跳过并告警；语义经用户确认保留）；休眠/重启/关机执行前 Web 界面显示 60 秒倒计时卡片可取消（v0.6.3+：重启/关机走 Windows 倒计时 `shutdown /t 60`，`shutdown /a` 取消；休眠走应用内 60 秒延迟，取消后不执行；倒计时为真实墙钟不随测试时间加速缩放；exit 退出软件立即执行不可取消）。
 
 ### 3.3 手动执行脚本
 
 - 指定用户：只运行该用户；未指定：按启用用户顺序全部运行一次。
-- 冲突检查：脚本已在运行（进程名检测）→ 拒绝；队列运行时任一任务脚本在运行 → 队列跳过该队列并记录失败历史。
+- 冲突检查：脚本已在运行（进程名检测）→ 先杀掉并确认退出后重新启动监管；队列运行时任一任务脚本在运行 → 队列跳过该队列并记录失败历史。
 - 取消：`Cancel` 通过 CancellationToken 中断当前尝试（杀进程树）并标记 cancelled，后续任务不再执行。
 
 ## 4. 配置交换机制
@@ -142,6 +142,9 @@ flowchart TD
 ```
 data/{脚本Id}/{用户名}/
 ├── store/          用户配置快照（添加用户时从 configPath 复制；v0.7.6 起运行后自动更新回写——任务完成记录/计数保留延续；可重建）
+├── store.previous/ 上一份完整用户快照（自动更新事务保留，崩溃恢复用）
+├── store.tmp       自动更新事务临时目录
+├── retry-store/    当前运行重试轮临时快照，不等同于用户永久 store
 ├── original/       运行前 configPath 原内容（移动进来，运行后移回；崩溃恢复保底）
 ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
 ├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
@@ -174,7 +177,7 @@ flowchart LR
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置——**v0.6.9+（P6）在尝试收尾、杀进程确认退出后应用**（此前判断脚本触发时进程可能仍在运行，复制覆盖 config 存在文件占用/半写窗口）；**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
-- 本次尝试失败后重试循环自动用新配置重试（重试轮不重新 PrepareForRun，直接使用收尾后的 config；可多轮替换，计入 MaxAttempts）。
+- 本次尝试失败后先将最终 config 保存到 retry-store，恢复 original 真实现场，再重新执行完整配置交换加载下一轮；可多轮替换，计入 MaxAttempts。
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
@@ -186,9 +189,9 @@ flowchart LR
 - **Missing 形态还原（v0.6.0）**：`DoRestore` 在 original 空且原形态为 Missing（运行/编辑前 config 位置不存在）时，删除会话期间在 config 位置产生的文件/目录（运行生效的 store 快照、编辑模板），还原为「不存在」——否则运行结束后 store 快照残留 config 位置并污染后续添加用户快照（真机复现修复）；删除失败保留标记交由自愈/后台重试。
 - **收尾顺序（v0.6.0）**：运行收尾固定为「杀脚本进程（`KillAndConfirmExited`：进程树 + 轮询按名强杀直至确认退出，处理被杀后自重启的脚本）→ 按设置处理游戏进程 → 配置交换还原」，确保还原前进程已完全退出。
 
-### 4.5 自动更新配置（v0.7.6）：config → store 反向同步
+### 4.5 自动更新配置（v0.7.6+）：config → store 反向同步
 
-**解决的问题**：v0.7.6 之前运行结束配置交换还原会把脚本运行产生的配置更改（任务完成记录/运行计数/脚本更新新增任务）全部丢弃，重试/下次运行从旧快照从头开始，违背脚本自身设计（如 BetterGI 一键宏计数、MXU 任务完成状态）。`ScriptInstance.AutoUpdateConfig`（**默认开**，专项脚本恒开）允许运行产生的配置更改**反向同步回用户快照 store**（config → store 全量镜像），供下次运行延续。
+**解决的问题**：v0.7.6 之前运行结束配置交换还原会把脚本运行产生的配置更改（任务完成记录/运行计数/脚本更新新增任务）全部丢弃，重试/下次运行从旧快照从头开始，违背脚本自身设计（如 BetterGI 一键宏计数、MXU 任务完成状态）。`ScriptInstance.AutoUpdateConfig`（**默认开**，专项脚本由后端强制恒开）允许运行产生的配置更改**反向同步回用户快照 store**（config → store 全量镜像），供下次运行延续。v0.7.8 起同步先写入 `store.tmp`，成功后将旧快照保留为 `store.previous`，再以目录移动完成替换。
 
 **触发时机**：
 
@@ -199,16 +202,16 @@ flowchart LR
 
 **同步语义**（`UserConfigManager.SyncConfigToStore` → `ConfigSwapSession`，`WithSwapLock` 内）：
 
-- **全量镜像（copy-then-prune）**：先复制 config → store（全部文件），成功后再删除 store 中 config 已无的文件——先复制后删除防中途失败留下空 store。
-- **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时**跳过**（store 保持原样，不写插队编排产物）。
-- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[0].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 限 `标识符[下标].标识符` 链。契约全文见 `plugins/README.md`「配置还原描述」。
+- **事务化全量镜像**：先复制 config → store.tmp（全部文件），复制期间源配置变化则放弃本次同步；成功后将旧 store 移动为 store.previous，再将 store.tmp 移动为 store，避免逐文件写入造成混合快照。
+- **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时从旧 store 保留原文件，不写入插队编排产物。
+- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `plugins/README.md`「配置还原描述」。
 
-**守护机制**（v0.7.6 评估加强，防坏态入库永久污染快照）：
+**守护机制**（v0.7.8 强化，防坏态入库永久污染快照）：
 
 1. **会话有效性**：`.session` 存在且 Phase=run 才同步（防 15s 首次检测与收尾还原的时序异常）。
-2. **内容有效性**（v0.7.6 评估 KN-77 修复）：config 缺失/为空/文件数骤降一半以上 → 跳过；**JSON 型内容探测**——`.json` 扩展名或内容以 `{`/`[` 开头的文件必须可解析（0 字节 `.json` = 半写坏态），解析失败视为脚本被杀瞬间半写 → 跳过整个同步，保留旧快照。
-3. **稳定性检查**（v0.7.6 评估后扩展为**全部同步**）：短间隔两次采样不一致（脚本或外部守护进程仍在写）→ 跳过本次，保留旧快照。
-4. 同步失败仅告警，**不阻断**收尾还原（.session 标记不改、swap-backup 不清）。
+2. **内容有效性**：config 缺失/为空/文件数骤降一半以上 → 跳过；明确 JSON 内容执行语法校验，非 JSON 文本不强行解析；解析失败视为脚本被杀瞬间半写 → 跳过整个同步，保留旧快照。
+3. **稳定性检查**：短间隔两次采样不一致，或复制期间源配置再次变化（脚本或外部守护进程仍在写）→ 放弃本次事务，保留旧快照。
+4. 同步失败仅告警，**不阻断**收尾还原；临时目录清理失败或旧快照替换失败时保留 `store.tmp`/`store.previous`，下次启动恢复。
 
 **与既有机制的关系**：收尾顺序固定为「自动更新同步 → 插队还原（swap-backup → config）→ 配置交换还原（original → config）」——同步读的是脚本最终态，插队/交换还原在同步之后把 config 还原为运行前现场；store 则保留同步后的「启停还原 + 计数延续」内容供下次运行。
 

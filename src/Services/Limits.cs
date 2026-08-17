@@ -216,6 +216,11 @@ internal static class Limits
             {
                 return $"配置文件路径/文件夹不存在：{config}";
             }
+            string? managedPathError = CheckManagedPathOverlap(config);
+            if (managedPathError is not null)
+            {
+                return managedPathError;
+            }
             if (!IsLogPathPlausible(script.LogPath))
             {
                 return $"日志路径格式不合法（不允许包含 引号/尖括号/竖线/问号）：{script.LogPath}";
@@ -233,6 +238,56 @@ internal static class Limits
             return $"游戏路径必须为存在的可执行文件：{script.GameExe}";
         }
         return null;
+    }
+
+    /// <summary>拒绝配置路径与宿主自管目录重叠，避免添加用户/自动镜像递归复制或删除宿主运行数据。</summary>
+    private static string? CheckManagedPathOverlap(string configPath)
+    {
+        string[] managed =
+        {
+            AppPaths.ConfigDir,
+            AppPaths.DataDir,
+            AppPaths.HistoryDir,
+            AppPaths.OutputDir,
+            AppPaths.LogDir,
+            AppPaths.WwwRootDir,
+            AppPaths.PluginsDir,
+        };
+        try
+        {
+            string candidate = Path.GetFullPath(configPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string appRoot = Path.GetFullPath(AppPaths.AppRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(candidate, appRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return "配置路径不能指向 NexusPipeline 程序根目录";
+            }
+            foreach (string path in managed)
+            {
+                string managedPath = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                if (IsSameOrWithin(candidate, managedPath) || IsSameOrWithin(managedPath, candidate))
+                {
+                    return $"配置路径不能与 NexusPipeline 自管目录重叠：{managedPath}";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            return $"配置路径无法完成安全校验：{ex.Message}";
+        }
+        return null;
+    }
+
+    private static bool IsSameOrWithin(string path, string root)
+    {
+        if (string.Equals(path, root, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        string relative = Path.GetRelativePath(root, path);
+        return !Path.IsPathRooted(relative)
+            && !relative.Equals("..", StringComparison.Ordinal)
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !relative.StartsWith("../", StringComparison.Ordinal);
     }
 
     /// <summary>日志路径为「路径格式」：允许日期占位符与 * 通配，禁止其余非法字符（不要求文件存在）。</summary>

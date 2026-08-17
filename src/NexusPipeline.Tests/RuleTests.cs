@@ -25,6 +25,11 @@ public class RuleTests
     [InlineData("a/b")]
     [InlineData("a\\b")]
     [InlineData("a:b")]
+    [InlineData("A.")]
+    [InlineData("A ")]
+    [InlineData("CON")]
+    [InlineData("CON.txt")]
+    [InlineData("COM1")]
     public void ScriptUserRule_InvalidNames(string name)
     {
         Assert.False(ScriptUserRule.IsValidName(name));

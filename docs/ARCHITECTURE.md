@@ -52,13 +52,13 @@ NexusPipeline.Plugins（插件契约 + 内置插件）
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
-| `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换）；判断脚本输入按尝试切片（v0.5.2+）；自动更新配置首次检测（15 秒）与收尾同步触发（v0.7.6） |
+| `RunSession` | src/Services/RunSession.cs | 单次脚本运行会话（重试、日志监控、用户配置交换）；判断脚本输入按尝试切片（v0.5.2+）；v0.7.8 起每轮失败重试使用 retry-store 重新交换配置；自动更新配置首次检测（15 秒）与收尾事务同步 |
 | `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：判断脚本/关键字两模式，判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（v0.6.9+：部分截断从新尾续读、归零从头读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
-| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试；自动更新配置全量镜像同步（`SyncConfigToStore`/`MirrorToStore`/还原描述执行器，v0.7.6） |
+| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试；retry-store 完整重试交换；自动更新配置事务镜像（`SyncConfigToStore`/`MirrorToStoreAtomic`/还原描述执行器） |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduler.cs | 定时/启动时触发队列 |
@@ -121,7 +121,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ## 插件扩展指南
 
-v0.6.3 起专项插件为**数据化目录形态**（`plugins/<名称>/plugin.json + data/`），无需编译；内置 C# 插件仅剩 NotifyPlugin（通知推送）。
+v0.6.3 起专项插件为**数据化目录形态**（`plugins/<名称>/plugin.json + data/`），无需编译；内置 C# 插件包含 NotifyPlugin（通知推送）与 EmulatorAdapterPlugin（模拟器适配）。
 
 ### 插件分类
 

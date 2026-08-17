@@ -210,6 +210,7 @@ if (input.log.includes("TASK DONE")) {
   expect(r.rec && r.rec.attempts === 2, "替换后发生重试（attempts=2）").toBeTruthy();
   const modeAfter = fs.readFileSync(path.join(dir, "mode.txt"), "utf8").trim();
   expect(modeAfter === "FAIL", "运行结束后 config 已还原至启动前状态（mode.txt=FAIL，实际 " + modeAfter + "）").toBeTruthy();
+  expect(!fs.existsSync(path.join(runtimeDir, "data", id, "默认", "retry-store")), "运行结束后 retry-store 已清理").toBeTruthy();
   await api("DELETE", "/api/scripts/" + id);
 });
 
@@ -340,6 +341,10 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   expect(sp.judgeScript.includes("一条龙和配置组任务结束"), "固化判断脚本含运行结束关键字").toBeTruthy();
   expect(sp.judgeScript.includes("NexusPipeline.json"), "固化判断脚本的配置交换文件名为 NexusPipeline.json").toBeTruthy();
   expect(sp.configPath.endsWith("NexusPipeline.json"), "专项 ConfigPath 指向 NexusPipeline.json").toBeTruthy();
+  const forcedOff = await api("PUT", "/api/scripts/" + sp.id, { ...sp, autoUpdateConfig: false });
+  expect(forcedOff.ok, "API 修改专项脚本成功").toBeTruthy();
+  const forcedOffScript = await forcedOff.json();
+  expect(forcedOffScript.autoUpdateConfig === true, "后端强制专项自动更新配置保持开启").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sp.id);
   await page.evaluate(() => { location.hash = "#/dashboard"; });
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("仪表盘"), null, { timeout: 5000 });

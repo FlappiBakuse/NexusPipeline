@@ -33,6 +33,11 @@ internal static class ApiQueuesHandler
         }
         if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
         {
+            if (RuntimeContext.Instance.Center.Active.Any(exec => exec.Kind == "queue"))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "有调度队列正在运行，无法调整队列顺序" }, 409).ConfigureAwait(false);
+                return;
+            }
             await HandleReorderQueuesAsync(context, body).ConfigureAwait(false);
             return;
         }
@@ -81,6 +86,11 @@ internal static class ApiQueuesHandler
         }
         if (method == "PUT" && seg.Length == 2)
         {
+            if (RuntimeContext.Instance.Center.Active.Any(exec => exec.Kind == "queue" && exec.TargetId == seg[1]))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "调度队列正在运行，无法修改" }, 409).ConfigureAwait(false);
+                return;
+            }
             DispatchQueue? update = HttpHelper.ParseBody<DispatchQueue>(body);
             if (update is null)
             {
@@ -125,6 +135,11 @@ internal static class ApiQueuesHandler
         }
         if (method == "DELETE" && seg.Length == 2)
         {
+            if (RuntimeContext.Instance.Center.Active.Any(exec => exec.Kind == "queue" && exec.TargetId == seg[1]))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "调度队列正在运行，无法删除" }, 409).ConfigureAwait(false);
+                return;
+            }
             DispatchQueue? removed = ctx.FindQueue(seg[1]);
             // v0.7.2+（KN-04）：锁内删除与保存，避免与并发请求/后台线程冲突。
             lock (ctx.DataLock)

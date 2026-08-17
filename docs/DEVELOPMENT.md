@@ -71,11 +71,11 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 套件 | 命令 | 断言数 | 耗时 | 管理员 |
 |---|---|---|---|---|
-| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 183 | 毫秒级 | 否 |
+| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 204 | 毫秒级 | 否 |
 | e2e（全量） | `npx playwright test`（先 build.cmd） | 77 | 加速档约 4 分钟 | 是 |
 | e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 76 | 加速档约 4 分钟 | 是 |
 | 专项稳定性 | `node uitest\judge-scenarios.mjs` | 150 | 加速档数分钟 | 是 |
-| 混沌压力 | `node uitest\chaos-queue.mjs` | 166 | 加速档数分钟 | 是 |
+| 混沌压力 | `node uitest\chaos-queue.mjs` | 166（加速档可能 167） | 加速档数分钟 | 是 |
 
 ### 4.2 时间加速档（日常迭代默认）
 
@@ -94,7 +94,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | 改动范围 | 必跑 |
 |---|---|
 | 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 77（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
-| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（166）+ `dotnet test`（183），默认加速档 |
+| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（166）+ `dotnet test`（204），默认加速档 |
 | 版本发布前 | 真实计时档全量（e2e + judge + chaos）+ 单测 |
 
 > 新增或删除测试用例/断言后，同步更新 AGENTS.md / CONTRIBUTING.md / README.md 中的数字。
@@ -129,7 +129,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 ### 5.4 单元测试
 
 - 工程：`src/NexusPipeline.Tests/`（xUnit，`InternalsVisibleTo` 暴露 internal 契约，`Compile Remove` 排除测试目录）。
-- 覆盖：判定状态机（SessionJudge）、关键字规则（KeywordRule）、日志路径解析（LogPattern）、模型规则校验（ScriptUserRule/QueueRule）、进程树清理（ProcessTreeTests）、自动更新配置同步（ConfigSwapSyncTests：还原描述执行器 array/map/全量镜像/内容有效性校验/首次检测时机，v0.7.6+）。
+- 覆盖：判定状态机（SessionJudge）、关键字规则（KeywordRule）、日志路径解析（LogPattern）、模型规则校验（ScriptUserRule/QueueRule）、进程树清理（ProcessTreeTests）、自动更新配置同步（ConfigSwapSyncTests：还原描述执行器 array/map/稳定 ID 定位/事务镜像/内容有效性校验/首次检测时机，v0.7.6+）。
 
 ## 6. 运行时数据
 
@@ -140,7 +140,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `config/plugins/<插件名>.json` | 插件级配置与密钥 |
 | `history/YYYY-MM-DD/HH-mm-ss.json` + `-{尝试号}.log` | 运行状态（纯状态，PascalCase）+ 按尝试分批的脚本日志 |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志（审计行 `[审计] 来源 \| 操作`，来源 web/manage/cli/scheduler/system） |
-| `data/{脚本Id}/{用户}/` | 配置交换数据目录（store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续） |
+| `data/{脚本Id}/{用户}/` | 配置交换数据目录（store/store.previous/store.tmp/retry-store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续） |
 
 - 磁盘 JSON = PascalCase；Web API 返回 camelCase；读测试 JSON 前先 `.replace(/^\uFEFF/, "")` 去 BOM。
 - 历史/管理器日志按保留天数每日清理（启动时 + 调度器每日首次 tick）。

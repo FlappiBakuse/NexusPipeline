@@ -1,9 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem ÔöÁ¿¹¹½¨£¨v0.6.4+£©£ºsrc ÎÞ±ä»¯Ê±Ìø¹ý dotnet publish£¬½öÍ¬²½ wwwroot/plugins£¨Ç°¶Ë¸Ä¶¯ÎÞÐèÖØ±à£©£»
-rem Ö¸ÎÆÎÄ¼þ .build-src-hash ÔÚÏîÄ¿¸ù£¨²»Èë¿â£©£¬CI È«ÐÂ¼ì³öÎÞ´ËÎÄ¼þ = È«Á¿¹¹½¨¡£
-for /f "usebackq delims=" %%h in (`powershell -NoProfile -Command "$h=(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''; $b=[System.Text.Encoding]::UTF8.GetBytes($h); $d=[System.Security.Cryptography.SHA256]::Create().ComputeHash($b); [System.BitConverter]::ToString($d).Replace('-','')"`) do set SRC_HASH=%%h
+rem ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½v0.6.4+ï¿½ï¿½ï¿½ï¿½src ï¿½Þ±ä»¯Ê±ï¿½ï¿½ï¿½ï¿½ dotnet publishï¿½ï¿½ï¿½ï¿½Í¬ï¿½ï¿½ wwwroot/pluginsï¿½ï¿½Ç°ï¿½Ë¸Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø±à£©ï¿½ï¿½
+rem Ö¸ï¿½ï¿½ï¿½Ä¼ï¿½ .build-src-hash ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â£©ï¿½ï¿½CI È«ï¿½Â¼ï¿½ï¿½ï¿½Þ´ï¿½ï¿½Ä¼ï¿½ = È«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+for /f "usebackq delims=" %%h in (`pwsh -NoProfile -Command "$h=(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''; $b=[System.Text.Encoding]::UTF8.GetBytes($h); $d=[System.Security.Cryptography.SHA256]::Create().ComputeHash($b); [System.BitConverter]::ToString($d).Replace('-','')"`) do set SRC_HASH=%%h
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
 if not exist "%~dp0.build-src-hash" goto do_publish
 set /p OLD_HASH=<"%~dp0.build-src-hash"
@@ -20,12 +20,12 @@ if exist "%~dp0plugins" xcopy /e /i /y "%~dp0plugins" "%~dp0release\plugins" >nu
 if not exist "%~dp0release\plugins" mkdir "%~dp0release\plugins"
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
-echo ¹¹½¨ÀàÐÍ£ºÌáÈ¨°æ£¨requireAdministrator£¬³ÌÐò±ØÐëÒÔ¹ÜÀíÔ±Éí·ÝÔËÐÐ£©
-echo ²¿Êð£ºÕûÌå¿½±´ release ÎÄ¼þ¼Ðµ½Ä¿±êÄ¿Â¼¼´¿É£¨config/history/logs ÔËÐÐÊ±×Ô¶¯Éú³É£©¡£
+echo ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í£ï¿½ï¿½ï¿½È¨ï¿½æ£¨requireAdministratorï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¹ï¿½ï¿½ï¿½Ô±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð£ï¿½
+echo ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½å¿½ï¿½ï¿½ release ï¿½Ä¼ï¿½ï¿½Ðµï¿½Ä¿ï¿½ï¿½Ä¿Â¼ï¿½ï¿½ï¿½É£ï¿½config/history/logs ï¿½ï¿½ï¿½ï¿½Ê±ï¿½Ô¶ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½
 exit /b 0
 
 :build_failed
 if exist "%~dp0build-tmp" rmdir /s /q "%~dp0build-tmp"
 echo.
-echo Build failed. Çë¼ì²éÉÏ·½´íÎóÐÅÏ¢¡£
+echo Build failed. ï¿½ï¿½ï¿½ï¿½ï¿½Ï·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½
 exit /b 1

@@ -11,7 +11,7 @@
  *
  * 运行：node uitest\judge-scenarios.mjs   （先跑 build.cmd）
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
