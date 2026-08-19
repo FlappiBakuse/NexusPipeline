@@ -2,7 +2,7 @@ import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { scrollField, selectField, valueField, pageHeader } from "../core/forms.js";
-import { pagerMarkup, registerPager } from "../core/pager.js";
+import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
@@ -106,20 +106,16 @@ export async function pageScripts(token) {
   wireScriptDnd();
 }
 
-/** 拖拽排序（v0.6.8+）：页内重排可见项，其余项保持相对顺序追加；提交全量顺序落盘。 */
+/** 拖拽排序：只改变当前分页区间，其他分页保持原位置与相对顺序。 */
 function wireScriptDnd() {
   const list = $dom(".script-grid");
   if (!list) return;
   initDndList(list, { onDrop: (ids) => reorderScripts(ids) });
 }
 
-/** 把可见项按拖拽后的顺序重排进全量列表（其余项保持原相对顺序），提交 PUT /api/scripts/order。 */
+/** 把当前页新顺序写回全量列表，提交 PUT /api/scripts/order。 */
 async function reorderScripts(visibleIds) {
-  const visible = new Set(visibleIds);
-  const byId = new Map(state.scripts.map(item => [item.id, item]));
-  const ordered = visibleIds.map(id => byId.get(id)).filter(Boolean);
-  const rest = state.scripts.filter(item => !visible.has(item.id));
-  const full = [...ordered, ...rest];
+  const full = replacePageOrder(state.scripts, scriptPage, SCRIPT_PAGE_SIZE, visibleIds);
   try {
     await api("PUT", "/api/scripts/order", { ids: full.map(item => item.id) });
     toast("脚本顺序已保存");
@@ -194,13 +190,13 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
     </div>
     <p class="muted helper-copy">由专用插件「${esc(pluginDisplay(pluginType))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
-    <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
+    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid">
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
       </div>
-      <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
+      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
@@ -225,13 +221,13 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
       ${scrollField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt")}
     </div>
-    <div class="subsection"><div class="section-heading"><h3>游戏与通知</h3><span class="muted">按需启用，不影响基础脚本执行</span></div>
+    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid">
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
         <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
       </div>
-      <p class="muted helper-copy">启动游戏：运行脚本前启动；强制关闭：运行结束后结束游戏进程；运行通知：发送状态到通知渠道。</p>
+      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>

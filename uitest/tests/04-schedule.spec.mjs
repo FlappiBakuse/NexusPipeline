@@ -276,6 +276,73 @@ test("调度中心执行 + 历史记录详情", async ({ page }) => {
   await page.click(".modal button:has-text('关闭')");
 });
 
+test("历史详情：长日志默认尾部显示并可按需加载完整内容", async ({ page }) => {
+  const dir = makeScriptDir("history-full-log");
+  const logFile = path.join(dir.root, "history-full.log");
+  const bat = path.join(dir.root, "history-full.bat");
+  fs.writeFileSync(bat, [
+    "@echo off",
+    `for /L %%i in (1,1,250) do echo LONG-LINE-%%i>>"${logFile}"`,
+    "exit /b 0",
+  ].join("\r\n"), "ascii");
+  const created = await createScript({
+    name: "完整日志脚本", rootPath: dir.root, mainExe: bat,
+    configPath: dir.cfg, logPath: logFile, maxAttempts: 1,
+    logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30, successKeywords: "LONG-LINE-250",
+  });
+  expect(created.ok, "创建完整日志测试脚本").toBeTruthy();
+  try {
+    const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
+    expect(dispatch.ok, "发起完整日志测试脚本运行").toBeTruthy();
+    expect(await waitNoRunning(30000), "完整日志测试脚本运行结束").toBeTruthy();
+
+    await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
+    const row = page.locator("tr").filter({ hasText: "完整日志脚本" }).first();
+    await row.waitFor({ timeout: 10000 });
+    await row.locator('[data-action="history-detail"]').click();
+    await page.waitForSelector('[data-action="history-full-log"]', { timeout: 5000 });
+    const tail = (await page.locator("[data-history-log-body]").first().textContent()) || "";
+    const tailLines = tail.split(/\r?\n/).filter(Boolean);
+    expect(tailLines.length === 200 && !tailLines.includes("LONG-LINE-1") && tailLines.includes("LONG-LINE-250"), "长日志详情默认只显示尾部 200 行").toBeTruthy();
+    await page.click('[data-action="history-full-log"]');
+    await page.waitForSelector('[data-action="history-full-log"]', { state: "detached", timeout: 5000 });
+    const full = (await page.locator("[data-history-log-body]").first().textContent()) || "";
+    const fullLines = full.split(/\r?\n/).filter(Boolean);
+    expect(fullLines.includes("LONG-LINE-1") && fullLines.includes("LONG-LINE-250"), "点击后可加载完整脚本日志").toBeTruthy();
+    expect(/\d+ 行/.test((await page.locator("[data-history-log-meta]").first().textContent()) || ""), "完整日志元信息显示总行数").toBeTruthy();
+    await page.click(".modal button:has-text('关闭')");
+  } finally {
+    try { await api("DELETE", "/api/scripts/" + created.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});
+
+test("调度中心取消运行：确认卡片可取消/确认，确认后弹窗关闭", async ({ page }) => {
+  const dir = makeScriptDir("cancel-confirm");
+  const bat = path.join(dir.root, "cancel-confirm.bat");
+  fs.writeFileSync(bat, "@echo off\r\nping -n 12 127.0.0.1 >nul\r\nexit /b 0\r\n", "ascii");
+  const created = await createScript({ name: "取消确认脚本", rootPath: dir.root, mainExe: bat, configPath: dir.cfg, logPath: dir.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(created.ok, "创建取消确认测试脚本").toBeTruthy();
+  try {
+    await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#dc-script");
+    await page.selectOption("#dc-script", { label: "取消确认脚本" });
+    await page.click("button:has-text('执行')");
+    await page.waitForSelector("#dispatch-running .list-item", { timeout: 10000 });
+    await page.click('[data-action="cancel-run"]');
+    await page.waitForSelector('[data-action="confirm-cancel-run"]', { timeout: 5000 });
+    expect((await page.textContent(".modal")).includes("后续任务也不会继续执行"), "取消运行先显示风险确认文案").toBeTruthy();
+    await page.click(".modal button:has-text('取消')");
+    await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+    expect(await waitFor(async () => (await (await fetch(baseUrl + "api/status")).json()).running?.length > 0, 5000), "取消确认卡片点取消不会终止运行").toBeTruthy();
+    await page.click('[data-action="cancel-run"]');
+    await page.click('[data-action="confirm-cancel-run"]');
+    await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+    expect(await waitNoRunning(30000), "确认取消后运行结束且确认弹窗关闭").toBeTruthy();
+  } finally {
+    try { await api("DELETE", "/api/scripts/" + created.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});
+
 test("调度中心：运行中任务实时日志滚动（重试后成功 → 部分失败）", async ({ page }) => {
   const batPath = path.join(runtimeDir, "live.bat");
   const logPath = path.join(runtimeDir, "logs", "live.log");

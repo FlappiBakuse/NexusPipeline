@@ -17,6 +17,19 @@ export function registerPager(key, onChange) {
   pagers.set(key, onChange);
 }
 
+/** 将当前分页的新顺序写回全量数组，禁止把当前页隐式移动到全局首部。 */
+export function replacePageOrder(items, page, pageSize, orderedKeys, keyOf = item => item.id) {
+  const start = (page - 1) * pageSize;
+  const pageLength = Math.min(pageSize, Math.max(0, items.length - start));
+  if (start < 0 || pageLength !== orderedKeys.length) return [...items];
+  const byKey = new Map(items.map(item => [String(keyOf(item)), item]));
+  const ordered = orderedKeys.map(key => byKey.get(String(key))).filter(Boolean);
+  if (ordered.length !== pageLength) return [...items];
+  const result = [...items];
+  result.splice(start, pageLength, ...ordered);
+  return result;
+}
+
 export function pagerNavigate(key, action, target) {
   const onChange = pagers.get(key);
   if (!onChange) return;

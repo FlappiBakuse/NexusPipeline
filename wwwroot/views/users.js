@@ -2,7 +2,7 @@ import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
-import { pagerMarkup, registerPager } from "../core/pager.js";
+import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
@@ -54,23 +54,19 @@ export async function pageScriptUsers(scriptId, token) {
   wireUserDnd(scriptId);
 }
 
-/** 拖拽排序（v0.6.8+，替代上/下移按钮）：页内重排可见用户，其余保持相对顺序追加；提交全量用户名名单。 */
+/** 拖拽排序：只改变当前分页区间，其他分页保持原位置与相对顺序。 */
 function wireUserDnd(scriptId) {
   const list = $dom(".dnd-list");
   if (!list) return;
   initDndList(list, { onDrop: (names) => reorderUsers(scriptId, names) });
 }
 
-/** 把可见用户按拖拽后的顺序重排进全量列表（其余保持原相对顺序），提交 PUT users/order（names 协议）。 */
+/** 把当前页新顺序写回全量用户列表，提交 PUT users/order（names 协议）。 */
 async function reorderUsers(scriptId, visibleNames) {
   const script = state.scripts.find(item => item.id === scriptId);
   if (!script) return;
   const users = script.users || [];
-  const visible = new Set(visibleNames);
-  const byName = new Map(users.map(user => [user.name, user]));
-  const ordered = visibleNames.map(name => byName.get(name)).filter(Boolean);
-  const rest = users.filter(user => !visible.has(user.name));
-  const full = [...ordered, ...rest];
+  const full = replacePageOrder(users, userPage, USER_PAGE_SIZE, visibleNames, user => user.name);
   try {
     await api("PUT", `/api/scripts/${scriptId}/users/order`, { names: full.map(user => user.name) });
     toast("用户顺序已保存");
@@ -130,7 +126,7 @@ export function deleteUser(scriptId, userName) {
 }
 
 export async function confirmDeleteUser(scriptId, userName) {
-  try { await api("DELETE", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}`); toast("用户已删除"); await pageScriptUsers(scriptId, state.routeToken); }
+  try { await api("DELETE", `/api/scripts/${scriptId}/users/${encodeURIComponent(userName)}`); closeModal(); toast("用户已删除"); await pageScriptUsers(scriptId, state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 

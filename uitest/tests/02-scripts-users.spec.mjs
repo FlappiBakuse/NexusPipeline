@@ -329,6 +329,12 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   list = await (await fetch(baseUrl + "api/scripts")).json();
   got = list.find(s => s.id === sid);
   expect(got.users.map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后顺序已落盘（乙,丙,甲）").toBeTruthy();
+  await page.click('[data-action="delete-user"][data-name="乙"]');
+  await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
+  expect((await page.textContent(".modal")).includes("确定删除用户"), "删除用户先弹出确认卡片").toBeTruthy();
+  await page.click('[data-action="confirm-delete-user"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  expect(!(await page.$('.user-card[data-dnd-id="乙"]')), "删除用户成功后确认弹窗关闭且用户卡片消失").toBeTruthy();
   } finally {
     // v0.6.9+ F2 根治：删除需确认成功（res.ok）+ 轮询确认从列表消失（此前仅「请求无异常」即 break，
     // DELETE 返回非 2xx 时残留导致后续卡片数断言失准）；sid2 未赋值（try 内提前失败）时跳过，避免删 null。
@@ -871,6 +877,28 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(iconRes.status === 200 && (iconRes.headers.get("content-type") || "").includes("image/png"), "图标 API 返回 PNG").toBeTruthy();
   const iconBytes = Buffer.from(await iconRes.arrayBuffer());
   expect(iconBytes.length > 24 && iconBytes.readUInt32BE(16) >= 48, "图标 API 返回最高分辨率图标（PNG 宽度 ≥ 48）").toBeTruthy();
+  const shell = await fetch(baseUrl);
+  const csp = shell.headers.get("content-security-policy") || "";
+  expect(/img-src[^;]*\bblob:/.test(csp), "页面 CSP 允许图标 Blob URL（img-src 包含 blob:）").toBeTruthy();
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction((id) => {
+    const image = [...document.querySelectorAll("img[data-icon-id]")].find(el => el.dataset.iconId === id);
+    return !!image && image.src.startsWith("blob:") && image.complete && image.naturalWidth > 0;
+  }, sid, { timeout: 10000 });
+  expect(true, "脚本卡片实际加载主程序图标（Blob URL）").toBeTruthy();
+  const iconQueue = await api("POST", "/api/queues", {
+    name: "图标队列", autoRunMode: "none", completionAction: "none", timeSets: [],
+    tasks: [{ id: "", index: 0, scriptInstanceId: sid }],
+  });
+  const iconQueueId = (await iconQueue.json()).id;
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction((id) => {
+    const card = [...document.querySelectorAll('[data-testid="queue-card"]')].find(el => el.textContent.includes("图标队列"));
+    const image = card?.querySelector("img[data-icon-id]");
+    return !!image && image.dataset.iconId === id && image.src.startsWith("blob:") && image.complete && image.naturalWidth > 0;
+  }, sid, { timeout: 10000 });
+  expect(true, "调度队列卡片实际加载首个脚本图标（Blob URL）").toBeTruthy();
+  await api("DELETE", "/api/queues/" + iconQueueId);
   await api("DELETE", "/api/scripts/" + iconOk.id);
   const noIconBat = path.join(runtimeDir, "no-icon.bat");
   fs.writeFileSync(noIconBat, "@echo off\r\nexit /b 0\r\n", "ascii");
@@ -1215,6 +1243,55 @@ test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
     expect((await api("PUT", "/api/scripts/order", { ids: ids.slice(0, 2) })).status === 400, "顺序名单缺项被拒（400）").toBeTruthy();
     expect((await api("PUT", "/api/scripts/order", { ids: [...ids, "no-such-id"] })).status === 400, "顺序名单含不存在 id 被拒（400）").toBeTruthy();
     expect((await api("PUT", "/api/scripts/order", { ids: [ids[0], ids[0], ids[1]] })).status === 400, "顺序名单含重复 id 被拒（400）").toBeTruthy();
+  } finally {
+    for (const id of ids) { try { await api("DELETE", "/api/scripts/" + id); } catch { /* 清理失败不阻塞 */ } }
+  }
+});
+
+test("脚本卡片拖拽排序：第二页只重排当前页，不移动第一页", async ({ page }) => {
+  const stale = await (await fetch(baseUrl + "api/scripts")).json();
+  for (const item of stale) {
+    try { await api("DELETE", "/api/scripts/" + item.id); } catch { /* 清理失败不阻塞 */ }
+  }
+  const entries = Array.from({ length: 25 }, (_, index) => ({
+    name: `跨页脚本${String(index + 1).padStart(2, "0")}`,
+    dir: makeScriptDir(`dnd-page-${index + 1}`),
+  }));
+  const ids = [];
+  for (const entry of entries) {
+    const created = await api("POST", "/api/scripts", {
+      name: entry.name, rootPath: entry.dir.root, mainExe: entry.dir.main,
+      configPath: entry.dir.cfg, logPath: entry.dir.log, gameExe: PING_GAME,
+      maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+    });
+    expect(created.ok, "创建跨页拖拽排序脚本成功").toBeTruthy();
+    ids.push((await created.json()).id);
+  }
+  try {
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="script-card"]').length === 20, null, { timeout: 10000 });
+    const before = await (await fetch(baseUrl + "api/scripts")).json();
+    const firstPageBefore = before.slice(0, 20).map(script => script.name);
+    await page.click('[data-action="pager-page"][data-pager="scripts"][data-page="2"]');
+    await page.waitForFunction(() => document.querySelector('[data-testid="pager-scripts"]')?.dataset.pageCurrent === "2", null, { timeout: 5000 });
+    await page.waitForFunction(() => document.querySelectorAll('[data-testid="script-card"]').length === 5, null, { timeout: 5000 });
+
+    const cards = page.locator('[data-testid="script-card"]');
+    const source = cards.nth(2).locator(".drag-handle");
+    const destination = await cards.nth(0).boundingBox();
+    const sourceBox = await source.boundingBox();
+    if (!destination || !sourceBox) throw new Error("第二页拖拽把手或目标卡片不可见");
+    await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(destination.x + destination.width / 2, destination.y + 2, { steps: 8 });
+    await page.mouse.up();
+
+    const orderOk = await waitFor(async () => {
+      const list = await (await fetch(baseUrl + "api/scripts")).json();
+      return list.slice(0, 20).map(script => script.name).join() === firstPageBefore.join()
+        && list.slice(20).map(script => script.name).join() === "跨页脚本23,跨页脚本21,跨页脚本22,跨页脚本24,跨页脚本25";
+    }, 10000);
+    expect(orderOk, "第二页拖拽只改变第二页局部顺序，第一页全局顺序保持不变").toBeTruthy();
   } finally {
     for (const id of ids) { try { await api("DELETE", "/api/scripts/" + id); } catch { /* 清理失败不阻塞 */ } }
   }

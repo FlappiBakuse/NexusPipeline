@@ -29,14 +29,22 @@ internal static class HttpHelper
             _ => "application/octet-stream",
         };
         context.Response.ContentType = contentType;
-        // v0.6.9+（P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data: 内联图标）；
+        // v0.6.9+（P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data:/blob: 图标）；
         // 缓存保持 no-cache（零构建无版本号，浏览器每次校验）。
-        // v0.7.5（台账外）：connect-src 放行 http://127.0.0.1:* ——设置页「重启服务」跨端口探测（端口漂移 +1）与 CSP 'self'
-        // （端口不同即不同 origin）冲突，原被 CSP 拦截致自动跳转新端口分支永远走不到；仅放行本机回环，不扩大攻击面。
+        // v0.7.10：重启服务需要跨端口探测；同时允许当前访问主机的任意端口，覆盖 LAN/主机名/IPv6 远程访问，
+        // 不把 connect-src 扩大到任意主机。
+        Uri? requestUrl = context.Request.Url;
+        string requestScheme = requestUrl?.Scheme ?? "http";
+        string requestHost = requestUrl?.Host ?? "127.0.0.1";
+        if (requestHost.Contains(':', StringComparison.Ordinal) && !requestHost.StartsWith("[", StringComparison.Ordinal))
+        {
+            requestHost = "[" + requestHost + "]";
+        }
+        string currentHostPorts = $"{requestScheme}://{requestHost}:*";
         context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
-        context.Response.Headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:*; font-src 'self' data:";
+        context.Response.Headers["Content-Security-Policy"] = $"default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:* {currentHostPorts}; font-src 'self' data:";
         byte[] data = File.ReadAllBytes(filePath);
         context.Response.ContentLength64 = data.Length;
         context.Response.OutputStream.Write(data, 0, data.Length);

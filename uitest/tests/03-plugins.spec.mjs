@@ -399,7 +399,8 @@ test("下一调度队列显示/倒计时 + 通知统计", async ({ page }) => {
   await page.waitForFunction(() => { const el = document.querySelector("#next-q"); return el && /^\d{2}:\d{2}:\d{2}$/.test(el.textContent.trim()); }, null, { timeout: 10000 });
   const cd = await page.textContent("#next-q");
   expect(/^\d{2}:\d{2}:\d{2}$/.test(cd.trim()), "下一调度队列卡片上方显示倒计时（" + cd + "）").toBeTruthy();
-  expect(await page.evaluate(() => { const el = document.querySelector('[data-testid="stat-next"] .lbl'); return el && el.textContent === "下一调度队列"; }), "倒计时下方标签仍为「下一调度队列」").toBeTruthy();
+  expect((await page.textContent("#next-q-label")) === "下一调度队列：统计队列", "下一调度队列卡片第二行显示队列名称").toBeTruthy();
+  expect(await page.evaluate(() => document.querySelectorAll('[data-testid="stat-next"] > *').length === 2), "下一调度队列卡片保持两行布局").toBeTruthy();
   const body = await page.textContent("body");
   expect(body.includes("1 个脚本实例") && body.includes("1 个调度队列"), "通知统计显示 1 个脚本实例 / 1 个调度队列").toBeTruthy();
 

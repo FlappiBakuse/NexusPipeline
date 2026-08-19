@@ -30,6 +30,9 @@ internal static class ApiHistoryHandler
                 return;
             }
             Audit.Log(Audit.Web, "查询运行详情", $"{record.ScriptName}（{record.StartTime:yyyy-MM-dd HH:mm:ss}）");
+            bool includeFull = string.Equals(context.Request.QueryString["full"], "true", StringComparison.OrdinalIgnoreCase)
+                || context.Request.QueryString["full"] == "1";
+            string fullAttempt = context.Request.QueryString["attempt"] ?? "";
             var attemptLogs = new List<object>();
             bool legacyFallback = false;
             foreach (RunAttempt attempt in record.AttemptDetails)
@@ -45,6 +48,9 @@ internal static class ApiHistoryHandler
                     number = attempt.Number,
                     logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
                     logTotalLines = log?.TotalLines ?? 0,
+                    logText = includeFull && (string.IsNullOrWhiteSpace(fullAttempt) || fullAttempt == attempt.Number.ToString())
+                        ? log?.LogText
+                        : null,
                 });
             }
             object? legacyLog = null;
@@ -55,6 +61,9 @@ internal static class ApiHistoryHandler
                 {
                     logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
                     logTotalLines = log?.TotalLines ?? 0,
+                    logText = includeFull && (string.IsNullOrWhiteSpace(fullAttempt) || fullAttempt.Equals("legacy", StringComparison.OrdinalIgnoreCase))
+                        ? log?.LogText
+                        : null,
                 };
             }
             await HttpHelper.WriteJsonAsync(context, new

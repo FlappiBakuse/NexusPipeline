@@ -2,7 +2,7 @@
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
-import { pagerMarkup, registerPager } from "../core/pager.js";
+import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
@@ -41,20 +41,16 @@ export async function pageQueues(token) {
   wireQueueDnd();
 }
 
-/** 拖拽排序（v0.6.8+）：页内重排可见项，其余项保持相对顺序追加；提交全量顺序落盘。 */
+/** 拖拽排序：只改变当前分页区间，其他分页保持原位置与相对顺序。 */
 function wireQueueDnd() {
   const list = $(".script-grid");
   if (!list) return;
   initDndList(list, { onDrop: (ids) => reorderQueues(ids) });
 }
 
-/** 把可见项按拖拽后的顺序重排进全量列表（其余项保持原相对顺序），提交 PUT /api/queues/order。 */
+/** 把当前页新顺序写回全量列表，提交 PUT /api/queues/order。 */
 async function reorderQueues(visibleIds) {
-  const visible = new Set(visibleIds);
-  const byId = new Map(state.queues.map(item => [item.id, item]));
-  const ordered = visibleIds.map(id => byId.get(id)).filter(Boolean);
-  const rest = state.queues.filter(item => !visible.has(item.id));
-  const full = [...ordered, ...rest];
+  const full = replacePageOrder(state.queues, queuePage, QUEUE_PAGE_SIZE, visibleIds);
   try {
     await api("PUT", "/api/queues/order", { ids: full.map(item => item.id) });
     toast("队列顺序已保存");

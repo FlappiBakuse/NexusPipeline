@@ -30,7 +30,7 @@ function statGridMarkup(status, next) {
   return `<section class="stat-grid" aria-label="运行概览">
     <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
     <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
-    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl">下一调度队列</div></div>
+    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl next-q-label" id="next-q-label">下一调度队列：${next ? esc(next.queueName || "未命名队列") : "无"}</div></div>
     <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
   </section>`;
 }
@@ -67,6 +67,7 @@ export async function pageDashboard(token) {
     <div id="system-action-area">${systemActionCard(status.systemAction)}</div>
     <section class="card" data-testid="running-panel">${runningPanelMarkup(status)}</section>
     <section class="card" id="dashboard-plugin-panel">${pluginPanelMarkup(status, stats)}</section>`);
+    if (next) startCountdown("next-q", next.time); else stopCountdown();
   } else {
     // 局部更新（v0.6.7+）：不整页重渲染，避免倒计时定时器反复重建与滚动/焦点重置；区域缺失时静默跳过。
     const setNum = (selector, text) => {
@@ -77,9 +78,16 @@ export async function pageDashboard(token) {
     setNum('.stat[data-testid="stat-queues"] .num', status.queueCount ?? 0);
     setNum('.stat[data-testid="stat-version"] .num', status.version || "0.0.0");
     const nextEl = document.querySelector("#next-q");
+    const nextLabel = document.querySelector("#next-q-label");
     if (nextEl) {
-      if (next) startCountdown("next-q", next.time);
-      else { stopCountdown(); nextEl.textContent = "无"; }
+      if (next) {
+        if (nextLabel) nextLabel.textContent = "下一调度队列：" + (next.queueName || "未命名队列");
+        startCountdown("next-q", next.time);
+      } else {
+        stopCountdown();
+        nextEl.textContent = "无";
+        if (nextLabel) nextLabel.textContent = "下一调度队列：无";
+      }
     }
     const sysArea = document.querySelector("#system-action-area");
     if (sysArea) sysArea.innerHTML = systemActionCard(status.systemAction);

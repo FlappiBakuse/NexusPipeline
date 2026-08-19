@@ -236,13 +236,15 @@ internal static class ConfigSwapSession
             }
             catch (Exception ex)
             {
-                Logger.Error($"[错误] 配置替换备份清单损坏（{metaPath}），已跳过还原并保留备份现场：{ex.Message}");
+                Logger.Error($"[错误] 配置替换备份清单损坏（{metaPath}）：{ex.Message}");
+                QuarantineInvalidBackup(backupDir, "meta 损坏");
                 return false;
             }
         }
         if (string.IsNullOrWhiteSpace(configPath))
         {
-            Logger.Error($"[错误] 配置替换备份清单缺少 configPath（{metaPath}），已跳过还原并保留备份现场。");
+            Logger.Error($"[错误] 配置替换备份清单缺少 configPath（{metaPath}）。");
+            QuarantineInvalidBackup(backupDir, "缺少 configPath");
             return false;
         }
         bool restored = true;
@@ -305,6 +307,26 @@ internal static class ConfigSwapSession
         {
             Logger.Warn($"[警告] 清理配置替换备份失败，保留备份现场：{backupDir}（{ex.Message}）");
             return false;
+        }
+    }
+
+    /// <summary>隔离无法安全解释的替换备份，保留现场但移出自动恢复扫描，避免每 10 秒永久重试。</summary>
+    private static void QuarantineInvalidBackup(string backupDir, string reason)
+    {
+        string suffix = DateTime.Now.ToString("yyyyMMdd-HHmmssfff");
+        string target = backupDir + ".corrupt-" + suffix;
+        if (Directory.Exists(target))
+        {
+            target = backupDir + ".corrupt-" + suffix + "-" + Guid.NewGuid().ToString("N")[..8];
+        }
+        try
+        {
+            Directory.Move(backupDir, target);
+            Logger.Error($"[恢复] 已隔离损坏的配置替换备份（{reason}）：{target}；请人工核查后处理。");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[恢复] 隔离损坏的配置替换备份失败（{backupDir}）：{ex.Message}；将继续保留现场。");
         }
     }
 

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using Xunit;
 
@@ -42,6 +43,49 @@ public class ConfigSwapSyncTests
     {
         Assert.Equal(PathKind.File, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\state.json", OriginalKind = "missing" }));
         Assert.Equal(PathKind.Dir, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\config", OriginalKind = "missing" }));
+    }
+
+    [Fact]
+    public void RestoreConfigReplacements_CorruptMeta_IsQuarantined()
+    {
+        string scriptId = "kn74-" + Guid.NewGuid().ToString("N");
+        string userName = "user";
+        string backupDir = ConfigSwapPaths.ReplaceBackupDir(scriptId, userName);
+        Directory.CreateDirectory(backupDir);
+        File.WriteAllText(Path.Combine(backupDir, ".meta"), "{not-json");
+        string parent = Directory.GetParent(backupDir)!.FullName;
+        try
+        {
+            Assert.False(ConfigSwapSession.RestoreConfigReplacements(scriptId, userName));
+            Assert.False(Directory.Exists(backupDir));
+            Assert.Single(Directory.GetDirectories(parent, Path.GetFileName(backupDir) + ".corrupt-*"));
+        }
+        finally
+        {
+            if (Directory.Exists(Path.Combine(AppPaths.DataDir, scriptId)))
+            {
+                Directory.Delete(Path.Combine(AppPaths.DataDir, scriptId), recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MigrateLegacyLayout_ReservedUserName_IsNotRenamed()
+    {
+        string dataRoot = MakeTempDir();
+        string legacyScript = Path.Combine(dataRoot, "legacy-script");
+        string reservedUserScript = Path.Combine(dataRoot, "reserved-user-script");
+        Directory.CreateDirectory(Path.Combine(legacyScript, "config"));
+        File.WriteAllText(Path.Combine(legacyScript, "config", "state.json"), "legacy");
+        Directory.CreateDirectory(Path.Combine(reservedUserScript, "config", "store"));
+        File.WriteAllText(Path.Combine(reservedUserScript, "config", "store", "state.json"), "user");
+
+        ConfigSwapPaths.MigrateLegacyLayout(dataRoot);
+
+        Assert.True(File.Exists(Path.Combine(legacyScript, "store", "state.json")));
+        Assert.True(File.Exists(Path.Combine(reservedUserScript, "config", "store", "state.json")));
+        Assert.False(Directory.Exists(Path.Combine(reservedUserScript, "store")));
+        Directory.Delete(dataRoot, recursive: true);
     }
 
     /* ---------------- 还原描述路径 DSL（LocateNode） ---------------- */

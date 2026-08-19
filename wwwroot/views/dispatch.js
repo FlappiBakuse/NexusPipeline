@@ -2,6 +2,7 @@ import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { systemActionCard } from "../core/forms.js";
 import { esc } from "../core/format.js";
+import { closeModal, confirmModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
 
@@ -136,8 +137,12 @@ export async function dispatchQueue() {
   catch (error) { toast(error.message, "error"); }
 }
 
-export async function cancelRun(runId) {
-  try { await api("POST", "/api/cancel", { runId }); toast("已发送取消请求"); }
+export function cancelRun(runId) {
+  confirmModal("取消运行", "当前任务将被终止；如果这是调度队列，后续任务也不会继续执行。确定取消吗？", "confirm-cancel-run", { id: runId });
+}
+
+export async function confirmCancelRun(runId) {
+  try { await api("POST", "/api/cancel", { runId }); closeModal(); toast("已发送取消请求"); }
   catch (error) { toast(error.message, "error"); }
 }
 
@@ -145,4 +150,5 @@ export const actions = {
   "dispatch-script": target => withBusy(target, () => dispatchScript()),
   "dispatch-queue": target => withBusy(target, () => dispatchQueue()),
   "cancel-run": target => cancelRun(target.dataset.id),
+  "confirm-cancel-run": target => withBusy(target, () => confirmCancelRun(target.dataset.id)),
 };

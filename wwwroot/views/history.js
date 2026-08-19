@@ -3,7 +3,7 @@ import { esc, finalStatusOf, fmtTime, statusBadge } from "../core/format.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { modalShell, showModal } from "../core/modal.js";
-import { navActive, render, setTopbarTitle, toast } from "../core/ui.js";
+import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 
 let historyPage = 1;
 let historyDays = 7;
@@ -35,6 +35,17 @@ export function historyDaysChange(target) {
   pageHistory(state.routeToken);
 }
 
+function historyLogMarkup(id, attemptKey, logInfo, label) {
+  const total = logInfo?.logTotalLines || 0;
+  const full = logInfo?.logText != null;
+  const tailNote = total > 200 && !full ? "，仅显示尾部 200 行" : "";
+  const action = total > 200 && !full
+    ? `<div class="history-log-actions"><span class="muted">日志较长，默认只加载尾部</span><button class="ghost sm" type="button" data-action="history-full-log" data-id="${esc(id)}" data-attempt="${esc(attemptKey)}">查看完整日志</button></div>`
+    : "";
+  const text = full ? logInfo.logText : (logInfo?.logTail || "（无脚本日志）");
+  return `<div class="history-log" data-history-log data-attempt="${esc(attemptKey)}"><div class="qk-row" data-history-log-meta>${label}${logInfo ? `，${total} 行${tailNote}` : ""}</div>${action}<pre class="logbox" data-history-log-body>${esc(text)}</pre></div>`;
+}
+
 export async function historyDetail(id) {
   try {
     const data = await api("GET", "/api/history/detail?id=" + encodeURIComponent(id));
@@ -42,15 +53,34 @@ export async function historyDetail(id) {
     if (!record) return;
     const attempts = (record.attemptDetails || []).map(attempt => {
       const logInfo = (data.attemptLogs || []).find(l => l.number === attempt.number);
-      return `<div class="subsection"><h3>第 ${attempt.number} 次尝试：${attempt.status === "success" ? "成功" : attempt.status === "cancelled" ? "已取消" : "失败"}</h3><div class="detail"><div class="kv"><span class="k">原因</span><span>${esc(attempt.reason || "-")}</span></div><div class="kv"><span class="k">时间</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div></div><div class="qk-row">脚本日志（第 ${attempt.number} 次尝试${logInfo ? `，${logInfo.logTotalLines || 0} 行${(logInfo.logTotalLines || 0) > 200 ? "，仅显示尾部 200 行" : ""}` : ""}）</div><pre class="logbox">${esc(logInfo && logInfo.logTail ? logInfo.logTail : "（无脚本日志）")}</pre></div>`;
+      return `<div class="subsection"><h3>第 ${attempt.number} 次尝试：${attempt.status === "success" ? "成功" : attempt.status === "cancelled" ? "已取消" : "失败"}</h3><div class="detail"><div class="kv"><span class="k">原因</span><span>${esc(attempt.reason || "-")}</span></div><div class="kv"><span class="k">时间</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, `脚本日志（第 ${attempt.number} 次尝试）`)} </div>`;
     }).join("");
-    const legacySection = data.legacyLog ? `<div class="subsection"><h3>脚本日志（${data.legacyLog.logTotalLines || 0} 行${(data.legacyLog.logTotalLines || 0) > 200 ? "，仅显示尾部 200 行" : ""}）</h3><pre class="logbox">${esc(data.legacyLog.logTail || "（无脚本日志）")}</pre></div>` : "";
+    const legacySection = data.legacyLog ? `<div class="subsection"><h3>兼容旧格式日志</h3>${historyLogMarkup(id, "legacy", data.legacyLog, "脚本日志")}</div>` : "";
     const body = `<div class="detail"><div class="kv"><span class="k">开始</span><span>${esc(fmtTime(record.startTime))}</span></div><div class="kv"><span class="k">结束</span><span>${esc(fmtTime(record.endTime))}</span></div><div class="kv"><span class="k">模式</span><span>${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div>${record.userName ? `<div class="kv"><span class="k">用户</span><span>${esc(record.userName)}</span></div>` : ""}<div class="kv"><span class="k">重试</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"} 次</span></div><div class="kv"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))} ${esc(record.resultDetail)}</span></div></div>${attempts}${legacySection}`;
     showModal(modalShell(`${esc(record.scriptName)} 运行详情`, body, '<button class="ghost" type="button" data-action="close-modal">关闭</button>'), true);
+  } catch (error) { toast(error.message, "error"); }
+}
+
+export async function historyFullLog(id, attemptKey, target) {
+  try {
+    const query = `/api/history/detail?id=${encodeURIComponent(id)}&full=true&attempt=${encodeURIComponent(attemptKey)}`;
+    const data = await api("GET", query);
+    const info = attemptKey === "legacy"
+      ? data.legacyLog
+      : (data.attemptLogs || []).find(log => String(log.number) === String(attemptKey));
+    if (!info || info.logText == null) throw new Error("完整日志不存在或已被清理");
+    const root = target.closest("[data-history-log]");
+    const body = root?.querySelector("[data-history-log-body]");
+    const meta = root?.querySelector("[data-history-log-meta]");
+    if (!body || !meta) return;
+    body.textContent = info.logText || "（无脚本日志）";
+    meta.textContent = `${attemptKey === "legacy" ? "脚本日志" : `脚本日志（第 ${attemptKey} 次尝试）`}，${info.logTotalLines || 0} 行`;
+    target.remove();
   } catch (error) { toast(error.message, "error"); }
 }
 
 export const actions = {
   "history-detail": target => historyDetail(target.dataset.id),
   "history-days": target => historyDaysChange(target),
+  "history-full-log": target => withBusy(target, () => historyFullLog(target.dataset.id, target.dataset.attempt, target)),
 };

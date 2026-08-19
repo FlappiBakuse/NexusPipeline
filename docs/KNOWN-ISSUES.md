@@ -1,6 +1,6 @@
 # 已知问题台账（Known Issues）
 
-**建立日期**：2026-08-15（v0.6.9 全面代码评估产出）｜ **维护记录**：v0.6.10~v0.7.8 分批修复台账内全部可修复项（KN-01~83 等，修复详情见 [CHANGELOG.md](../CHANGELOG.md) 对应版本）｜ **v0.7.8 发布门禁已通过**：已修复条目**彻底移除**，本台账仅登记当前未修复问题；后续新发现按版本登记。
+**建立日期**：2026-08-15（v0.6.9 全面代码评估产出）｜ **维护记录**：v0.6.10~v0.7.10 分批修复台账内全部可修复项（KN-01~83 等，修复详情见 [CHANGELOG.md](../CHANGELOG.md) 对应版本）｜ **v0.7.10 复核完成**：已修复条目**彻底移除**，本台账仅登记当前未修复问题；后续新发现按版本登记。
 
 > 本台账仅登记项目已确认但**尚未修复**的已知问题（潜在 BUG / 边界缺陷 / 语义待决）。已修复项不再保留（历史记录见 [CHANGELOG.md](../CHANGELOG.md)）；版本修复排期建议见 [ROADMAP.md](ROADMAP.md)；代码定位指引见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -21,11 +21,8 @@
 
 | 编号 | 问题 | 位置 | 状态 |
 |---|---|---|---|
-| KN-73 | **Mutex「持有中销毁」窗口**：`RemoveMutex` 在 `WaitOne` 成功之后、action 执行期间 Dispose 时，finally 的 `ReleaseMutex` 异常被吞、互斥体所有权丢失，同进程重建同名 Mutex 后理论上双线程可同时进临界区（KN-36 修复仅覆盖「WaitOne 时已 Dispose」窗口） | `src/Services/ConfigSwapPrimitives.cs:106-152` | 随版（Web 删除路径有 `gate.Wait(0)` 前置保护，实际窗口极小） |
-| KN-74 | **.meta 损坏 → 永久待办无限重试**：`RestoreConfigReplacements` 遇 .meta 损坏/缺 configPath 时保留备份现场并返回失败，后台恢复循环每 10 秒重试；当前不会再由正常收尾清理逻辑删除备份，但仍缺少人工隔离出口 | `src/Services/ConfigSwapSession.cs:207-315`、`src/Services/ConfigSwapSession.cs:1275-1290` | 随版（建议：损坏 .meta 时改名保留并生成明确待办） |
-| KN-75 | **MigrateLegacyLayout 用户目录名碰撞**：脚本级旧布局重命名（config→store 等）不校验目标是否为「用户目录」——用户恰巧名为 `config`/`cache`/`edit-hide`/`replace-backup` 时其数据目录被误当旧布局迁移改名，用户数据错位（低概率） | `src/Services/ConfigSwapPaths.cs:76-119` | 随版（建议：迁移前排除含数据目录子结构/加保留名单） |
-| KN-76 | **PrepareForRun 失败回滚形态不一致**：`!prepared` 回滚分支固定按目录还原（未用 `RestoreKind(mark)`），单文件原配置在「复制成功、删源失败」窄窗口下被还原成「目录/同名文件」形态且立即清标记（无恢复标记；`prepared` 分支的 `DoRestore` 处理正确） | `src/Services/UserConfigManager.cs:158-168` | 随版（窄窗口：MoveAs 删源失败才触发） |
-| KN-82 | **首次检测同步阻塞主监控循环**：`WithSwapLock`（30 秒锁上限）+ 800ms 双采样 + 全量镜像期间日志判定/游戏前置/超时检查全部延迟；跨进程锁竞争时最长阻塞 30 秒（日志行不丢但判定迟到） | `src/Services/ConfigSwapSession.cs:299-331` | 随版（文档化；锁竞争窗口极小） |
+| KN-73 | **Mutex「持有中销毁」窗口**：`RemoveMutex` 在 `WaitOne` 成功之后、action 执行期间 Dispose 时，finally 的 `ReleaseMutex` 异常被吞、互斥体所有权丢失，同进程重建同名 Mutex 后理论上双线程可同时进临界区（KN-36 修复仅覆盖「WaitOne 时已 Dispose」窗口） | `src/Services/ConfigSwapPrimitives.cs:106-152` | v0.7.10 复核未能稳定复现；保留为低概率并发边界（Web 删除路径有 `gate.Wait(0)` 前置保护） |
+| KN-82 | **首次检测同步阻塞主监控循环**：`WithSwapLock`（30 秒锁上限）+ 800ms 双采样 + 全量镜像期间日志判定/游戏前置/超时检查全部延迟；跨进程锁竞争时最长阻塞 30 秒（日志行不丢但判定迟到） | `src/Services/ConfigSwapSession.cs:299-331` | v0.7.10 复核未能稳定复现；保留为低概率锁竞争边界 |
 
 ## 语义文档化保留（2026-08-16 与用户对齐确认，非缺陷）
 

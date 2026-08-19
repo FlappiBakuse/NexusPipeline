@@ -112,6 +112,20 @@ test("远程访问设置（令牌加密存储 + 本地豁免）与历史保留�
   expect(off.ok, "关闭远程访问成功").toBeTruthy();
 });
 
+test("访问令牌：生成后默认隐藏、可切换显示并在保存完成后反馈", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#st-token");
+  await page.click('[data-action="gen-token"]');
+  await page.waitForFunction(() => document.querySelector("#st-token")?.value.length > 0, null, { timeout: 5000 });
+  expect(await page.getAttribute("#st-token", "type"), "生成访问令牌后输入框默认保持 password 隐藏").toBe("password");
+  await page.waitForFunction(() => document.body.textContent.includes("访问令牌已保存"), null, { timeout: 5000 });
+  expect(await page.getAttribute('[data-action="toggle-token-visibility"]', "aria-pressed"), "令牌保存完成后显示切换按钮保持隐藏状态").toBe("false");
+  await page.click('[data-action="toggle-token-visibility"]');
+  expect(await page.getAttribute("#st-token", "type"), "点击显示后令牌输入框切换为 text").toBe("text");
+  await page.click('[data-action="toggle-token-visibility"]');
+  expect(await page.getAttribute("#st-token", "type"), "再次点击后令牌输入框恢复 password").toBe("password");
+});
+
 test("重启服务：确认卡片 → 自动重启并恢复（service 模式）", async ({ page }) => {
   // v0.6.9+ F3 治理：页面错误探针，失败时输出 pageerror/console.error 现场
   const pageErrors = [];

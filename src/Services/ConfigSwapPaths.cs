@@ -78,16 +78,30 @@ internal static class ConfigSwapPaths
     /// 幂等：目标名已存在则跳过（保留新现场）；失败仅告警不阻断。启动时在崩溃恢复扫描前调用，确保旧版本残留现场仍可恢复。</summary>
     public static void MigrateLegacyLayout()
     {
-        if (!Directory.Exists(AppPaths.DataDir))
+        MigrateLegacyLayout(AppPaths.DataDir);
+    }
+
+    /// <summary>迁移指定数据根目录；内部重载用于隔离测试，生产入口仍使用 AppPaths.DataDir。</summary>
+    internal static void MigrateLegacyLayout(string dataDir)
+    {
+        if (!Directory.Exists(dataDir))
         {
             return;
         }
-        foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
+        foreach (string scriptDir in Directory.GetDirectories(dataDir))
         {
             string scriptId = Path.GetFileName(scriptDir);
             foreach ((string oldName, string newName) in LegacyDirMap)
             {
-                TryRenameDir(Path.Combine(scriptDir, oldName), Path.Combine(scriptDir, newName), $"{scriptId}（无用户）");
+                string oldPath = Path.Combine(scriptDir, oldName);
+                if (LooksLikeUserDataDir(oldPath))
+                {
+                    Logger.Warn($"[迁移] 跳过疑似保留名用户目录，避免误改用户数据：{oldPath}");
+                }
+                else
+                {
+                    TryRenameDir(oldPath, Path.Combine(scriptDir, newName), $"{scriptId}（无用户）");
+                }
                 foreach (string userDir in Directory.GetDirectories(scriptDir))
                 {
                     string userName = Path.GetFileName(userDir);
@@ -95,6 +109,16 @@ internal static class ConfigSwapPaths
                 }
             }
         }
+    }
+
+    private static bool LooksLikeUserDataDir(string path)
+    {
+        if (!Directory.Exists(path))
+        {
+            return false;
+        }
+        string[] markers = { "store", "original", "retry-store", "script", "swap-backup", "replace-backup", "edit-hidden", "edit-hide", ".session" };
+        return markers.Any(marker => Directory.Exists(Path.Combine(path, marker)) || File.Exists(Path.Combine(path, marker)));
     }
 
     private static readonly (string Old, string New)[] LegacyDirMap =
