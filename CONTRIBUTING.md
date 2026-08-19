@@ -153,7 +153,7 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 | 改动范围 | 必跑 |
 |---|---|
 | 仅前端 | `build.cmd` + e2e 全量 77（局部迭代可按域筛选） |
-| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（166）+ 单元测试（204），默认加速档 |
+| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（167）+ 单元测试（228），默认加速档 |
 | 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
 
 常用命令：

@@ -1,4 +1,5 @@
 using System.Text;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -7,6 +8,8 @@ namespace NexusPipeline.Plugins;
 
 internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 {
+    private PluginContext? _context;
+
     public string Name => "notify";
 
     public string DisplayName => "通知推送";
@@ -19,6 +22,7 @@ internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 
     public void Initialize(PluginContext context)
     {
+        _context = context;
         context.Log("通知推送已接管运行状态通知。");
     }
 
@@ -28,7 +32,7 @@ internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 
     public Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
+        AppSettings settings = _context?.Settings ?? throw new InvalidOperationException("通知插件尚未初始化");
         if (!HasChannel(settings))
         {
             Logger.Info($"[通知] 脚本「{script.Name}」完成，但未配置通知渠道，跳过发送。");
@@ -40,7 +44,7 @@ internal sealed class NotifyPlugin : IPlugin, INotifyChannel
 
     public Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
+        AppSettings settings = _context?.Settings ?? throw new InvalidOperationException("通知插件尚未初始化");
         if (!HasChannel(settings))
         {
             Logger.Info($"[通知] 调度队列「{queue.Name}」完成，但未配置通知渠道，跳过发送。");

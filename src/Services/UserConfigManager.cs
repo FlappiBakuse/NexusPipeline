@@ -1,7 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Text;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
-using NexusPipeline.Plugins;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;

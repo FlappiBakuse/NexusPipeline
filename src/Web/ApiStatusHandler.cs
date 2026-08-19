@@ -1,6 +1,6 @@
 using System.Net;
-using NexusPipeline.Plugins;
 using NexusPipeline.Models;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
@@ -76,7 +76,7 @@ internal static class ApiStatusHandler
                 plugin.Version,
                 plugin.IsBuiltIn,
                 kind = plugin.Kind,
-                plugin.SupportsEmulator,
+                supportsEmulator = RuntimeContext.Instance.Plugins.HasCapability(plugin.Name, PluginCapabilityKeys.Emulator),
                 enabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),
         };

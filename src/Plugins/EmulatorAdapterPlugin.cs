@@ -1,9 +1,10 @@
 using NexusPipeline.Models;
+using NexusPipeline.Extensibility;
 
 namespace NexusPipeline.Plugins;
 
 /// <summary>模拟器适配能力插件（v0.7.0+）：纯元数据条目，控制「安卓模拟器启动方式」可用性（禁用后模拟器运行被拒、前端不渲染选项）。</summary>
-internal sealed class EmulatorAdapterPlugin : IPlugin
+internal sealed class EmulatorAdapterPlugin : IPlugin, IEmulatorCapability
 {
     public string Name => AppSettings.EmulatorAdapterPlugin;
 

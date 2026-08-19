@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
@@ -18,7 +19,11 @@ internal class RuntimeContext
         ServiceCollection collection = new();
         collection.AddSingleton(new DispatchCenter());
         collection.AddSingleton(new HistoryService());
-        collection.AddSingleton(new PluginManager());
+        collection.AddSingleton<PluginManager>(provider => new PluginManager(
+            new PluginHostServices(
+                () => Settings,
+                ReloadSettings,
+                type => provider.GetRequiredService(type))));
         collection.AddSingleton(new Scheduler());
         _services = collection.BuildServiceProvider();
     }

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
@@ -10,7 +11,7 @@ namespace NexusPipeline.Plugins;
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
 /// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）。
 /// </summary>
-internal sealed class DataSpecializedPlugin
+internal sealed class DataSpecializedPlugin : IProfileResolver
 {
     public string Name { get; private set; } = "";
 
@@ -22,12 +23,13 @@ internal sealed class DataSpecializedPlugin
 
     public string Version { get; private set; } = "";
 
-    /// <summary>是否支持安卓模拟器启动方式（v0.7.0+，plugin.json 的 supportsEmulator 声明，缺省 false）。</summary>
-    public bool SupportsEmulator { get; private set; }
+    /// <summary>数据化插件声明的能力 key；旧 supportsEmulator 字段会映射为 emulator。</summary>
+    public IReadOnlySet<string> CapabilityKeys => _capabilityKeys;
+
+    /// <summary>旧内部查询兼容投影；新代码通过 capability key 查询。</summary>
+    public bool SupportsEmulator => _capabilityKeys.Contains(PluginCapabilityKeys.Emulator);
 
     public bool IsBuiltIn => false;
-
-    private string _pluginDir = "";
 
     private string _resolvePath = "";
 
@@ -40,6 +42,8 @@ internal sealed class DataSpecializedPlugin
     private string? _judgeScript;
 
     private readonly object _sync = new();
+
+    private readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
     public static DataSpecializedPlugin? Load(string pluginDir)
@@ -59,11 +63,25 @@ internal sealed class DataSpecializedPlugin
                 GameName = node?["gameName"]?.ToString() ?? "",
                 Description = node?["description"]?.ToString() ?? "",
                 Version = node?["version"]?.ToString() ?? "",
-                SupportsEmulator = node?["supportsEmulator"]?.GetValue<bool>() ?? false,
-                _pluginDir = pluginDir,
                 _resolvePath = node?["resolve"]?.ToString() ?? "",
                 _judgeScriptPath = node?["judgeScript"]?.ToString() ?? "",
             };
+            if (node?["capabilities"] is JsonArray capabilities)
+            {
+                foreach (JsonNode? capability in capabilities)
+                {
+                    string key = capability?.ToString() ?? "";
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        plugin._capabilityKeys.Add(key.Trim());
+                    }
+                }
+            }
+            // v0.7.0+ plugin.json compatibility: the former boolean declaration is a capability key.
+            if (node?["supportsEmulator"]?.GetValue<bool>() == true)
+            {
+                plugin._capabilityKeys.Add(PluginCapabilityKeys.Emulator);
+            }
             string? templateRef = node?["configTemplate"]?.ToString();
             if (string.IsNullOrWhiteSpace(plugin.Name) || string.IsNullOrWhiteSpace(plugin._resolvePath) || string.IsNullOrWhiteSpace(plugin._judgeScriptPath))
             {
@@ -137,7 +155,7 @@ internal sealed class DataSpecializedPlugin
                 {
                     return null;
                 }
-                string found = FindFile(rootPath, file, item?["searchUpward"]?.GetValue<bool>() == true);
+                string? found = FindFile(rootPath, file, item?["searchUpward"]?.GetValue<bool>() == true);
                 if (found is null)
                 {
                     return null;

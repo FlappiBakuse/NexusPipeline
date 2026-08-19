@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
@@ -23,35 +24,6 @@ internal interface IPlugin
     void Shutdown();
 }
 
-/// <summary>专项插件推导出的脚本配置快照（v0.6.3 起由数据化专项插件提供：保存时固化到脚本实例字段）。</summary>
-internal class ScriptProfile
-{
-    public string MainExe { get; set; } = "";
-
-    public string Args { get; set; } = "";
-
-    public string ConfigPath { get; set; } = "";
-
-    public string LogPath { get; set; } = "";
-
-    /// <summary>默认判断脚本（v0.6.0+）：专项脚本实例保存时固化到脚本字段（用户不可编辑）；为空表示插件不提供。</summary>
-    public string JudgeScript { get; set; } = "";
-
-    /// <summary>判断脚本语言（数据化插件按扩展名：.js → javascript / .py → python）。</summary>
-    public string JudgeScriptLanguage { get; set; } = "javascript";
-
-    /// <summary>默认配置模板目录（v0.6.3 起为文件夹形态）：编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置（用户按需修改）；为空表示插件不提供。</summary>
-    public string ConfigTemplateDir { get; set; } = "";
-}
-
-/// <summary>通知能力接口（v0.6.3 起仅供宿主内置插件使用）：实现该接口的插件被宿主用于发送脚本/队列运行状态通知。</summary>
-internal interface INotifyChannel
-{
-    Task NotifyScriptAsync(ScriptInstance script, RunRecord record);
-
-    Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);
-}
-
 /// <summary>宿主提供给内置插件的上下文抽象：插件只能通过它访问宿主能力，不直接依赖全局单例。
 /// 插件级配置（v0.5.1+）：<see cref="GetConfig{T}"/>/<see cref="SetConfig{T}"/> 落盘 config/plugins/&lt;插件名&gt;.json（PascalCase），
 /// 密钥经 <see cref="GetSecret"/>/<see cref="SetSecret"/> 走 DPAPI（enc: 前缀），普通字段与密钥同文件。</summary>
@@ -59,9 +31,12 @@ internal class PluginContext
 {
     private readonly string _pluginName;
 
-    internal PluginContext(string pluginName)
+    private readonly PluginHostServices _host;
+
+    internal PluginContext(string pluginName, PluginHostServices host)
     {
         _pluginName = pluginName;
+        _host = host;
     }
 
     public void Log(string message)
@@ -69,17 +44,17 @@ internal class PluginContext
         Logger.Info($"[插件] {message}");
     }
 
-    public AppSettings Settings => RuntimeContext.Instance.Settings;
+    public AppSettings Settings => _host.Settings;
 
     public void ReloadSettings()
     {
-        RuntimeContext.Instance.ReloadSettings();
+        _host.ReloadSettings();
     }
 
     /// <summary>服务解析：从宿主组合根容器解析已注册服务（如通知渠道、服务实例）；未注册类型抛出异常。</summary>
     public T Resolve<T>() where T : notnull
     {
-        return RuntimeContext.Instance.Resolve<T>();
+        return _host.Resolve<T>();
     }
 
     /// <summary>插件配置文件路径：config/plugins/&lt;插件名&gt;.json（普通配置与密钥同文件，密钥值 DPAPI 加密 enc: 前缀）。</summary>

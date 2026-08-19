@@ -4,7 +4,7 @@ using System.Drawing.Imaging;
 using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
-using NexusPipeline.Plugins;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;

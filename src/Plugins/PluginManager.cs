@@ -1,4 +1,5 @@
 using NexusPipeline.Models;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -8,7 +9,7 @@ namespace NexusPipeline.Plugins;
 /// <summary>插件统一元数据投影（前端插件列表 / 新建专项脚本选择卡片）。</summary>
 internal sealed record PluginSummary(
     string Name, string DisplayName, string GameName, string Description,
-    string Version, bool IsBuiltIn, string Kind, bool SupportsEmulator);
+    string Version, bool IsBuiltIn, string Kind);
 
 /// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
 internal sealed class PluginManager
@@ -17,11 +18,18 @@ internal sealed class PluginManager
 
     private readonly List<DataSpecializedPlugin> _dataPlugins = new();
 
+    private readonly PluginCapabilityRegistry _capabilities = new();
+
+    private readonly PluginHostServices _host;
+
+    internal PluginManager(PluginHostServices host)
+    {
+        _host = host;
+    }
+
     /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
     public IReadOnlyList<INotifyChannel> NotifyChannels =>
-        _plugins.Where(p => p is INotifyChannel && IsEnabled(p.Name))
-            .Cast<INotifyChannel>()
-            .ToList();
+        _capabilities.GetAll<INotifyChannel>(IsEnabled);
 
     /// <summary>插件统一元数据投影（内置 general + 数据化 specialized）。</summary>
     public IReadOnlyList<PluginSummary> PluginSummaries
@@ -31,11 +39,11 @@ internal sealed class PluginManager
             var list = new List<PluginSummary>();
             foreach (IPlugin plugin in _plugins)
             {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general", false));
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general"));
             }
             foreach (DataSpecializedPlugin plugin in _dataPlugins)
             {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized", plugin.SupportsEmulator));
+                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized"));
             }
             return list;
         }
@@ -44,8 +52,21 @@ internal sealed class PluginManager
     /// <summary>专项插件是否支持安卓模拟器启动方式（v0.7.0+，由 plugin.json 的 supportsEmulator 声明，缺省 false）。</summary>
     public bool SupportsEmulator(string pluginName)
     {
-        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
-        return plugin?.SupportsEmulator ?? false;
+        return HasCapability(pluginName, PluginCapabilityKeys.Emulator);
+    }
+
+    /// <summary>按 key 查询数据化 capability；保留给旧 Web/限制门禁作为兼容 façade。</summary>
+    public bool HasCapability(string pluginName, string capabilityKey)
+    {
+        return _capabilities.HasKey(pluginName, capabilityKey, IsEnabled)
+            || capabilityKey.Equals(PluginCapabilityKeys.Emulator, StringComparison.OrdinalIgnoreCase)
+                && _capabilities.Get<IEmulatorCapability>(pluginName, IsEnabled) is not null;
+    }
+
+    /// <summary>通用 C# capability 查询入口；新增能力无需在 PluginManager 增加类型分支。</summary>
+    public IReadOnlyList<T> GetCapabilities<T>() where T : class, IPluginCapability
+    {
+        return _capabilities.GetAll<T>(IsEnabled);
     }
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
@@ -55,18 +76,18 @@ internal sealed class PluginManager
         {
             return null;
         }
-        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(p => string.Equals(p.Name, pluginName, StringComparison.OrdinalIgnoreCase));
-        if (plugin is null || !IsEnabled(plugin.Name))
+        IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsEnabled);
+        if (resolver is null)
         {
             return null;
         }
         try
         {
-            return plugin.Resolve(rootPath.Trim());
+            return resolver.Resolve(rootPath.Trim());
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[插件] 数据化插件「{plugin.DisplayName}」解析「{rootPath}」失败：{ex.Message}");
+            Logger.Warn($"[插件] 插件「{pluginName}」解析「{rootPath}」失败：{ex.Message}");
             return null;
         }
     }
@@ -113,13 +134,17 @@ internal sealed class PluginManager
     {
         _plugins.Clear();
         _dataPlugins.Clear();
+        _capabilities.Clear();
         foreach (IPlugin plugin in DiscoverBuiltIn())
         {
             _plugins.Add(plugin);
+            _capabilities.Register(plugin);
         }
         foreach (DataSpecializedPlugin plugin in DiscoverDataPlugins())
         {
             _dataPlugins.Add(plugin);
+            _capabilities.Register(plugin.Name, plugin);
+            _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
         }
         PruneUnknownPluginSettings();
         foreach (IPlugin plugin in _plugins)
@@ -129,7 +154,7 @@ internal sealed class PluginManager
             {
                 try
                 {
-                    plugin.Initialize(new PluginContext(plugin.Name));
+                    plugin.Initialize(new PluginContext(plugin.Name, _host));
                     Logger.Info($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
                 }
                 catch (Exception ex)
@@ -150,7 +175,7 @@ internal sealed class PluginManager
 
     private void PruneUnknownPluginSettings()
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
+        AppSettings settings = _host.Settings;
         var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (IPlugin plugin in _plugins)
         {
@@ -187,7 +212,7 @@ internal sealed class PluginManager
 
     public bool IsEnabled(string name)
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
+        AppSettings settings = _host.Settings;
         if (_plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
         {
             return settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
@@ -202,7 +227,7 @@ internal sealed class PluginManager
 
     public void SetEnabled(string name, bool enabled, string source = Audit.System)
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
+        AppSettings settings = _host.Settings;
         // v0.7.4（KN-24）：插件不存在时显式拒绝（此前静默写入配置，待下次 LoadAll 的 PruneUnknownPluginSettings 才清理）。
         bool isBuiltIn = _plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         bool isDataPlugin = _dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));

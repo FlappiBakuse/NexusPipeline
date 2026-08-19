@@ -2,6 +2,27 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.7.9（Pre-release）
+
+### 核心模块扩展性治理
+
+- **Run 生命周期收敛**：新增 `RunBudget` 统一整个运行（含重试、前置/后置脚本）的总超时预算；新增 `RunAttemptFinalizer` 收敛脚本进程树、游戏/模拟器清理策略，保持原有失败/取消/强制关闭语义。
+- **Config 生命周期收敛**：新增 `ConfigRunSession` 统一 prepare、retry、自动更新同步、`replaceConfigs` 还原、判断脚本目录清理和最终配置现场恢复；固定顺序为「同步 → 替换还原 → script 清理 → 配置交换还原」。
+- **Plugin capability 治理**：新增内部 `PluginCapabilityRegistry` 与中立 capability/profile 契约；`PluginSummary` 保持元数据职责，Web 继续输出兼容的 `supportsEmulator` 字段；数据化插件支持 `capabilities` 数组，旧 `supportsEmulator` 自动映射为 `emulator`。
+- **Plugin host 解耦**：`PluginContext` 改用显式 `PluginHostServices` 访问设置与服务，插件配置/密钥文件格式保持不变；未实现未来的 `ISignInProvider`、`IRunHook`、`IProbeProvider` 等业务扩展。
+
+### 兼容与文档
+
+- 保持现有 Web/API、磁盘 JSON、配置交换目录、`.session`/`swap-backup`/`retry-store`、数据化插件目录和通知行为兼容。
+- 架构、设计、开发门禁、发布流程与项目协作约束同步至 v0.7.9；当前单元测试为 138 个测试、228 个断言。
+
+### 测试
+
+- `build.cmd`：通过（仅保留既有 3 项 nullable 警告）。
+- 单元测试：138/138 通过。
+- Playwright e2e：77/77 通过（加速档约 4.2 分钟）。
+- `judge-scenarios`：150/150 通过；`chaos-queue`：167/167 通过。
+
 ## v0.7.8（Pre-release）
 
 ### 核心运行与配置安全

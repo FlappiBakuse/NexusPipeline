@@ -67,8 +67,8 @@ internal class RunSession
 
     private bool _scriptLogTruncated;
 
-    /// <summary>整个运行（含全部重试与前置/后置脚本）的开始时间：TotalTimeoutMinutes 以它为准。</summary>
-    private DateTime _runStartedAt;
+    /// <summary>整个运行（含全部重试与前置/后置脚本）的总预算。</summary>
+    private RunBudget? _budget;
 
     private ScriptUser? _activeUser;
 
@@ -84,8 +84,8 @@ internal class RunSession
     /// <summary>判断脚本请求的待替换配置（v0.6.9+ P6）：触发时仅记录，尝试收尾杀进程确认退出后应用（避免进程仍运行时复制覆盖 config）。</summary>
     private List<string>? _pendingReplaceConfigs;
 
-    /// <summary>配置交换已准备（v0.7.6）：用户存在且 ConfigPath 非空时运行开始前 PrepareForRun 成功。</summary>
-    private bool _configPrepared;
+    /// <summary>当前运行拥有的配置交换作用域，统一表达 prepare/retry/sync/restore 生命周期。</summary>
+    private ConfigRunSession? _configRun;
 
     /// <summary>自动更新配置首次检测已完成（v0.7.6）：仅第 1 次尝试、运行开始 15 秒后同步一次。</summary>
     private bool _firstSyncDone;
@@ -136,7 +136,7 @@ internal class RunSession
 
     public async Task<RunRecord> RunAsync()
     {
-        _runStartedAt = DateTime.Now;
+        _budget = new RunBudget(_script.TotalTimeoutMinutes, DateTime.Now);
         var record = new RunRecord
         {
             ScriptInstanceId = _script.Id,
@@ -165,16 +165,12 @@ internal class RunSession
         }
         _activeUser = user;
 
-        if (_script.HasJudgeScript())
-        {
-            UserConfigManager.PrepareScriptDir(_script.Id, user?.Name);
-        }
-
-        bool configPrepared = false;
+        _configRun = new ConfigRunSession(_script.Id, user?.Name, _script.ConfigPath, _script.HasJudgeScript());
+        _configRun.PrepareScriptArea();
         if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
         {
             _statusChanged?.Invoke("正在加载用户配置...");
-            if (!UserConfigManager.PrepareForRun(_script.Id, user.Name, _script.ConfigPath, out string? prepError))
+            if (!_configRun.Prepare(out string? prepError))
             {
                 record.Status = "failed";
                 record.FinalStatus = "failed";
@@ -183,8 +179,6 @@ internal class RunSession
                 Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
                 return record;
             }
-            configPrepared = true;
-            _configPrepared = true;
         }
 
         int maxAttempts = Math.Max(1, _script.MaxAttempts);
@@ -196,9 +190,9 @@ internal class RunSession
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++)
             {
                 _attemptChanged?.Invoke(attemptNo, maxAttempts);
-                if (attemptNo > 1 && configPrepared)
+                if (attemptNo > 1 && _configRun.IsPrepared)
                 {
-                    string? retryError = UserConfigManager.PrepareForRetry(_script.Id, user!.Name, _script.ConfigPath);
+                    string? retryError = _configRun.PrepareForRetry();
                     if (retryError is not null)
                     {
                         _attemptLogStart = _scriptFullLog.Length;
@@ -310,35 +304,16 @@ internal class RunSession
         }
         finally
         {
-            // v0.7.6：自动更新配置收尾同步——在插队还原与配置交换还原之前（config 此刻为脚本最终态），
-            // config → store 全量镜像（专项插队文件按还原描述还原启停后写入，保留运行后计数/完成记录）。
-            // 含 cancelled 与全部自然收尾；失败仅告警，不阻断后续还原。
-            if (configPrepared && _script.AutoUpdateConfig)
+            // ConfigRunSession 是唯一的运行收尾入口：自动更新同步 → 插队还原 →
+            // 判断脚本目录清理 → 配置交换还原。
+            if (_configRun is not null)
             {
-                try
-                {
-                    UserConfigManager.SyncConfigToStore(_script.Id, user!.Name, _script.ConfigPath, firstCheck: false);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[警告] 脚本「{_script.Name}」用户「{user!.Name}」自动更新配置收尾同步失败：{ex.Message}");
-                }
-            }
-            if (_script.HasJudgeScript())
-            {
-                // 先还原配置替换（swap-backup → config 恢复为替换前快照内容），
-                // 再执行配置交换还原（original → config 恢复运行前现场），避免替换还原覆盖交换还原的现场。
-                UserConfigManager.RestoreConfigReplacements(_script.Id, user?.Name);
-                UserConfigManager.CleanupScriptArea(_script.Id, user?.Name);
-            }
-            if (configPrepared)
-            {
-                string? restoreError = UserConfigManager.RestoreAfterRun(_script.Id, user!.Name, _script.ConfigPath);
+                string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
                 {
                     string msg = $"（警告：配置还原失败，现场已保留，详见日志）";
                     record.ResultDetail += msg;
-                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置还原失败：{restoreError}");
+                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.Name ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
             }
         }
@@ -388,7 +363,7 @@ internal class RunSession
         using var timeoutCts = new CancellationTokenSource();
         if (_script.TotalTimeoutMinutes > 0)
         {
-            double remainingSeconds = TestHooks.ScaledSeconds(_script.TotalTimeoutMinutes * 60) - (DateTime.Now - _runStartedAt).TotalSeconds;
+            double remainingSeconds = RemainingRunSeconds();
             if (remainingSeconds <= 0)
             {
                 SystemActions.KillTree(process.Id);
@@ -420,6 +395,7 @@ internal class RunSession
     private async Task<RunAttemptResult> RunAttemptAsync(RunAttempt attempt)
     {
         string modeText = _mode == "auto" ? "自动" : "手动";
+        var finalizer = new RunAttemptFinalizer(_script, modeText);
         RunAttemptResult? budgetError = CheckTotalTimeout();
         if (budgetError is not null)
         {
@@ -428,31 +404,7 @@ internal class RunSession
 
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
-            bool closeGame = early.Status == "failed"
-                || (early.Status == "cancelled" && _script.ForceCloseGame);
-            if (!closeGame || string.IsNullOrWhiteSpace(_script.GameExe))
-            {
-                return early;
-            }
-            try
-            {
-                if (EmulatorSupport.IsEmulator(_script))
-                {
-                    string? adb = EmulatorSupport.ResolveAdbExe();
-                    if (adb is not null)
-                    {
-                        await EmulatorSupport.ForceStopForegroundAppAsync(adb, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
-                    }
-                }
-                else
-                {
-                    SystemActions.KillByName(_script.GameExe, "游戏");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 运行提前结束时清理游戏失败：{ex.Message}");
-            }
+            await finalizer.CleanupGameOnEarlyExitAsync(early).ConfigureAwait(false);
             return early;
         }
 
@@ -542,18 +494,6 @@ internal class RunSession
         string? excludeGame = EmulatorSupport.IsEmulator(_script)
             ? null
             : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe));
-        void KillStartedScript()
-        {
-            if (process is null)
-            {
-                return;
-            }
-            // 进程树清理 + 轮询按名强杀直至确认退出（处理「被杀后自重启」的脚本），确保配置还原前进程已完全退出。
-            // v0.6.5+：与 GameExe 同名的进程（脚本自启动的游戏）不属于脚本树，树清理排除，由游戏管理逻辑按名处理。
-            // v0.7.0+：模拟器模式无 PC 游戏进程概念，不做按名排除。
-            SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
-        }
-
         if (SystemActions.IsExeRunning(launchExe))
         {
             Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」检测到旧进程，先结束后重新启动。");
@@ -683,12 +623,12 @@ internal class RunSession
                 // v0.7.6：自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
                 // config → store（捕获脚本启动后自行更新的任务配置；重试轮不检测）。
                 // 并入主循环避免后台任务与收尾还原的竞态；关/开模式共有。
-                if (!_firstSyncDone && attempt.Number == 1 && _configPrepared
-                    && ShouldRunFirstSync((DateTime.Now - _runStartedAt).TotalSeconds, TestHooks.ScaledSeconds(15)))
+                if (!_firstSyncDone && attempt.Number == 1 && _configRun is not null && _configRun.IsPrepared
+                    && ShouldRunFirstSync(_budget!.ElapsedSeconds, TestHooks.ScaledSeconds(15)))
                 {
                     _firstSyncDone = true;
                     Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」自动更新配置首次检测（运行开始 15 秒后）。");
-                    UserConfigManager.SyncConfigToStore(_script.Id, _activeUser!.Name, _script.ConfigPath, firstCheck: true);
+                    _configRun.SyncToStore(firstCheck: true);
                 }
 
                 // v0.6.6+：游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
@@ -700,13 +640,13 @@ internal class RunSession
 
                 if (judge.IsFailure)
                 {
-                    KillStartedScript();
+                    finalizer.KillScript(process, launchExe, excludeGame);
                     result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
                     break;
                 }
 
                 if (_script.TotalTimeoutMinutes > 0
-                    && (DateTime.Now - _runStartedAt).TotalSeconds >= TestHooks.ScaledSeconds(_script.TotalTimeoutMinutes * 60))
+                    && _budget!.IsExpired)
                 {
                     result = RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
                     break;
@@ -883,7 +823,7 @@ internal class RunSession
                 if (judge.IsMarker
                     && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
-                    KillStartedScript();
+                    finalizer.KillScript(process, launchExe, excludeGame);
                     result = RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功");
                     result.NotifyText = judge.NotifyText;
                     break;
@@ -905,68 +845,23 @@ internal class RunSession
         monitor?.Dispose();
         monitor = null;
 
-        KillStartedScript();
+        finalizer.KillScript(process, launchExe, excludeGame);
 
         // v0.6.9+（P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
         // 复制覆盖 config 存在文件占用/半写窗口）；仅本次尝试失败时应用，重试循环将使用新配置。
         if (_pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
         {
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
-            UserConfigManager.ApplyConfigReplacements(_script.Id, _activeUser?.Name, _script.ConfigPath, _pendingReplaceConfigs);
+            _configRun?.ApplyReplacements(_pendingReplaceConfigs);
         }
         _pendingReplaceConfigs = null;
 
+        RunAttemptResult finalResult = result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
         // v0.6.5+：运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
         process?.Dispose();
         process = null;
-
-        string resultStatus = result?.Status ?? "failed";
-        if (EmulatorSupport.IsEmulator(_script))
-        {
-            // 模拟器模式收尾（v0.7.0+）：
-            // 失败 → 无条件关闭模拟器当前前台应用（供重试轮重新 am start 干净启动）；
-            // 运行结束（成功/最终失败）且 ForceCloseGame → 关闭整个模拟器（MuMu 专项适配，回退 reboot -p）；取消不处理。
-            string? adbExe = EmulatorSupport.ResolveAdbExe();
-            if (adbExe is null)
-            {
-                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」未找到 adb 可执行文件，跳过模拟器收尾处理。");
-            }
-            else if (resultStatus == "failed" || (resultStatus == "cancelled" && _script.ForceCloseGame))
-            {
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(resultStatus == "failed" ? "任务失败" : "任务取消且启用强制关闭")}，关闭模拟器前台应用。");
-                await EmulatorSupport.ForceStopForegroundAppAsync(adbExe, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
-            }
-            bool runEnded = resultStatus is "success" or "cancelled"
-                || (result?.IsFatal ?? false)
-                || attempt.Number >= Math.Max(1, _script.MaxAttempts);
-            if (adbExe is not null && _script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
-            {
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
-                (bool shutdownOk, string shutdownMsg) = await EmulatorSupport.ShutdownEmulatorAsync(adbExe, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
-                if (shutdownOk)
-                {
-                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{shutdownMsg}。");
-                }
-                else
-                {
-                    Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」{shutdownMsg}");
-                }
-            }
-        }
-        else if (resultStatus == "failed")
-        {
-            if (!string.IsNullOrWhiteSpace(_script.GameExe))
-            {
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」任务失败，强制结束游戏进程。");
-                SystemActions.KillByName(_script.GameExe, "游戏");
-            }
-        }
-        else if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
-        {
-            SystemActions.KillByName(_script.GameExe, "游戏");
-        }
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
-        return result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
+        await finalizer.CleanupGameAsync(finalResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
+        return finalResult;
     }
 
     /// <summary>
@@ -1001,8 +896,7 @@ internal class RunSession
         {
             return double.PositiveInfinity;
         }
-        return TestHooks.ScaledSeconds(_script.TotalTimeoutMinutes * 60)
-            - (DateTime.Now - _runStartedAt).TotalSeconds;
+        return _budget?.RemainingSeconds ?? double.PositiveInfinity;
     }
 
     private RunAttemptResult? CheckTotalTimeout()
@@ -1129,16 +1023,13 @@ internal class RunSession
 
     private int RemainingCommandSeconds(int cap)
     {
-        double remaining = RemainingRunSeconds();
-        return double.IsPositiveInfinity(remaining)
-            ? cap
-            : Math.Max(1, Math.Min(cap, (int)Math.Ceiling(remaining)));
+        return _budget?.RemainingCommandSeconds(cap) ?? cap;
     }
 
     /// <summary>执行一次判断脚本：收集 config/script 文件清单 + 构建输入 JSON + 执行；返回 (status, reason, notifyText, replaceConfigs, error)。</summary>
     private async Task<(string Status, string Reason, string NotifyText, List<string> ReplaceConfigs, string? Error)> RunJudgeOnceAsync()
     {
-        string scriptDir = UserConfigManager.ScriptDir(_script.Id, _activeUser?.Name);
+        string scriptDir = _configRun?.ScriptDir ?? UserConfigManager.ScriptDir(_script.Id, _activeUser?.Name);
         List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir);
         bool logTruncated = false;
         string logText;
