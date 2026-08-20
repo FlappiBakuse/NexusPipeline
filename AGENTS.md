@@ -22,7 +22,7 @@ $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
 # 3. 单元测试（v0.6.4+，毫秒级，无管理员）：判定状态机/关键字规则/日志路径解析/模型规则校验等纯逻辑
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 234 断言 / 140 个测试；CI 每次必跑
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 262 断言 / 141 个测试；CI 每次必跑
 ```
 
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 81 / 80（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
@@ -83,7 +83,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 234 
 
 ## 主要入口
 
-- `src/Program.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）+ 配置迁移；启动编排见 `src/Bootstrap.cs`。**web 模式（v0.7.8+）复用已有服务**：常驻服务在跑时发现实际端口并打开已有 Web，不再重复启动；退出循环按回车停止 / stdin 重定向 EOF 自动退出 / 无效 stdin 持续运行。
+- `src/Application/ProgramEntry.cs`：进程入口；`src/Application/ApplicationHost.cs`：CLI 分发（服务/manage/status/web/run-script/run-queue/cancel/register/unregister）；`src/Application/RuntimeInitializer.cs`：权限/配置/约束/数据初始化；`src/Application/StartupPipeline.cs`：服务、web、重启生命周期。**web 模式（v0.7.8+）复用已有服务**：常驻服务在跑时发现实际端口并打开已有 Web，不再重复启动；退出循环按回车停止 / stdin 重定向 EOF 自动退出 / 无效 stdin 持续运行。
 - `src/Web/WebServer.cs`：HTTP 骨架 + **特性路由表**（v0.5.0+：`[ApiRoute("资源名")]` 标注在 handler 类/方法上，`WebServer.Routes` 启动反射扫描注册，新增 API 无需改路由表；每个 `/api/*` 资源一个 `ApiXxxHandler`，见 `src/Web/`）；`GET /api/status` 不记审计（轮询豁免）。
 - `src/Cli/`：命令行菜单（MainMenu + 脚本/队列/调度/历史/插件/设置/通知渠道 7 个菜单类）；**调度中心（v0.6.6+）统一经常驻服务 HTTP 通道**（`CliTransport`，与 CLI run-script 同通道，Web 端可见运行任务）；manage 启动时探测常驻服务在跑 → 提示菜单修改可能与 Web 端互相覆盖；菜单保存带异常兜底（`Ui.TrySave`）。
 - `wwwroot/`（项目根目录，非 src 下）：前端 `app.js` 只做路由 + 各视图 `actions` 注册表合并分发；视图一域一文件（`views/scripts|users|queues|dispatch|history|plugins|settings|dashboard.js`），共享模板在 `core/forms.js`，弹窗在 `core/modal.js`。页面结构：仪表盘首行 4 卡（脚本数/队列数/下一调度倒计时/版本）+ 插件 1/4 小卡片；插件页可进 `#/plugins/{name}` 配置二级页；脚本弹窗主程序+参数同行、三个游戏/通知切换按钮同行（启动游戏｜强制关闭｜运行通知，强制关闭独立于启动游戏）、运行设置区含自定义完成标志（v0.4.0+，见后端约定）；**无系统选择按钮**（用户手填路径）。
@@ -94,7 +94,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 234 
 
 ## 后端分层约定（v0.2.0+，v0.5.0 目录重组）
 
-- 命名空间：`NexusPipeline`（入口/组合根：Program/Bootstrap/RuntimeContext/TrayApp）/ `NexusPipeline.Models`（领域模型）/ `NexusPipeline.Services`（服务）/ `NexusPipeline.Persistence`（持久化）/ `NexusPipeline.Utilities`（工具，JsonOpts/Logger/TextRules 等）/ `NexusPipeline.Extensibility`（中立 capability/profile 契约，internal）/ `NexusPipeline.Web` / `NexusPipeline.Cli` / `NexusPipeline.Plugins`。
+- 命名空间：`NexusPipeline`（入口/组合根：Application/Bootstrap/RuntimeContext/TrayApp）/ `NexusPipeline.Models`（领域模型）/ `NexusPipeline.Services`（服务）/ `NexusPipeline.Persistence`（持久化）/ `NexusPipeline.Utilities`（工具，JsonOpts/Logger/TextRules 等）/ `NexusPipeline.Extensibility`（中立 capability/profile 契约，internal）/ `NexusPipeline.Web` / `NexusPipeline.Cli` / `NexusPipeline.Plugins`。
 - 依赖方向：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities；根命名空间不依赖子域反向。
 - **壳式 DI（v0.5.0+）**：`RuntimeContext` 组合根内建 `ServiceProvider`（注册 DispatchCenter/HistoryService/PluginManager/Scheduler），外部访问方式不变（`RuntimeContext.Instance.Xxx`）；新增服务注册进组合根构造，经 `RuntimeContext.Resolve<T>()` / 插件 `PluginContext.Resolve<T>()` 解析。
 - **public 仅限契约**：Program 与领域模型（AppSettings/ScriptInstance/ScriptUser/DispatchQueue/QueueTask/QueueTimeSet/RunRecord/RunAttempt）；其余一律 `internal`（v0.6.3 起插件契约为宿主内置，无外部 DLL 消费者：IPlugin/INotifyChannel/PluginContext/ScriptProfile/IPluginCapability 均 internal）。
@@ -178,4 +178,4 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 234 
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 81（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（167）+ `dotnet test`（234 单测断言），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 81（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（166，加速档采样兜底可能 167）+ `dotnet test`（262 单测断言），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

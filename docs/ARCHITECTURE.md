@@ -4,13 +4,15 @@
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
 > v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
+> v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
 
 ## 总体结构
 
 ```
 NexusPipeline/
 ├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener）
-│   ├── *.cs            入口与组合根（NexusPipeline）：Program/Bootstrap/RuntimeContext/TrayApp
+│   ├── Application/    应用宿主与启动流程：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer
+│   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
 │   ├── Services/       服务层（NexusPipeline.Services）
 │   ├── Persistence/    持久化层（NexusPipeline.Persistence）
@@ -32,7 +34,7 @@ NexusPipeline/
 ### 依赖方向（只允许向下依赖）
 
 ```
-NexusPipeline（根：Program/Bootstrap/RuntimeContext 组合根）
+NexusPipeline（根：Application/Program/Bootstrap/RuntimeContext 组合根）
    └── Models（领域模型）← Services（服务）← Persistence（持久化）← Utilities（工具，被一切依赖）
         ↑           ↑            ↑
 NexusPipeline.Web（HTTP 适配层）
@@ -51,11 +53,16 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 | 类 | 位置 | 职责 |
 |---|---|---|
-| `Program` | src/Program.cs | CLI 命令分发（service/manage/status/web/run-script/run-queue/cancel/register/unregister） |
+| `Program` | src/Application/ProgramEntry.cs | 进程入口，仅转交 `ApplicationHost.Run(args)` |
+| `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化后的命令分发与 CLI 处理 |
+| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
+| `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
-| `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发 |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发；运行状态存储委托给 `ExecutionStateStore` |
+| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务与待执行系统操作，保留原子防重入和 100 条历史上限 |
+| `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、记录快照和日志尾部 |
 | `RunSession` | src/Services/RunSession.cs | 单次脚本运行编排（重试、日志监控、判定和结果汇总）；判断脚本输入按尝试切片（v0.5.2+）；v0.7.8 起每轮失败重试使用 retry-store 重新交换配置；v0.7.9 起总预算、配置作用域和 attempt 收尾分别由 `RunBudget`/`ConfigRunSession`/`RunAttemptFinalizer` 承载 |
 | `RunBudget` | src/Services/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
 | `ConfigRunSession` | src/Services/ConfigRunSession.cs | 运行期间配置交换作用域：script 区、prepare/retry、自动更新同步、replace 还原、清理和最终现场还原的唯一收尾顺序 |
@@ -65,7 +72,9 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（v0.6.9+：部分截断从新尾续读、归零从头读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
-| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换会话/恢复层：replaceConfigs 替换、.session 标记、自愈 + 启动扫描恢复 + 后台延迟重试；retry-store 完整重试交换；自动更新配置事务镜像（`SyncConfigToStore`/`MirrorToStoreAtomic`/还原描述执行器） |
+| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换兼容 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
+| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；不改变原磁盘布局 |
+| `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduler.cs | 定时/启动时触发队列 |
@@ -207,7 +216,7 @@ plugins/bettergi/
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
 | 脚本运行流程/重试/日志监控 | `src/Services/RunSession.cs`、`src/Services/RunBudget.cs`、`src/Services/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/SessionJudge.cs`（判定状态机）、`src/Services/RunSession.cs`（监控循环/触发时机）、`src/Services/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
-| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/恢复）、`src/Services/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
+| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
 | 队列调度触发 | `src/Services/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |

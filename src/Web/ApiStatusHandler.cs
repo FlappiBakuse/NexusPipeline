@@ -22,7 +22,7 @@ internal static class ApiStatusHandler
     {
         AppSettings settings = RuntimeContext.Instance.Settings;
         var next = RuntimeContext.Instance.Scheduler.NextTrigger();
-        DispatchCenter.PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
+        PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
         // v0.7.2+（KN-04）：锁内读取计数，避免与并发修改冲突（「集合已修改」）。
         int scriptCount, queueCount, enabledScripts, enabledQueues;
         lock (RuntimeContext.Instance.DataLock)

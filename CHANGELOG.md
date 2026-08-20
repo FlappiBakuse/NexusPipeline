@@ -2,6 +2,23 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.8.0（开发中）
+
+### 后端架构强化
+
+- 将进程入口、运行时初始化和服务启动生命周期拆分到 `src/Application/`：`Program` 仅负责入口转交，`ApplicationHost` 负责命令分发，`StartupPipeline` 负责服务生命周期，`RuntimeInitializer` 负责运行时数据初始化。
+- 将 `DispatchCenter` 的运行中/已结束任务和系统操作倒计时状态隔离到 `ExecutionStateStore`，保留原子防重入、队列全局串行和 100 条结束记录上限。
+- 将配置会话标记、编辑会话模型及配置恢复扫描/延迟重试从 `ConfigSwapSession` 拆分到 `Services/ConfigSwap/`；原 `ConfigSwapSession` 保留兼容 façade。
+- 保持现有 Web/API、配置交换目录、`.session`/`swap-backup`/`retry-store` 磁盘协议、插件能力和运行时语义不变，并补充运行状态生命周期架构测试。
+
+### 验证
+
+- 管理员 `build.cmd`：通过（仅保留既有 3 项 nullable 警告）。
+- 单元测试：141/141 通过（262 项断言）。
+- 管理员加速档 Playwright e2e：81/81 通过。
+- 管理员加速档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过。
+- 发布前仍需按门禁执行真实计时档全量回归，随后再提交并发布 v0.8.0 Pre-release。
+
 ## v0.7.12（Pre-release）
 
 ### 前端 UI 第二次全面优化

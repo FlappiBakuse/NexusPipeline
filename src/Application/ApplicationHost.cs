@@ -14,30 +14,20 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 
-public static class Program
+/// <summary>
+/// 应用宿主：负责进程级启动、命令分发与服务生命周期编排。
+/// 具体运行时数据初始化由 <see cref="RuntimeInitializer"/> 负责，避免入口同时承担组合根初始化与命令实现。
+/// </summary>
+internal static class ApplicationHost
 {
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
     /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web，v0.6.5+）：该模式不支持自动重启，仅常驻服务模式支持。</summary>
-    internal static bool IsWebOnly { get; private set; }
-
-    private static bool IsAdministrator()
-    {
-        try
-        {
-            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-            return new System.Security.Principal.WindowsPrincipal(identity)
-                .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
-        }
-        catch
-        {
-            return false;
-        }
-    }
+    internal static bool IsWebOnly { get; set; }
 
     [STAThread]
-    public static int Main(string[] args)
+    public static int Run(string[] args)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Fatal($"未处理异常：{e.ExceptionObject}");
         Application.ThreadException += (_, e) => Logger.Fatal($"UI 线程异常：{e.Exception}");
@@ -76,52 +66,22 @@ public static class Program
             Logger.Debug($"设置控制台输入编码失败：{ex.Message}");
         }
 
-        if (!IsAdministrator())
+        int initializationResult = RuntimeInitializer.Initialize();
+        if (initializationResult != 0)
         {
-            const string msg = "NexusPipeline 必须以管理员身份运行（脚本程序需要管理员权限才能被接管运行），当前实例未获得管理员权限，即将退出。请右键「以管理员身份运行」，或确认部署的是提权版（requireAdministrator）。";
-            Logger.Fatal(msg);
-            Console.Error.WriteLine($"[FATAL] {msg}");
-            try
-            {
-                System.Windows.Forms.MessageBox.Show(msg, "NexusPipeline 需要管理员权限", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-            catch
-            {
-            }
-            return 2;
-        }
-
-        RuntimeContext ctx = RuntimeContext.Instance;
-        MigrateLegacyConfig();
-        // v0.6.6+：先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
-        Limits.Load();
-        ctx.ReloadSettings();
-        ctx.ReloadData();
-        if (Limits.Fatals.Count > 0)
-        {
-            foreach (string fatal in Limits.Fatals)
-            {
-                Logger.Fatal(fatal);
-                Console.Error.WriteLine(fatal);
-            }
-            Console.Error.WriteLine("约束配置存在致命错误，拒绝启动。请修正 config/limits.json 后重试。");
-            return 1;
-        }
-        foreach (string warning in Limits.Warnings)
-        {
-            Logger.Warn(warning);
+            return initializationResult;
         }
 
         if (args.Length == 0)
         {
-            RunService();
+            StartupPipeline.RunService();
             return 0;
         }
 
         switch (args[0].ToLowerInvariant())
         {
             case "service":
-                RunService();
+                StartupPipeline.RunService();
                 return 0;
             case "manage":
                 MainMenu.Show();
@@ -130,9 +90,9 @@ public static class Program
                 MainMenu.ShowStatus();
                 return 0;
             case "web":
-                return RunWebOnly(args.Skip(1).ToArray());
+                return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
             case "restart":
-                return RunRestart();
+                return StartupPipeline.RunRestart();
             case "run-script":
                 return RunScriptCli(args.Skip(1).ToArray());
             case "run-queue":
@@ -155,223 +115,6 @@ public static class Program
                 PrintUsage();
                 return 1;
         }
-    }
-
-    private static void MigrateLegacyConfig()
-    {
-        try
-        {
-            Directory.CreateDirectory(AppPaths.ConfigDir);
-            var pairs = new[]
-            {
-                (Legacy: Path.Combine(AppPaths.AppRoot, "settings.json"), New: AppPaths.ConfigPath, Name: "settings.json"),
-                (Legacy: Path.Combine(AppPaths.AppRoot, "scripts.json"), New: AppPaths.ScriptsPath, Name: "scripts.json"),
-                (Legacy: Path.Combine(AppPaths.AppRoot, "queues.json"), New: AppPaths.QueuesPath, Name: "queues.json"),
-            };
-            foreach ((string legacy, string dest, string name) in pairs)
-            {
-                if (File.Exists(legacy) && !File.Exists(dest))
-                {
-                    File.Move(legacy, dest);
-                    Audit.Log(Audit.System, "迁移旧配置文件", $"{name} → config\\{name}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 迁移旧配置文件失败：{ex.Message}");
-        }
-    }
-
-    private static void RunService()
-    {
-        using Mutex? mutex = AcquireSingleInstanceMutex();
-        if (mutex is null)
-        {
-            Logger.Info("检测到 NexusPipeline 已在运行，本次启动退出（可在托盘图标打开管理页面）。");
-            TrayApp.OpenWeb();
-            return;
-        }
-
-        RuntimeContext ctx = RuntimeContext.Instance;
-        ctx.ReloadSettings();
-        ctx.ReloadData();
-        // v0.6.6+：崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底），避免多进程并发恢复竞争文件。
-        UserConfigManager.RecoverInterrupted();
-        TaskRegistration.SyncWithSettings(ctx.Settings);
-        Bootstrap.StartServices();
-
-        WebServer? web = null;
-        if (!ctx.Settings.LightweightMode)
-        {
-            web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
-            if (web is not null)
-            {
-                Bootstrap.AfterWebStarted(web);
-                if (ctx.Settings.AutoOpenBrowser)
-                {
-                    TrayApp.OpenWeb(web.Port);
-                }
-            }
-        }
-        else
-        {
-            Logger.Info("轻量运行模式：不启动 Web 服务与浏览器，仅命令行操作。");
-        }
-
-        Application.EnableVisualStyles();
-        Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new TrayApp());
-
-        Bootstrap.Shutdown(web);
-        Logger.Info("NexusPipeline 已退出。");
-    }
-
-    /// <summary>
-    /// 创建单实例互斥体并取得所有权（v0.6.5+）：处理「服务被强杀后互斥体被遗弃」——构造函数会抛
-    /// AbandonedMutexException（所有权已授予本线程），此时先打开同一互斥体释放遗弃所有权再重试一次，
-    /// 避免强杀后首次启动即崩溃（曾需启动两次）。已有实例在运行时返回 null。
-    /// </summary>
-    private static Mutex? AcquireSingleInstanceMutex()
-    {
-        const string name = "NexusPipeline.SingleInstance";
-        for (int attempt = 0; attempt < 2; attempt++)
-        {
-            try
-            {
-                var mutex = new Mutex(true, name, out bool createdNew);
-                if (createdNew)
-                {
-                    return mutex;
-                }
-                mutex.Dispose();
-                return null;
-            }
-            catch (AbandonedMutexException ex)
-            {
-                Logger.Warn($"[警告] 接管上次异常退出残留的单实例互斥体（{ex.Message}），正在重试启动...");
-                try
-                {
-                    using var stale = new Mutex(false, name);
-                    stale.ReleaseMutex();
-                }
-                catch (Exception e)
-                {
-                    Logger.Debug($"释放遗弃互斥体失败：{e.Message}");
-                }
-            }
-        }
-        Logger.Error("[错误] 获取单实例互斥体失败（两次尝试均被遗弃状态占用）。");
-        return null;
-    }
-
-    /// <summary>自动重启分支（v0.6.5+）：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
-    /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。</summary>
-    private static int RunRestart()
-    {
-        Logger.Info("[重启] 正在等待旧进程退出...");
-        try
-        {
-            using var probe = new Mutex(false, "NexusPipeline.SingleInstance");
-            DateTime deadline = DateTime.Now.AddSeconds(30);
-            while (DateTime.Now < deadline)
-            {
-                try
-                {
-                    if (probe.WaitOne(500))
-                    {
-                        try
-                        {
-                            probe.ReleaseMutex();
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Debug($"释放互斥体失败：{ex.Message}");
-                        }
-                        break;
-                    }
-                }
-                catch (AbandonedMutexException)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[重启] 等待旧进程退出异常（继续启动）：{ex.Message}");
-        }
-        RunService();
-        return 0;
-    }
-
-    private static int RunWebOnly(string[] args)
-    {
-        // v0.6.6+：web 模式同样抢单实例互斥——常驻服务已在运行时直接退出（防两实例双写配置/数据）。
-        using Mutex? mutex = AcquireSingleInstanceMutex();
-        if (mutex is null)
-        {
-            int? existingPort = CliTransport.FindServicePort(RuntimeContext.Instance.Settings.WebPort);
-            if (existingPort is not null)
-            {
-                Logger.Info($"检测到已有 NexusPipeline 服务，复用 Web 端口 {existingPort.Value}。");
-                TrayApp.OpenWeb(existingPort.Value);
-                return 0;
-            }
-            Logger.Warn("[错误] 检测到 NexusPipeline 已在运行，但未能发现其 Web 端口；本次网页模式退出。");
-            Console.WriteLine("[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。");
-            return 1;
-        }
-        IsWebOnly = true;
-        RuntimeContext ctx = RuntimeContext.Instance;
-        // v0.6.6+：崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
-        UserConfigManager.RecoverInterrupted();
-        Bootstrap.StartServices();
-        WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
-        if (web is null)
-        {
-            Console.WriteLine("[错误] 无法启动 Web 服务（端口均被占用）。");
-            return 1;
-        }
-        Bootstrap.AfterWebStarted(web);
-        Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
-        if (ctx.Settings.AutoOpenBrowser)
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo($"http://127.0.0.1:{web.Port}/")
-                {
-                    UseShellExecute = true,
-                });
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"自动打开浏览器失败：{ex.Message}");
-            }
-        }
-        // v0.6.6+：正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
-        // 无效 stdin（spawn stdio:ignore，e2e 服务启动方式）Peek 抛异常 → 持续运行直到被外部终止。
-        while (true)
-        {
-            int peek;
-            try
-            {
-                peek = Console.In.Peek();
-            }
-            catch
-            {
-                Thread.Sleep(500);
-                continue;
-            }
-            if (peek == -1)
-            {
-                break;
-            }
-            Console.ReadLine();
-            break;
-        }
-        Bootstrap.Shutdown(web);
-        return 0;
     }
 
     private static int RunScriptCli(string[] args)

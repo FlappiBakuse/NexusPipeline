@@ -4,172 +4,35 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
-internal class RunningExecution
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
-
-    public string Kind { get; set; } = "";
-
-    public string TargetId { get; set; } = "";
-
-    public string TargetName { get; set; } = "";
-
-    public string Mode { get; set; } = "";
-
-    public string Status { get; set; } = "running";
-
-    public DateTime StartedAt { get; set; } = DateTime.Now;
-
-    public DateTime? FinishedAt { get; set; }
-
-    public int TotalTasks { get; set; }
-
-    public int DoneTasks { get; set; }
-
-    public string CurrentScriptName { get; set; } = "";
-
-    public string CurrentStatus { get; set; } = "";
-
-    public int CurrentAttempt { get; set; }
-
-    public int CurrentMaxAttempts { get; set; }
-
-    public List<RunRecord> Records { get; set; } = new();
-
-    public CancellationTokenSource Cts { get; set; } = new();
-
-    public Task Completion { get; set; } = Task.CompletedTask;
-
-    private readonly object _logSync = new();
-
-    private readonly List<string> _logLines = new();
-
-    /// <summary>运行记录读写锁（v0.7.2+，KN-04）：运行后台线程追加记录与 Web 请求线程序列化并发时保护集合。</summary>
-    private readonly object _recordsSync = new();
-
-    public void AddRecord(RunRecord record)
-    {
-        lock (_recordsSync)
-        {
-            Records.Add(record);
-        }
-    }
-
-    public List<RunRecord> SnapshotRecords()
-    {
-        lock (_recordsSync)
-        {
-            return Records.ToList();
-        }
-    }
-
-    public void AppendLog(string line)
-    {
-        if (string.IsNullOrWhiteSpace(line))
-        {
-            return;
-        }
-        lock (_logSync)
-        {
-            _logLines.Add(line);
-            if (_logLines.Count > 100)
-            {
-                _logLines.RemoveRange(0, _logLines.Count - 100);
-            }
-        }
-    }
-
-    public List<string> LogTail(int max = 60)
-    {
-        lock (_logSync)
-        {
-            return _logLines.TakeLast(max).ToList();
-        }
-    }
-}
-
 internal class DispatchCenter
 {
-    /// <summary>待执行的系统操作（v0.6.3+）：队列全部完成后 Web 界面显示 60 秒倒计时卡片，可取消。</summary>
-    internal sealed class PendingSystemAction
-    {
-        public string Action { get; set; } = "";
-
-        public string QueueName { get; set; } = "";
-
-        public DateTime Deadline { get; set; }
-
-        public CancellationTokenSource Cts { get; set; } = new();
-    }
-
-    private readonly List<RunningExecution> _active = new();
-
-    private readonly List<RunningExecution> _finished = new();
-
-    private PendingSystemAction? _pendingSystemAction;
-
-    private readonly object _sync = new();
+    private readonly ExecutionStateStore _state = new();
 
     public IReadOnlyList<RunningExecution> Active
     {
-        get
-        {
-            lock (_sync)
-            {
-                return _active.ToList();
-            }
-        }
+        get => _state.Active;
     }
 
     public RunningExecution? Find(string id)
     {
-        lock (_sync)
-        {
-            return _active.FirstOrDefault(exec => exec.Id == id);
-        }
+        return _state.Find(id);
     }
 
     /// <summary>查找运行任务（v0.6.3+）：先查运行中列表，再查已结束列表（CLI 轮询结果用；Find 保持只查运行中）。</summary>
     public RunningExecution? FindAny(string id)
     {
-        lock (_sync)
-        {
-            return _active.FirstOrDefault(exec => exec.Id == id)
-                ?? _finished.FirstOrDefault(exec => exec.Id == id);
-        }
+        return _state.FindAny(id);
     }
 
     /// <summary>当前待执行的系统操作（锁内返回拷贝，供 /api/status 展示倒计时卡片）；无则 null。</summary>
-    public PendingSystemAction? CurrentSystemAction
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _pendingSystemAction is null
-                    ? null
-                    : new PendingSystemAction
-                    {
-                        Action = _pendingSystemAction.Action,
-                        QueueName = _pendingSystemAction.QueueName,
-                        Deadline = _pendingSystemAction.Deadline,
-                    };
-            }
-        }
-    }
+    public PendingSystemAction? CurrentSystemAction => _state.CurrentSystemAction;
 
     /// <summary>取消待执行的系统操作：sleep 取消应用内延迟；reboot/shutdown 执行 shutdown /a 取消 Windows 倒计时。返回是否取消成功。</summary>
     public bool CancelSystemAction()
     {
-        PendingSystemAction? pending;
-        lock (_sync)
+        if (!_state.TryTakePending(out PendingSystemAction? pending) || pending is null)
         {
-            pending = _pendingSystemAction;
-            if (pending is null)
-            {
-                return false;
-            }
-            _pendingSystemAction = null;
+            return false;
         }
         string action = pending.Action;
         string queueName = pending.QueueName;
@@ -327,25 +190,9 @@ internal class DispatchCenter
 
     private void Register(RunningExecution exec, string source)
     {
-        lock (_sync)
+        if (!_state.TryRegister(exec, out string? error))
         {
-            // 原子防重入（v0.6.5+ 脚本 / v0.7.2+ 队列，KN-03）：并发触发（双击/手动 + 定时/多入口同时提交）
-            // 可能在进程检测通过后同时注册同一目标，锁内按目标查重拒绝后者——
-            // 队列双跑曾致双历史/双通知/双完成操作（如双关机命令）；Scheduler 的 _runningQueueIds 只挡定时入口，
-            // 手动入口（Web/CLI/manage）统一由此处兜底。
-            if (exec.Kind == "script" && _active.Any(active => active.Kind == "script" && active.TargetId == exec.TargetId))
-            {
-                throw new InvalidOperationException($"脚本「{exec.TargetName}」正在运行，请先退出后再执行");
-            }
-            if (exec.Kind == "queue" && _active.Any(active => active.Kind == "queue" && active.TargetId == exec.TargetId))
-            {
-                throw new InvalidOperationException($"调度队列「{exec.TargetName}」正在运行，请先完成后再执行");
-            }
-            if (exec.Kind == "queue" && _active.Any(active => active.Kind == "queue"))
-            {
-                throw new InvalidOperationException($"已有其他调度队列正在运行，当前队列「{exec.TargetName}」暂不能并行执行");
-            }
-            _active.Add(exec);
+            throw new InvalidOperationException(error);
         }
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");
     }
@@ -353,15 +200,7 @@ internal class DispatchCenter
     /// <summary>运行结束出队：从运行中列表移入已结束列表（CLI 轮询可查询结果；超过 100 条移除最旧）。</summary>
     private void Unregister(RunningExecution exec)
     {
-        lock (_sync)
-        {
-            _active.Remove(exec);
-            _finished.Add(exec);
-            if (_finished.Count > 100)
-            {
-                _finished.RemoveRange(0, _finished.Count - 100);
-            }
-        }
+        _state.Unregister(exec);
     }
 
     /// <summary>
@@ -378,22 +217,19 @@ internal class DispatchCenter
             QueueName = queueName,
             Deadline = DateTime.Now.AddSeconds(60),
         };
-        lock (_sync)
+        PendingSystemAction? previous = _state.ReplacePending(pending);
+        if (previous is not null)
         {
             // v0.7.4：新操作登记前先取消旧 pending 的后台任务——单槽位覆盖时旧 sleep 的
             // Task.Delay 若继续运行，到期仍会执行休眠（60 秒窗口内多个队列先后完成的双系统操作真实触发）。
-            if (_pendingSystemAction is not null)
+            try
             {
-                try
-                {
-                    _pendingSystemAction.Cts.Cancel();
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[警告] 取消旧系统操作后台任务失败：{ex.Message}");
-                }
+                previous.Cts.Cancel();
             }
-            _pendingSystemAction = pending;
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 取消旧系统操作后台任务失败：{ex.Message}");
+            }
         }
         if (execute is not null)
         {
@@ -436,13 +272,7 @@ internal class DispatchCenter
     /// <summary>清除待执行系统操作（引用相同才清，避免误清新登记的操作）。</summary>
     private void ClearPendingSystemAction(PendingSystemAction pending)
     {
-        lock (_sync)
-        {
-            if (ReferenceEquals(_pendingSystemAction, pending))
-            {
-                _pendingSystemAction = null;
-            }
-        }
+        _state.ClearPending(pending);
     }
 
     private async Task RunScriptAsync(RunningExecution exec, ScriptInstance script, string? userName = null)

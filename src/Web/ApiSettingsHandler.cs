@@ -130,7 +130,7 @@ internal static class ApiSettingsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "轻量模式未启动 Web 服务，请手动重启程序" }, 400).ConfigureAwait(false);
                 return;
             }
-            if (Program.IsWebOnly)
+            if (ApplicationHost.IsWebOnly)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "当前为仅网页模式（web），不支持自动重启，请手动重启" }, 400).ConfigureAwait(false);
                 return;

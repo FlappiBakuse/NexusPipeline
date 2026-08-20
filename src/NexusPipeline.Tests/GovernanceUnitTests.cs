@@ -104,6 +104,47 @@ public class GovernanceUnitTests
         Assert.True(manager.HasCapability(AppSettings.EmulatorAdapterPlugin, PluginCapabilityKeys.Emulator));
     }
 
+    [Fact]
+    public void ExecutionStateStore_PreservesRegistrationGuardsAndLifecycleHistory()
+    {
+        var store = new ExecutionStateStore();
+        var first = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-1",
+            TargetName = "每日队列",
+        };
+        var second = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-2",
+            TargetName = "备用队列",
+        };
+
+        Assert.True(store.TryRegister(first, out string? firstError));
+        Assert.Null(firstError);
+        Assert.False(store.TryRegister(second, out string? secondError));
+        Assert.Equal("已有其他调度队列正在运行，当前队列「备用队列」暂不能并行执行", secondError);
+        Assert.Same(first, store.Find(first.Id));
+        Assert.Null(store.Find(second.Id));
+
+        store.Unregister(first);
+        Assert.Empty(store.Active);
+        Assert.Same(first, store.FindAny(first.Id));
+
+        var pending = new PendingSystemAction
+        {
+            Action = "sleep",
+            QueueName = "每日队列",
+            Deadline = DateTime.Now.AddMinutes(1),
+        };
+        Assert.Null(store.ReplacePending(pending));
+        Assert.NotNull(store.CurrentSystemAction);
+        Assert.True(store.TryTakePending(out PendingSystemAction? taken));
+        Assert.Same(pending, taken);
+        Assert.Null(store.CurrentSystemAction);
+    }
+
     private sealed class TestCapability : IPluginCapability
     {
     }
