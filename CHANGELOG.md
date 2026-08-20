@@ -2,6 +2,23 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.8.1（Pre-release）
+
+### 后端领域边界收敛
+
+- 将 `RunSession` 收敛为运行状态对象，由 `ExecutionCoordinator` 负责一次运行级编排；新增 `AttemptRunner` 宿主端口、`RetryPolicy`、`ResultCollector` 和 `CleanupManager`，保留原有判定、重试、日志和清理时序。
+- 按领域整理 Services 目录：Execution、Configuration、Judgement、Scheduling、History、Notification；`ConfigurationTransaction` 封装配置交换 prepare/retry/sync/replace/rollback 原语，`ConfigRunSession` 继续作为唯一收尾顺序入口。
+- 新增 `INotificationChannelProvider`、`IEmulatorCapabilityProvider` 与 `NotificationDispatcher`，执行域/DispatchCenter 不再直接依赖具体插件管理器；新增 `ExecutionCommands` 作为 Web、Scheduler 和常驻服务 CLI 通道共享的启动/取消命令入口。
+- 保持现有 Web/API、配置交换磁盘协议、历史格式、队列串行语义和插件 capability 行为不变，并增加运行生命周期、重试策略、配置事务、通知端口和应用命令治理测试。
+
+### 验证
+
+- 管理员 `build.cmd`：通过（仅保留既有 3 项 nullable 警告）。
+- 单元测试：145/145 通过（281 项断言）。
+- 管理员加速档 Playwright e2e：81/81 通过。
+- 管理员加速档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过（加速档采样兜底可能为 167）。
+- 发布前真实计时档全量回归：管理员 E2E 81/81（8.8 分钟）、judge 150/150、chaos 166/166，全部通过。
+
 ## v0.8.0（Pre-release）
 
 ### 后端架构强化

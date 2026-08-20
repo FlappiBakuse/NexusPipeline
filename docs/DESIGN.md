@@ -40,31 +40,37 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 调度队列（DispatchQueue） | 按 Index 顺序链式执行一组脚本实例（每实例内仍按用户串行）；可定时/启动时自动运行，结束可执行完成操作 |
 | 尝试（RunAttempt） | 一次尝试 = 一次完整的进程启动→监控→判定→清理；失败按 MaxAttempts 重试 |
 | 运行（RunRecord） | 一次「脚本实例 × 用户」的完整运行（含全部尝试），落盘历史（.json 纯状态 + 按尝试分批日志） |
+| 运行状态（RunSession） | 一次运行的状态/元数据对象；不再承担完整流程，流程由 `ExecutionCoordinator` 编排 |
+| 尝试执行（AttemptRunner） | 单次尝试执行边界，承接前/后置脚本、脚本监控、判定和资源清理调用 |
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
 | 配置交换（ConfigSwap） | 运行前 configPath ↔ 用户快照的交换机制（见第 4 节） |
-| 配置运行作用域（ConfigRunSession） | 封装一次运行的 prepare/retry/sync/restore 生命周期，固定最终收尾顺序 |
+| 配置事务（ConfigurationTransaction） | 封装 prepare/retry/sync/replace/rollback 原语；保持现有 ConfigSwap 磁盘协议 |
+| 配置运行作用域（ConfigRunSession） | 编排一次运行的事务动作并固定最终收尾顺序 |
 | 日志监控（LogMonitor） | 对脚本日志文件的增量读取器，支持追加/截断/替换三种文件形态（见第 6 节） |
 | 插件 capability | 与插件身份/元数据分离的可查询能力；C# 按接口注册，数据化插件按 key 登记 |
+| 应用命令（ExecutionCommands） | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消入口 |
 
 ## 3. 核心运行流程
 
 ### 3.1 脚本运行完整链路
 
-一次「脚本实例 × 用户」的运行由 `RunSession.RunAsync` 驱动（队列/手动/CLI 均经 `DispatchCenter` 汇聚到此处）：
+一次「脚本实例 × 用户」的运行由 `ExecutionCoordinator.RunAsync` 驱动（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
 
 ```mermaid
 sequenceDiagram
     participant DC as DispatchCenter
-    participant S as RunSession.RunAsync
-    participant A as RunAttemptAsync（每次尝试）
+    participant C as ExecutionCommands
+    participant S as ExecutionCoordinator.RunAsync
+    participant A as AttemptRunner（每次尝试）
     participant M as LogMonitor
     participant J as SessionJudge/判断脚本
 
-    DC->>S: StartScript / RunQueue → 门禁后创建 RunSession
+    C->>DC: StartScript / StartQueue / Cancel
+    DC->>S: 门禁后创建 RunSession 状态并交给协调器
     loop 尝试 1..MaxAttempts
-        S->>S: 前置脚本（用户配置，可选）
         S->>A: 执行本次尝试
+        A->>A: 前置脚本、游戏/脚本启动、日志监控、判定和清理
         A->>A: 启动游戏（可选，轮询确认 GameWaitSeconds）
         A->>A: 启动主程序（已在运行则仅监控）
         A->>M: 解析日志路径 → 创建监控（严格 fresh：本次尝试写过才从头读，否则末尾读忽略残留）
@@ -86,7 +92,7 @@ sequenceDiagram
     DC->>DC: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发
 ```
 
-**分步细节（RunAttemptAsync 内）：**
+**分步细节（AttemptRunner 单次尝试边界内）：**
 
 1. **前置检查**：`IsScriptRunning` 检测运行时启动目标是否已在运行（按解析后的进程名，含自重启产物兜底）；已运行 → 先按启动目标强制结束并确认退出，再重新启动监管。
 2. **启动游戏（可选）**：`LaunchGame=true` 且已填游戏路径时，校验可执行 → 启动（bat 经 cmd 包装并接管输出）→ 每 1 秒轮询 `GameWaitSeconds` 秒确认进程出现 → 超时本次尝试失败。未填写路径则跳过并提示。
@@ -119,7 +125,7 @@ flowchart TD
     F -- 否 --> G[记录失败历史·未配置启用用户已跳过]
     F -- 是 --> H[RunUsersAsync 按用户顺序串行]
     H --> I[门禁 ScriptConfigGate 等待]
-    I --> J[RunSession 运行该用户]
+    I --> J[ExecutionCoordinator 编排该用户]
     J --> K[历史落盘（.json 纯状态 + 按尝试分批日志）+ 进度 DoneTasks++]
     K --> C
     C -- 遍历完成 --> L{queue.NotifyEnabled}
@@ -272,10 +278,10 @@ flowchart LR
     R[运行结束] --> N{脚本/队列 NotifyEnabled}
     N -- 脚本级 --> S[NotifyScriptAsync]
     N -- 队列级汇总 --> Q[NotifyQueueAsync]
-    S --> C1[NotifyPlugin: Webhook 并行 SMTP]
-    Q --> C1
-    S --> C2[内置通知通道（NotifyPlugin）]
-    Q --> C2
+    S --> D[NotificationDispatcher]
+    Q --> D
+    D --> C1[NotifyPlugin: Webhook 并行 SMTP]
+    D --> C2[其他 INotifyChannel]
 ```
 
 - **脚本实例级**：实例开启通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后）发送该实例运行状态。

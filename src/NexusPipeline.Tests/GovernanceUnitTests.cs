@@ -1,14 +1,62 @@
+using System.Reflection;
 using NexusPipeline.Extensibility;
 using NexusPipeline;
+using NexusPipeline.App.Commands;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Configuration;
+using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Notification;
 using Xunit;
 
 namespace NexusPipeline.Tests;
 
 public class GovernanceUnitTests
 {
+    [Fact]
+    public void ExecutionCoordinator_OwnsFlow_WhileRunSessionRemainsStateObject()
+    {
+        Assert.Null(typeof(RunSession).GetMethod("RunAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+        Assert.NotNull(typeof(ExecutionCoordinator).GetMethod("RunAsync", BindingFlags.Instance | BindingFlags.Public));
+        Assert.NotNull(typeof(AttemptRunner));
+        Assert.Equal(typeof(IAttemptExecutionHost), typeof(AttemptRunner).GetConstructors()[0].GetParameters()[0].ParameterType);
+        Assert.True(typeof(IAttemptExecutionHost).IsAssignableFrom(typeof(ExecutionCoordinator)));
+        Assert.NotNull(typeof(ResultCollector));
+    }
+
+    [Fact]
+    public void RetryPolicy_OnlyRetriesRecoverableFailures()
+    {
+        var policy = new RetryPolicy(2);
+
+        Assert.True(policy.ShouldRetry(1, RunAttemptResult.Failed("retry")));
+        Assert.False(policy.ShouldRetry(1, RunAttemptResult.Fatal("fatal")));
+        Assert.False(policy.ShouldRetry(2, RunAttemptResult.Failed("last")));
+    }
+
+    [Fact]
+    public void ConfigurationTransaction_ProvidesExplicitLifecycleBoundary()
+    {
+        var transaction = new ConfigurationTransaction("script", null, "");
+
+        Assert.Equal("script", transaction.ScriptId);
+        Assert.False(transaction.IsPrepared);
+        Assert.True(transaction.Begin(out string? error));
+        Assert.Null(error);
+        Assert.False(transaction.IsPrepared);
+    }
+
+    [Fact]
+    public void NotificationAndCommandBoundaries_UseApplicationPorts()
+    {
+        Assert.True(typeof(INotificationChannelProvider).IsAssignableFrom(typeof(PluginManager)));
+        Assert.True(typeof(IEmulatorCapabilityProvider).IsAssignableFrom(typeof(PluginManager)));
+        Assert.Equal(typeof(INotificationChannelProvider), typeof(NotificationDispatcher).GetConstructors()[0].GetParameters()[0].ParameterType);
+        Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.StartScript)));
+        Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.Cancel)));
+    }
+
     [Fact]
     public void RunBudget_CentralizesElapsedRemainingAndCommandCap()
     {

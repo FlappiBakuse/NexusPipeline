@@ -1,4 +1,5 @@
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Configuration;
 
 namespace NexusPipeline.Services;
 
@@ -16,67 +17,50 @@ internal sealed class ConfigRunSession
         RestoreConfig,
     }
 
-    private readonly string _scriptId;
-    private readonly string? _userName;
-    private readonly string _configPath;
+    private readonly ConfigurationTransaction _transaction;
     private readonly bool _hasJudgeScript;
 
     public ConfigRunSession(string scriptId, string? userName, string configPath, bool hasJudgeScript)
     {
-        _scriptId = scriptId;
-        _userName = userName;
-        _configPath = configPath;
+        _transaction = new ConfigurationTransaction(scriptId, userName, configPath);
         _hasJudgeScript = hasJudgeScript;
     }
 
-    public bool IsPrepared { get; private set; }
+    public bool IsPrepared => _transaction.IsPrepared;
 
-    public string ScriptDir => UserConfigManager.ScriptDir(_scriptId, _userName);
+    public string ScriptDir => _transaction.ScriptDir;
 
     public void PrepareScriptArea()
     {
-        if (_hasJudgeScript)
-        {
-            UserConfigManager.PrepareScriptDir(_scriptId, _userName);
-        }
+        if (_hasJudgeScript) _transaction.PrepareScriptArea();
     }
 
     public bool Prepare(out string? error)
     {
         error = null;
-        if (string.IsNullOrWhiteSpace(_userName) || string.IsNullOrWhiteSpace(_configPath))
-        {
-            return true;
-        }
-        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userName, _configPath, out error);
-        return IsPrepared;
+        return _transaction.Begin(out error);
     }
 
     public string? PrepareForRetry()
     {
-        return IsPrepared && !string.IsNullOrWhiteSpace(_userName)
-            ? UserConfigManager.PrepareForRetry(_scriptId, _userName, _configPath)
-            : null;
+        return _transaction.PrepareRetry();
     }
 
     public void SyncToStore(bool firstCheck)
     {
-        if (IsPrepared && !string.IsNullOrWhiteSpace(_userName))
-        {
-            UserConfigManager.SyncConfigToStore(_scriptId, _userName, _configPath, firstCheck);
-        }
+        _transaction.SyncToStore(firstCheck);
     }
 
     public void ApplyReplacements(List<string> replacements)
     {
-        UserConfigManager.ApplyConfigReplacements(_scriptId, _userName, _configPath, replacements);
+        _transaction.ApplyReplacements(replacements);
     }
 
     /// <summary>唯一权威的运行收尾顺序；顺序由测试保护，业务调用者不再手工拼接。</summary>
     internal IReadOnlyList<FinalizationStep> GetFinalizationOrder(bool autoUpdateConfig)
     {
         return BuildFinalizationOrder(
-            autoUpdateConfig && IsPrepared && !string.IsNullOrWhiteSpace(_userName),
+            autoUpdateConfig && IsPrepared,
             _hasJudgeScript,
             IsPrepared);
     }
@@ -115,17 +99,17 @@ internal sealed class ConfigRunSession
                     }
                     catch (Exception ex)
                     {
-                        Logger.Warn($"[配置] 脚本「{_scriptId}」自动更新同步失败：{ex.Message}");
+                        Logger.Warn($"[配置] 脚本「{_transaction.ScriptId}」自动更新同步失败：{ex.Message}");
                     }
                     break;
                 case FinalizationStep.RestoreReplacements:
-                    UserConfigManager.RestoreConfigReplacements(_scriptId, _userName);
+                    _transaction.RestoreReplacements();
                     break;
                 case FinalizationStep.CleanupScriptArea:
-                    UserConfigManager.CleanupScriptArea(_scriptId, _userName);
+                    _transaction.CleanupScriptArea();
                     break;
                 case FinalizationStep.RestoreConfig:
-                    restoreError = UserConfigManager.RestoreAfterRun(_scriptId, _userName!, _configPath);
+                    restoreError = _transaction.Restore();
                     break;
             }
         }

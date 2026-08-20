@@ -12,7 +12,7 @@ internal sealed record PluginSummary(
     string Version, bool IsBuiltIn, string Kind);
 
 /// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
-internal sealed class PluginManager
+internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCapabilityProvider
 {
     private readonly List<IPlugin> _plugins = new();
 
@@ -30,6 +30,16 @@ internal sealed class PluginManager
     /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
     public IReadOnlyList<INotifyChannel> NotifyChannels =>
         _capabilities.GetAll<INotifyChannel>(IsEnabled);
+
+    public IReadOnlyList<INotifyChannel> GetNotificationChannels()
+    {
+        return NotifyChannels;
+    }
+
+    public bool IsEnabled()
+    {
+        return IsEnabled(AppSettings.EmulatorAdapterPlugin);
+    }
 
     /// <summary>插件统一元数据投影（内置 general + 数据化 specialized）。</summary>
     public IReadOnlyList<PluginSummary> PluginSummaries

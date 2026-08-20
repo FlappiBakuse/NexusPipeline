@@ -15,6 +15,18 @@ internal interface INotifyChannel : IPluginCapability
     Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);
 }
 
+/// <summary>宿主通知端口；业务服务只依赖 capability provider，不依赖具体插件管理实现。</summary>
+internal interface INotificationChannelProvider
+{
+    IReadOnlyList<INotifyChannel> GetNotificationChannels();
+}
+
+/// <summary>宿主模拟器 capability 端口；执行域只读取是否启用，不感知具体插件管理器。</summary>
+internal interface IEmulatorCapabilityProvider
+{
+    bool IsEnabled();
+}
+
 /// <summary>数据化或 C# 插件提供的脚本 profile 推导能力。</summary>
 internal interface IProfileResolver : IPluginCapability
 {

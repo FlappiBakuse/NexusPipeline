@@ -5,6 +5,7 @@
 
 > v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
+> v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
 
 ## 总体结构
 
@@ -14,7 +15,7 @@ NexusPipeline/
 │   ├── Application/    应用宿主与启动流程：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
-│   ├── Services/       服务层（NexusPipeline.Services）
+│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification 分域）
 │   ├── Persistence/    持久化层（NexusPipeline.Persistence）
 │   ├── Utilities/      工具层（NexusPipeline.Utilities）
 │   ├── Extensibility/  中立扩展契约与宿主服务（NexusPipeline.Extensibility，internal）
@@ -47,7 +48,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过宿主内置契约接口（`IPlugin` / `INotifyChannel` / `PluginContext`）交互**；跨模块的 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.6.3 插件契约内置后，`Services` 与 `Plugins` 仍存在双向依赖（`UserConfigManager`/`DispatchCenter` 引用 Plugins 调用 profile/通知 façade；`PluginManager`/`NotifyPlugin` 引用 Services 使用 Audit/发送器）。v0.7.9 已将 capability/profile 的中立契约移至 `Extensibility/`，并让 `PluginContext` 使用显式 `PluginHostServices`，但未进行风险更高的全量依赖倒置；`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。
+- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.6.3 插件契约内置后，`UserConfigManager` 与 `PluginManager` 仍存在历史兼容依赖；v0.8.1 已移除执行域/`DispatchCenter` 对具体插件管理器的运行期查询，通知经 `INotificationChannelProvider`、模拟器启用状态经 `IEmulatorCapabilityProvider` capability 端口分发。完整依赖倒置仍未进行，`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。
 
 ### 关键类职责
 
@@ -59,16 +60,22 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `ExecutionCommands` | src/Application/Commands/ExecutionCommands.cs | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消应用命令入口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
-| `DispatchCenter` | src/Services/DispatchCenter.cs | 运行编排：脚本/队列执行、取消、通知分发；运行状态存储委托给 `ExecutionStateStore` |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 队列/系统操作门面与运行注册；单次运行交给 `ExecutionCoordinator`，通知交给 `NotificationDispatcher` |
+| `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、运行收尾和历史记录边界 |
+| `RunSession` | src/Services/RunSession.cs | 一次运行的状态对象：元数据、预算、日志收集、配置事务状态和回调；不再拥有 `RunAsync` 流程 |
+| `AttemptRunner` | src/Services/Execution/AttemptRunner.cs | 单次尝试执行入口；协调器通过该边界调用前/后置脚本与监控执行 |
+| `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
+| `CleanupManager` / `RunAttemptFinalizer` | src/Services/Execution/ | 执行域清理门面与 Windows 进程/游戏清理基础设施 |
 | `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务与待执行系统操作，保留原子防重入和 100 条历史上限 |
 | `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、记录快照和日志尾部 |
-| `RunSession` | src/Services/RunSession.cs | 单次脚本运行编排（重试、日志监控、判定和结果汇总）；判断脚本输入按尝试切片（v0.5.2+）；v0.7.8 起每轮失败重试使用 retry-store 重新交换配置；v0.7.9 起总预算、配置作用域和 attempt 收尾分别由 `RunBudget`/`ConfigRunSession`/`RunAttemptFinalizer` 承载 |
-| `RunBudget` | src/Services/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
-| `ConfigRunSession` | src/Services/ConfigRunSession.cs | 运行期间配置交换作用域：script 区、prepare/retry、自动更新同步、replace 还原、清理和最终现场还原的唯一收尾顺序 |
-| `RunAttemptFinalizer` | src/Services/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理；承载失败/取消/强制关闭策略，不改变既有清理时序 |
-| `SessionJudge` | src/Services/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：判断脚本/关键字两模式，判定状态与输入 |
-| `JudgeScriptRunner` | src/Services/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
+| `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
+| `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
+| `ConfigurationTransaction` | src/Services/Configuration/ConfigurationTransaction.cs | 配置 prepare/retry/sync/replace/rollback 原语边界，兼容现有 `ConfigSwap` 磁盘协议 |
+| `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
+| `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：判断脚本/关键字两模式，判定状态与输入 |
+| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（v0.6.9+：部分截断从新尾续读、归零从头读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
@@ -77,8 +84,9 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Services/Scheduler.cs | 定时/启动时触发队列 |
-| `HistoryService` | src/Services/HistoryService.cs | 历史记录读写与清理 |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列 |
+| `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
+| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 通过 `INotificationChannelProvider` 分发脚本/队列通知，隔离具体插件实现 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体）；v0.6.9+ 移除 `ReadLogTail`（`/api/logs` 孤儿 API 删除） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册（v0.5.0+） |
@@ -148,7 +156,7 @@ v0.6.3 起专项插件为**数据化目录形态**（`plugins/<名称>/plugin.js
 | 通用插件 | 内置 C#（`IPlugin`/能力接口/`PluginContext`） | 为程序添加能力（内置「通知推送」和模拟器适配，`PluginManager.DiscoverBuiltIn` 注册） | 内置白名单 `EnabledPlugins`（默认 notify），只可禁用不可删除 |
 | 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 外部默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
 
-> **通知通道（v0.4.4+）**：`INotifyChannel` 为**多通道并存**语义——`PluginManager.NotifyScriptAsync/NotifyQueueAsync` 分发至全部已启用通道（NotifyPlugin 内部按 Webhook/SMTP 独立开关并行双发）。单个通道异常仅记警告，不影响其余通道。
+> **通知通道（v0.4.4+，v0.8.1 边界收敛）**：`INotifyChannel` 为**多通道并存**语义——`NotificationDispatcher` 通过 `INotificationChannelProvider` 分发至全部已启用通道（NotifyPlugin 内部按 Webhook/SMTP 独立开关并行双发）。单个通道异常仅记警告，不影响其余通道；具体插件类型不再由 `DispatchCenter` 直接引用。
 
 ### Capability 扩展约束（v0.7.9）
 
@@ -214,15 +222,15 @@ plugins/bettergi/
 |---|---|
 | 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（`[ApiRoute]` 特性注册，见 `WebServer.Routes`） |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
-| 脚本运行流程/重试/日志监控 | `src/Services/RunSession.cs`、`src/Services/RunBudget.cs`、`src/Services/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
-| 自定义完成标志（关键字/判断脚本） | `src/Services/SessionJudge.cs`（判定状态机）、`src/Services/RunSession.cs`（监控循环/触发时机）、`src/Services/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
-| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
-| 队列调度触发 | `src/Services/Scheduler.cs` |
-| 通知发送（Webhook/SMTP） | `src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
+| 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/AttemptRunner.cs`、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
+| 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/AttemptRunner.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
+| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/Configuration/ConfigurationTransaction.cs`（事务原语）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
+| 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
+| 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
 | 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
-| 历史记录格式 | `src/Services/HistoryService.cs`、`src/Models/RunRecord.cs` |
+| 历史记录格式 | `src/Services/History/HistoryService.cs`、`src/Models/RunRecord.cs` |
 
 > **v0.5.0 分层变更**：核心域按子域重组（`Models/`、`Services/`、`Persistence/`、`Utilities/` 对应命名空间）；Web 路由改特性路由；`RuntimeContext` 引入壳式 DI（`ServiceProvider` + `Resolve<T>()`，外部访问方式不变）；`RunSession` 判定策略拆出 `SessionJudge`；`UserConfigManager` 拆为门面 + 原语/会话恢复/数据目录三层。public 契约清单不变，extensions 三插件工程对齐后仍可编译。v0.6.3 起专项插件数据化（extensions/ 工程移除，见「插件扩展指南」）。
 >
@@ -233,7 +241,7 @@ plugins/bettergi/
 ## 数据流速览
 
 ```
-Web 请求 → WebServer → ApiXxxHandler → 核心服务（DispatchCenter/Scheduler/HistoryService/...）→ DataStore/Logger
-CLI 菜单 → Cli 菜单类 → 核心服务
-运行结束 → DispatchCenter → RuntimeContext.Plugins.NotifyScriptAsync → INotifyChannel 实现 → Webhook/SMTP
+Web 请求 → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
+CLI 菜单 / Scheduler → Application Command 或核心服务 → DispatchCenter
+运行结束 → DispatchCenter → NotificationDispatcher → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP
 ```

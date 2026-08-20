@@ -238,7 +238,7 @@ internal class Scheduler : IDisposable
             RunningExecution? exec = null;
             try
             {
-                exec = RuntimeContext.Instance.Center.StartQueue(queue.Id, "auto", Audit.Scheduler);
+                exec = RuntimeContext.Instance.Commands.StartQueue(queue.Id, "auto", Audit.Scheduler);
                 await exec.Completion.ConfigureAwait(false);
             }
             catch (Exception ex)

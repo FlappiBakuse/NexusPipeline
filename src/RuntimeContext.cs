@@ -1,9 +1,11 @@
+using NexusPipeline.App.Commands;
 using Microsoft.Extensions.DependencyInjection;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Notification;
 
 namespace NexusPipeline;
 
@@ -17,13 +19,17 @@ internal class RuntimeContext
     private RuntimeContext()
     {
         ServiceCollection collection = new();
-        collection.AddSingleton(new DispatchCenter());
         collection.AddSingleton(new HistoryService());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             new PluginHostServices(
                 () => Settings,
                 ReloadSettings,
                 type => provider.GetRequiredService(type))));
+        collection.AddSingleton<INotificationChannelProvider>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<IEmulatorCapabilityProvider>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<NotificationDispatcher>();
+        collection.AddSingleton<DispatchCenter>(provider => new DispatchCenter(provider.GetRequiredService<NotificationDispatcher>()));
+        collection.AddSingleton<ExecutionCommands>(provider => new ExecutionCommands(provider.GetRequiredService<DispatchCenter>()));
         collection.AddSingleton(new Scheduler());
         _services = collection.BuildServiceProvider();
     }
@@ -44,6 +50,10 @@ internal class RuntimeContext
     public HistoryService History => Resolve<HistoryService>();
 
     public PluginManager Plugins => Resolve<PluginManager>();
+
+    public NotificationDispatcher Notifications => Resolve<NotificationDispatcher>();
+
+    public ExecutionCommands Commands => Resolve<ExecutionCommands>();
 
     public Scheduler Scheduler => Resolve<Scheduler>();
 

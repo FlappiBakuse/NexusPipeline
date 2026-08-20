@@ -1,5 +1,6 @@
-﻿using NexusPipeline.Plugins;
 using NexusPipeline.Models;
+using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -7,6 +8,12 @@ namespace NexusPipeline.Services;
 internal class DispatchCenter
 {
     private readonly ExecutionStateStore _state = new();
+    private readonly NotificationDispatcher _notifications;
+
+    internal DispatchCenter(NotificationDispatcher notifications)
+    {
+        _notifications = notifications;
+    }
 
     public IReadOnlyList<RunningExecution> Active
     {
@@ -308,7 +315,7 @@ internal class DispatchCenter
             {
                 foreach (RunRecord record in records)
                 {
-                    await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                    await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
                 }
             }
         }
@@ -351,7 +358,7 @@ internal class DispatchCenter
             }
             try
             {
-                var session = new RunSession(
+                var session = new ExecutionCoordinator(
                     script, exec.Mode, queueId, queueName, runUser,
                     exec.Cts.Token,
                     (attempt, max) =>
@@ -465,7 +472,7 @@ internal class DispatchCenter
             bool anyCancelled = records.Any(record => record.Status == "cancelled");
             if (queue.NotifyEnabled)
             {
-                await RuntimeContext.Instance.Plugins.NotifyQueueAsync(queue, records).ConfigureAwait(false);
+                await _notifications.NotifyQueueAsync(queue, records).ConfigureAwait(false);
             }
             else
             {
@@ -475,7 +482,7 @@ internal class DispatchCenter
                     ScriptInstance? script = RuntimeContext.Instance.FindScript(record.ScriptInstanceId);
                     if (script is not null && script.NotifyEnabled)
                     {
-                        await RuntimeContext.Instance.Plugins.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                        await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
                     }
                 }
             }
