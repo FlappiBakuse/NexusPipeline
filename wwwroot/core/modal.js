@@ -20,9 +20,15 @@ export function confirmModal(title, message, confirmAction, data = {}) {
   const dataAttrs = Object.entries(data)
     .map(([key, value]) => ` data-${key}="${esc(value)}"`)
     .join("");
-  const confirmClass = confirmAction.startsWith("confirm-delete") ? "danger" : "";
+  const isDelete = confirmAction.startsWith("confirm-delete");
+  const confirmClass = isDelete ? "danger solid" : "";
+  const confirmLabel = isDelete
+    ? "确认删除"
+    : confirmAction === "restart-confirm" ? "确认重启"
+      : confirmAction === "confirm-cancel-run" ? "确认取消"
+        : "确定";
   showModal(modalShell(title, `<p class="modal-copy">${message}</p>`,
-    `<button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>确定</button><button class="ghost" type="button" data-action="close-modal">取消</button>`));
+    `<button class="ghost" type="button" data-action="close-modal">取消</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
 }
 
 export function showModal(content, wide = false, locked = false) {

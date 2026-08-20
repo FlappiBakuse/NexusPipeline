@@ -44,7 +44,7 @@ export async function pageScriptUsers(scriptId, token) {
       <div class="action-row"><div class="user-actions">
         <button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
         <button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
-        <button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
+        <button class="sm danger solid" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
       </div></div>
     </div>
   </article>`;

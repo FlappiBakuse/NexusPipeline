@@ -1,7 +1,7 @@
 import { esc } from "./format.js";
 
 export function pageHeader(kicker, title, description, action = "") {
-  return `<div class="page-head"><div><div class="eyebrow">${kicker}</div><h2>${title}</h2>${description ? `<p class="page-kicker">${description}</p>` : ""}</div>${action}</div>`;
+  return `<header class="page-head"><div class="page-head-copy"><div class="eyebrow">${kicker}</div><div class="page-head-main"><h2>${title}</h2>${action ? `<div class="page-head-actions">${action}</div>` : ""}</div>${description ? `<p class="page-kicker">${description}</p>` : ""}</div></header>`;
 }
 
 export function valueField(id, label, value, type = "text", extra = "") {

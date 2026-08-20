@@ -1,12 +1,17 @@
 import { api } from "../core/api.js";
-import { systemActionCard } from "../core/forms.js";
+import { pageHeader, systemActionCard } from "../core/forms.js";
 import { esc, statusBadge } from "../core/format.js";
 import { isCurrent, schedule } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown, stopCountdown } from "../core/ui.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>暂无运行任务</strong>当前没有正在运行的脚本或调度队列。</div>';
-  return `<div class="table-scroll"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">模式</th><th scope="col">进度</th><th scope="col">状态</th></tr></thead><tbody>
+  const records = running.map(record => `<article class="running-record">
+      <div class="running-record-head"><strong>${esc(record.targetName)}</strong>${statusBadge(record.status)}</div>
+      <div class="running-record-meta"><span>${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span>${record.mode === "auto" ? "自动" : "手动"}</span></div>
+      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span></div>
+    </article>`).join("");
+  return `<div class="table-scroll running-table"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">模式</th><th scope="col">进度</th><th scope="col">状态</th></tr></thead><tbody>
     ${running.map(record => `<tr>
       <td><strong>${esc(record.targetName)}</strong></td>
       <td>${record.kind === "queue" ? "调度队列" : "脚本实例"}</td>
@@ -14,7 +19,7 @@ function runningMarkup(running) {
       <td>${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span></td>
       <td>${statusBadge(record.status)}</td>
     </tr>`).join("")}
-  </tbody></table></div>`;
+  </tbody></table></div><div class="running-records">${records}</div>`;
 }
 
 function pluginMarkup(status, stats) {
@@ -27,12 +32,20 @@ function pluginMarkup(status, stats) {
 }
 
 function statGridMarkup(status, next) {
-  return `<section class="stat-grid" aria-label="运行概览">
+  return `<section class="stat-grid stat-grid-operational" aria-label="运行概览">
     <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
     <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
-    <div class="stat" data-testid="stat-next"><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div><div class="lbl next-q-label" id="next-q-label">下一调度队列：${next ? esc(next.queueName || "未命名队列") : "无"}</div></div>
-    <div class="stat" data-testid="stat-version"><div class="num">${esc(status.version || "0.0.0")}</div><div class="lbl">当前版本</div></div>
+    <div class="stat" data-testid="stat-running"><div class="num">${(status.running || []).length}</div><div class="lbl">正在运行</div></div>
+  </section>
+  <section class="stat next-schedule-card" data-testid="stat-next" aria-label="下一调度队列">
+    <div class="next-schedule-main"><div class="eyebrow">下一次调度</div><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div></div>
+    <div class="next-schedule-detail"><strong class="next-q-label" id="next-q-label">下一调度队列：${next ? esc(next.queueName || "未命名队列") : "无"}</strong><span class="muted">${next ? "按启用的定时队列计算" : "暂无已启用的定时队列"}</span></div>
   </section>`;
+}
+
+function setVersionLabel(version) {
+  const el = document.querySelector("#app-version");
+  if (el) el.textContent = `当前版本 · ${version || "0.0.0"}`;
 }
 
 function runningPanelMarkup(status) {
@@ -59,14 +72,13 @@ export async function pageDashboard(token) {
   if (!isCurrent("dashboard", token)) return;
   const next = status.nextSchedule;
   const stats = status.notifyStats || {};
+  setVersionLabel(status.version);
   if (!document.querySelector('[data-testid="stat-scripts"]')) {
-    render(`<div class="page-head">
-      <div><div class="eyebrow">运行概览</div><h2>仪表盘</h2><p class="page-kicker">查看当前运行状态、调度概览和通知能力。</p></div>
-    </div>
-    ${statGridMarkup(status, next)}
-    <div id="system-action-area">${systemActionCard(status.systemAction)}</div>
-    <section class="card" data-testid="running-panel">${runningPanelMarkup(status)}</section>
-    <section class="card" id="dashboard-plugin-panel">${pluginPanelMarkup(status, stats)}</section>`);
+    render(pageHeader("运行概览", "仪表盘", "查看当前运行状态、调度概览和通知能力。")
+      + statGridMarkup(status, next)
+      + `<div id="system-action-area">${systemActionCard(status.systemAction)}</div>
+      <section class="card" data-testid="running-panel">${runningPanelMarkup(status)}</section>
+      <section class="card" id="dashboard-plugin-panel">${pluginPanelMarkup(status, stats)}</section>`);
     if (next) startCountdown("next-q", next.time); else stopCountdown();
   } else {
     // 局部更新（v0.6.7+）：不整页重渲染，避免倒计时定时器反复重建与滚动/焦点重置；区域缺失时静默跳过。
@@ -76,7 +88,7 @@ export async function pageDashboard(token) {
     };
     setNum('.stat[data-testid="stat-scripts"] .num', status.scriptCount ?? 0);
     setNum('.stat[data-testid="stat-queues"] .num', status.queueCount ?? 0);
-    setNum('.stat[data-testid="stat-version"] .num', status.version || "0.0.0");
+    setNum('.stat[data-testid="stat-running"] .num', (status.running || []).length);
     const nextEl = document.querySelector("#next-q");
     const nextLabel = document.querySelector("#next-q-label");
     if (nextEl) {

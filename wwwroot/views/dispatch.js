@@ -1,6 +1,6 @@
 import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
-import { systemActionCard } from "../core/forms.js";
+import { pageHeader, systemActionCard } from "../core/forms.js";
 import { esc } from "../core/format.js";
 import { closeModal, confirmModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
@@ -104,7 +104,7 @@ export async function pageDispatch(token) {
   catch (error) { render(`<div class="empty"><strong>加载调度中心失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("dispatch", token)) return;
   state.scripts = scripts; state.queues = queues;
-  render(`<div class="page-head"><div><div class="eyebrow">调度中心</div><h2>调度中心</h2><p class="page-kicker">手动启动任务，观察实时输出并及时取消运行。</p></div></div>
+  render(pageHeader("调度中心", "调度中心", "手动启动任务，观察实时输出并及时取消运行。") + `
     <div id="system-action-area"></div>
     <section class="card" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
     <div class="dispatch-cards">

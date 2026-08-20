@@ -1,6 +1,7 @@
 import { api } from "../core/api.js";
 import { esc, finalStatusOf, fmtTime, statusBadge } from "../core/format.js";
 import { pagerMarkup, registerPager } from "../core/pager.js";
+import { pageHeader } from "../core/forms.js";
 import { isCurrent, state } from "../core/state.js";
 import { modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
@@ -22,7 +23,8 @@ export async function pageHistory(token) {
   const scriptName = id => scripts.find(script => script.id === id)?.name || "(已删除)";
   const queueName = id => queues.find(queue => queue.id === id)?.name || "";
   const content = records.length ? `<section class="card"><div class="table-scroll"><table class="data-table"><thead><tr><th scope="col">时间</th><th scope="col">脚本</th><th scope="col">队列</th><th scope="col">模式</th><th scope="col">结果</th><th scope="col">操作</th></tr></thead><tbody>${records.map(record => `<tr><td>${esc(fmtTime(record.startTime))}</td><td>${esc(scriptName(record.scriptInstanceId))}</td><td>${esc(queueName(record.queueId)) || "-"}</td><td>${record.mode === "auto" ? "自动" : "手动"}</td><td>${statusBadge(finalStatusOf(record))}</td><td class="ops"><button class="sm" type="button" data-action="history-detail" data-id="${esc(record.id)}">查看详情</button></td></tr>`).join("")}</tbody></table></div>${pagerMarkup("history", historyPage, HISTORY_PAGE_SIZE, total)}</section>` : '<div class="empty"><strong>暂无历史记录</strong>运行脚本或调度队列后在此查看。</div>';
-  render(`<div class="page-head"><div><div class="eyebrow">历史记录</div><h2>历史记录（最近 ${historyDays} 天，共 ${total} 条）</h2><p class="page-kicker">按运行时间查看结果、重试过程和脚本输出。</p></div><div class="history-days-box"><label class="field-label" for="history-days">天数范围</label><select id="history-days" data-action="history-days" data-testid="history-days">${HISTORY_DAY_OPTIONS.map(days => `<option value="${days}" ${days === historyDays ? "selected" : ""}>${days} 天</option>`).join("")}</select></div></div>${content}`);
+  const action = `<div class="history-days-box"><label class="field-label" for="history-days">天数范围</label><select id="history-days" data-action="history-days" data-testid="history-days">${HISTORY_DAY_OPTIONS.map(days => `<option value="${days}" ${days === historyDays ? "selected" : ""}>${days} 天</option>`).join("")}</select></div>`;
+  render(pageHeader("历史记录", `历史记录（最近 ${historyDays} 天，共 ${total} 条）`, "按运行时间查看结果、重试过程和脚本输出。", action) + content);
   registerPager("history", page => { historyPage = page; pageHistory(state.routeToken); });
 }
 
