@@ -556,6 +556,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法新增用户" }, 409).ConfigureAwait(false);
                     return;
                 }
+                bool gateReleased = false;
                 try
                 {
                 // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/运行线程冲突；锁内不做 await。
@@ -584,6 +585,8 @@ internal static class ApiScriptsHandler
                 }
                 if (userLimit is not null)
                 {
+                    gate.Release();
+                    gateReleased = true;
                     await HttpHelper.WriteJsonAsync(context, new { error = userLimit }, 400).ConfigureAwait(false);
                     return;
                 }
@@ -596,16 +599,26 @@ internal static class ApiScriptsHandler
                         script.Users.RemoveAll(existing => ReferenceEquals(existing, user));
                         DataStore.SaveScripts(ctx.Scripts);
                     }
+                    gate.Release();
+                    gateReleased = true;
                     await HttpHelper.WriteJsonAsync(context, new { error = "初始配置快照失败：" + snapError }, 400).ConfigureAwait(false);
                     return;
                 }
+                // 状态变更（落盘 + 初始快照）已完成，写响应前释放门禁——此前 finally 在响应写出后才释放，
+                // 客户端收到响应后紧接的下一个门禁操作（如 edit-config start）可能抢在释放前到达被 409 拒绝，
+                // CI 上「POST users → 立即 start」稳定复现（本地经人工/浏览器延迟不可见）。
+                gate.Release();
+                gateReleased = true;
                 Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
                 }
                 finally
                 {
-                    gate.Release();
+                    if (!gateReleased)
+                    {
+                        gate.Release();
+                    }
                 }
             }
             if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))

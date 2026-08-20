@@ -975,10 +975,6 @@ test("专项脚本编辑配置：模板生成/隐藏默认配置/cancel 恢复/d
   const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
 
   const start = await api("POST", editBase, { action: "start" });
-  if (!start.ok) {
-    console.log("[DIAG] 首次 edit-config start 失败：status=" + start.status + " body=" + (await start.text()));
-    console.log("[DIAG] 脚本字段 mainExe=" + sp.mainExe + " configPath=" + sp.configPath + " args=" + sp.args + " rootPath=" + sp.rootPath);
-  }
   expect(start.ok, "首次编辑配置 start 成功（生成模板）").toBeTruthy();
   expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "首次编辑生成 NexusPipeline.json 文件（非目录）").toBeTruthy();
   expect(!fs.existsSync(defaultCfg), "编辑期间默认配置被隐藏（BetterGI 仅 NexusPipeline 可选）").toBeTruthy();
