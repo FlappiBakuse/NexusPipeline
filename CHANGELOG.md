@@ -2,7 +2,7 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
-## v0.8.0（开发中）
+## v0.8.0（Pre-release）
 
 ### 后端架构强化
 
@@ -17,7 +17,8 @@
 - 单元测试：141/141 通过（262 项断言）。
 - 管理员加速档 Playwright e2e：81/81 通过。
 - 管理员加速档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过。
-- 发布前仍需按门禁执行真实计时档全量回归，随后再提交并发布 v0.8.0 Pre-release。
+- 管理员真实计时档 Playwright e2e：81/81 通过（8.9 分钟）。
+- 管理员真实计时档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过。
 
 ## v0.7.12（Pre-release）
 
