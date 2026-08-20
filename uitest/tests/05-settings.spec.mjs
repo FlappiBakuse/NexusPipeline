@@ -55,6 +55,7 @@ test("日志级别：设置 UI / 落盘 / 阈值过滤 / DEBUG 请求记录", as
 
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#st-loglevel");
+  expect(await page.locator(".settings-list .settings-option").count(), "服务行为开关按标题/说明/右侧控件分行排列").toBe(3);
   const defaultLevel = await page.$eval("#st-loglevel", el => el.value);
   expect(defaultLevel === "info", "设置页含「日志级别」下拉且默认 info").toBeTruthy();
   const levelOptions = await page.$$eval("#st-loglevel option", els => els.map(e => e.textContent));
@@ -210,6 +211,8 @@ test("重启服务：运行任务时 409 拒绝", async () => {
 test("切换按钮文字状态：后缀「：开/：关」实时同步 + 豁免按钮", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#st-autostart");
+  const remoteToggleLayout = await page.$eval("#st-remote", el => { const row = el.parentElement; const style = getComputedStyle(row); const description = row.querySelector(".muted"); return { flexDirection: style.flexDirection, gap: style.gap, buttonRight: el.getBoundingClientRect().right >= description.getBoundingClientRect().right }; });
+  expect(remoteToggleLayout.flexDirection === "row-reverse" && remoteToggleLayout.gap !== "0px" && remoteToggleLayout.buttonRight, "远程访问开关与服务行为使用统一的右侧控件布局").toBeTruthy();
   expect((await page.textContent("#st-autostart")) === "开机自启：关", "设置页切换按钮初始带「：关」后缀").toBeTruthy();
   await page.click("#st-autostart");
   expect((await page.textContent("#st-autostart")) === "开机自启：开", "点击后按钮文字同步「：开」").toBeTruthy();

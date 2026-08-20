@@ -638,12 +638,12 @@ test("队列编辑弹窗：定时列表/任务列表拖拽排序", async ({ page
     await page.click("button:has-text('+ 添加定时')");
     await page.fill('[data-ts-time="0"]', "08:00");
     await page.fill('[data-ts-time="1"]', "08:30");
-
     const dragToTop = async (itemLocator, targetLocator) => {
       const handle = itemLocator.locator(".drag-handle");
       await handle.waitFor({ timeout: 10000 });
       // v0.7.0：弹窗内容较高时把手可能在视口外（Playwright 会把越界坐标 clamp 到视口边缘导致事件落空），先滚入视口
       await handle.scrollIntoViewIfNeeded();
+      const scrollBefore = await page.$eval(".modal-body", el => el.scrollTop);
       let box = await handle.boundingBox();
       if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
       if (!box) throw new Error("拖拽把手不可见");
@@ -655,18 +655,27 @@ test("队列编辑弹窗：定时列表/任务列表拖拽排序", async ({ page
       const ty = target ? target.y + 2 : box.y - 12;
       await page.mouse.move(tx, ty, { steps: 8 });
       await page.mouse.up();
+      return scrollBefore;
     };
 
     const taskRows = page.locator("#qm-tasks .task-row");
     expect((await taskRows.count()) === 2, "任务列表两条").toBeTruthy();
-    await dragToTop(taskRows.nth(1), taskRows.nth(0));
+    const taskDragScrollBefore = await dragToTop(taskRows.nth(1), taskRows.nth(0));
     await page.waitForTimeout(500);
     expect((await taskRows.nth(0).locator("select").inputValue()) !== "", "拖拽重渲染后第一行 select 值保留").toBeTruthy();
+    const modalScrollAfterTaskDrag = await page.$eval(".modal-body", el => el.scrollTop);
+    expect(Math.abs(modalScrollAfterTaskDrag - taskDragScrollBefore) <= 2, `任务拖拽后弹窗滚动位置保持（${taskDragScrollBefore} → ${modalScrollAfterTaskDrag}）`).toBeTruthy();
 
     const tsCards = page.locator("#qm-timesets .timeset-card");
     expect((await tsCards.count()) === 2, "定时列表两条").toBeTruthy();
-    await dragToTop(tsCards.nth(1), tsCards.nth(0));
+    const timeSetDragScrollBefore = await dragToTop(tsCards.nth(1), tsCards.nth(0));
     await page.waitForTimeout(500);
+    const modalScrollAfterTimeSetDrag = await page.$eval(".modal-body", el => el.scrollTop);
+    expect(Math.abs(modalScrollAfterTimeSetDrag - timeSetDragScrollBefore) <= 2, `定时拖拽后弹窗滚动位置保持（${timeSetDragScrollBefore} → ${modalScrollAfterTimeSetDrag}）`).toBeTruthy();
+    await page.click("button:has-text('+ 添加定时')");
+    await page.waitForTimeout(300);
+    const modalScrollAfterAdd = await page.$eval(".modal-body", el => el.scrollTop);
+    expect(Math.abs(modalScrollAfterAdd - timeSetDragScrollBefore) <= 2, `新增定时后弹窗滚动位置保持（${timeSetDragScrollBefore} → ${modalScrollAfterAdd}）`).toBeTruthy();
 
     await page.click(".modal button:has-text('保存')");
     await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });

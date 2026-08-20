@@ -19,6 +19,7 @@ test("仪表盘：统计卡片 + 版本 + 插件配置信息", async ({ page }) 
   const pcards = await page.$$eval(".plugin-card", els => els.map(e => e.textContent.trim()));
   expect(pcards.some(t => t.includes("通知推送")), "插件小卡片含「通知推送」").toBeTruthy();
   expect(body.includes("已启用通知"), "仪表盘插件卡片显示通知配置信息").toBeTruthy();
+  expect(await page.locator(".main-nav .nav-icon svg").count(), "主导航统一使用 SVG 图标").toBe(7);
 });
 
 test("响应式冒烟：手机 / 平板 / 电脑视口无横向溢出（粗检）", async ({ page }) => {
@@ -102,14 +103,23 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
   await page.waitForFunction(() => document.activeElement?.id === "sm-name", null, { timeout: 2000 });
   const modalMetrics = await page.evaluate(() => {
     const modal = document.querySelector(".modal");
+    const style = getComputedStyle(modal);
+    const modalBody = document.querySelector(".modal-body");
+    const modalFooter = document.querySelector(".modal-footer");
     const exe = document.querySelector("#sm-exe");
     const args = document.querySelector("#sm-args");
-    return { fits: modal.getBoundingClientRect().width <= window.innerWidth, stacked: args.getBoundingClientRect().top > exe.getBoundingClientRect().top, dialog: modal.getAttribute("role") === "dialog" && modal.getAttribute("aria-modal") === "true", focus: document.activeElement?.id === "sm-name" };
+    const wait = document.querySelector("#sm-game-wait");
+    const total = document.querySelector("#sm-total");
+    const waitWidthPx = wait?.getBoundingClientRect().width || 0;
+    const totalWidthPx = total?.getBoundingClientRect().width || 0;
+    return { fits: modal.getBoundingClientRect().width <= window.innerWidth, stacked: args.getBoundingClientRect().top > exe.getBoundingClientRect().top, dialog: modal.getAttribute("role") === "dialog" && modal.getAttribute("aria-modal") === "true", focus: document.activeElement?.id === "sm-name", column: style.flexDirection === "column", bodyScroll: modalBody && getComputedStyle(modalBody).overflowY === "auto", footer: !!modalFooter, waitWidth: wait && total && Math.abs(waitWidthPx - totalWidthPx) <= 1, waitWidthPx, totalWidthPx };
   });
   expect(modalMetrics.fits, "手机端弹窗不超出视口").toBeTruthy();
   expect(modalMetrics.stacked, "手机端脚本表单自动堆叠").toBeTruthy();
   expect(modalMetrics.dialog, "弹窗包含可访问语义").toBeTruthy();
   expect(modalMetrics.focus, "弹窗打开后焦点进入第一个字段").toBeTruthy();
+  expect(modalMetrics.column && modalMetrics.bodyScroll && modalMetrics.footer, "长表单弹窗标题/正文/操作区分层滚动").toBeTruthy();
+  expect(modalMetrics.waitWidth, `手机端启动后等待秒数与运行设置输入框等宽（${modalMetrics.waitWidthPx} → ${modalMetrics.totalWidthPx}）`).toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });

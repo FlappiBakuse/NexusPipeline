@@ -1,6 +1,7 @@
 import { $, $$ } from "./dom.js";
 import { registerInterval } from "./state.js";
 import { api } from "./api.js";
+import { icon } from "./icons.js";
 import { systemActionCard } from "./forms.js";
 
 const view = $("#view");
@@ -199,8 +200,8 @@ export function applyTheme(theme) {
   } catch {
     // 存储不可用（隐私模式/禁用存储）：主题仅本次会话生效。
   }
-  const icon = value === "light" ? "☼" : value === "dark" ? "☾" : "◐";
-  $$('[data-theme-icon]').forEach(element => element.textContent = icon);
+  const iconName = value === "light" ? "sun" : value === "dark" ? "moon" : "system";
+  $$('[data-theme-icon], #theme-icon').forEach(element => element.innerHTML = icon(iconName));
   $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", `当前${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}，点击切换主题`));
 }
 
@@ -210,24 +211,13 @@ export function cycleTheme() {
   toast(`主题：${document.body.dataset.theme === "system" ? "跟随系统" : document.body.dataset.theme === "light" ? "浅色" : "深色"}`);
 }
 
-/** 字段内联错误（v0.7.3+，P2-1）：高亮 + 字段旁错误文字（role=alert）+ aria-invalid + 聚焦；代替仅 toast 提示。 */
-export function setFieldError(id, message) {
+/** 字段错误：仅高亮输入框并保留 aria-invalid，避免插入提示文字造成表单布局跳动。 */
+export function setFieldError(id, _message) {
   const element = $(`#${id}`);
   if (!element) return;
   element.classList.add("field-error");
   element.setAttribute("aria-invalid", "true");
-  const wrap = element.closest("div");
-  if (wrap) {
-    let err = wrap.querySelector(".field-error-text");
-    if (!err) {
-      err = document.createElement("span");
-      err.className = "field-error-text";
-      err.setAttribute("role", "alert");
-      wrap.appendChild(err);
-    }
-    err.textContent = message;
-  }
-  element.focus();
+  element.focus({ preventScroll: true });
 }
 
 /** 清除字段内联错误（无错误时无操作）。 */
@@ -236,7 +226,6 @@ export function clearFieldError(id) {
   if (!element) return;
   element.classList.remove("field-error");
   element.removeAttribute("aria-invalid");
-  element.closest("div")?.querySelector(".field-error-text")?.remove();
 }
 
 /** 批量清除（弹窗关闭/保存成功后调用，防止残留高亮）。 */

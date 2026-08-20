@@ -2,6 +2,7 @@ import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { scrollField, selectField, valueField, pageHeader } from "../core/forms.js";
+import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
@@ -86,7 +87,7 @@ export async function pageScripts(token) {
     ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
     : `<section class="card"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
-        <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
+        <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
         <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
         <div class="script-main">
           <div class="script-name-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
@@ -99,7 +100,7 @@ export async function pageScripts(token) {
         </div>
       </article>`).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
-  render(pageHeader("脚本实例", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
+  render(pageHeader("自动化管理", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
   wireScriptIcons();
   hydrateIcons($dom("#view"));
@@ -261,7 +262,7 @@ export async function openScriptModal(id = "", plugin = "") {
       </div>
     </div>`;
   const footer = '<button type="button" data-action="save-script">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell(title, body, footer));
+  showModal(modalShell(title, body, footer), true);
   syncScriptGhostState();
   syncJudgeBox();
   const rootInput = $dom("#sm-root");

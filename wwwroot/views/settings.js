@@ -22,7 +22,29 @@ export async function pageSettings(token) {
   // v0.7.3+（用户需求）：重启服务按钮移至右上角（同调度队列页新建按钮位置），主色样式；轻量模式不可用。
   const restartBtn = `<button type="button" data-action="restart-service" data-testid="restart-service" ${settings.lightweightMode ? "disabled" : ""}>重启服务</button>`;
   render(`<div class="page-head"><div><div class="eyebrow">系统设置</div><h2>设置</h2><p class="page-kicker">控制服务启动方式、历史保留和本地 Web 服务端口。</p></div>${restartBtn}</div><section class="card"><div class="section-heading"><h3>服务行为</h3><span class="muted">部分改动需重启生效</span></div><div class="toggle-grid"><button class="mode-toggle" type="button" data-action="toggle-st-flag" data-flag="st-autostart" id="st-autostart" aria-pressed="${settings.autoStart ? "true" : "false"}">开机自启</button><button class="mode-toggle" type="button" data-action="toggle-st-flag" data-flag="st-lightweight" id="st-lightweight" aria-pressed="${settings.lightweightMode ? "true" : "false"}">轻量模式</button><button class="mode-toggle" type="button" data-action="toggle-st-flag" data-flag="st-browser" id="st-browser" aria-pressed="${settings.autoOpenBrowser ? "true" : "false"}">打开浏览器</button></div><p class="muted helper-copy">开机自启：注册到当前用户启动项；轻量模式：不启动网页服务，重启生效；打开浏览器：服务启动后自动打开。修改即时自动保存。</p><div class="form-grid three">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口（重启生效）", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div><p class="muted helper-copy">日志级别：DEBUG 全部记录（含 Web 请求）；INFO 常规；WARN 仅警告与错误；ERROR 仅错误与致命；FATAL 仅致命错误。即时生效。</p>${settings.lightweightMode ? '<p class="muted helper-copy">轻量模式未启动 Web 服务，不支持自动重启，请手动重启程序。</p>' : ""}</section><section class="card"><div class="section-heading"><h3>远程访问</h3><span class="muted">默认仅本地，需重启生效</span></div><div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-st-flag" data-flag="st-remote" id="st-remote" aria-pressed="${settings.allowRemoteAccess ? "true" : "false"}">远程访问</button><span class="muted">绑定所有网卡，所有 API 需携带访问令牌；本地 127.0.0.1 请求豁免</span></div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div>${settings.allowRemoteAccess ? '<p class="muted helper-copy lan-helper">其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p>' : ""}<p class="muted helper-copy">安全提示：开启远程访问后，任何持有令牌的人都能完整管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section><div class="helper-copy muted">通知渠道（Webhook / SMTP）请在「插件」页的通知推送插件配置中设置。</div>`);
+  enhanceSettingsToggles();
   bindAutoSave();
+}
+
+function enhanceSettingsToggles() {
+  const grid = document.querySelector(".toggle-grid");
+  if (!grid) return;
+  const descriptions = {
+    "st-autostart": "注册到当前用户启动项",
+    "st-lightweight": "不启动网页服务，重启后生效",
+    "st-browser": "服务启动后自动打开控制台",
+  };
+  grid.classList.add("settings-list");
+  const summary = grid.nextElementSibling;
+  if (summary?.classList.contains("helper-copy")) summary.remove();
+  grid.querySelectorAll(".mode-toggle").forEach(button => {
+    const row = document.createElement("div");
+    row.className = "settings-option";
+    const label = button.dataset.baseText || button.textContent.replace(/：(?:开|关)$/, "").trim();
+    row.innerHTML = `<div><strong>${esc(label)}</strong><span class="muted">${esc(descriptions[button.id] || "即时自动保存")}</span></div>`;
+    row.appendChild(button);
+    grid.appendChild(row);
+  });
 }
 
 /** 自动保存串行链（v0.7.3+ 用户需求：修改一次即保存一次，成功静默、失败 toast）：连续触发（快速切换开关）

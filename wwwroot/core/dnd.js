@@ -13,6 +13,49 @@
 
 let active = null;
 
+function scrollTargetKey(target) {
+  if (target?.id) return { type: "id", value: target.id };
+  if (target?.classList?.contains("modal-body")) return { type: "selector", value: ".modal-mask .modal-body" };
+  return null;
+}
+
+function captureScrollState(container) {
+  const state = [{ target: window, left: window.scrollX, top: window.scrollY }];
+  let parent = container.parentElement;
+  while (parent) {
+    if (parent.scrollHeight > parent.clientHeight || parent.scrollWidth > parent.clientWidth) {
+      state.push({ target: parent, key: scrollTargetKey(parent), left: parent.scrollLeft, top: parent.scrollTop });
+    }
+    parent = parent.parentElement;
+  }
+  return state;
+}
+
+function restoreScrollState(state) {
+  const restore = () => state.forEach(({ target, key, left, top }) => {
+    let current = target;
+    if (current !== window && !current?.isConnected && key) {
+      current = key.type === "id" ? document.getElementById(key.value) : document.querySelector(key.value);
+    }
+    if (current === window) window.scrollTo(left, top);
+    else if (current) { current.scrollLeft = left; current.scrollTop = top; }
+  });
+  requestAnimationFrame(() => {
+    restore();
+    requestAnimationFrame(restore);
+  });
+}
+
+function submitDrop(container, ids, itemId, scrollState, onDrop) {
+  let result;
+  try {
+    result = onDrop?.(ids, itemId);
+  } finally {
+    if (result && typeof result.then === "function") Promise.resolve(result).then(() => restoreScrollState(scrollState), () => restoreScrollState(scrollState));
+    else restoreScrollState(scrollState);
+  }
+}
+
 export function initDndList(container, { onDrop } = {}) {
   container.addEventListener("pointerdown", (event) => {
     const handle = event.target.closest(".drag-handle");
@@ -26,6 +69,7 @@ export function initDndList(container, { onDrop } = {}) {
       pointerId: event.pointerId,
       startClientY: event.clientY,
       offsetY: event.clientY - item.getBoundingClientRect().top,
+      scrollState: captureScrollState(container),
       placeBefore: null,
       moved: false,
     };
@@ -63,7 +107,7 @@ export function initDndList(container, { onDrop } = {}) {
     const ids = Array.from(container.querySelectorAll("[data-dnd-id]"))
       .map(el => el.dataset.dndId)
       .filter(Boolean);
-    onDrop?.(ids, s.item.dataset.dndId);
+    submitDrop(container, ids, s.item.dataset.dndId, s.scrollState, onDrop);
   });
 
   container.addEventListener("pointercancel", (event) => {
@@ -88,11 +132,12 @@ export function initDndList(container, { onDrop } = {}) {
     const index = items.indexOf(item);
     const target = event.key === "ArrowUp" ? index - 1 : index + 1;
     if (target < 0 || target >= items.length) return;
+    const scrollState = captureScrollState(container);
     container.insertBefore(item, event.key === "ArrowUp" ? items[target] : items[target].nextSibling);
     const ids = Array.from(container.querySelectorAll("[data-dnd-id]"))
       .map(el => el.dataset.dndId)
       .filter(Boolean);
-    onDrop?.(ids, item.dataset.dndId);
+    submitDrop(container, ids, item.dataset.dndId, scrollState, onDrop);
   });
 }
 

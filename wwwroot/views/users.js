@@ -2,6 +2,7 @@ import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
 import { pageHeader, valueField } from "../core/forms.js";
+import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
@@ -35,7 +36,7 @@ export async function pageScriptUsers(scriptId, token) {
   const usersMarkup = users.length ? `<section class="card dnd-list">${pageItems.map((user, pageIndex) => {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
     return `<article class="user-card" data-dnd-id="${esc(user.name)}">
-    <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">⋮⋮</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
     <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
       <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
       <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
@@ -48,7 +49,7 @@ export async function pageScriptUsers(scriptId, token) {
     </div>
   </article>`;
   }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
-  render(pageHeader("用户管理", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">← 返回脚本实例</a></div>${usersMarkup}`);
+  render(pageHeader("用户配置", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">${icon("arrowLeft")} 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
   restoreEditSessionCard(scriptId);
   wireUserDnd(scriptId);

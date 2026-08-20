@@ -21,6 +21,8 @@ test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编�
   await page.click(".modal button:has-text('保存')");
   await page.waitForTimeout(400);
   expect(await page.$(".modal-mask"), "必填未填时无法保存（弹窗保留）").toBeTruthy();
+  expect(await page.$(".field-error-text"), "字段错误不插入会改变布局的错误文字").toBeFalsy();
+  expect(await page.$("#sm-name.field-error"), "字段错误仅以红色输入框高亮").toBeTruthy();
   await page.click(".modal button:has-text('保存')");
   await page.waitForTimeout(200);
 
@@ -295,16 +297,30 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
 
   // 拖拽排序（v0.6.8+）：把手拖动到目标卡片顶部；re-render 竞态下 boundingBox 可能为 null，重试一次
   const dragUser = async (name, toBox) => {
-    const handle = page.locator(`.user-card[data-dnd-id="${name}"] .drag-handle`);
-    await handle.waitFor({ timeout: 10000 });
-    await handle.scrollIntoViewIfNeeded();
-    let box = await handle.boundingBox();
-    if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
-    if (!box) throw new Error("拖拽把手不可见：" + name);
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + 2, { steps: 8 });
-    await page.mouse.up();
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let mouseDown = false;
+      try {
+        // 用户列表会被轮询刷新；每次重试都重新创建 locator，避免复用已脱离 DOM 的句柄。
+        const handle = page.locator(`.user-card[data-dnd-id="${name}"] .drag-handle`);
+        await handle.waitFor({ timeout: 10000 });
+        await handle.scrollIntoViewIfNeeded();
+        let box = await handle.boundingBox();
+        if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
+        if (!box) throw new Error("拖拽把手不可见：" + name);
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        mouseDown = true;
+        await page.mouse.move(toBox.x + toBox.width / 2, toBox.y + 2, { steps: 8 });
+        await page.mouse.up();
+        return;
+      } catch (error) {
+        lastError = error;
+        if (mouseDown) await page.mouse.up().catch(() => {});
+        await page.waitForTimeout(500);
+      }
+    }
+    throw lastError;
   };
 
   const targetBox = async (selector) => {
@@ -1210,6 +1226,8 @@ test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
   try {
     await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="script-card"]').length === 3, null, { timeout: 10000 });
+    await page.evaluate(() => { document.body.style.paddingBottom = "2000px"; window.scrollTo(0, 40); });
+    const scrollBefore = await page.evaluate(() => window.scrollY);
     const dragScript = async (fromIndex, toBox) => {
       const cards = page.locator('[data-testid="script-card"]');
       const handle = cards.nth(fromIndex).locator(".drag-handle");
@@ -1232,6 +1250,8 @@ test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ pa
       return cards.length === 3 && cards[0].textContent.includes("拖拽脚本2");
     }, null, { timeout: 10000 });
     expect(true, "拖拽后 拖拽脚本2 成为第一张卡片").toBeTruthy();
+    const scrollAfter = await page.evaluate(() => window.scrollY);
+    expect(Math.abs(scrollAfter - scrollBefore) <= 2, `拖拽卡片后页面滚动位置保持（${scrollBefore} → ${scrollAfter}）`).toBeTruthy();
     // v0.6.10 修复：dnd onDrop 不等待 PUT 落盘完成，立即 fetch 存在竞态——轮询等待服务端顺序生效
     const orderOk = await waitFor(async () => {
       const l = await (await fetch(baseUrl + "api/scripts")).json();
