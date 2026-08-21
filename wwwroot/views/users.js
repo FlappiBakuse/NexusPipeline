@@ -29,11 +29,11 @@ export async function pageScriptUsers(scriptId, token) {
   if (!script) { render('<div class="empty"><strong>脚本实例不存在</strong><a class="back-link" href="#/scripts">返回脚本实例</a></div>'); return; }
   const users = script.users || [];
   const atLimit = !!(state.limits && users.length >= state.limits.maxUsersPerScript);
-  const action = `<button type="button" data-action="open-user-modal" data-id="${script.id}" ${atLimit ? "disabled" : ""}>添加用户${atLimit ? `（${users.length}/${state.limits.maxUsersPerScript}）` : ""}</button>`;
+  const action = `<button class="primary" type="button" data-action="open-user-modal" data-id="${script.id}" ${atLimit ? "disabled" : ""}>添加用户${atLimit ? `（${users.length}/${state.limits.maxUsersPerScript}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(users.length / USER_PAGE_SIZE));
   if (userPage > totalPages) userPage = totalPages;
   const pageItems = users.slice((userPage - 1) * USER_PAGE_SIZE, userPage * USER_PAGE_SIZE);
-  const usersMarkup = users.length ? `<section class="card dnd-list">${pageItems.map((user, pageIndex) => {
+  const usersMarkup = users.length ? `<section class="card list-surface dnd-list">${pageItems.map((user, pageIndex) => {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
     return `<article class="user-card" data-dnd-id="${esc(user.name)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
@@ -42,9 +42,9 @@ export async function pageScriptUsers(scriptId, token) {
       <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
     </div>
       <div class="action-row"><div class="user-actions">
-        <button class="sm" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
-        <button class="sm" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
-        <button class="sm danger solid" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
+        <button class="sm ghost" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
+        <button class="sm ghost" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
+        <button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
       </div></div>
     </div>
   </article>`;
@@ -104,7 +104,7 @@ export function openUserModal(scriptId, userName = "") {
     <div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-enabled" id="um-enabled" aria-pressed="${d.enabled ? "true" : "false"}">启用用户</button><span class="muted">禁用后不可选用于运行</span></div>
     <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-pre-once" id="um-pre-once" aria-pressed="${d.preRunOnceOnly ? "true" : "false"}">仅首次执行</button><span class="muted">重试时不再执行</span></div></div>
     <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-post-final" id="um-post-final" aria-pressed="${d.postRunOnFinalOnly ? "true" : "false"}">仅最终完成</button><span class="muted">仅最终运行完成启用</span></div></div>`;
-  showModal(modalShell(user ? "编辑用户" : "添加用户", body, '<button type="button" data-action="save-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
+    showModal(modalShell(user ? "编辑用户" : "添加用户", body, '<button class="primary" type="button" data-action="save-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
 export async function saveUser() {
@@ -140,7 +140,7 @@ export async function editUserConfig(scriptId, userName) {
 
 /** 「配置编辑中」锁定卡片（Esc/遮罩/× 均不可关闭，只能完成或取消）；刷新后由用户管理页自动恢复。 */
 function showEditConfigCard(scriptId, userName) {
-  showModal(modalShell("配置编辑中", `<p class="modal-copy">主程序已启动（不带参数）。请自行设置好当前用户「${esc(userName)}」的脚本配置。设置完成后点击「完成」保存，或点击「取消」放弃本次修改。</p>`, `<button type="button" data-action="edit-config-done" data-id="${scriptId}" data-name="${esc(userName)}">完成</button><button class="ghost" type="button" data-action="edit-config-cancel" data-id="${scriptId}" data-name="${esc(userName)}">取消</button>`), false, true);
+  showModal(modalShell("配置编辑中", `<p class="modal-copy">主程序已启动（不带参数）。请自行设置好当前用户「${esc(userName)}」的脚本配置。设置完成后点击「完成」保存，或点击「取消」放弃本次修改。</p>`, `<button class="primary" type="button" data-action="edit-config-done" data-id="${scriptId}" data-name="${esc(userName)}">完成</button><button class="ghost" type="button" data-action="edit-config-cancel" data-id="${scriptId}" data-name="${esc(userName)}">取消</button>`), false, true);
 }
 
 export async function editConfigAction(scriptId, userName, action) {

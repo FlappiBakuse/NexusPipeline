@@ -21,7 +21,7 @@ export function confirmModal(title, message, confirmAction, data = {}) {
     .map(([key, value]) => ` data-${key}="${esc(value)}"`)
     .join("");
   const isDelete = confirmAction.startsWith("confirm-delete");
-  const confirmClass = isDelete ? "danger solid" : "";
+  const confirmClass = isDelete || confirmAction === "confirm-cancel-run" ? "danger solid" : "primary";
   const confirmLabel = isDelete
     ? "确认删除"
     : confirmAction === "restart-confirm" ? "确认重启"

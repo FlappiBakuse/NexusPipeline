@@ -377,7 +377,7 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
   await api("DELETE", "/api/scripts/" + created.id);
 });
 
-test("下一调度队列显示/倒计时 + 通知统计", async ({ page }) => {
+test("下一调度队列显示/倒计时 + 插件能力精简", async ({ page }) => {
   const statDir = path.join(runtimeDir, "stat");
   fs.rmSync(statDir, { recursive: true, force: true });
   fs.mkdirSync(statDir, { recursive: true });
@@ -403,8 +403,8 @@ test("下一调度队列显示/倒计时 + 通知统计", async ({ page }) => {
   expect(/^\d{2}:\d{2}:\d{2}$/.test(cd.trim()), "下一调度队列卡片上方显示倒计时（" + cd + "）").toBeTruthy();
   expect((await page.textContent("#next-q-label")) === "下一调度队列：统计队列", "下一调度队列卡片第二行显示队列名称").toBeTruthy();
   expect(await page.evaluate(() => document.querySelectorAll('[data-testid="stat-next"] > *').length === 2), "下一调度队列卡片保持两行布局").toBeTruthy();
-  const body = await page.textContent("body");
-  expect(body.includes("1 个脚本实例") && body.includes("1 个调度队列"), "通知统计显示 1 个脚本实例 / 1 个调度队列").toBeTruthy();
+  const notifyCard = page.locator(".plugin-card").filter({ hasText: "通知推送" }).first();
+  expect(await notifyCard.locator(".qk-row").count() === 0 && !(await notifyCard.textContent()).includes("已启用通知"), "仪表盘通知插件行移除冗余通知统计").toBeTruthy();
 
   await api("DELETE", "/api/queues/" + qid);
   await api("DELETE", "/api/scripts/" + sid);

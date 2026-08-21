@@ -3,7 +3,7 @@ import { baseUrl, CI_MODE, ensureService } from "./helpers.mjs";
 
 await ensureService();
 
-test("仪表盘：统计卡片 + 版本 + 插件配置信息", async ({ page }) => {
+test("仪表盘：统计卡片 + 版本 + 插件能力状态", async ({ page }) => {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".stat-grid", { timeout: 15000 });
   const body = await page.textContent("body");
@@ -18,7 +18,8 @@ test("仪表盘：统计卡片 + 版本 + 插件配置信息", async ({ page }) 
   expect(nums.includes("无"), "无定时队列时下一调度显示「无」").toBeTruthy();
   const pcards = await page.$$eval(".plugin-card", els => els.map(e => e.textContent.trim()));
   expect(pcards.some(t => t.includes("通知推送")), "插件小卡片含「通知推送」").toBeTruthy();
-  expect(body.includes("已启用通知"), "仪表盘插件卡片显示通知配置信息").toBeTruthy();
+  const notifyCard = pcards.find(t => t.includes("通知推送")) || "";
+  expect(!notifyCard.includes("已启用通知") && !notifyCard.includes("个脚本实例") && !notifyCard.includes("个调度队列"), "仪表盘通知插件行不显示冗余通知统计").toBeTruthy();
   expect(await page.locator(".main-nav .nav-icon svg").count(), "主导航统一使用 SVG 图标").toBe(7);
 });
 

@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.8.4（开发中）
+
+### 前端视觉重构
+
+- 收敛为低阴影、细边框、统一圆角和数字间距 token 的工作台视觉，保留原生 ES modules、现有 API、路由、主题、响应式和无障碍交互契约。
+- 将脚本实例、调度队列、用户、定时任务和队列任务统一为列表行；历史与插件管理统一为表格 surface；设置和通知插件配置减少嵌套卡片层级。
+- 普通按钮改为 neutral/ghost，新增 `primary` 主操作语义；次要操作与删除操作恢复可见描边，删除确认继续使用实心危险按钮。
+- Dashboard 插件摘要改为紧凑能力行；移除通知插件行中的重复状态与实例统计文案；普通内容块取消阴影，Modal、Toast、拖拽项等浮层保留独立 elevation。
+- 队列通知切换控件与远程访问设置采用同一设置行结构；移除队列任务列表外层卡片，保留任务行与拖拽排序。
+- 保留 `effects/particles.js`、`#ambient-particles` 及其低透明度、减弱动效、页面隐藏暂停和窗口尺寸响应行为。
+
+### 验证
+
+- 管理员 `build.cmd`：通过（保留既有 3 项 nullable 警告）。
+- 前端 JavaScript 模块语法检查：通过；`git diff --check`：通过。
+- 管理员加速档 Playwright e2e：81/81 通过，`failedTests` 为空。
+- 发布前真实计时档：单元测试 148/148、e2e 81/81、judge 150/150、chaos 166/166，全部通过。
+
 ## v0.8.3（Pre-release）
 
 ### 项目与文档治理

@@ -22,12 +22,11 @@ function runningMarkup(running) {
   </tbody></table></div><div class="running-records">${records}</div>`;
 }
 
-function pluginMarkup(status, stats) {
-  return (status.plugins || []).map(plugin => `<article class="plugin-card">
+function pluginMarkup(status) {
+  return (status.plugins || []).map(plugin => `<article class="plugin-card capability-row">
     <div class="p-name">${esc(plugin.displayName)}</div>
     <div class="p-ver">${esc(plugin.version)} · ${esc(plugin.description || "本地插件")}</div>
-    <div>${plugin.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
-    ${plugin.name === "notify" ? `<div class="qk-row">已启用通知 ${plugin.enabled ? '<span class="badge ok">开</span>' : '<span class="badge muted">关</span>'}<br><b>${stats.enabledScripts ?? 0}</b> 个脚本实例 / <b>${stats.enabledQueues ?? 0}</b> 个调度队列</div>` : ""}
+    <div class="capability-status">${plugin.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
   </article>`).join("");
 }
 
@@ -52,8 +51,8 @@ function runningPanelMarkup(status) {
   return `<div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}`;
 }
 
-function pluginPanelMarkup(status, stats) {
-  return `<div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid">${pluginMarkup(status, stats) || '<div class="empty">暂无已加载插件</div>'}</div>`;
+function pluginPanelMarkup(status) {
+  return `<div class="section-heading"><h3>插件能力</h3><span class="muted">本地扩展状态</span></div><div class="plugin-grid capability-list">${pluginMarkup(status) || '<div class="empty">暂无已加载插件</div>'}</div>`;
 }
 
 export async function pageDashboard(token) {
@@ -71,14 +70,13 @@ export async function pageDashboard(token) {
   }
   if (!isCurrent("dashboard", token)) return;
   const next = status.nextSchedule;
-  const stats = status.notifyStats || {};
   setVersionLabel(status.version);
   if (!document.querySelector('[data-testid="stat-scripts"]')) {
     render(pageHeader("运行概览", "仪表盘", "查看当前运行状态、调度概览和通知能力。")
       + statGridMarkup(status, next)
       + `<div id="system-action-area">${systemActionCard(status.systemAction)}</div>
-      <section class="card" data-testid="running-panel">${runningPanelMarkup(status)}</section>
-      <section class="card" id="dashboard-plugin-panel">${pluginPanelMarkup(status, stats)}</section>`);
+      <section class="card section-surface" data-testid="running-panel">${runningPanelMarkup(status)}</section>
+      <section class="card section-surface" id="dashboard-plugin-panel">${pluginPanelMarkup(status)}</section>`);
     if (next) startCountdown("next-q", next.time); else stopCountdown();
   } else {
     // 局部更新（v0.6.7+）：不整页重渲染，避免倒计时定时器反复重建与滚动/焦点重置；区域缺失时静默跳过。
@@ -106,7 +104,7 @@ export async function pageDashboard(token) {
     const runningPanel = document.querySelector('[data-testid="running-panel"]');
     if (runningPanel) runningPanel.innerHTML = runningPanelMarkup(status);
     const pluginPanel = document.querySelector("#dashboard-plugin-panel");
-    if (pluginPanel) pluginPanel.innerHTML = pluginPanelMarkup(status, stats);
+    if (pluginPanel) pluginPanel.innerHTML = pluginPanelMarkup(status);
   }
   startSystemActionCountdown();
   schedule(() => pageDashboard(token), 3000, "dashboard", token);

@@ -79,13 +79,13 @@ export async function pageScripts(token) {
   state.plugins = status.plugins || [];
   const notifyOn = notifyAvailable();
   const atLimit = !!(state.limits && scripts.length >= state.limits.maxScripts);
-  const action = `<button type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
+  const action = `<button class="primary" type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(scripts.length / SCRIPT_PAGE_SIZE));
   if (scriptPage > totalPages) scriptPage = totalPages;
   const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
     ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
-    : `<section class="card"><div class="script-grid">
+    : `<section class="card list-surface"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
         <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
         <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
@@ -94,9 +94,9 @@ export async function pageScripts(token) {
           <div class="script-name-row entity-meta-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
         </div>
         <div class="script-ops">
-          <button class="sm" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
-          <button class="sm" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
-          <button class="sm danger solid" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
+          <button class="sm ghost" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
+          <button class="sm ghost" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
+          <button class="sm danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
         </div>
       </article>`).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
@@ -261,7 +261,7 @@ export async function openScriptModal(id = "", plugin = "") {
         </div>
       </div>
     </div>`;
-  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button type="button" data-action="save-script">保存</button>';
+  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-script">保存</button>';
   showModal(modalShell(title, body, footer), true);
   syncScriptGhostState();
   syncJudgeBox();
