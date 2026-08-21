@@ -12,11 +12,11 @@ queues.json
 history/
 outputs/
 logs/
-uitest/node_modules/
-uitest/runtime/
-uitest/browsers/
-uitest/test-results/
-uitest/flake-monitor-logs/
+tests/e2e/node_modules/
+tests/e2e/runtime/
+tests/e2e/browsers/
+tests/e2e/test-results/
+tests/e2e/flake-monitor-logs/
 playwright-report/
 .build-src-hash
 web.port

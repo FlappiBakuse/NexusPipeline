@@ -21,8 +21,8 @@
 | 依赖 | 版本 | 用途 |
 |---|---|---|
 | Windows | 10/11 | 唯一支持平台（WinForms 托盘 + Win32 API） |
-| .NET SDK | 8.x | 编译与运行（`dotnet --version` 验证；正式版 exe 为框架依赖，部署机仅需 .NET 8 Runtime） |
-| Node.js（仅测试） | 20.x | Playwright 端到端测试（`uitest/` 已装入依赖，不全局安装） |
+| .NET SDK | 8.x | 编译与运行（`dotnet --version` 验证；正式版 exe 为框架依赖，部署机仅需 .NET 8 Desktop Runtime） |
+| Node.js（仅测试） | 20.x | Playwright 端到端测试（`tests/e2e/` 已装入依赖，不全局安装） |
 
 - **无其他外部依赖**：不依赖数据库、云平台、前端构建链；网页管理界面为纯静态 ES modules，浏览器直接加载。
 - **管理员权限**：程序必须以管理员身份运行（正式版构建带 `requireAdministrator` 清单，双击自动提权；非管理员启动拒绝并退出，exit 2）。开发调试请使用管理员 shell。
@@ -71,33 +71,33 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 套件 | 命令 | 断言数 | 耗时 | 管理员 |
 |---|---|---|---|---|
-| 单元测试 | `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 304（148 个测试） | 毫秒级 | 否 |
-| e2e（全量） | `npx playwright test`（先 build.cmd） | 81 | 加速档约 4 分钟 | 是 |
-| e2e（CI 核心集） | `$env:NEXUS_CI = "1"; npx playwright test` | 80 | 加速档约 4 分钟 | 是 |
-| 专项稳定性 | `node uitest\judge-scenarios.mjs` | 150 | 加速档数分钟 | 是 |
-| 混沌压力 | `node uitest\chaos-queue.mjs` | 166（加速档可能 167） | 加速档数分钟 | 是 |
+| 单元测试 | `dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 纯逻辑回归 | 毫秒级 | 否 |
+| e2e（全量） | 在 `tests/e2e/` 执行 `npx playwright test`（先 build.cmd） | 完整浏览器回归 | 加速档数分钟 | 是 |
+| e2e（CI 核心集） | 在 `tests/e2e/` 设置 `NEXUS_CI=1` 后执行 `npx playwright test` | CI 核心回归 | 加速档数分钟 | 是 |
+| 专项稳定性 | 在 `tests/e2e/` 执行 `node judge-scenarios.mjs` | 判定与配置专项回归 | 加速档数分钟 | 是 |
+| 混沌压力 | 在 `tests/e2e/` 执行 `node chaos-queue.mjs` | 调度队列稳定性回归 | 加速档数分钟 | 是 |
 
 ### 4.2 时间加速档（日常迭代默认）
 
-- **加速档**：`$env:NEXUS_TIME_SCALE = "10"`——宿主等待按比例缩放（1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms）。`uitest\run-uitest.cmd` 已默认内置加速档。
+- **加速档**：`$env:NEXUS_TIME_SCALE = "10"`——宿主等待按比例缩放（1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms）。`tests\e2e\run-e2e.cmd` 已默认内置加速档。
 - **真实计时档**：不设 `NEXUS_TIME_SCALE`（`Remove-Item Env:NEXUS_TIME_SCALE`）——**发布前必须真实计时档全量回归**。
 - **注意**：判断脚本单次执行 30 秒上限不随加速缩放（外部进程冷启动可达数秒）；测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（契约见 AGENTS.md「加速档测试契约」）。
 
 ### 4.3 测试隔离与 flake 治理
 
-- e2e 自带 `uitest/runtime/` 隔离目录（复制 release 版 exe + wwwroot + plugins），不污染项目根；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件跨进程兜底）。
+- e2e 自带 `tests/e2e/runtime/` 隔离目录（复制 release 版 exe + wwwroot + plugins），不污染项目根；服务生命周期由 `tests/e2e/tests/global-setup|teardown.mjs` 管理（PID 文件跨进程兜底）。
 - 测试中日期一律用 `localDate()`（本地时区），禁止 `new Date().toISOString()`（UTC 跨午夜断言失败）。
-- flake 台账 `uitest/FLAKE-LEDGER.md` + 采样器 `uitest/flake-monitor.mjs`（进程/端口 500ms 采样）；每次全量回归更新台账直至清零。
+- flake 台账 `tests/e2e/FLAKE-LEDGER.md` + 采样器 `tests/e2e/flake-monitor.mjs`（进程/端口 500ms 采样）；每次全量回归更新台账直至清零。
 
 ### 4.4 测试范围分层（改动后必跑）
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端（wwwroot/ 与 uitest/tests 断言） | `build.cmd` + e2e 全量 81（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
-| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（166，加速档采样兜底可能 167）+ `dotnet test`（304），默认加速档 |
+| 仅前端（wwwroot/ 与 `tests/e2e/tests` 断言） | `build.cmd` + e2e 全量（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
+| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios + chaos-queue + `dotnet test`，默认加速档 |
 | 版本发布前 | 真实计时档全量（e2e + judge + chaos）+ 单测 |
 
-> 新增或删除测试用例/断言后，同步更新 AGENTS.md / CONTRIBUTING.md / README.md 中的数字。
+> 测试用例或断言发生变化时，更新 CHANGELOG、Release Notes 或 CI 验证记录；长期规范文档只维护测试套件、命令和通过要求。
 
 ## 5. 调试技巧
 
@@ -122,13 +122,13 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 - `Set-Content` 破坏 UTF-8 中文的坑（5.1 时代）已消除；稳妥起见写中文文件仍用编辑工具或 `[IO.File]::WriteAllText(..., [Text.Encoding]::UTF8)`（无 BOM）。
 - **0x800700E8**：无控制台父进程启动 cmd/bat 必须带有效 stdio（`CreateProcess + RedirectStandardOutput/Error=true` 并消费）；**禁止**对 bat 用 `UseShellExecute`、禁止无重定向启动 cmd。
 - **Win32Exception 740**：目标程序要求管理员——程序已强制管理员运行，仍出现时明确报错失败；**禁止 runas 降级提权**。
-- `build.cmd` / `run-uitest.cmd` 不得加入无条件 `pause`（CI/PowerShell 调用会挂死）。
+- `build.cmd` / `run-e2e.cmd` 不得加入无条件 `pause`（CI/PowerShell 调用会挂死）。
 - 脚本自启动参数（Args）以显式路径开头（`X:\`、`\\`、`.\`、`..\`）= 运行时启动目标（管理端/执行端分离），`?` 后为参数；**Args 一律禁止引号**。
 - gh 中文操作（曾踩坑）：修改已发布 release 前先备份原正文；含中文的 gh 写操作建议走文件（`--notes-file`，UTF-8 无 BOM）。
 
 ### 5.4 单元测试
 
-- 工程：`src/NexusPipeline.Tests/`（xUnit，`InternalsVisibleTo` 暴露 internal 契约，`Compile Remove` 排除测试目录）。
+- 工程：`tests/NexusPipeline.Tests/`（xUnit，`InternalsVisibleTo` 暴露 internal 契约）。
 - 覆盖：判定状态机（SessionJudge）、关键字规则（KeywordRule）、日志路径解析（LogPattern）、模型规则校验（ScriptUserRule/QueueRule）、进程树清理（ProcessTreeTests）、自动更新配置同步（ConfigSwapSyncTests：还原描述执行器 array/map/稳定 ID 定位/事务镜像/内容有效性校验/首次检测时机，v0.7.6+）。
 
 ## 6. 运行时数据
@@ -154,6 +154,6 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | 端口被占用自动 +1 | 预期行为；检查是否有旧实例残留 |
 | 重构建报 exe 锁定 | `Get-Process nexus-pipeline \| Stop-Process` 后重试 |
 | Web 打不开 / ECONNREFUSED | 确认服务在运行、端口正确、轻量模式未开启（轻量模式无 Web） |
-| 测试全量级联失败 | 服务残留：`uitest/runtime` 清理残留进程后再跑；检查 `uitest/flake-monitor-logs/` 采样 |
+| 测试全量级联失败 | 服务残留：`tests/e2e/runtime` 清理残留进程后再跑；检查 `tests/e2e/flake-monitor-logs/` 采样 |
 | 脚本判定异常 | 检查 `logs/` 管理器日志与 `history/` 按尝试分批日志；判断脚本模式看 JudgeError 输出 |
 | 配置还原异常 | `data/{脚本Id}/{用户}/` 的 `.session` 标记与 swap-backup；重启服务触发自愈 |

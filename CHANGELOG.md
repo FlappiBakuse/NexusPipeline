@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.8.3（Pre-release）
+
+### 项目与文档治理
+
+- 统一框架依赖单文件发布、队列全局串行和文档单一事实源表述。
+- 将历史全面评估报告归档至 `docs/archive/`，收敛 README、设计、架构、开发、贡献、发布和路线文档职责。
+- 将测试目录整理为 `tests/NexusPipeline.Tests/` 与 `tests/e2e/`，同步构建、CI、测试隔离和文档路径。
+- 增加 `SECURITY.md`、Issue/PR 模板、Dependabot、`.editorconfig`、`.gitattributes` 和 CI 最小权限声明。
+- 测试数量与断言数量集中记录在本版本验证结果、后续 Release Notes 和 CI 产物中。
+
+### 验证
+
+- 管理员 `build.cmd`：通过（保留既有 3 项 nullable 警告）。
+- 单元测试：148/148 通过（304 项断言）。
+- 管理员加速档 Playwright e2e：81/81 通过（4.1 分钟）；`judge-scenarios`：150/150 通过；`chaos-queue`：167/167 通过。
+- 管理员真实计时档 Playwright e2e：81/81 通过（8.9 分钟）。
+- 管理员真实计时档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过。
+
 ## v0.8.2（Pre-release）
 
 ### 后端架构第三次优化

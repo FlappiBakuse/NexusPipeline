@@ -8,7 +8,7 @@
 
 - 网页管理界面：浏览器打开即用，手机也能操作
 - 纯本地运行：不需要任何云平台、数据库，解压即用，配置全部留在你自己的电脑上
-- C# / .NET 8，单文件 exe，体积小、无依赖
+- C# / .NET 8，框架依赖的单文件 exe；不依赖数据库、云平台或前端构建环境，运行机器需安装 .NET 8 Desktop Runtime
 
 ## 它能帮你做什么
 
@@ -99,6 +99,7 @@
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 开发者 | 版本路线与后续开发清单 |
 | [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) | 开发者 | 已知问题台账（分版本修复） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献者 | 协作规范（Issue / PR / 提交信息 / 测试流程） |
+| [SECURITY.md](SECURITY.md) | 所有人 | 安全漏洞报告与敏感信息处理 |
 | [CHANGELOG.md](CHANGELOG.md) | 所有人 | 版本历史（升级前必看） |
 | [plugins/README.md](plugins/README.md) | 高级用户 | 专项插件数据化形态与自定义插件指南 |
 

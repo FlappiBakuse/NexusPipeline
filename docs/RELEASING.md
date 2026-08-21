@@ -2,7 +2,7 @@
 
 本文件是版本发布（tag / release / 资产）的操作手册，供维护者使用。开发环境搭建见 [DEVELOPMENT.md](DEVELOPMENT.md)；协作规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)；版本路线见 [ROADMAP.md](ROADMAP.md)。
 
-> **发布权（最高优先级）**：commit / push / pull request / release 的创建与发布，必须先经用户明确同意，未经同意不得执行（含 git commit、push、gh pr、gh release、打 tag）。
+> **发布权（最高优先级）**：commit、push、tag、Pull Request 和 Release 由项目维护者按根目录 `AGENTS.md` 授权规则执行。未经维护者授权不得发布。
 
 ## 目录
 
@@ -34,15 +34,15 @@
 
 1. 确认本地构建与测试全绿：
    - `build.cmd`（提权版）；
-    - 单元测试 `dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`（304 断言 / 148 个测试）；
-   - **真实计时档**（不设 `NEXUS_TIME_SCALE`）全量回归：e2e 81 + judge-scenarios 150 + chaos-queue 166。
+    - 单元测试 `dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`；
+   - **真实计时档**（不设 `NEXUS_TIME_SCALE`）全量回归：e2e + judge-scenarios + chaos-queue。
 2. **文档一致性自检（v0.6.2+）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/plugins-README 只做简引）。
 3. 核对 ROADMAP 勾选状态与 KNOWN-ISSUES 台账（本版应修项状态）。
 
 ## 3. 发布流程
 
-1. 按用户要求的版本号完成版本 bump 提交并推送（提交信息见 CONTRIBUTING.md）；
-2. 打 tag：`git tag vX.Y.Z` → `git push origin vX.Y.Z`（发布操作先经用户同意）；
+1. 按已授权的版本计划完成版本 bump 提交并推送（提交信息见 CONTRIBUTING.md）；
+2. 打 tag：`git tag vX.Y.Z` → `git push origin vX.Y.Z`（按根目录 `AGENTS.md` 的发布权规则执行）；
 3. 编写 release notes 到临时文件（`gh release create` 引号坑，用 `--notes-file`）；
 4. `gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file <file>`（v1.0.0 起不加 `--prerelease`）；
 5. 上传资产：
@@ -102,5 +102,5 @@ SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
 
 - 更新 [KNOWN-ISSUES.md](KNOWN-ISSUES.md) 台账（本版修复项状态 → 已修复）；
 - 更新 [ROADMAP.md](ROADMAP.md)（版本状态勾选）；
-- 更新 `uitest/FLAKE-LEDGER.md`（发布前回归的 flake 记录）；
+- 更新 `tests/e2e/FLAKE-LEDGER.md`（发布前回归的 flake 记录）；
 - 确认 CHANGELOG.md 已含本版条目（Keep a Changelog 规范，见 [CHANGELOG.md](../CHANGELOG.md)）。

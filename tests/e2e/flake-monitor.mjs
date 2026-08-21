@@ -105,7 +105,7 @@ fs.mkdirSync(resultsDir, { recursive: true });
 fs.writeFileSync(logFile, "", "utf8");
 try { fs.rmSync(stopFile, { force: true }); } catch { /* 忽略 */ }
 emit("BOOT", `flake 监控采样器启动（runtime=${runtimeDir}，端口 ${PORT}，500ms 采样）`);
-emit("BOOT", "停止方式：touch uitest/flake-monitor-logs/flake-monitor.stop 或 Ctrl+C");
+emit("BOOT", "停止方式：touch tests/e2e/flake-monitor-logs/flake-monitor.stop 或 Ctrl+C");
 
 const stopTimer = setInterval(() => {
   if (fs.existsSync(stopFile)) {

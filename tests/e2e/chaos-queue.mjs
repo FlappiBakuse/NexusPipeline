@@ -9,7 +9,7 @@
  *  - 随机种子轮（seed 随机，只断言不变量）
  *  - 脚本级自定义通知（另建小队列 notifyEnabled=false + 脚本 notifyEnabled=true）
  *
- * 运行：node uitest\chaos-queue.mjs   （先跑 build.cmd；管理员 shell）
+ * 运行：node chaos-queue.mjs   （先跑 build.cmd；管理员 shell）
  */
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..");
+const projectRoot = path.resolve(__dirname, "..", "..");
 const releaseDir = path.join(projectRoot, "release");
 const runtimeDir = path.join(__dirname, "runtime");
 const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
@@ -115,10 +115,10 @@ async function waitNoRunning(timeoutMs = 600000, intervalMs = 500) {
 /* ---------------- 准备阶段 ---------------- */
 
 function setupRuntime() {
-  // 清理上次残留的测试服务（占用 58731），仅杀 uitest/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
+  // 清理上次残留的测试服务（占用 58731），仅杀 tests/e2e/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 忽略 */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });

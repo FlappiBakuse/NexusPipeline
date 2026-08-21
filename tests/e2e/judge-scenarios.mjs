@@ -9,7 +9,7 @@
  *  - BUG 验证：新文件残留（B-2）/ 路径逃逸（B-3）/ marker 后重复触发（B-4）/ PostRun 覆盖通知文本（B-5）/
  *    API 空代码保存（B-8）/ 判断脚本超时与容错
  *
- * 运行：node uitest\judge-scenarios.mjs   （先跑 build.cmd）
+ * 运行：node judge-scenarios.mjs   （先跑 build.cmd）
  */
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
@@ -18,7 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..");
+const projectRoot = path.resolve(__dirname, "..", "..");
 const releaseDir = path.join(projectRoot, "release");
 const runtimeDir = path.join(__dirname, "runtime");
 const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
@@ -27,7 +27,7 @@ const JSON_HDR = { "Content-Type": "application/json" };
 const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 const HOOK_PORT = 58888;
 
-// 测试时间加速（v0.6.2+，v0.6.4 统一 scale=10）：run-uitest 加速档设置 NEXUS_TIME_SCALE 时，宿主等待（stall/周期触发/宽限/超时）按比例缩放，
+// 测试时间加速（v0.6.2+，v0.6.4 统一 scale=10）：run-e2e 加速档设置 NEXUS_TIME_SCALE 时，宿主等待（stall/周期触发/宽限/超时）按比例缩放，
 // 伪造脚本的墙钟卡住时长与判断脚本内部墙钟常量同步缩放，保持场景语义（卡住时长仍远大于缩放后的周期触发间隔）。
 const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
 const FAST = TIME_SCALE > 1;
@@ -98,10 +98,10 @@ async function waitNoRunning(timeoutMs = 120000, intervalMs = 300) {
 }
 
 function setupRuntime() {
-  // 清理上次残留的测试服务（占用 58731），仅杀 uitest/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
+  // 清理上次残留的测试服务（占用 58731），仅杀 tests/e2e/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 忽略 */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });

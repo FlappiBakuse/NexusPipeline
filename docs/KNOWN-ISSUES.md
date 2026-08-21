@@ -15,14 +15,14 @@
 
 | 编号 | 问题 | 位置 | 建议 |
 |---|---|---|---|
-| KN-09 | **日志截断后立即写入的内容漏判窗口**：`ReadNew` 长度检查在 `Length < position` 时把 position 置为新尾——若截断后、下次读取前已写入新内容，截断后新写内容不进入判定输入（失败关键字可能漏判） | `src/Services/LogMonitor.cs:138-143` | 随版（两难问题：补漏判需知截断点，文件系统不提供；改从头读复活旧行重复污染，实际影响小于已修问题，建议文档化保留） |
+| KN-09 | **日志截断后立即写入的内容漏判窗口**：`ReadNew` 长度检查在截断后、下次读取前已写入新内容时，可能无法把截断后的新写内容纳入判定输入 | `src/Services/LogMonitor.cs` | 随版（两难问题：补漏判需知截断点，文件系统不提供；改从头读会复活旧行，建议文档化保留） |
 
 ## 随版（低概率/低影响边界项，2026-08-16 评估登记）
 
 | 编号 | 问题 | 位置 | 状态 |
 |---|---|---|---|
-| KN-73 | **Mutex「持有中销毁」窗口**：`RemoveMutex` 在 `WaitOne` 成功之后、action 执行期间 Dispose 时，finally 的 `ReleaseMutex` 异常被吞、互斥体所有权丢失，同进程重建同名 Mutex 后理论上双线程可同时进临界区（KN-36 修复仅覆盖「WaitOne 时已 Dispose」窗口） | `src/Services/ConfigSwapPrimitives.cs:106-152` | v0.7.10 复核未能稳定复现；保留为低概率并发边界（Web 删除路径有 `gate.Wait(0)` 前置保护） |
-| KN-82 | **首次检测同步阻塞主监控循环**：`WithSwapLock`（30 秒锁上限）+ 800ms 双采样 + 全量镜像期间日志判定/游戏前置/超时检查全部延迟；跨进程锁竞争时最长阻塞 30 秒（日志行不丢但判定迟到） | `src/Services/ConfigSwapSession.cs:299-331` | v0.7.10 复核未能稳定复现；保留为低概率锁竞争边界 |
+| KN-73 | **Mutex「持有中销毁」窗口**：`RemoveMutex` 在 `WaitOne` 成功之后、action 执行期间 Dispose 时，finally 的 `ReleaseMutex` 异常被吞、互斥体所有权丢失，同进程重建同名 Mutex 后理论上双线程可同时进临界区（KN-36 修复仅覆盖「WaitOne 时已 Dispose」窗口） | `src/Services/ConfigSwapPrimitives.cs` | v0.7.10 复核未能稳定复现；保留为低概率并发边界（Web 删除路径有 `gate.Wait(0)` 前置保护） |
+| KN-82 | **首次检测同步阻塞主监控循环**：`WithSwapLock`（30 秒锁上限）+ 800ms 双采样 + 全量镜像期间日志判定/游戏前置/超时检查全部延迟；跨进程锁竞争时最长阻塞 30 秒（日志行不丢但判定迟到） | `src/Services/ConfigSwapSession.cs` | v0.7.10 复核未能稳定复现；保留为低概率锁竞争边界 |
 
 ## 语义文档化保留（2026-08-16 与用户对齐确认，非缺陷）
 

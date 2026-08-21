@@ -5,7 +5,8 @@
 - 版本发布（tag / release / 资产）见 [docs/RELEASING.md](docs/RELEASING.md)；
 - 开发环境搭建与调试见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 版本路线与后续开发清单见 [docs/ROADMAP.md](docs/ROADMAP.md)；
-- 已知问题台账见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)。
+- 已知问题台账见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)；
+- 安全漏洞报告见 [SECURITY.md](SECURITY.md)。
 
 ## 目录
 
@@ -21,9 +22,8 @@
 
 ## 1. 版本与发布权
 
-- **commit / push / pull request / release 的创建与发布，必须先经用户明确同意**，未经同意不得执行（含 git commit、push、gh pr、gh release、打 tag）。
-- 同一版本内的多轮对话修改，全部累积为同一版本的一部分；未经用户要求，不得中途拆分提交或单独发布。
-- 版本号（bump）仅随用户要求的版本开发进行，不得擅自递增。
+- 普通贡献通过 Pull Request 提交；版本 tag、Release 与发布资产由项目维护者负责。
+- 版本号变更应对应已确认的版本开发计划，并同步更新相关文档。
 - 不得提交运行产物、用户配置、日志、密钥；配置与用户数据永不进入版本库。
 
 ## 2. 协作模式（以 v1.0.0 为界）
@@ -51,12 +51,11 @@
 
 ## 4. 如何提交代码（PR / push）
 
-1. 同步最新代码：`git checkout main && git pull`（提交前必做）；
-2. 在 `main` 上完成改动（v1.0.0 前阶段；确需协作时开前缀分支）；
-3. 本地验证全绿（见第 7 节）；
-4. 按第 5 节规范提交（小改动一条提交，大改动分多条逻辑提交）；
-5. 推送：`git push origin main`（禁止 force push；v1.0.0 起走 PR + squash）；
-6. 涉及发布：按 [docs/RELEASING.md](docs/RELEASING.md) 执行。
+1. 从最新 `main` 创建带前缀的工作分支：`feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/`；
+2. 本地验证全绿（见第 7 节）；
+3. 按第 5 节规范提交，并通过 Pull Request 说明变更范围与验证结果；
+4. 维护者按当前版本阶段处理合并与推送；禁止 force push；
+5. 涉及发布：按 [docs/RELEASING.md](docs/RELEASING.md) 执行。
 
 ## 5. 提交信息规范（Conventional Commits）
 
@@ -152,8 +151,8 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端 | `build.cmd` + e2e 全量 81（局部迭代可按域筛选） |
-| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios（150）+ chaos-queue（166，加速档采样兜底可能 167）+ 单元测试（281），默认加速档 |
+| 仅前端 | `build.cmd` + e2e 全量（局部迭代可按域筛选） |
+| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios + chaos-queue + 单元测试，默认加速档 |
 | 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
 
 常用命令：
@@ -163,22 +162,24 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 build.cmd                                     # 提权版（增量构建：src 未变仅同步 wwwroot/plugins）
 
 # 2. 单元测试（毫秒级，无管理员）
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
+dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
 # 3. e2e（先 build.cmd；加速档为日常迭代默认）
-$env:PLAYWRIGHT_BROWSERS_PATH = "uitest\browsers"
+Push-Location tests\e2e
+$env:PLAYWRIGHT_BROWSERS_PATH = "browsers"
 $env:NEXUS_TIME_SCALE = "10"
-npx playwright test                            # 全量 81（发布前回归）
-$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集 80
+npx playwright test                            # 全量回归
+$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集
 Remove-Item Env:NEXUS_TIME_SCALE               # 切回真实计时档
 
 # 4. 专项测试（需管理员 shell；先 build.cmd）
 $env:NEXUS_TIME_SCALE = "10"
-node uitest\judge-scenarios.mjs                # 150 断言
-node uitest\chaos-queue.mjs                    # 166 断言
+node judge-scenarios.mjs
+node chaos-queue.mjs
+Pop-Location
 ```
 
-- 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`uitest\run-uitest.cmd` 已默认内置；
-- 新增或删除测试用例/断言后，同步更新 AGENTS.md / README.md / CONTRIBUTING.md 中的数字；
-- 发布前真实计时档全量回归 + flake 台账（`uitest/FLAKE-LEDGER.md`）更新；
-- 永不提交：`release/`、`config/`、`history/`、`logs/`、`uitest/runtime/`、密钥与账号信息。
+- 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`tests\e2e\run-e2e.cmd` 已默认内置；
+- 测试数量与断言数量只记录在 CHANGELOG、Release Notes 或 CI 验证结果中；
+- 发布前真实计时档全量回归 + flake 台账（`tests/e2e/FLAKE-LEDGER.md`）更新；
+- 永不提交：`release/`、`config/`、`history/`、`logs/`、`tests/e2e/runtime/`、密钥与账号信息。

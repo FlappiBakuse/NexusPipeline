@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: 构建 + e2e 测试
@@ -29,18 +32,18 @@ jobs:
           node-version: 20
 
       - name: 安装测试依赖
-        working-directory: uitest
+        working-directory: tests/e2e
         run: npm ci
 
       - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
         run: .\build.cmd
 
       - name: 运行单元测试（毫秒级，覆盖判定/解析/校验纯逻辑）
-        run: dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
+        run: dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
       - name: 运行 e2e 测试（核心回归集，加速档）
         shell: cmd
-        working-directory: uitest
+        working-directory: tests/e2e
         env:
           NEXUS_CI: "1"
           NEXUS_TIME_SCALE: "10"
@@ -52,6 +55,6 @@ jobs:
         with:
           name: e2e-diagnostics
           path: |
-            uitest/runtime/logs/*.log
-            uitest/test-results/**
+            tests/e2e/runtime/logs/*.log
+            tests/e2e/test-results/**
           retention-days: 7

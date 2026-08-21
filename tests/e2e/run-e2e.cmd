@@ -7,9 +7,9 @@ net session >nul 2>&1
 if errorlevel 1 (
     echo [��ʾ] ��ǰ�ն��޹���ԱȨ�ޣ������Թ���Ա���������������ԣ�UAC �Ӳ�֪ͨʱ�޵�����...
     if "%*"=="" (
-        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-uitest.cmd' -Verb RunAs -WorkingDirectory '%~dp0'"
+        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-e2e.cmd' -Verb RunAs -WorkingDirectory '%~dp0'"
     ) else (
-        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-uitest.cmd' -ArgumentList '%*' -Verb RunAs -WorkingDirectory '%~dp0'"
+        pwsh -NoProfile -Command "Start-Process -FilePath '%~dp0run-e2e.cmd' -ArgumentList '%*' -Verb RunAs -WorkingDirectory '%~dp0'"
     )
     exit /b 0
 )

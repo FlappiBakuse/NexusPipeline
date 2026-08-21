@@ -28,7 +28,9 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
-└── uitest/             Playwright 端到端测试（黑盒，@playwright/test 框架；用例数与分层见 AGENTS.md「构建与测试」；单元测试见 src/NexusPipeline.Tests/）
+├── tests/
+│   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
+│   └── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
 ```
 
 ## 后端分层（src/）

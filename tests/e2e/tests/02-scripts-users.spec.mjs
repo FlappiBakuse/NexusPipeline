@@ -1197,7 +1197,7 @@ test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务
     // 清理 CLI 自动拉起的常驻服务（托盘模式，不写 pid 文件），再恢复标准测试服务
     try {
       spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
         { stdio: "ignore" });
     } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
     await startService();

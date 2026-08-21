@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const projectRoot = path.resolve(__dirname, "..", "..");
+export const projectRoot = path.resolve(__dirname, "..", "..", "..");
 export const releaseDir = path.join(projectRoot, "release");
 export const runtimeDir = path.join(__dirname, "..", "runtime");
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
@@ -68,7 +68,7 @@ function serviceDiagnostics() {
   const lines = ["—— 服务启动诊断 ——"];
   try {
     const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
       { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
     lines.push("runtime nexus-pipeline 进程：" + ((r.stdout || "").trim() || "（无）"));
   } catch { lines.push("runtime nexus-pipeline 进程：查询失败"); }
@@ -140,11 +140,11 @@ export function latestHistoryDay() {
 }
 
 export function setupRuntime() {
-  // 清理上次残留的测试服务（崩溃/中断遗留仍占用 58731）：仅杀 uitest/runtime 目录下的 nexus-pipeline.exe，
+  // 清理上次残留的测试服务（崩溃/中断遗留仍占用 58731）：仅杀 tests/e2e/runtime 目录下的 nexus-pipeline.exe，
   // 避免 e2e 服务落到 58732 而请求打向残留实例（先跑 judge/chaos 再跑 e2e 的常见工作流踩坑，v0.6.2 修复）。
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
@@ -227,14 +227,14 @@ export async function ensureService() {
   await waitForService();
 }
 
-/** 强杀 uitest/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。
+/** 强杀 tests/e2e/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。
  *  v0.6.9+：杀后轮询确认进程完全消失（Stop-Process 异步，固定 600ms 等待存在旧进程互斥体未释放的竞态窗口，
  *  曾致后续 startService("web") 因互斥体被占直接退出——F1/F4 级联 flake），确认消失后才返回。 */
 export async function killRuntimeServices(timeoutMs = 15000) {
   const runtimePids = () => {
     try {
       const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
         { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
       return (r.stdout || "").trim();
     } catch {
@@ -243,7 +243,7 @@ export async function killRuntimeServices(timeoutMs = 15000) {
   };
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*uitest\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 清理失败不阻塞 */ }
   const gone = await waitFor(() => runtimePids() === "", timeoutMs, 300);

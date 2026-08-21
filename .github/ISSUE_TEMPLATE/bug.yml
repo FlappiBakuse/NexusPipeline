@@ -1,0 +1,53 @@
+name: Bug report
+description: 报告可复现的产品缺陷
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: input
+    id: version
+    attributes:
+      label: NexusPipeline 版本
+      description: 请填写版本号或提交版本。
+      placeholder: v0.8.3
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows 版本
+      placeholder: Windows 11 24H2 x64
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请提供最小、可重复的操作步骤和相关配置条件。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 仅粘贴已脱敏的必要片段，不要上传 token、配置、账号或完整日志。
+      render: text
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: 敏感信息确认
+      options:
+        - label: 我已移除或脱敏 token、密钥、用户配置、账号和个人路径。
+          required: true
