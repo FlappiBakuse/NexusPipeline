@@ -51,7 +51,7 @@ jobs:
 
       - name: 上传诊断日志（e2e 失败时排查用）
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-diagnostics
           path: |
