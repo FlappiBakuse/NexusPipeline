@@ -1,6 +1,7 @@
 using System.Reflection;
 using NexusPipeline.Extensibility;
 using NexusPipeline;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Commands;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
@@ -55,6 +56,60 @@ public class GovernanceUnitTests
         Assert.Equal(typeof(INotificationChannelProvider), typeof(NotificationDispatcher).GetConstructors()[0].GetParameters()[0].ParameterType);
         Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.StartScript)));
         Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.Cancel)));
+    }
+
+    [Fact]
+    public void ExecutionBoundary_SplitsFacadeValidationRunnerAndSystemActions()
+    {
+        Assert.Null(typeof(DispatchCenter).GetMethod("RunScriptAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+        Assert.Null(typeof(DispatchCenter).GetMethod("RunQueueAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
+        Assert.NotNull(typeof(ExecutionValidator).GetMethod(nameof(ExecutionValidator.ValidateScriptStart)));
+        Assert.NotNull(typeof(ExecutionValidator).GetMethod(nameof(ExecutionValidator.ValidateQueueStart)));
+        Assert.NotNull(typeof(ExecutionRunner).GetMethod(nameof(ExecutionRunner.RunScriptAsync)));
+        Assert.NotNull(typeof(ExecutionRunner).GetMethod(nameof(ExecutionRunner.RunQueueAsync)));
+        Assert.NotNull(typeof(SystemActionExecutor).GetMethod(nameof(SystemActionExecutor.Schedule)));
+        Assert.NotNull(typeof(SystemActionExecutor).GetMethod(nameof(SystemActionExecutor.Cancel)));
+        Assert.True(typeof(IExecutionService).IsAssignableFrom(typeof(ExecutionCommands)));
+        Assert.True(typeof(IHistoryStore).IsAssignableFrom(typeof(HistoryService)));
+        Assert.True(typeof(INotificationService).IsAssignableFrom(typeof(NotificationDispatcher)));
+        Assert.True(typeof(IPluginCapabilityResolver).IsAssignableFrom(typeof(PluginManager)));
+    }
+
+    [Fact]
+    public void CompositionRoot_ResolvesV082ApplicationPorts()
+    {
+        RuntimeContext context = RuntimeContext.Instance;
+
+        Assert.NotNull(context.Resolve<IScriptRepository>());
+        Assert.NotNull(context.Resolve<IQueueRepository>());
+        Assert.NotNull(context.Resolve<IUserRepository>());
+        Assert.NotNull(context.Center);
+        Assert.NotNull(context.Validator);
+        Assert.NotNull(context.Scheduler);
+    }
+
+    [Fact]
+    public void ExecutionRequest_CanBeValidatedWithoutStartingRuntimeWork()
+    {
+        var script = new ScriptInstance
+        {
+            Id = "script-1",
+            Name = "示例脚本",
+            Users = new List<ScriptUser> { new() { Name = "user-1", Enabled = true } },
+        };
+        var validator = new ExecutionValidator(
+            new TestScriptRepository(script),
+            new TestQueueRepository(),
+            new TestUserRepository());
+
+        ExecutionResult accepted = validator.Validate(new ExecutionRequest("script", script.Id, "manual"));
+        ExecutionResult rejected = validator.Validate(new ExecutionRequest("unknown", "missing", "manual"));
+
+        Assert.True(accepted.Accepted);
+        Assert.Same(script, accepted.Script);
+        Assert.Equal(1, accepted.TotalTasks);
+        Assert.False(rejected.Accepted);
+        Assert.Contains("不支持的执行类型", rejected.Error);
     }
 
     [Fact]
@@ -195,5 +250,40 @@ public class GovernanceUnitTests
 
     private sealed class TestCapability : IPluginCapability
     {
+    }
+
+    private sealed class TestScriptRepository : IScriptRepository
+    {
+        private readonly ScriptInstance _script;
+
+        public TestScriptRepository(ScriptInstance script)
+        {
+            _script = script;
+        }
+
+        public ScriptInstance? FindById(string id) => id == _script.Id ? _script : null;
+
+        public IReadOnlyList<ScriptInstance> Snapshot() => new[] { _script };
+    }
+
+    private sealed class TestQueueRepository : IQueueRepository
+    {
+        public DispatchQueue? FindById(string id) => null;
+
+        public IReadOnlyList<DispatchQueue> Snapshot() => Array.Empty<DispatchQueue>();
+    }
+
+    private sealed class TestUserRepository : IUserRepository
+    {
+        public ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+        {
+            return script.Users.FirstOrDefault(user => user.Enabled
+                && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        public IReadOnlyList<string> EnabledNames(ScriptInstance script)
+        {
+            return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
+        }
     }
 }

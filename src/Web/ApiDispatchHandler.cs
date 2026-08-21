@@ -49,7 +49,7 @@ internal static class ApiDispatchHandler
                 {
                     throw new InvalidOperationException($"调度队列不存在：{queueId}");
                 }
-                string? blocked = DispatchCenter.QueueBlockedBy(queue);
+                string? blocked = RuntimeContext.Instance.Validator.QueueBlockedBy(queue);
                 if (blocked is not null)
                 {
                     throw new InvalidOperationException($"队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行");

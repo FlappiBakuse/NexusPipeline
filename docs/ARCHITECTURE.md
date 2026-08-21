@@ -6,13 +6,14 @@
 > v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
 > v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
+> v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
 
 ## 总体结构
 
 ```
 NexusPipeline/
 ├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener）
-│   ├── Application/    应用宿主与启动流程：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer
+│   ├── Application/    应用宿主、启动流程与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/Abstractions/Repositories
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
 │   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification 分域）
@@ -48,7 +49,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过宿主内置契约接口（`IPlugin` / `INotifyChannel` / `PluginContext`）交互**；跨模块的 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.6.3 插件契约内置后，`UserConfigManager` 与 `PluginManager` 仍存在历史兼容依赖；v0.8.1 已移除执行域/`DispatchCenter` 对具体插件管理器的运行期查询，通知经 `INotificationChannelProvider`、模拟器启用状态经 `IEmulatorCapabilityProvider` capability 端口分发。完整依赖倒置仍未进行，`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。
+- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复仍保留 `RuntimeContext` 查找脚本，属于启动/恢复兼容路径。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。新服务不得新增这类依赖。
 
 ### 关键类职责
 
@@ -59,11 +60,17 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
-| `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册 Center/History/Plugins/Scheduler，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `IScriptRepository` / `IQueueRepository` / `IUserRepository` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列和启用用户的显式端口；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
+| `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
+| `IExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；具体实现仍由现有 `ExecutionCommands`、`NotificationDispatcher`、`PluginManager` 提供 |
 | `ExecutionCommands` | src/Application/Commands/ExecutionCommands.cs | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消应用命令入口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
-| `DispatchCenter` | src/Services/DispatchCenter.cs | 队列/系统操作门面与运行注册；单次运行交给 `ExecutionCoordinator`，通知交给 `NotificationDispatcher` |
-| `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、运行收尾和历史记录边界 |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 兼容执行门面：执行门禁、状态登记、取消和入口参数编排；不再承载后台运行流程 |
+| `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程冲突和任务计数校验 |
+| `ExecutionRunner` | src/Services/Execution/ExecutionRunner.cs | 脚本/队列后台生命周期、用户串行、历史落盘、通知和完成操作调度 |
+| `SystemActionExecutor` | src/Services/Execution/SystemActionExecutor.cs | sleep/reboot/shutdown 完成操作的 pending 单槽位、倒计时和取消语义 |
+| `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、配置事务和运行收尾；后台任务与历史/通知外层边界由 `ExecutionRunner` 承载 |
 | `RunSession` | src/Services/RunSession.cs | 一次运行的状态对象：元数据、预算、日志收集、配置事务状态和回调；不再拥有 `RunAsync` 流程 |
 | `AttemptRunner` | src/Services/Execution/AttemptRunner.cs | 单次尝试执行入口；协调器通过该边界调用前/后置脚本与监控执行 |
 | `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
@@ -84,7 +91,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列 |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 通过 `INotificationChannelProvider` 分发脚本/队列通知，隔离具体插件实现 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |
@@ -242,6 +249,6 @@ plugins/bettergi/
 
 ```
 Web 请求 → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
-CLI 菜单 / Scheduler → Application Command 或核心服务 → DispatchCenter
-运行结束 → DispatchCenter → NotificationDispatcher → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP
+CLI 菜单 / Scheduler → Application Command → DispatchCenter → ExecutionValidator → ExecutionRunner
+运行结束 → ExecutionRunner → INotificationService → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP
 ```

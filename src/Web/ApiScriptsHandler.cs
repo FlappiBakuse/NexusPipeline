@@ -5,6 +5,7 @@ using System.Net;
 using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -133,7 +134,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "开启「使用判断脚本」但判断脚本代码为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            string? pathError = Limits.CheckScriptPaths(script);
+            string? pathError = Limits.CheckScriptPaths(script, RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
             if (pathError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
@@ -189,7 +190,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "开启「使用判断脚本」但判断脚本代码为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            string? pathError = Limits.CheckScriptPaths(update);
+            string? pathError = Limits.CheckScriptPaths(update, RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
             if (pathError is not null)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
@@ -915,7 +916,9 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "配置交换失败：" + prepError }, 400).ConfigureAwait(false);
                     return;
                 }
-                List<string> generatedTemplateFiles = UserConfigManager.EnsureConfigForEdit(script);
+                List<string> generatedTemplateFiles = UserConfigManager.EnsureConfigForEdit(
+                    script,
+                    RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
                 bool generatedTemplate = generatedTemplateFiles.Count > 0;
                 // v0.7.5（台账外）：模板生成后立即持久化标记（GeneratedTemplate/TemplateFiles）——此前补写发生在
                 // 主程序启动之后（StartVisible 失败路径的 CancelEdit 与崩溃窗口内标记仍为 PrepareForRun 的无模板版本，

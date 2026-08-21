@@ -1,5 +1,7 @@
 ﻿using NexusPipeline.Models;
 using NexusPipeline.Utilities;
+using NexusPipeline.App.Abstractions;
+using NexusPipeline.Services.Execution;
 namespace NexusPipeline.Services;
 
 internal class Scheduler : IDisposable
@@ -17,6 +19,30 @@ internal class Scheduler : IDisposable
     private bool _startupRunsIssued;
 
     private string? _lastCleanupDate;
+
+    private readonly IQueueRepository _queues;
+
+    private readonly IHistoryStore _history;
+
+    private readonly ISettingsProvider _settings;
+
+    private readonly IExecutionService _commands;
+
+    private readonly ExecutionValidator _validator;
+
+    public Scheduler(
+        IQueueRepository queues,
+        IHistoryStore history,
+        ISettingsProvider settings,
+        IExecutionService commands,
+        ExecutionValidator validator)
+    {
+        _queues = queues;
+        _history = history;
+        _settings = settings;
+        _commands = commands;
+        _validator = validator;
+    }
 
     public void Start()
     {
@@ -56,11 +82,7 @@ internal class Scheduler : IDisposable
         DateTime now = DateTime.Now;
         var candidates = new List<(string Name, DateTime Time)>();
         // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 修改并发冲突（调度线程每秒枚举）。
-        List<DispatchQueue> queues;
-        lock (RuntimeContext.Instance.DataLock)
-        {
-            queues = RuntimeContext.Instance.Queues.ToList();
-        }
+        List<DispatchQueue> queues = _queues.Snapshot().ToList();
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             DateTime? time = NextTriggerFor(queue, now);
@@ -140,15 +162,11 @@ internal class Scheduler : IDisposable
         if (!string.Equals(_lastCleanupDate, today, StringComparison.Ordinal))
         {
             _lastCleanupDate = today;
-            RuntimeContext.Instance.History.Cleanup(RuntimeContext.Instance.Settings.HistoryRetentionDays);
+            _history.Cleanup(_settings.Current.HistoryRetentionDays);
         }
 
         // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 请求线程并发修改冲突（调度线程每秒枚举）。
-        List<DispatchQueue> queues;
-        lock (RuntimeContext.Instance.DataLock)
-        {
-            queues = RuntimeContext.Instance.Queues.ToList();
-        }
+        List<DispatchQueue> queues = _queues.Snapshot().ToList();
 
         if (!_startupRunsIssued)
         {
@@ -186,7 +204,7 @@ internal class Scheduler : IDisposable
     private void TriggerQueue(DispatchQueue queue)
     {
         // v0.7.0：长时/普通混排防御（保存时已校验，此处兜底手工改配置/旧数据场景）——跳过并记录失败历史。
-        string? mixError = Limits.CheckQueueMix(RuntimeContext.Instance, queue);
+        string? mixError = _validator.CheckQueueMix(queue);
         if (mixError is not null)
         {
             Logger.Error($"[错误] 自动运行队列「{queue.Name}」{mixError}，已跳过该队列。");
@@ -202,10 +220,10 @@ internal class Scheduler : IDisposable
                 FinalStatus = "failed",
                 ResultDetail = mixError,
             };
-            RuntimeContext.Instance.History.Save(skipped, new List<string>());
+            _history.Save(skipped, new List<string>());
             return;
         }
-        string? blocked = DispatchCenter.QueueBlockedBy(queue);
+        string? blocked = _validator.QueueBlockedBy(queue);
         if (blocked is not null)
         {
             Logger.Error($"[错误] 自动运行队列「{queue.Name}」检测到脚本「{blocked}」正在运行，已跳过该队列。");
@@ -221,7 +239,7 @@ internal class Scheduler : IDisposable
                 FinalStatus = "failed",
                 ResultDetail = $"检测到脚本「{blocked}」正在运行，已跳过该队列",
             };
-            RuntimeContext.Instance.History.Save(skipped, new List<string>());
+            _history.Save(skipped, new List<string>());
             return;
         }
         lock (_sync)
@@ -238,7 +256,7 @@ internal class Scheduler : IDisposable
             RunningExecution? exec = null;
             try
             {
-                exec = RuntimeContext.Instance.Commands.StartQueue(queue.Id, "auto", Audit.Scheduler);
+                exec = _commands.StartQueue(queue.Id, "auto", Audit.Scheduler);
                 await exec.Completion.ConfigureAwait(false);
             }
             catch (Exception ex)

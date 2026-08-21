@@ -3,10 +3,11 @@ using System.Text.Json;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
-internal class HistoryService
+internal class HistoryService : IHistoryStore
 {
     private static readonly object Sync = new();
 

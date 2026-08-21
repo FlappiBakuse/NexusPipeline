@@ -386,9 +386,20 @@ function psOut(script) {
   });
 }
 
-async function findScriptCmdPid() {
-  const out = await psOut("$p = Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -like '*nexuschaos.bat*' } | Select-Object -First 1; if ($p) { Write-Output $p.ProcessId }");
+async function findScriptCmdPid(instanceLabel = "") {
+  const pattern = instanceLabel ? `*${instanceLabel}*nexuschaos.bat*` : "*nexuschaos.bat*";
+  const out = await psOut(`$p = Get-CimInstance Win32_Process -Filter \"Name='cmd.exe'\" | Where-Object { $_.CommandLine -like '${pattern}' } | Select-Object -First 1; if ($p) { Write-Output $p.ProcessId }`);
   return parseInt(out, 10) || 0;
+}
+
+function attemptLogStarted(instanceLabel, seed, attempt) {
+  try {
+    const log = fs.readFileSync(INST_LOG(instanceLabel), "utf8");
+    const marker = `DBG seed=${seed} n=${attempt}`;
+    return log.split(/\r?\n/).some(line => line.trim().startsWith(marker));
+  } catch {
+    return false;
+  }
 }
 
 async function waitForPid(fn, timeoutMs = 90000, intervalMs = 400) {
@@ -477,8 +488,14 @@ async function runInjector(seedMap, gameMap, deadlineMs, label) {
       const key = user + ":" + attempt;
       const kind = interference(seedMap[user], attempt);
       if (!injected.has(key)) {
+        const instanceLabel = USERS.find(u => u.name === user)?.inst || "";
+        // /api/status 在配置交换的瞬间可能短暂沿用上一用户的 currentAttempt。
+        // 必须确认目标实例的当前日志已经写出对应 seed/attempt，才能执行注入，
+        // 否则真实计时档可能误杀上一尝试并让目标 crash 轮永久运行。
+        const attemptStarted = () => attemptLogStarted(instanceLabel, seedMap[user], attempt);
         if (kind === 2) {
-          const pid = await waitForPid(async () => await findScriptCmdPid());
+          const started = await waitFor(attemptStarted, 90000, 400);
+          const pid = started ? await waitForPid(async () => await findScriptCmdPid(instanceLabel), 10000, 400) : 0;
           if (pid) {
             await sleep(INJECT_WAIT_MS);
             await taskkill("/T", "/PID", String(pid));
@@ -487,7 +504,8 @@ async function runInjector(seedMap, gameMap, deadlineMs, label) {
           }
         } else if (kind === 3) {
           const exe = gameMap[user];
-          const ok = await waitFor(async () => (await procCount(exe.replace(".exe", ""))) > 0, 60000, 400);
+          const started = await waitFor(attemptStarted, 90000, 400);
+          const ok = started && await waitFor(async () => (await procCount(exe.replace(".exe", ""))) > 0, 60000, 400);
           if (ok) {
             await sleep(INJECT_WAIT_MS);
             await taskkill("/IM", exe);

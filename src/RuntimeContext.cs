@@ -1,10 +1,13 @@
 using NexusPipeline.App.Commands;
+using NexusPipeline.App.Abstractions;
+using NexusPipeline.App.Repositories;
 using Microsoft.Extensions.DependencyInjection;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
 
 namespace NexusPipeline;
@@ -20,6 +23,17 @@ internal class RuntimeContext
     {
         ServiceCollection collection = new();
         collection.AddSingleton(new HistoryService());
+        collection.AddSingleton<IScriptRepository>(_ => new RuntimeScriptRepository(FindScript, SnapshotScripts));
+        collection.AddSingleton<IQueueRepository>(_ => new RuntimeQueueRepository(FindQueue, SnapshotQueues));
+        collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(action =>
+        {
+            lock (DataLock)
+            {
+                action();
+            }
+        }));
+        collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
+        collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             new PluginHostServices(
                 () => Settings,
@@ -27,10 +41,17 @@ internal class RuntimeContext
                 type => provider.GetRequiredService(type))));
         collection.AddSingleton<INotificationChannelProvider>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IEmulatorCapabilityProvider>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
-        collection.AddSingleton<DispatchCenter>(provider => new DispatchCenter(provider.GetRequiredService<NotificationDispatcher>()));
+        collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
+        collection.AddSingleton<ExecutionStateStore>();
+        collection.AddSingleton<ExecutionValidator>();
+        collection.AddSingleton<SystemActionExecutor>();
+        collection.AddSingleton<ExecutionRunner>();
+        collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<ExecutionCommands>(provider => new ExecutionCommands(provider.GetRequiredService<DispatchCenter>()));
-        collection.AddSingleton(new Scheduler());
+        collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionCommands>());
+        collection.AddSingleton<Scheduler>();
         _services = collection.BuildServiceProvider();
     }
 
@@ -46,6 +67,8 @@ internal class RuntimeContext
     public List<DispatchQueue> Queues { get; private set; } = new();
 
     public DispatchCenter Center => Resolve<DispatchCenter>();
+
+    public ExecutionValidator Validator => Resolve<ExecutionValidator>();
 
     public HistoryService History => Resolve<HistoryService>();
 

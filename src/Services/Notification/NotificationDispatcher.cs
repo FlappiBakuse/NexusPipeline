@@ -1,11 +1,12 @@
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services.Notification;
 
 /// <summary>通知领域服务：只依赖通知 capability provider，不知道具体插件实现。</summary>
-internal sealed class NotificationDispatcher
+internal sealed class NotificationDispatcher : INotificationService
 {
     private readonly INotificationChannelProvider _provider;
 

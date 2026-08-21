@@ -1,6 +1,9 @@
 ﻿using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
+using NexusPipeline.Services.Execution;
 namespace NexusPipeline.Cli;
 
 /// <summary>脚本实例管理子菜单：列表 / 新建 / 编辑 / 删除。</summary>
@@ -69,7 +72,7 @@ internal static class ScriptsMenu
                         {
                             string removedName = removing.Name;
                             // v0.7.4（KN-05）：运行中脚本拒绝删除，避免删掉正在使用的配置现场。
-                            if (DispatchCenter.IsScriptRunning(removing))
+                            if (ExecutionValidator.IsScriptRunning(removing))
                             {
                                 Console.WriteLine("[错误] 脚本正在运行中，无法删除。");
                             }
@@ -189,7 +192,7 @@ internal static class ScriptsMenu
         limitError ??= Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称");
         limitError ??= Limits.CheckAttempts(script.MaxAttempts);
         limitError ??= Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
-        limitError ??= Limits.CheckScriptPaths(script);
+        limitError ??= Limits.CheckScriptPaths(script, RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
         if (limitError is not null)
         {
             Console.WriteLine($"[错误] {limitError}，未保存。");

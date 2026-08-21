@@ -1,10 +1,11 @@
 using NexusPipeline.Models;
 using NexusPipeline.Services;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.App.Commands;
 
 /// <summary>执行应用命令入口。Web、CLI（经常驻 HTTP）和 Scheduler 共用同一组业务命令。</summary>
-internal sealed class ExecutionCommands
+internal sealed class ExecutionCommands : IExecutionService
 {
     private readonly DispatchCenter _center;
 

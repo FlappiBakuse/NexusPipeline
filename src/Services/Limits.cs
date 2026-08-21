@@ -3,6 +3,8 @@ using System.Text.Json;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
+using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
@@ -160,10 +162,10 @@ internal static class Limits
     /// 队列长时/普通混排校验（v0.7.0）：队列链式串行执行，长时脚本（两个超时均为 -1）会无限阻塞后续任务——
     /// 长时脚本实例不能与普通脚本实例编排进同一队列。任务不足两项或全部同类时通过。
     /// </summary>
-    public static string? CheckQueueMix(RuntimeContext ctx, DispatchQueue queue)
+    public static string? CheckQueueMix(IEnumerable<ScriptInstance> scripts, DispatchQueue queue)
     {
         List<ScriptInstance> tasks = queue.Tasks
-            .Select(task => ctx.FindScript(task.ScriptInstanceId))
+            .Select(task => scripts.FirstOrDefault(script => script.Id == task.ScriptInstanceId))
             .Where(script => script is not null)
             .Cast<ScriptInstance>()
             .ToList();
@@ -192,7 +194,7 @@ internal static class Limits
     /// 游戏配置（v0.7.0+ 按启动方式分叉）——PC 客户端：游戏路径一律必填且必须为存在的可执行文件；安卓模拟器：ADB 地址必填且格式合法（主机:端口）。
     /// 返回错误信息或 null。
     /// </summary>
-    public static string? CheckScriptPaths(ScriptInstance script)
+    public static string? CheckScriptPaths(ScriptInstance script, IPluginCapabilityResolver capabilities)
     {
         bool specialized = !string.IsNullOrWhiteSpace(script.PluginType);
         string root = script.RootPath.Trim();
@@ -201,7 +203,7 @@ internal static class Limits
             return $"脚本根目录不存在或不是文件夹：{root}";
         }
         if (EmulatorSupport.IsEmulator(script) && specialized
-            && !RuntimeContext.Instance.Plugins.SupportsEmulator(script.PluginType))
+            && !capabilities.SupportsEmulator(script.PluginType))
         {
             return "该专项插件不支持安卓模拟器启动方式（专用插件需在 plugin.json 声明 supportsEmulator）";
         }

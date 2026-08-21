@@ -1,5 +1,6 @@
 using NexusPipeline.Models;
 using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -12,7 +13,7 @@ internal sealed record PluginSummary(
     string Version, bool IsBuiltIn, string Kind);
 
 /// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
-internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCapabilityProvider
+internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCapabilityProvider, IPluginCapabilityResolver
 {
     private readonly List<IPlugin> _plugins = new();
 

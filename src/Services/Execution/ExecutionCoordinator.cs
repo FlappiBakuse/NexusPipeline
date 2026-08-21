@@ -4,6 +4,7 @@ using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services.Execution;
 
@@ -15,10 +16,20 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
     private readonly AttemptRunner _attemptRunner;
 
+    private readonly IUserRepository _users;
+
+    private readonly IEmulatorCapabilityProvider _emulator;
+
     public ExecutionCoordinator(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
-        Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
+        Action<int, int>? attemptChanged,
+        Action<string>? statusChanged,
+        Action<string>? logLine,
+        IUserRepository users,
+        IEmulatorCapabilityProvider emulator)
         : base(script, mode, queueId, queueName, userName, token, attemptChanged, statusChanged, logLine)
     {
+        _users = users;
+        _emulator = emulator;
         _attemptRunner = new AttemptRunner(this);
     }
 
@@ -44,7 +55,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         ScriptUser? user = string.IsNullOrWhiteSpace(_userName)
             ? null
-            : UserConfigManager.FindEnabledUser(_script, _userName);
+            : _users.FindEnabled(_script, _userName);
         if (!string.IsNullOrWhiteSpace(_userName) && user is null)
         {
             record.Status = "failed";
@@ -820,7 +831,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
     private async Task<RunAttemptResult?> LaunchEmulatorGameCoreAsync(string modeText)
     {
-        if (!RuntimeContext.Instance.Resolve<IEmulatorCapabilityProvider>().IsEnabled())
+        if (!_emulator.IsEnabled())
         {
             return RunAttemptResult.Failed("模拟器适配已禁用，请到「插件」页启用后重试");
         }

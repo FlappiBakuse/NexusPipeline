@@ -41,6 +41,9 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 尝试（RunAttempt） | 一次尝试 = 一次完整的进程启动→监控→判定→清理；失败按 MaxAttempts 重试 |
 | 运行（RunRecord） | 一次「脚本实例 × 用户」的完整运行（含全部尝试），落盘历史（.json 纯状态 + 按尝试分批日志） |
 | 运行状态（RunSession） | 一次运行的状态/元数据对象；不再承担完整流程，流程由 `ExecutionCoordinator` 编排 |
+| 执行门禁（ExecutionValidator） | 执行前的脚本/队列/用户/进程冲突与限制校验；不创建运行任务 |
+| 执行运行器（ExecutionRunner） | 负责后台脚本/队列生命周期、用户串行、历史落盘、通知和完成操作调度 |
+| 系统操作执行器（SystemActionExecutor） | 负责 sleep/reboot/shutdown 的 pending 状态、真实 60 秒倒计时与取消 |
 | 尝试执行（AttemptRunner） | 单次尝试执行边界，承接前/后置脚本、脚本监控、判定和资源清理调用 |
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
@@ -55,11 +58,13 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 
 ### 3.1 脚本运行完整链路
 
-一次「脚本实例 × 用户」的运行由 `ExecutionCoordinator.RunAsync` 驱动（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
+一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动，先经 `ExecutionValidator` 完成门禁，再由 `ExecutionCoordinator.RunAsync` 编排（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
 
 ```mermaid
 sequenceDiagram
     participant DC as DispatchCenter
+    participant V as ExecutionValidator
+    participant R as ExecutionRunner
     participant C as ExecutionCommands
     participant S as ExecutionCoordinator.RunAsync
     participant A as AttemptRunner（每次尝试）
@@ -67,7 +72,9 @@ sequenceDiagram
     participant J as SessionJudge/判断脚本
 
     C->>DC: StartScript / StartQueue / Cancel
-    DC->>S: 门禁后创建 RunSession 状态并交给协调器
+    DC->>V: 读取仓储并执行门禁校验
+    DC->>R: 登记 RunSession 状态并启动后台任务
+    R->>S: 编排该用户运行
     loop 尝试 1..MaxAttempts
         S->>A: 执行本次尝试
         A->>A: 前置脚本、游戏/脚本启动、日志监控、判定和清理
@@ -89,7 +96,7 @@ sequenceDiagram
         end
     end
     S->>S: 还原替换配置 → 清空脚本区 → 配置交换还原现场
-    DC->>DC: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发
+    R->>R: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发/完成操作
 ```
 
 **分步细节（AttemptRunner 单次尝试边界内）：**

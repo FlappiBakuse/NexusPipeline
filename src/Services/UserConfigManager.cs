@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Text;
 using NexusPipeline.Extensibility;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 
@@ -68,11 +69,9 @@ internal static class UserConfigManager
         {
             return null;
         }
-        // v0.7.2+（KN-04）：锁内枚举用户集合，避免与 Web 请求线程的并发修改冲突。
-        lock (RuntimeContext.Instance.DataLock)
-        {
-            return script.Users.FirstOrDefault(user => user.Enabled && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
-        }
+        // 执行域现在通过 IUserRepository 读取用户；该兼容静态入口保留原签名，
+        // 由调用方在需要时使用数据仓储提供的并发快照。
+        return script.Users.FirstOrDefault(user => user.Enabled && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
     }
 
     /* ---------------- 对外操作 ---------------- */
@@ -225,13 +224,13 @@ internal static class UserConfigManager
     }
     /// <summary>编辑配置会话：ConfigPath 不存在且数据化插件提供默认配置模板目录（config-template/）时整体复制到配置位置（用户按需修改）；
     /// 返回复制生成的文件清单（相对 configPath 父目录；空 = 未生成模板，cancel 时无需清理）。</summary>
-    public static List<string> EnsureConfigForEdit(ScriptInstance script)
+    public static List<string> EnsureConfigForEdit(ScriptInstance script, IPluginCapabilityResolver capabilities)
     {
         if (File.Exists(script.ConfigPath))
         {
             return new List<string>();
         }
-        ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
+        ScriptProfile? profile = capabilities.ResolveProfile(script.PluginType, script.RootPath);
         if (profile is null || string.IsNullOrWhiteSpace(profile.ConfigTemplateDir) || !Directory.Exists(profile.ConfigTemplateDir))
         {
             return new List<string>();

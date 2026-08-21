@@ -58,7 +58,7 @@ internal static class ApiQueuesHandler
                     ?? Limits.CheckTimeSets(queue.TimeSets.Count)
                     ?? CheckTimeFormat(queue)
                     ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue))
-                    ?? Limits.CheckQueueMix(ctx, queue);
+                    ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), queue);
                 if (limitError is null)
                 {
                     // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
@@ -108,7 +108,7 @@ internal static class ApiQueuesHandler
                         ?? Limits.CheckTimeSets(update.TimeSets.Count)
                         ?? CheckTimeFormat(update)
                         ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, update))
-                        ?? Limits.CheckQueueMix(ctx, update);
+                    ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), update);
                 if (existing is not null && limitError is null)
                 {
                     update.Id = existing.Id;

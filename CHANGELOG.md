@@ -2,6 +2,22 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.8.2（Pre-release）
+
+### 后端架构第三次优化
+
+- 将 `DispatchCenter` 收敛为执行门面，拆分 `ExecutionValidator`、`ExecutionRunner` 与 `SystemActionExecutor`，保留现有执行入口、取消和系统完成操作语义。
+- 建立脚本、队列、用户、设置、历史、执行、通知和插件能力的显式 Application 端口与运行时仓储，减少业务服务直接依赖 `RuntimeContext`。
+- 保持配置交换、重试、通知、队列串行、历史记录、Web/CLI 入口和插件 capability 行为兼容。
+- 增加执行边界与组合根解析治理测试，防止新的服务定位器和具体插件实现耦合回流。
+
+### 验证
+
+- 管理员 `build.cmd`：通过（仅保留既有 3 项 nullable 警告）。
+- 管理员真实计时档 Playwright e2e：81/81 通过。
+- 管理员真实计时档 `judge-scenarios`：150/150 通过；`chaos-queue`：166/166 通过。
+- 单元测试：148/148 通过（304 项断言）。
+
 ## v0.8.1（Pre-release）
 
 ### 后端领域边界收敛

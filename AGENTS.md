@@ -22,7 +22,7 @@ $env:NEXUS_TIME_SCALE = "10"; npx playwright test   # 加速档
 Remove-Item Env:NEXUS_TIME_SCALE; npx playwright test   # 真实计时档
 
 # 3. 单元测试（v0.6.4+，毫秒级，无管理员）：判定状态机/关键字规则/日志路径解析/模型规则校验等纯逻辑
-dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 281 断言 / 145 个测试；CI 每次必跑
+dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 304 断言 / 148 个测试；CI 每次必跑
 ```
 
 - e2e 测试自带 `uitest/runtime/` 隔离目录（复制 release 版 exe+wwwroot+plugins），**不得污染项目根**；服务生命周期由 `tests/global-setup|teardown.mjs` 管理（PID 文件 `service.pid` 跨进程兜底）；用例数 81 / 80（用例增减须同步更新本文件数字；自建 assert 计数机制已随 v0.5.1 迁移废弃）。
@@ -97,6 +97,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 281 
 - 命名空间：`NexusPipeline`（入口/组合根：Application/Bootstrap/RuntimeContext/TrayApp）/ `NexusPipeline.Models`（领域模型）/ `NexusPipeline.Services`（服务）/ `NexusPipeline.Persistence`（持久化）/ `NexusPipeline.Utilities`（工具，JsonOpts/Logger/TextRules 等）/ `NexusPipeline.Extensibility`（中立 capability/profile 契约，internal）/ `NexusPipeline.Web` / `NexusPipeline.Cli` / `NexusPipeline.Plugins`。
 - 依赖方向：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities；根命名空间不依赖子域反向。
 - **壳式 DI（v0.5.0+）**：`RuntimeContext` 组合根内建 `ServiceProvider`（注册 DispatchCenter/HistoryService/PluginManager/Scheduler），外部访问方式不变（`RuntimeContext.Instance.Xxx`）；新增服务注册进组合根构造，经 `RuntimeContext.Resolve<T>()` / 插件 `PluginContext.Resolve<T>()` 解析。
+- **应用端口（v0.8.2+）**：执行/调度服务读取脚本、队列、用户和设置必须优先依赖 `src/Application/Abstractions/` 中的 `IScriptRepository`/`IQueueRepository`/`IUserRepository`/`ISettingsProvider`；历史、执行、通知和插件能力分别经 `IHistoryStore`/`IExecutionService`/`INotificationService`/`IPluginCapabilityResolver` 注入。`RuntimeContext` 只负责组合根适配与兼容入口，新服务不得新增 `RuntimeContext.Instance` 业务读取。
 - **public 仅限契约**：Program 与领域模型（AppSettings/ScriptInstance/ScriptUser/DispatchQueue/QueueTask/QueueTimeSet/RunRecord/RunAttempt）；其余一律 `internal`（v0.6.3 起插件契约为宿主内置，无外部 DLL 消费者：IPlugin/INotifyChannel/PluginContext/ScriptProfile/IPluginCapability 均 internal）。
 - 新 API 路由：`src/Web/` 的 `ApiXxxHandler` + 类上 `[ApiRoute("资源名")]`（子路由标在方法上，如 cancel），`WebServer` 反射扫描自动注册（v0.5.0+）；新菜单：`src/Cli/` 对应菜单类；新服务：`src/Services/` 新增类 + 注册进 `RuntimeContext` 组合根容器。
 - **完成判定策略（v0.5.0 拆分）**：判定状态机内聚于 `SessionJudge`（`src/Services/Judgement/SessionJudge.cs`）：判断脚本/关键字两模式；`AttemptRunner` 的监控循环经 `judge.HandleLine/ApplyJudgeResult/IsFailure/IsMarker` 驱动，判定语义不变。
@@ -105,6 +106,7 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 281 
   - **保存固化**：保存专用脚本实例时固化快照（`ApplyProfile` 覆盖主程序/参数/配置/日志/判断脚本）；`GameName` 提供中文游戏名，脚本卡片徽章显示「{GameName}专项」，**游戏名不得写入主程序**，仅由插件提供。
   - **启用语义**：数据插件外部默认启用，显式禁用记入 `DisabledPlugins`；开发指南见 `plugins/README.md`。
 - **v0.8.1 核心生命周期边界**：`RunSession` 仅保存一次运行状态；`ExecutionCoordinator` 负责运行级编排；`AttemptRunner` 负责单次尝试入口；`RunBudget`/`RetryPolicy`/`ResultCollector`/`CleanupManager` 分别收敛预算、重试、结果和清理；`ConfigurationTransaction` 负责配置交换原语，`ConfigRunSession` 固定收尾顺序；`NotificationDispatcher`、`IEmulatorCapabilityProvider` 与 `ExecutionCommands` 提供通知/模拟器 capability 和应用命令边界。以上均为 internal，不改变现有 API、磁盘格式或配置交换不变量。
+- **v0.8.2 执行边界**：`DispatchCenter` 仅保留入口门禁、状态登记和取消；`ExecutionValidator` 负责 `ExecutionRequest` 的存在性/用户/冲突/限制验证，`ExecutionRunner` 负责后台脚本/队列生命周期，`SystemActionExecutor` 负责系统完成操作的 pending/倒计时/取消。保持配置交换、重试、通知、完成操作和队列串行语义；新增执行策略不得回填到 `DispatchCenter`。
 - **完成判定**：判定优先级 = 判断脚本（`JudgeScriptEnabled`+代码，脚本优先，忽略关键字）→ 成功/失败关键字（`SuccessKeywords`/`FailureKeywords`，组内逗号 AND——整个尝试日志中分别出现即命中（v0.7.1+，跨行累积与顺序无关）、换行 OR，失败命中立即终止本次尝试，成功命中等待退出 60 秒）→ 无任何配置时按「进程自行退出」判定成功。
 - **专用插件判定固化（v0.6.0 起）**：判断脚本由插件固化——`ApplyProfile` 每次保存覆盖 `JudgeScriptEnabled/Language/JudgeScript = profile.JudgeScript`，语言按插件判断脚本扩展名（.js→javascript / .py→python），用户不可编辑，判定走脚本模式；同时强制清空自定义关键字字段。通用完成标志 `SuccessMarkers` 已废弃，v0.6.3 起全链路删除，旧配置残留字段反序列化自动忽略、下次保存自然丢弃。
 - **判断脚本契约（v0.4.0+）**：
@@ -178,4 +180,4 @@ dotnet test src\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # 281 
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 81（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（166，加速档采样兜底可能 167）+ `dotnet test`（281 单测断言），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。
+- **测试范围分层（v0.5.4+）**：仅前端改动（wwwroot/ 与 uitest/tests 断言）→ `build.cmd` + `npx playwright test` 全量 81（免跑专项；局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`）；涉及后端（src/、plugins/）→ `build.cmd` + e2e 全量 + `judge-scenarios.mjs`（150）+ `chaos-queue.mjs`（166，加速档采样兜底可能 167）+ `dotnet test`（304 单测断言），均默认跑加速档；**版本发布前**一律真实计时档全量（e2e + 专项）。新增或删除断言后同步本文件中的断言数字，并补充手机/平板/电脑至少一档回归。

@@ -175,7 +175,7 @@ internal static class QueuesMenu
         limitError ??= Limits.CheckNameBytes(queue.Name, Limits.Current.MaxQueueNameBytes, "队列名称");
         limitError ??= Limits.CheckTimeSets(queue.TimeSets.Count);
         limitError ??= Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, queue));
-        limitError ??= Limits.CheckQueueMix(ctx, queue);
+        limitError ??= Limits.CheckQueueMix(ctx.SnapshotScripts(), queue);
         if (limitError is not null)
         {
             Console.WriteLine($"[错误] {limitError}，未保存。");
