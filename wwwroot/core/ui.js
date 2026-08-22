@@ -47,6 +47,20 @@ export function initAutoScroll(root = view) {
       el.classList.remove("scrolling");
     }
   });
+  root.querySelectorAll(".plugin-name-scroll").forEach(el => {
+    const inner = el.querySelector(":scope > .plugin-name-scroll-inner");
+    if (!inner) return;
+    const width = inner.scrollWidth;
+    if (width > el.clientWidth + 1) {
+      inner.style.width = `${width}px`;
+      el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
+      el.classList.add("is-overflowing");
+    } else {
+      inner.style.removeProperty("width");
+      el.style.removeProperty("--hover-scroll-x");
+      el.classList.remove("is-overflowing");
+    }
+  });
   initInputHints(root);
 }
 

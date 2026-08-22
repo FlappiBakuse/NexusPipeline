@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { baseUrl, CI_MODE, ensureService } from "./helpers.mjs";
+import { api, baseUrl, CI_MODE, createScript, ensureService, makeScriptDir } from "./helpers.mjs";
 
 await ensureService();
 
@@ -35,6 +35,178 @@ test("响应式冒烟：手机 / 平板 / 电脑视口无横向溢出（粗检�
     await page.waitForSelector(".stat-grid", { timeout: 10000 });
     const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     expect(noOverflow, `${size.name}视口没有横向溢出（${size.width}px）`).toBeTruthy();
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+test("响应式内容组合：标题、统计区和脚本/队列操作区保持完整", async ({ page }) => {
+  const fixture = makeScriptDir("responsive-layout");
+  let scriptId = "";
+  let queueId = "";
+  try {
+    const created = await createScript({ name: "响应式布局脚本", rootPath: fixture.root, mainExe: fixture.main, configPath: fixture.cfg, logPath: fixture.log });
+    expect(created.ok, "响应式布局测试脚本创建成功").toBeTruthy();
+    scriptId = created.id;
+    const queueResponse = await api("POST", "/api/queues", { name: "响应式布局队列", autoRunMode: "none", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: scriptId }] });
+    expect(queueResponse.ok, "响应式布局测试队列创建成功").toBeTruthy();
+    queueId = (await queueResponse.json()).id;
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="script-card"]');
+    const scriptLayout = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="script-card"]');
+      const main = card?.querySelector(".script-main");
+      const ops = card?.querySelector(".script-ops");
+      const buttons = Array.from(card?.querySelectorAll(".script-ops button") || []);
+      const cardBox = card?.getBoundingClientRect();
+      const opsBox = ops?.getBoundingClientRect();
+      const tops = buttons.map(button => button.getBoundingClientRect().top);
+      return {
+        actionCount: buttons.length,
+        actionRow: !!opsBox && !!cardBox && opsBox.left >= cardBox.left - 1 && opsBox.right <= cardBox.right + 1 && opsBox.bottom <= cardBox.bottom + 1,
+        buttonsInline: tops.length === 3 && Math.max(...tops) - Math.min(...tops) <= 1,
+        buttonsFit: buttons.every(button => { const box = button.getBoundingClientRect(); return box.left >= (cardBox?.left || 0) - 1 && box.right <= (cardBox?.right || 0) + 1 && box.width >= 0; }),
+        actionBelowCopy: !!main && !!opsBox && opsBox.top >= main.getBoundingClientRect().bottom - 1,
+      };
+    });
+    expect(scriptLayout.actionCount, "手机脚本卡片保留三个操作").toBe(3);
+    expect(scriptLayout.actionRow && scriptLayout.buttonsFit, "手机脚本操作区完整位于卡片内").toBeTruthy();
+    expect(scriptLayout.buttonsInline && scriptLayout.actionBelowCopy, "手机脚本三个操作横向排列且位于正文之后").toBeTruthy();
+
+    await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="queue-card"]');
+    const queueLayout = await page.evaluate(() => {
+      const card = document.querySelector('[data-testid="queue-card"]');
+      const ops = card?.querySelector(".queue-ops");
+      const buttons = Array.from(card?.querySelectorAll(".queue-ops button") || []);
+      const cardBox = card?.getBoundingClientRect();
+      const opsBox = ops?.getBoundingClientRect();
+      const tops = buttons.map(button => button.getBoundingClientRect().top);
+      return {
+        actionCount: buttons.length,
+        actionRow: !!opsBox && !!cardBox && opsBox.left >= cardBox.left - 1 && opsBox.right <= cardBox.right + 1 && opsBox.bottom <= cardBox.bottom + 1,
+        buttonsInline: tops.length === 2 && Math.max(...tops) - Math.min(...tops) <= 1,
+      };
+    });
+    expect(queueLayout.actionCount, "手机队列卡片保留两个操作").toBe(2);
+    expect(queueLayout.actionRow && queueLayout.buttonsInline, "手机队列操作区整行排列且位于卡片内").toBeTruthy();
+
+    await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="stat-scripts"]');
+    const dashboardLayout = await page.evaluate(() => {
+      const grid = document.querySelector(".stat-grid-operational");
+      const stats = Array.from(grid?.querySelectorAll(".stat") || []).map(item => item.getBoundingClientRect());
+      const gridBox = grid?.getBoundingClientRect();
+      return {
+        count: stats.length,
+        oneRow: stats.length === 3 && Math.max(...stats.map(box => box.top)) - Math.min(...stats.map(box => box.top)) <= 1,
+        equalWidth: stats.length === 3 && Math.max(...stats.map(box => box.width)) - Math.min(...stats.map(box => box.width)) <= 2,
+        inside: !!gridBox && stats.every(box => box.left >= gridBox.left - 1 && box.right <= gridBox.right + 1),
+      };
+    });
+    expect(dashboardLayout.count, "Dashboard 保留三个运行统计项").toBe(3);
+    expect(dashboardLayout.oneRow && dashboardLayout.equalWidth && dashboardLayout.inside, "手机 Dashboard 三项统计保持等宽同排").toBeTruthy();
+  } finally {
+    if (queueId) await api("DELETE", "/api/queues/" + queueId);
+    if (scriptId) await api("DELETE", "/api/scripts/" + scriptId);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+});
+
+test("验收修正：手机用户/调度布局与队列、插件细节保持一致", async ({ page }) => {
+  const fixture = makeScriptDir("acceptance-layout");
+  let scriptId = "";
+  let queueId = "";
+  try {
+    const created = await createScript({ name: "验收布局脚本", rootPath: fixture.root, mainExe: fixture.main, configPath: fixture.cfg, logPath: fixture.log });
+    expect(created.ok, "验收布局测试脚本创建成功").toBeTruthy();
+    scriptId = created.id;
+    const queueResponse = await api("POST", "/api/queues", {
+      name: "验收布局队列",
+      autoRunMode: "scheduled",
+      completionAction: "none",
+      timeSets: [{ id: "", enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: "05:30" }],
+      tasks: [{ id: "", index: 0, scriptInstanceId: scriptId }],
+    });
+    expect(queueResponse.ok, "验收布局测试队列创建成功").toBeTruthy();
+    queueId = (await queueResponse.json()).id;
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.goto(baseUrl + `#/scripts/${scriptId}/users`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".user-card");
+    const userLayout = await page.evaluate(() => {
+      const card = document.querySelector(".user-card");
+      const info = card?.querySelector(".list-item-head > div:first-child");
+      const actions = card?.querySelector(".action-row");
+      const handle = card?.querySelector(".drag-handle");
+      const cardBox = card?.getBoundingClientRect();
+      const actionBox = actions?.getBoundingClientRect();
+      return {
+        cardGrid: getComputedStyle(card).display === "grid",
+        handleWidth: handle?.getBoundingClientRect().width || 0,
+        actionsBelowInfo: !!info && !!actionBox && actionBox.top >= info.getBoundingClientRect().bottom - 1,
+        actionsInside: !!cardBox && !!actionBox && actionBox.left >= cardBox.left - 1 && actionBox.right <= cardBox.right + 1,
+        actionCount: actions?.querySelectorAll("button").length || 0,
+      };
+    });
+    expect(userLayout.cardGrid, "手机用户卡片采用脚本实例式网格布局").toBeTruthy();
+    expect(userLayout.handleWidth >= 44, "手机用户卡片拖拽把手保持触控尺寸").toBeTruthy();
+    expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 3, "手机用户操作区位于正文之后且完整排列").toBeTruthy();
+
+    await page.click('[data-action="edit-user"][data-name="默认"]');
+    await page.waitForSelector(".modal .settings-option-card");
+    const toggleLayout = await page.$$eval(".modal .settings-option-card", rows => rows.map(row => {
+      const button = row.querySelector(".mode-toggle")?.getBoundingClientRect();
+      const note = row.querySelector(".muted")?.getBoundingClientRect();
+      return { rowReverse: getComputedStyle(row).flexDirection === "row-reverse", buttonAfterNote: !!button && !!note && button.left >= note.left };
+    }));
+    expect(toggleLayout.length, "用户编辑弹窗保留三个切换项").toBe(3);
+    expect(toggleLayout.every(item => item.rowReverse && item.buttonAfterNote), "用户编辑弹窗切换项采用远程访问式右侧开关布局").toBeTruthy();
+    await page.click('[data-action="close-modal"]');
+
+    await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector("#dc-script");
+    const dispatchLayout = await page.evaluate(() => [
+      ["#dc-script", '[data-action="dispatch-script"]'],
+      ["#dc-queue", '[data-action="dispatch-queue"]'],
+    ].map(([selectSelector, buttonSelector]) => {
+      const select = document.querySelector(selectSelector);
+      const button = document.querySelector(buttonSelector);
+      const card = select?.closest(".card")?.getBoundingClientRect();
+      const selectBox = select?.getBoundingClientRect();
+      const buttonBox = button?.getBoundingClientRect();
+      return {
+        sameRow: !!selectBox && !!buttonBox && Math.abs(selectBox.top - buttonBox.top) <= 1,
+        inside: !!card && !!buttonBox && buttonBox.right <= card.right + 1 && buttonBox.bottom <= card.bottom + 1,
+      };
+    }));
+    expect(dispatchLayout.every(item => item.sameRow && item.inside), "手机调度中心选择框与执行按钮同行且位于卡片内").toBeTruthy();
+
+    await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(`[data-action="edit-queue"][data-id="${queueId}"]`);
+    await page.click(`[data-action="edit-queue"][data-id="${queueId}"]`);
+    await page.waitForSelector("#qm-timesets");
+    const timeSetList = await page.$eval("#qm-timesets", el => ({ className: el.className, borderWidth: getComputedStyle(el).borderWidth, borderRadius: getComputedStyle(el).borderRadius }));
+    expect(timeSetList.className.includes("timeset-list") && timeSetList.borderWidth === "0px" && timeSetList.borderRadius === "0px", "定时列表整体外框已移除").toBeTruthy();
+    await page.click('[data-action="close-modal"]');
+
+    await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".plugins-table");
+    const pluginLayout = await page.$eval(".plugins-table", table => {
+      const nameCell = table.querySelector("tbody td:first-child");
+      const helper = table.parentElement?.nextElementSibling;
+      const name = table.querySelector(".plugin-name-scroll");
+      return {
+        nameWidth: nameCell?.getBoundingClientRect().width || 0,
+        helperPadding: helper ? parseFloat(getComputedStyle(helper).paddingLeft) : 0,
+        nameFocusable: name?.getAttribute("tabindex") === "0",
+      };
+    });
+    expect(pluginLayout.nameWidth <= 210 && pluginLayout.helperPadding >= 16 && pluginLayout.nameFocusable, "插件名称列、底部说明和可聚焦滚动名称结构已就位").toBeTruthy();
+  } finally {
+    if (queueId) await api("DELETE", "/api/queues/" + queueId);
+    if (scriptId) await api("DELETE", "/api/scripts/" + scriptId);
   }
   await page.setViewportSize({ width: 1280, height: 900 });
 });

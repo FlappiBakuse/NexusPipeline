@@ -2,7 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
-## v0.8.4（开发中）
+## v0.8.5（Pre-release）
+
+### 前端响应式协调性改造
+
+- 收敛 CSS 设计令牌与组件级联，统一页面标题、列表行、表格、设置行和响应式规则。
+- 优化手机端导航外壳、脚本/队列操作区、Dashboard 统计区和 History 移动记录布局。
+- 保持原生 ES modules、现有 API、路由、`data-action`/`data-testid`、DnD、Modal、主题和无障碍交互契约。
+- 根据验收截图修正定时列表外框、手机用户卡片、调度中心同行操作、插件名称滚动、插件说明间距和用户编辑开关布局。
+- 修正插件名称单元格直接使用弹性布局造成的表格行边界与其他列上下错位，保留名称悬停/键盘聚焦滚动交互。
+
+### 验证
+
+- 管理员构建通过：`release/nexus-pipeline.exe`。
+- 单元测试通过：148/148。
+- 加速档全量 Playwright 回归通过：83/83；验收修正定向回归通过：6/6。
+- 发布前真实计时档通过：Playwright 83/83（约 9.0 分钟）、judge 150/150、chaos 166/166。
+- 全部 `wwwroot/**/*.js` 通过 `node --check`，差异检查通过。
+
+## v0.8.4（Pre-release）
 
 ### 前端视觉重构
 

@@ -101,9 +101,9 @@ export function openUserModal(scriptId, userName = "") {
   };
   const d = userDraft;
   const body = `${valueField("um-name", "用户名 <span class='req'>*</span>", d.name, "text", 'placeholder="脚本内不可重复"')}
-    <div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-enabled" id="um-enabled" aria-pressed="${d.enabled ? "true" : "false"}">启用用户</button><span class="muted">禁用后不可选用于运行</span></div>
-    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-pre-once" id="um-pre-once" aria-pressed="${d.preRunOnceOnly ? "true" : "false"}">仅首次执行</button><span class="muted">重试时不再执行</span></div></div>
-    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}<div class="toggle-row"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-post-final" id="um-post-final" aria-pressed="${d.postRunOnFinalOnly ? "true" : "false"}">仅最终完成</button><span class="muted">仅最终运行完成启用</span></div></div>`;
+    <div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-enabled" id="um-enabled" aria-pressed="${d.enabled ? "true" : "false"}">启用用户</button><span class="muted">禁用后不可选用于运行</span></div>
+    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}<div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-pre-once" id="um-pre-once" aria-pressed="${d.preRunOnceOnly ? "true" : "false"}">仅首次执行</button><span class="muted">重试时不再执行</span></div></div>
+    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}<div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-post-final" id="um-post-final" aria-pressed="${d.postRunOnFinalOnly ? "true" : "false"}">仅最终完成</button><span class="muted">仅最终运行完成启用</span></div></div>`;
     showModal(modalShell(user ? "编辑用户" : "添加用户", body, '<button class="primary" type="button" data-action="save-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
