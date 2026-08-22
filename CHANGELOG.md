@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.0（Pre-release）
+
+### 并行调度
+
+- 固化队列、任务、脚本和启用用户快照，形成不可变执行计划，运行期间不受仓储后续编辑影响。
+- 建立 `EmulatorOnly` / `Standard` 资格矩阵：纯安卓模拟器队列可互相并行，最多一个普通队列同时运行；无法证明为纯模拟器的队列按普通队列处理。
+- 建立原子资源租约，统一检查脚本 ID、解析后的启动目标、进程基名、配置路径父子关系和模拟器 ADB 端点冲突。
+- 将脚本、队列、Web、CLI 与 Scheduler 的启动准入收敛到同一策略；队列内任务与用户顺序保持串行。
+- 将并行运行状态、进度、历史与日志查询改为快照读取，并协调配置门禁、完成通知和取消语义。
+- 将完成操作改为完成意图：活动运行全部释放后统一 arm，同一操作合并，不同操作在准入时拒绝；取消队列跳过完成意图。
+
+### 验证
+
+- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.0）。
+- 单元测试通过：158/158。
+- 加速档全量 Playwright：86 通过、1 个 CI 预期跳过；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 发布前真实计时档：Playwright 86 通过、1 个 CI 预期跳过（约 9.0 分钟）；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 新增并行准入 E2E 用例在加速档与真实计时档均通过；`node --check` 与 `git diff --check` 通过。
+
 ## v0.8.7（Pre-release）
 
 ### 前端布局验收修正

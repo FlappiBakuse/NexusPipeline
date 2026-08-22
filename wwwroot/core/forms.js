@@ -35,7 +35,8 @@ export function switchControl(id, label, description, pressed, action, extra = "
 
 /** 完成操作倒计时卡片（v0.6.3+）：队列全部完成后 60 秒倒计时窗口，可取消；无待执行操作返回空串。 */
 export function systemActionCard(action) {
-  if (!action) return "";
+  // 退出软件在协调器中立即执行，不展示可取消的倒计时卡片。
+  if (!action || action.action === "exit") return "";
   const verb = action.action === "sleep" ? "休眠" : action.action === "reboot" ? "重启" : "关机";
   return `<section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${verb}">
     <div class="section-heading"><h3>完成操作倒计时</h3><span class="muted">队列已完成，等待执行系统操作</span></div>

@@ -223,25 +223,6 @@ internal class Scheduler : IDisposable
             _history.Save(skipped, new List<string>());
             return;
         }
-        string? blocked = _validator.QueueBlockedBy(queue);
-        if (blocked is not null)
-        {
-            Logger.Error($"[错误] 自动运行队列「{queue.Name}」检测到脚本「{blocked}」正在运行，已跳过该队列。");
-            var skipped = new RunRecord
-            {
-                ScriptName = queue.Name,
-                QueueId = queue.Id,
-                QueueName = queue.Name,
-                Mode = "auto",
-                StartTime = DateTime.Now,
-                EndTime = DateTime.Now,
-                Status = "failed",
-                FinalStatus = "failed",
-                ResultDetail = $"检测到脚本「{blocked}」正在运行，已跳过该队列",
-            };
-            _history.Save(skipped, new List<string>());
-            return;
-        }
         lock (_sync)
         {
             if (_runningQueueIds.Contains(queue.Id))

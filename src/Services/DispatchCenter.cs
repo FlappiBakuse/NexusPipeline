@@ -11,18 +11,18 @@ namespace NexusPipeline.Services;
 internal sealed class DispatchCenter
 {
     private readonly ExecutionStateStore _state;
-    private readonly ExecutionValidator _validator;
+    private readonly ExecutionPlanBuilder _plans;
     private readonly ExecutionRunner _runner;
     private readonly SystemActionExecutor _systemActions;
 
     public DispatchCenter(
         ExecutionStateStore state,
-        ExecutionValidator validator,
+        ExecutionPlanBuilder plans,
         ExecutionRunner runner,
         SystemActionExecutor systemActions)
     {
         _state = state;
-        _validator = validator;
+        _plans = plans;
         _runner = runner;
         _systemActions = systemActions;
     }
@@ -41,46 +41,38 @@ internal sealed class DispatchCenter
 
     public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
     {
-        ExecutionResult validation = _validator.Validate(new ExecutionRequest("script", scriptId, mode, userName));
-        if (!validation.Accepted || validation.Script is null)
-        {
-            throw new InvalidOperationException(validation.Error ?? $"脚本实例不存在：{scriptId}");
-        }
-        ScriptInstance script = validation.Script;
+        ScriptExecutionPlan plan = _plans.BuildScript(scriptId, userName);
+        ScriptInstance script = plan.Script;
         var exec = new RunningExecution
         {
             Kind = "script",
             TargetId = script.Id,
             TargetName = script.Name,
             Mode = mode,
-            TotalTasks = validation.TotalTasks,
+            TotalTasks = plan.TotalTasks,
             CurrentScriptName = script.Name,
         };
-        Register(exec, source);
+        Register(exec, plan.Admission, source);
         exec.CurrentStatus = "排队等待中...";
-        Task task = Task.Run(() => _runner.RunScriptAsync(exec, script, userName));
+        Task task = Task.Run(() => _runner.RunScriptAsync(exec, plan));
         exec.Completion = task;
         return exec;
     }
 
     public RunningExecution StartQueue(string queueId, string mode, string source = Audit.System)
     {
-        ExecutionResult validation = _validator.Validate(new ExecutionRequest("queue", queueId, mode));
-        if (!validation.Accepted || validation.Queue is null)
-        {
-            throw new InvalidOperationException(validation.Error ?? $"调度队列不存在：{queueId}");
-        }
-        DispatchQueue queue = validation.Queue;
+        QueueExecutionPlan plan = _plans.BuildQueue(queueId);
+        DispatchQueue queue = plan.Queue;
         var exec = new RunningExecution
         {
             Kind = "queue",
             TargetId = queue.Id,
             TargetName = queue.Name,
             Mode = mode,
-            TotalTasks = validation.TotalTasks,
+            TotalTasks = plan.TotalTasks,
         };
-        Register(exec, source);
-        Task task = Task.Run(() => _runner.RunQueueAsync(exec, queue));
+        Register(exec, plan.Admission, source);
+        Task task = Task.Run(() => _runner.RunQueueAsync(exec, plan));
         exec.Completion = task;
         return exec;
     }
@@ -106,11 +98,11 @@ internal sealed class DispatchCenter
     /// <summary>兼容现有 CLI/内部调用方的静态进程检测入口。</summary>
     public static bool IsScriptRunning(ScriptInstance? script) => ExecutionValidator.IsScriptRunning(script);
 
-    private void Register(RunningExecution exec, string source)
+    private void Register(RunningExecution exec, ExecutionAdmissionProfile profile, string source)
     {
-        if (!_state.TryRegister(exec, out string? error))
+        if (!_state.TryRegister(exec, profile, out ExecutionAdmissionFailure? failure))
         {
-            throw new InvalidOperationException(error);
+            throw new ExecutionAdmissionException(failure!);
         }
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");
     }

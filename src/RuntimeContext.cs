@@ -44,6 +44,8 @@ internal class RuntimeContext
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
+        collection.AddSingleton<ExecutionAdmissionPolicy>();
+        collection.AddSingleton<ExecutionPlanBuilder>();
         collection.AddSingleton<ExecutionStateStore>();
         collection.AddSingleton<ExecutionValidator>();
         collection.AddSingleton<SystemActionExecutor>();

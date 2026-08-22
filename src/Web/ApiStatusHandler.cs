@@ -49,23 +49,27 @@ internal static class ApiStatusHandler
                 enabledScripts,
                 enabledQueues,
             },
-            running = RuntimeContext.Instance.Center.Active.Select(exec => new
+            running = RuntimeContext.Instance.Center.Active.Select(exec =>
             {
-                exec.Id,
-                exec.Kind,
-                exec.TargetId,
-                exec.TargetName,
-                exec.Mode,
-                exec.Status,
-                exec.StartedAt,
-                exec.FinishedAt,
-                exec.TotalTasks,
-                exec.DoneTasks,
-                exec.CurrentScriptName,
-                exec.CurrentStatus,
-                exec.CurrentAttempt,
-                exec.CurrentMaxAttempts,
-                logTail = exec.LogTail(60),
+                RunningExecutionSnapshot snapshot = exec.Snapshot();
+                return new
+                {
+                    snapshot.Id,
+                    snapshot.Kind,
+                    snapshot.TargetId,
+                    snapshot.TargetName,
+                    snapshot.Mode,
+                    snapshot.Status,
+                    snapshot.StartedAt,
+                    snapshot.FinishedAt,
+                    snapshot.TotalTasks,
+                    snapshot.DoneTasks,
+                    snapshot.CurrentScriptName,
+                    snapshot.CurrentStatus,
+                    snapshot.CurrentAttempt,
+                    snapshot.CurrentMaxAttempts,
+                    logTail = snapshot.LogTail,
+                };
             }),
             plugins = RuntimeContext.Instance.Plugins.PluginSummaries.Select(plugin => new
             {

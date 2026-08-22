@@ -570,6 +570,102 @@ test("队列防重入：运行中重复触发被拒（KN-03）", async () => {
   await api("DELETE", "/api/queues/" + qid);
 });
 
+test("v0.9.0 并行准入：两个模拟器队列与一个普通队列并行，第二个普通队列被拒", async () => {
+  const createdScripts = [];
+  const createdQueues = [];
+  const scriptPlans = [
+    { label: "v090-emu-a", name: "v0.9模拟器队列A脚本", mode: "emulator", gameExe: "127.0.0.1:16384" },
+    { label: "v090-emu-b", name: "v0.9模拟器队列B脚本", mode: "emulator", gameExe: "127.0.0.1:16416" },
+    { label: "v090-pc-a", name: "v0.9普通队列A脚本", mode: "pc", gameExe: PING_GAME },
+    { label: "v090-pc-b", name: "v0.9普通队列B脚本", mode: "pc", gameExe: "C:\\Windows\\System32\\cmd.exe" },
+  ];
+
+  async function createLongScript(plan) {
+    const dir = makeScriptDir(plan.label);
+    const logFile = path.join(dir.root, "logs", plan.label + ".log");
+    const bat = path.join(dir.root, plan.label + ".bat");
+    fs.writeFileSync(bat, [
+      "@echo off",
+      "ping 127.0.0.1 -n 8 >nul",
+      "echo v090-ok >> \"" + logFile + "\"",
+      "exit /b 0",
+    ].join("\r\n"), "ascii");
+    const response = await api("POST", "/api/scripts", {
+      name: plan.name,
+      rootPath: dir.root,
+      mainExe: bat,
+      configPath: dir.cfg,
+      logPath: logFile,
+      gameMode: plan.mode,
+      gameExe: plan.gameExe,
+      gameArgs: "-n com.example.game/.MainActivity",
+      launchGame: false,
+      maxAttempts: 1,
+      logStallTimeoutMinutes: 5,
+      totalTimeoutMinutes: 120,
+      successKeywords: "v090-ok",
+    });
+    expect(response.ok, "创建 " + plan.name).toBeTruthy();
+    const script = await response.json();
+    await api("POST", "/api/scripts/" + script.id + "/users", { name: "默认", enabled: true });
+    createdScripts.push({ id: script.id, dir: dir.root });
+    return script;
+  }
+
+  async function createQueue(name, scriptId) {
+    const response = await api("POST", "/api/queues", {
+      name,
+      autoRunMode: "none",
+      completionAction: "none",
+      timeSets: [],
+      tasks: [{ id: "", index: 0, scriptInstanceId: scriptId }],
+    });
+    expect(response.ok, "创建 " + name).toBeTruthy();
+    const queue = await response.json();
+    createdQueues.push(queue.id);
+    return queue;
+  }
+
+  try {
+    const scripts = [];
+    for (const plan of scriptPlans) scripts.push(await createLongScript(plan));
+    const emuA = await createQueue("v0.9模拟器队列A", scripts[0].id);
+    const emuB = await createQueue("v0.9模拟器队列B", scripts[1].id);
+    const standardA = await createQueue("v0.9普通队列A", scripts[2].id);
+    const standardB = await createQueue("v0.9普通队列B", scripts[3].id);
+
+    const first = await api("POST", "/api/dispatch/queue", { queueId: emuA.id, mode: "manual" });
+    expect(first.ok, "第一个模拟器队列准入").toBeTruthy();
+    expect(await waitFor(async () => {
+      const status = await (await fetch(baseUrl + "api/status")).json();
+      return (status.running || []).some(item => item.targetId === emuA.id);
+    }, 10000), "第一个模拟器队列进入运行中").toBeTruthy();
+
+    const second = await api("POST", "/api/dispatch/queue", { queueId: emuB.id, mode: "manual" });
+    expect(second.ok, "第二个不同端点的模拟器队列准入").toBeTruthy();
+    const standard = await api("POST", "/api/dispatch/queue", { queueId: standardA.id, mode: "manual" });
+    expect(standard.ok, "模拟器运行组内一个普通队列准入").toBeTruthy();
+    expect(await waitFor(async () => {
+      const status = await (await fetch(baseUrl + "api/status")).json();
+      return (status.running || []).some(item => item.targetId === standardA.id);
+    }, 10000), "普通队列进入运行中").toBeTruthy();
+
+    const secondStandard = await api("POST", "/api/dispatch/queue", { queueId: standardB.id, mode: "manual" });
+    expect(!secondStandard.ok && secondStandard.status === 400, "第二个普通队列被准入矩阵拒绝").toBeTruthy();
+    const errorBody = await secondStandard.json();
+    expect(errorBody.error || "").toContain("其他调度队列");
+  } finally {
+    await waitNoRunning(120000);
+    for (const queueId of createdQueues) {
+      try { await api("DELETE", "/api/queues/" + queueId); } catch { /* 清理失败不阻塞后续回归 */ }
+    }
+    for (const script of createdScripts) {
+      try { await api("DELETE", "/api/scripts/" + script.id); } catch { /* 清理失败不阻塞后续回归 */ }
+      fs.rmSync(script.dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("队列卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ page }) => {
   // 清理先前用例失败残留的队列（防御：残留会导致卡片数断言失准）
   const staleQueues = await (await fetch(baseUrl + "api/queues")).json();

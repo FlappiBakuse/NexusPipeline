@@ -104,12 +104,6 @@ internal static class DispatchMenu
                 if (int.TryParse(number?.Trim(), out int index) && index >= 1 && index <= ctx.Queues.Count)
                 {
                     DispatchQueue queue = ctx.Queues.OrderBy(queue => queue.Index).ElementAt(index - 1);
-                    string? blocked = RuntimeContext.Instance.Validator.QueueBlockedBy(queue);
-                    if (blocked is not null)
-                    {
-                        Console.WriteLine($"[错误] 队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行。");
-                        break;
-                    }
                     Submit("queue", new { queueId = queue.Id, mode = "manual" }, $"队列「{queue.Name}」已提交运行");
                 }
                 break;

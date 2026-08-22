@@ -223,11 +223,18 @@ public class GovernanceUnitTests
             TargetId = "queue-2",
             TargetName = "备用队列",
         };
+        ExecutionAdmissionProfile standard = new(
+            "queue",
+            ExecutionConcurrencyClass.Standard,
+            ExecutionResourceSet.Empty,
+            "none");
 
-        Assert.True(store.TryRegister(first, out string? firstError));
-        Assert.Null(firstError);
-        Assert.False(store.TryRegister(second, out string? secondError));
-        Assert.Equal("已有其他调度队列正在运行，当前队列「备用队列」暂不能并行执行", secondError);
+        Assert.True(store.TryRegister(first, standard, out ExecutionAdmissionFailure? firstFailure));
+        Assert.Null(firstFailure);
+        Assert.False(store.TryRegister(second, standard, out ExecutionAdmissionFailure? secondFailure));
+        Assert.NotNull(secondFailure);
+        Assert.Equal(ExecutionAdmissionFailureCode.StandardQueueAlreadyRunning, secondFailure!.Code);
+        Assert.Equal("已有其他调度队列正在运行，当前队列「备用队列」暂不能并行执行", secondFailure.Message);
         Assert.Same(first, store.Find(first.Id));
         Assert.Null(store.Find(second.Id));
 
@@ -246,6 +253,110 @@ public class GovernanceUnitTests
         Assert.True(store.TryTakePending(out PendingSystemAction? taken));
         Assert.Same(pending, taken);
         Assert.Null(store.CurrentSystemAction);
+
+        var armStore = new ExecutionStateStore();
+        var armPending = new PendingSystemAction
+        {
+            Action = "shutdown",
+            QueueName = "arm-queue",
+            Deadline = DateTime.Now.AddMinutes(1),
+        };
+        Assert.Null(armStore.ReplacePending(armPending));
+        Assert.True(armStore.TryArm(armPending, () => { }));
+        Assert.True(armStore.TryCancelPending(out _));
+        bool canceledCommandRan = false;
+        Assert.False(armStore.TryArm(armPending, () => canceledCommandRan = true));
+        Assert.False(canceledCommandRan);
+    }
+
+    [Fact]
+    public void ExecutionStateStore_ArmsCompletionOnlyWhenLastExecutionReleases()
+    {
+        var store = new ExecutionStateStore();
+        ExecutionAdmissionProfile emulator = new(
+            "queue",
+            ExecutionConcurrencyClass.EmulatorOnly,
+            ExecutionResourceSet.Empty,
+            "shutdown");
+        var first = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-1",
+            TargetName = "模拟器队列A",
+        };
+        var second = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-2",
+            TargetName = "模拟器队列B",
+        };
+
+        Assert.True(store.TryRegister(first, emulator, out _));
+        Assert.True(store.TryRegister(second, emulator, out _));
+
+        Assert.Null(store.Release(first, new CompletionIntent(first.Id, first.TargetName, "shutdown")));
+        Assert.Null(store.CurrentSystemAction);
+
+        PendingSystemAction? pending = store.Release(second, new CompletionIntent(second.Id, second.TargetName, "shutdown"));
+        Assert.NotNull(pending);
+        Assert.Equal("shutdown", pending!.Action);
+        Assert.Equal("模拟器队列A、模拟器队列B", pending.QueueName);
+        Assert.Equal(pending.Action, store.CurrentSystemAction!.Action);
+        Assert.Equal(pending.QueueName, store.CurrentSystemAction.QueueName);
+
+        var blocked = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-3",
+            TargetName = "新队列",
+        };
+        Assert.False(store.TryRegister(blocked, emulator, out ExecutionAdmissionFailure? blockedFailure));
+        Assert.Equal(ExecutionAdmissionFailureCode.PendingSystemAction, blockedFailure!.Code);
+
+        Assert.True(store.TryCancelPending(out PendingSystemAction? canceled));
+        Assert.Same(pending, canceled);
+        Assert.True(store.TryRegister(blocked, emulator, out _));
+    }
+
+    [Fact]
+    public void ExecutionStateStore_MergesSameCompletionIntentAndRejectsDifferentAction()
+    {
+        var store = new ExecutionStateStore();
+        ExecutionAdmissionProfile shutdown = new(
+            "queue",
+            ExecutionConcurrencyClass.EmulatorOnly,
+            ExecutionResourceSet.Empty,
+            "shutdown");
+        ExecutionAdmissionProfile reboot = shutdown with { CompletionAction = "reboot" };
+        var first = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-1",
+            TargetName = "队列A",
+        };
+        var second = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-2",
+            TargetName = "队列B",
+        };
+
+        Assert.True(store.TryRegister(first, shutdown, out _));
+        Assert.True(store.TryRegister(second, shutdown, out _));
+        Assert.Null(store.Release(first, new CompletionIntent(first.Id, first.TargetName, "shutdown")));
+
+        var candidate = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-3",
+            TargetName = "队列C",
+        };
+        Assert.False(store.TryRegister(candidate, reboot, out ExecutionAdmissionFailure? failure));
+        Assert.Equal(ExecutionAdmissionFailureCode.CompletionActionConflict, failure!.Code);
+
+        PendingSystemAction? pending = store.Release(second, new CompletionIntent(second.Id, second.TargetName, "shutdown"));
+        Assert.NotNull(pending);
+        Assert.True(store.TryCancelPending(out _));
     }
 
     private sealed class TestCapability : IPluginCapability

@@ -44,16 +44,6 @@ internal static class ApiDispatchHandler
             if (seg.Length >= 2 && seg[1].ToLowerInvariant() == "queue")
             {
                 string queueId = node.Get("queueId").Str();
-                DispatchQueue? queue = RuntimeContext.Instance.FindQueue(queueId);
-                if (queue is null)
-                {
-                    throw new InvalidOperationException($"调度队列不存在：{queueId}");
-                }
-                string? blocked = RuntimeContext.Instance.Validator.QueueBlockedBy(queue);
-                if (blocked is not null)
-                {
-                    throw new InvalidOperationException($"队列「{queue.Name}」引用的脚本「{blocked}」正在运行，请先退出后再执行");
-                }
                 RunningExecution exec = RuntimeContext.Instance.Commands.StartQueue(queueId, mode, Audit.Web);
                 await HttpHelper.WriteJsonAsync(context, new { runId = exec.Id, ok = true }).ConfigureAwait(false);
                 return;
@@ -75,24 +65,25 @@ internal static class ApiDispatchHandler
             await HttpHelper.WriteJsonAsync(context, new { error = $"未找到运行任务：{runId}" }, 404).ConfigureAwait(false);
             return;
         }
+        RunningExecutionSnapshot snapshot = exec.Snapshot();
         await HttpHelper.WriteJsonAsync(context, new
         {
-            exec.Id,
-            exec.Kind,
-            exec.TargetId,
-            exec.TargetName,
-            exec.Mode,
-            exec.Status,
-            exec.StartedAt,
-            exec.FinishedAt,
-            exec.TotalTasks,
-            exec.DoneTasks,
-            exec.CurrentScriptName,
-            exec.CurrentStatus,
-            exec.CurrentAttempt,
-            exec.CurrentMaxAttempts,
-            logTail = exec.LogTail(60),
-            records = exec.SnapshotRecords(),
+            snapshot.Id,
+            snapshot.Kind,
+            snapshot.TargetId,
+            snapshot.TargetName,
+            snapshot.Mode,
+            snapshot.Status,
+            snapshot.StartedAt,
+            snapshot.FinishedAt,
+            snapshot.TotalTasks,
+            snapshot.DoneTasks,
+            snapshot.CurrentScriptName,
+            snapshot.CurrentStatus,
+            snapshot.CurrentAttempt,
+            snapshot.CurrentMaxAttempts,
+            logTail = snapshot.LogTail,
+            records = snapshot.Records,
         }).ConfigureAwait(false);
     }
 

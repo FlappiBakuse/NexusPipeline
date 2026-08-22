@@ -7,6 +7,7 @@
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
 > v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
 > v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
+> v0.9.0 并行调度：`ExecutionPlanBuilder` 从仓储快照构建冻结执行计划，`ExecutionAdmissionPolicy` 负责纯资格矩阵/资源/完成操作策略，`ExecutionStateStore` 原子登记 profile 租约并协调完成意图；队列内保持串行，符合条件的模拟器队列和一个标准队列可并行，外部 API 与磁盘结构保持兼容。
 
 ## 总体结构
 
@@ -68,17 +69,19 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `IExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；具体实现仍由现有 `ExecutionCommands`、`NotificationDispatcher`、`PluginManager` 提供 |
 | `ExecutionCommands` | src/Application/Commands/ExecutionCommands.cs | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消应用命令入口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
-| `DispatchCenter` | src/Services/DispatchCenter.cs | 兼容执行门面：执行门禁、状态登记、取消和入口参数编排；不再承载后台运行流程 |
-| `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程冲突和任务计数校验 |
-| `ExecutionRunner` | src/Services/Execution/ExecutionRunner.cs | 脚本/队列后台生命周期、用户串行、历史落盘、通知和完成操作调度 |
-| `SystemActionExecutor` | src/Services/Execution/SystemActionExecutor.cs | sleep/reboot/shutdown 完成操作的 pending 单槽位、倒计时和取消语义 |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 兼容执行门面：获取冻结计划、提交准入登记、取消和入口参数编排；不承载后台运行流程 |
+| `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作 |
+| `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程预检和任务计数校验 |
+| `ExecutionAdmissionPolicy` | src/Services/Execution/ExecutionAdmissionPolicy.cs | 纯逻辑比较 EmulatorOnly/Standard 矩阵、重复目标、资源冲突、完成操作兼容性和 pending 阻断 |
+| `ExecutionRunner` | src/Services/Execution/ExecutionRunner.cs | 脚本/队列后台生命周期、队列内用户串行、历史落盘、通知和完成意图提交 |
+| `SystemActionExecutor` | src/Services/Execution/SystemActionExecutor.cs | 运行组空闲后的完成操作 arm、pending 倒计时和取消语义 |
 | `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、配置事务和运行收尾；后台任务与历史/通知外层边界由 `ExecutionRunner` 承载 |
 | `RunSession` | src/Services/RunSession.cs | 一次运行的状态对象：元数据、预算、日志收集、配置事务状态和回调；不再拥有 `RunAsync` 流程 |
 | `AttemptRunner` | src/Services/Execution/AttemptRunner.cs | 单次尝试执行入口；协调器通过该边界调用前/后置脚本与监控执行 |
 | `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
 | `CleanupManager` / `RunAttemptFinalizer` | src/Services/Execution/ | 执行域清理门面与 Windows 进程/游戏清理基础设施 |
-| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务与待执行系统操作，保留原子防重入和 100 条历史上限 |
-| `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、记录快照和日志尾部 |
+| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、完成意图与待执行系统操作；保留原子防重入和 100 条历史上限 |
+| `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、并发安全记录/日志写入与一致快照 |
 | `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
 | `ConfigurationTransaction` | src/Services/Configuration/ConfigurationTransaction.cs | 配置 prepare/retry/sync/replace/rollback 原语边界，兼容现有 `ConfigSwap` 磁盘协议 |
@@ -251,6 +254,6 @@ plugins/bettergi/
 
 ```
 Web 请求 → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
-CLI 菜单 / Scheduler → Application Command → DispatchCenter → ExecutionValidator → ExecutionRunner
-运行结束 → ExecutionRunner → INotificationService → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP
+CLI 菜单 / Scheduler → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+运行结束 → ExecutionRunner → INotificationService → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP；同时向 ExecutionStateStore 提交完成意图
 ```

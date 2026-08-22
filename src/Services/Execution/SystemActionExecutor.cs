@@ -2,7 +2,9 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Execution;
 
-/// <summary>系统完成操作的延迟登记、取消和单槽位替换策略。</summary>
+/// <summary>
+/// 并行运行组完成操作协调器：完成意图先登记，所有活动运行退出后才原子预留并执行系统操作。
+/// </summary>
 internal sealed class SystemActionExecutor
 {
     private readonly ExecutionStateStore _state;
@@ -14,22 +16,30 @@ internal sealed class SystemActionExecutor
 
     public PendingSystemAction? Current => _state.CurrentSystemAction;
 
-    /// <summary>取消待执行系统操作：sleep 取消应用内延迟；reboot/shutdown 调用 shutdown /a。</summary>
+    /// <summary>运行释放入口；只有最后一个活动运行释放时才会得到 idle pending action。</summary>
+    public void CompleteExecution(RunningExecution exec, CompletionIntent? intent)
+    {
+        PendingSystemAction? pending = _state.Release(exec, intent);
+        if (pending is not null)
+        {
+            Arm(pending);
+        }
+    }
+
+    /// <summary>取消待执行系统操作：sleep/reboot/shutdown 可取消，exit 保持立即退出语义。</summary>
     public bool Cancel(string source = Audit.Web)
     {
-        if (!_state.TryTakePending(out PendingSystemAction? pending) || pending is null)
+        if (!_state.TryCancelPending(out PendingSystemAction? pending) || pending is null)
         {
             return false;
         }
+
         string action = pending.Action;
         string queueName = pending.QueueName;
         try
         {
-            if (action == "sleep")
-            {
-                pending.Cts.Cancel();
-            }
-            else if (action is "reboot" or "shutdown")
+            pending.Cts.Cancel();
+            if (action is "reboot" or "shutdown")
             {
                 SystemActions.CancelShutdown();
             }
@@ -43,14 +53,14 @@ internal sealed class SystemActionExecutor
     }
 
     /// <summary>
-    /// 登记待执行系统操作。倒计时保持真实 60 秒，不受 NEXUS_TIME_SCALE 缩放，
-    /// 以保留现有 Web 取消和验收断言语义。
+    /// 兼容旧调用方的直接调度入口。并行队列完成路径不再使用 replacement 语义，而是经 CompleteExecution。
+    /// 倒计时保持真实 60 秒，不受 NEXUS_TIME_SCALE 缩放。
     /// </summary>
     public void Schedule(string action, string queueName, Action? execute)
     {
         var pending = new PendingSystemAction
         {
-            Action = action,
+            Action = ExecutionAdmissionProfile.NormalizeCompletionAction(action),
             QueueName = queueName,
             Deadline = DateTime.Now.AddSeconds(60),
         };
@@ -66,42 +76,70 @@ internal sealed class SystemActionExecutor
                 Logger.Warn($"[警告] 取消旧系统操作后台任务失败：{ex.Message}");
             }
         }
+        StartDelay(pending, execute, pending.Action == "exit" ? TimeSpan.Zero : TimeSpan.FromSeconds(60));
+    }
 
-        if (execute is not null)
+    private void Arm(PendingSystemAction pending)
+    {
+        try
         {
-            _ = Task.Run(async () =>
+            switch (pending.Action)
             {
-                try
-                {
-                    await Task.Delay(60000, pending.Cts.Token).ConfigureAwait(false);
-                    execute();
-                }
-                catch (OperationCanceledException)
-                {
-                    // 已取消，不执行。
-                }
-                finally
-                {
+                case "reboot":
+                    if (_state.TryArm(pending, () => SystemActions.Reboot(60)))
+                    {
+                        StartDelay(pending, null, TimeSpan.FromSeconds(60));
+                    }
+                    break;
+                case "shutdown":
+                    if (_state.TryArm(pending, () => SystemActions.Shutdown(60)))
+                    {
+                        StartDelay(pending, null, TimeSpan.FromSeconds(60));
+                    }
+                    break;
+                case "sleep":
+                    StartDelay(pending, SystemActions.Hibernate, TimeSpan.FromSeconds(60));
+                    break;
+                case "exit":
+                    StartDelay(pending, SystemActions.ExitApp, TimeSpan.Zero);
+                    break;
+                default:
                     _state.ClearPending(pending);
-                }
-            });
+                    Logger.Warn($"[警告] 未识别的完成操作「{pending.Action}」，已跳过。");
+                    break;
+            }
         }
-        else
+        catch (Exception ex)
         {
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await Task.Delay(60000).ConfigureAwait(false);
-                }
-                catch
-                {
-                }
-                finally
-                {
-                    _state.ClearPending(pending);
-                }
-            });
+            _state.ClearPending(pending);
+            Logger.Warn($"[警告] 启动完成操作「{pending.Action}」失败：{ex.Message}");
         }
+    }
+
+    private void StartDelay(PendingSystemAction pending, Action? execute, TimeSpan delay)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(delay, pending.Cts.Token).ConfigureAwait(false);
+                if (!pending.Cts.IsCancellationRequested)
+                {
+                    execute?.Invoke();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 已取消，不执行。
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 完成操作「{pending.Action}」执行失败：{ex.Message}");
+            }
+            finally
+            {
+                _state.ClearPending(pending);
+            }
+        });
     }
 }

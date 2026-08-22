@@ -41,9 +41,13 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 尝试（RunAttempt） | 一次尝试 = 一次完整的进程启动→监控→判定→清理；失败按 MaxAttempts 重试 |
 | 运行（RunRecord） | 一次「脚本实例 × 用户」的完整运行（含全部尝试），落盘历史（.json 纯状态 + 按尝试分批日志） |
 | 运行状态（RunSession） | 一次运行的状态/元数据对象；不再承担完整流程，流程由 `ExecutionCoordinator` 编排 |
+| 执行计划（ScriptExecutionPlan / QueueExecutionPlan） | 从仓储快照构建并冻结本次脚本/队列的任务、脚本、用户、资源和完成操作描述；运行期间不回读共享仓储 |
+| 执行准入 profile（ExecutionAdmissionProfile） | 描述脚本/队列的并行分类、资源集合和完成操作；队列分类在计划创建时固定 |
 | 执行门禁（ExecutionValidator） | 执行前的脚本/队列/用户/进程冲突与限制校验；不创建运行任务 |
-| 执行运行器（ExecutionRunner） | 负责后台脚本/队列生命周期、用户串行、历史落盘、通知和完成操作调度 |
-| 系统操作执行器（SystemActionExecutor） | 负责 sleep/reboot/shutdown 的 pending 状态、真实 60 秒倒计时与取消 |
+| 执行准入策略（ExecutionAdmissionPolicy） | 纯逻辑比较资格矩阵、重复目标、资源冲突、完成操作兼容性和待执行系统操作 |
+| 执行状态存储（ExecutionStateStore） | 在同一临界区完成准入检查、活动运行登记、profile 资源租约释放和完成意图协调 |
+| 执行运行器（ExecutionRunner） | 负责后台脚本/队列生命周期、用户串行、历史落盘、通知和完成意图提交 |
+| 系统操作执行器（SystemActionExecutor） | 负责运行组空闲后的完成操作 arm、真实 60 秒倒计时与取消 |
 | 尝试执行（AttemptRunner） | 单次尝试执行边界，承接前/后置脚本、脚本监控、判定和资源清理调用 |
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
@@ -58,12 +62,15 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 
 ### 3.1 脚本运行完整链路
 
-一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动，先经 `ExecutionValidator` 完成门禁，再由 `ExecutionCoordinator.RunAsync` 编排（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
+一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`DispatchCenter` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
 
 ```mermaid
 sequenceDiagram
     participant DC as DispatchCenter
+    participant P as ExecutionPlanBuilder
     participant V as ExecutionValidator
+    participant Q as ExecutionAdmissionPolicy
+    participant E as ExecutionStateStore
     participant R as ExecutionRunner
     participant C as ExecutionCommands
     participant S as ExecutionCoordinator.RunAsync
@@ -72,8 +79,13 @@ sequenceDiagram
     participant J as SessionJudge/判断脚本
 
     C->>DC: StartScript / StartQueue / Cancel
-    DC->>V: 读取仓储并执行门禁校验
-    DC->>R: 登记 RunSession 状态并启动后台任务
+    DC->>P: 读取仓储快照并构建冻结计划
+    P->>V: 执行计划前置校验
+    P-->>DC: 返回计划与 AdmissionProfile
+    DC->>Q: 比较资格矩阵/资源/完成操作
+    Q->>E: 在同一临界区检查并登记活动运行
+    E-->>DC: 接受或返回准入失败码
+    DC->>R: 启动后台任务
     R->>S: 编排该用户运行
     loop 尝试 1..MaxAttempts
         S->>A: 执行本次尝试
@@ -96,7 +108,9 @@ sequenceDiagram
         end
     end
     S->>S: 还原替换配置 → 清空脚本区 → 配置交换还原现场
-    R->>R: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发/完成操作
+    R->>R: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发
+    R->>E: 提交完成意图并释放资源租约
+    E-->>E: 活动运行数为 0 时原子预留 pending 系统操作
 ```
 
 **分步细节（AttemptRunner 单次尝试边界内）：**
@@ -124,31 +138,41 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A[调度器/手动/CLI 触发队列] --> B[StartQueue 注册 RunningExecution]
-    B --> C[按 Index 遍历任务]
-    C --> D{脚本实例存在?}
-    D -- 否 --> E[记录失败历史·已跳过]
-    D -- 是 --> F{有启用用户?}
-    F -- 否 --> G[记录失败历史·未配置启用用户已跳过]
-    F -- 是 --> H[RunUsersAsync 按用户顺序串行]
-    H --> I[门禁 ScriptConfigGate 等待]
-    I --> J[ExecutionCoordinator 编排该用户]
-    J --> K[历史落盘（.json 纯状态 + 按尝试分批日志）+ 进度 DoneTasks++]
-    K --> C
-    C -- 遍历完成 --> L{queue.NotifyEnabled}
-    L -- 是 --> M[队列级汇总通知]
-    L -- 否 --> N[逐脚本通知 script.NotifyEnabled]
-    M --> O[执行完成操作 exit/sleep/reboot/shutdown]
+    A[调度器/手动/CLI 触发队列] --> B[ExecutionPlanBuilder 构建冻结计划]
+    B --> C[ExecutionStateStore 原子准入与资源租约]
+    C -- 拒绝 --> X[返回准入错误]
+    C -- 接受 --> D[按 Index 遍历任务]
+    D --> E{脚本实例存在?}
+    E -- 否 --> F[记录失败历史·已跳过]
+    E -- 是 --> G{有启用用户?}
+    G -- 否 --> H[记录失败历史·未配置启用用户已跳过]
+    G -- 是 --> I[RunUsersAsync 按用户顺序串行]
+    I --> J[门禁 ScriptConfigGate 等待]
+    J --> K[ExecutionCoordinator 编排该用户]
+    K --> L[历史落盘（.json 纯状态 + 按尝试分批日志）+ 进度 DoneTasks++]
+    L --> D
+    F --> D
+    H --> D
+    D -- 遍历完成 --> M{queue.NotifyEnabled}
+    M -- 是 --> N[队列级汇总通知]
+    M -- 否 --> O[逐脚本通知 script.NotifyEnabled]
+    N --> P[提交完成意图]
+    O --> P
+    P --> Q[所有活动运行空闲后 arm 完成操作]
 ```
 
-- 队列任务按 `Index` 升序；每脚本实例内按**启用用户添加顺序**串行轮换；不同队列当前也必须全局串行，任一用户取消则中断后续。
+- 队列任务按 `Index` 升序；每脚本实例内按**启用用户添加顺序**串行轮换；队列之间按准入矩阵并行，任一用户取消则中断当前队列后续任务。
+- 队列任务数大于零、全部引用可解析脚本实例且每个脚本 `GameMode == "emulator"` 时归类为 `EmulatorOnly`；任意数量 `EmulatorOnly` 可并行，最多一个 `Standard` 队列。空队列、缺失引用和其他无法证明为纯模拟器的情况归类为 `Standard`。
+- 独立脚本不占用 `Standard` 队列名额，但与队列共同申请脚本 ID、解析后的启动目标、进程基名、配置路径和模拟器 ADB 端点资源租约；同一资源或配置父子路径冲突时准入失败。
 - 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送（忽略实例级）；`false` 时逐脚本按各自 `NotifyEnabled` 发送。
-- 完成操作（退出/休眠/重启/关机）仅在无取消时执行（v0.7.1+ 文档化，KN-54：**任务失败（failed）不跳过完成操作**——队列全部任务执行完毕即视为完成，仅存在「取消」才跳过并告警；语义经用户确认保留）；休眠/重启/关机执行前 Web 界面显示 60 秒倒计时卡片可取消（v0.6.3+：重启/关机走 Windows 倒计时 `shutdown /t 60`，`shutdown /a` 取消；休眠走应用内 60 秒延迟，取消后不执行；倒计时为真实墙钟不随测试时间加速缩放；exit 退出软件立即执行不可取消）。
+- 完成操作（退出/休眠/重启/关机）以完成意图提交；只有全部活动运行释放后才 arm，同一操作合并，存在不同非空操作时由准入策略拒绝；任务失败仍照常提交完成意图，取消队列跳过。休眠/重启/关机执行前 Web 界面显示 60 秒倒计时卡片可取消（重启/关机走 Windows 倒计时 `shutdown /t 60`，`shutdown /a` 取消；休眠走应用内 60 秒延迟，取消后不执行；倒计时为真实墙钟不随测试时间加速缩放；exit 退出软件立即执行不可取消）。
+
+并行准入发生在 `ExecutionStateStore` 的同一临界区：先检查 pending 系统操作和重复目标，再由 `ExecutionAdmissionPolicy` 比较队列类别、资源集合与完成操作，最后同时登记 `RunningExecution` 和 profile。执行释放时移除 profile 租约并追加完成意图；最后一个活动运行释放时原子创建 pending 系统操作，新的启动在 pending 清除或取消前保持拒绝。
 
 ### 3.3 手动执行脚本
 
 - 指定用户：只运行该用户；未指定：按启用用户顺序全部运行一次。
-- 冲突检查：脚本已在运行（进程名检测）→ 先杀掉并确认退出后重新启动监管；队列运行时任一任务脚本在运行 → 队列跳过该队列并记录失败历史。
+- 冲突检查：脚本启动目标已在运行时沿用既有进程检测；脚本和队列入口统一走资源租约准入，队列计划中的已运行脚本或与活动执行共享脚本/进程/配置/模拟器端点资源时返回准入错误。
 - 取消：`Cancel` 通过 CancellationToken 中断当前尝试（杀进程树）并标记 cancelled，后续任务不再执行。
 
 ## 4. 配置交换机制
@@ -313,7 +337,7 @@ flowchart LR
 1. **配置交换清除运行产物**：运行结束时 `DoRestore` 清空 configPath 再还原现场，**运行期间脚本写入 configPath 内的文件（含脚本日志文件）会被删除**。日志文件的安全保存依赖宿主历史落盘（.json + 按尝试分批 .log），脚本自身文件请避免放在 configPath 内。**例外（v0.7.6+）**：自动更新配置开启时，脚本写入的任务完成记录/运行计数/新增任务会在收尾同步进用户快照 store——配置本体仍还原为运行前现场，但快照内容延续到下次运行（详见 4.5）。
 2. **同一用户尝试间的日志残留**：配置还原只在**整个运行结束**时执行，尝试之间 log.txt 保留（监控已按末尾读+严格 fresh 处理，无害）。
 3. **配置 JSON 无事务锁**：服务运行期间不建议另一个实例同时修改配置。
-4. **定时触发为每分钟秒级检测**：服务在该分钟内处于运行状态即可触发，错过整点不补跑；触发时队列内任一脚本已在运行则跳过该队列并记录失败历史。
+4. **定时触发为每分钟秒级检测**：服务在该分钟内处于运行状态即可触发，错过整点不补跑；触发时通过统一计划与准入流程，重复队列、资源冲突或矩阵不兼容时记录触发失败。
 5. **管理员权限强制**：正式版构建 requireAdministrator，非管理员拒绝运行（exit 2）；开机自启为计划任务（onlogon + highest）。
 6. **远程访问**：默认仅绑定 `127.0.0.1`；开启后绑定 `http://+:{port}/`（禁止 `0.0.0.0`），远程请求须 `Authorization: Bearer <token>`，自动添加防火墙入站规则；局域网设备须用本机局域网 IP 访问。
 7. **进程名检测的权衡**：`IsExeRunning` 按进程名（不含扩展名）检测，同名无关进程可能误报（防重复启动的保守权衡）；bat 经 cmd 包装无法按名检测，直接放行。

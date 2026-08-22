@@ -79,7 +79,13 @@ internal sealed class ExecutionValidator
 
     public void ValidateQueueStart(DispatchQueue queue)
     {
-        string? mixError = CheckQueueMix(queue);
+        ValidateQueueStartSnapshot(queue, _scripts.Snapshot());
+    }
+
+    /// <summary>使用同一份脚本快照校验队列，供 ExecutionPlanBuilder 避免校验与计划读取之间漂移。</summary>
+    public void ValidateQueueStartSnapshot(DispatchQueue queue, IReadOnlyList<ScriptInstance> scripts)
+    {
+        string? mixError = Limits.CheckQueueMix(scripts, queue);
         if (mixError is not null)
         {
             throw new InvalidOperationException(mixError);
