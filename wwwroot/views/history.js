@@ -1,42 +1,136 @@
 import { api } from "../core/api.js";
 import { esc, finalStatusOf, fmtTime, statusBadge } from "../core/format.js";
-import { pagerMarkup, registerPager } from "../core/pager.js";
 import { pageHeader } from "../core/forms.js";
+import { icon } from "../core/icons.js";
 import { isCurrent, state } from "../core/state.js";
 import { modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 
-let historyPage = 1;
-let historyDays = 7;
-const HISTORY_PAGE_SIZE = 20;
-const HISTORY_DAY_OPTIONS = [7, 30, 180];
+let historyDays = 30;
+let historyDates = [];
+let historySelectedDate = "";
+let historyDir = "";
+const HISTORY_DAY_OPTIONS = [7, 15, 30, 60, 90, 120, 180];
+
+const pad = n => String(n).padStart(2, "0");
+
+/** 「2026年08月21日」样式的日期文本（date 参数形如 2026-08-21）。 */
+function fmtDateCN(dateStr) {
+  const parts = String(dateStr || "").split("-");
+  return parts.length === 3 ? `${parts[0]}年${parts[1]}月${parts[2]}日` : esc(dateStr);
+}
+
+/** 「2026年08月21日 04:05:00」样式的完整时间文本。 */
+function fmtDateTimeCN(value) {
+  const d = new Date(value);
+  if (!value || isNaN(d.getTime())) return "-";
+  return `${d.getFullYear()}年${pad(d.getMonth() + 1)}月${pad(d.getDate())}日 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** 记录条状态徽章（参考图2）：成功=✓ 完成、失败=✕ 失败：原因、部分完成/已取消=警示色。 */
+function entryBadge(record) {
+  const status = finalStatusOf(record);
+  if (status === "success") return '<span class="badge ok">✓ 完成</span>';
+  if (status === "partial") return '<span class="badge warn">⚠ 部分完成</span>';
+  if (status === "cancelled") return '<span class="badge warn">已取消</span>';
+  const reason = record.resultDetail ? `：${record.resultDetail}` : "";
+  return `<span class="badge bad" title="${esc(reason)}">✕ 失败${esc(reason)}</span>`;
+}
+
+function daysAction() {
+  return `<div class="history-days-box"><label class="field-label" for="history-days">天数范围</label><select id="history-days" data-action="history-days" data-testid="history-days">${HISTORY_DAY_OPTIONS.map(days => `<option value="${days}" ${days === historyDays ? "selected" : ""}>${days} 天</option>`).join("")}</select></div>`;
+}
+
+function dateRowsMarkup() {
+  return historyDates.map(date => `<button class="history-date-row${date.date === historySelectedDate ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-pressed="${date.date === historySelectedDate ? "true" : "false"}">${icon("chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} 条</span></button>`).join("");
+}
+
+function entryMarkup(record) {
+  const queue = record.queueName ? ` · ${esc(record.queueName)}` : "";
+  const filePath = historyDir && historySelectedDate ? `${historyDir}\\${historySelectedDate}\\${esc(record.logFile || "")}` : esc(record.logFile || "");
+  return `<button class="history-entry history-status-${esc(finalStatusOf(record))}" type="button" data-action="history-detail" data-id="${esc(record.id)}" data-testid="history-entry">
+    <span class="history-entry-bar" aria-hidden="true"></span>
+    <span class="history-entry-main">
+      <span class="history-entry-title"><strong>${fmtDateTimeCN(record.startTime)} · ${esc(record.scriptName)}${queue}</strong>${entryBadge(record)}</span>
+      <span class="history-entry-path">${filePath}</span>
+    </span>
+    <span class="history-entry-arrow" aria-hidden="true">${icon("chevronRight")}</span>
+  </button>`;
+}
+
+function panelsMarkup(records) {
+  return `<section class="card history-panels" data-testid="history-panels">
+    <aside class="history-dates-panel">
+      <div class="history-panel-head">${icon("calendar")}<h3>运行日期</h3><span class="muted">${historyDates.length} 天</span></div>
+      <div class="history-dates-list">${dateRowsMarkup()}</div>
+    </aside>
+    <section class="history-records-panel">
+      <div class="history-panel-head">${icon("queues")}<h3>运行情况</h3><span class="muted" data-testid="history-records-count">${records.length} 条记录</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="刷新记录" data-testid="history-refresh">${icon("refresh")}</button></div>
+      <div class="history-entry-list">${records.length ? records.map(entryMarkup).join("") : '<div class="empty"><strong>该日暂无记录</strong></div>'}</div>
+    </section>
+  </section>`;
+}
 
 export async function pageHistory(token) {
   if (!isCurrent("history", token)) return;
   navActive("history"); setTopbarTitle("历史记录");
-  let data, scripts, queues;
-  try { [data, scripts, queues] = await Promise.all([api("GET", `/api/history?days=${historyDays}&offset=${(historyPage - 1) * HISTORY_PAGE_SIZE}&limit=${HISTORY_PAGE_SIZE}`), api("GET", "/api/scripts"), api("GET", "/api/queues")]); }
-  catch (error) { render(`<div class="empty"><strong>加载历史记录失败</strong>${esc(error.message)}</div>`); return; }
+  let data;
+  try {
+    data = await api("GET", `/api/history/dates?days=${historyDays}`);
+  } catch (error) {
+    if (isCurrent("history", token)) render(`<div class="empty"><strong>加载历史记录失败</strong>${esc(error.message)}</div>`);
+    return;
+  }
   if (!isCurrent("history", token)) return;
-  const records = data.records || data;
-  const total = data.total ?? records.length;
-  const scriptName = id => scripts.find(script => script.id === id)?.name || "(已删除)";
-  const queueName = id => queues.find(queue => queue.id === id)?.name || "";
-  const tableRows = records.map(record => `<tr class="history-row" tabindex="0" role="button" data-action="history-detail" data-id="${esc(record.id)}"><td>${esc(fmtTime(record.startTime))}</td><td><strong>${esc(scriptName(record.scriptInstanceId))}</strong></td><td>${esc(queueName(record.queueId)) || "-"}</td><td>${record.mode === "auto" ? "自动" : "手动"}</td><td>${statusBadge(finalStatusOf(record))}</td><td class="ops history-row-action">查看详情</td></tr>`).join("");
-  const mobileRecords = records.map(record => `<article class="history-record history-row" tabindex="0" role="button" data-action="history-detail" data-testid="history-record" data-id="${esc(record.id)}"><div class="history-record-head"><strong>${esc(scriptName(record.scriptInstanceId))}</strong>${statusBadge(finalStatusOf(record))}</div><div class="history-record-meta"><span>${esc(fmtTime(record.startTime))}</span></div><div class="history-record-meta"><span>${record.mode === "auto" ? "自动运行" : "手动运行"}</span><span>${esc(queueName(record.queueId) || "独立运行")}</span></div><div class="history-record-actions"><span class="history-row-action">查看详情</span></div></article>`).join("");
-  const content = records.length ? `<section class="card table-surface history-surface"><div class="history-table"><div class="table-scroll"><table class="data-table"><thead><tr><th scope="col">时间</th><th scope="col">脚本</th><th scope="col">队列</th><th scope="col">模式</th><th scope="col">结果</th><th scope="col">操作</th></tr></thead><tbody>${tableRows}</tbody></table></div></div><div class="history-records">${mobileRecords}</div>${pagerMarkup("history", historyPage, HISTORY_PAGE_SIZE, total)}</section>` : '<div class="empty"><strong>暂无历史记录</strong>运行脚本或调度队列后在此查看。</div>';
-  const action = `<div class="history-days-box"><label class="field-label" for="history-days">天数范围</label><select id="history-days" data-action="history-days" data-testid="history-days">${HISTORY_DAY_OPTIONS.map(days => `<option value="${days}" ${days === historyDays ? "selected" : ""}>${days} 天</option>`).join("")}</select></div>`;
-  render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天 · 共 ${total} 条 · 按运行时间查看结果、重试过程和脚本输出。`, action) + content);
-  registerPager("history", page => { historyPage = page; pageHistory(state.routeToken); });
+  historyDates = data.dates || [];
+  if (!historyDates.some(date => date.date === historySelectedDate)) {
+    historySelectedDate = historyDates[0]?.date || "";
+  }
+  if (!historySelectedDate) {
+    render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天 · 暂无运行记录`, daysAction()) + '<div class="empty"><strong>暂无历史记录</strong>运行脚本或调度队列后在此查看。</div>');
+    return;
+  }
+  await loadDayRecords(token);
 }
 
-/** 历史天数范围切换（v0.6.3+）：重置分页并重新拉取。 */
+/** 拉取选中日期的记录并渲染（无轮询；刷新按钮与切日期共用）。 */
+async function loadDayRecords(token) {
+  let data;
+  try {
+    data = await api("GET", `/api/history?date=${encodeURIComponent(historySelectedDate)}`);
+  } catch (error) {
+    if (isCurrent("history", token)) {
+      toast(error.message, "error");
+      render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天`, daysAction()) + panelsMarkup([]));
+    }
+    return;
+  }
+  if (!isCurrent("history", token)) return;
+  historyDir = data.historyDir || "";
+  const records = data.records || [];
+  render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天 · 按日期查看运行记录`, daysAction()) + panelsMarkup(records));
+}
+
+/** 天数范围切换（v0.8.7+）：扩展为 7/15/30/60/90/120/180 天，切换后重拉日期列表并回落最新日期。 */
 export function historyDaysChange(target) {
-  const days = Number(target.value) || 7;
+  const days = Number(target.value) || 30;
   if (days === historyDays) return;
   historyDays = days;
-  historyPage = 1;
+  historySelectedDate = "";
   pageHistory(state.routeToken);
+}
+
+/** 左侧日期行点击：切换选中日期并加载当日记录。 */
+export async function historySelectDate(target) {
+  const date = target.dataset.date;
+  if (!date || date === historySelectedDate) return;
+  historySelectedDate = date;
+  await loadDayRecords(state.routeToken);
+}
+
+/** 右侧刷新按钮：重拉当前选中日期的记录。 */
+export async function historyRefresh() {
+  await loadDayRecords(state.routeToken);
 }
 
 function historyLogMarkup(id, attemptKey, logInfo, label) {
@@ -86,5 +180,7 @@ export async function historyFullLog(id, attemptKey, target) {
 export const actions = {
   "history-detail": target => historyDetail(target.dataset.id),
   "history-days": target => historyDaysChange(target),
+  "history-date": target => historySelectDate(target),
+  "history-refresh": () => historyRefresh(),
   "history-full-log": target => withBusy(target, () => historyFullLog(target.dataset.id, target.dataset.attempt, target)),
 };

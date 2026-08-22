@@ -2,7 +2,7 @@ import { api } from "../core/api.js";
 import { pageHeader, systemActionCard } from "../core/forms.js";
 import { esc, statusBadge } from "../core/format.js";
 import { isCurrent, schedule } from "../core/state.js";
-import { navActive, render, setTopbarTitle, startCountdown, startSystemActionCountdown, stopCountdown } from "../core/ui.js";
+import { navActive, render, setTopbarTitle, startSystemActionCountdown } from "../core/ui.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>当前空闲</strong><span>没有正在运行的脚本或调度队列。</span><a class="back-link" href="#/dispatch">前往调度中心</a></div>';
@@ -28,18 +28,6 @@ function pluginMarkup(status) {
   return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${disabled.length} 个插件当前已禁用：${disabled.map(plugin => esc(plugin.displayName)).join("、")}</p><a class="back-link" href="#/plugins">查看插件</a></div>`;
 }
 
-function statGridMarkup(status, next) {
-  return `<section class="stat-grid stat-grid-operational" aria-label="运行概览">
-    <div class="stat stat-accent" data-testid="stat-scripts"><div class="num">${status.scriptCount ?? 0}</div><div class="lbl">脚本实例</div></div>
-    <div class="stat" data-testid="stat-queues"><div class="num">${status.queueCount ?? 0}</div><div class="lbl">调度队列</div></div>
-    <div class="stat" data-testid="stat-running"><div class="num">${(status.running || []).length}</div><div class="lbl">正在运行</div></div>
-    <div class="stat next-schedule-card" data-testid="stat-next" aria-label="下一调度队列">
-    <div class="next-schedule-main"><div class="eyebrow">下一次调度</div><div class="num" id="next-q">${next ? "正在计算倒计时" : "无"}</div></div>
-    <div class="next-schedule-detail"><strong class="next-q-label" id="next-q-label">下一调度队列：${next ? esc(next.queueName || "未命名队列") : "无"}</strong><span class="muted">${next ? "按启用的定时队列计算" : "暂无已启用的定时队列"}</span></div>
-    </div>
-  </section>`;
-}
-
 function setVersionLabel(version) {
   const el = document.querySelector("#app-version");
   if (el) el.textContent = `当前版本 · ${version || "0.0.0"}`;
@@ -59,7 +47,6 @@ function statePanelMarkup(status) {
   const active = running.length > 0;
   return `<section id="dashboard-state" class="dashboard-state ${active ? "running" : "idle"}" data-testid="dashboard-state" aria-live="polite">
     <div class="dashboard-state-copy"><div class="state-label">${active ? "正在运行" : "系统空闲"}</div><h3>${active ? "任务正在执行" : "一切准备就绪"}</h3><p>${active ? `当前有 ${running.length} 个活动任务，状态会自动更新。` : "当前没有活动任务，可以从调度中心手动执行脚本或队列。"}</p></div>
-    <strong class="state-count" data-testid="dashboard-running-count">${running.length}</strong>
   </section>`;
 }
 
@@ -71,32 +58,21 @@ export async function pageDashboard(token) {
   try {
     status = await api("GET", "/api/status");
   } catch (error) {
-    if (isCurrent("dashboard", token) && !document.querySelector('[data-testid="stat-scripts"]')) {
+    if (isCurrent("dashboard", token) && !document.querySelector('[data-testid="dashboard-state"]')) {
       render(`<div class="empty"><strong>无法连接服务</strong>${esc(error.message)}</div>`);
     }
     return;
   }
   if (!isCurrent("dashboard", token)) return;
-  const next = status.nextSchedule;
   setVersionLabel(status.version);
-  if (!document.querySelector('[data-testid="stat-scripts"]')) {
+  if (!document.querySelector('[data-testid="dashboard-state"]')) {
     render(pageHeader("运行概览", "仪表盘", "查看当前运行状态、调度概览和通知能力。")
       + statePanelMarkup(status)
       + `<div id="system-action-area">${systemActionCard(status.systemAction)}</div>
       <section class="content-section list-surface" data-testid="running-panel">${runningPanelMarkup(status)}</section>
-      <section class="content-section dashboard-metrics" aria-label="运行数据">${statGridMarkup(status, next)}</section>
       <section class="content-section" id="dashboard-plugin-panel" hidden>${pluginPanelMarkup(status)}</section>`);
-    if (next) startCountdown("next-q", next.time); else stopCountdown();
   } else {
-    // 局部更新（v0.6.7+）：不整页重渲染，避免倒计时定时器反复重建与滚动/焦点重置；区域缺失时静默跳过。
-    const setNum = (selector, text) => {
-      const el = document.querySelector(selector);
-      if (el) el.textContent = text;
-    };
-    setNum('.stat[data-testid="stat-scripts"] .num', status.scriptCount ?? 0);
-    setNum('.stat[data-testid="stat-queues"] .num', status.queueCount ?? 0);
-    setNum('.stat[data-testid="stat-running"] .num', (status.running || []).length);
-    setNum('[data-testid="dashboard-running-count"]', (status.running || []).length);
+    // 局部更新（v0.6.7+）：不整页重渲染，避免滚动/焦点重置；区域缺失时静默跳过。
     const statePanel = document.querySelector("#dashboard-state");
     if (statePanel) {
       const active = (status.running || []).length > 0;
@@ -108,18 +84,6 @@ export async function pageDashboard(token) {
       if (label) label.textContent = active ? "正在运行" : "系统空闲";
       if (heading) heading.textContent = active ? "任务正在执行" : "一切准备就绪";
       if (copy) copy.textContent = active ? `当前有 ${(status.running || []).length} 个活动任务，状态会自动更新。` : "当前没有活动任务，可以从调度中心手动执行脚本或队列。";
-    }
-    const nextEl = document.querySelector("#next-q");
-    const nextLabel = document.querySelector("#next-q-label");
-    if (nextEl) {
-      if (next) {
-        if (nextLabel) nextLabel.textContent = "下一调度队列：" + (next.queueName || "未命名队列");
-        startCountdown("next-q", next.time);
-      } else {
-        stopCountdown();
-        nextEl.textContent = "无";
-        if (nextLabel) nextLabel.textContent = "下一调度队列：无";
-      }
     }
     const sysArea = document.querySelector("#system-action-area");
     if (sysArea) sysArea.innerHTML = systemActionCard(status.systemAction);

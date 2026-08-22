@@ -377,7 +377,7 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
   await api("DELETE", "/api/scripts/" + created.id);
 });
 
-test("下一调度队列显示/倒计时 + 插件能力精简", async ({ page }) => {
+test("仪表盘统计区移除 + 插件能力精简", async ({ page }) => {
   const statDir = path.join(runtimeDir, "stat");
   fs.rmSync(statDir, { recursive: true, force: true });
   fs.mkdirSync(statDir, { recursive: true });
@@ -398,11 +398,8 @@ test("下一调度队列显示/倒计时 + 插件能力精简", async ({ page })
   const qid = (await qr.json()).id;
 
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => { const el = document.querySelector("#next-q"); return el && /^\d{2}:\d{2}:\d{2}$/.test(el.textContent.trim()); }, null, { timeout: 10000 });
-  const cd = await page.textContent("#next-q");
-  expect(/^\d{2}:\d{2}:\d{2}$/.test(cd.trim()), "下一调度队列卡片上方显示倒计时（" + cd + "）").toBeTruthy();
-  expect((await page.textContent("#next-q-label")) === "下一调度队列：统计队列", "下一调度队列卡片第二行显示队列名称").toBeTruthy();
-  expect(await page.evaluate(() => document.querySelectorAll('[data-testid="stat-next"] > *').length === 2), "下一调度队列卡片保持两行布局").toBeTruthy();
+  await page.waitForSelector('[data-testid="dashboard-state"]');
+  expect(await page.evaluate(() => !document.querySelector(".stat-grid-operational") && !document.querySelector("#next-q")), "仪表盘不再显示下一调度倒计时卡").toBeTruthy();
   expect(await page.locator(".plugin-card").count() === 0, "健康通知插件不再占用仪表盘卡片空间").toBeTruthy();
 
   await api("DELETE", "/api/queues/" + qid);

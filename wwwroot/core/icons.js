@@ -15,6 +15,8 @@ const PATHS = Object.freeze({
   chevronRight: '<path d="m9 6.5 5.5 5.5L9 17.5"/>',
   arrowLeft: '<path d="M19 12H5M11 6l-6 6 6 6"/>',
   grip: '<path d="M8 6h.01M16 6h.01M8 12h.01M16 12h.01M8 18h.01M16 18h.01" stroke-width="3"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/>',
+  refresh: '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/>',
 });
 
 export function icon(name, className = "icon") {

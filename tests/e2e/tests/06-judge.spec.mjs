@@ -284,6 +284,26 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   expect(await page.$("#sm-kw-box[hidden]"), "开启后关键字区隐藏").toBeTruthy();
   expect(await page.$("#sm-script-box:not([hidden])"), "开启后脚本区显示").toBeTruthy();
   expect(await page.$("#sm-upload-btn:not([hidden])"), "上传脚本按钮显示").toBeTruthy();
+  const judgeLayoutOn = await page.evaluate(() => {
+    const upload = document.querySelector("#sm-upload-btn")?.getBoundingClientRect();
+    const mode = document.querySelector("#sm-mode-btn")?.getBoundingClientRect();
+    const auto = document.querySelector('[data-switch-row="sm-autoupdate"]')?.getBoundingClientRect();
+    const row = document.querySelector(".judge-actions")?.getBoundingClientRect();
+    const style = document.querySelector(".judge-actions") ? getComputedStyle(document.querySelector(".judge-actions")) : null;
+    const gapPx = parseFloat(style?.gap) || 12;
+    const third = (row?.width || 0) > 0 ? (row.width - 2 * gapPx) / 3 : 0;
+    const game = document.querySelector('[data-switch-row="sm-launch"]')?.getBoundingClientRect();
+    return {
+      hasAll: !!(upload && mode && auto && row),
+      order: !!upload && !!mode && !!auto && upload.left < mode.left && mode.left < auto.left,
+      rightAligned: !!auto && !!row && Math.abs(auto.right - row.right) <= 1,
+      thirdWidth: [upload, mode, auto].every(box => !!box && Math.abs(box.width - third) <= 2),
+      sameAsGameGroup: !!auto && !!game && Math.abs(auto.width - game.width) <= 2,
+    };
+  });
+  expect(judgeLayoutOn.hasAll && judgeLayoutOn.order, "开启后按钮顺序为上传脚本文件、使用判断脚本、自动更新配置").toBeTruthy();
+  expect(judgeLayoutOn.rightAligned, "开启后按钮组靠右对齐").toBeTruthy();
+  expect(judgeLayoutOn.thirdWidth && judgeLayoutOn.sameAsGameGroup, "开启后三个按钮均占行宽 1/3，与游戏联动组按钮同宽").toBeTruthy();
   const langVal = await page.$eval("#sm-judge-lang", el => el.value);
   expect(langVal === "javascript", "语言默认 JavaScript").toBeTruthy();
 
@@ -291,6 +311,25 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   expect((await page.$eval("#sm-mode-btn", el => el.getAttribute("aria-pressed"))) === "false", "再次点击按钮还原为未激活").toBeTruthy();
   expect(await page.$("#sm-kw-box:not([hidden])"), "还原后关键字区重新显示").toBeTruthy();
   expect(await page.$("#sm-upload-btn[hidden]"), "还原后上传按钮隐藏").toBeTruthy();
+  const judgeLayoutOff = await page.evaluate(() => {
+    const mode = document.querySelector("#sm-mode-btn")?.getBoundingClientRect();
+    const auto = document.querySelector('[data-switch-row="sm-autoupdate"]')?.getBoundingClientRect();
+    const row = document.querySelector(".judge-actions")?.getBoundingClientRect();
+    const style = document.querySelector(".judge-actions") ? getComputedStyle(document.querySelector(".judge-actions")) : null;
+    const gapPx = parseFloat(style?.gap) || 12;
+    const third = (row?.width || 0) > 0 ? (row.width - 2 * gapPx) / 3 : 0;
+    const game = document.querySelector('[data-switch-row="sm-launch"]')?.getBoundingClientRect();
+    return {
+      hasAll: !!(mode && auto && row),
+      order: !!mode && !!auto && mode.left < auto.left,
+      rightAligned: !!auto && !!row && Math.abs(auto.right - row.right) <= 1,
+      thirdWidth: [mode, auto].every(box => !!box && Math.abs(box.width - third) <= 2),
+      sameAsGameGroup: !!auto && !!game && Math.abs(auto.width - game.width) <= 2,
+    };
+  });
+  expect(judgeLayoutOff.hasAll && judgeLayoutOff.order, "关闭后顺序为使用判断脚本、自动更新配置").toBeTruthy();
+  expect(judgeLayoutOff.rightAligned, "关闭后按钮组靠右对齐").toBeTruthy();
+  expect(judgeLayoutOff.thirdWidth && judgeLayoutOff.sameAsGameGroup, "关闭后两个按钮均占行宽 1/3，与游戏联动组按钮同宽").toBeTruthy();
   await page.click('[data-action="toggle-judge-mode"]');
 
   const pyFile = path.join(runtimeDir, "judge-upload.py");

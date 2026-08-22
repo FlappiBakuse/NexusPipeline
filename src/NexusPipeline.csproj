@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -8,9 +8,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>nexus-pipeline</AssemblyName>
     <RootNamespace>NexusPipeline</RootNamespace>
-    <Version>0.8.6</Version>
+    <Version>0.8.7</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CA1416</NoWarn>
+    <ApplicationIcon>NexusPipeline.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 

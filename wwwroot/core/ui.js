@@ -53,10 +53,48 @@ export function closeMoreMenus({ restoreFocus = false } = {}) {
   document.querySelectorAll(".overflow-menu:not([hidden])").forEach(menu => {
     menu.hidden = true;
     menu.removeAttribute("data-open");
+    menu.removeAttribute("style");
     const trigger = menu.closest(".overflow-menu-wrap")?.querySelector(".overflow-trigger");
     trigger?.setAttribute("aria-expanded", "false");
     if (restoreFocus && trigger) trigger.focus({ preventScroll: true });
   });
+}
+
+/** 弹出卡定位（v0.8.7）：列表容器 overflow:hidden 会裁掉绝对定位弹出卡（底部卡片处被卡片边截断），
+ *  改为 fixed + 触发器视口坐标（脱离祖先裁剪）；视口底部空间不足时翻转到触发器上方，水平方向完整可见。 */
+function positionMoreMenu(menu, trigger) {
+  const GAP = 6; // 与 CSS .overflow-menu 的 calc(100% + 6px) 保持一致
+  const MARGIN = 8;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = menu.offsetWidth;
+  const menuHeight = menu.offsetHeight;
+  let top = triggerRect.bottom + GAP;
+  let left = triggerRect.right - menuWidth;
+  if (top + menuHeight > window.innerHeight - MARGIN && triggerRect.top - menuHeight - GAP >= MARGIN) {
+    top = triggerRect.top - menuHeight - GAP;
+  }
+  if (top < MARGIN) top = MARGIN;
+  if (left < MARGIN) left = MARGIN;
+  if (left + menuWidth > window.innerWidth - MARGIN) left = Math.max(MARGIN, window.innerWidth - menuWidth - MARGIN);
+  menu.style.position = "fixed";
+  menu.style.right = "auto";
+  menu.style.top = `${Math.round(top)}px`;
+  menu.style.left = `${Math.round(left)}px`;
+}
+
+let moreMenuPositionBound = false;
+function bindMoreMenuPositioning() {
+  if (moreMenuPositionBound) return;
+  moreMenuPositionBound = true;
+  // fixed 定位不随文档滚动，滚动/改变视口时重新跟随触发器（capture 阶段覆盖任意滚动容器）。
+  const reposition = () => {
+    document.querySelectorAll(".overflow-menu[data-open]").forEach(menu => {
+      const trigger = menu.closest(".overflow-menu-wrap")?.querySelector(".overflow-trigger");
+      if (trigger) positionMoreMenu(menu, trigger);
+    });
+  };
+  document.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition);
 }
 
 export function toggleMoreMenu(trigger) {
@@ -69,6 +107,8 @@ export function toggleMoreMenu(trigger) {
   menu.hidden = false;
   menu.dataset.open = "true";
   trigger.setAttribute("aria-expanded", "true");
+  bindMoreMenuPositioning();
+  positionMoreMenu(menu, trigger);
   menu.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
 }
 

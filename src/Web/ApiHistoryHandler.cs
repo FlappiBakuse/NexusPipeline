@@ -1,5 +1,7 @@
 using System.Net;
+using System.Globalization;
 using NexusPipeline.Models;
+using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
@@ -13,6 +15,30 @@ internal static class ApiHistoryHandler
         if (method != "GET")
         {
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+            return;
+        }
+        // v0.8.7：日期索引——范围内有记录的日期（倒序、含当日条数），供历史页左侧日期列表。
+        if (seg.Length == 2 && seg[1].ToLowerInvariant() == "dates")
+        {
+            int rangeDays = int.TryParse(context.Request.QueryString["days"], out int rangeD) ? rangeD : 3;
+            if (rangeDays < 1)
+            {
+                rangeDays = 1;
+            }
+            if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+            {
+                rangeDays = Limits.Current.MaxHistoryRetentionDays;
+            }
+            List<IGrouping<string, RunRecord>> groups = RuntimeContext.Instance.History.Query(
+                DateTime.Today.AddDays(-(rangeDays - 1)), DateTime.Now.AddMinutes(5))
+                .GroupBy(record => record.StartTime.ToString("yyyy-MM-dd"))
+                .OrderByDescending(group => group.Key)
+                .ToList();
+            Audit.Log(Audit.Web, "查询历史记录", $"{groups.Count} 个日期（{rangeDays} 天）");
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                dates = groups.Select(group => new { date = group.Key, count = group.Count() }).ToList(),
+            }).ConfigureAwait(false);
             return;
         }
         if (seg.Length == 2 && seg[1].ToLowerInvariant() == "detail")
@@ -71,6 +97,25 @@ internal static class ApiHistoryHandler
                 record,
                 attemptLogs,
                 legacyLog,
+            }).ConfigureAwait(false);
+            return;
+        }
+        // v0.8.7：按日期取记录——当日全部记录按开始时间升序（顺序执行），附 historyDir 供前端展示记录文件绝对路径。
+        string? dateParam = context.Request.QueryString["date"];
+        if (!string.IsNullOrWhiteSpace(dateParam))
+        {
+            if (!DateTime.TryParseExact(dateParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime day))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "date 参数格式须为 yyyy-MM-dd" }, 400).ConfigureAwait(false);
+                return;
+            }
+            List<RunRecord> dayRecords = RuntimeContext.Instance.History.Query(day, day.AddDays(1).AddTicks(-1));
+            Audit.Log(Audit.Web, "查询历史记录", $"{dayRecords.Count} 条（{day:yyyy-MM-dd}）");
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                date = day.ToString("yyyy-MM-dd"),
+                historyDir = AppPaths.HistoryDir,
+                records = dayRecords.OrderBy(record => record.StartTime).ToList(),
             }).ConfigureAwait(false);
             return;
         }

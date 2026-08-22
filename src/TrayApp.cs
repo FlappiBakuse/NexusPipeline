@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using NexusPipeline.Cli;
 using NexusPipeline.Utilities;
 using NexusPipeline.Web;
@@ -13,12 +13,28 @@ internal class TrayApp : ApplicationContext
     {
         _icon = new NotifyIcon
         {
-            Icon = System.Drawing.SystemIcons.Application,
+            // v0.8.7：托盘使用 exe 内置品牌图标（侧边栏 N 徽章），提取失败回退系统默认图标。
+            Icon = ExtractAppIcon(),
             Text = "NexusPipeline 枢链",
             Visible = true,
             ContextMenuStrip = BuildMenu(),
         };
         _icon.DoubleClick += (_, _) => OpenWeb();
+    }
+
+    private static Icon ExtractAppIcon()
+    {
+        try
+        {
+            string exe = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+            return string.IsNullOrEmpty(exe)
+                ? System.Drawing.SystemIcons.Application
+                : System.Drawing.Icon.ExtractAssociatedIcon(exe) ?? System.Drawing.SystemIcons.Application;
+        }
+        catch
+        {
+            return System.Drawing.SystemIcons.Application;
+        }
     }
 
     private ContextMenuStrip BuildMenu()

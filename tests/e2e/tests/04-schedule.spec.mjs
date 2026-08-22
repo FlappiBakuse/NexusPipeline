@@ -143,6 +143,8 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   const qBody = await page.textContent('[data-testid="queue-card"]');
   expect(!qBody.includes("定时：") && !qBody.includes("任务："), "队列卡片移除定时与任务信息行").toBeTruthy();
   expect(!qBody.includes("开始运行"), "不运行队列无运行时间提示").toBeTruthy();
+  expect(qBody.includes("不自动运行"), "手动队列卡片显示「不自动运行」徽章").toBeTruthy();
+  expect(!qBody.includes("手动运行") && !qBody.includes("按计划运行") && !qBody.includes("启动时运行"), "队列卡片不再显示运行模式徽章").toBeTruthy();
 
   const sq = await api("POST", "/api/queues", { name: "启动队列", autoRunMode: "startup", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: created.id }] });
   expect(sq.ok, "API 创建启动时运行队列").toBeTruthy();
@@ -150,6 +152,7 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.body.textContent.includes("启动队列"), null, { timeout: 5000 });
   expect((await page.textContent("body")).includes("将在下次启动开始运行"), "启动时运行队列显示「将在下次启动开始运行」").toBeTruthy();
+  expect(!(await page.textContent("body")).includes("启动时运行"), "启动队列卡片不再显示运行模式徽章").toBeTruthy();
   const sqList = await (await fetch(baseUrl + "api/queues")).json();
   const sqGot = sqList.find(q => q.name === "启动队列");
   expect(sqGot && sqGot.nextTrigger === null, "启动时运行队列 nextTrigger 为 null").toBeTruthy();
@@ -300,7 +303,7 @@ test("历史详情：长日志默认尾部显示并可按需加载完整内容",
     expect(await waitNoRunning(30000), "完整日志测试脚本运行结束").toBeTruthy();
 
     await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
-    const row = page.locator("tr").filter({ hasText: "完整日志脚本" }).first();
+    const row = page.locator('[data-testid="history-entry"]').filter({ hasText: "完整日志脚本" }).first();
     await row.waitFor({ timeout: 10000 });
     await row.click();
     await page.waitForSelector('[data-action="history-full-log"]', { timeout: 5000 });
@@ -316,6 +319,76 @@ test("历史详情：长日志默认尾部显示并可按需加载完整内容",
     await page.click(".modal button:has-text('关闭')");
   } finally {
     try { await api("DELETE", "/api/scripts/" + created.id); } catch { /* 清理失败不阻塞 */ }
+  }
+});
+
+test("历史记录日期索引：仅显示有记录的日期 + 按日取记录 + 详情弹窗（v0.8.7）", async ({ page }) => {
+  const io = makeScriptDir("history-dates");
+  const today = localDate();
+  const pad = n => String(n).padStart(2, "0");
+  const shift = days => { const d = new Date(); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+  const oldDate = shift(-2);
+  const absentDate = shift(-1);
+
+  // 造数：前 2 天的历史记录（磁盘 JSON 为 PascalCase + 按尝试 .log，参照既有磁盘格式用例）
+  const oldDayDir = path.join(runtimeDir, "history", oldDate);
+  fs.mkdirSync(oldDayDir, { recursive: true });
+  const oldStart = `${oldDate}T08:30:00`;
+  const oldRecord = {
+    Id: "history-dates-fake-1", ScriptInstanceId: "fake-script", ScriptName: "历史造数脚本",
+    QueueId: "", QueueName: "", Mode: "manual", UserName: "默认",
+    StartTime: oldStart, EndTime: `${oldDate}T08:31:00`,
+    Attempts: 1, MaxAttempts: 1, Status: "failed", FinalStatus: "failed",
+    ResultDetail: "脚本进程超时", LogFile: "08-30-00.json",
+    AttemptDetails: [{ Number: 1, StartTime: oldStart, EndTime: `${oldDate}T08:31:00`, Status: "failed", Reason: "日志无更新超时", LogFile: "08-30-00-1.log" }],
+  };
+  fs.writeFileSync(path.join(oldDayDir, "08-30-00.json"), JSON.stringify(oldRecord, null, 2), "utf8");
+  fs.writeFileSync(path.join(oldDayDir, "08-30-00-1.log"), "attempt log line\n", "utf8");
+
+  // 今日真实运行一条
+  const created = await createScript({ name: "日期索引脚本", rootPath: io.root, mainExe: io.main, configPath: io.cfg, logPath: io.log, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30 });
+  expect(created.ok, "创建日期索引测试脚本").toBeTruthy();
+  try {
+    const dispatch = await api("POST", "/api/dispatch/script", { scriptId: created.id, mode: "manual" });
+    expect(dispatch.ok, "发起日期索引运行").toBeTruthy();
+    expect(await waitNoRunning(60000), "日期索引运行结束").toBeTruthy();
+
+    // API：dates 仅含有记录的日期且倒序；date 响应形状；非法 date 400
+    const datesRes = await (await fetch(baseUrl + "api/history/dates?days=7")).json();
+    const dates = datesRes.dates || [];
+    expect(dates.length >= 2, "日期索引含多个有记录的日期").toBeTruthy();
+    expect(dates[0].date === today, "日期索引最新日期置顶").toBeTruthy();
+    expect(dates.some(d => d.date === oldDate) && !dates.some(d => d.date === absentDate), "仅显示有记录的日期（前 2 天显示、前 1 天不显示）").toBeTruthy();
+    expect(dates.every((d, i) => i === 0 || dates[i - 1].date > d.date), "日期索引按日期倒序").toBeTruthy();
+    expect(dates.find(d => d.date === oldDate)?.count === 1, "日期索引含当日条数").toBeTruthy();
+    const dayRes = await (await fetch(baseUrl + "api/history?date=" + oldDate)).json();
+    expect(dayRes && dayRes.date === oldDate && Array.isArray(dayRes.records) && dayRes.records.length === 1, "按日期取记录返回当日记录").toBeTruthy();
+    expect(typeof dayRes.historyDir === "string" && dayRes.historyDir.length > 0, "按日期取记录返回 historyDir").toBeTruthy();
+    expect((await fetch(baseUrl + "api/history?date=bad-date")).status === 400, "非法 date 参数返回 400").toBeTruthy();
+
+    // UI：日期列表默认选中最新日期（今日），今日记录含本用例运行
+    await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="history-panels"]', { timeout: 10000 });
+    const optCount = await page.$$eval("#history-days option", els => els.length);
+    expect(optCount === 7, "天数范围下拉含 7 个选项（7/15/30/60/90/120/180）").toBeTruthy();
+    const dateRows = await page.$$eval('[data-testid="history-date"]', els => els.map(el => el.getAttribute("data-date")));
+    expect(dateRows[0] === today, "日期列表默认选中并置顶今日").toBeTruthy();
+    expect(dateRows.includes(oldDate) && !dateRows.includes(absentDate), "日期列表仅显示有记录的日期").toBeTruthy();
+    await page.waitForFunction(() => document.body.textContent.includes("日期索引脚本"), null, { timeout: 5000 });
+
+    // 切到前 2 天：显示造数记录（失败徽章 + 原因 + 文件路径），点击弹出详情
+    await page.click(`[data-testid="history-date"][data-date="${oldDate}"]`);
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-testid="history-entry"]')).some(el => el.textContent.includes("历史造数脚本")), null, { timeout: 5000 });
+    const entryText = await page.textContent('[data-testid="history-entry"]');
+    expect(entryText.includes("08:30:00") && entryText.includes("失败") && entryText.includes("脚本进程超时"), "记录条显示时间、失败徽章与原因").toBeTruthy();
+    expect(entryText.includes(oldDate) && entryText.includes("08-30-00.json"), "记录条显示记录文件路径").toBeTruthy();
+    await page.click('[data-testid="history-entry"]');
+    await page.waitForSelector(".modal-mask", { timeout: 5000 });
+    const modalText = await page.textContent(".modal");
+    expect(modalText.includes("运行详情") && modalText.includes("历史造数脚本") && modalText.includes("脚本日志"), "点击记录条弹出运行详情（含脚本日志）").toBeTruthy();
+    await page.click(".modal button:has-text('关闭')");
+  } finally {
+    await api("DELETE", "/api/scripts/" + created.id);
   }
 });
 

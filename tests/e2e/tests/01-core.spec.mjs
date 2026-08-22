@@ -3,18 +3,16 @@ import { api, baseUrl, CI_MODE, createScript, ensureService, makeScriptDir } fro
 
 await ensureService();
 
-test("仪表盘：统计卡片 + 版本 + 状态优先布局", async ({ page }) => {
+test("仪表盘：版本 + 状态优先布局", async ({ page }) => {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".stat-grid", { timeout: 15000 });
+  await page.waitForSelector('[data-testid="dashboard-state"]', { timeout: 15000 });
   const body = await page.textContent("body");
-  expect(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片").toBeTruthy();
-  expect(body.includes("当前版本"), "首行含当前版本卡片").toBeTruthy();
+  expect(body.includes("一切准备就绪") || body.includes("任务正在执行"), "仪表盘保留状态优先卡片").toBeTruthy();
+  expect(body.includes("当前版本"), "页面含当前版本信息").toBeTruthy();
   // v0.6.7+：版本断言改从 /api/status 动态读取，消除发版漏改测试导致的误红
   const status = await (await fetch(baseUrl + "api/status")).json();
   expect(body.includes(status.version), `版本显示 ${status.version}（x.x.x 不带 v）`).toBeTruthy();
-  expect(body.includes("下一调度队列"), "首行含下一调度队列卡片").toBeTruthy();
-  const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
-  expect(nums.includes("无"), "无定时队列时下一调度显示「无」").toBeTruthy();
+  expect(!body.includes("下一调度队列"), "仪表盘不再显示统计卡行（含下一调度）").toBeTruthy();
   const disabledPlugins = (await (await fetch(baseUrl + "api/status")).json()).plugins?.filter(plugin => !plugin.enabled) || [];
   expect(await page.locator(".plugin-card").count(), "健康插件不占用仪表盘主视觉").toBe(0);
   expect(await page.locator("#dashboard-plugin-panel").isVisible(), "无异常时插件摘要保持收起").toBe(disabledPlugins.length > 0);
@@ -31,14 +29,14 @@ test("响应式冒烟：手机 / 平板 / 电脑视口无横向溢出（粗检�
   for (const size of sizes) {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".stat-grid", { timeout: 10000 });
+    await page.waitForSelector('[data-testid="dashboard-state"]', { timeout: 10000 });
     const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1);
     expect(noOverflow, `${size.name}视口没有横向溢出（${size.width}px）`).toBeTruthy();
   }
   await page.setViewportSize({ width: 1280, height: 900 });
 });
 
-test("响应式内容组合：标题、统计区和脚本/队列操作区保持完整", async ({ page }) => {
+test("响应式内容组合：标题、状态区和脚本/队列操作区保持完整", async ({ page }) => {
   const fixture = makeScriptDir("responsive-layout");
   let scriptId = "";
   let queueId = "";
@@ -61,17 +59,22 @@ test("响应式内容组合：标题、统计区和脚本/队列操作区保持�
       const cardBox = card?.getBoundingClientRect();
       const opsBox = ops?.getBoundingClientRect();
       const tops = buttons.map(button => button.getBoundingClientRect().top);
+      const manage = ops?.querySelector('[data-action="manage-users"]')?.getBoundingClientRect();
+      const trigger = ops?.querySelector(".overflow-trigger")?.getBoundingClientRect();
+      const gap = ops ? parseFloat(getComputedStyle(ops).gap) || 8 : 0;
       return {
         actionCount: buttons.length,
         actionRow: !!opsBox && !!cardBox && opsBox.left >= cardBox.left - 1 && opsBox.right <= cardBox.right + 1 && opsBox.bottom <= cardBox.bottom + 1,
         buttonsInline: tops.length === 2 && Math.max(...tops) - Math.min(...tops) <= 1,
         buttonsFit: buttons.every(button => { const box = button.getBoundingClientRect(); return box.left >= (cardBox?.left || 0) - 1 && box.right <= (cardBox?.right || 0) + 1 && box.width >= 0; }),
         actionBelowCopy: !!main && !!opsBox && opsBox.top >= main.getBoundingClientRect().bottom - 1,
+        manageFills: !!manage && !!trigger && !!opsBox && Math.abs(manage.right - (trigger.left - gap)) <= 2 && Math.abs(trigger.right - opsBox.right) <= 2,
       };
     });
     expect(scriptLayout.actionCount, "手机脚本卡片保留两个高频操作").toBe(2);
     expect(scriptLayout.actionRow && scriptLayout.buttonsFit, "手机脚本操作区完整位于卡片内").toBeTruthy();
     expect(scriptLayout.buttonsInline && scriptLayout.actionBelowCopy, "手机脚本高频操作横向排列且位于正文之后").toBeTruthy();
+    expect(scriptLayout.manageFills, "手机脚本「用户管理」按钮延伸至更多按钮（与用户编辑配置同宽）").toBeTruthy();
 
     await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="queue-card"]');
@@ -82,32 +85,34 @@ test("响应式内容组合：标题、统计区和脚本/队列操作区保持�
       const cardBox = card?.getBoundingClientRect();
       const opsBox = ops?.getBoundingClientRect();
       const tops = buttons.map(button => button.getBoundingClientRect().top);
+      const edit = ops?.querySelector('[data-action="edit-queue-direct"]')?.getBoundingClientRect();
+      const trigger = ops?.querySelector(".overflow-trigger")?.getBoundingClientRect();
+      const gap = ops ? parseFloat(getComputedStyle(ops).gap) || 8 : 0;
       return {
         actionCount: buttons.length,
         actionRow: !!opsBox && !!cardBox && opsBox.left >= cardBox.left - 1 && opsBox.right <= cardBox.right + 1 && opsBox.bottom <= cardBox.bottom + 1,
         buttonsInline: tops.length === 2 && Math.max(...tops) - Math.min(...tops) <= 1,
+        editFills: !!edit && !!trigger && !!opsBox && Math.abs(edit.right - (trigger.left - gap)) <= 2 && Math.abs(trigger.right - opsBox.right) <= 2,
       };
     });
     expect(queueLayout.actionCount, "手机队列卡片保留两个高频操作").toBe(2);
     expect(queueLayout.actionRow && queueLayout.buttonsInline, "手机队列操作区整行排列且位于卡片内").toBeTruthy();
+    expect(queueLayout.editFills, "手机队列「编辑队列」按钮延伸至更多按钮（与用户编辑配置同宽）").toBeTruthy();
 
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="stat-scripts"]');
+    await page.waitForSelector('[data-testid="dashboard-state"]');
     const dashboardLayout = await page.evaluate(() => {
-      const grid = document.querySelector(".stat-grid-operational");
-      const stats = Array.from(grid?.querySelectorAll(".stat") || []).map(item => item.getBoundingClientRect());
-      const gridBox = grid?.getBoundingClientRect();
-      const gaps = stats.slice(1).map((box, index) => box.top - stats[index].bottom);
+      const state = document.querySelector('[data-testid="dashboard-state"]');
+      const running = document.querySelector('[data-testid="running-panel"]');
       return {
-        count: stats.length,
-        equalWidth: stats.length === 4 && Math.max(...stats.map(box => box.width)) - Math.min(...stats.map(box => box.width)) <= 2,
-        equalHeight: stats.length === 4 && Math.max(...stats.map(box => box.height)) - Math.min(...stats.map(box => box.height)) <= 1,
-        uniformGap: stats.length === 4 && Math.max(...gaps) - Math.min(...gaps) <= 1,
-        inside: !!gridBox && stats.every(box => box.left >= gridBox.left - 1 && box.right <= gridBox.right + 1),
+        hasState: !!state,
+        hasRunning: !!running,
+        noMetricsRow: !document.querySelector(".stat-grid-operational"),
+        noRedundantCount: !document.querySelector('[data-testid="dashboard-running-count"]'),
       };
     });
-    expect(dashboardLayout.count, "Dashboard 保留四张运行卡片").toBe(4);
-    expect(dashboardLayout.equalWidth && dashboardLayout.equalHeight && dashboardLayout.uniformGap && dashboardLayout.inside, "Dashboard 四张卡片保持等宽、等高且间隔一致").toBeTruthy();
+    expect(dashboardLayout.hasState && dashboardLayout.hasRunning, "仪表盘保留状态卡与正在运行面板").toBeTruthy();
+    expect(dashboardLayout.noMetricsRow && dashboardLayout.noRedundantCount, "仪表盘不再显示冗余统计卡行与状态卡数字").toBeTruthy();
   } finally {
     if (queueId) await api("DELETE", "/api/queues/" + queueId);
     if (scriptId) await api("DELETE", "/api/scripts/" + scriptId);
@@ -213,7 +218,7 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
   for (const size of sizes) {
     await page.setViewportSize({ width: size.width, height: size.height });
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".stat-grid", { timeout: 10000 });
+    await page.waitForSelector('[data-testid="dashboard-state"]', { timeout: 10000 });
     const metrics = await page.evaluate(() => ({
       noOverflow: document.documentElement.scrollWidth <= window.innerWidth + 1,
       canvas: document.querySelector("#ambient-particles")?.getAttribute("aria-hidden") === "true"
@@ -227,7 +232,7 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
 
   await page.evaluate(() => localStorage.removeItem("nexus-theme"));
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".stat-grid");
+  await page.waitForSelector('[data-testid="dashboard-state"]');
   await page.locator('[data-action="toggle-theme"]:visible').click();
   const lightTheme = await page.evaluate(() => document.body.dataset.theme);
   expect(lightTheme === "light", "主题切换可进入浅色模式").toBeTruthy();
@@ -238,7 +243,7 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
 
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".stat-grid");
+  await page.waitForSelector('[data-testid="dashboard-state"]');
   expect(await page.evaluate(() => getComputedStyle(document.querySelector("#ambient-particles")).display !== "none" && document.querySelector("#ambient-particles").dataset.ready === "true"), "减少动画模式保留静态粒子").toBeTruthy();
   await page.emulateMedia({ reducedMotion: "no-preference" });
 
@@ -345,4 +350,65 @@ test("菜单切换：无回弹", async ({ page }) => {
   await page.waitForTimeout(3600);
   const h2 = await page.textContent("h2");
   expect(h2.includes("脚本实例"), "停留在脚本实例页 3.5 秒后未被仪表盘轮询覆盖（回弹已修复）").toBeTruthy();
+});
+
+test("更多菜单弹出卡：不被卡片容器底部截断（v0.8.7）", async ({ page }) => {
+  const fixture = makeScriptDir("more-menu");
+  const created = await createScript({ name: "更多菜单脚本", rootPath: fixture.root, mainExe: fixture.main, configPath: fixture.cfg, logPath: fixture.log });
+  expect(created.ok, "测试脚本创建成功").toBeTruthy();
+  const id = created.id;
+  try {
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="script-card"]');
+    await page.click('[data-action="toggle-more-menu"]');
+    await page.waitForSelector('.overflow-menu:not([hidden])');
+    const layout = await page.evaluate(() => {
+      const menu = document.querySelector(".overflow-menu:not([hidden])");
+      const list = document.querySelector(".card.list-surface");
+      const menuRect = menu?.getBoundingClientRect();
+      const listRect = list?.getBoundingClientRect();
+      return {
+        fixed: !!menu && getComputedStyle(menu).position === "fixed",
+        inViewport: !!menuRect && menuRect.top >= 0 && menuRect.bottom <= window.innerHeight && menuRect.left >= 0 && menuRect.right <= window.innerWidth,
+        escapesCard: !!menuRect && !!listRect && menuRect.bottom > listRect.bottom + 1,
+        menuItems: menu?.querySelectorAll('[role="menuitem"]').length || 0,
+      };
+    });
+    expect(layout.fixed, "弹出卡使用 fixed 定位（脱离列表容器裁剪）").toBeTruthy();
+    expect(layout.inViewport, "弹出卡完整位于视口内").toBeTruthy();
+    expect(layout.escapesCard, "弹出卡底部超出卡片容器（未被卡片底边截断）").toBeTruthy();
+    expect(layout.menuItems === 2, "脚本更多菜单含编辑/删除两项").toBeTruthy();
+  } finally {
+    await api("DELETE", "/api/scripts/" + id);
+  }
+});
+
+test("手机端卡片操作按钮宽度统一：用户管理/编辑队列与编辑配置一致（v0.8.7）", async ({ page }) => {
+  const fixture = makeScriptDir("ops-unify");
+  // createScript 已自动创建「默认」用户（helpers.mjs），无需再添加。
+  const created = await createScript({ name: "宽度统一脚本", rootPath: fixture.root, mainExe: fixture.main, configPath: fixture.cfg, logPath: fixture.log });
+  expect(created.ok, "测试脚本创建成功").toBeTruthy();
+  const id = created.id;
+  let qid = "";
+  try {
+    const qr = await api("POST", "/api/queues", { name: "宽度统一队列", autoRunMode: "none", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: id }] });
+    expect(qr.ok, "测试队列创建成功").toBeTruthy();
+    qid = (await qr.json()).id;
+    await page.setViewportSize({ width: 500, height: 900 });
+    await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="script-card"]');
+    const scriptBtnWidth = await page.$eval('[data-action="manage-users"]', el => el.getBoundingClientRect().width);
+    await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="queue-card"]');
+    const queueBtnWidth = await page.$eval('[data-action="edit-queue-direct"]', el => el.getBoundingClientRect().width);
+    await page.goto(baseUrl + `#/scripts/${id}/users`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".user-card");
+    const userBtnWidth = await page.$eval('[data-action="edit-user-config"]', el => el.getBoundingClientRect().width);
+    expect(Math.abs(scriptBtnWidth - userBtnWidth) <= 2, `用户管理宽度（${scriptBtnWidth.toFixed(1)}px）与编辑配置（${userBtnWidth.toFixed(1)}px）一致`).toBeTruthy();
+    expect(Math.abs(queueBtnWidth - userBtnWidth) <= 2, `编辑队列宽度（${queueBtnWidth.toFixed(1)}px）与编辑配置（${userBtnWidth.toFixed(1)}px）一致`).toBeTruthy();
+  } finally {
+    if (qid) await api("DELETE", "/api/queues/" + qid);
+    await api("DELETE", "/api/scripts/" + id);
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
 });

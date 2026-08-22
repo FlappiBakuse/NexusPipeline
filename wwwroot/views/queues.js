@@ -1,4 +1,4 @@
-﻿import { api, hydrateIcons } from "../core/api.js";
+import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
 import { pageHeader, switchControl, valueField } from "../core/forms.js";
@@ -82,7 +82,7 @@ function queueCardMarkup(queue, scripts) {
     ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? "正在计算倒计时" : "等待定时触发"}</span>`
     : queue.autoRunMode === "startup"
       ? '<span class="badge blue">将在下次启动开始运行</span>'
-      : "";
+      : '<span class="badge blue" data-testid="queue-manual-badge">不自动运行</span>';
   const notifyBadge = notifyAvailable()
     ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? "队列通知已开启" : "队列通知未开启"}</span>`
     : "";
@@ -91,7 +91,7 @@ function queueCardMarkup(queue, scripts) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
       <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="编辑调度队列：${esc(queue.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
-      <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.autoRunMode === "scheduled" ? "按计划运行" : queue.autoRunMode === "startup" ? "启动时运行" : "手动运行"}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${timeBadge}${notifyBadge}</div>
+      <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${timeBadge}${notifyBadge}</div>
     </div>
     <div class="queue-ops row-actions">
       <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">编辑队列</button>

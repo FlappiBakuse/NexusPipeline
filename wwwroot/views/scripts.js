@@ -253,7 +253,7 @@ export async function openScriptModal(id = "", plugin = "") {
           <textarea id="sm-judge-code" class="mono code-area" placeholder="输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}">${esc(d.judgeScript)}</textarea>
           <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
         </div>
-        <div class="judge-actions">
+        <div class="judge-actions${d.judgeScriptEnabled ? " judge-enabled" : ""}">
           <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
           <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
           ${switchControl("sm-autoupdate", "自动更新配置", "保存时同步专项配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
@@ -290,15 +290,17 @@ export function syncScriptGhostState() {
   });
 }
 
-/** 自定义完成标志开关（按钮切换模式）：开启显示脚本区（隐藏关键字区），关闭反之。 */
+/** 自定义完成标志开关（按钮切换模式）：开启显示脚本区（隐藏关键字区），关闭反之；开启时上传按钮与判断脚本按钮交换位置。 */
 export function syncJudgeBox() {
   const enabled = $dom("#sm-mode-btn")?.getAttribute("aria-pressed") === "true";
   const kw = $dom("#sm-kw-box");
   const script = $dom("#sm-script-box");
   const upload = $dom("#sm-upload-btn");
+  const actions = document.querySelector(".judge-actions");
   if (kw) kw.hidden = enabled;
   if (script) script.hidden = !enabled;
   if (upload) upload.hidden = !enabled;
+  if (actions) actions.classList.toggle("judge-enabled", enabled);
 }
 
 /** 切换「使用判断脚本」按钮状态。 */
