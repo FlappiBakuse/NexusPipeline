@@ -1,6 +1,6 @@
 import { initParticles } from "./effects/particles.js";
 import { closeModal, showModal, modalShell } from "./core/modal.js";
-import { cancelSystemAction, cycleTheme, initTheme, setNavOpen, syncModeToggleText } from "./core/ui.js";
+import { cancelSystemAction, closeMoreMenus, cycleTheme, initTheme, setNavOpen, syncModeToggleText, syncSwitchControl, toggleMoreMenu } from "./core/ui.js";
 import { enterPage } from "./core/state.js";
 import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } from "./views/limits.js";
 import { pagerNavigate } from "./core/pager.js";
@@ -24,6 +24,7 @@ const shellActions = {
   "pager-prev": target => pagerNavigate(target.dataset.pager, "prev", target),
   "pager-next": target => pagerNavigate(target.dataset.pager, "next", target),
   "cancel-system-action": () => cancelSystemAction(),
+  "toggle-more-menu": target => toggleMoreMenu(target),
 };
 
 const allActions = {
@@ -62,6 +63,7 @@ document.addEventListener("click", event => {
     setNavOpen(false);
     return;
   }
+  if (!event.target.closest(".overflow-menu-wrap")) closeMoreMenus();
   const target = event.target.closest("[data-action]");
   if (!target) return;
   // v0.7.4（KN-44）：原生 select 的 data-action 由 change 事件唯一分发——select 上点击（打开/选项变更）同样会
@@ -69,9 +71,28 @@ document.addEventListener("click", event => {
   if (target.matches("select") || target.matches("option")) return;
   const handler = allActions[target.dataset.action];
   if (handler) handler(target, event);
-  // v0.6.7+：切换按钮点击后同步「：开/：关」文字（handler 已移除节点时 closest 为 null 自动跳过）
+  if (target.matches('[role="menuitem"]')) closeMoreMenus();
   const toggleBtn = event.target.closest(".mode-toggle");
   if (toggleBtn) syncModeToggleText(toggleBtn);
+  if (toggleBtn) syncSwitchControl(toggleBtn);
+});
+
+document.addEventListener("keydown", event => {
+  if (event.key === "Escape") {
+    const openMenu = document.querySelector(".overflow-menu:not([hidden])");
+    if (openMenu) {
+      event.preventDefault();
+      closeMoreMenus({ restoreFocus: true });
+    }
+    return;
+  }
+  if (event.key !== "Enter" && event.key !== " ") return;
+  const target = event.target.closest('[data-action][role="button"]');
+  if (!target || target.matches("button, a, input, select, textarea")) return;
+  const handler = allActions[target.dataset.action];
+  if (!handler) return;
+  event.preventDefault();
+  handler(target, event);
 });
 
 document.addEventListener("input", event => {

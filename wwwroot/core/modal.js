@@ -1,7 +1,7 @@
 import { $, $$ } from "./dom.js";
 import { esc } from "./format.js";
 import { icon } from "./icons.js";
-import { initAutoScroll, syncAllModeToggles } from "./ui.js";
+import { initAutoScroll, syncAllModeToggles, syncAllSwitchControls } from "./ui.js";
 
 let modalReturnFocus = null;
 
@@ -87,6 +87,7 @@ export function showModal(content, wide = false, locked = false) {
   });
   initAutoScroll(modal);
   syncAllModeToggles(modal);
+  syncAllSwitchControls(modal);
   const restorePreviousBodyScroll = () => {
     if (!previousScroll) return;
     const nextBody = $(".modal-mask .modal-body");

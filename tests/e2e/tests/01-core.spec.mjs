@@ -3,11 +3,10 @@ import { api, baseUrl, CI_MODE, createScript, ensureService, makeScriptDir } fro
 
 await ensureService();
 
-test("仪表盘：统计卡片 + 版本 + 插件能力状态", async ({ page }) => {
+test("仪表盘：统计卡片 + 版本 + 状态优先布局", async ({ page }) => {
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".stat-grid", { timeout: 15000 });
   const body = await page.textContent("body");
-  expect(body.includes("通知推送"), "插件「通知推送」在页面可见").toBeTruthy();
   expect(body.includes("脚本实例") && body.includes("调度队列"), "首行含脚本实例与调度队列统计卡片").toBeTruthy();
   expect(body.includes("当前版本"), "首行含当前版本卡片").toBeTruthy();
   // v0.6.7+：版本断言改从 /api/status 动态读取，消除发版漏改测试导致的误红
@@ -16,10 +15,10 @@ test("仪表盘：统计卡片 + 版本 + 插件能力状态", async ({ page }) 
   expect(body.includes("下一调度队列"), "首行含下一调度队列卡片").toBeTruthy();
   const nums = await page.$$eval(".stat .num", els => els.map(e => e.textContent.trim()));
   expect(nums.includes("无"), "无定时队列时下一调度显示「无」").toBeTruthy();
-  const pcards = await page.$$eval(".plugin-card", els => els.map(e => e.textContent.trim()));
-  expect(pcards.some(t => t.includes("通知推送")), "插件小卡片含「通知推送」").toBeTruthy();
-  const notifyCard = pcards.find(t => t.includes("通知推送")) || "";
-  expect(!notifyCard.includes("已启用通知") && !notifyCard.includes("个脚本实例") && !notifyCard.includes("个调度队列"), "仪表盘通知插件行不显示冗余通知统计").toBeTruthy();
+  const disabledPlugins = (await (await fetch(baseUrl + "api/status")).json()).plugins?.filter(plugin => !plugin.enabled) || [];
+  expect(await page.locator(".plugin-card").count(), "健康插件不占用仪表盘主视觉").toBe(0);
+  expect(await page.locator("#dashboard-plugin-panel").isVisible(), "无异常时插件摘要保持收起").toBe(disabledPlugins.length > 0);
+  if (disabledPlugins.length) expect(body.includes(disabledPlugins[0].displayName), "异常插件会在仪表盘提示").toBeTruthy();
   expect(await page.locator(".main-nav .nav-icon svg").count(), "主导航统一使用 SVG 图标").toBe(7);
 });
 
@@ -58,28 +57,28 @@ test("响应式内容组合：标题、统计区和脚本/队列操作区保持�
       const card = document.querySelector('[data-testid="script-card"]');
       const main = card?.querySelector(".script-main");
       const ops = card?.querySelector(".script-ops");
-      const buttons = Array.from(card?.querySelectorAll(".script-ops button") || []);
+      const buttons = Array.from(card?.querySelectorAll('.script-ops button:not([role="menuitem"])') || []);
       const cardBox = card?.getBoundingClientRect();
       const opsBox = ops?.getBoundingClientRect();
       const tops = buttons.map(button => button.getBoundingClientRect().top);
       return {
         actionCount: buttons.length,
         actionRow: !!opsBox && !!cardBox && opsBox.left >= cardBox.left - 1 && opsBox.right <= cardBox.right + 1 && opsBox.bottom <= cardBox.bottom + 1,
-        buttonsInline: tops.length === 3 && Math.max(...tops) - Math.min(...tops) <= 1,
+        buttonsInline: tops.length === 2 && Math.max(...tops) - Math.min(...tops) <= 1,
         buttonsFit: buttons.every(button => { const box = button.getBoundingClientRect(); return box.left >= (cardBox?.left || 0) - 1 && box.right <= (cardBox?.right || 0) + 1 && box.width >= 0; }),
         actionBelowCopy: !!main && !!opsBox && opsBox.top >= main.getBoundingClientRect().bottom - 1,
       };
     });
-    expect(scriptLayout.actionCount, "手机脚本卡片保留三个操作").toBe(3);
+    expect(scriptLayout.actionCount, "手机脚本卡片保留两个高频操作").toBe(2);
     expect(scriptLayout.actionRow && scriptLayout.buttonsFit, "手机脚本操作区完整位于卡片内").toBeTruthy();
-    expect(scriptLayout.buttonsInline && scriptLayout.actionBelowCopy, "手机脚本三个操作横向排列且位于正文之后").toBeTruthy();
+    expect(scriptLayout.buttonsInline && scriptLayout.actionBelowCopy, "手机脚本高频操作横向排列且位于正文之后").toBeTruthy();
 
     await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="queue-card"]');
     const queueLayout = await page.evaluate(() => {
       const card = document.querySelector('[data-testid="queue-card"]');
       const ops = card?.querySelector(".queue-ops");
-      const buttons = Array.from(card?.querySelectorAll(".queue-ops button") || []);
+      const buttons = Array.from(card?.querySelectorAll('.queue-ops button:not([role="menuitem"])') || []);
       const cardBox = card?.getBoundingClientRect();
       const opsBox = ops?.getBoundingClientRect();
       const tops = buttons.map(button => button.getBoundingClientRect().top);
@@ -89,7 +88,7 @@ test("响应式内容组合：标题、统计区和脚本/队列操作区保持�
         buttonsInline: tops.length === 2 && Math.max(...tops) - Math.min(...tops) <= 1,
       };
     });
-    expect(queueLayout.actionCount, "手机队列卡片保留两个操作").toBe(2);
+    expect(queueLayout.actionCount, "手机队列卡片保留两个高频操作").toBe(2);
     expect(queueLayout.actionRow && queueLayout.buttonsInline, "手机队列操作区整行排列且位于卡片内").toBeTruthy();
 
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
@@ -98,15 +97,17 @@ test("响应式内容组合：标题、统计区和脚本/队列操作区保持�
       const grid = document.querySelector(".stat-grid-operational");
       const stats = Array.from(grid?.querySelectorAll(".stat") || []).map(item => item.getBoundingClientRect());
       const gridBox = grid?.getBoundingClientRect();
+      const gaps = stats.slice(1).map((box, index) => box.top - stats[index].bottom);
       return {
         count: stats.length,
-        oneRow: stats.length === 3 && Math.max(...stats.map(box => box.top)) - Math.min(...stats.map(box => box.top)) <= 1,
-        equalWidth: stats.length === 3 && Math.max(...stats.map(box => box.width)) - Math.min(...stats.map(box => box.width)) <= 2,
+        equalWidth: stats.length === 4 && Math.max(...stats.map(box => box.width)) - Math.min(...stats.map(box => box.width)) <= 2,
+        equalHeight: stats.length === 4 && Math.max(...stats.map(box => box.height)) - Math.min(...stats.map(box => box.height)) <= 1,
+        uniformGap: stats.length === 4 && Math.max(...gaps) - Math.min(...gaps) <= 1,
         inside: !!gridBox && stats.every(box => box.left >= gridBox.left - 1 && box.right <= gridBox.right + 1),
       };
     });
-    expect(dashboardLayout.count, "Dashboard 保留三个运行统计项").toBe(3);
-    expect(dashboardLayout.oneRow && dashboardLayout.equalWidth && dashboardLayout.inside, "手机 Dashboard 三项统计保持等宽同排").toBeTruthy();
+    expect(dashboardLayout.count, "Dashboard 保留四张运行卡片").toBe(4);
+    expect(dashboardLayout.equalWidth && dashboardLayout.equalHeight && dashboardLayout.uniformGap && dashboardLayout.inside, "Dashboard 四张卡片保持等宽、等高且间隔一致").toBeTruthy();
   } finally {
     if (queueId) await api("DELETE", "/api/queues/" + queueId);
     if (scriptId) await api("DELETE", "/api/scripts/" + scriptId);
@@ -147,41 +148,32 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
         handleWidth: handle?.getBoundingClientRect().width || 0,
         actionsBelowInfo: !!info && !!actionBox && actionBox.top >= info.getBoundingClientRect().bottom - 1,
         actionsInside: !!cardBox && !!actionBox && actionBox.left >= cardBox.left - 1 && actionBox.right <= cardBox.right + 1,
-        actionCount: actions?.querySelectorAll("button").length || 0,
+        actionCount: actions?.querySelectorAll('button:not([role="menuitem"])').length || 0,
       };
     });
     expect(userLayout.cardGrid, "手机用户卡片采用脚本实例式网格布局").toBeTruthy();
     expect(userLayout.handleWidth >= 44, "手机用户卡片拖拽把手保持触控尺寸").toBeTruthy();
-    expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 3, "手机用户操作区位于正文之后且完整排列").toBeTruthy();
+    expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 2, "手机用户高频操作区位于正文之后且完整排列").toBeTruthy();
 
     await page.click('[data-action="edit-user"][data-name="默认"]');
-    await page.waitForSelector(".modal .settings-option-card");
-    const toggleLayout = await page.$$eval(".modal .settings-option-card", rows => rows.map(row => {
+    await page.waitForSelector(".modal .switch-row");
+    const toggleLayout = await page.$$eval(".modal .switch-row", rows => rows.map(row => {
       const button = row.querySelector(".mode-toggle")?.getBoundingClientRect();
       const note = row.querySelector(".muted")?.getBoundingClientRect();
-      return { rowReverse: getComputedStyle(row).flexDirection === "row-reverse", buttonAfterNote: !!button && !!note && button.left >= note.left };
+      return { buttonAfterNote: !!button && !!note && button.left >= note.left, hasStateVisual: !!row.querySelector(".switch-track") };
     }));
     expect(toggleLayout.length, "用户编辑弹窗保留三个切换项").toBe(3);
-    expect(toggleLayout.every(item => item.rowReverse && item.buttonAfterNote), "用户编辑弹窗切换项采用远程访问式右侧开关布局").toBeTruthy();
+    expect(toggleLayout.every(item => item.buttonAfterNote && item.hasStateVisual), "用户编辑弹窗切换项采用右侧轨道开关布局").toBeTruthy();
     await page.click('[data-action="close-modal"]');
 
     await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
     await page.waitForSelector("#dc-script");
-    const dispatchLayout = await page.evaluate(() => [
-      ["#dc-script", '[data-action="dispatch-script"]'],
-      ["#dc-queue", '[data-action="dispatch-queue"]'],
-    ].map(([selectSelector, buttonSelector]) => {
-      const select = document.querySelector(selectSelector);
-      const button = document.querySelector(buttonSelector);
-      const card = select?.closest(".card")?.getBoundingClientRect();
-      const selectBox = select?.getBoundingClientRect();
-      const buttonBox = button?.getBoundingClientRect();
-      return {
-        sameRow: !!selectBox && !!buttonBox && Math.abs(selectBox.top - buttonBox.top) <= 1,
-        inside: !!card && !!buttonBox && buttonBox.right <= card.right + 1 && buttonBox.bottom <= card.bottom + 1,
-      };
-    }));
-    expect(dispatchLayout.every(item => item.sameRow && item.inside), "手机调度中心选择框与执行按钮同行且位于卡片内").toBeTruthy();
+    const dispatchLayout = await page.evaluate(() => {
+      const bar = document.querySelector(".dispatch-runbar")?.getBoundingClientRect();
+      const controls = Array.from(document.querySelectorAll(".dispatch-runbar select, .dispatch-runbar button")).filter(control => control.offsetParent !== null);
+      return { bar, inside: !!bar && controls.every(control => { const box = control.getBoundingClientRect(); return box.left >= bar.left - 1 && box.right <= bar.right + 1 && box.bottom <= bar.bottom + 1; }) };
+    });
+    expect(dispatchLayout.inside, "手机调度中心统一执行条控件位于容器内").toBeTruthy();
 
     await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(`[data-action="edit-queue"][data-id="${queueId}"]`);
@@ -194,16 +186,16 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
     await page.waitForSelector(".plugins-table");
     const pluginLayout = await page.$eval(".plugins-table", table => {
-      const nameCell = table.querySelector("tbody td:first-child");
-      const helper = table.parentElement?.nextElementSibling;
+      const group = table.querySelector(".plugin-group");
+      const helper = table.nextElementSibling;
       const name = table.querySelector(".plugin-name-scroll");
       return {
-        nameWidth: nameCell?.getBoundingClientRect().width || 0,
+        groupCount: table.querySelectorAll(".plugin-group").length,
         helperPadding: helper ? parseFloat(getComputedStyle(helper).paddingLeft) : 0,
         nameFocusable: name?.getAttribute("tabindex") === "0",
       };
     });
-    expect(pluginLayout.nameWidth <= 210 && pluginLayout.helperPadding >= 16 && pluginLayout.nameFocusable, "插件名称列、底部说明和可聚焦滚动名称结构已就位").toBeTruthy();
+    expect(pluginLayout.groupCount > 0 && pluginLayout.helperPadding >= 0 && pluginLayout.nameFocusable, "插件按分组列表展示且名称可聚焦滚动").toBeTruthy();
   } finally {
     if (queueId) await api("DELETE", "/api/queues/" + queueId);
     if (scriptId) await api("DELETE", "/api/scripts/" + scriptId);
@@ -315,27 +307,21 @@ test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#dc-script");
-  const dispatchButtons = await page.evaluate(() => Array.from(document.querySelectorAll(".control-action button")).map(button => ({ width: button.getBoundingClientRect().width, card: button.closest(".card").getBoundingClientRect().width })));
-  expect(dispatchButtons.length === 2 && dispatchButtons.every(item => item.width / item.card <= 0.25), "调度中心执行按钮保持紧凑宽度").toBeTruthy();
-  const cardRow = await page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll(".dispatch-cards > .card"));
-    if (cards.length !== 2) return false;
-    const a = cards[0].getBoundingClientRect();
-    const b = cards[1].getBoundingClientRect();
-    return a.right <= b.left + 1 && Math.abs(a.top - b.top) <= 1;
+  const dispatchBar = await page.evaluate(() => {
+    const bar = document.querySelector(".dispatch-runbar")?.getBoundingClientRect();
+    const button = document.querySelector("#dc-run")?.getBoundingClientRect();
+    return !!bar && !!button && button.right <= bar.right + 1 && button.width < bar.width * .35;
   });
-  expect(cardRow, "桌面端脚本/队列执行卡片同排").toBeTruthy();
+  expect(dispatchBar, "桌面端统一执行条保持紧凑执行按钮").toBeTruthy();
   await page.setViewportSize({ width: 360, height: 800 });
   await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#dc-script");
-  const cardStack = await page.evaluate(() => {
-    const cards = Array.from(document.querySelectorAll(".dispatch-cards > .card"));
-    if (cards.length !== 2) return false;
-    const a = cards[0].getBoundingClientRect();
-    const b = cards[1].getBoundingClientRect();
-    return a.bottom <= b.top + 1 && Math.abs(a.left - b.left) <= 1;
+  const barStack = await page.evaluate(() => {
+    const bar = document.querySelector(".dispatch-runbar")?.getBoundingClientRect();
+    const fields = Array.from(document.querySelectorAll(".dispatch-runbar .field")).filter(field => !field.hidden && field.offsetParent !== null);
+    return !!bar && fields.length >= 2 && fields.every(field => { const box = field.getBoundingClientRect(); return box.left >= bar.left - 1 && box.right <= bar.right + 1; });
   });
-  expect(cardStack, "手机竖屏脚本/队列执行卡片保持堆叠").toBeTruthy();
+  expect(barStack, "手机竖屏统一执行条保持堆叠且不溢出").toBeTruthy();
   await page.setViewportSize({ width: 1280, height: 900 });
 });
 

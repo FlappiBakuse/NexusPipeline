@@ -1,7 +1,7 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
-import { scrollField, selectField, valueField, pageHeader } from "../core/forms.js";
+import { scrollField, selectField, switchControl, valueField, pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, notifyAvailable, state } from "../core/state.js";
@@ -84,19 +84,18 @@ export async function pageScripts(token) {
   if (scriptPage > totalPages) scriptPage = totalPages;
   const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
-    ? '<div class="empty"><strong>暂无脚本实例</strong>点击右上角「新建脚本实例」创建你的第一个脚本。</div>'
+    ? '<div class="empty"><strong>暂无脚本实例</strong><span>创建一个脚本实例后，它会出现在这里并可加入调度队列。</span><a class="back-link" href="#/scripts" data-action="open-script-modal">新建脚本实例</a></div>'
     : `<section class="card list-surface"><div class="script-grid">
       ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
         <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
         <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
         <div class="script-main">
-          <div class="script-name-row entity-title-row"><strong class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></strong></div>
-          <div class="script-name-row entity-meta-row"><span class="badge ${script.pluginType ? "blue" : "muted"}">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知：开" : "通知：关"}</span>` : ""}</div>
+          <button class="entity-link" type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="编辑脚本实例：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
+          <div class="meta-line script-meta"><span class="badge muted">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用脚本"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
         </div>
-        <div class="script-ops">
-          <button class="sm ghost" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
-          <button class="sm ghost" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
-          <button class="sm danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
+        <div class="script-ops row-actions">
+          <button class="tertiary manage-users" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
+          <div class="overflow-menu-wrap"><button class="overflow-trigger" type="button" data-action="toggle-more-menu" aria-haspopup="menu" aria-expanded="false" aria-label="更多脚本操作">•••</button><div class="overflow-menu" role="menu" hidden><button role="menuitem" type="button" data-action="edit-script-menu" data-id="${esc(script.id)}">编辑脚本</button><button role="menuitem" class="destructive" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button></div></div>
         </div>
       </article>`).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
@@ -192,10 +191,10 @@ export async function openScriptModal(id = "", plugin = "") {
     </div>
     <p class="muted helper-copy">由专用插件「${esc(pluginDisplay(pluginType))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
-      <div class="toggle-grid">
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
+      <div class="toggle-grid switch-grid">
+        ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
+        ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
+        <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
       </div>
       <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
@@ -205,10 +204,10 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="-1 = 不超时（长时脚本）"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="-1 = 不超时（长时脚本）"`)}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <p class="muted helper-copy">两个超时均填 -1 即为长时脚本（无限等待）；两者须同为 -1 才能保存，且长时脚本不能与普通脚本编排进同一调度队列。</p>
+      <p class="muted helper-copy">两个超时字段同时填 -1 表示长时运行；其他数值按超时规则判断并支持重试。</p>
     </div>`
     : `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
@@ -223,10 +222,10 @@ export async function openScriptModal(id = "", plugin = "") {
       ${scrollField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt")}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
-      <div class="toggle-grid">
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="launch" id="sm-launch" aria-pressed="${d.launchGame ? "true" : "false"}">启动游戏</button>
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="force" id="sm-force" aria-pressed="${d.forceCloseGame ? "true" : "false"}">强制关闭</button>
-        <button class="mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="notify" id="sm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">运行通知</button>
+      <div class="toggle-grid switch-grid">
+        ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
+        ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
+        <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
       </div>
       <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
@@ -236,10 +235,10 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新超时（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}" placeholder="-1 = 不超时（长时脚本）"`)}
-        ${valueField("sm-total", "运行总时间超时（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}" placeholder="-1 = 不超时（长时脚本）"`)}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <p class="muted helper-copy">两个超时均填 -1 即为长时脚本（无限等待）；两者须同为 -1 才能保存，且长时脚本不能与普通脚本编排进同一调度队列。</p>
+      <p class="muted helper-copy">两个超时字段同时填 -1 表示长时运行；其他数值按超时规则判断并支持重试。</p>
       <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
           <label class="field-label" for="sm-succ-kw">成功关键字</label>
@@ -255,9 +254,9 @@ export async function openScriptModal(id = "", plugin = "") {
           <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
         </div>
         <div class="judge-actions">
-          <button class="ghost sm" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
-          <button class="sm mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本（脚本优先）</button>
-          <button class="sm mode-toggle" type="button" data-action="toggle-sm-flag" data-flag="autoupdate" id="sm-autoupdate" data-testid="sm-autoupdate" aria-pressed="${d.autoUpdateConfig ? "true" : "false"}">自动更新配置</button>
+          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
+          <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
+          ${switchControl("sm-autoupdate", "自动更新配置", "保存时同步专项配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
         </div>
       </div>
     </div>`;
@@ -480,6 +479,7 @@ export const actions = {
   "open-script-modal": () => openNewScriptChooser(),
   "open-script-type": target => openScriptModal("", target.dataset.plugin || ""),
   "edit-script": target => openScriptModal(target.dataset.id),
+  "edit-script-menu": target => openScriptModal(target.dataset.id),
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "confirm-delete-script": target => withBusy(target, () => confirmDeleteScript(target.dataset.id, target.dataset.name)),
   "save-script": target => withBusy(target, () => saveScript()),

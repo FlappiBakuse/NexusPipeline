@@ -106,11 +106,15 @@ export async function pageDispatch(token) {
   state.scripts = scripts; state.queues = queues;
   render(pageHeader("调度中心", "调度中心", "手动启动任务，观察实时输出并及时取消运行。") + `
     <div id="system-action-area"></div>
-    <section class="card section-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
-    <div class="dispatch-cards">
-    <section class="card section-surface"><div class="section-heading"><h3>手动执行脚本实例</h3><span class="muted">启用用户将自动依次运行</span></div><div class="form-grid dispatch-controls dispatch-script-controls"><div><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}">${esc(script.name)}</option>`).join("")}</select></div><div class="control-action"><button class="primary" type="button" data-action="dispatch-script">执行</button></div></div></section>
-    <section class="card section-surface"><div class="section-heading"><h3>手动执行调度队列</h3><span class="muted">按队列内顺序运行</span></div><div class="form-grid dispatch-controls dispatch-queue-controls"><div><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div><div class="control-action"><button class="primary" type="button" data-action="dispatch-queue">执行</button></div></div></section>
-    </div>`);
+    <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
+    <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">开始一次运行</h3><span class="muted">选择目标后立即加入运行列表</span></div>
+      <div class="dispatch-runbar">
+        <div class="field"><label class="field-label" for="dc-kind">目标类型</label><select id="dc-kind" data-action="dispatch-kind"><option value="script">脚本实例</option><option value="queue">调度队列</option></select></div>
+        <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}">${esc(script.name)}</option>`).join("")}</select></div>
+        <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div>
+        <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current">执行脚本</button></div>
+      </div>
+    </section>`);
   applyProgress();
   updateSystemAction(status);
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
@@ -137,6 +141,22 @@ export async function dispatchQueue() {
   catch (error) { toast(error.message, "error"); }
 }
 
+export function dispatchKindChange(target) {
+  const kind = target.value === "queue" ? "queue" : "script";
+  const scriptWrap = $("#dc-script-wrap");
+  const queueWrap = $("#dc-queue-wrap");
+  const runButton = $("#dc-run");
+  if (scriptWrap) scriptWrap.hidden = kind !== "script";
+  if (queueWrap) queueWrap.hidden = kind !== "queue";
+  if (runButton) runButton.textContent = kind === "queue" ? "执行队列" : "执行脚本";
+}
+
+export async function dispatchCurrent() {
+  const kind = $("#dc-kind")?.value || "script";
+  if (kind === "queue") return dispatchQueue();
+  return dispatchScript();
+}
+
 export function cancelRun(runId) {
   confirmModal("取消运行", "当前任务将被终止；如果这是调度队列，后续任务也不会继续执行。确定取消吗？", "confirm-cancel-run", { id: runId });
 }
@@ -149,6 +169,8 @@ export async function confirmCancelRun(runId) {
 export const actions = {
   "dispatch-script": target => withBusy(target, () => dispatchScript()),
   "dispatch-queue": target => withBusy(target, () => dispatchQueue()),
+  "dispatch-current": target => withBusy(target, () => dispatchCurrent()),
+  "dispatch-kind": target => dispatchKindChange(target),
   "cancel-run": target => cancelRun(target.dataset.id),
   "confirm-cancel-run": target => withBusy(target, () => confirmCancelRun(target.dataset.id)),
 };

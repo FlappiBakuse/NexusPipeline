@@ -14,16 +14,16 @@ export function render(html) {
   view.innerHTML = html;
   initAutoScroll(view);
   syncAllModeToggles(view);
+  syncAllSwitchControls(view);
   // v0.7.3+（P1-2）：路由渲染后焦点移到主内容区（tabindex=-1 的 #view），键盘用户切页后从页面开头继续导航；
   // preventScroll 避免打断视口位置。
   view.focus({ preventScroll: true });
 }
 
-/** 切换按钮文字状态同步（v0.6.7+）：.mode-toggle 按钮文字追加「：开/：关」后缀，让用户直接明了开关状态。
- *  跳过星期按钮（data-day）与显式标记 data-toggle-text="false" 的按钮（如「使用判断脚本」模式切换）。
- *  aria-pressed 仍为唯一状态权威，文字仅作展示。 */
+/** 旧式文本切换按钮的状态同步。新的布尔开关使用 .switch-control 的轨道/滑块视觉。 */
 export function syncModeToggleText(btn) {
   if (!btn || !btn.classList.contains("mode-toggle")) return;
+  if (btn.classList.contains("switch-control")) return;
   if (btn.hasAttribute("data-day") || btn.dataset.toggleText === "false") return;
   const base = btn.dataset.baseText || btn.textContent.trim();
   btn.dataset.baseText = base;
@@ -35,6 +35,43 @@ export function syncAllModeToggles(root = view) {
   root.querySelectorAll(".mode-toggle").forEach(syncModeToggleText);
 }
 
+/** 同步开关的视觉状态与可读的状态数据，不修改用户可见文案。 */
+export function syncSwitchControl(btn) {
+  if (!btn?.classList.contains("switch-control")) return;
+  const on = btn.getAttribute("aria-pressed") === "true";
+  btn.dataset.state = on ? "on" : "off";
+  const stateText = btn.querySelector("[data-switch-state]");
+  if (stateText) stateText.textContent = on ? "已启用" : "已停用";
+}
+
+export function syncAllSwitchControls(root = view) {
+  root.querySelectorAll(".switch-control").forEach(syncSwitchControl);
+}
+
+/** 更多菜单：打开时将焦点交给菜单，关闭时可恢复到触发按钮。 */
+export function closeMoreMenus({ restoreFocus = false } = {}) {
+  document.querySelectorAll(".overflow-menu:not([hidden])").forEach(menu => {
+    menu.hidden = true;
+    menu.removeAttribute("data-open");
+    const trigger = menu.closest(".overflow-menu-wrap")?.querySelector(".overflow-trigger");
+    trigger?.setAttribute("aria-expanded", "false");
+    if (restoreFocus && trigger) trigger.focus({ preventScroll: true });
+  });
+}
+
+export function toggleMoreMenu(trigger) {
+  const wrap = trigger?.closest(".overflow-menu-wrap");
+  const menu = wrap?.querySelector(".overflow-menu");
+  if (!menu) return;
+  const open = menu.hidden;
+  closeMoreMenus();
+  if (!open) return;
+  menu.hidden = false;
+  menu.dataset.open = "true";
+  trigger.setAttribute("aria-expanded", "true");
+  menu.querySelector('[role="menuitem"]')?.focus({ preventScroll: true });
+}
+
 /** 长文本滚动：内容溢出容器时启用往返滚动（否则保持省略号兜底）。</summary> */
 export function initAutoScroll(root = view) {
   root.querySelectorAll(".scroll-text").forEach(el => {
@@ -42,9 +79,10 @@ export function initAutoScroll(root = view) {
     if (!inner) return;
     if (inner.scrollWidth > el.clientWidth + 1) {
       el.style.setProperty("--scroll-x", `${el.clientWidth - inner.scrollWidth}px`);
-      el.classList.add("scrolling");
+      el.classList.add("scrolling", "is-overflowing");
     } else {
-      el.classList.remove("scrolling");
+      el.classList.remove("scrolling", "is-overflowing");
+      el.style.removeProperty("--scroll-x");
     }
   });
   root.querySelectorAll(".plugin-name-scroll").forEach(el => {
@@ -225,12 +263,27 @@ export function cycleTheme() {
   toast(`主题：${document.body.dataset.theme === "system" ? "跟随系统" : document.body.dataset.theme === "light" ? "浅色" : "深色"}`);
 }
 
-/** 字段错误：仅高亮输入框并保留 aria-invalid，避免插入提示文字造成表单布局跳动。 */
-export function setFieldError(id, _message) {
+/** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */
+export function setFieldError(id, message) {
   const element = $(`#${id}`);
   if (!element) return;
   element.classList.add("field-error");
   element.setAttribute("aria-invalid", "true");
+  let slot = document.getElementById(`${id}-error`);
+  if (!slot) {
+    slot = document.createElement("p");
+    slot.id = `${id}-error`;
+    slot.className = "field-error-message";
+    slot.setAttribute("role", "alert");
+    (element.closest(".field") || element.parentElement)?.append(slot);
+  }
+  if (slot) {
+    slot.textContent = message || "请检查此项";
+    slot.hidden = false;
+    const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+    if (!describedBy.includes(slot.id)) describedBy.push(slot.id);
+    element.setAttribute("aria-describedby", describedBy.join(" "));
+  }
   element.focus({ preventScroll: true });
 }
 
@@ -240,6 +293,14 @@ export function clearFieldError(id) {
   if (!element) return;
   element.classList.remove("field-error");
   element.removeAttribute("aria-invalid");
+  const slot = document.getElementById(`${id}-error`);
+  if (slot) {
+    slot.hidden = true;
+    slot.textContent = "";
+    const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean).filter(value => value !== slot.id);
+    if (describedBy.length) element.setAttribute("aria-describedby", describedBy.join(" "));
+    else element.removeAttribute("aria-describedby");
+  }
 }
 
 /** 批量清除（弹窗关闭/保存成功后调用，防止残留高亮）。 */

@@ -359,7 +359,7 @@ test("自动更新配置开关：通用弹窗默认开/切换/保存/回显；�
   await page.waitForSelector("#sm-autoupdate", { timeout: 5000 });
 
   expect((await page.$eval("#sm-autoupdate", el => el.getAttribute("aria-pressed"))) === "true", "自动更新配置按钮默认开").toBeTruthy();
-  expect((await page.textContent("#sm-autoupdate")).includes("自动更新配置"), "按钮含主文案").toBeTruthy();
+  expect((await page.textContent('[data-switch-row="sm-autoupdate"]')).includes("自动更新配置"), "开关行含主文案").toBeTruthy();
 
   await page.click('[data-action="toggle-sm-flag"][data-flag="autoupdate"]');
   expect((await page.$eval("#sm-autoupdate", el => el.getAttribute("aria-pressed"))) === "false", "点击后切换为关").toBeTruthy();

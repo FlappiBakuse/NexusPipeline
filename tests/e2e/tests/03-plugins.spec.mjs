@@ -307,8 +307,8 @@ test("插件配置二级页：布局 + 类型选择器 + generic 模板联动与
   expect(body.includes("Webhook 通知") && body.includes("SMTP 邮件通知"), "插件配置页含 Webhook/SMTP 折叠面板").toBeTruthy();
   expect(body.includes("配置信息") && body.includes("启用通知的脚本实例"), "插件配置页含配置信息（统计）").toBeTruthy();
   expect(body.includes("0 个"), "启用通知统计显示（脚本 0 / 队列 0）").toBeTruthy();
-  const webhookToggleLayout = await page.$eval("#panel-wh > .toggle-row", el => { const style = getComputedStyle(el); const button = el.querySelector("button"); const description = el.querySelector(".muted"); return { flexDirection: style.flexDirection, gap: style.gap, buttonRight: button.getBoundingClientRect().right >= description.getBoundingClientRect().right }; });
-  expect(webhookToggleLayout.flexDirection === "row-reverse" && webhookToggleLayout.gap !== "0px" && webhookToggleLayout.buttonRight, "Webhook 开关与设置页服务行为使用统一的右侧控件布局").toBeTruthy();
+  const webhookToggleLayout = await page.$eval("#panel-wh > .switch-row", el => { const style = getComputedStyle(el); const button = el.querySelector("button"); const description = el.querySelector(".switch-copy .muted"); return { flexDirection: style.flexDirection, gap: style.gap, buttonRight: !!button && !!description && button.getBoundingClientRect().right >= description.getBoundingClientRect().right, hasTrack: !!el.querySelector(".switch-track") }; });
+  expect(webhookToggleLayout.flexDirection === "row" && webhookToggleLayout.gap !== "0px" && webhookToggleLayout.buttonRight && webhookToggleLayout.hasTrack, "Webhook 开关与设置页服务行为使用统一的右侧控件布局").toBeTruthy();
 
   const typeOptions = await page.$$eval("#st-whtype option", els => els.map(e => e.textContent));
   expect(typeOptions.length === 6 && typeOptions[0] === "Feishu" && typeOptions[5] === "Generic", "Webhook 类型选项首字母大写（Feishu…Generic）").toBeTruthy();
@@ -359,7 +359,7 @@ test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", as
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
   await page.waitForSelector(".script-card", { timeout: 5000 });
   const notifyCell2 = await page.$eval('[data-testid="script-card"] [data-testid="script-notify"]', el => el.textContent.trim());
-  expect(notifyCell2 === "通知：关", "插件启用后脚本卡片通知徽章显示「通知：关」").toBeTruthy();
+  expect(notifyCell2 === "通知未开启", "插件启用后脚本卡片显示通知状态").toBeTruthy();
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
@@ -403,8 +403,7 @@ test("下一调度队列显示/倒计时 + 插件能力精简", async ({ page })
   expect(/^\d{2}:\d{2}:\d{2}$/.test(cd.trim()), "下一调度队列卡片上方显示倒计时（" + cd + "）").toBeTruthy();
   expect((await page.textContent("#next-q-label")) === "下一调度队列：统计队列", "下一调度队列卡片第二行显示队列名称").toBeTruthy();
   expect(await page.evaluate(() => document.querySelectorAll('[data-testid="stat-next"] > *').length === 2), "下一调度队列卡片保持两行布局").toBeTruthy();
-  const notifyCard = page.locator(".plugin-card").filter({ hasText: "通知推送" }).first();
-  expect(await notifyCard.locator(".qk-row").count() === 0 && !(await notifyCard.textContent()).includes("已启用通知"), "仪表盘通知插件行移除冗余通知统计").toBeTruthy();
+  expect(await page.locator(".plugin-card").count() === 0, "健康通知插件不再占用仪表盘卡片空间").toBeTruthy();
 
   await api("DELETE", "/api/queues/" + qid);
   await api("DELETE", "/api/scripts/" + sid);

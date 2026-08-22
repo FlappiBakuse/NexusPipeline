@@ -1,7 +1,7 @@
 import { api } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc } from "../core/format.js";
-import { pageHeader, valueField } from "../core/forms.js";
+import { pageHeader, switchControl, valueField } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
@@ -37,18 +37,16 @@ export async function pageScriptUsers(scriptId, token) {
     const userIndex = (userPage - 1) * USER_PAGE_SIZE + pageIndex;
     return `<article class="user-card" data-dnd-id="${esc(user.name)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
-    <div class="list-item-head"><div><div class="list-item-title"><strong>${esc(user.name)}</strong>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
-      <div class="qk-row">任务前脚本：${user.preRunScript ? `<span class="mono">${esc(user.preRunScript)}</span>${user.preRunOnceOnly ? "（仅首次）" : ""}` : '<span class="muted">未设置</span>'}</div>
-      <div class="qk-row">任务后脚本：${user.postRunScript ? `<span class="mono">${esc(user.postRunScript)}</span>${user.postRunOnFinalOnly ? "（仅最终完成）" : ""}` : '<span class="muted">未设置</span>'}</div>
+    <div class="list-item-head"><div><div class="list-item-title"><button class="entity-link user-name-link" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}" aria-label="编辑用户：${esc(user.name)}"><span>${esc(user.name)}</span></button>${user.enabled ? '<span class="badge ok">已启用</span>' : '<span class="badge muted">已禁用</span>'}</div>
+      <div class="meta-line user-meta"><span class="badge muted">${user.preRunScript ? `前置脚本已配置${user.preRunOnceOnly ? " · 仅首次" : ""}` : "未设置前置脚本"}</span><span class="badge muted">${user.postRunScript ? `后置脚本已配置${user.postRunOnFinalOnly ? " · 仅最终完成" : ""}` : "未设置后置脚本"}</span></div>
     </div>
       <div class="action-row"><div class="user-actions">
-        <button class="sm ghost" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
-        <button class="sm ghost" type="button" data-action="edit-user" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button>
-        <button class="sm danger" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button>
+        <button class="ghost" type="button" data-action="edit-user-config" data-id="${script.id}" data-name="${esc(user.name)}">编辑配置</button>
+        <div class="overflow-menu-wrap"><button class="overflow-trigger" type="button" data-action="toggle-more-menu" aria-haspopup="menu" aria-expanded="false" aria-label="更多用户操作">•••</button><div class="overflow-menu" role="menu" hidden><button role="menuitem" type="button" data-action="edit-user-menu" data-id="${script.id}" data-name="${esc(user.name)}">编辑用户</button><button role="menuitem" class="destructive" type="button" data-action="delete-user" data-id="${script.id}" data-name="${esc(user.name)}">删除用户</button></div></div>
       </div></div>
     </div>
   </article>`;
-  }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong>点击右上角「添加用户」创建。</div>';
+  }).join("")}${users.length > USER_PAGE_SIZE ? pagerMarkup("users", userPage, USER_PAGE_SIZE, users.length) : ""}</section>` : '<div class="empty"><strong>暂无用户</strong><span>为脚本添加用户后，可以分别保存配置并选择运行。</span><a class="back-link" href="#/scripts">返回脚本实例</a></div>';
   render(pageHeader("用户配置", `${esc(script.name)} · 用户管理`, "为不同用户保存独立配置，运行时会自动交换并还原。", action) + `<div class="back-row"><a class="back-link" href="#/scripts">${icon("arrowLeft")} 返回脚本实例</a></div>${usersMarkup}`);
   registerPager("users", p => { userPage = p; pageScriptUsers(scriptId, state.routeToken); });
   restoreEditSessionCard(scriptId);
@@ -101,9 +99,9 @@ export function openUserModal(scriptId, userName = "") {
   };
   const d = userDraft;
   const body = `${valueField("um-name", "用户名 <span class='req'>*</span>", d.name, "text", 'placeholder="脚本内不可重复"')}
-    <div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-enabled" id="um-enabled" aria-pressed="${d.enabled ? "true" : "false"}">启用用户</button><span class="muted">禁用后不可选用于运行</span></div>
-    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}<div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-pre-once" id="um-pre-once" aria-pressed="${d.preRunOnceOnly ? "true" : "false"}">仅首次执行</button><span class="muted">重试时不再执行</span></div></div>
-    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}<div class="toggle-row settings-option settings-option-card"><button class="mode-toggle" type="button" data-action="toggle-um-flag" data-flag="um-post-final" id="um-post-final" aria-pressed="${d.postRunOnFinalOnly ? "true" : "false"}">仅最终完成</button><span class="muted">仅最终运行完成启用</span></div></div>`;
+    ${switchControl("um-enabled", "启用用户", "禁用后不可选用于运行", d.enabled, "toggle-um-flag", 'data-flag="um-enabled"')}
+    <div class="subsection"><h3>任务前运行脚本</h3>${valueField("um-pre", "脚本路径（填写则启用，留空不启用）", d.preRunScript)}${switchControl("um-pre-once", "仅首次执行", "重试时不再执行", d.preRunOnceOnly, "toggle-um-flag", 'data-flag="um-pre-once"')}</div>
+    <div class="subsection"><h3>任务后运行脚本</h3>${valueField("um-post", "脚本路径（填写则启用，留空不启用）", d.postRunScript)}${switchControl("um-post-final", "仅最终完成", "仅最终运行完成启用", d.postRunOnFinalOnly, "toggle-um-flag", 'data-flag="um-post-final"')}</div>`;
     showModal(modalShell(user ? "编辑用户" : "添加用户", body, '<button class="primary" type="button" data-action="save-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
@@ -152,6 +150,7 @@ export const actions = {
   "manage-users": target => { location.hash = "#/scripts/" + target.dataset.id + "/users"; },
   "open-user-modal": target => openUserModal(target.dataset.id),
   "edit-user": target => openUserModal(target.dataset.id, target.dataset.name),
+  "edit-user-menu": target => openUserModal(target.dataset.id, target.dataset.name),
   "save-user": target => withBusy(target, () => saveUser()),
   "delete-user": target => deleteUser(target.dataset.id, target.dataset.name),
   "confirm-delete-user": target => withBusy(target, () => confirmDeleteUser(target.dataset.id, target.dataset.name)),

@@ -138,6 +138,8 @@ test("重启服务：确认卡片 → 自动重启并恢复（service 模式）"
   startService("service");
   await waitForService();
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.click("#st-lightweight");
+  await page.click("#st-lightweight");
   await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
   await page.click('[data-testid="restart-service"]');
   await page.waitForSelector('[data-action="restart-confirm"]', { timeout: 5000 });
@@ -168,14 +170,14 @@ test("重启服务：确认卡片 → 自动重启并恢复（service 模式）"
   let restored = false;
   for (let attempt = 0; attempt < 3 && !restored; attempt++) {
     try {
-      await page.waitForSelector('[data-testid="restart-service"]', { timeout: 15000 });
+      await page.waitForSelector("#st-autostart", { timeout: 15000 });
       restored = true;
     } catch {
       await page.waitForTimeout(500);
       await page.reload({ waitUntil: "domcontentloaded" });
     }
   }
-  expect(restored, "重启后前端恢复（restart-service 按钮可见；页面错误现场：" + (pageErrors.join(" | ") || "无") + "）").toBeTruthy();
+  expect(restored, "重启后前端恢复（设置页控件可见；页面错误现场：" + (pageErrors.join(" | ") || "无") + "）").toBeTruthy();
   // 清理：杀掉自重启拉起的进程（service 模式，未登记 PID 文件），恢复标准 web 模式测试环境
   await killRuntimeServices();
   startService("web");
@@ -208,16 +210,18 @@ test("重启服务：运行任务时 409 拒绝", async () => {
   await sleep(500);
 });
 
-test("切换按钮文字状态：后缀「：开/：关」实时同步 + 豁免按钮", async ({ page }) => {
+test("布尔开关视觉状态：轨道、aria-pressed 与键盘语义同步", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#st-autostart");
   const remoteToggleLayout = await page.$eval("#st-remote", el => { const row = el.parentElement; const style = getComputedStyle(row); const description = row.querySelector(".muted"); return { flexDirection: style.flexDirection, gap: style.gap, buttonRight: el.getBoundingClientRect().right >= description.getBoundingClientRect().right }; });
-  expect(remoteToggleLayout.flexDirection === "row-reverse" && remoteToggleLayout.gap !== "0px" && remoteToggleLayout.buttonRight, "远程访问开关与服务行为使用统一的右侧控件布局").toBeTruthy();
-  expect((await page.textContent("#st-autostart")) === "开机自启：关", "设置页切换按钮初始带「：关」后缀").toBeTruthy();
+  expect(remoteToggleLayout.flexDirection === "row" && remoteToggleLayout.gap !== "0px" && remoteToggleLayout.buttonRight && await page.locator("#st-remote .switch-track").count() === 1, "远程访问开关采用统一的右侧轨道布局").toBeTruthy();
+  expect(await page.getAttribute("#st-autostart", "aria-pressed"), "设置页开关初始状态由 aria-pressed 表达").toBe("false");
+  expect(await page.getAttribute("#st-autostart", "data-state"), "设置页开关初始视觉状态为 off").toBe("off");
   await page.click("#st-autostart");
-  expect((await page.textContent("#st-autostart")) === "开机自启：开", "点击后按钮文字同步「：开」").toBeTruthy();
+  expect(await page.getAttribute("#st-autostart", "aria-pressed"), "点击后 aria-pressed 切换为 true").toBe("true");
+  expect(await page.getAttribute("#st-autostart", "data-state"), "点击后轨道状态切换为 on").toBe("on");
   await page.click("#st-autostart");
-  expect((await page.textContent("#st-autostart")) === "开机自启：关", "再次点击恢复「：关」").toBeTruthy();
+  expect(await page.getAttribute("#st-autostart", "aria-pressed"), "再次点击恢复 false").toBe("false");
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("h2");
@@ -225,9 +229,10 @@ test("切换按钮文字状态：后缀「：开/：关」实时同步 + 豁免�
   await page.waitForSelector('[data-action="open-script-type"][data-plugin=""]');
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-mode-btn");
-  expect((await page.textContent("#sm-mode-btn")) === "使用判断脚本（脚本优先）", "判断脚本模式按钮豁免（不加「：开/关」后缀）").toBeTruthy();
-  expect((await page.textContent("#sm-launch")) === "启动游戏：关", "脚本弹窗切换按钮带「：关」后缀").toBeTruthy();
+  expect((await page.textContent("#sm-mode-btn")) === "使用判断脚本", "判断脚本模式使用独立的模式控件").toBeTruthy();
+  expect(await page.getAttribute("#sm-launch", "aria-pressed"), "脚本弹窗开关初始状态由 aria-pressed 表达").toBe("false");
+  expect(await page.locator("#sm-launch .switch-track").count(), "脚本弹窗开关使用轨道视觉").toBe(1);
   await page.click("#sm-launch");
-  expect((await page.textContent("#sm-launch")) === "启动游戏：开", "脚本弹窗点击后同步「：开」").toBeTruthy();
+  expect(await page.getAttribute("#sm-launch", "aria-pressed"), "脚本弹窗点击后开关切换为 true").toBe("true");
   await page.click('[data-action="close-modal"]');
 });

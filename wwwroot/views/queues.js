@@ -1,7 +1,7 @@
 ﻿import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
-import { pageHeader, valueField } from "../core/forms.js";
+import { pageHeader, switchControl, valueField } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
@@ -14,6 +14,7 @@ let queuePage = 1;
 let nextTimer = null;
 let queuePendingMerged = false;
 let queueModalScroll = null;
+let queueOpenTimeSets = null;
 const QUEUE_PAGE_SIZE = 20;
 
 export async function pageQueues(token) {
@@ -31,7 +32,7 @@ export async function pageQueues(token) {
   const pageItems = queues.slice((queuePage - 1) * QUEUE_PAGE_SIZE, queuePage * QUEUE_PAGE_SIZE);
   const content = queues.length ? `<section class="card list-surface"><div class="script-grid">
     ${pageItems.map(queue => queueCardMarkup(queue, scripts)).join("")}
-    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : '<div class="empty"><strong>暂无调度队列</strong>点击右上角「新建调度队列」创建。</div>';
+    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : '<div class="empty"><strong>暂无调度队列</strong><span>把多个脚本串成一个可重复执行的工作流。</span><a class="back-link" href="#/queues" data-action="open-queue-modal">新建调度队列</a></div>';
   render(pageHeader("调度管理", "调度队列", "把多个脚本串成可重复执行的工作流。", action) + content);
   registerPager("queues", p => { queuePage = p; pageQueues(state.routeToken); });
   tickQueueNext();
@@ -83,19 +84,18 @@ function queueCardMarkup(queue, scripts) {
       ? '<span class="badge blue">将在下次启动开始运行</span>'
       : "";
   const notifyBadge = notifyAvailable()
-    ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">队列级通知：${queue.notifyEnabled ? "开" : "关"}</span>`
+    ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? "队列通知已开启" : "队列通知未开启"}</span>`
     : "";
-  const badgesRow = timeBadge || notifyBadge ? `<div class="script-name-row entity-meta-row">${timeBadge}${notifyBadge}</div>` : "";
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
-      <div class="script-name-row entity-title-row"><strong class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></strong></div>
-      ${badgesRow}
+      <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="编辑调度队列：${esc(queue.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
+      <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.autoRunMode === "scheduled" ? "按计划运行" : queue.autoRunMode === "startup" ? "启动时运行" : "手动运行"}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${timeBadge}${notifyBadge}</div>
     </div>
-    <div class="queue-ops">
-      <button class="sm ghost" type="button" data-action="edit-queue" data-id="${queue.id}">编辑队列</button>
-      <button class="sm danger" type="button" data-action="delete-queue" data-id="${queue.id}" data-name="${esc(queue.name)}">删除队列</button>
+    <div class="queue-ops row-actions">
+      <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">编辑队列</button>
+      <div class="overflow-menu-wrap"><button class="overflow-trigger" type="button" data-action="toggle-more-menu" aria-haspopup="menu" aria-expanded="false" aria-label="更多队列操作">•••</button><div class="overflow-menu" role="menu" hidden><button role="menuitem" class="destructive" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">删除队列</button></div></div>
     </div>
   </article>`;
 }
@@ -128,6 +128,7 @@ function $domIcons() {
 
 export async function openQueueModal(id = "") {
   queueModalScroll = null;
+  queueOpenTimeSets = null;
   let queue = id ? state.queues.find(item => item.id === id) : null;
   if (id && !queue) {
     try { state.queues = await api("GET", "/api/queues"); queue = state.queues.find(item => item.id === id); }
@@ -160,7 +161,15 @@ function syncQueueDraftFromDom() {
   $$('[data-task-idx]').forEach(select => { const index = +select.dataset.taskIdx; if (queueDraft.tasks[index]) queueDraft.tasks[index].scriptInstanceId = select.value; });
 }
 
-export function renderQueueModal() {
+function captureQueueOpenState() {
+  if (!queueDraft) return;
+  const cards = $$("#qm-timesets .timeset-card");
+  if (!cards.length) return;
+  queueOpenTimeSets = new Set(cards.filter(card => card.open).map(card => queueDraft.timeSets[+card.dataset.tsIdx]).filter(Boolean));
+}
+
+export function renderQueueModal(skipOpenCapture = false) {
+  if (!skipOpenCapture) captureQueueOpenState();
   const previousBody = $(".modal-mask .modal-body");
   if (previousBody) queueModalScroll = { left: previousBody.scrollLeft, top: previousBody.scrollTop };
   syncQueueDraftFromDom();
@@ -171,9 +180,9 @@ export function renderQueueModal() {
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
   const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
     <div class="form-grid"><div><label class="field-label" for="qm-mode">自动运行方式</label><select id="qm-mode"><option value="none" ${d.autoRunMode === "none" ? "selected" : ""}>不运行</option><option value="scheduled" ${d.autoRunMode === "scheduled" ? "selected" : ""}>定时运行</option><option value="startup" ${d.autoRunMode === "startup" ? "selected" : ""}>启动时运行</option></select></div><div><label class="field-label" for="qm-action">运行完成操作</label><select id="qm-action"><option value="none" ${d.completionAction === "none" ? "selected" : ""}>无操作</option><option value="exit" ${d.completionAction === "exit" ? "selected" : ""}>退出软件</option><option value="sleep" ${d.completionAction === "sleep" ? "selected" : ""}>休眠</option><option value="reboot" ${d.completionAction === "reboot" ? "selected" : ""}>重启</option><option value="shutdown" ${d.completionAction === "shutdown" ? "selected" : ""}>关机</option></select></div></div>
-    <div class="toggle-row settings-option settings-option-card queue-notify-row"><button class="mode-toggle" type="button" data-action="toggle-qm-flag" id="qm-notify" ${notifyAvailable() ? "" : "hidden"} aria-pressed="${d.notifyEnabled ? "true" : "false"}">队列通知</button><div><span class="muted">统一发送所有脚本状态，覆盖实例级设置</span></div></div>
-    <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">可添加多个触发时间，拖拽左侧把手排序</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<div class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><button class="mode-toggle" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" aria-pressed="${timeSet.enabled ? "true" : "false"}">启用</button><button class="sm danger" type="button" data-action="remove-time-set" data-index="${index}">删除</button></div></div></div>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
-    <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时脚本（-1 超时）与普通脚本不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><select data-task-idx="${index}" aria-label="第 ${index + 1} 个任务：脚本实例"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}" ${script.id === task.scriptInstanceId ? "selected" : ""}>${esc(script.name)}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? "（长时）" : ""}</option>`).join("")}</select><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
+    <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置", d.notifyEnabled, "toggle-qm-flag")}</div>
+    <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><strong>定时 ${index + 1}</strong><span class="muted">${esc(timeSet.time || "未设置时间")} · ${timeSet.days.length ? `${timeSet.days.length} 天` : "未选周期"}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? "已启用" : "已停用"}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">删除定时</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
+    <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><select data-task-idx="${index}" aria-label="第 ${index + 1} 个任务：脚本实例"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}" ${script.id === task.scriptInstanceId ? "selected" : ""}>${esc(script.name)}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? "（长时）" : ""}</option>`).join("")}</select><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
   showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body, '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-queue">保存</button>'), true);
   const restoreModalScroll = () => {
     if (!queueModalScroll) return;
@@ -220,7 +229,7 @@ function queueTotalUsers() {
 }
 
 export function queueAddTimeSet() { queueDraft.timeSets.push({ id: "", enabled: true, days: [1, 2, 3, 4, 5], time: "05:30" }); renderQueueModal(); }
-export function queueRemoveTimeSet(index) { syncQueueDraftFromDom(); queueDraft.timeSets.splice(index, 1); renderQueueModal(); }
+export function queueRemoveTimeSet(index) { syncQueueDraftFromDom(); captureQueueOpenState(); queueDraft.timeSets.splice(index, 1); renderQueueModal(true); }
 export function queueAddTask() {
   syncQueueDraftFromDom();
   const l = state.limits || {};
@@ -322,6 +331,7 @@ export async function confirmDeleteQueue(id, name) {
 export const actions = {
   "open-queue-modal": target => openQueueModal(target.dataset.id || ""),
   "edit-queue": target => openQueueModal(target.dataset.id),
+  "edit-queue-direct": target => openQueueModal(target.dataset.id),
   "delete-queue": target => deleteQueue(target.dataset.id, target.dataset.name),
   "confirm-delete-queue": target => withBusy(target, () => confirmDeleteQueue(target.dataset.id, target.dataset.name)),
   "save-queue": target => withBusy(target, () => saveQueue()),

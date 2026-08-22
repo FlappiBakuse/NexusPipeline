@@ -48,7 +48,9 @@ test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编�
   await page.waitForFunction(() => document.body.textContent.includes("测试脚本A-改"), null, { timeout: 5000 });
   expect((await page.textContent("body")).includes("测试脚本A-改"), "编辑后名称已更新").toBeTruthy();
 
-  await page.click('[data-action="delete-script"]');
+  const editedScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "测试脚本A-改" }).first();
+  await editedScriptCard.locator(".overflow-trigger").click();
+  await editedScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');
@@ -101,7 +103,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   let body = await page.textContent("body");
   expect(body.includes("编辑脚本"), "按钮改为「编辑脚本」").toBeTruthy();
   expect(body.includes("删除脚本"), "按钮改为「删除脚本」").toBeTruthy();
-  expect(body.includes("用户管理"), "新增「用户管理」按钮").toBeTruthy();
+  expect(await page.$('[data-action="manage-users"]'), "脚本卡片提供直接用户入口").toBeTruthy();
 
   await page.click('[data-action="manage-users"]');
   await page.waitForFunction(() => document.body.textContent.includes("添加用户"), null, { timeout: 5000 });
@@ -113,7 +115,8 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.waitForSelector("#um-name");
   await page.fill("#um-name", "甲");
   await page.click(".modal button:has-text('保存')");
-  await page.waitForFunction(() => document.body.textContent.includes(">甲<") || document.body.textContent.includes("已启用"), null, { timeout: 5000 });
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
+  await page.waitForSelector('.user-card[data-dnd-id="甲"]', { timeout: 5000 });
   body = await page.textContent("body");
   expect(body.includes("甲") && body.includes("已启用"), "添加用户后卡片显示用户名与启用状态").toBeTruthy();
   expect(fs.existsSync(path.join(dataDir, "甲", "store", "configA.txt")), "首次添加用户生成配置快照（data/…/甲/store/configA.txt）").toBeTruthy();
@@ -201,7 +204,9 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
 
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("h2");
-  await page.click('[data-action="delete-script"][data-name="用户测试脚本"]');
+  const userTestScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "用户测试脚本" }).first();
+  await userTestScriptCard.locator(".overflow-trigger").click();
+  await userTestScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');
@@ -333,19 +338,21 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   };
 
   await dragUser("丙", await targetBox('.user-card[data-dnd-id="甲"]'));
-  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "丙"; }, null, { timeout: 10000 });
+  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title .user-name-link")); return cards.length === 3 && cards[0].textContent.trim() === "丙"; }, null, { timeout: 10000 });
   expect(true, "拖拽后 丙 成为第一位（卡片顺序更新）").toBeTruthy();
   list = await (await fetch(baseUrl + "api/scripts")).json();
   got = list.find(s => s.id === sid);
   expect(got.users.map(u => u.name).join() === "丙,甲,乙", "UI 拖拽后顺序已落盘（丙,甲,乙）").toBeTruthy();
 
   await dragUser("乙", await targetBox('.user-card[data-dnd-id="丙"]'));
-  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title strong")); return cards.length === 3 && cards[0].textContent === "乙"; }, null, { timeout: 10000 });
+  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title .user-name-link")); return cards.length === 3 && cards[0].textContent.trim() === "乙"; }, null, { timeout: 10000 });
   expect(true, "拖拽后 乙 成为第一位（卡片顺序更新）").toBeTruthy();
   list = await (await fetch(baseUrl + "api/scripts")).json();
   got = list.find(s => s.id === sid);
   expect(got.users.map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后顺序已落盘（乙,丙,甲）").toBeTruthy();
-  await page.click('[data-action="delete-user"][data-name="乙"]');
+  const user乙Card = page.locator('.user-card[data-dnd-id="乙"]').first();
+  await user乙Card.locator(".overflow-trigger").click();
+  await user乙Card.locator('[role="menuitem"][data-action="delete-user"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除用户"), "删除用户先弹出确认卡片").toBeTruthy();
   await page.click('[data-action="confirm-delete-user"]');
@@ -951,7 +958,9 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   expect(!(await page.$("#sm-exe")), "编辑专用实例仍为简化弹窗（无主程序字段）").toBeTruthy();
   await page.click(".modal button:has-text('取消')");
 
-  await page.click('[data-action="delete-script"][data-name="专项UI脚本"]');
+  const specialUiScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "专项UI脚本" }).first();
+  await specialUiScriptCard.locator(".overflow-trigger").click();
+  await specialUiScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除专项 UI 脚本弹出确认卡片").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');

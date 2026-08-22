@@ -162,13 +162,15 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   await page.waitForFunction(() => document.body.textContent.includes("定时倒计时队列"), null, { timeout: 5000 });
   await page.waitForFunction(() => { const el = document.querySelector('[data-testid="queue-card"] .queue-next'); return el && /\d{2}:\d{2}:\d{2}后开始/.test(el.textContent); }, null, { timeout: 5000 });
   expect(true, "定时运行队列显示倒计时（xx:xx:xx后开始）").toBeTruthy();
-  expect((await page.textContent('[data-testid="queue-card"] [data-testid="queue-notify"]')).includes("队列级通知：关"), "定时队列卡片显示「队列级通知：关」").toBeTruthy();
+  expect((await page.textContent('[data-testid="queue-card"] [data-testid="queue-notify"]')).includes("队列通知未开启"), "定时队列卡片显示队列通知状态").toBeTruthy();
   const tqList = await (await fetch(baseUrl + "api/queues")).json();
   const tqGot = tqList.find(q => q.name === "定时倒计时队列");
   expect(tqGot && tqGot.nextTrigger, "定时运行队列 API 返回 nextTrigger").toBeTruthy();
   await api("DELETE", "/api/queues/" + tqGot.id);
 
-  await page.click('[data-action="delete-queue"]');
+  const editedQueueCard = page.locator('[data-testid="queue-card"]').filter({ hasText: "测试队列A-改" }).first();
+  await editedQueueCard.locator(".overflow-trigger").click();
+  await editedQueueCard.locator('[role="menuitem"][data-action="delete-queue"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除调度队列"), "删除队列弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-queue"]');
@@ -224,6 +226,7 @@ test("定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10�
   await page.selectOption('[data-task-idx="0"]', { label: "定时合并用脚本" });
   await page.click("button:has-text('+ 添加定时')");
   await page.fill('[data-ts-time="0"]', "08:00");
+  await page.locator(".timeset-card").nth(1).locator("summary").click();
   await page.fill('[data-ts-time="1"]', "08:05");
   await page.click(".modal button:has-text('保存')");
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
@@ -299,7 +302,7 @@ test("历史详情：长日志默认尾部显示并可按需加载完整内容",
     await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
     const row = page.locator("tr").filter({ hasText: "完整日志脚本" }).first();
     await row.waitFor({ timeout: 10000 });
-    await row.locator('[data-action="history-detail"]').click();
+    await row.click();
     await page.waitForSelector('[data-action="history-full-log"]', { timeout: 5000 });
     const tail = (await page.locator("[data-history-log-body]").first().textContent()) || "";
     const tailLines = tail.split(/\r?\n/).filter(Boolean);
@@ -637,6 +640,7 @@ test("队列编辑弹窗：定时列表/任务列表拖拽排序", async ({ page
     await page.selectOption('[data-task-idx="1"]', { label: "拖拽任务乙" });
     await page.click("button:has-text('+ 添加定时')");
     await page.fill('[data-ts-time="0"]', "08:00");
+    await page.locator(".timeset-card").nth(1).locator("summary").click();
     await page.fill('[data-ts-time="1"]', "08:30");
     const dragToTop = async (itemLocator, targetLocator) => {
       const handle = itemLocator.locator(".drag-handle");
