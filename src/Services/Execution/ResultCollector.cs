@@ -11,6 +11,7 @@ internal sealed class ResultCollector
     private readonly List<string> _attemptSegments = new();
     private bool _truncated;
     private int _attemptStart;
+    private int _fullLogUtf8Bytes;
 
     public StringBuilder FullLog => _fullLog;
 
@@ -34,13 +35,22 @@ internal sealed class ResultCollector
         {
             return;
         }
-        if (_fullLog.Length > MaxScriptLogBytes)
+        string lineWithNewLine = line + Environment.NewLine;
+        int lineBytes = Encoding.UTF8.GetByteCount(lineWithNewLine);
+        if (_fullLogUtf8Bytes + lineBytes > MaxScriptLogBytes)
         {
             _truncated = true;
-            _fullLog.AppendLine("（脚本日志超过 20MB，已截断尾部）");
+            const string marker = "（脚本日志超过 20MB，已截断尾部）";
+            int markerBytes = Encoding.UTF8.GetByteCount(marker + Environment.NewLine);
+            if (_fullLogUtf8Bytes + markerBytes <= MaxScriptLogBytes)
+            {
+                _fullLog.AppendLine(marker);
+                _fullLogUtf8Bytes += markerBytes;
+            }
             return;
         }
-        _fullLog.AppendLine(line);
+        _fullLog.Append(lineWithNewLine);
+        _fullLogUtf8Bytes += lineBytes;
     }
 
     public void CompleteAttempt()

@@ -23,6 +23,8 @@ internal sealed class RunningExecution
 
     private int _currentMaxAttempts;
 
+    private string _persistenceWarning = "";
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     public string Kind { get; set; } = "";
@@ -169,6 +171,31 @@ internal sealed class RunningExecution
 
     public Task Completion { get; set; } = Task.CompletedTask;
 
+    public string PersistenceWarning
+    {
+        get
+        {
+            lock (_stateSync)
+            {
+                return _persistenceWarning;
+            }
+        }
+    }
+
+    public void SetPersistenceWarning(string warning)
+    {
+        if (string.IsNullOrWhiteSpace(warning))
+        {
+            return;
+        }
+        lock (_stateSync)
+        {
+            _persistenceWarning = string.IsNullOrWhiteSpace(_persistenceWarning)
+                ? warning
+                : $"{_persistenceWarning}；{warning}";
+        }
+    }
+
     public void IncrementDoneTasks()
     {
         lock (_stateSync)
@@ -236,6 +263,7 @@ internal sealed class RunningExecution
         string currentStatus;
         int currentAttempt;
         int currentMaxAttempts;
+        string persistenceWarning;
         lock (_stateSync)
         {
             status = _status;
@@ -245,6 +273,7 @@ internal sealed class RunningExecution
             currentStatus = _currentStatus;
             currentAttempt = _currentAttempt;
             currentMaxAttempts = _currentMaxAttempts;
+            persistenceWarning = _persistenceWarning;
 
             return new RunningExecutionSnapshot
             {
@@ -262,6 +291,7 @@ internal sealed class RunningExecution
                 CurrentStatus = currentStatus,
                 CurrentAttempt = currentAttempt,
                 CurrentMaxAttempts = currentMaxAttempts,
+                PersistenceWarning = persistenceWarning,
                 Records = Records.Select(record => record.Clone()).ToList(),
                 LogTail = _logLines.TakeLast(60).ToList(),
             };
@@ -298,6 +328,8 @@ internal sealed record RunningExecutionSnapshot
     public int CurrentAttempt { get; init; }
 
     public int CurrentMaxAttempts { get; init; }
+
+    public string PersistenceWarning { get; init; } = "";
 
     public IReadOnlyList<RunRecord> Records { get; init; } = Array.Empty<RunRecord>();
 

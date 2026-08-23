@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
@@ -22,7 +23,19 @@ internal static class ApiPluginsHandler
             return;
         }
         bool enabled = verb == "enable";
-        RuntimeContext.Instance.Plugins.SetEnabled(name, enabled, Audit.Web);
-        await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+        PluginManager plugins = RuntimeContext.Instance.Plugins;
+        if (!plugins.SetEnabled(name, enabled, Audit.Web))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = $"插件不存在：{name}" }, 404).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, new
+        {
+            ok = true,
+            configuredEnabled = plugins.IsConfiguredEnabled(name),
+            runtimeEnabled = plugins.IsEnabled(name),
+            state = plugins.GetRuntimeState(name),
+            restartRequired = true,
+        }).ConfigureAwait(false);
     }
 }

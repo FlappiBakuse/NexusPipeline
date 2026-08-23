@@ -52,10 +52,13 @@ internal interface ISettingsProvider
 /// <summary>历史持久化端口，执行域不依赖历史文件实现。</summary>
 internal interface IHistoryStore
 {
-    void Save(RunRecord record, List<string> attemptLogs);
+    HistorySaveResult Save(RunRecord record, List<string> attemptLogs);
 
     void Cleanup(int retentionDays);
 }
+
+/// <summary>历史提交结果：调用方只发布已经确定的不可变快照，并显式感知持久化告警。</summary>
+internal sealed record HistorySaveResult(RunRecord Record, string? PersistenceWarning);
 
 /// <summary>执行应用端口，供 Web、CLI、Scheduler 共享执行入口。</summary>
 internal interface IExecutionService
@@ -65,6 +68,12 @@ internal interface IExecutionService
     RunningExecution StartQueue(string queueId, string mode, string source);
 
     void Cancel(string runId, string source);
+}
+
+/// <summary>调度器使用的冻结队列计划入口；普通 Web/CLI 入口仍按 ID 构建即时计划。</summary>
+internal interface IFrozenQueueExecutionService
+{
+    RunningExecution StartQueue(QueueExecutionPlan plan, string mode, string source);
 }
 
 /// <summary>通知应用端口，执行域不感知具体 NotificationDispatcher 实现。</summary>

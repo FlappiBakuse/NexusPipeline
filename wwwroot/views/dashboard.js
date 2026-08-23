@@ -9,7 +9,7 @@ function runningMarkup(running) {
   const records = running.map(record => `<article class="running-record">
       <div class="running-record-head"><strong>${esc(record.targetName)}</strong>${statusBadge(record.status)}</div>
       <div class="running-record-meta"><span>${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span>${record.mode === "auto" ? "自动" : "手动"}</span></div>
-      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span></div>
+      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span>${record.persistenceWarning ? `<br><span class="badge warn">历史保存警告：${esc(record.persistenceWarning)}</span>` : ""}</div>
     </article>`).join("");
   return `<div class="table-scroll running-table"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">模式</th><th scope="col">进度</th><th scope="col">状态</th></tr></thead><tbody>
     ${running.map(record => `<tr>

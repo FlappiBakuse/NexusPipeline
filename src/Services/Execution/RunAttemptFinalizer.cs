@@ -38,49 +38,66 @@ internal sealed class RunAttemptFinalizer
 
     public async Task CleanupGameAsync(RunAttemptResult result, int attemptNumber, int maxAttempts)
     {
-        string resultStatus = result.Status;
-        if (EmulatorSupport.IsEmulator(_script))
+        using CancellationTokenSource cleanupCts = CreateCleanupCancellation();
+        CancellationToken cleanupToken = cleanupCts.Token;
+        try
         {
-            string? adbExe = EmulatorSupport.ResolveAdbExe();
-            if (adbExe is null)
+            string resultStatus = result.Status;
+            if (EmulatorSupport.IsEmulator(_script))
             {
-                Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」未找到 adb 可执行文件，跳过模拟器收尾处理。");
-            }
-            else if (resultStatus == "failed" || (resultStatus == "cancelled" && _script.ForceCloseGame))
-            {
-                Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{(resultStatus == "failed" ? "任务失败" : "任务取消且启用强制关闭")}，关闭模拟器前台应用。");
-                await EmulatorSupport.ForceStopForegroundAppAsync(adbExe, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
-            }
-            bool runEnded = resultStatus is "success" or "cancelled"
-                || result.IsFatal
-                || attemptNumber >= Math.Max(1, maxAttempts);
-            if (adbExe is not null && _script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
-            {
-                Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
-                (bool shutdownOk, string shutdownMsg) = await EmulatorSupport.ShutdownEmulatorAsync(adbExe, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
-                if (shutdownOk)
+                string? adbExe = EmulatorSupport.ResolveAdbExe();
+                if (adbExe is null)
                 {
-                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}。");
+                    Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」未找到 adb 可执行文件，跳过模拟器收尾处理。");
                 }
-                else
+                else if (resultStatus == "failed" || (resultStatus == "cancelled" && _script.ForceCloseGame))
                 {
-                    Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}");
+                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{(resultStatus == "failed" ? "任务失败" : "任务取消且启用强制关闭")}，关闭本次目标应用。");
+                    await EmulatorSupport.ForceStopTargetAppAsync(
+                        adbExe,
+                        _script.GameExe,
+                        EmulatorSupport.ParseAmStartPackage(_script.GameArgs),
+                        cleanupToken).ConfigureAwait(false);
+                }
+                bool runEnded = resultStatus is "success" or "cancelled"
+                    || result.IsFatal
+                    || attemptNumber >= Math.Max(1, maxAttempts);
+                if (adbExe is not null && _script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
+                {
+                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
+                    (bool shutdownOk, string shutdownMsg) = await EmulatorSupport.ShutdownEmulatorAsync(adbExe, _script.GameExe, cleanupToken).ConfigureAwait(false);
+                    if (shutdownOk)
+                    {
+                        Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}。");
+                    }
+                    else
+                    {
+                        Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}");
+                    }
                 }
             }
-        }
-        else if (resultStatus == "failed")
-        {
-            if (!string.IsNullOrWhiteSpace(_script.GameExe))
+            else if (resultStatus == "failed")
             {
-                Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」任务失败，强制结束游戏进程。");
+                if (!string.IsNullOrWhiteSpace(_script.GameExe))
+                {
+                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」任务失败，强制结束游戏进程。");
+                    SystemActions.KillByName(_script.GameExe, "游戏");
+                }
+            }
+            else if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
+            {
                 SystemActions.KillByName(_script.GameExe, "游戏");
             }
+            Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
         }
-        else if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
+        catch (OperationCanceledException) when (cleanupCts.IsCancellationRequested)
         {
-            SystemActions.KillByName(_script.GameExe, "游戏");
+            Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」清理达到独立截止时间，已结束清理阶段。");
         }
-        Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
+        catch (Exception ex)
+        {
+            Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」清理失败：{ex.Message}");
+        }
     }
 
     public async Task CleanupGameOnEarlyExitAsync(RunAttemptResult early)
@@ -89,6 +106,7 @@ internal sealed class RunAttemptFinalizer
         {
             return;
         }
+        using CancellationTokenSource cleanupCts = CreateCleanupCancellation();
         try
         {
             if (EmulatorSupport.IsEmulator(_script))
@@ -96,7 +114,11 @@ internal sealed class RunAttemptFinalizer
                 string? adb = EmulatorSupport.ResolveAdbExe();
                 if (adb is not null)
                 {
-                    await EmulatorSupport.ForceStopForegroundAppAsync(adb, _script.GameExe, CancellationToken.None).ConfigureAwait(false);
+                    await EmulatorSupport.ForceStopTargetAppAsync(
+                        adb,
+                        _script.GameExe,
+                        EmulatorSupport.ParseAmStartPackage(_script.GameArgs),
+                        cleanupCts.Token).ConfigureAwait(false);
                 }
             }
             else
@@ -104,9 +126,20 @@ internal sealed class RunAttemptFinalizer
                 SystemActions.KillByName(_script.GameExe, "游戏");
             }
         }
+        catch (OperationCanceledException) when (cleanupCts.IsCancellationRequested)
+        {
+            Logger.Warn($"[警告] 运行提前结束时清理游戏达到独立截止时间。");
+        }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 运行提前结束时清理游戏失败：{ex.Message}");
         }
+    }
+
+    private static CancellationTokenSource CreateCleanupCancellation()
+    {
+        var cts = new CancellationTokenSource();
+        cts.CancelAfter(TimeSpan.FromSeconds(TestHooks.ScaledSeconds(120)));
+        return cts;
     }
 }

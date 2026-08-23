@@ -43,6 +43,8 @@ internal class LogMonitor : IDisposable
 
     private long _position;
 
+    private long _lastCommittedOffset;
+
     private bool _reopenScheduled;
 
     private uint _volSerial;
@@ -115,12 +117,7 @@ internal class LogMonitor : IDisposable
     /// </summary>
     public bool FileReplaced(string path)
     {
-        if (_stream is null || !_fileIdValid)
-        {
-            return false;
-        }
-        (uint vol, uint hi, uint lo, bool ok) = QueryFileId(_stream.SafeFileHandle);
-        if (!ok)
+        if (_stream is null)
         {
             return false;
         }
@@ -128,18 +125,16 @@ internal class LogMonitor : IDisposable
         {
             using var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             (uint pVol, uint pHi, uint pLo, bool pOk) = QueryFileId(probe.SafeFileHandle);
-            if (!pOk)
+            if (_fileIdValid)
             {
-                try
+                (uint vol, uint hi, uint lo, bool ok) = QueryFileId(_stream.SafeFileHandle);
+                if (ok && pOk)
                 {
-                    return File.GetCreationTimeUtc(path).Ticks != FileStamp;
-                }
-                catch (Exception)
-                {
-                    return false;
+                    return pVol != vol || pHi != hi || pLo != lo;
                 }
             }
-            return pVol != vol || pHi != hi || pLo != lo;
+            // 句柄 FileId 不可用或读取失败时，仍使用创建时间回退；不能因为能力探测失败而永久跳过替换检测。
+            return File.GetCreationTimeUtc(path).Ticks != FileStamp;
         }
         catch (Exception)
         {
@@ -159,7 +154,7 @@ internal class LogMonitor : IDisposable
         }
         if (_reopenScheduled)
         {
-            Open();
+            Open(resumeCommittedOffset: true);
             _reopenScheduled = false;
             if (_stream is null)
             {
@@ -178,6 +173,7 @@ internal class LogMonitor : IDisposable
             using var reader = new StreamReader(_stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
             string content = reader.ReadToEnd();
             _position = _stream.Position;
+            _lastCommittedOffset = _position;
             if (content.Length > 0)
             {
                 LastWrite = DateTime.Now;
@@ -191,23 +187,19 @@ internal class LogMonitor : IDisposable
         }
     }
 
-    private void Open()
+    private void Open(bool resumeCommittedOffset = false)
     {
+        uint previousVol = _volSerial;
+        uint previousHi = _fileIndexHigh;
+        uint previousLo = _fileIndexLow;
+        bool previousFileIdValid = _fileIdValid;
+        long previousStamp = FileStamp;
+        bool hadPreviousStream = _stream is not null;
         _stream?.Dispose();
         _stream = null;
         try
         {
             _stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            // 读取起点：从头读 / 显式起点（v0.6.5+：尝试开始时长度，只读本次尝试新增内容）/ 打开时文件尾。
-            // 显式起点超过当前长度（文件被截断/重建）时由 ReadNew 的长度检查归零从头读。
-            if (_readFromStart || _stream.Length == 0)
-            {
-                _position = 0;
-            }
-            else
-            {
-                _position = _initialPosition >= 0 ? Math.Min(_initialPosition, _stream.Length) : _stream.Length;
-            }
             try
             {
                 FileStamp = File.GetCreationTimeUtc(_path).Ticks;
@@ -221,6 +213,30 @@ internal class LogMonitor : IDisposable
             _fileIndexHigh = hi;
             _fileIndexLow = lo;
             _fileIdValid = ok;
+
+            bool replacementDuringReopen = resumeCommittedOffset
+                && hadPreviousStream
+                && (previousFileIdValid && ok
+                    ? previousVol != vol || previousHi != hi || previousLo != lo
+                    : previousStamp != FileStamp);
+            // 读取起点：从头读 / 显式起点（尝试开始时长度）/ 打开时文件尾；瞬时重开仅续读同一文件，
+            // 若重开期间确认文件身份已变化，则按替换文件从头处理，避免重复或漏读。
+            if (resumeCommittedOffset && !replacementDuringReopen)
+            {
+                _position = Math.Min(_lastCommittedOffset, _stream.Length);
+            }
+            else if (_readFromStart || _stream.Length == 0 || replacementDuringReopen)
+            {
+                _position = 0;
+            }
+            else
+            {
+                _position = _initialPosition >= 0 ? Math.Min(_initialPosition, _stream.Length) : _stream.Length;
+            }
+            if (!resumeCommittedOffset || replacementDuringReopen)
+            {
+                _lastCommittedOffset = _position;
+            }
         }
         catch (Exception)
         {

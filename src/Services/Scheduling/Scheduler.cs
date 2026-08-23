@@ -1,18 +1,20 @@
-﻿using NexusPipeline.Models;
-using NexusPipeline.Utilities;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
+
 namespace NexusPipeline.Services;
 
-internal class Scheduler : IDisposable
+internal sealed class Scheduler : IDisposable
 {
     private readonly object _sync = new();
 
     private readonly HashSet<string> _runningQueueIds = new();
 
-    private readonly Dictionary<string, string> _lastTrigger = new();
-
+    /// <summary>当前进程内仍待准入的 occurrence；已完成 occurrence 保留在 _occurrences 中用于去重。</summary>
     private readonly Dictionary<string, PendingScheduledRun> _pendingTriggers = new();
+
+    private readonly Dictionary<string, PendingScheduledRun> _occurrences = new();
 
     private readonly HashSet<string> _attemptingTriggers = new();
 
@@ -24,6 +26,8 @@ internal class Scheduler : IDisposable
 
     private string? _lastCleanupDate;
 
+    private DateTime? _lastSchedulerCheck;
+
     private readonly IQueueRepository _queues;
 
     private readonly IHistoryStore _history;
@@ -34,18 +38,27 @@ internal class Scheduler : IDisposable
 
     private readonly ExecutionValidator _validator;
 
+    private readonly ExecutionPlanBuilder? _plans;
+
+    private readonly ISchedulerStateStore _stateStore;
+
     public Scheduler(
         IQueueRepository queues,
         IHistoryStore history,
         ISettingsProvider settings,
         IExecutionService commands,
-        ExecutionValidator validator)
+        ExecutionValidator validator,
+        ExecutionPlanBuilder? plans = null,
+        ISchedulerStateStore? stateStore = null)
     {
         _queues = queues;
         _history = history;
         _settings = settings;
         _commands = commands;
         _validator = validator;
+        _plans = plans;
+        _stateStore = stateStore ?? new MemorySchedulerStateStore();
+        RestorePersistedState();
     }
 
     public void Start()
@@ -54,6 +67,7 @@ internal class Scheduler : IDisposable
         {
             return;
         }
+        RevalidatePendingPlans();
         _cts = new CancellationTokenSource();
         _loop = Task.Run(() => LoopAsync(_cts.Token));
         Logger.Info("调度器已启动。");
@@ -68,7 +82,6 @@ internal class Scheduler : IDisposable
         catch
         {
         }
-        // v0.6.5+：取消后释放 CTS（此前仅 Cancel 不 Dispose，重复 Start 时旧 CTS 泄漏）。
         try
         {
             _cts?.Dispose();
@@ -78,6 +91,64 @@ internal class Scheduler : IDisposable
         }
         _cts = null;
         _loop = null;
+        SaveState();
+    }
+
+    /// <summary>用户修改队列、脚本或用户后调用，显式重校验尚未准入的冻结计划。</summary>
+    public void RevalidatePendingPlans()
+    {
+        PendingScheduledRun[] pending;
+        lock (_sync)
+        {
+            pending = _pendingTriggers.Values
+                .Where(item => item.Status is "Triggered" or "Waiting")
+                .ToArray();
+        }
+
+        foreach (PendingScheduledRun item in pending)
+        {
+            DispatchQueue? current = _queues.Snapshot().FirstOrDefault(queue => queue.Id == item.QueueId);
+            if (current is null)
+            {
+                InvalidatePending(item, "引用的调度队列已删除", saveHistory: false);
+                continue;
+            }
+            if (!item.IsStartup && !MatchesOccurrence(current, item.OriginalTriggerTime))
+            {
+                InvalidatePending(item, "定时配置已变化，本次等待触发已取消", saveHistory: false, cancelled: true);
+                continue;
+            }
+
+            if (_plans is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                QueueExecutionPlan plan = _plans.BuildQueueForSchedule(current.Id);
+                if (plan.Tasks.Any(task => task.Script is null))
+                {
+                    InvalidatePending(item, "等待计划引用的脚本实例已删除", saveHistory: false);
+                    continue;
+                }
+                lock (_sync)
+                {
+                    if (_pendingTriggers.TryGetValue(item.Key, out PendingScheduledRun? live)
+                        && ReferenceEquals(live, item)
+                        && (live.Status is "Triggered" or "Waiting"))
+                    {
+                        live.Plan = plan;
+                        live.QueueName = plan.Queue.Name;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                InvalidatePending(item, ex.Message, saveHistory: false);
+            }
+        }
+        SaveState();
     }
 
     /// <summary>计算下一次定时触发的调度队列（今天之后 7 天内的最近匹配时间点；仅定时模式，不含启动时运行）。</summary>
@@ -85,7 +156,6 @@ internal class Scheduler : IDisposable
     {
         DateTime now = DateTime.Now;
         var candidates = new List<(string Name, DateTime Time)>();
-        // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 修改并发冲突（调度线程每秒枚举）。
         List<DispatchQueue> queues = _queues.Snapshot().ToList();
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
@@ -166,7 +236,6 @@ internal class Scheduler : IDisposable
 
     private void Tick()
     {
-        // 每日清理一次（历史/脚本控制台/管理器日志按保留天数，服务持续运行期间同样生效）。
         string today = DateTime.Now.ToString("yyyy-MM-dd");
         if (!string.Equals(_lastCleanupDate, today, StringComparison.Ordinal))
         {
@@ -174,10 +243,9 @@ internal class Scheduler : IDisposable
             _history.Cleanup(_settings.Current.HistoryRetentionDays);
         }
 
-        // v0.7.2+（KN-04）：锁内快照队列列表，避免与 Web 请求线程并发修改冲突（调度线程每秒枚举）。
         List<DispatchQueue> queues = _queues.Snapshot().ToList();
-
-        RetryPendingTriggers(DateTime.Now, queues);
+        DateTime now = DateTime.Now;
+        RetryPendingTriggers(now, queues);
 
         if (!_startupRunsIssued)
         {
@@ -185,55 +253,93 @@ internal class Scheduler : IDisposable
             foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0))
             {
                 Audit.Log(Audit.Scheduler, "启动时触发队列", queue.Name);
-                EnqueueTrigger(queue, "startup", DateTime.Now, isStartup: true);
+                EnqueueTrigger(queue, "startup-" + now.ToString("yyyyMMddHHmmssfff"), now, isStartup: true);
             }
         }
 
-        DateTime now = DateTime.Now;
-        string clock = now.ToString("HH:mm");
+        DateTime from;
+        lock (_sync)
+        {
+            // 首次 tick 仍检查当前分钟，后续按 (lastCheck, now] 补齐整个停顿窗口。
+            from = _lastSchedulerCheck ?? now.AddMinutes(-1);
+            _lastSchedulerCheck = now;
+        }
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
-            bool hit = queue.TimeSets.Any(timeSet =>
-                timeSet.Enabled
-                && timeSet.Days.Contains((int)now.DayOfWeek)
-                && string.Equals(timeSet.Time, clock, StringComparison.Ordinal));
-            if (!hit)
+            foreach ((string occurrenceKey, DateTime triggerTime) in EnumerateOccurrences(queue, from, now))
             {
-                continue;
-            }
-            string key = $"{now:yyyy-MM-dd} {clock}";
-            string pendingKey = TriggerKey(queue.Id, key);
-            lock (_sync)
-            {
-                if ((_lastTrigger.TryGetValue(queue.Id, out string? last) && last == key)
-                    || _pendingTriggers.ContainsKey(pendingKey))
+                string key = TriggerKey(queue.Id, occurrenceKey);
+                lock (_sync)
                 {
-                    continue;
+                    if (_occurrences.ContainsKey(key))
+                    {
+                        continue;
+                    }
                 }
+                Audit.Log(Audit.Scheduler, "定时触发队列", $"{queue.Name}（{triggerTime:HH:mm}）");
+                EnqueueTrigger(queue, occurrenceKey, triggerTime, isStartup: false);
             }
-            Audit.Log(Audit.Scheduler, "定时触发队列", $"{queue.Name}（{clock}）");
-            EnqueueTrigger(queue, key, now, isStartup: false);
         }
+        SaveState();
     }
 
     private void EnqueueTrigger(DispatchQueue queue, string occurrenceKey, DateTime originalTriggerTime, bool isStartup)
     {
+        QueueExecutionPlan? plan = null;
+        if (_plans is not null)
+        {
+            try
+            {
+                plan = _plans.BuildQueueForSchedule(queue.Id);
+            }
+            catch (Exception ex)
+            {
+                var invalid = new PendingScheduledRun
+                {
+                    QueueId = queue.Id,
+                    QueueName = queue.Name,
+                    OccurrenceKey = occurrenceKey,
+                    OriginalTriggerTime = originalTriggerTime,
+                    IsStartup = isStartup,
+                    Status = "Invalidated",
+                    LastReason = ex.Message,
+                };
+                lock (_sync)
+                {
+                    if (_occurrences.TryAdd(invalid.Key, invalid))
+                    {
+                        Logger.Error($"[错误] 自动运行队列「{queue.Name}」触发失败：{ex.Message}");
+                    }
+                }
+                SaveState();
+                return;
+            }
+        }
+
         var pending = new PendingScheduledRun
         {
             QueueId = queue.Id,
-            QueueName = queue.Name,
+            QueueName = plan?.Queue.Name ?? queue.Name,
             OccurrenceKey = occurrenceKey,
             OriginalTriggerTime = originalTriggerTime,
             IsStartup = isStartup,
             NextAttemptAt = DateTime.Now,
+            Plan = plan,
+            Status = "Triggered",
         };
         lock (_sync)
         {
-            if (!_pendingTriggers.TryAdd(pending.Key, pending))
+            if (!_occurrences.TryAdd(pending.Key, pending))
             {
                 return;
             }
+            _pendingTriggers[pending.Key] = pending;
+            if (isStartup)
+            {
+                _startupRunsIssued = true;
+            }
         }
+        SaveState();
         QueueTriggerAttempt(pending);
     }
 
@@ -244,20 +350,22 @@ internal class Scheduler : IDisposable
         lock (_sync)
         {
             pending = _pendingTriggers.Values
-                .Where(item => item.NextAttemptAt <= now)
+                .Where(item => item.NextAttemptAt <= now && (item.Status is "Triggered" or "Waiting"))
                 .ToArray();
         }
         foreach (PendingScheduledRun item in pending)
         {
-            if (byId.TryGetValue(item.QueueId, out DispatchQueue? queue))
+            if (!byId.TryGetValue(item.QueueId, out DispatchQueue? queue))
             {
-                item.QueueName = queue.Name;
-                QueueTriggerAttempt(item);
+                InvalidatePending(item, $"调度队列不存在：{item.QueueId}", saveHistory: true);
+                continue;
             }
-            else
+            if (!item.IsStartup && !MatchesOccurrence(queue, item.OriginalTriggerTime))
             {
-                CompletePermanentFailure(item, $"调度队列不存在：{item.QueueId}");
+                InvalidatePending(item, "定时配置已变化，本次等待触发已取消", saveHistory: false, cancelled: true);
+                continue;
             }
+            QueueTriggerAttempt(item);
         }
     }
 
@@ -278,10 +386,11 @@ internal class Scheduler : IDisposable
 
     private async Task AttemptTriggerAsync(PendingScheduledRun pending)
     {
-        DispatchQueue? queue = _queues.Snapshot().FirstOrDefault(item => item.Id == pending.QueueId);
+        QueueExecutionPlan? plan = pending.Plan;
+        DispatchQueue? queue = plan?.Queue ?? _queues.Snapshot().FirstOrDefault(item => item.Id == pending.QueueId);
         if (queue is null)
         {
-            CompletePermanentFailure(pending, $"调度队列不存在：{pending.QueueId}");
+            InvalidatePending(pending, $"调度队列不存在：{pending.QueueId}", saveHistory: true);
             ReleaseTriggerAttempt(pending);
             return;
         }
@@ -298,6 +407,7 @@ internal class Scheduler : IDisposable
             {
                 ScheduleRetryLocked(pending, $"队列「{queue.Name}」已有自动运行实例");
                 ReleaseTriggerAttemptLocked(pending);
+                SaveState();
                 return;
             }
             _runningQueueIds.Add(queue.Id);
@@ -305,18 +415,27 @@ internal class Scheduler : IDisposable
 
         try
         {
-            // v0.7.0：长时/普通混排防御（保存时已校验，此处兜底手工改配置/旧数据场景）——永久错误只消费本次触发。
-            string? mixError = _validator.CheckQueueMix(queue);
-            if (mixError is not null)
+            if (plan is not null)
             {
-                CompletePermanentFailure(pending, mixError, saveHistory: true);
-                return;
+                string? blocked = _validator.QueueBlockedByPlan(plan);
+                if (blocked is not null)
+                {
+                    ScheduleRetry(pending, $"脚本「{blocked}」进程仍在运行");
+                    return;
+                }
+            }
+            else if (_plans is not null)
+            {
+                plan = _plans.BuildQueueForSchedule(queue.Id);
+                pending.Plan = plan;
             }
 
             RunningExecution exec;
             try
             {
-                exec = _commands.StartQueue(queue.Id, "auto", Audit.Scheduler);
+                exec = plan is not null && _commands is IFrozenQueueExecutionService frozen
+                    ? frozen.StartQueue(plan, "auto", Audit.Scheduler)
+                    : _commands.StartQueue(queue.Id, "auto", Audit.Scheduler);
             }
             catch (ExecutionAdmissionException admission) when (admission.Failure.Disposition == AdmissionFailureDisposition.Transient)
             {
@@ -325,21 +444,33 @@ internal class Scheduler : IDisposable
             }
             catch (ExecutionAdmissionException admission)
             {
-                CompletePermanentFailure(pending, admission.Failure.Message, saveHistory: false);
+                InvalidatePending(pending, admission.Failure.Message, saveHistory: false);
                 return;
             }
             catch (Exception ex)
             {
-                CompletePermanentFailure(pending, ex.Message, saveHistory: false);
+                InvalidatePending(pending, ex.Message, saveHistory: false);
                 return;
             }
 
             lock (_sync)
             {
                 _pendingTriggers.Remove(pending.Key);
-                _lastTrigger[queue.Id] = pending.OccurrenceKey;
+                pending.Status = "Running";
             }
-            await exec.Completion.ConfigureAwait(false);
+            SaveState();
+            try
+            {
+                await exec.Completion.ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    pending.Status = "Completed";
+                }
+                SaveState();
+            }
         }
         finally
         {
@@ -361,25 +492,30 @@ internal class Scheduler : IDisposable
             }
             ScheduleRetryLocked(pending, reason);
         }
+        SaveState();
         Logger.Info($"[调度等待] 队列「{pending.QueueName}」本次触发暂缓：{reason}；将在资源释放后重试。");
     }
 
     private static void ScheduleRetryLocked(PendingScheduledRun pending, string reason)
     {
+        pending.Status = "Waiting";
         pending.RetryCount++;
         pending.LastReason = reason;
         pending.NextAttemptAt = DateTime.Now.AddSeconds(TestHooks.ScaledSeconds(5));
     }
 
-    private void CompletePermanentFailure(PendingScheduledRun pending, string reason, bool saveHistory = false)
+    private void InvalidatePending(PendingScheduledRun pending, string reason, bool saveHistory, bool cancelled = false)
     {
         lock (_sync)
         {
-            if (!_pendingTriggers.Remove(pending.Key))
+            if (!_occurrences.TryGetValue(pending.Key, out PendingScheduledRun? current)
+                || !ReferenceEquals(current, pending))
             {
                 return;
             }
-            _lastTrigger[pending.QueueId] = pending.OccurrenceKey;
+            _pendingTriggers.Remove(pending.Key);
+            pending.Status = cancelled ? "Cancelled" : "Invalidated";
+            pending.LastReason = reason;
         }
         Logger.Error($"[错误] 自动运行队列「{pending.QueueName}」触发失败：{reason}");
         if (saveHistory)
@@ -398,6 +534,7 @@ internal class Scheduler : IDisposable
             };
             _history.Save(skipped, new List<string>());
         }
+        SaveState();
     }
 
     private void ReleaseTriggerAttempt(PendingScheduledRun pending)
@@ -411,6 +548,132 @@ internal class Scheduler : IDisposable
     private void ReleaseTriggerAttemptLocked(PendingScheduledRun pending)
     {
         _attemptingTriggers.Remove(pending.Key);
+    }
+
+    private void RestorePersistedState()
+    {
+        SchedulerPersistedState state;
+        try
+        {
+            state = _stateStore.Load();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[调度] 读取 scheduler-state.json 失败，按空状态启动：{ex.Message}");
+            return;
+        }
+        _lastSchedulerCheck = state.LastSchedulerCheck;
+        lock (_sync)
+        {
+            foreach (PersistedScheduledOccurrence item in state.Occurrences)
+            {
+                if (string.IsNullOrWhiteSpace(item.QueueId) || string.IsNullOrWhiteSpace(item.OccurrenceKey))
+                {
+                    continue;
+                }
+                QueueExecutionPlan? plan = null;
+                if (item.Plan is not null && _plans is not null)
+                {
+                    try
+                    {
+                        plan = _plans.RestoreFrozenQueue(item.Plan);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[调度] 恢复队列「{item.QueueName}」冻结计划失败，将在下次重校验：{ex.Message}");
+                    }
+                }
+                var occurrence = new PendingScheduledRun
+                {
+                    QueueId = item.QueueId,
+                    QueueName = item.QueueName,
+                    OccurrenceKey = item.OccurrenceKey,
+                    OriginalTriggerTime = item.OriginalTriggerTime,
+                    IsStartup = item.IsStartup,
+                    Status = item.Status == "Running" ? "Waiting" : item.Status,
+                    RetryCount = item.RetryCount,
+                    LastReason = item.LastReason,
+                    NextAttemptAt = item.Status == "Running" ? DateTime.Now : item.NextAttemptAt,
+                    Plan = plan,
+                };
+                _occurrences[occurrence.Key] = occurrence;
+                if (occurrence.Status is "Triggered" or "Waiting")
+                {
+                    _pendingTriggers[occurrence.Key] = occurrence;
+                }
+                if (occurrence.IsStartup && (occurrence.Status is "Triggered" or "Waiting" or "Running"))
+                {
+                    _startupRunsIssued = true;
+                }
+            }
+        }
+    }
+
+    private void SaveState()
+    {
+        SchedulerPersistedState snapshot;
+        lock (_sync)
+        {
+            snapshot = new SchedulerPersistedState
+            {
+                LastSchedulerCheck = _lastSchedulerCheck,
+                Occurrences = _occurrences.Values.Select(item => new PersistedScheduledOccurrence
+                {
+                    Key = item.Key,
+                    QueueId = item.QueueId,
+                    QueueName = item.QueueName,
+                    OccurrenceKey = item.OccurrenceKey,
+                    OriginalTriggerTime = item.OriginalTriggerTime,
+                    IsStartup = item.IsStartup,
+                    Status = item.Status,
+                    RetryCount = item.RetryCount,
+                    LastReason = item.LastReason,
+                    NextAttemptAt = item.NextAttemptAt,
+                    Plan = item.Plan is null ? null : ExecutionPlanBuilder.FreezeQueue(item.Plan),
+                }).ToList(),
+            };
+        }
+        try
+        {
+            _stateStore.Save(snapshot);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[调度] 保存 scheduler-state.json 失败：{ex.Message}");
+        }
+    }
+
+    private static IEnumerable<(string OccurrenceKey, DateTime TriggerTime)> EnumerateOccurrences(
+        DispatchQueue queue,
+        DateTime from,
+        DateTime to)
+    {
+        for (DateTime date = from.Date; date <= to.Date; date = date.AddDays(1))
+        {
+            foreach (QueueTimeSet timeSet in queue.TimeSets.Where(item => item.Enabled))
+            {
+                if (!TimeOnly.TryParseExact(timeSet.Time, "HH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out TimeOnly timeOnly))
+                {
+                    continue;
+                }
+                DateTime candidate = date.Add(timeOnly.ToTimeSpan());
+                if (candidate > from && candidate <= to && timeSet.Days.Contains((int)candidate.DayOfWeek))
+                {
+                    yield return ($"{candidate:yyyy-MM-dd HH:mm}", candidate);
+                }
+            }
+        }
+    }
+
+    private static bool MatchesOccurrence(DispatchQueue queue, DateTime triggerTime)
+    {
+        return queue.AutoRunMode == "scheduled"
+            && queue.Tasks.Count > 0
+            && queue.TimeSets.Any(timeSet =>
+                timeSet.Enabled
+                && timeSet.Days.Contains((int)triggerTime.DayOfWeek)
+                && string.Equals(timeSet.Time, triggerTime.ToString("HH:mm"), StringComparison.Ordinal));
     }
 
     private static string TriggerKey(string queueId, string occurrenceKey)
@@ -430,11 +693,15 @@ internal class Scheduler : IDisposable
 
         public bool IsStartup { get; init; }
 
+        public string Status { get; set; } = "Triggered";
+
         public int RetryCount { get; set; }
 
         public string LastReason { get; set; } = "";
 
         public DateTime NextAttemptAt { get; set; }
+
+        public QueueExecutionPlan? Plan { get; set; }
 
         public string Key => TriggerKey(QueueId, OccurrenceKey);
     }

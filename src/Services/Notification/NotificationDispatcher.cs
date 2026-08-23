@@ -10,9 +10,12 @@ internal sealed class NotificationDispatcher : INotificationService
 {
     private readonly INotificationChannelProvider _provider;
 
-    public NotificationDispatcher(INotificationChannelProvider provider)
+    private readonly TimeSpan _channelTimeout;
+
+    public NotificationDispatcher(INotificationChannelProvider provider, TimeSpan? channelTimeout = null)
     {
         _provider = provider;
+        _channelTimeout = channelTimeout ?? TimeSpan.FromSeconds(30);
     }
 
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
@@ -21,7 +24,11 @@ internal sealed class NotificationDispatcher : INotificationService
         {
             try
             {
-                await channel.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                await channel.NotifyScriptAsync(script, record).WaitAsync(_channelTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Logger.Warn($"[通知] 通道「{channel.GetType().Name}」发送脚本通知超时（{_channelTimeout.TotalSeconds:0.#} 秒），已继续后续通道。");
             }
             catch (Exception ex)
             {
@@ -36,7 +43,11 @@ internal sealed class NotificationDispatcher : INotificationService
         {
             try
             {
-                await channel.NotifyQueueAsync(queue, records).ConfigureAwait(false);
+                await channel.NotifyQueueAsync(queue, records).WaitAsync(_channelTimeout).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                Logger.Warn($"[通知] 通道「{channel.GetType().Name}」发送队列通知超时（{_channelTimeout.TotalSeconds:0.#} 秒），已继续后续通道。");
             }
             catch (Exception ex)
             {

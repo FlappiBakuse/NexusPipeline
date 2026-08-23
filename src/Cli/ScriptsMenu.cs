@@ -113,6 +113,7 @@ internal static class ScriptsMenu
                                 ConfigSwapPrimitives.RemoveMutex(removing.Id);
                             }, "脚本实例"))
                             {
+                                ctx.Scheduler.RevalidatePendingPlans();
                                 Audit.Log(Audit.Manage, "删除脚本实例", removedName);
                                 Console.WriteLine("[完成] 已删除。");
                             }
@@ -262,6 +263,7 @@ internal static class ScriptsMenu
             DataStore.SaveScripts(ctx.Scripts);
         }, "脚本实例"))
         {
+            ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Manage, current is null ? "添加脚本实例" : "修改脚本实例", script.Name);
             Console.WriteLine("[完成] 脚本实例已保存。");
         }

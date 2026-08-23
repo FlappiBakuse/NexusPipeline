@@ -73,6 +73,105 @@ internal sealed class ExecutionPlanBuilder
 
     public QueueExecutionPlan BuildQueue(string queueId)
     {
+        return BuildQueueInternal(queueId, checkProcessConflicts: true);
+    }
+
+    /// <summary>
+    /// 为定时 occurrence 构建冻结计划。触发时只做计划/资源快照，进程冲突留到 Admission 重试，
+    /// 这样“已触发但暂不能运行”的 occurrence 仍然拥有完整、可持久化的执行计划。
+    /// </summary>
+    public QueueExecutionPlan BuildQueueForSchedule(string queueId)
+    {
+        return BuildQueueInternal(queueId, checkProcessConflicts: false);
+    }
+
+    internal QueueExecutionPlan RestoreFrozenQueue(FrozenQueuePlanData data)
+    {
+        DispatchQueue queue = data.Queue.Clone();
+        List<PlannedQueueTask> tasks = data.Tasks
+            .Select(item => new PlannedQueueTask(
+                CloneTask(item.Task),
+                item.Script?.Clone(),
+                item.EnabledUsers.ToList()))
+            .ToList();
+        ExecutionAdmissionProfile admission = data.Admission is null
+            ? ExecutionAdmissionProfile.ForQueue(queue, tasks, _capabilities)
+            : RestoreAdmission(data.Admission);
+        int totalTasks = tasks.Sum(task => task.Script is null || task.EnabledUsers.Count == 0
+            ? 1
+            : task.EnabledUsers.Count);
+        return new QueueExecutionPlan(queue, tasks, admission, totalTasks);
+    }
+
+    internal static FrozenQueuePlanData FreezeQueue(QueueExecutionPlan plan)
+    {
+        return new FrozenQueuePlanData
+        {
+            Queue = plan.Queue.Clone(),
+            Tasks = plan.Tasks.Select(task => new FrozenQueueTaskData
+            {
+                Task = CloneTask(task.Task),
+                Script = task.Script?.Clone(),
+                EnabledUsers = task.EnabledUsers.ToList(),
+            }).ToList(),
+            Admission = FreezeAdmission(plan.Admission),
+        };
+    }
+
+    private static FrozenAdmissionProfileData FreezeAdmission(ExecutionAdmissionProfile profile)
+    {
+        return new FrozenAdmissionProfileData
+        {
+            Kind = profile.Kind,
+            QueueClass = profile.QueueClass?.ToString(),
+            CompletionAction = profile.CompletionAction,
+            ScriptIds = profile.Resources.ScriptIds.ToList(),
+            UserDataKeys = profile.Resources.UserDataKeys.ToList(),
+            ExecutablePaths = profile.Resources.ExecutablePaths.ToList(),
+            ProcessNames = profile.Resources.ProcessNames.ToList(),
+            ConfigPaths = profile.Resources.ConfigPaths.ToList(),
+            EmulatorEndpoints = profile.Resources.EmulatorEndpoints.ToList(),
+            LogResources = profile.Resources.LogResources.Select(resource => new FrozenLogResourceData
+            {
+                BaseDirectory = resource.BaseDirectory,
+                Pattern = resource.Pattern,
+                IsExactFile = resource.IsExactFile,
+                DisplayPath = resource.DisplayPath,
+            }).ToList(),
+            AuxiliaryExecutablePaths = profile.Resources.AuxiliaryExecutablePaths.ToList(),
+            AuxiliaryProcessNames = profile.Resources.AuxiliaryProcessNames.ToList(),
+        };
+    }
+
+    private static ExecutionAdmissionProfile RestoreAdmission(FrozenAdmissionProfileData data)
+    {
+        ExecutionResourceSet resources = new(
+            new HashSet<string>(data.ScriptIds, StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(data.ExecutablePaths, StringComparer.OrdinalIgnoreCase),
+            new HashSet<string>(data.ProcessNames, StringComparer.OrdinalIgnoreCase),
+            data.ConfigPaths.ToList(),
+            new HashSet<string>(data.EmulatorEndpoints, StringComparer.OrdinalIgnoreCase))
+        {
+            UserDataKeys = new HashSet<string>(data.UserDataKeys, StringComparer.OrdinalIgnoreCase),
+            LogResources = data.LogResources.Select(resource => new LogResourceDescriptor(
+                resource.BaseDirectory,
+                resource.Pattern,
+                resource.IsExactFile,
+                resource.DisplayPath)).ToList(),
+            AuxiliaryExecutablePaths = new HashSet<string>(data.AuxiliaryExecutablePaths, StringComparer.OrdinalIgnoreCase),
+            AuxiliaryProcessNames = new HashSet<string>(data.AuxiliaryProcessNames, StringComparer.OrdinalIgnoreCase),
+        };
+        ExecutionConcurrencyClass? queueClass = Enum.TryParse(
+            data.QueueClass,
+            ignoreCase: true,
+            out ExecutionConcurrencyClass parsedClass)
+            ? parsedClass
+            : null;
+        return new ExecutionAdmissionProfile(data.Kind, queueClass, resources, data.CompletionAction);
+    }
+
+    private QueueExecutionPlan BuildQueueInternal(string queueId, bool checkProcessConflicts)
+    {
         ExecutionQueueSnapshot? executionSnapshot = _snapshots?.SnapshotQueue(queueId);
         List<ScriptInstance> scripts;
         DispatchQueue? source;
@@ -105,8 +204,9 @@ internal sealed class ExecutionPlanBuilder
             })
             .ToList();
 
-        PlannedQueueTask? blocked = tasks.FirstOrDefault(task =>
-            task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script));
+        PlannedQueueTask? blocked = checkProcessConflicts
+            ? tasks.FirstOrDefault(task => task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script))
+            : null;
         if (blocked?.Script is not null)
         {
             throw new ExecutionAdmissionException(new ExecutionAdmissionFailure(

@@ -12,37 +12,41 @@ internal class HistoryService : IHistoryStore
     private static readonly object Sync = new();
 
     /// <summary>保存运行历史（v0.5.3 精简）：.json 纯运行状态 + 按尝试分批 .log（{base}-{尝试号}.log）。</summary>
-    public void Save(RunRecord record, List<string> attemptLogs)
+    public HistorySaveResult Save(RunRecord record, List<string> attemptLogs)
     {
         if (record.StartTime == DateTime.MinValue)
         {
-            return;
+            return new HistorySaveResult(record.Clone(), null);
         }
+        RunRecord persisted = record.Clone();
         try
         {
             lock (Sync)
             {
-                string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
+                string dayDir = Path.Combine(AppPaths.HistoryDir, persisted.StartTime.ToString("yyyy-MM-dd"));
                 Directory.CreateDirectory(dayDir);
-                string baseName = record.StartTime.ToString("HH-mm-ss");
+                string baseName = persisted.StartTime.ToString("HH-mm-ss");
                 string jsonPath = FindFreePath(dayDir, baseName, ".json");
                 string jsonBase = Path.GetFileNameWithoutExtension(jsonPath);
-                record.LogFile = Path.GetFileName(jsonPath);
-                for (int i = 0; i < record.AttemptDetails.Count && i < attemptLogs.Count; i++)
+                persisted.LogFile = Path.GetFileName(jsonPath);
+                for (int i = 0; i < persisted.AttemptDetails.Count && i < attemptLogs.Count; i++)
                 {
-                    string attemptLogName = $"{jsonBase}-{record.AttemptDetails[i].Number}.log";
-                    record.AttemptDetails[i].LogFile = attemptLogName;
+                    string attemptLogName = $"{jsonBase}-{persisted.AttemptDetails[i].Number}.log";
+                    persisted.AttemptDetails[i].LogFile = attemptLogName;
                     string attemptLogText = string.IsNullOrWhiteSpace(attemptLogs[i])
                         ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
                         : attemptLogs[i];
                     File.WriteAllText(Path.Combine(dayDir, attemptLogName), attemptLogText, new UTF8Encoding(true));
                 }
-                File.WriteAllText(jsonPath, JsonSerializer.Serialize(record, JsonOpts.Indented), new UTF8Encoding(true));
+                // RunRecord JSON 是提交标记：尝试日志全部写完后才原子替换 JSON。
+                JsonUtil.WriteAtomic(jsonPath, JsonSerializer.Serialize(persisted, JsonOpts.Indented));
             }
+            return new HistorySaveResult(persisted.Clone(), null);
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 保存运行历史失败：{ex.Message}");
+            return new HistorySaveResult(persisted.Clone(), $"保存运行历史失败：{ex.Message}");
         }
     }
 

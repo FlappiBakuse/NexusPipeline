@@ -75,16 +75,24 @@ internal static class QueuesMenu
                         if (Ui.IsYes(answer))
                         {
                             string removedName = removing.Name;
-                            // v0.7.4（KN-05）：运行中队列拒绝删除，避免运行状态悬挂在运行面板。
-                            bool queueRunning = ctx.Center.Active.Any(exec => exec.Kind == "queue" && exec.TargetId == removing.Id);
-                            if (queueRunning)
+                            if (Ui.TrySave(() =>
                             {
-                                Console.WriteLine("[错误] 调度队列正在运行中，无法删除。");
-                            }
-                            else if (Ui.TrySave(() =>
-                            {
-                                ctx.Queues.Remove(removing);
-                                DataStore.SaveQueues(ctx.Queues);
+                                bool changed = ctx.Center.TryExecuteQueueLeaseMutation(
+                                    removing.Id,
+                                    () =>
+                                    {
+                                        lock (ctx.DataLock)
+                                        {
+                                            ctx.Queues.RemoveAll(queue => queue.Id == removing.Id);
+                                            DataStore.SaveQueues(ctx.Queues);
+                                        }
+                                    },
+                                    out _);
+                                if (!changed)
+                                {
+                                    throw new InvalidOperationException("调度队列正在运行中，无法删除");
+                                }
+                                ctx.Scheduler.RevalidatePendingPlans();
                             }, "调度队列"))
                             {
                                 Audit.Log(Audit.Manage, "删除调度队列", removedName);
@@ -186,17 +194,45 @@ internal static class QueuesMenu
         {
             if (current is null)
             {
-                if (ctx.Queues.Count > 0)
+                ctx.Center.WithAdmissionCoordination(() =>
                 {
-                    queue.Index = ctx.Queues.Max(item => item.Index) + 1;
-                }
-                ctx.Queues.Add(queue);
+                    lock (ctx.DataLock)
+                    {
+                        if (ctx.Queues.Count > 0)
+                        {
+                            queue.Index = ctx.Queues.Max(item => item.Index) + 1;
+                        }
+                        ctx.Queues.Add(queue);
+                        DataStore.SaveQueues(ctx.Queues);
+                    }
+                });
             }
             else
             {
-                ctx.Queues[ctx.Queues.IndexOf(current)] = queue;
+                bool changed = ctx.Center.TryExecuteQueueLeaseMutation(
+                    current.Id,
+                    () =>
+                    {
+                        lock (ctx.DataLock)
+                        {
+                            int index = ctx.Queues.FindIndex(item => item.Id == current.Id);
+                            if (index < 0)
+                            {
+                                throw new InvalidOperationException("调度队列不存在，无法修改");
+                            }
+                            queue.Id = current.Id;
+                            queue.Index = current.Index;
+                            ctx.Queues[index] = queue;
+                            DataStore.SaveQueues(ctx.Queues);
+                        }
+                    },
+                    out _);
+                if (!changed)
+                {
+                    throw new InvalidOperationException("调度队列正在运行中，无法修改");
+                }
             }
-            DataStore.SaveQueues(ctx.Queues);
+            ctx.Scheduler.RevalidatePendingPlans();
         }, "调度队列"))
         {
             Audit.Log(Audit.Manage, current is null ? "添加调度队列" : "修改调度队列", $"{queue.Name}（任务 {queue.Tasks.Count} 项）");

@@ -148,6 +148,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
             }
+            ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
             await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
             return;
@@ -233,6 +234,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
+            ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "修改脚本实例", $"{update.Name}（id={update.Id}）");
             await HttpHelper.WriteJsonAsync(context, update).ConfigureAwait(false);
             return;
@@ -305,6 +307,7 @@ internal static class ApiScriptsHandler
             }
             ScriptConfigGate.Remove(seg[1]);
             ConfigSwapPrimitives.RemoveMutex(seg[1]);
+            ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "删除脚本实例", removed is null ? $"id={seg[1]}（不存在）" : $"{removed.Name}（id={seg[1]}）");
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             return;
@@ -686,6 +689,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "初始配置快照失败：" + snapError }, 400).ConfigureAwait(false);
                     return;
                 }
+                ctx.Scheduler.RevalidatePendingPlans();
                 Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
@@ -793,6 +797,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = renameError }, 400).ConfigureAwait(false);
                     return;
                 }
+                ctx.Scheduler.RevalidatePendingPlans();
                 Audit.Log(Audit.Web, "编辑用户", $"{script.Name} / {oldName} → {existing.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
@@ -872,6 +877,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                     return;
                 }
+                ctx.Scheduler.RevalidatePendingPlans();
                 Audit.Log(Audit.Web, "删除用户", $"{script.Name} / {userName}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
                 return;
@@ -926,6 +932,7 @@ internal static class ApiScriptsHandler
             await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
             return;
         }
+        ctx.Scheduler.RevalidatePendingPlans();
         Audit.Log(Audit.Web, "调整脚本顺序", $"{ids!.Count} 个脚本实例");
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
@@ -986,6 +993,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = reorderError }, 400).ConfigureAwait(false);
                 return;
             }
+            ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "调整用户顺序", $"{script.Name} / {names!.Count} 个用户");
             await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
         }
@@ -1028,6 +1036,8 @@ internal static class ApiScriptsHandler
         {
             bool gateAcquired = false;
             bool gateBusy = false;
+            bool editLeaseHeld = false;
+            string? editLeaseConflict = null;
             bool leaseChecked = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
                 context,
                 ctx.Center,
@@ -1042,14 +1052,21 @@ internal static class ApiScriptsHandler
                         return;
                     }
                     gateAcquired = true;
+                    if (!ctx.Center.TryBeginEditSession(scriptId, user.Name, script.ConfigPath, out editLeaseConflict))
+                    {
+                        gate.Release();
+                        gateAcquired = false;
+                        return;
+                    }
+                    editLeaseHeld = true;
                 }).ConfigureAwait(false);
             if (!leaseChecked)
             {
                 return;
             }
-            if (gateBusy || !gateAcquired)
+            if (gateBusy || !gateAcquired || editLeaseConflict is not null)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中" }, 409).ConfigureAwait(false);
+                await HttpHelper.WriteJsonAsync(context, new { error = editLeaseConflict ?? "脚本正在运行或编辑配置中" }, 409).ConfigureAwait(false);
                 return;
             }
             bool keepGate = false;
@@ -1137,6 +1154,8 @@ internal static class ApiScriptsHandler
                             UserConfigManager.CancelEdit(script.Id, user.Name, script.ConfigPath);
                             UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
                             UserConfigManager.EditSessions.TryRemove(scriptId, out _);
+                            ctx.Center.EndEditSession(scriptId, user.Name);
+                            editLeaseHeld = false;
                         }
                     }
                     catch (Exception cleanupEx)
@@ -1151,6 +1170,11 @@ internal static class ApiScriptsHandler
             {
                 if (!keepGate)
                 {
+                    if (editLeaseHeld)
+                    {
+                        ctx.Center.EndEditSession(scriptId, user.Name);
+                        editLeaseHeld = false;
+                    }
                     gate.Release();
                 }
             }
@@ -1190,6 +1214,10 @@ internal static class ApiScriptsHandler
                 UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
                 // 文件交换成功后才移除会话（失败保留，可原地重试；.session 标记由自愈/后台重试兜底）。
                 sessionRemoved = UserConfigManager.EditSessions.TryRemove(scriptId, out _);
+                if (sessionRemoved)
+                {
+                    ctx.Center.EndEditSession(scriptId, user.Name);
+                }
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             }

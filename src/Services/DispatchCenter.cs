@@ -41,12 +41,39 @@ internal sealed class DispatchCenter
     public IReadOnlyList<ExecutionLeaseReference> FindLeases(string scriptId, string? userName = null)
         => _state.FindLeases(scriptId, userName);
 
+    public T WithAdmissionCoordination<T>(Func<T> action)
+        => _state.WithAdmissionCoordination(action);
+
+    public void WithAdmissionCoordination(Action action)
+        => _state.WithAdmissionCoordination(() =>
+        {
+            action();
+            return true;
+        });
+
     public bool TryExecuteLeaseMutation(
         string scriptId,
         string? userName,
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
         => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases);
+
+    public bool TryExecuteQueueLeaseMutation(
+        string queueId,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+        => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases);
+
+    public bool TryExecuteAnyQueueLeaseMutation(
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+        => _state.TryExecuteAnyQueueLeaseMutation(mutation, out leases);
+
+    public bool TryBeginEditSession(string scriptId, string userName, string configPath, out string? conflict)
+        => _state.TryBeginEditSession(scriptId, userName, configPath, out conflict);
+
+    public void EndEditSession(string scriptId, string userName)
+        => _state.EndEditSession(scriptId, userName);
 
     public bool CancelSystemAction() => _systemActions.Cancel(Audit.Web);
 
@@ -78,6 +105,15 @@ internal sealed class DispatchCenter
         return _state.WithAdmissionCoordination(() =>
         {
             QueueExecutionPlan plan = _plans.BuildQueue(queueId);
+            return StartQueue(plan, mode, source);
+        });
+    }
+
+    /// <summary>使用调度器在 trigger 时冻结的计划提交准入，运行期间不再回读队列/脚本仓储。</summary>
+    public RunningExecution StartQueue(QueueExecutionPlan plan, string mode, string source = Audit.System)
+    {
+        return _state.WithAdmissionCoordination(() =>
+        {
             DispatchQueue queue = plan.Queue;
             var exec = new RunningExecution
             {

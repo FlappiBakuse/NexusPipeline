@@ -47,6 +47,7 @@ internal static class StartupPipeline
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayApp());
 
+        WaitForSafeShutdown();
         Bootstrap.Shutdown(web);
         Logger.Info("NexusPipeline 已退出。");
     }
@@ -194,8 +195,23 @@ internal static class StartupPipeline
             Console.ReadLine();
             break;
         }
+        WaitForSafeShutdown();
         Bootstrap.Shutdown(web);
         return 0;
+    }
+
+    private static void WaitForSafeShutdown()
+    {
+        DateTime nextNotice = DateTime.MinValue;
+        while (!Bootstrap.CanStopServices(out string reason))
+        {
+            if (DateTime.Now >= nextNotice)
+            {
+                Logger.Warn($"[退出] 等待任务/编辑会话结束后再停止宿主：{reason}");
+                nextNotice = DateTime.Now.AddSeconds(5);
+            }
+            Thread.Sleep(500);
+        }
     }
 
 

@@ -12,8 +12,8 @@ internal static class PluginsMenu
         Console.WriteLine("===== 插件 =====");
         foreach (PluginSummary plugin in ctx.Plugins.PluginSummaries)
         {
-            bool enabled = ctx.Plugins.IsEnabled(plugin.Name);
-            Console.WriteLine($"  {plugin.DisplayName} v{plugin.Version} [{(enabled ? "已启用" : "已禁用")}]");
+            bool enabled = ctx.Plugins.IsConfiguredEnabled(plugin.Name);
+            Console.WriteLine($"  {plugin.DisplayName} v{plugin.Version} [{(enabled ? "配置启用" : "配置禁用")} / 运行态 {ctx.Plugins.GetRuntimeState(plugin.Name)}]");
             Console.WriteLine($"    {plugin.Description}");
         }
         Console.WriteLine();
@@ -32,8 +32,12 @@ internal static class PluginsMenu
                 {
                     return;
                 }
-                bool enabled = ctx.Plugins.IsEnabled(name.Trim());
-                ctx.Plugins.SetEnabled(name.Trim(), !enabled, Audit.Manage);
+                bool enabled = ctx.Plugins.IsConfiguredEnabled(name.Trim());
+                if (!ctx.Plugins.SetEnabled(name.Trim(), !enabled, Audit.Manage))
+                {
+                    Console.WriteLine($"[提示] 插件不存在：{name.Trim()}。");
+                    break;
+                }
                 Console.WriteLine($"[完成] {name.Trim()} 已{(enabled ? "禁用（下次启动生效）" : "启用（下次启动生效）")}。");
                 break;
             }

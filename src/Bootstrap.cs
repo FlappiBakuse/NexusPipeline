@@ -54,10 +54,75 @@ internal static class Bootstrap
         }
     }
 
+    internal static bool CanStopServices(out string reason)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        if (ctx.Center.Active.Count > 0)
+        {
+            reason = "存在运行中的任务，请先等待完成或取消任务";
+            return false;
+        }
+        if (UserConfigManager.EditSessions.Count > 0)
+        {
+            reason = "存在编辑配置会话，请先完成或取消编辑";
+            return false;
+        }
+        reason = "";
+        return true;
+    }
+
+    internal static bool CanRequestDirectExit(out string reason)
+    {
+        if (!CanStopServices(out reason))
+        {
+            return false;
+        }
+        if (RuntimeContext.Instance.Center.CurrentSystemAction is not null)
+        {
+            reason = "存在待执行的系统操作，请先完成或取消该操作";
+            return false;
+        }
+        return true;
+    }
+
+    internal static bool TryRequestDirectExit()
+    {
+        if (CanRequestDirectExit(out string reason))
+        {
+            System.Windows.Forms.Application.Exit();
+            return true;
+        }
+        Logger.Warn($"[退出] 已拒绝退出请求：{reason}");
+        try
+        {
+            System.Windows.Forms.MessageBox.Show(reason, "NexusPipeline", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+        }
+        catch
+        {
+        }
+        return false;
+    }
+
+    internal static bool TryRequestCompletionExit()
+    {
+        if (!CanStopServices(out string reason))
+        {
+            Logger.Warn($"[退出] 完成操作退出请求被延后：{reason}");
+            return false;
+        }
+        System.Windows.Forms.Application.Exit();
+        return true;
+    }
+
     /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护（v0.6.5+）：单步异常不影响其余清理步骤执行。</summary>
     public static void Shutdown(WebServer? web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
+        if (!CanStopServices(out string reason))
+        {
+            Logger.Warn($"[退出] 服务仍有活动任务，拒绝执行宿主停止：{reason}");
+            return;
+        }
         try
         {
             ctx.Scheduler.Stop();

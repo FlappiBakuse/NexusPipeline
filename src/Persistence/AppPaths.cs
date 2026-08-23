@@ -28,4 +28,7 @@ internal static class AppPaths
 
     /// <summary>常驻 Web 服务实际监听端口（服务启动时写入，停止时删除；CLI 用于复用端口漂移后的服务）。</summary>
     public static readonly string WebPortPath = Path.Combine(AppRoot, "web.port");
+
+    /// <summary>定时 occurrence 与待执行冻结计划的持久化状态。</summary>
+    public static readonly string SchedulerStatePath = Path.Combine(AppRoot, "scheduler-state.json");
 }

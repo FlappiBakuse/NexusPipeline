@@ -48,6 +48,35 @@ internal static class ExecutionConflictResponse
         return false;
     }
 
+    public static async Task<bool> TryExecuteQueueLeaseMutationAsync(
+        HttpListenerContext context,
+        DispatchCenter center,
+        string queueId,
+        string resource,
+        Action mutation)
+    {
+        if (center.TryExecuteQueueLeaseMutation(queueId, mutation, out IReadOnlyList<ExecutionLeaseReference> leases))
+        {
+            return true;
+        }
+        await WriteLeaseConflictAsync(context, leases, resource).ConfigureAwait(false);
+        return false;
+    }
+
+    public static async Task<bool> TryExecuteAnyQueueLeaseMutationAsync(
+        HttpListenerContext context,
+        DispatchCenter center,
+        string resource,
+        Action mutation)
+    {
+        if (center.TryExecuteAnyQueueLeaseMutation(mutation, out IReadOnlyList<ExecutionLeaseReference> leases))
+        {
+            return true;
+        }
+        await WriteLeaseConflictAsync(context, leases, resource).ConfigureAwait(false);
+        return false;
+    }
+
     public static async Task WriteAdmissionAsync(HttpListenerContext context, ExecutionAdmissionException exception)
     {
         ExecutionAdmissionFailure failure = exception.Failure;

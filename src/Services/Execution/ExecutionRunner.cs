@@ -127,24 +127,21 @@ internal sealed class ExecutionRunner
             {
                 record.FinalStatus = record.Status == "success" ? "success" : record.Status;
             }
-            records.Add(record);
-            exec.AddRecordAndIncrement(record);
-            exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
-            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
-            try
-            {
-                _history.Save(record, session?.AttemptLogs ?? new List<string>());
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 保存脚本「{displayName}」运行历史时发生异常：{ex.Message}");
-            }
+            RunRecord published = PersistRecord(
+                exec,
+                record,
+                session?.AttemptLogs ?? new List<string>(),
+                displayName);
+            records.Add(published);
+            exec.AddRecordAndIncrement(published);
+            exec.CurrentStatus = published.Status == "success" ? "运行成功" : (published.Status == "cancelled" ? "已取消" : "运行失败");
+            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{published.Status}（{published.ResultDetail}）");
             if (script.NotifyEnabled)
             {
                 try
                 {
                     // 脚本级通知与队列级汇总通知相互独立，按每个用户完成立即发送。
-                    await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                    await _notifications.NotifyScriptAsync(script, published).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -153,6 +150,32 @@ internal sealed class ExecutionRunner
             }
         }
         return records;
+    }
+
+    private RunRecord PersistRecord(
+        RunningExecution exec,
+        RunRecord record,
+        List<string> attemptLogs,
+        string displayName)
+    {
+        HistorySaveResult result;
+        try
+        {
+            result = _history.Save(record, attemptLogs);
+        }
+        catch (Exception ex)
+        {
+            string warning = $"保存脚本「{displayName}」运行历史时发生异常：{ex.Message}";
+            Logger.Warn($"[警告] {warning}");
+            result = new HistorySaveResult(record.Clone(), warning);
+        }
+        if (!string.IsNullOrWhiteSpace(result.PersistenceWarning))
+        {
+            exec.SetPersistenceWarning(result.PersistenceWarning);
+        }
+        // HistoryService 返回的是提交后的快照；通知文本属于运行时字段，需要随最终快照保留。
+        result.Record.CustomNotifyText = record.CustomNotifyText;
+        return result.Record;
     }
 
     internal static RunRecord CreateHostErrorRecord(
@@ -229,9 +252,9 @@ internal sealed class ExecutionRunner
                         FinalStatus = "failed",
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
-                    records.Add(missing);
-                    exec.AddRecordAndIncrement(missing);
-                    _history.Save(missing, new List<string>());
+                    RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), queue.Name);
+                    records.Add(publishedMissing);
+                    exec.AddRecordAndIncrement(publishedMissing);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
                     continue;
                 }
@@ -255,9 +278,9 @@ internal sealed class ExecutionRunner
                         FinalStatus = "failed",
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
-                    records.Add(skipped);
-                    exec.AddRecordAndIncrement(skipped);
-                    _history.Save(skipped, new List<string>());
+                    RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), queue.Name);
+                    records.Add(publishedSkipped);
+                    exec.AddRecordAndIncrement(publishedSkipped);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
                 }

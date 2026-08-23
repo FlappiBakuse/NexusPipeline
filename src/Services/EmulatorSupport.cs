@@ -311,28 +311,39 @@ internal static class EmulatorSupport
         return ok ? ParseForegroundPackage(output) : null;
     }
 
-    /// <summary>关闭模拟器当前前台应用（am force-stop）；桌面与系统界面跳过。失败仅记警告。</summary>
+    /// <summary>兼容旧调用方：没有目标包名时不执行任意前台应用清理。</summary>
+    [Obsolete("请使用 ForceStopTargetAppAsync 并传入本次启动目标包名。")]
     public static async Task ForceStopForegroundAppAsync(string adbExe, string address, CancellationToken token)
     {
-        string? pkg = await GetForegroundPackageAsync(adbExe, address, token).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(pkg))
+        await Task.CompletedTask.ConfigureAwait(false);
+        Logger.Info("[模拟器] 未提供目标包名，跳过任意前台应用清理。");
+    }
+
+    /// <summary>按本次脚本启动参数中的目标包名关闭应用；缺少目标包名时跳过，不接管任意前台应用。</summary>
+    public static async Task ForceStopTargetAppAsync(
+        string adbExe,
+        string address,
+        string? targetPackage,
+        CancellationToken token)
+    {
+        if (string.IsNullOrWhiteSpace(targetPackage))
         {
-            Logger.Info($"[模拟器] 未能识别模拟器当前前台应用，跳过关闭。");
+            Logger.Info("[模拟器] 未配置本次启动目标包名，跳过应用关闭。");
             return;
         }
-        if (pkg is "com.android.systemui" or "com.android.launcher" or "app.lawnchair" or "com.mumu.launcher")
+        if (targetPackage is "com.android.systemui" or "com.android.launcher" or "app.lawnchair" or "com.mumu.launcher")
         {
-            Logger.Info($"[模拟器] 当前前台为桌面/系统界面（{pkg}），跳过关闭。");
+            Logger.Info($"[模拟器] 目标包名为桌面/系统界面（{targetPackage}），跳过关闭。");
             return;
         }
-        (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "am", "force-stop", pkg }, 30, token).ConfigureAwait(false);
+        (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "am", "force-stop", targetPackage }, 30, token).ConfigureAwait(false);
         if (ok)
         {
-            Logger.Info($"[模拟器] 已关闭前台应用：{pkg}。");
+            Logger.Info($"[模拟器] 已关闭目标应用：{targetPackage}。");
         }
         else
         {
-            Logger.Warn($"[模拟器] 关闭前台应用 {pkg} 失败：{Truncate(output)}");
+            Logger.Warn($"[模拟器] 关闭目标应用 {targetPackage} 失败：{Truncate(output)}");
         }
     }
 
@@ -382,15 +393,34 @@ internal static class EmulatorSupport
     }
 
     /// <summary>轮询确认模拟器离线（adb shell echo 失败即离线），上限 60 秒（随 NEXUS_TIME_SCALE 缩放）；离线返回 true。</summary>
+    internal static bool IsOfflineProbeFailure(string output)
+    {
+        return output.Contains("device offline", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("device not found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("no devices/emulators found", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("cannot connect to", StringComparison.OrdinalIgnoreCase)
+            || output.Contains("failed to connect", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<bool> WaitEmulatorOfflineAsync(string adbExe, string address, CancellationToken token)
     {
         DateTime deadline = DateTime.Now.AddSeconds(TestHooks.ScaledSeconds(60));
+        int consecutiveOfflineProbes = 0;
         while (DateTime.Now < deadline)
         {
             (bool ok, string output) = await RunCommandAsync(adbExe, new[] { "-s", address, "shell", "echo", "ok" }, 10, token).ConfigureAwait(false);
-            if (!ok)
+            if (!ok && IsOfflineProbeFailure(output))
             {
-                return true;
+                consecutiveOfflineProbes++;
+                if (consecutiveOfflineProbes >= 2)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                // 任意命令失败不等于离线；例如 adb 本身出错、权限错误或超时都继续观察。
+                consecutiveOfflineProbes = 0;
             }
             try
             {

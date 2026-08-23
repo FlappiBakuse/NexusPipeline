@@ -111,8 +111,9 @@ public class SchedulerTests
 
     private sealed class EmptyHistoryStore : IHistoryStore
     {
-        public void Save(RunRecord record, List<string> attemptLogs)
+        public HistorySaveResult Save(RunRecord record, List<string> attemptLogs)
         {
+            return new HistorySaveResult(record.Clone(), null);
         }
 
         public void Cleanup(int retentionDays)

@@ -12,6 +12,16 @@ internal sealed record PluginSummary(
     string Name, string DisplayName, string GameName, string Description,
     string Version, bool IsBuiltIn, string Kind);
 
+internal enum PluginRuntimeState
+{
+    Discovered,
+    Disabled,
+    Initializing,
+    Active,
+    InitFailed,
+    Shutdown,
+}
+
 /// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
 internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCapabilityProvider, IPluginCapabilityResolver
 {
@@ -23,14 +33,29 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
 
     private readonly PluginHostServices _host;
 
-    internal PluginManager(PluginHostServices host)
+    private readonly Func<List<IPlugin>> _discoverBuiltIn;
+
+    private readonly Func<List<DataSpecializedPlugin>> _discoverData;
+
+    private readonly Dictionary<string, bool> _configuredEnabled = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, PluginRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Dictionary<string, string> _runtimeErrors = new(StringComparer.OrdinalIgnoreCase);
+
+    internal PluginManager(
+        PluginHostServices host,
+        Func<List<IPlugin>>? discoverBuiltIn = null,
+        Func<List<DataSpecializedPlugin>>? discoverData = null)
     {
         _host = host;
+        _discoverBuiltIn = discoverBuiltIn ?? DiscoverBuiltIn;
+        _discoverData = discoverData ?? DiscoverDataPlugins;
     }
 
     /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
     public IReadOnlyList<INotifyChannel> NotifyChannels =>
-        _capabilities.GetAll<INotifyChannel>(IsEnabled);
+        _capabilities.GetAll<INotifyChannel>(IsRuntimeEnabled);
 
     public IReadOnlyList<INotifyChannel> GetNotificationChannels()
     {
@@ -69,15 +94,15 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
     /// <summary>按 key 查询数据化 capability；保留给旧 Web/限制门禁作为兼容 façade。</summary>
     public bool HasCapability(string pluginName, string capabilityKey)
     {
-        return _capabilities.HasKey(pluginName, capabilityKey, IsEnabled)
+        return _capabilities.HasKey(pluginName, capabilityKey, IsRuntimeEnabled)
             || capabilityKey.Equals(PluginCapabilityKeys.Emulator, StringComparison.OrdinalIgnoreCase)
-                && _capabilities.Get<IEmulatorCapability>(pluginName, IsEnabled) is not null;
+                && _capabilities.Get<IEmulatorCapability>(pluginName, IsRuntimeEnabled) is not null;
     }
 
     /// <summary>通用 C# capability 查询入口；新增能力无需在 PluginManager 增加类型分支。</summary>
     public IReadOnlyList<T> GetCapabilities<T>() where T : class, IPluginCapability
     {
-        return _capabilities.GetAll<T>(IsEnabled);
+        return _capabilities.GetAll<T>(IsRuntimeEnabled);
     }
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
@@ -87,7 +112,7 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
         {
             return null;
         }
-        IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsEnabled);
+        IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsRuntimeEnabled);
         if (resolver is null)
         {
             return null;
@@ -143,66 +168,61 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
     /// <summary>加载全部插件（v0.6.6+ 幂等：重复调用先清空，避免重复注册）。</summary>
     public void LoadAll()
     {
+        if (_plugins.Count > 0 || _dataPlugins.Count > 0)
+        {
+            ShutdownAll();
+        }
         _plugins.Clear();
         _dataPlugins.Clear();
         _capabilities.Clear();
-        foreach (IPlugin plugin in DiscoverBuiltIn())
+        _configuredEnabled.Clear();
+        _runtimeStates.Clear();
+        _runtimeErrors.Clear();
+        foreach (IPlugin plugin in _discoverBuiltIn())
         {
             _plugins.Add(plugin);
             _capabilities.Register(plugin);
+            _configuredEnabled[plugin.Name] = ReadConfiguredEnabled(plugin.Name, isBuiltIn: true);
+            _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
         }
-        foreach (DataSpecializedPlugin plugin in DiscoverDataPlugins())
+        foreach (DataSpecializedPlugin plugin in _discoverData())
         {
             _dataPlugins.Add(plugin);
             _capabilities.Register(plugin.Name, plugin);
             _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
+            _configuredEnabled[plugin.Name] = ReadConfiguredEnabled(plugin.Name, isBuiltIn: false);
+            _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
         }
-        PruneUnknownPluginSettings();
         foreach (IPlugin plugin in _plugins)
         {
-            bool enabled = IsEnabled(plugin.Name);
+            bool enabled = _configuredEnabled[plugin.Name];
             if (enabled)
             {
+                _runtimeStates[plugin.Name] = PluginRuntimeState.Initializing;
                 try
                 {
                     plugin.Initialize(new PluginContext(plugin.Name, _host));
+                    _runtimeStates[plugin.Name] = PluginRuntimeState.Active;
                     Logger.Info($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
                 }
                 catch (Exception ex)
                 {
+                    _runtimeStates[plugin.Name] = PluginRuntimeState.InitFailed;
+                    _runtimeErrors[plugin.Name] = ex.Message;
                     Logger.Warn($"[插件] 插件「{plugin.DisplayName}」初始化失败：{ex.Message}");
                 }
             }
             else
             {
+                _runtimeStates[plugin.Name] = PluginRuntimeState.Disabled;
                 Logger.Info($"[插件] 已禁用：{plugin.DisplayName}");
             }
         }
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
-            Logger.Info($"[插件] 已{(IsEnabled(plugin.Name) ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化）");
-        }
-    }
-
-    private void PruneUnknownPluginSettings()
-    {
-        AppSettings settings = _host.Settings;
-        var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (IPlugin plugin in _plugins)
-        {
-            known.Add(plugin.Name);
-        }
-        foreach (DataSpecializedPlugin plugin in _dataPlugins)
-        {
-            known.Add(plugin.Name);
-        }
-        int before = settings.EnabledPlugins.Count + settings.DisabledPlugins.Count;
-        settings.EnabledPlugins.RemoveAll(name => !known.Contains(name));
-        settings.DisabledPlugins.RemoveAll(name => !known.Contains(name));
-        if (settings.EnabledPlugins.Count + settings.DisabledPlugins.Count != before)
-        {
-            ConfigStore.Save(settings);
-            Logger.Info("[插件] 已清理设置中不存在的插件名。");
+            bool enabled = _configuredEnabled[plugin.Name];
+            _runtimeStates[plugin.Name] = enabled ? PluginRuntimeState.Active : PluginRuntimeState.Disabled;
+            Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化）");
         }
     }
 
@@ -213,43 +233,66 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
             try
             {
                 plugin.Shutdown();
+                _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
             }
             catch (Exception ex)
             {
                 Logger.Warn($"插件「{plugin.DisplayName}」关停失败：{ex.Message}");
             }
+            finally
+            {
+                _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
+            }
+        }
+        foreach (DataSpecializedPlugin plugin in _dataPlugins)
+        {
+            _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
         }
     }
 
     public bool IsEnabled(string name)
     {
-        AppSettings settings = _host.Settings;
-        if (_plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            return settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
-        }
-        if (!_dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-        // 数据化专项插件：外部默认启用，显式禁用记入 DisabledPlugins（重启后仍禁用）。
-        return !settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
+        return IsRuntimeEnabled(name);
     }
 
-    public void SetEnabled(string name, bool enabled, string source = Audit.System)
+    /// <summary>配置开关状态；开关写入后运行中能力保持原状，下一次加载才应用。</summary>
+    public bool IsConfiguredEnabled(string name)
+    {
+        return _configuredEnabled.TryGetValue(name, out bool enabled)
+            ? enabled
+            : IsKnownPlugin(name) && ReadConfiguredEnabled(name, IsBuiltIn(name));
+    }
+
+    public string GetRuntimeState(string name)
+    {
+        return _runtimeStates.TryGetValue(name, out PluginRuntimeState state)
+            ? state.ToString()
+            : PluginRuntimeState.Discovered.ToString();
+    }
+
+    public string? GetRuntimeError(string name)
+    {
+        return _runtimeErrors.TryGetValue(name, out string? error) ? error : null;
+    }
+
+    public bool IsKnownPlugin(string name)
+    {
+        return _plugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
+            || _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool SetEnabled(string name, bool enabled, string source = Audit.System)
     {
         AppSettings settings = _host.Settings;
-        // v0.7.4（KN-24）：插件不存在时显式拒绝（此前静默写入配置，待下次 LoadAll 的 PruneUnknownPluginSettings 才清理）。
-        bool isBuiltIn = _plugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        bool isBuiltIn = IsBuiltIn(name);
         bool isDataPlugin = _dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
         if (!isBuiltIn && !isDataPlugin)
         {
             Logger.Warn($"[插件] 插件「{name}」不存在，已忽略启用开关操作。");
-            return;
+            return false;
         }
-        // 内置插件禁用同样写入 DisabledPlugins——非纯冗余：ConfigStore.Normalize 的
-        // 「旧配置补默认内置插件（emulator-adapter）」判据依赖它标记「用户显式禁用过」，迁移时不再补回；
-        // IsEnabled 对内置插件只查 EnabledPlugins 白名单。
+            // 内置插件禁用时同步写入 DisabledPlugins，ConfigStore.Normalize 据此识别用户显式禁用过
+            // emulator-adapter，迁移时保留该选择；运行态能力查询由 _runtimeStates 决定。
         bool exists = settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
         if (enabled && !exists)
         {
@@ -268,8 +311,29 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
             settings.DisabledPlugins.Add(name);
         }
         ConfigStore.Save(settings);
+        _configuredEnabled[name] = enabled;
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
         Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
+        return true;
+    }
+
+    private bool IsRuntimeEnabled(string name)
+    {
+        return _runtimeStates.TryGetValue(name, out PluginRuntimeState state)
+            && state == PluginRuntimeState.Active;
+    }
+
+    private bool IsBuiltIn(string name)
+    {
+        return _plugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool ReadConfiguredEnabled(string name, bool isBuiltIn)
+    {
+        AppSettings settings = _host.Settings;
+        return isBuiltIn
+            ? settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase)
+            : !settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
     }
 
     private static List<IPlugin> DiscoverBuiltIn()

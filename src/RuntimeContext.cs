@@ -56,6 +56,7 @@ internal class RuntimeContext
         collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<ExecutionCommands>(provider => new ExecutionCommands(provider.GetRequiredService<DispatchCenter>()));
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionCommands>());
+        collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
         _services = collection.BuildServiceProvider();
     }

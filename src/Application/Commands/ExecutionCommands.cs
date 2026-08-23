@@ -1,11 +1,12 @@
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.App.Commands;
 
 /// <summary>执行应用命令入口。Web、CLI（经常驻 HTTP）和 Scheduler 共用同一组业务命令。</summary>
-internal sealed class ExecutionCommands : IExecutionService
+internal sealed class ExecutionCommands : IExecutionService, IFrozenQueueExecutionService
 {
     private readonly DispatchCenter _center;
 
@@ -22,6 +23,11 @@ internal sealed class ExecutionCommands : IExecutionService
     public RunningExecution StartQueue(string queueId, string mode, string source)
     {
         return _center.StartQueue(queueId, mode, source);
+    }
+
+    public RunningExecution StartQueue(QueueExecutionPlan plan, string mode, string source)
+    {
+        return _center.StartQueue(plan, mode, source);
     }
 
     public void Cancel(string runId, string source)

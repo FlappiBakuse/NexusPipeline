@@ -187,7 +187,10 @@ internal static class ApiSettingsHandler
                 }
                 try
                 {
-                    System.Windows.Forms.Application.Exit();
+                    if (!Bootstrap.TryRequestCompletionExit())
+                    {
+                        Logger.Warn("[重启] 当前进程仍有活动执行或编辑会话，已拒绝退出；新进程可能需要手动处理。");
+                    }
                 }
                 catch (Exception ex)
                 {

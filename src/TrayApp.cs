@@ -53,8 +53,10 @@ internal class TrayApp : ApplicationContext
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出 NexusPipeline", null, (_, _) =>
         {
-            _icon.Visible = false;
-            Application.Exit();
+            if (Bootstrap.TryRequestDirectExit())
+            {
+                _icon.Visible = false;
+            }
         });
         return menu;
     }

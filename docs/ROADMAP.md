@@ -1,49 +1,8 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-23｜ **当前版本**：v0.9.2｜ **下一开发版本**：v0.9.3｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-23｜ **当前版本**：v0.9.3｜ **下一开发版本**：v0.9.4｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 CHANGELOG、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题台账见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
-
----
-
-## v0.9.3：Scheduler / Persistence / Lifecycle Consistency
-
-### Scheduler 与执行计划
-
-- [ ] 在 trigger 时冻结完整执行计划，重试和恢复沿用同一计划快照。
-- [ ] 用户配置或队列发生变更后，对 pending plan 执行明确的重新校验策略。
-- [ ] 持久化 trigger 去重状态，处理同一分钟重启重复触发。
-- [ ] 为跨 minute 调度、短暂停顿和 missed-fire 建立可验证的补偿语义。
-- [ ] 明确 backlog 的观察、告警和长期积压处置策略。
-
-### History、结果与通知
-
-- [ ] History JSON 使用原子写入，避免留下半个 JSON 文件。
-- [ ] RunRecord 发布后保持不可变，补充的日志元数据通过明确的更新事件处理。
-- [ ] 为通知通道增加宿主级超时、取消和失败可见性。
-- [ ] 将 ResultCollector 的大小限制统一按 UTF-8 字节数定义。
-
-### 插件生命周期与能力
-
-- [ ] 分离 restart-only 配置开关和当前运行态 capability。
-- [ ] InitFailed 插件禁止暴露可执行 capability。
-- [ ] 未知插件开关返回稳定失败结果。
-- [ ] 保留当前不存在插件的用户偏好，避免无提示 prune。
-
-### Admission、生命周期与配置编辑
-
-- [ ] 将 Queue mutation 纳入统一 Admission coordination，消除并发修改的 TOCTOU 窗口。
-- [ ] 将 Config EditSession 建模为 Admission resource，收敛 ghost Active 语义。
-- [ ] 为 Host exit 增加 Active run 拒绝与 graceful shutdown 流程。
-- [ ] 对 pending trigger 提供可恢复的重启持久化策略。
-
-### 模拟器与日志监控
-
-- [ ] Emulator cleanup 优先关闭本次运行目标 package，避免依赖当前 foreground app。
-- [ ] 区分 adb command failure 与 emulator offline，保留可诊断的失败原因。
-- [ ] 为模拟器和游戏 cleanup 增加独立 deadline 与取消边界。
-- [ ] 修正 LogMonitor transient reopen 的起始 offset 语义。
-- [ ] FileId 不可用时增加可靠的 creation-time 或等价身份回退策略。
 
 ---
 

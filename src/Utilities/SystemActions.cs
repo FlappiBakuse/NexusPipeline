@@ -578,7 +578,7 @@ internal static class SystemActions
         Logger.Info("调度队列完成操作：退出软件。");
         try
         {
-            System.Windows.Forms.Application.Exit();
+            NexusPipeline.Bootstrap.TryRequestCompletionExit();
         }
         catch (Exception ex)
         {

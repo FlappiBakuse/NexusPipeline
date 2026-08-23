@@ -68,6 +68,7 @@ internal static class ApiStatusHandler
                     snapshot.CurrentStatus,
                     snapshot.CurrentAttempt,
                     snapshot.CurrentMaxAttempts,
+                    persistenceWarning = snapshot.PersistenceWarning,
                     logTail = snapshot.LogTail,
                 };
             }),
@@ -81,7 +82,10 @@ internal static class ApiStatusHandler
                 plugin.IsBuiltIn,
                 kind = plugin.Kind,
                 supportsEmulator = RuntimeContext.Instance.Plugins.HasCapability(plugin.Name, PluginCapabilityKeys.Emulator),
-                enabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
+                enabled = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name),
+                runtimeEnabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
+                state = RuntimeContext.Instance.Plugins.GetRuntimeState(plugin.Name),
+                error = RuntimeContext.Instance.Plugins.GetRuntimeError(plugin.Name),
             }),
         };
     }

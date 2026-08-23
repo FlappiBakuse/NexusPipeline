@@ -14,6 +14,8 @@ internal sealed class ExecutionStateStore
 
     private readonly Dictionary<string, ExecutionAdmissionProfile> _admissions = new();
 
+    private readonly Dictionary<string, ExecutionResourceSet> _editSessionLeases = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly List<CompletionIntent> _completionIntents = new();
 
     private readonly ExecutionAdmissionPolicy _policy;
@@ -142,6 +144,19 @@ internal sealed class ExecutionStateStore
                         ExecutionAdmissionFailureCode.ExecutionGroupClosing,
                         "当前并行运行组已进入收尾阶段，新的任务暂不能加入");
                     return false;
+                }
+
+                foreach ((string leaseKey, ExecutionResourceSet leaseResources) in _editSessionLeases)
+                {
+                    string? editConflict = profile.Resources.FindConflict(leaseResources);
+                    if (editConflict is not null)
+                    {
+                        failure = new ExecutionAdmissionFailure(
+                            ExecutionAdmissionFailureCode.ResourceConflict,
+                            $"当前执行与配置编辑会话「{leaseKey}」存在资源冲突（{editConflict}）",
+                            Resource: editConflict);
+                        return false;
+                    }
                 }
 
                 List<ExecutionAdmissionEntry> active = _active
@@ -387,6 +402,128 @@ internal sealed class ExecutionStateStore
             }
             mutation();
             return true;
+        }
+    }
+
+    /// <summary>把队列 CRUD 也纳入准入协调域，避免检查完成后执行计划才登记的 TOCTOU 窗口。</summary>
+    public bool TryExecuteQueueLeaseMutation(
+        string queueId,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                leases = _active
+                    .Where(exec => exec.Kind == "queue"
+                        && string.Equals(exec.TargetId, queueId, StringComparison.Ordinal))
+                    .Select(exec => new ExecutionLeaseReference(
+                        exec.Id,
+                        exec.Kind,
+                        exec.TargetId,
+                        exec.TargetName))
+                    .ToList();
+                if (leases.Count > 0)
+                {
+                    return false;
+                }
+                mutation();
+                return true;
+            }
+        }
+    }
+
+    public bool TryExecuteAnyQueueLeaseMutation(
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                leases = _active
+                    .Where(exec => exec.Kind == "queue")
+                    .Select(exec => new ExecutionLeaseReference(
+                        exec.Id,
+                        exec.Kind,
+                        exec.TargetId,
+                        exec.TargetName))
+                    .ToList();
+                if (leases.Count > 0)
+                {
+                    return false;
+                }
+                mutation();
+                return true;
+            }
+        }
+    }
+
+    /// <summary>以脚本、用户和配置文件资源建立编辑会话租约。</summary>
+    public bool TryBeginEditSession(
+        string scriptId,
+        string userName,
+        string configPath,
+        out string? conflict)
+    {
+        string normalizedScriptId = scriptId.Trim();
+        string normalizedUser = userName.Trim();
+        string leaseKey = $"{normalizedScriptId}:{normalizedUser}";
+        ExecutionResourceSet resources = ExecutionResourceSetBuilder.Build(
+                new[] { new ExecutionResourceInput(normalizedScriptId, null, new[] { normalizedUser }) })
+            with
+            {
+                ConfigPaths = string.IsNullOrWhiteSpace(configPath)
+                    ? Array.Empty<string>()
+                    : new[] { Path.GetFullPath(configPath) },
+            };
+
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                foreach (ExecutionAdmissionEntry active in _active.Select(exec => new ExecutionAdmissionEntry(
+                    exec.Id,
+                    exec.Kind,
+                    exec.TargetId,
+                    exec.TargetName,
+                    _admissions[exec.Id])))
+                {
+                    string? resource = resources.FindConflict(active.Profile.Resources);
+                    if (resource is not null)
+                    {
+                        conflict = $"运行「{active.TargetName}」已占用资源 {resource}";
+                        return false;
+                    }
+                }
+
+                foreach ((string existingKey, ExecutionResourceSet existing) in _editSessionLeases)
+                {
+                    string? resource = resources.FindConflict(existing);
+                    if (resource is not null)
+                    {
+                        conflict = $"配置编辑会话「{existingKey}」已占用资源 {resource}";
+                        return false;
+                    }
+                }
+
+                _editSessionLeases[leaseKey] = resources;
+                conflict = null;
+                return true;
+            }
+        }
+    }
+
+    public void EndEditSession(string scriptId, string userName)
+    {
+        string leaseKey = $"{scriptId.Trim()}:{userName.Trim()}";
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                _editSessionLeases.Remove(leaseKey);
+            }
         }
     }
 

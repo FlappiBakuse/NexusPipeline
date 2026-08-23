@@ -2,6 +2,30 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.3（Pre-release）
+
+### 调度、持久化与生命周期
+
+- 为 Scheduled occurrence 增加持久化状态、重启恢复、触发去重、跨 minute 补偿和冻结执行计划；配置或队列变化后重新校验 pending plan。
+- 将队列变更、脚本/用户修改、配置编辑与执行准入纳入统一资源协调，并补充 graceful shutdown 门禁。
+- History 记录采用尝试日志与 JSON 提交标记的原子流程；持久化 warning 会进入运行状态；通知通道增加独立超时。
+- ResultCollector 的日志限制统一按 UTF-8 字节数计算。
+
+### 插件、模拟器与日志监控
+
+- 分离插件配置态与运行态，补充 InitFailed 能力门禁、未知插件失败结果和用户偏好保留。
+- 模拟器清理按目标 package 执行，区分 ADB 命令失败与离线状态，并增加独立 cleanup deadline。
+- 修正 LogMonitor transient reopen offset 和 FileId fallback 语义。
+
+### 测试与验证
+
+- 基线回归测试统一命名为 `BaselineReproductionTests.cs`，覆盖 v0.9.3 开工前稳定复现的问题。
+- 管理员构建通过，仅保留基线已有的 3 条 nullable 警告。
+- 单元测试通过：184/184。
+- 加速档全量 Playwright：87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 发布前真实计时档：Playwright 87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- `git diff --check` 通过。
+
 ## v0.9.2（Pre-release）
 
 ### 正确性与安全性加固

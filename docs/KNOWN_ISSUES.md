@@ -45,32 +45,34 @@
 
 ## v0.9.3：Scheduler / Persistence / Lifecycle Consistency
 
-| 编号 | 已知问题 | 当前确认状态 | 代码位置 | 归属 |
+| 编号 | 已知问题 | v0.9.3 发布状态 | 代码位置 | 归属 |
 |---|---|---|---|---|
-| #44 | History persistence failure 只写宿主日志，外部运行状态缺少提示 | 稳定代码路径；待 v0.9.3 定义宿主警告/运行状态契约 | `src/Services/History/HistoryService.cs`, `ExecutionRunner.cs` | v0.9.3 |
-| #47 | Notification channel 可无限占用 completion | 已确认异步调用无 host-level timeout；待专项测试 | `src/Services/Notification/NotificationDispatcher.cs` | v0.9.3 |
-| #48 | Scheduled occurrence 未在 trigger 时冻结执行计划 | 已确认 Scheduler pending 只保存队列 ID/时间键 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
-| #49 | 用户修改后 pending plan 不主动重新校验 | 已确认 pending 计划不会随 CRUD 变更重校验 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
-| #50 | 同 minute restart 可能重复 trigger | 已确认 `_lastTrigger` 只在成功准入后更新，重启不持久化 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
-| #51 | Scheduler 短暂停顿跨过 minute 时可能 missed-fire | 已确认 Tick 只匹配当前 `HH:mm` | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #44 | History persistence failure 只写宿主日志，外部运行状态缺少提示 | 已修复 | `src/Services/History/HistoryService.cs`, `ExecutionRunner.cs` | v0.9.3 |
+| #47 | Notification channel 可无限占用 completion | 已修复 | `src/Services/Notification/NotificationDispatcher.cs` | v0.9.3 |
+| #48 | Scheduled occurrence 未在 trigger 时冻结执行计划 | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #49 | 用户修改后 pending plan 不主动重新校验 | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #50 | 同 minute restart 可能重复 trigger | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #51 | Scheduler 短暂停顿跨过 minute 时可能 missed-fire | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
 | #52 | backlog 可持续积压 | 这是已确认的风险语义，报告要求允许 backlog，不做数量裁剪 | `src/Services/Scheduling/Scheduler.cs` | 语义保留 |
-| #54 | ResultCollector 的“20MB”按 .NET chars 计数，实际字节数可能超过 20MB | 已确认字段使用 `StringBuilder.Length`；待 v0.9.3 修正语义 | `src/Services/Execution/ResultCollector.cs` | v0.9.3 |
-| #57 | Plugin restart-only toggle 实际立即改变运行态 | 已确认配置开关与 capability 查询未分离 restart-bound 状态 | `src/Plugins/PluginManager.cs` | v0.9.3 |
-| #58 | InitFailed plugin 仍可能暴露 capability | 已确认初始化状态尚未成为 capability 查询门槛 | `src/Plugins/PluginManager.cs` | v0.9.3 |
-| #59 | unknown plugin toggle 返回成功 | 已确认未知插件路径缺少失败结果 | `src/Plugins/PluginManager.cs`, `src/Web/ApiPluginsHandler.cs` | v0.9.3 |
-| #60 | 当前不存在插件的用户偏好被 prune | 已确认 `PruneUnknownPluginSettings` 会清理 orphan setting | `src/Plugins/PluginManager.cs` | v0.9.3 |
-| #63 | Queue mutation 未纳入 Admission coordination，存在 TOCTOU | 已确认 PUT/DELETE 仍有独立 Active 检查路径 | `src/Web/ApiQueuesHandler.cs` | v0.9.3 |
-| #65 | Config EditSession 未作为 Admission resource，可能形成 ghost Active | 已确认 EditSession gate 与运行 Admission 尚未统一资源模型 | `src/Web/ApiScriptsHandler.cs`, `ExecutionStateStore.cs` | v0.9.3 |
-| #66 | Scheduler retry 重建当前 plan，可能丢失触发时状态 | 与 #48 同属 pending plan 未冻结问题 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
-| #67 | Pending trigger 重启丢失 | pending 仅存在内存 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
-| #68 | Host exit 非 graceful，可能静默脱管 Active run | 退出生命周期缺少 Active 拒绝门禁 | `src/Application/StartupPipeline.cs` | v0.9.3 |
-| #71 | History JSON 直接写入，可能留下半个 JSON | 已确认 `HistoryService.Save` 使用 `File.WriteAllText(jsonPath, ...)` | `src/Services/History/HistoryService.cs` | v0.9.3 |
-| #72 | RunRecord publish 后仍可能被 History persistence 修改 | `HistoryService.Save` 在执行记录已加入快照后补写 LogFile metadata | `src/Services/History/HistoryService.cs`, `ExecutionRunner.cs` | v0.9.3 |
-| #80 | Emulator cleanup 按当前 foreground app 关闭，可能关闭无关应用 | 已确认当前实现使用 `GetForegroundPackage`，目标 package 尚未优先 | `src/Services/EmulatorSupport.cs` | v0.9.3 |
-| #82 | 任意 adb command failure 被当作 emulator offline | 已确认 `WaitEmulatorOfflineAsync` 以 `!ok` 直接返回 true | `src/Services/EmulatorSupport.cs` | v0.9.3 |
-| #84 | Cleanup 使用 `CancellationToken.None`，缺少独立 deadline | 已确认模拟器/游戏 cleanup 使用无界取消语义 | `src/Services/Execution/RunAttemptFinalizer.cs` | v0.9.3 |
-| #86 | LogMonitor transient reopen 回到初始 offset，可能重读旧段 | 已确认 `_reopenScheduled` 调用 `Open` 时沿用初始起点 | `src/Services/LogMonitor.cs` | v0.9.3 |
-| #87 | FileId 不可用时直接返回 false，creation-time fallback 未真正生效 | 已确认 `FileReplaced` 首行要求 `_fileIdValid` | `src/Services/LogMonitor.cs` | v0.9.3 |
+| #54 | ResultCollector 的“20MB”按 .NET chars 计数，实际字节数可能超过 20MB | 已修复 | `src/Services/Execution/ResultCollector.cs` | v0.9.3 |
+| #57 | Plugin restart-only toggle 实际立即改变运行态 | 已修复 | `src/Plugins/PluginManager.cs` | v0.9.3 |
+| #58 | InitFailed plugin 仍可能暴露 capability | 已修复 | `src/Plugins/PluginManager.cs` | v0.9.3 |
+| #59 | unknown plugin toggle 返回成功 | 已修复 | `src/Plugins/PluginManager.cs`, `src/Web/ApiPluginsHandler.cs` | v0.9.3 |
+| #60 | 当前不存在插件的用户偏好被 prune | 已修复 | `src/Plugins/PluginManager.cs` | v0.9.3 |
+| #63 | Queue mutation 未纳入 Admission coordination，存在 TOCTOU | 已修复 | `src/Web/ApiQueuesHandler.cs` | v0.9.3 |
+| #65 | Config EditSession 未作为 Admission resource，可能形成 ghost Active | 已修复 | `src/Web/ApiScriptsHandler.cs`, `ExecutionStateStore.cs` | v0.9.3 |
+| #66 | Scheduler retry 重建当前 plan，可能丢失触发时状态 | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #67 | Pending trigger 重启丢失 | 已修复 | `src/Services/Scheduling/Scheduler.cs` | v0.9.3 |
+| #68 | Host exit 非 graceful，可能静默脱管 Active run | 已修复 | `src/Application/StartupPipeline.cs` | v0.9.3 |
+| #71 | History JSON 直接写入，可能留下半个 JSON | 已修复 | `src/Services/History/HistoryService.cs` | v0.9.3 |
+| #72 | RunRecord publish 后仍可能被 History persistence 修改 | 已修复 | `src/Services/History/HistoryService.cs`, `ExecutionRunner.cs` | v0.9.3 |
+| #80 | Emulator cleanup 按当前 foreground app 关闭，可能关闭无关应用 | 已修复 | `src/Services/EmulatorSupport.cs` | v0.9.3 |
+| #82 | 任意 adb command failure 被当作 emulator offline | 已修复 | `src/Services/EmulatorSupport.cs` | v0.9.3 |
+| #84 | Cleanup 使用 `CancellationToken.None`，缺少独立 deadline | 已修复 | `src/Services/Execution/RunAttemptFinalizer.cs` | v0.9.3 |
+| #86 | LogMonitor transient reopen 回到初始 offset，可能重读旧段 | 已修复 | `src/Services/LogMonitor.cs` | v0.9.3 |
+| #87 | FileId 不可用时直接返回 false，creation-time fallback 未真正生效 | 已修复 | `src/Services/LogMonitor.cs` | v0.9.3 |
+
+**v0.9.3 修复验证结果（2026-08-23）**：本节 v0.9.3 条目均已完成修复并转为回归保护。验证包含完整单元测试 184/184、管理员构建、加速 E2E 87/87、judge 150/150、chaos 166/166，以及真实计时 E2E 87/87、judge 150/150、chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
 
 ## v0.9.4：Runtime Monitor & Process Ownership Hardening
 

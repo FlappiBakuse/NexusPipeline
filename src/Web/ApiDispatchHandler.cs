@@ -87,6 +87,7 @@ internal static class ApiDispatchHandler
             snapshot.CurrentStatus,
             snapshot.CurrentAttempt,
             snapshot.CurrentMaxAttempts,
+            persistenceWarning = snapshot.PersistenceWarning,
             logTail = snapshot.LogTail,
             records = snapshot.Records,
         }).ConfigureAwait(false);

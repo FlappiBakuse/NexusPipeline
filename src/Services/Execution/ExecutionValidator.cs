@@ -133,6 +133,14 @@ internal sealed class ExecutionValidator
         return null;
     }
 
+    /// <summary>检查已经冻结的定时计划所引用的脚本进程，避免重试时回读并改变计划内容。</summary>
+    public string? QueueBlockedByPlan(QueueExecutionPlan plan)
+    {
+        PlannedQueueTask? blocked = plan.Tasks.FirstOrDefault(task =>
+            task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script));
+        return blocked?.Script?.Name;
+    }
+
     /// <summary>按运行时启动目标进程名检测脚本冲突；Args 首项为显式路径时按它，否则使用主程序。</summary>
     public static bool IsScriptRunning(ScriptInstance? script)
     {

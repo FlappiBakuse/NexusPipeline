@@ -9,7 +9,7 @@ import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, w
 /** 单个运行任务卡片 HTML（新任务插入用；已有任务走 updateRunningItem 局部更新，不重建 DOM）。 */
 function runningItemMarkup(record) {
   return `<div class="list-item-head"><div><div class="list-item-title"><strong>${esc(record.targetName)}</strong><span class="badge ${record.kind === "queue" ? "blue" : "muted"}">${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span class="badge muted">${record.mode === "auto" ? "自动" : "手动"}</span>${record.kind === "queue" ? `<span class="muted done-count">${record.doneTasks}/${record.totalTasks} 项</span>` : ""}</div></div><button class="sm danger" type="button" data-action="cancel-run" data-id="${record.id}">取消</button></div>
-    <div class="qk-row">当前：${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</div>
+    <div class="qk-row">当前：${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</div>${record.persistenceWarning ? `<div class="qk-row"><span class="badge warn">历史保存警告</span> ${esc(record.persistenceWarning)}</div>` : ""}
     <div class="progress-line"><div data-progress="0"></div></div>
     <pre class="logbox run-log">${esc((record.logTail || []).join("\n")) || "(暂无日志输出)"}</pre>`;
 }

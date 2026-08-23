@@ -287,9 +287,14 @@ test("am start 失败：输出 Error 标记时立即失败，不做前台确认�
   }
 });
 
-test("插件开关：禁用「模拟器适配」后前端无选择器、模拟器运行被拒", async ({ page }) => {
+test("插件开关：配置状态与运行态分离，前端按配置隐藏选择器", async ({ page }) => {
   resetStub();
-  await api("POST", "/api/plugins/emulator-adapter/disable");
+  const disabled = await api("POST", "/api/plugins/emulator-adapter/disable");
+  expect(disabled.ok).toBeTruthy();
+  const disabledBody = await disabled.json();
+  expect(disabledBody.configuredEnabled).toBe(false);
+  expect(disabledBody.runtimeEnabled).toBe(true);
+  expect(disabledBody.state).toBe("Active");
   try {
     await page.goto(baseUrl + "#/scripts");
     await page.click('[data-testid="new-script"]');
@@ -309,11 +314,12 @@ test("插件开关：禁用「模拟器适配」后前端无选择器、模拟�
     const script = await created.json();
     await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
     try {
+      // 配置开关重启生效；当前进程的模拟器 capability 仍保持 Active。
+      resetStub(PKG);
       await runScript(script.id);
       const rec = await waitHistory(script.id);
-      expect(rec.FinalStatus).toBe("failed");
-      expect(rec.ResultDetail).toContain("模拟器适配已禁用");
-      expect(callsContain("start -n " + PKG)).toBe(0);
+      expect(rec.FinalStatus).toBe("success");
+      expect(callsContain("start -n " + PKG)).toBe(1);
     } finally {
       await deleteScript(script.id);
     }

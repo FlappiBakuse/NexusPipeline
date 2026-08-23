@@ -44,7 +44,7 @@ export function releaseController(controller) {
 }
 
 export function notifyAvailable() {
-  return !!(state.plugins || []).find(plugin => plugin.name === "notify" && plugin.enabled);
+  return !!(state.plugins || []).find(plugin => plugin.name === "notify" && plugin.enabled && plugin.state !== "InitFailed");
 }
 
 export function disposePage() {
