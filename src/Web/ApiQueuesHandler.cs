@@ -49,7 +49,8 @@ internal static class ApiQueuesHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "队列名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/后台线程冲突；锁内不做 await。
+            NormalizeQueue(queue);
+            // v0.9.2（#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
             string? limitError;
             lock (ctx.DataLock)
             {
@@ -61,11 +62,17 @@ internal static class ApiQueuesHandler
                     ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), queue);
                 if (limitError is null)
                 {
-                    // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
                     queue.Id = Guid.NewGuid().ToString("N");
-                    if (ctx.Queues.Count > 0)
+                    queue.Index = ctx.Queues.Count == 0 ? 0 : ctx.Queues.Max(item => item.Index) + 1;
+                    ctx.Queues.Add(queue);
+                    try
                     {
-                        queue.Index = ctx.Queues.Max(item => item.Index) + 1;
+                        DataStore.SaveQueues(ctx.Queues);
+                    }
+                    catch
+                    {
+                        ctx.Queues.Remove(queue);
+                        throw;
                     }
                 }
             }
@@ -73,12 +80,6 @@ internal static class ApiQueuesHandler
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
                 return;
-            }
-            NormalizeQueue(queue);
-            lock (ctx.DataLock)
-            {
-                ctx.Queues.Add(queue);
-                DataStore.SaveQueues(ctx.Queues);
             }
             Audit.Log(Audit.Web, "添加调度队列", $"{queue.Name}（id={queue.Id}，任务 {queue.Tasks.Count} 项）");
             await HttpHelper.WriteJsonAsync(context, queue).ConfigureAwait(false);

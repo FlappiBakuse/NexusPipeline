@@ -159,12 +159,6 @@ internal class HistoryService : IHistoryStore
         return attempt is null ? null : ReadDayFile(record, attempt.LogFile);
     }
 
-    /// <summary>读取运行内全部尝试的日志（兼容旧数据：无按尝试文件时回退读取旧 .log 单文件）。</summary>
-    public (string LogText, int TotalLines)? ReadLegacyScriptLog(RunRecord record)
-    {
-        return ReadDayFile(record, ".log");
-    }
-
     private static (string LogText, int TotalLines)? ReadDayFile(RunRecord record, string attemptLogFile)
     {
         if (string.IsNullOrWhiteSpace(attemptLogFile))

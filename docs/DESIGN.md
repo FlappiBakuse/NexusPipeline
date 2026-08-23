@@ -351,6 +351,6 @@ flowchart LR
 - [RELEASING.md](RELEASING.md)：发布流程手册（tag / release / 资产）
 - [CONTRIBUTING.md](../CONTRIBUTING.md)：协作规范（Issue / PR / 提交信息 / 测试流程）
 - [ROADMAP.md](ROADMAP.md)：版本路线与后续开发清单
-- [KNOWN-ISSUES.md](KNOWN-ISSUES.md)：已知问题台账
+- [KNOWN_ISSUES.md](KNOWN_ISSUES.md)：已知问题台账
 - [CHANGELOG.md](../CHANGELOG.md)：版本历史
 - [plugins/README.md](../plugins/README.md)：专项插件（数据化形态）开发指南

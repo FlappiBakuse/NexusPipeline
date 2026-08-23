@@ -70,22 +70,6 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         }
         _activeUser = user;
 
-        _configRun = new ConfigRunSession(_script.Id, user?.Name, _script.ConfigPath, _script.HasJudgeScript());
-        _configRun.PrepareScriptArea();
-        if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
-        {
-            _statusChanged?.Invoke("正在加载用户配置...");
-            if (!_configRun.Prepare(out string? prepError))
-            {
-                record.Status = "failed";
-                record.FinalStatus = "failed";
-                record.EndTime = DateTime.Now;
-                record.ResultDetail = $"用户配置加载失败：{prepError}";
-                Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
-                return record;
-            }
-        }
-
         var retryPolicy = new RetryPolicy(_script.MaxAttempts);
         int maxAttempts = retryPolicy.MaxAttempts;
         record.MaxAttempts = maxAttempts;
@@ -93,6 +77,23 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         try
         {
+            // 配置运行会话在 try 内创建并准备，任何 Prepare 异常都统一进入幂等 FinalizeRun。
+            _configRun = new ConfigRunSession(_script.Id, user?.Name, _script.ConfigPath, _script.HasJudgeScript());
+            _configRun.PrepareScriptArea();
+            if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
+            {
+                _statusChanged?.Invoke("正在加载用户配置...");
+                if (!_configRun.Prepare(out string? prepError))
+                {
+                    record.Status = "failed";
+                    record.FinalStatus = "failed";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = $"用户配置加载失败：{prepError}";
+                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
+                    return record;
+                }
+            }
+
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++)
             {
                 _attemptChanged?.Invoke(attemptNo, maxAttempts);
@@ -135,26 +136,43 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
-                if (user is not null && !string.IsNullOrWhiteSpace(user.PreRunScript)
-                    && (attemptNo == 1 || !user.PreRunOnceOnly))
+                bool runPreRun = AttemptLifecycle.ShouldRunPreRun(
+                    user is not null && !string.IsNullOrWhiteSpace(user.PreRunScript),
+                    user?.PreRunOnceOnly ?? false,
+                    _preRunCompletedSuccessfully);
+                bool mainExecuted = true;
+                if (runPreRun)
                 {
-                    RunAttemptResult? preResult = await _attemptRunner.RunUserScriptAsync(user.PreRunScript, "任务前", attempt, _token).ConfigureAwait(false);
-                    result = preResult ?? await _attemptRunner.RunAsync(attempt).ConfigureAwait(false);
+                    RunAttemptResult? preResult = await _attemptRunner.RunUserScriptAsync(user!.PreRunScript!, "任务前", attempt, _token).ConfigureAwait(false);
+                    if (preResult is not null)
+                    {
+                        // PreRun 只有成功（返回 null）才允许进入 Main；失败/取消直接结束本次 Attempt。
+                        mainExecuted = false;
+                        result = preResult;
+                    }
+                    else
+                    {
+                        _preRunCompletedSuccessfully = true;
+                        result = await _attemptRunner.RunAsync(attempt).ConfigureAwait(false);
+                    }
                 }
                 else
                 {
                     result = await _attemptRunner.RunAsync(attempt).ConfigureAwait(false);
                 }
 
-                if (result.Status != "cancelled"
+                if (mainExecuted && result.Status != "cancelled"
                     && user is not null && !string.IsNullOrWhiteSpace(user.PostRunScript)
-                    && (attemptNo >= maxAttempts || !user.PostRunOnFinalOnly))
+                    && AttemptLifecycle.ShouldRunPostRun(
+                        user.PostRunOnFinalOnly,
+                        attemptNo,
+                        retryPolicy,
+                        result))
                 {
-                    RunAttemptResult? postResult = await _attemptRunner.RunUserScriptAsync(user.PostRunScript, "任务后", attempt, _token).ConfigureAwait(false);
+                    RunAttemptResult? postResult = await _attemptRunner.RunUserScriptAsync(user!.PostRunScript!, "任务后", attempt, _token).ConfigureAwait(false);
                     if (postResult is not null)
                     {
-                        postResult.NotifyText = result.NotifyText;
-                        result = postResult;
+                        result = RunAttemptResult.MergePostRun(result, postResult);
                     }
                 }
 
@@ -284,12 +302,21 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
         {
-            SystemActions.KillTree(process.Id);
+            bool cleaned = SystemActions.KillAndConfirmExited(process.Id, scriptPath, role);
+            if (!cleaned)
+            {
+                _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本超时后仍未确认退出");
+            }
             return RunAttemptResult.Fatal($"{role}脚本运行超时（{_script.TotalTimeoutMinutes} 分钟）");
         }
         catch (OperationCanceledException)
         {
-            SystemActions.KillTree(process.Id);
+            bool cleaned = SystemActions.KillAndConfirmExited(process.Id, scriptPath, role);
+            if (!cleaned)
+            {
+                _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本取消后仍未确认退出");
+                return RunAttemptResult.Fatal($"{role}脚本取消后进程清理未确认，已保留配置现场");
+            }
             return RunAttemptResult.Cancelled($"已取消（{role}脚本执行期间）");
         }
         bool hasExited = process.HasExited;
@@ -307,6 +334,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             return budgetError;
         }
+        // Attempt 起点一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
+        Dictionary<string, LogCandidateSnapshot> logCandidatesAtAttemptStart = CaptureLogCandidates(_script.LogPath);
 
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
@@ -397,6 +426,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         Process? process = null;
         bool stdoutAttached = false;
+        bool cleanupConfirmed = true;
         string? excludeGame = EmulatorSupport.IsEmulator(_script)
             ? null
             : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe));
@@ -458,10 +488,22 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             process.BeginErrorReadLine();
         }
 
+        bool KillScriptAndConfirm()
+        {
+            bool confirmed = cleanup.KillScript(process, launchExe, excludeGame);
+            if (!confirmed)
+            {
+                cleanupConfirmed = false;
+                _configRun?.MarkProcessCleanupUnconfirmed($"脚本「{_script.Name}」进程树清理结果未确认");
+            }
+            return confirmed;
+        }
+
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
-        // 记录尝试开始前的日志文件快照（长度）：启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，
-        // 也只从「启动时长度」续读，残留内容不再污染判定输入（v0.6.5 修复原 LastWriteTime 误判）。
-        LogFileSnapshot? snapshotBeforeStart = resolvedBeforeStart is null ? null : TrySnapshot(resolvedBeforeStart);
+        // 启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，也只从 Attempt 起点长度续读。
+        LogCandidateSnapshot? snapshotBeforeStart = resolvedBeforeStart is null
+            ? null
+            : SnapshotForCandidate(resolvedBeforeStart, logCandidatesAtAttemptStart);
         DateTime attemptStart = DateTime.Now;
         LogMonitor? monitor = resolvedBeforeStart is null ? null : NewMonitor(resolvedBeforeStart, snapshotBeforeStart, modeText);
         var judge = new SessionJudge(_script);
@@ -546,8 +588,9 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
                 if (judge.IsFailure)
                 {
-                    cleanup.KillScript(process, launchExe, excludeGame);
-                    result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
+                    result = KillScriptAndConfirm()
+                        ? RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败")
+                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
                     break;
                 }
 
@@ -565,12 +608,19 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     {
                         if (monitor is null)
                         {
-                            monitor = NewMonitor(resolved, null, modeText);
+                            monitor = NewMonitor(
+                                resolved,
+                                SnapshotForCandidate(resolved, logCandidatesAtAttemptStart),
+                                modeText);
                         }
                         else if (!string.Equals(resolved, monitor.Path, StringComparison.OrdinalIgnoreCase))
                         {
                             monitor.Dispose();
-                            monitor = NewMonitor(resolved, null, modeText, rotated: true);
+                            monitor = NewMonitor(
+                                resolved,
+                                SnapshotForCandidate(resolved, logCandidatesAtAttemptStart),
+                                modeText,
+                                rotated: true);
                         }
                         else
                         {
@@ -729,8 +779,9 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 if (judge.IsMarker
                     && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
-                    cleanup.KillScript(process, launchExe, excludeGame);
-                    result = RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功");
+                    result = KillScriptAndConfirm()
+                        ? RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功")
+                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
                     result.NotifyText = judge.NotifyText;
                     break;
                 }
@@ -751,11 +802,17 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         monitor?.Dispose();
         monitor = null;
 
-        cleanup.KillScript(process, launchExe, excludeGame);
+        KillScriptAndConfirm();
+
+        if (!cleanupConfirmed)
+        {
+            _pendingReplaceConfigs = null;
+            result = RunAttemptResult.Fatal("脚本进程清理未确认，已保留配置现场并阻断后续操作");
+        }
 
         // v0.6.9+（P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
         // 复制覆盖 config 存在文件占用/半写窗口）；仅本次尝试失败时应用，重试循环将使用新配置。
-        if (_pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
+        if (cleanupConfirmed && _pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
         {
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
             _configRun?.ApplyReplacements(_pendingReplaceConfigs);
@@ -958,19 +1015,42 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         return (judge.Status, judge.Reason, judge.NotifyText, judge.ReplaceConfigs, null);
     }
 
-    /// <summary>尝试开始前的日志文件快照（仅长度；存在性由 null 表达）。</summary>
-    private sealed record LogFileSnapshot(long Length);
+    private static Dictionary<string, LogCandidateSnapshot> CaptureLogCandidates(string? pattern)
+    {
+        var snapshots = new Dictionary<string, LogCandidateSnapshot>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return snapshots;
+        }
+        foreach (string candidate in LogPattern.ResolveFiles(pattern))
+        {
+            LogCandidateSnapshot? snapshot = LogMonitor.CaptureSnapshot(candidate);
+            if (snapshot is not null)
+            {
+                snapshots[SnapshotKey(candidate)] = snapshot;
+            }
+        }
+        return snapshots;
+    }
 
-    /// <summary>读取文件当前长度作为快照；文件不存在/读取失败返回 null（视作本次尝试新建，从头读）。</summary>
-    private static LogFileSnapshot? TrySnapshot(string resolved)
+    private static LogCandidateSnapshot? SnapshotForCandidate(
+        string path,
+        IReadOnlyDictionary<string, LogCandidateSnapshot> snapshots)
+    {
+        return snapshots.TryGetValue(SnapshotKey(path), out LogCandidateSnapshot? snapshot)
+            ? snapshot
+            : null;
+    }
+
+    private static string SnapshotKey(string path)
     {
         try
         {
-            return File.Exists(resolved) ? new LogFileSnapshot(new FileInfo(resolved).Length) : null;
+            return System.IO.Path.GetFullPath(path);
         }
-        catch (Exception)
+        catch
         {
-            return null;
+            return path;
         }
     }
 
@@ -1011,10 +1091,11 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     }
 
     /// <summary>创建日志监控：文件在尝试开始前不存在（本次新建）或被轮换 → 从头读；否则从「尝试开始时长度」续读（忽略残留旧内容）。</summary>
-    private LogMonitor NewMonitor(string resolved, LogFileSnapshot? beforeStart, string modeText, bool rotated = false)
+    private LogMonitor NewMonitor(string resolved, LogCandidateSnapshot? beforeStart, string modeText, bool rotated = false)
     {
-        bool fresh = rotated || beforeStart is null;
-        var monitor = new LogMonitor(resolved, readFromStart: fresh, initialPosition: beforeStart?.Length ?? -1);
+        LogCandidateSnapshot? current = LogMonitor.CaptureSnapshot(resolved);
+        (bool fresh, long initialPosition) = LogMonitor.DecideStart(beforeStart, current);
+        var monitor = new LogMonitor(resolved, readFromStart: fresh, initialPosition: initialPosition);
         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(rotated ? "日志轮换，改监控" : "开始监控")}：{resolved}（{(fresh ? "从头" : "续读")}）");
         return monitor;
     }

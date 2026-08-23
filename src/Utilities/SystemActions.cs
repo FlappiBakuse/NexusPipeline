@@ -164,9 +164,9 @@ internal static class SystemActions
     /// excludeProcessBaseName 非空时（与 GameExe 同名的进程名，不含扩展名、忽略大小写）跳过该进程整棵子树——
     /// 脚本自启动的游戏进程即使父进程是脚本，只要进程名与游戏配置一致就视为「游戏进程」而非脚本树成员，
     /// 其生杀归游戏管理（ForceCloseGame / 失败路径按名关闭），不被脚本进程树连带清理。
-    /// 快照失败回退原 taskkill /T 全树语义（宁可不残留，日志 Warn 提示）。
+    /// 快照失败时无排除名单才允许回退 taskkill /T；带 Game 排除名单时返回未确认，避免误杀游戏。
     /// </summary>
-    public static void KillTree(int pid, string? excludeProcessBaseName = null)
+    public static ProcessCleanupResult KillTree(int pid, string? excludeProcessBaseName = null)
     {
         try
         {
@@ -174,7 +174,7 @@ internal static class SystemActions
             if (!nodes.ContainsKey(pid))
             {
                 Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
-                return;
+                return ProcessCleanupResult.Confirmed("根进程已不存在");
             }
             HashSet<int> targets = CollectTree(pid, nodes, excludeProcessBaseName);
             int killed = 0;
@@ -198,16 +198,25 @@ internal static class SystemActions
             {
                 Logger.Warn($"[警告] 进程树清理部分失败（PID {pid}，成功 {killed}/{targets.Count}）。");
             }
+            List<int> remaining = targets.Where(IsProcessAlive).ToList();
+            return remaining.Count == 0
+                ? ProcessCleanupResult.Confirmed("进程树已确认退出")
+                : ProcessCleanupResult.Unconfirmed(remaining, $"仍有 {remaining.Count} 个已知进程存活");
         }
         catch (Exception ex)
         {
+            if (!string.IsNullOrWhiteSpace(excludeProcessBaseName))
+            {
+                Logger.Warn($"[警告] 进程树快照失败（PID {pid}）：{ex.Message}；当前启用游戏排除名单，拒绝回退全树清理并标记为未确认。");
+                return ProcessCleanupResult.Unconfirmed(new[] { pid }, $"Toolhelp 快照失败且启用游戏排除名单：{ex.Message}");
+            }
             Logger.Warn($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}，回退全树清理。");
-            FallbackKillTree(pid);
+            return FallbackKillTree(pid);
         }
     }
 
     /// <summary>回退方案：taskkill /T 递归全树（快照失败时使用，不排除游戏进程）。</summary>
-    private static void FallbackKillTree(int pid)
+    private static ProcessCleanupResult FallbackKillTree(int pid)
     {
         try
         {
@@ -229,10 +238,39 @@ internal static class SystemActions
             {
                 Logger.Warn($"[警告] 进程树清理返回码 {process?.ExitCode}（PID {pid}）。");
             }
+            return IsProcessAlive(pid)
+                ? ProcessCleanupResult.Unconfirmed(new[] { pid }, "taskkill 返回后根进程仍存活")
+                : ProcessCleanupResult.Confirmed("taskkill 已确认根进程退出");
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 进程树清理失败（PID {pid}）：{ex.Message}");
+            return ProcessCleanupResult.Unconfirmed(new[] { pid }, $"taskkill 执行失败：{ex.Message}");
+        }
+    }
+
+    private static bool IsProcessAlive(int pid)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+        catch
+        {
+            return true;
         }
     }
 
@@ -448,10 +486,20 @@ internal static class SystemActions
     /// </summary>
     public static bool KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800, string? excludeProcessBaseName = null)
     {
-        KillTree(pid, excludeProcessBaseName);
+        ProcessCleanupResult cleanup = KillTree(pid, excludeProcessBaseName);
+        if (!cleanup.ConfirmedExited && string.IsNullOrWhiteSpace(excludeProcessBaseName))
+        {
+            Logger.Warn($"[警告] {display}进程树清理未确认：{cleanup.Reason}。");
+        }
+        else if (!cleanup.ConfirmedExited)
+        {
+            Logger.Warn($"[警告] {display}进程树清理未确认且启用游戏排除名单：{cleanup.Reason}。");
+            return false;
+        }
         for (int round = 1; round <= rounds; round++)
         {
-            if (!IsExeRunning(exePath))
+            bool knownRemaining = cleanup.RemainingPids.Any(IsProcessAlive);
+            if (!IsExeRunning(exePath) && !knownRemaining)
             {
                 return true;
             }
@@ -462,8 +510,9 @@ internal static class SystemActions
             {
                 Thread.Sleep(intervalMs);
             }
+            cleanup = KillTree(pid, excludeProcessBaseName);
         }
-        if (IsExeRunning(exePath))
+        if (IsExeRunning(exePath) || cleanup.RemainingPids.Any(IsProcessAlive))
         {
             Logger.Warn($"[警告] {display}进程清理后仍在运行（疑似持续自重启），请手动检查：{exePath}");
             return false;
@@ -508,9 +557,14 @@ internal static class SystemActions
     }
 
     /// <summary>取消 Windows 关机/重启倒计时（shutdown /a；无倒计时时是无害空操作，v0.6.3 取消完成操作卡片用）。</summary>
-    public static void CancelShutdown()
+    public static bool CancelShutdown()
     {
-        Run("shutdown.exe", "/a");
+        if (DryRun())
+        {
+            Logger.Info("[DRYRUN] 系统操作（已抑制执行）：shutdown.exe /a");
+            return true;
+        }
+        return Run("shutdown.exe", "/a");
     }
 
     /// <summary>测试闸门：NEXUS_SYSTEM_ACTION_DRYRUN=1 时抑制真实系统操作（e2e 在 global-setup 设置，服务进程继承）。</summary>
@@ -724,7 +778,7 @@ internal static class SystemActions
         return found;
     }
 
-    private static void Run(string file, string args)
+    private static bool Run(string file, string args)
     {
         Logger.Info($"执行系统操作：{file} {args}");
         try
@@ -738,15 +792,35 @@ internal static class SystemActions
             if (process is not null && process.ExitCode == 0)
             {
                 Logger.Info("系统操作命令已提交。");
+                return true;
             }
             else
             {
                 Logger.Warn($"[警告] 系统操作命令返回码 {process?.ExitCode}");
+                return false;
             }
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 系统操作命令执行失败：{ex.Message}");
+            return false;
         }
+    }
+}
+
+/// <summary>进程树清理的可验证结果；后续配置还原/重试只能消费 ConfirmedExited=true 的结果。</summary>
+internal sealed record ProcessCleanupResult(
+    bool ConfirmedExited,
+    IReadOnlyList<int> RemainingPids,
+    string Reason)
+{
+    public static ProcessCleanupResult Confirmed(string reason)
+    {
+        return new ProcessCleanupResult(true, Array.Empty<int>(), reason);
+    }
+
+    public static ProcessCleanupResult Unconfirmed(IEnumerable<int> remainingPids, string reason)
+    {
+        return new ProcessCleanupResult(false, remainingPids.Distinct().OrderBy(pid => pid).ToArray(), reason);
     }
 }

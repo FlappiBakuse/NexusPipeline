@@ -100,29 +100,6 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "脚本名称不能为空" }, 400).ConfigureAwait(false);
                 return;
             }
-            string? limitError;
-            lock (ctx.DataLock)
-            {
-                // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/后台线程冲突。
-                limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
-                    ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
-                    ?? Limits.CheckAttempts(script.MaxAttempts)
-                    ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
-                if (limitError is null)
-                {
-                    // v0.7.1+（KN-02）：新建一律重新生成 Id——客户端提交已存在 Id 会造成集合重复记录。
-                    script.Id = Guid.NewGuid().ToString("N");
-                    if (ctx.Scripts.Count > 0)
-                    {
-                        script.Index = ctx.Scripts.Max(item => item.Index) + 1;
-                    }
-                }
-            }
-            if (limitError is not null)
-            {
-                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
-                return;
-            }
             NormalizePaths(script);
             string? pluginError = string.IsNullOrWhiteSpace(script.PluginType) ? null : ApplyProfile(script);
             if (pluginError is not null)
@@ -141,10 +118,35 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
                 return;
             }
+            string? limitError;
             lock (ctx.DataLock)
             {
-                ctx.Scripts.Add(script);
-                DataStore.SaveScripts(ctx.Scripts);
+                // v0.9.2（#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
+                limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
+                    ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+                    ?? Limits.CheckAttempts(script.MaxAttempts)
+                    ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
+                if (limitError is null)
+                {
+                    // v0.7.1+（KN-02）：新建一律重新生成 Id。
+                    script.Id = Guid.NewGuid().ToString("N");
+                    script.Index = ctx.Scripts.Count == 0 ? 0 : ctx.Scripts.Max(item => item.Index) + 1;
+                    ctx.Scripts.Add(script);
+                    try
+                    {
+                        DataStore.SaveScripts(ctx.Scripts);
+                    }
+                    catch
+                    {
+                        ctx.Scripts.Remove(script);
+                        throw;
+                    }
+                }
+            }
+            if (limitError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = limitError }, 400).ConfigureAwait(false);
+                return;
             }
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
             await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
@@ -263,15 +265,29 @@ internal static class ApiScriptsHandler
                     $"script:{seg[1]}",
                     () =>
                     {
+                        // v0.9.2（#62）：先完成新元数据落盘，再将数据目录移入隔离区；
+                        // 元数据保存失败时不触碰用户数据，目录移动失败也保留可恢复现场。
+                        lock (ctx.DataLock)
+                        {
+                            int index = ctx.Scripts.FindIndex(script => script.Id == seg[1]);
+                            if (index >= 0)
+                            {
+                                ScriptInstance removedEntry = ctx.Scripts[index];
+                                ctx.Scripts.RemoveAt(index);
+                                try
+                                {
+                                    DataStore.SaveScripts(ctx.Scripts);
+                                }
+                                catch
+                                {
+                                    ctx.Scripts.Insert(index, removedEntry);
+                                    throw;
+                                }
+                            }
+                        }
                         if (removed is not null)
                         {
                             UserConfigManager.RemoveScriptData(seg[1]);
-                        }
-                        // v0.7.2+（KN-04）：锁内完成删除与保存，避免与并发请求/后台线程冲突。
-                        lock (ctx.DataLock)
-                        {
-                            ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
-                            DataStore.SaveScripts(ctx.Scripts);
                         }
                         lock (IconSync)
                         {

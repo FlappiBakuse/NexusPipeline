@@ -97,7 +97,7 @@
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 开发者 | 开发环境搭建、编译、测试命令、调试技巧 |
 | [docs/RELEASING.md](docs/RELEASING.md) | 维护者 | 版本发布流程（tag / release / 资产） |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | 开发者 | 版本路线与后续开发清单 |
-| [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md) | 开发者 | 已知问题台账（分版本修复） |
+| [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | 开发者 | 已知问题台账（分版本修复） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献者 | 协作规范（Issue / PR / 提交信息 / 测试流程） |
 | [SECURITY.md](SECURITY.md) | 所有人 | 安全漏洞报告与敏感信息处理 |
 | [CHANGELOG.md](CHANGELOG.md) | 所有人 | 版本历史（升级前必看） |

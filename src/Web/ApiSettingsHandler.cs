@@ -50,66 +50,78 @@ internal static class ApiSettingsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "请求体无效" }, 400).ConfigureAwait(false);
                 return;
             }
-            AppSettings current = ctx.Settings;
-            if (node is JsonObject json)
+            AppSettings candidate;
+            string secretDetail = "";
+            string? bindError = null;
+            lock (ctx.SettingsMutationLock)
             {
-                foreach (KeyValuePair<string, JsonNode?> pair in json)
+                candidate = ctx.Settings.Clone();
+                if (node is JsonObject json)
                 {
-                    string field = pair.Key;
-                    // v0.7.2+（KN-32）：空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
-                    if (string.IsNullOrEmpty(field))
+                    foreach (KeyValuePair<string, JsonNode?> pair in json)
                     {
-                        await HttpHelper.WriteJsonAsync(context, new { error = "请求体包含空字段名" }, 400).ConfigureAwait(false);
-                        return;
-                    }
-                    if (field is "secretKey" or "secretValue")
-                    {
-                        continue;
-                    }
-                    if (SecretFields.Contains(field) || ListFields.Contains(field))
-                    {
-                        continue;
-                    }
-                    JsonNode? value = pair.Value;
-                    if (value is null)
-                    {
-                        continue;
-                    }
-                    string? error = BindField(current, field, value);
-                    if (error is not null)
-                    {
-                        await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
-                        return;
+                        string field = pair.Key;
+                        // v0.7.2+（KN-32）：空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
+                        if (string.IsNullOrEmpty(field))
+                        {
+                            bindError = "请求体包含空字段名";
+                            break;
+                        }
+                        if (field is "secretKey" or "secretValue"
+                            || SecretFields.Contains(field)
+                            || ListFields.Contains(field))
+                        {
+                            continue;
+                        }
+                        JsonNode? value = pair.Value;
+                        if (value is null)
+                        {
+                            continue;
+                        }
+                        bindError = BindField(candidate, field, value);
+                        if (bindError is not null)
+                        {
+                            break;
+                        }
                     }
                 }
+                if (bindError is null && node.Get("secretKey") is not null && node.Get("secretValue") is not null)
+                {
+                    string key = node.Get("secretKey").Str();
+                    string value = node.Get("secretValue").Str();
+                    if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
+                    {
+                        if (string.IsNullOrWhiteSpace(value))
+                        {
+                            ClearSecret(candidate, key);
+                            secretDetail = $"，清除密钥 {key}";
+                        }
+                        else
+                        {
+                            SetSecret(candidate, key, value);
+                            secretDetail = $"，更新密钥 {key}";
+                        }
+                    }
+                }
+                if (bindError is null)
+                {
+                    // v0.7.4（KN-30）：allowRemoteAccess 已在上方 BindField 通用反射路径绑定。
+                    // 候选对象完成校验、密钥处理和规范化后才写盘；写盘失败时当前引用保持不变。
+                    ConfigStore.Save(candidate);
+                    ctx.ReplaceSettings(candidate);
+                }
             }
-            // v0.7.4（KN-30）：allowRemoteAccess 已在上方 BindField 通用反射路径绑定，此处不再二次绑定/二次保存。
-            ConfigStore.Save(current);
+            if (bindError is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = bindError }, 400).ConfigureAwait(false);
+                return;
+            }
+            AppSettings current = ctx.Settings;
             if (current.AllowRemoteAccess)
             {
                 FirewallRule.EnsureAllowInbound();
             }
             TaskRegistration.SyncWithSettings(current);
-            string secretDetail = "";
-            if (node.Get("secretKey") is not null && node.Get("secretValue") is not null)
-            {
-                string key = node.Get("secretKey").Str();
-                string value = node.Get("secretValue").Str();
-                if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
-                {
-                    if (string.IsNullOrWhiteSpace(value))
-                    {
-                        ClearSecret(current, key);
-                        secretDetail = $"，清除密钥 {key}";
-                    }
-                    else
-                    {
-                        SetSecret(current, key, value);
-                        secretDetail = $"，更新密钥 {key}";
-                    }
-                    ConfigStore.Save(current);
-                }
-            }
             Audit.Log(Audit.Web, "保存设置", $"WebPort={current.WebPort}，AutoStart={(current.AutoStart ? "开" : "关")}，轻量={(current.LightweightMode ? "开" : "关")}{secretDetail}");
             await HttpHelper.WriteJsonAsync(context, new { ok = true, settings = MaskedSettings(current) }).ConfigureAwait(false);
             return;
@@ -138,6 +150,16 @@ internal static class ApiSettingsHandler
             if (ctx.Center.Active.Count > 0)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "存在运行中的任务，请等待完成或取消后再重启" }, 409).ConfigureAwait(false);
+                return;
+            }
+            if (UserConfigManager.EditSessions.Count > 0)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "存在编辑配置会话，请结束后再重启" }, 409).ConfigureAwait(false);
+                return;
+            }
+            if (ctx.Center.CurrentSystemAction is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "存在待执行的系统操作，请完成或取消后再重启" }, 409).ConfigureAwait(false);
                 return;
             }
             int newPort = ctx.Settings.WebPort;

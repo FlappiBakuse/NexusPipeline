@@ -67,6 +67,9 @@ internal class RuntimeContext
     /// <see cref="SnapshotScripts"/> / <see cref="SnapshotQueues"/> 或在锁内枚举，避免「集合已修改」/越界异常。</summary>
     internal readonly object DataLock = new();
 
+    /// <summary>设置 clone-on-write 事务锁；保存成功前不发布候选引用。</summary>
+    internal readonly object SettingsMutationLock = new();
+
     public List<ScriptInstance> Scripts { get; private set; } = new();
 
     public List<DispatchQueue> Queues { get; private set; } = new();
@@ -93,7 +96,15 @@ internal class RuntimeContext
 
     public void ReloadSettings()
     {
-        Settings = ConfigStore.Load();
+        lock (SettingsMutationLock)
+        {
+            Settings = ConfigStore.Load();
+        }
+    }
+
+    internal void ReplaceSettings(AppSettings settings)
+    {
+        Settings = settings;
     }
 
     public void ReloadData()

@@ -151,20 +151,27 @@ internal static class ConfigSwapPaths
         }
     }
 
-    /// <summary>删除脚本时清理其全部数据目录。</summary>
-    public static void RemoveScriptData(string scriptId)
+    /// <summary>删除脚本时将其全部数据目录移入应用根目录下的隔离区，保留人工恢复机会。</summary>
+    public static bool RemoveScriptData(string scriptId)
     {
         string dir = Path.Combine(AppPaths.DataDir, scriptId);
         try
         {
-            if (Directory.Exists(dir))
+            if (!Directory.Exists(dir))
             {
-                Directory.Delete(dir, recursive: true);
+                return true;
             }
+            string trashRoot = Path.Combine(AppPaths.AppRoot, "data-trash");
+            Directory.CreateDirectory(trashRoot);
+            string target = Path.Combine(trashRoot, $"{scriptId}-{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}");
+            Directory.Move(dir, target);
+            Logger.Info($"脚本数据目录已移入隔离区：{target}");
+            return true;
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[警告] 清理脚本数据目录失败（{dir}）：{ex.Message}");
+            Logger.Warn($"[警告] 隔离脚本数据目录失败（{dir}，原数据保留）：{ex.Message}");
+            return false;
         }
     }
 

@@ -29,27 +29,33 @@ internal sealed class SystemActionExecutor
     /// <summary>取消待执行系统操作：sleep/reboot/shutdown 可取消，exit 保持立即退出语义。</summary>
     public bool Cancel(string source = Audit.Web)
     {
-        if (!_state.TryCancelPending(out PendingSystemAction? pending) || pending is null)
+        if (!_state.TryBeginCancelPending(out PendingSystemAction? pending) || pending is null)
         {
             return false;
         }
 
         string action = pending.Action;
         string queueName = pending.QueueName;
+        bool osCancelSucceeded = false;
         try
         {
             pending.Cts.Cancel();
             if (action is "reboot" or "shutdown")
             {
-                SystemActions.CancelShutdown();
+                if (!SystemActions.CancelShutdown())
+                {
+                    throw new InvalidOperationException("OS 取消关机/重启命令返回失败");
+                }
             }
+            osCancelSucceeded = true;
         }
         catch (Exception ex)
         {
             Logger.Warn($"[警告] 取消系统操作「{action}」失败：{ex.Message}");
         }
-        Audit.Log(source, "取消系统操作", $"{action}（{queueName}）");
-        return true;
+        bool cleared = _state.CompleteCancelPending(pending, osCancelSucceeded);
+        Audit.Log(source, cleared ? "取消系统操作" : "取消系统操作失败", $"{action}（{queueName}）");
+        return cleared;
     }
 
     /// <summary>

@@ -11,42 +11,49 @@ internal static class LogPattern
     /// 规则：已存在目录 → 目录内最新文件（旧配置兼容）；无占位符无通配 → 精确文件；含占位符 → 替换为当天日期后精确匹配；含 * → 目录内通配取最新修改。</summary>
     public static string? ResolveFile(string pattern)
     {
+        return ResolveFiles(pattern)
+            .OrderByDescending(path =>
+            {
+                try { return File.GetLastWriteTime(path); }
+                catch { return DateTime.MinValue; }
+            })
+            .FirstOrDefault();
+    }
+
+    /// <summary>返回本次格式能匹配的全部候选文件，供一次 Attempt 开始时建立路径/FileId 快照。</summary>
+    public static IReadOnlyList<string> ResolveFiles(string pattern)
+    {
         if (string.IsNullOrWhiteSpace(pattern))
         {
-            return null;
+            return Array.Empty<string>();
         }
         try
         {
             string path = pattern.Trim();
             if (Directory.Exists(path))
             {
-                return Directory.GetFiles(path)
-                    .OrderByDescending(File.GetLastWriteTime)
-                    .FirstOrDefault();
+                return Directory.GetFiles(path);
             }
             string? expanded = ExpandDateTokens(path);
             if (expanded is null)
             {
                 Logger.Warn($"[日志格式] 路径格式含非法日期占位符，按无匹配处理：{path}");
-                return null;
+                return Array.Empty<string>();
             }
             if (expanded.IndexOf('*') < 0)
             {
-                return File.Exists(expanded) ? expanded : null;
+                return File.Exists(expanded) ? new[] { expanded } : Array.Empty<string>();
             }
             string dir = Path.GetDirectoryName(expanded) ?? "";
             string name = Path.GetFileName(expanded);
-            if (!Directory.Exists(dir))
-            {
-                return null;
-            }
-            string[] matches = Directory.GetFiles(dir, name);
-            return matches.OrderByDescending(File.GetLastWriteTime).FirstOrDefault();
+            return !Directory.Exists(dir)
+                ? Array.Empty<string>()
+                : Directory.GetFiles(dir, name);
         }
         catch (Exception ex)
         {
             Logger.Warn($"[日志格式] 解析「{pattern}」异常：{ex.Message}");
-            return null;
+            return Array.Empty<string>();
         }
     }
 

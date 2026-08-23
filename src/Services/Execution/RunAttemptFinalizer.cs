@@ -25,15 +25,15 @@ internal sealed class RunAttemptFinalizer
             || (result.Status == "cancelled" && forceCloseGame);
     }
 
-    public void KillScript(Process? process, string launchExe, string? excludeGame)
+    public bool KillScript(Process? process, string launchExe, string? excludeGame)
     {
         if (process is null)
         {
-            return;
+            return true;
         }
         // 进程树清理 + 轮询按名强杀直至确认退出，处理被杀后自重启的脚本；
         // 与 GameExe 同名的进程树由游戏清理逻辑负责。
-        SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
+        return SystemActions.KillAndConfirmExited(process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
     }
 
     public async Task CleanupGameAsync(RunAttemptResult result, int attemptNumber, int maxAttempts)

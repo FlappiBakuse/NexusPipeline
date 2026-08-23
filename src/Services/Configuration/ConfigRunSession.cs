@@ -19,6 +19,10 @@ internal sealed class ConfigRunSession
 
     private readonly ConfigurationTransaction _transaction;
     private readonly bool _hasJudgeScript;
+    private readonly object _finalizationGate = new();
+    private bool _processCleanupConfirmed = true;
+    private bool _finalizationCompleted;
+    private string? _finalizationError;
 
     public ConfigRunSession(string scriptId, string? userName, string configPath, bool hasJudgeScript)
     {
@@ -27,6 +31,8 @@ internal sealed class ConfigRunSession
     }
 
     public bool IsPrepared => _transaction.IsPrepared;
+
+    public bool ProcessCleanupConfirmed => _processCleanupConfirmed;
 
     public string ScriptDir => _transaction.ScriptDir;
 
@@ -54,6 +60,13 @@ internal sealed class ConfigRunSession
     public void ApplyReplacements(List<string> replacements)
     {
         _transaction.ApplyReplacements(replacements);
+    }
+
+    /// <summary>进程树未能确认退出时锁住配置收尾，保留现场供恢复，而不是继续覆盖/还原文件。</summary>
+    public void MarkProcessCleanupUnconfirmed(string reason)
+    {
+        _processCleanupConfirmed = false;
+        Logger.Error($"[错误] 脚本「{_transaction.ScriptId}」进程清理未确认，已阻断配置替换/还原：{reason}");
     }
 
     /// <summary>唯一权威的运行收尾顺序；顺序由测试保护，业务调用者不再手工拼接。</summary>
@@ -87,32 +100,50 @@ internal sealed class ConfigRunSession
     /// <summary>执行收尾并返回配置交换还原错误；同步失败由现有门面记录警告，不阻断后续还原。</summary>
     public string? FinalizeRun(bool autoUpdateConfig)
     {
-        string? restoreError = null;
-        foreach (FinalizationStep step in GetFinalizationOrder(autoUpdateConfig))
+        lock (_finalizationGate)
         {
-            switch (step)
+            if (_finalizationCompleted)
             {
-                case FinalizationStep.Sync:
-                    try
-                    {
-                        SyncToStore(firstCheck: false);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[配置] 脚本「{_transaction.ScriptId}」自动更新同步失败：{ex.Message}");
-                    }
-                    break;
-                case FinalizationStep.RestoreReplacements:
-                    _transaction.RestoreReplacements();
-                    break;
-                case FinalizationStep.CleanupScriptArea:
-                    _transaction.CleanupScriptArea();
-                    break;
-                case FinalizationStep.RestoreConfig:
-                    restoreError = _transaction.Restore();
-                    break;
+                return _finalizationError;
             }
+
+            if (!_processCleanupConfirmed)
+            {
+                _finalizationError = "脚本进程树未确认退出，已保留配置交换现场供恢复";
+                _finalizationCompleted = true;
+                return _finalizationError;
+            }
+
+            string? restoreError = null;
+            foreach (FinalizationStep step in GetFinalizationOrder(autoUpdateConfig))
+            {
+                switch (step)
+                {
+                    case FinalizationStep.Sync:
+                        try
+                        {
+                            SyncToStore(firstCheck: false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[配置] 脚本「{_transaction.ScriptId}」自动更新同步失败：{ex.Message}");
+                        }
+                        break;
+                    case FinalizationStep.RestoreReplacements:
+                        _transaction.RestoreReplacements();
+                        break;
+                    case FinalizationStep.CleanupScriptArea:
+                        _transaction.CleanupScriptArea();
+                        break;
+                    case FinalizationStep.RestoreConfig:
+                        restoreError = _transaction.Restore();
+                        break;
+                }
+            }
+
+            _finalizationError = restoreError;
+            _finalizationCompleted = true;
+            return _finalizationError;
         }
-        return restoreError;
     }
 }

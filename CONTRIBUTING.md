@@ -5,7 +5,7 @@
 - 版本发布（tag / release / 资产）见 [docs/RELEASING.md](docs/RELEASING.md)；
 - 开发环境搭建与调试见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 版本路线与后续开发清单见 [docs/ROADMAP.md](docs/ROADMAP.md)；
-- 已知问题台账见 [docs/KNOWN-ISSUES.md](docs/KNOWN-ISSUES.md)；
+- 已知问题台账见 [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)；
 - 安全漏洞报告见 [SECURITY.md](SECURITY.md)。
 
 ## 目录

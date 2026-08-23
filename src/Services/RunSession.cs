@@ -27,6 +27,7 @@ internal class RunSession
     protected List<string>? _pendingReplaceConfigs;
     protected ConfigRunSession? _configRun;
     protected bool _firstSyncDone;
+    protected bool _preRunCompletedSuccessfully;
 
     protected RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
@@ -64,6 +65,7 @@ internal class RunSession
     internal List<string>? PendingReplaceConfigs { get => _pendingReplaceConfigs; set => _pendingReplaceConfigs = value; }
     internal ConfigRunSession? ConfigRun { get => _configRun; set => _configRun = value; }
     internal bool FirstSyncDone { get => _firstSyncDone; set => _firstSyncDone = value; }
+    internal bool PreRunCompletedSuccessfully { get => _preRunCompletedSuccessfully; set => _preRunCompletedSuccessfully = value; }
     internal Action<string>? StatusChanged => _statusChanged;
     internal Action<string>? LogLine => _logLine;
 

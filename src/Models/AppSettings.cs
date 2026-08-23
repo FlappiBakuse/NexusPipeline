@@ -1,5 +1,7 @@
 namespace NexusPipeline.Models;
 
+using System.Text.Json;
+
 public class AppSettings
 {
     public bool AutoStart { get; set; }
@@ -65,4 +67,10 @@ public class AppSettings
 
     /// <summary>显式禁用的外部插件列表（持久化；删除后该插件重新默认启用）。</summary>
     public List<string> DisabledPlugins { get; set; } = new();
+
+    /// <summary>生成与当前设置完全脱钩的候选对象，供设置 PUT 的 clone-on-write 事务使用。</summary>
+    public AppSettings Clone()
+    {
+        return JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(this)) ?? new AppSettings();
+    }
 }

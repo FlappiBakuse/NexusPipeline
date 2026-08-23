@@ -68,6 +68,39 @@ internal class LogMonitor : IDisposable
 
     public DateTime LastWrite { get; private set; } = DateTime.Now;
 
+    internal static LogCandidateSnapshot? CaptureSnapshot(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            (uint vol, uint hi, uint lo, bool ok) = QueryFileId(stream.SafeFileHandle);
+            string identity = ok
+                ? $"fileid:{vol:x8}:{hi:x8}:{lo:x8}"
+                : $"stamp:{File.GetCreationTimeUtc(path).Ticks:x16}";
+            return new LogCandidateSnapshot(stream.Length, identity);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>按 Attempt 开始快照决定候选文件读取起点：原文件续读，新建/替换文件从头读。</summary>
+    internal static (bool ReadFromStart, long InitialPosition) DecideStart(
+        LogCandidateSnapshot? beforeAttempt,
+        LogCandidateSnapshot? current)
+    {
+        if (beforeAttempt is null || current is null || !string.Equals(beforeAttempt.Identity, current.Identity, StringComparison.Ordinal))
+        {
+            return (true, 0);
+        }
+        return (false, Math.Min(beforeAttempt.Length, current.Length));
+    }
+
     /// <summary>重新打开并从文件头读取（文件被重建/截断后使用）。</summary>
     public void ReopenFromStart()
     {
@@ -215,3 +248,5 @@ internal class LogMonitor : IDisposable
         _stream = null;
     }
 }
+
+internal sealed record LogCandidateSnapshot(long Length, string Identity);

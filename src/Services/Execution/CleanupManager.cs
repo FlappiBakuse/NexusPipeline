@@ -17,9 +17,9 @@ internal sealed class CleanupManager
         _finalizer = new RunAttemptFinalizer(script, modeText);
     }
 
-    public void KillScript(Process? process, string launchExe, string? excludeGame)
+    public bool KillScript(Process? process, string launchExe, string? excludeGame)
     {
-        _finalizer.KillScript(process, launchExe, excludeGame);
+        return _finalizer.KillScript(process, launchExe, excludeGame);
     }
 
     public Task CleanupGameAsync(RunAttemptResult result, int attemptNumber, int maxAttempts)

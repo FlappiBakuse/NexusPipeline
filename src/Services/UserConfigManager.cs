@@ -490,9 +490,9 @@ internal static class UserConfigManager
     }
 
     /// <summary>删除脚本时清理其全部数据目录。</summary>
-    public static void RemoveScriptData(string scriptId)
+    public static bool RemoveScriptData(string scriptId)
     {
-        ConfigSwapPaths.RemoveScriptData(scriptId);
+        return ConfigSwapPaths.RemoveScriptData(scriptId);
     }
 
     /// <summary>删除用户时清理其数据目录。</summary>

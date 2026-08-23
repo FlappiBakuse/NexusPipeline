@@ -47,13 +47,6 @@ internal sealed class ExecutionRunner
             {
                 exec.Status = "done";
             }
-            if (script.NotifyEnabled)
-            {
-                foreach (RunRecord record in records)
-                {
-                    await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
-                }
-            }
         }
         catch (Exception ex)
         {
@@ -97,9 +90,11 @@ internal sealed class ExecutionRunner
                 exec.Status = "cancelled";
                 break;
             }
+            ExecutionCoordinator? session = null;
+            RunRecord record;
             try
             {
-                var session = new ExecutionCoordinator(
+                session = new ExecutionCoordinator(
                     script, exec.Mode, queueId, queueName, runUser,
                     exec.Cts.Token,
                     (attempt, max) =>
@@ -112,19 +107,91 @@ internal sealed class ExecutionRunner
                     _users,
                     _emulator);
 
-                RunRecord record = await session.RunAsync().ConfigureAwait(false);
-                records.Add(record);
-                exec.AddRecordAndIncrement(record);
-                exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
-                Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
-                _history.Save(record, session.AttemptLogs);
+                try
+                {
+                    record = await session.RunAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Coordinator 异常也必须形成可查询的失败历史，并继续队列后续任务。
+                    record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser, ex);
+                    Logger.Error($"[错误] 脚本「{displayName}」协调器异常，已生成失败历史并继续：{ex}");
+                }
             }
             finally
             {
                 gate.Release();
             }
+
+            if (string.IsNullOrWhiteSpace(record.FinalStatus))
+            {
+                record.FinalStatus = record.Status == "success" ? "success" : record.Status;
+            }
+            records.Add(record);
+            exec.AddRecordAndIncrement(record);
+            exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
+            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
+            try
+            {
+                _history.Save(record, session?.AttemptLogs ?? new List<string>());
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 保存脚本「{displayName}」运行历史时发生异常：{ex.Message}");
+            }
+            if (script.NotifyEnabled)
+            {
+                try
+                {
+                    // 脚本级通知与队列级汇总通知相互独立，按每个用户完成立即发送。
+                    await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[通知] 脚本「{displayName}」通知发送异常：{ex.Message}");
+                }
+            }
         }
         return records;
+    }
+
+    internal static RunRecord CreateHostErrorRecord(
+        ScriptInstance script,
+        string mode,
+        string queueId,
+        string queueName,
+        string? userName,
+        Exception exception)
+    {
+        DateTime now = DateTime.Now;
+        string reason = $"宿主协调器异常：{exception.Message}";
+        return new RunRecord
+        {
+            ScriptInstanceId = script.Id,
+            ScriptName = script.Name,
+            QueueId = queueId,
+            QueueName = queueName,
+            Mode = mode,
+            UserName = userName ?? "",
+            StartTime = now,
+            EndTime = now,
+            Attempts = 1,
+            MaxAttempts = Math.Max(1, script.MaxAttempts),
+            Status = "failed",
+            FinalStatus = "failed",
+            ResultDetail = reason,
+            AttemptDetails = new List<RunAttempt>
+            {
+                new()
+                {
+                    Number = 1,
+                    StartTime = now,
+                    EndTime = now,
+                    Status = "failed",
+                    Reason = reason,
+                },
+            },
+        };
     }
 
     public async Task RunQueueAsync(RunningExecution exec, QueueExecutionPlan plan)
@@ -159,6 +226,7 @@ internal sealed class ExecutionRunner
                         StartTime = DateTime.Now,
                         EndTime = DateTime.Now,
                         Status = "failed",
+                        FinalStatus = "failed",
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
                     records.Add(missing);
@@ -184,6 +252,7 @@ internal sealed class ExecutionRunner
                         StartTime = DateTime.Now,
                         EndTime = DateTime.Now,
                         Status = "failed",
+                        FinalStatus = "failed",
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
                     records.Add(skipped);
@@ -205,19 +274,6 @@ internal sealed class ExecutionRunner
             if (queue.NotifyEnabled)
             {
                 await _notifications.NotifyQueueAsync(queue, records).ConfigureAwait(false);
-            }
-            else
-            {
-                foreach (RunRecord record in records)
-                {
-                    ScriptInstance? script = tasks
-                        .FirstOrDefault(item => item.Task.ScriptInstanceId == record.ScriptInstanceId)
-                        ?.Script;
-                    if (script is not null && script.NotifyEnabled)
-                    {
-                        await _notifications.NotifyScriptAsync(script, record).ConfigureAwait(false);
-                    }
-                }
             }
 
             if (!anyCancelled)

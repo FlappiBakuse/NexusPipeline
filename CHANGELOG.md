@@ -2,6 +2,29 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.2（Pre-release）
+
+### 正确性与安全性加固
+
+- 统一 PreRun、Main、Judge、PostRun 的 Attempt 与最终收尾语义，确保前置失败、提前成功、致命结束和 PostRun 失败都能保留正确的最终结果与原因。
+- 收敛配置准备、交换、替换和还原的事务边界；补齐异常路径 History、synthetic record 的 `FinalStatus`、脚本级完成通知和 `FinalizeRun()` 重复调用幂等性。
+- 加固 SystemAction 取消状态机、重启门禁、Settings 克隆写入、脚本与队列提交/删除隔离，以及 Scheduler 瞬时资源冲突的重试语义。
+- 加固进程树清理与收尾屏障，区分远程 ADB 与本机模拟器控制，并在 ADB 取消时回收子进程。
+- 修正通配符/目录日志轮换的候选文件快照，避免旧日志内容进入当前 Attempt。
+
+### 文档与测试
+
+- 完成 v0.9.2 回归保护，回归测试文件统一命名为 `RegressionTests.cs`。
+- 将已知问题台账统一为 `KNOWN_ISSUES.md`，移除过时的 v0.6/v0.7 历史评估归档，并将 ROADMAP 收敛为后续版本计划。
+
+### 验证
+
+- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.2），仅保留基线已有的 3 条 nullable 警告。
+- 单元测试通过：178/178。
+- 加速档全量 Playwright：87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 发布前真实计时档：Playwright 87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- `node --check` 与 `git diff --check` 通过。
+
 ## v0.9.1（Pre-release）
 
 ### 并行调度安全性加固
@@ -121,7 +144,7 @@
 ### 项目与文档治理
 
 - 统一框架依赖单文件发布、队列全局串行和文档单一事实源表述。
-- 将历史全面评估报告归档至 `docs/archive/`，收敛 README、设计、架构、开发、贡献、发布和路线文档职责。
+- 完成历史评估内容收尾，收敛 README、设计、架构、开发、贡献、发布和路线文档职责。
 - 将测试目录整理为 `tests/NexusPipeline.Tests/` 与 `tests/e2e/`，同步构建、CI、测试隔离和文档路径。
 - 增加 `SECURITY.md`、Issue/PR 模板、Dependabot、`.editorconfig`、`.gitattributes` 和 CI 最小权限声明。
 - 测试数量与断言数量集中记录在本版本验证结果、后续 Release Notes 和 CI 产物中。
@@ -294,7 +317,7 @@
 - **KN-77 自动更新配置收尾同步内容有效性守护（数据风险）**：此前收尾同步对单文件 config 只查「非空」——脚本被取消/超时强杀瞬间正在写配置（半写/损坏 JSON）时，坏内容直接被镜像进用户快照 store 永久污染，下次运行脚本解析失败。现新增：
   - **JSON 型内容有效性探测**（`ConfigSwapSession.ValidForSync` → `ContentValidForSync`/`JsonContentValid`）：`.json` 扩展名或内容以 `{`/`[` 开头的文件必须可解析，0 字节 `.json` = 半写坏态，非 JSON 文本不校验，单文件 32MB 上限跳过探测；探测失败 → 跳过整个同步（宁可保留旧快照也不入库坏态）；
   - **收尾同步同样执行稳定性双采样**（此前仅首次检测）：外部守护进程仍在写配置时跳过本次回写，保留旧快照。
-- **文档全面对齐 v0.7.6**：KNOWN-ISSUES 台账移除全部已修复项（仅留未修复 KN-09/73-76/78/79/82/83 与语义保留 KN-80/81）；ROADMAP 基线更新 v0.7.6 并删除已发布详章；DESIGN 新增「自动更新配置」说明（4.5 节）；README/ARCHITECTURE/DEVELOPMENT/ASSESSMENT 同步 v0.7.6 语义；FLAKE-LEDGER 补本次回归记录。
+- **文档全面对齐 v0.7.6**：KNOWN_ISSUES 台账移除全部已修复项（仅留未修复 KN-09/73-76/78/79/82/83 与语义保留 KN-80/81）；ROADMAP 基线更新 v0.7.6 并删除已发布详章；DESIGN 新增「自动更新配置」说明（4.5 节）；README/ARCHITECTURE/DEVELOPMENT/ASSESSMENT 同步 v0.7.6 语义；FLAKE-LEDGER 补本次回归记录。
 
 ### 测试
 
@@ -515,7 +538,7 @@
 
 ### 变更
 
-- 文档体系重组：README 大众化重写（面向普通用户，快速上手以专项插件为例）、CONTRIBUTING 大幅扩充、docs/DEVELOPMENT 重构为开发环境指南、新增 docs/RELEASING（发布流程）与 docs/KNOWN-ISSUES（已知问题台账）、开发清单入库 docs/ROADMAP、ci.yml 混合编码修复为 UTF-8、DESIGN/ARCHITECTURE 过时内容修正。
+- 文档体系重组：README 大众化重写（面向普通用户，快速上手以专项插件为例）、CONTRIBUTING 大幅扩充、docs/DEVELOPMENT 重构为开发环境指南、新增 docs/RELEASING（发布流程）与 docs/KNOWN_ISSUES（已知问题台账）、开发清单入库 docs/ROADMAP、ci.yml 混合编码修复为 UTF-8、DESIGN/ARCHITECTURE 过时内容修正。
 - 长时脚本卡片取消 accent 底色高亮（仅保留「长时」徽章，用户决策）。
 
 ### 测试

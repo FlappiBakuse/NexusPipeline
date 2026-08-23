@@ -60,15 +60,9 @@ internal static class ApiHistoryHandler
                 || context.Request.QueryString["full"] == "1";
             string fullAttempt = context.Request.QueryString["attempt"] ?? "";
             var attemptLogs = new List<object>();
-            bool legacyFallback = false;
             foreach (RunAttempt attempt in record.AttemptDetails)
             {
                 var log = RuntimeContext.Instance.History.ReadScriptLog(record, attempt.Number);
-                if (log is null && string.IsNullOrWhiteSpace(attempt.LogFile))
-                {
-                    legacyFallback = true;
-                    break;
-                }
                 attemptLogs.Add(new
                 {
                     number = attempt.Number,
@@ -79,24 +73,10 @@ internal static class ApiHistoryHandler
                         : null,
                 });
             }
-            object? legacyLog = null;
-            if (legacyFallback)
-            {
-                var log = RuntimeContext.Instance.History.ReadLegacyScriptLog(record);
-                legacyLog = new
-                {
-                    logTail = log is null ? null : TextRules.TakeTail(log.Value.LogText, 200),
-                    logTotalLines = log?.TotalLines ?? 0,
-                    logText = includeFull && (string.IsNullOrWhiteSpace(fullAttempt) || fullAttempt.Equals("legacy", StringComparison.OrdinalIgnoreCase))
-                        ? log?.LogText
-                        : null,
-                };
-            }
             await HttpHelper.WriteJsonAsync(context, new
             {
                 record,
                 attemptLogs,
-                legacyLog,
             }).ConfigureAwait(false);
             return;
         }

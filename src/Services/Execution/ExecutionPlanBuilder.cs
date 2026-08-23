@@ -109,8 +109,9 @@ internal sealed class ExecutionPlanBuilder
             task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script));
         if (blocked?.Script is not null)
         {
-            throw new InvalidOperationException(
-                $"队列「{queue.Name}」引用的脚本「{blocked.Script.Name}」正在运行，请先退出后再执行");
+            throw new ExecutionAdmissionException(new ExecutionAdmissionFailure(
+                ExecutionAdmissionFailureCode.ProcessConflict,
+                $"队列「{queue.Name}」引用的脚本「{blocked.Script.Name}」正在运行，请先退出后再执行"));
         }
 
         DispatchQueue queueSnapshot = queue.Clone();

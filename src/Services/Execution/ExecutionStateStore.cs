@@ -244,8 +244,8 @@ internal sealed class ExecutionStateStore
         Release(exec, null);
     }
 
-    /// <summary>取消可取消的 pending 系统操作，并清除尚未执行的完成意图。</summary>
-    public bool TryCancelPending(out PendingSystemAction? pending)
+    /// <summary>将可取消的 pending 系统操作转入 Cancelling；OS 副作用在锁外执行。</summary>
+    public bool TryBeginCancelPending(out PendingSystemAction? pending)
     {
         lock (_sync)
         {
@@ -255,11 +255,40 @@ internal sealed class ExecutionStateStore
                 pending = null;
                 return false;
             }
+            _groupState = ExecutionGroupState.Cancelling;
+            return true;
+        }
+    }
+
+    /// <summary>提交 pending 取消结果；只有 OS 取消成功才释放 pending 与准入门禁。</summary>
+    public bool CompleteCancelPending(PendingSystemAction pending, bool osCancelSucceeded)
+    {
+        lock (_sync)
+        {
+            if (!ReferenceEquals(_pendingSystemAction, pending) || pending.Action == "exit")
+            {
+                return false;
+            }
+            if (!osCancelSucceeded)
+            {
+                _groupState = ExecutionGroupState.Cancelling;
+                return false;
+            }
             _pendingSystemAction = null;
             _completionIntents.Clear();
             _groupState = ExecutionGroupState.Open;
             return true;
         }
+    }
+
+    /// <summary>兼容旧内部调用方：取消动作已由新状态机完成后再提供原子成功语义。</summary>
+    public bool TryCancelPending(out PendingSystemAction? pending)
+    {
+        if (!TryBeginCancelPending(out pending) || pending is null)
+        {
+            return false;
+        }
+        return CompleteCancelPending(pending, osCancelSucceeded: true);
     }
 
     /// <summary>
@@ -389,6 +418,7 @@ internal enum ExecutionGroupState
     Open,
     Closing,
     ActionPending,
+    Cancelling,
 }
 
 internal sealed record ExecutionLeaseReference(

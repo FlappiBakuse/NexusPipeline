@@ -38,7 +38,7 @@ dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # CI
 
 ## Git 协作规范（强制）
 
-- 版本开发清单与开工备份见 `docs/ROADMAP.md`；已知问题台账见 `docs/KNOWN-ISSUES.md`；发布流程见 `docs/RELEASING.md`；公开协作流程见 `CONTRIBUTING.md`。
+- 版本开发清单与开工备份见 `docs/ROADMAP.md`；已知问题台账见 `docs/KNOWN_ISSUES.md`；发布流程见 `docs/RELEASING.md`；公开协作流程见 `CONTRIBUTING.md`。
 - Workspace 根目录 `AGENTS.md` 是版本发布权、版本边界和主分支策略的最高优先级规则；项目级约束不得覆盖它。
 - 分支命名、Conventional Commits、PR 内容与测试要求以 `CONTRIBUTING.md` 为准；资产和 SHA 规则以 `docs/RELEASING.md` 为准。
 

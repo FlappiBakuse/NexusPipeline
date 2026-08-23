@@ -52,7 +52,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过宿主内置契约接口（`IPlugin` / `INotifyChannel` / `PluginContext`）交互**；跨模块的 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录，见 KNOWN-ISSUES.md KN-49）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复仍保留 `RuntimeContext` 查找脚本，属于启动/恢复兼容路径。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。新服务不得新增这类依赖。
+- **已知偏差（如实记录，见 KNOWN_ISSUES.md KN-49）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复仍保留 `RuntimeContext` 查找脚本，属于启动/恢复兼容路径。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。新服务不得新增这类依赖。
 
 ### 关键类职责
 

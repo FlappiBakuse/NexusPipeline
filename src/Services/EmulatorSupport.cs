@@ -48,6 +48,25 @@ internal static class EmulatorSupport
         return null;
     }
 
+    /// <summary>只有回环 ADB 端点才允许探测并调用本机 MuMuManager；远程地址始终走 adb 协议。</summary>
+    public static bool IsLoopbackAdbEndpoint(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address) || ParseAdbPort(address) is null)
+        {
+            return false;
+        }
+        string trimmed = address.Trim();
+        int colon = trimmed.LastIndexOf(':');
+        string host = colon > 0 ? trimmed[..colon].Trim() : "";
+        if (host.StartsWith("[", StringComparison.Ordinal) && host.EndsWith("]", StringComparison.Ordinal))
+        {
+            host = host[1..^1];
+        }
+        return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || host.Equals("127.0.0.1", StringComparison.Ordinal)
+            || host.Equals("::1", StringComparison.Ordinal);
+    }
+
     /// <summary>解析 am start 参数中的目标包名（-n 包名/Activity 或 -n 包名）；找不到返回 null。</summary>
     public static string? ParseAmStartPackage(string args)
     {
@@ -325,7 +344,7 @@ internal static class EmulatorSupport
     /// </summary>
     public static async Task<(bool Ok, string Message)> ShutdownEmulatorAsync(string adbExe, string address, CancellationToken token)
     {
-        if (ParseAdbPort(address) is int port)
+        if (IsLoopbackAdbEndpoint(address) && ParseAdbPort(address) is int port)
         {
             string? mm = ResolveMuMuManager();
             if (mm is not null)
@@ -441,17 +460,41 @@ internal static class EmulatorSupport
             Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
             Task exitTask = proc.WaitForExitAsync(token);
             Task timeoutTask = Task.Delay(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)));
-            Task completed = await Task.WhenAny(exitTask, timeoutTask).ConfigureAwait(false);
-            if (completed == timeoutTask)
+            try
             {
-                TryKill(proc);
-                return (false, $"命令执行超时（{timeoutSeconds} 秒）");
+                Task completed = await Task.WhenAny(exitTask, timeoutTask).ConfigureAwait(false);
+                if (completed == timeoutTask)
+                {
+                    TryKill(proc);
+                    await ObserveOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                    return (false, $"命令执行超时（{timeoutSeconds} 秒）");
+                }
+                await exitTask.ConfigureAwait(false);
+                string stdout = await stdoutTask.ConfigureAwait(false);
+                string stderr = await stderrTask.ConfigureAwait(false);
+                string output = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\n{stderr}".Trim();
+                return (proc.ExitCode == 0, output);
             }
-            await exitTask.ConfigureAwait(false);
-            string stdout = await stdoutTask.ConfigureAwait(false);
-            string stderr = await stderrTask.ConfigureAwait(false);
-            string output = string.IsNullOrWhiteSpace(stderr) ? stdout : $"{stdout}\n{stderr}".Trim();
-            return (proc.ExitCode == 0, output);
+            catch (OperationCanceledException)
+            {
+                // WaitForExitAsync(token) 抛出时必须同时结束外部命令并观察两个输出任务，
+                // 否则 adb 子进程与重定向管道会遗留，下一次运行可能卡在旧命令上。
+                TryKill(proc);
+                await ObserveOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                throw;
+            }
+        }
+    }
+
+    private static async Task ObserveOutputAsync(Task<string> stdoutTask, Task<string> stderrTask)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+        }
+        catch
+        {
+            // 命令已被终止；读取任务的异常已被观察，保留原始超时/取消结果。
         }
     }
 
