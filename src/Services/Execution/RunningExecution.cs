@@ -7,11 +7,7 @@ internal sealed class RunningExecution
 {
     private readonly object _stateSync = new();
 
-    private readonly object _logSync = new();
-
     private readonly List<string> _logLines = new();
-
-    private readonly object _recordsSync = new();
 
     private string _status = "running";
 
@@ -183,15 +179,24 @@ internal sealed class RunningExecution
 
     public void AddRecord(RunRecord record)
     {
-        lock (_recordsSync)
+        lock (_stateSync)
         {
             Records.Add(record);
         }
     }
 
+    public void AddRecordAndIncrement(RunRecord record)
+    {
+        lock (_stateSync)
+        {
+            Records.Add(record);
+            _doneTasks++;
+        }
+    }
+
     public List<RunRecord> SnapshotRecords()
     {
-        lock (_recordsSync)
+        lock (_stateSync)
         {
             return Records.Select(record => record.Clone()).ToList();
         }
@@ -203,7 +208,7 @@ internal sealed class RunningExecution
         {
             return;
         }
-        lock (_logSync)
+        lock (_stateSync)
         {
             _logLines.Add(line);
             if (_logLines.Count > 100)
@@ -215,7 +220,7 @@ internal sealed class RunningExecution
 
     public List<string> LogTail(int max = 60)
     {
-        lock (_logSync)
+        lock (_stateSync)
         {
             return _logLines.TakeLast(max).ToList();
         }
@@ -240,27 +245,27 @@ internal sealed class RunningExecution
             currentStatus = _currentStatus;
             currentAttempt = _currentAttempt;
             currentMaxAttempts = _currentMaxAttempts;
-        }
 
-        return new RunningExecutionSnapshot
-        {
-            Id = Id,
-            Kind = Kind,
-            TargetId = TargetId,
-            TargetName = TargetName,
-            Mode = Mode,
-            Status = status,
-            StartedAt = StartedAt,
-            FinishedAt = finishedAt,
-            TotalTasks = TotalTasks,
-            DoneTasks = doneTasks,
-            CurrentScriptName = currentScriptName,
-            CurrentStatus = currentStatus,
-            CurrentAttempt = currentAttempt,
-            CurrentMaxAttempts = currentMaxAttempts,
-            Records = SnapshotRecords(),
-            LogTail = LogTail(60),
-        };
+            return new RunningExecutionSnapshot
+            {
+                Id = Id,
+                Kind = Kind,
+                TargetId = TargetId,
+                TargetName = TargetName,
+                Mode = Mode,
+                Status = status,
+                StartedAt = StartedAt,
+                FinishedAt = finishedAt,
+                TotalTasks = TotalTasks,
+                DoneTasks = doneTasks,
+                CurrentScriptName = currentScriptName,
+                CurrentStatus = currentStatus,
+                CurrentAttempt = currentAttempt,
+                CurrentMaxAttempts = currentMaxAttempts,
+                Records = Records.Select(record => record.Clone()).ToList(),
+                LogTail = _logLines.TakeLast(60).ToList(),
+            };
+        }
     }
 }
 

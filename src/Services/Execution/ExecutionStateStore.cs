@@ -6,6 +6,8 @@ namespace NexusPipeline.Services.Execution;
 /// </summary>
 internal sealed class ExecutionStateStore
 {
+    private ExecutionGroupState _groupState = ExecutionGroupState.Open;
+
     private readonly List<RunningExecution> _active = new();
 
     private readonly List<RunningExecution> _finished = new();
@@ -18,11 +20,36 @@ internal sealed class ExecutionStateStore
 
     private PendingSystemAction? _pendingSystemAction;
 
+    private readonly object _coordinationSync = new();
+
     private readonly object _sync = new();
 
     public ExecutionStateStore(ExecutionAdmissionPolicy? policy = null)
     {
         _policy = policy ?? new ExecutionAdmissionPolicy();
+    }
+
+    internal ExecutionGroupState GroupState
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _groupState;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 将计划建立、准入登记与数据生命周期门禁置于同一协调域。
+    /// 计划构建本身仍不持有状态锁，避免文件/仓储读取进入状态临界区。
+    /// </summary>
+    public T WithAdmissionCoordination<T>(Func<T> action)
+    {
+        lock (_coordinationSync)
+        {
+            return action();
+        }
     }
 
     public IReadOnlyList<RunningExecution> Active
@@ -97,39 +124,50 @@ internal sealed class ExecutionStateStore
         ExecutionAdmissionProfile profile,
         out ExecutionAdmissionFailure? failure)
     {
-        lock (_sync)
+        lock (_coordinationSync)
         {
-            if (_pendingSystemAction is not null)
+            lock (_sync)
             {
-                failure = new ExecutionAdmissionFailure(
-                    ExecutionAdmissionFailureCode.PendingSystemAction,
-                    "系统完成操作正在等待执行，请先取消后再启动新任务");
-                return false;
-            }
+                if (_pendingSystemAction is not null)
+                {
+                    failure = new ExecutionAdmissionFailure(
+                        ExecutionAdmissionFailureCode.PendingSystemAction,
+                        "系统完成操作正在等待执行，请先取消后再启动新任务");
+                    return false;
+                }
 
-            List<ExecutionAdmissionEntry> active = _active
-                .Select(item => new ExecutionAdmissionEntry(
-                    item.Id,
-                    item.Kind,
-                    item.TargetId,
-                    item.TargetName,
-                    _admissions[item.Id]))
-                .ToList();
-            failure = _policy.Evaluate(
-                exec.Kind,
-                exec.TargetId,
-                exec.TargetName,
-                profile,
-                active,
-                _completionIntents);
-            if (failure is not null)
-            {
-                return false;
-            }
+                if (_groupState == ExecutionGroupState.Closing)
+                {
+                    failure = new ExecutionAdmissionFailure(
+                        ExecutionAdmissionFailureCode.ExecutionGroupClosing,
+                        "当前并行运行组已进入收尾阶段，新的任务暂不能加入");
+                    return false;
+                }
 
-            _active.Add(exec);
-            _admissions[exec.Id] = profile;
-            return true;
+                List<ExecutionAdmissionEntry> active = _active
+                    .Select(item => new ExecutionAdmissionEntry(
+                        item.Id,
+                        item.Kind,
+                        item.TargetId,
+                        item.TargetName,
+                        _admissions[item.Id]))
+                    .ToList();
+                failure = _policy.Evaluate(
+                    exec.Kind,
+                    exec.TargetId,
+                    exec.TargetName,
+                    profile,
+                    active,
+                    _completionIntents);
+                if (failure is not null)
+                {
+                    return false;
+                }
+
+                _active.Add(exec);
+                _admissions[exec.Id] = profile;
+                return true;
+            }
         }
     }
 
@@ -147,52 +185,57 @@ internal sealed class ExecutionStateStore
     /// </summary>
     public PendingSystemAction? Release(RunningExecution exec, CompletionIntent? intent)
     {
-        lock (_sync)
+        lock (_coordinationSync)
         {
-            if (!_active.Remove(exec))
+            lock (_sync)
             {
-                return null;
-            }
-
-            _admissions.Remove(exec.Id);
-            _finished.Add(exec);
-            if (_finished.Count > 100)
-            {
-                _finished.RemoveRange(0, _finished.Count - 100);
-            }
-
-            if (intent is not null)
-            {
-                string action = ExecutionAdmissionProfile.NormalizeCompletionAction(intent.Action);
-                if (action != "none")
+                if (!_active.Remove(exec))
                 {
-                    _completionIntents.Add(intent with { Action = action });
+                    return null;
                 }
-            }
 
-            if (_active.Count > 0 || _completionIntents.Count == 0 || _pendingSystemAction is not null)
-            {
-                return null;
-            }
+                _admissions.Remove(exec.Id);
+                _finished.Add(exec);
+                if (_finished.Count > 100)
+                {
+                    _finished.RemoveRange(0, _finished.Count - 100);
+                }
 
-            string actionToArm = _completionIntents[0].Action;
-            string queueName = string.Join(
-                "、",
-                _completionIntents
-                    .Select(item => item.QueueName)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Distinct(StringComparer.Ordinal)
-                    .Take(8));
-            _completionIntents.Clear();
-            _pendingSystemAction = new PendingSystemAction
-            {
-                Action = actionToArm,
-                QueueName = queueName,
-                Deadline = actionToArm == "exit"
-                    ? DateTime.Now
-                    : DateTime.Now.AddSeconds(60),
-            };
-            return _pendingSystemAction;
+                if (intent is not null)
+                {
+                    string action = ExecutionAdmissionProfile.NormalizeCompletionAction(intent.Action);
+                    if (action != "none")
+                    {
+                        _groupState = ExecutionGroupState.Closing;
+                        _completionIntents.Add(intent with { Action = action });
+                    }
+                }
+
+                if (_active.Count > 0 || _completionIntents.Count == 0 || _pendingSystemAction is not null)
+                {
+                    return null;
+                }
+
+                string actionToArm = _completionIntents[0].Action;
+                string queueName = string.Join(
+                    "、",
+                    _completionIntents
+                        .Select(item => item.QueueName)
+                        .Where(name => !string.IsNullOrWhiteSpace(name))
+                        .Distinct(StringComparer.Ordinal)
+                        .Take(8));
+                _completionIntents.Clear();
+                _pendingSystemAction = new PendingSystemAction
+                {
+                    Action = actionToArm,
+                    QueueName = queueName,
+                    Deadline = actionToArm == "exit"
+                        ? DateTime.Now
+                        : DateTime.Now.AddSeconds(60),
+                };
+                _groupState = ExecutionGroupState.ActionPending;
+                return _pendingSystemAction;
+            }
         }
     }
 
@@ -214,25 +257,38 @@ internal sealed class ExecutionStateStore
             }
             _pendingSystemAction = null;
             _completionIntents.Clear();
+            _groupState = ExecutionGroupState.Open;
             return true;
         }
     }
 
     /// <summary>
-    /// 在状态锁内确认 pending 仍属于当前完成操作后执行一次需要立即发出的系统命令。
-    /// 解决完成线程尚未开始 Arm、用户已取消 pending 时的竞态。
+    /// 在状态锁内只完成 pending → armed 状态转换；实际系统调用必须在锁外执行。
     /// </summary>
-    public bool TryArm(PendingSystemAction pending, Action arm)
+    public bool TryArm(PendingSystemAction pending)
     {
         lock (_sync)
         {
-            if (!ReferenceEquals(_pendingSystemAction, pending) || pending.Cts.IsCancellationRequested)
+            if (!ReferenceEquals(_pendingSystemAction, pending)
+                || pending.Cts.IsCancellationRequested
+                || pending.IsArmed)
             {
                 return false;
             }
-            arm();
+            pending.IsArmed = true;
             return true;
         }
+    }
+
+    /// <summary>兼容旧测试/调用方；状态转换仍在锁内，回调在锁外执行。</summary>
+    public bool TryArm(PendingSystemAction pending, Action arm)
+    {
+        if (!TryArm(pending))
+        {
+            return false;
+        }
+        arm();
+        return true;
     }
 
     // 以下三个方法保留给旧测试与兼容调用方；新完成操作统一经 Release 的 idle arm 语义。
@@ -243,6 +299,7 @@ internal sealed class ExecutionStateStore
             PendingSystemAction? previous = _pendingSystemAction;
             _pendingSystemAction = pending;
             _completionIntents.Clear();
+            _groupState = ExecutionGroupState.ActionPending;
             return previous;
         }
     }
@@ -258,6 +315,7 @@ internal sealed class ExecutionStateStore
             }
             _pendingSystemAction = null;
             _completionIntents.Clear();
+            _groupState = ExecutionGroupState.Open;
             return true;
         }
     }
@@ -270,7 +328,71 @@ internal sealed class ExecutionStateStore
             {
                 _pendingSystemAction = null;
                 _completionIntents.Clear();
+                _groupState = ExecutionGroupState.Open;
             }
         }
     }
+
+    /// <summary>查询活动执行对脚本或用户数据的引用，供 Web/CLI 破坏性 CRUD 使用同一租约来源。</summary>
+    public IReadOnlyList<ExecutionLeaseReference> FindLeases(string scriptId, string? userName = null)
+    {
+        lock (_sync)
+        {
+            return FindLeasesLocked(scriptId, userName);
+        }
+    }
+
+    /// <summary>在准入协调锁内检查租约并执行同步数据变更，消除“检查后到删除前”的竞态窗口。</summary>
+    public bool TryExecuteLeaseMutation(
+        string scriptId,
+        string? userName,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+    {
+        lock (_coordinationSync)
+        {
+            leases = FindLeases(scriptId, userName);
+            if (leases.Count > 0)
+            {
+                return false;
+            }
+            mutation();
+            return true;
+        }
+    }
+
+    private IReadOnlyList<ExecutionLeaseReference> FindLeasesLocked(string scriptId, string? userName)
+    {
+        string scriptKey = $"script:{scriptId.Trim()}";
+        string? userKey = string.IsNullOrWhiteSpace(userName)
+            ? null
+            : $"user:{scriptId.Trim()}:{userName.Trim()}";
+        return _active
+            .Select(exec => new
+            {
+                Exec = exec,
+                Profile = _admissions[exec.Id],
+            })
+            .Where(item => item.Profile.Resources.ScriptIds.Contains(scriptKey)
+                && (userKey is null || item.Profile.Resources.UserDataKeys.Contains(userKey)))
+            .Select(item => new ExecutionLeaseReference(
+                item.Exec.Id,
+                item.Exec.Kind,
+                item.Exec.TargetId,
+                item.Exec.TargetName))
+            .ToList();
+    }
 }
+
+internal enum ExecutionGroupState
+{
+    Open,
+    Closing,
+    ActionPending,
+}
+
+internal sealed record ExecutionLeaseReference(
+    string RunId,
+    string Kind,
+    string TargetId,
+    string TargetName);

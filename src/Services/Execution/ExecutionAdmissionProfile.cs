@@ -1,4 +1,7 @@
 using System.Collections.Frozen;
+using System.Runtime.InteropServices;
+using System.Text;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -25,6 +28,18 @@ internal sealed record ExecutionResourceSet(
 {
     private static readonly StringComparer Comparer = StringComparer.OrdinalIgnoreCase;
 
+    /// <summary>运行计划引用的用户数据键，格式为 user:{scriptId}:{userName}。</summary>
+    public IReadOnlySet<string> UserDataKeys { get; init; } = Array.Empty<string>().ToFrozenSet(Comparer);
+
+    /// <summary>日志路径模式资源。无法证明模式互不重叠时按冲突处理。</summary>
+    public IReadOnlyList<LogResourceDescriptor> LogResources { get; init; } = Array.Empty<LogResourceDescriptor>();
+
+    /// <summary>用户前置/后置脚本的可执行文件资源。</summary>
+    public IReadOnlySet<string> AuxiliaryExecutablePaths { get; init; } = Array.Empty<string>().ToFrozenSet(Comparer);
+
+    /// <summary>用户前置/后置脚本的进程名资源。</summary>
+    public IReadOnlySet<string> AuxiliaryProcessNames { get; init; } = Array.Empty<string>().ToFrozenSet(Comparer);
+
     public static ExecutionResourceSet Empty { get; } = new(
         Array.Empty<string>().ToFrozenSet(Comparer),
         Array.Empty<string>().ToFrozenSet(Comparer),
@@ -41,13 +56,55 @@ internal sealed record ExecutionResourceSet(
             return conflict;
         }
 
+        conflict = FindSetConflict(UserDataKeys, other.UserDataKeys, "user");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
         conflict = FindSetConflict(ExecutablePaths, other.ExecutablePaths, "executable");
         if (conflict is not null)
         {
             return conflict;
         }
 
+        conflict = FindSetConflict(ExecutablePaths, other.AuxiliaryExecutablePaths, "executable");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        conflict = FindSetConflict(AuxiliaryExecutablePaths, other.ExecutablePaths, "auxiliary-executable");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
         conflict = FindSetConflict(ProcessNames, other.ProcessNames, "process");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        conflict = FindSetConflict(AuxiliaryExecutablePaths, other.AuxiliaryExecutablePaths, "auxiliary-executable");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        conflict = FindSetConflict(ProcessNames, other.AuxiliaryProcessNames, "process");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        conflict = FindSetConflict(AuxiliaryProcessNames, other.ProcessNames, "process");
+        if (conflict is not null)
+        {
+            return conflict;
+        }
+
+        conflict = FindSetConflict(AuxiliaryProcessNames, other.AuxiliaryProcessNames, "auxiliary-process");
         if (conflict is not null)
         {
             return conflict;
@@ -60,6 +117,17 @@ internal sealed record ExecutionResourceSet(
                 if (PathsConflict(candidate, existing))
                 {
                     return $"config:{candidate}";
+                }
+            }
+        }
+
+        foreach (LogResourceDescriptor candidate in LogResources)
+        {
+            foreach (LogResourceDescriptor existing in other.LogResources)
+            {
+                if (candidate.ConflictsWith(existing))
+                {
+                    return $"log:{candidate.DisplayPath}";
                 }
             }
         }
@@ -115,6 +183,59 @@ internal sealed record ExecutionResourceSet(
     }
 }
 
+/// <summary>
+/// 日志路径的运行时资源描述。目录和通配/日期模式只监控目录直接匹配的文件；
+/// 同一目录下只要任一方不是精确文件，就按可能重叠处理。
+/// </summary>
+internal sealed record LogResourceDescriptor(
+    string BaseDirectory,
+    string Pattern,
+    bool IsExactFile,
+    string DisplayPath)
+{
+    public static LogResourceDescriptor FromPath(string path)
+    {
+        string normalized = ExecutionResourceSetBuilder.NormalizePath(path);
+        bool isDirectory = Directory.Exists(path);
+        string baseDirectory;
+        string pattern;
+        if (isDirectory)
+        {
+            baseDirectory = normalized;
+            pattern = "*";
+        }
+        else
+        {
+            baseDirectory = ExecutionResourceSetBuilder.NormalizePath(Path.GetDirectoryName(normalized) ?? Directory.GetCurrentDirectory());
+            pattern = Path.GetFileName(normalized);
+        }
+
+        bool exact = pattern.Length > 0
+            && pattern.IndexOf('*') < 0
+            && pattern.IndexOf('{') < 0
+            && pattern.IndexOf('}') < 0;
+        return new LogResourceDescriptor(baseDirectory, pattern, exact, normalized);
+    }
+
+    public bool ConflictsWith(LogResourceDescriptor other)
+    {
+        if (!ExecutionResourceSet.PathsConflict(BaseDirectory, other.BaseDirectory))
+        {
+            return false;
+        }
+
+        if (IsExactFile && other.IsExactFile)
+        {
+            return string.Equals(
+                Path.Combine(BaseDirectory, Pattern),
+                Path.Combine(other.BaseDirectory, other.Pattern),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        return true;
+    }
+}
+
 /// <summary>执行准入时冻结的资格、资源与完成操作描述。</summary>
 internal sealed record ExecutionAdmissionProfile(
     string Kind,
@@ -122,29 +243,50 @@ internal sealed record ExecutionAdmissionProfile(
     ExecutionResourceSet Resources,
     string CompletionAction)
 {
-    public static ExecutionAdmissionProfile ForScript(ScriptInstance script)
+    public static ExecutionAdmissionProfile ForScript(
+        ScriptInstance script,
+        string? userName = null,
+        IPluginCapabilityResolver? capabilities = null)
     {
+        IReadOnlyList<string>? users = string.IsNullOrWhiteSpace(userName)
+            ? null
+            : new[] { userName };
         return new ExecutionAdmissionProfile(
             "script",
             null,
-            ExecutionResourceSetBuilder.Build(new[] { (script.Id, (ScriptInstance?)script) }),
+            ExecutionResourceSetBuilder.Build(
+                new[] { new ExecutionResourceInput(script.Id, script, users) },
+                capabilities),
             "none");
     }
 
     public static ExecutionAdmissionProfile ForQueue(
         DispatchQueue queue,
-        IReadOnlyList<PlannedQueueTask> tasks)
+        IReadOnlyList<PlannedQueueTask> tasks,
+        IPluginCapabilityResolver? capabilities = null)
     {
         bool emulatorOnly = tasks.Count > 0
-            && tasks.All(task => task.Script is not null && EmulatorSupport.IsEmulator(task.Script));
+            && tasks.All(task => task.Script is not null && IsVerifiedEmulator(task.Script, capabilities));
 
-        IEnumerable<(string ScriptId, ScriptInstance? Script)> resources = tasks.Select(task =>
-            (task.Task.ScriptInstanceId, task.Script));
+        IEnumerable<ExecutionResourceInput> resources = tasks.Select(task =>
+            new ExecutionResourceInput(task.Task.ScriptInstanceId, task.Script, task.EnabledUsers));
         return new ExecutionAdmissionProfile(
             "queue",
             emulatorOnly ? ExecutionConcurrencyClass.EmulatorOnly : ExecutionConcurrencyClass.Standard,
-            ExecutionResourceSetBuilder.Build(resources),
+            ExecutionResourceSetBuilder.Build(resources, capabilities),
             NormalizeCompletionAction(queue.CompletionAction));
+    }
+
+    public static bool IsVerifiedEmulator(ScriptInstance script, IPluginCapabilityResolver? capabilities)
+    {
+        if (!EmulatorSupport.IsEmulator(script)
+            || ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint(script.GameExe) is null)
+        {
+            return false;
+        }
+
+        return string.IsNullOrWhiteSpace(script.PluginType)
+            || capabilities?.SupportsEmulator(script.PluginType) == true;
     }
 
     /// <summary>供旧 TryRegister 兼容入口使用；新执行入口必须传入真实计划 profile。</summary>
@@ -179,23 +321,60 @@ internal sealed record CompletionIntent(
     string Action);
 
 /// <summary>Windows 资源的规范化构建逻辑，与准入策略保持纯逻辑隔离。</summary>
+internal sealed record ExecutionResourceInput(
+    string ScriptId,
+    ScriptInstance? Script,
+    IReadOnlyCollection<string>? UserNames);
+
 internal static class ExecutionResourceSetBuilder
 {
     private static readonly StringComparer Comparer = StringComparer.OrdinalIgnoreCase;
 
-    public static ExecutionResourceSet Build(IEnumerable<(string ScriptId, ScriptInstance? Script)> items)
+    public static ExecutionResourceSet Build(
+        IEnumerable<(string ScriptId, ScriptInstance? Script)> items,
+        IPluginCapabilityResolver? capabilities = null)
+    {
+        return Build(
+            items.Select(item => new ExecutionResourceInput(item.ScriptId, item.Script, null)),
+            capabilities);
+    }
+
+    public static ExecutionResourceSet Build(
+        IEnumerable<ExecutionResourceInput> items,
+        IPluginCapabilityResolver? capabilities = null)
     {
         var scriptIds = new HashSet<string>(Comparer);
+        var userDataKeys = new HashSet<string>(Comparer);
         var executablePaths = new HashSet<string>(Comparer);
         var processNames = new HashSet<string>(Comparer);
         var configPaths = new HashSet<string>(Comparer);
         var emulatorEndpoints = new HashSet<string>(Comparer);
+        var logResources = new List<LogResourceDescriptor>();
+        var auxiliaryExecutablePaths = new HashSet<string>(Comparer);
+        var auxiliaryProcessNames = new HashSet<string>(Comparer);
 
-        foreach ((string scriptId, ScriptInstance? script) in items)
+        foreach (ExecutionResourceInput item in items)
         {
+            string scriptId = item.ScriptId;
+            ScriptInstance? script = item.Script;
             if (!string.IsNullOrWhiteSpace(scriptId))
             {
-                scriptIds.Add($"script:{scriptId.Trim()}");
+                string normalizedScriptId = scriptId.Trim();
+                scriptIds.Add($"script:{normalizedScriptId}");
+
+                if (script is not null)
+                {
+                    IEnumerable<ScriptUser> users = script.Users.Where(user => user.Enabled);
+                    if (item.UserNames is not null)
+                    {
+                        users = users.Where(user => item.UserNames.Any(name =>
+                            string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));
+                    }
+                    foreach (ScriptUser user in users)
+                    {
+                        userDataKeys.Add($"user:{normalizedScriptId}:{user.Name.Trim()}");
+                    }
+                }
             }
 
             if (script is null)
@@ -211,10 +390,15 @@ internal static class ExecutionResourceSetBuilder
 
             if (!string.IsNullOrWhiteSpace(script.ConfigPath))
             {
-                configPaths.Add(NormalizePath(script.ConfigPath));
+                string configPath = NormalizePath(script.ConfigPath);
+                if (configPath.Length > 0)
+                {
+                    configPaths.Add(configPath);
+                }
             }
 
-            if (EmulatorSupport.IsEmulator(script))
+            bool emulator = EmulatorSupport.IsEmulator(script);
+            if (ExecutionAdmissionProfile.IsVerifiedEmulator(script, capabilities))
             {
                 string? endpoint = NormalizeEmulatorEndpoint(script.GameExe);
                 if (endpoint is not null)
@@ -222,9 +406,30 @@ internal static class ExecutionResourceSetBuilder
                     emulatorEndpoints.Add(endpoint);
                 }
             }
-            else
+            else if (!emulator)
             {
                 AddExecutable(executablePaths, processNames, script.GameExe);
+            }
+            else if (!string.IsNullOrWhiteSpace(script.GameExe))
+            {
+                emulatorEndpoints.Add($"invalid:{NormalizeEndpointText(script.GameExe)}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(script.LogPath))
+            {
+                logResources.Add(LogResourceDescriptor.FromPath(script.LogPath));
+            }
+
+            IEnumerable<ScriptUser> auxiliaryUsers = script.Users.Where(user => user.Enabled);
+            if (item.UserNames is not null)
+            {
+                auxiliaryUsers = auxiliaryUsers.Where(user => item.UserNames.Any(name =>
+                    string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));
+            }
+            foreach (ScriptUser user in auxiliaryUsers)
+            {
+                AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.PreRunScript);
+                AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.PostRunScript);
             }
         }
 
@@ -233,7 +438,13 @@ internal static class ExecutionResourceSetBuilder
             executablePaths.ToFrozenSet(Comparer),
             processNames.ToFrozenSet(Comparer),
             configPaths.ToArray(),
-            emulatorEndpoints.ToFrozenSet(Comparer));
+            emulatorEndpoints.ToFrozenSet(Comparer))
+        {
+            UserDataKeys = userDataKeys.ToFrozenSet(Comparer),
+            LogResources = logResources,
+            AuxiliaryExecutablePaths = auxiliaryExecutablePaths.ToFrozenSet(Comparer),
+            AuxiliaryProcessNames = auxiliaryProcessNames.ToFrozenSet(Comparer),
+        };
     }
 
     public static string NormalizePath(string path)
@@ -247,6 +458,7 @@ internal static class ExecutionResourceSetBuilder
         try
         {
             string full = Path.GetFullPath(trimmed);
+            full = TryGetPhysicalPath(full) ?? full;
             string root = Path.GetPathRoot(full) ?? string.Empty;
             return full.Length > root.Length
                 ? full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
@@ -272,7 +484,17 @@ internal static class ExecutionResourceSetBuilder
             return null;
         }
         string host = value[..colon].Trim().ToLowerInvariant();
+        host = host.Trim('[', ']');
+        if (host is "localhost" or "127.0.0.1" or "::1")
+        {
+            return $"loopback:{port}";
+        }
         return $"{host}:{port}";
+    }
+
+    private static string NormalizeEndpointText(string endpoint)
+    {
+        return endpoint.Trim().ToLowerInvariant().Replace(' ', '_');
     }
 
     private static void AddExecutable(HashSet<string> paths, HashSet<string> processNames, string? path)
@@ -294,4 +516,96 @@ internal static class ExecutionResourceSetBuilder
             processNames.Add(processName);
         }
     }
+
+    private static string? TryGetPhysicalPath(string path)
+    {
+        string existingPath = path;
+        var suffix = new Stack<string>();
+        while (!File.Exists(existingPath) && !Directory.Exists(existingPath))
+        {
+            string leaf = Path.GetFileName(existingPath);
+            string? parent = Path.GetDirectoryName(existingPath);
+            if (string.IsNullOrWhiteSpace(leaf)
+                || string.IsNullOrWhiteSpace(parent)
+                || string.Equals(parent, existingPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            suffix.Push(leaf);
+            existingPath = parent;
+        }
+
+        string? physical = TryGetFinalPath(existingPath);
+        if (physical is null)
+        {
+            return null;
+        }
+        while (suffix.Count > 0)
+        {
+            physical = Path.Combine(physical, suffix.Pop());
+        }
+        return physical;
+    }
+
+    private static string? TryGetFinalPath(string path)
+    {
+        IntPtr handle = CreateFile(
+            path,
+            0,
+            FileShare.ReadWrite | FileShare.Delete,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == InvalidHandleValue)
+        {
+            return null;
+        }
+
+        try
+        {
+            var buffer = new StringBuilder(1024);
+            uint length = GetFinalPathNameByHandle(handle, buffer, (uint)buffer.Capacity, 0);
+            if (length == 0 || length >= buffer.Capacity)
+            {
+                return null;
+            }
+            string finalPath = buffer.ToString();
+            if (finalPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                return @"\\" + finalPath[8..];
+            }
+            return finalPath.StartsWith(@"\\?\", StringComparison.Ordinal)
+                ? finalPath[4..]
+                : finalPath;
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    private const uint OpenExisting = 3;
+    private const uint FileFlagBackupSemantics = 0x02000000;
+    private static readonly IntPtr InvalidHandleValue = new(-1);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFile(
+        string fileName,
+        uint desiredAccess,
+        FileShare shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        IntPtr file,
+        StringBuilder filePath,
+        uint filePathLength,
+        uint flags);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr handle);
 }

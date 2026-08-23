@@ -37,44 +37,61 @@ internal sealed class DispatchCenter
     /// <summary>当前待执行的系统操作，供 Web 展示倒计时和取消入口。</summary>
     public PendingSystemAction? CurrentSystemAction => _systemActions.Current;
 
+    /// <summary>查询活动执行对脚本/用户数据的租约引用，供配置 CRUD 返回稳定的 409 冲突信息。</summary>
+    public IReadOnlyList<ExecutionLeaseReference> FindLeases(string scriptId, string? userName = null)
+        => _state.FindLeases(scriptId, userName);
+
+    public bool TryExecuteLeaseMutation(
+        string scriptId,
+        string? userName,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases)
+        => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases);
+
     public bool CancelSystemAction() => _systemActions.Cancel(Audit.Web);
 
     public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
     {
-        ScriptExecutionPlan plan = _plans.BuildScript(scriptId, userName);
-        ScriptInstance script = plan.Script;
-        var exec = new RunningExecution
+        return _state.WithAdmissionCoordination(() =>
         {
-            Kind = "script",
-            TargetId = script.Id,
-            TargetName = script.Name,
-            Mode = mode,
-            TotalTasks = plan.TotalTasks,
-            CurrentScriptName = script.Name,
-        };
-        Register(exec, plan.Admission, source);
-        exec.CurrentStatus = "排队等待中...";
-        Task task = Task.Run(() => _runner.RunScriptAsync(exec, plan));
-        exec.Completion = task;
-        return exec;
+            ScriptExecutionPlan plan = _plans.BuildScript(scriptId, userName);
+            ScriptInstance script = plan.Script;
+            var exec = new RunningExecution
+            {
+                Kind = "script",
+                TargetId = script.Id,
+                TargetName = script.Name,
+                Mode = mode,
+                TotalTasks = plan.TotalTasks,
+                CurrentScriptName = script.Name,
+            };
+            Register(exec, plan.Admission, source);
+            exec.CurrentStatus = "排队等待中...";
+            Task task = Task.Run(() => _runner.RunScriptAsync(exec, plan));
+            exec.Completion = task;
+            return exec;
+        });
     }
 
     public RunningExecution StartQueue(string queueId, string mode, string source = Audit.System)
     {
-        QueueExecutionPlan plan = _plans.BuildQueue(queueId);
-        DispatchQueue queue = plan.Queue;
-        var exec = new RunningExecution
+        return _state.WithAdmissionCoordination(() =>
         {
-            Kind = "queue",
-            TargetId = queue.Id,
-            TargetName = queue.Name,
-            Mode = mode,
-            TotalTasks = plan.TotalTasks,
-        };
-        Register(exec, plan.Admission, source);
-        Task task = Task.Run(() => _runner.RunQueueAsync(exec, plan));
-        exec.Completion = task;
-        return exec;
+            QueueExecutionPlan plan = _plans.BuildQueue(queueId);
+            DispatchQueue queue = plan.Queue;
+            var exec = new RunningExecution
+            {
+                Kind = "queue",
+                TargetId = queue.Id,
+                TargetName = queue.Name,
+                Mode = mode,
+                TotalTasks = plan.TotalTasks,
+            };
+            Register(exec, plan.Admission, source);
+            Task task = Task.Run(() => _runner.RunQueueAsync(exec, plan));
+            exec.Completion = task;
+            return exec;
+        });
     }
 
     public void Cancel(string runId, string source = Audit.System)

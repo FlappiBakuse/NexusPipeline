@@ -86,14 +86,16 @@ internal sealed class SystemActionExecutor
             switch (pending.Action)
             {
                 case "reboot":
-                    if (_state.TryArm(pending, () => SystemActions.Reboot(60)))
+                    if (_state.TryArm(pending))
                     {
+                        SystemActions.Reboot(60);
                         StartDelay(pending, null, TimeSpan.FromSeconds(60));
                     }
                     break;
                 case "shutdown":
-                    if (_state.TryArm(pending, () => SystemActions.Shutdown(60)))
+                    if (_state.TryArm(pending))
                     {
+                        SystemActions.Shutdown(60);
                         StartDelay(pending, null, TimeSpan.FromSeconds(60));
                     }
                     break;

@@ -1,4 +1,5 @@
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
@@ -161,8 +162,9 @@ public class ParallelAdmissionTests
         Assert.True(ExecutionResourceSet.PathsConflict(@"C:\Game\Config", @"C:\Game\Config\User"));
         Assert.True(ExecutionResourceSet.PathsConflict(@"C:\Game\Config", @"C:\Game\Config"));
         Assert.False(ExecutionResourceSet.PathsConflict(@"C:\Game\Config", @"C:\Game\ConfigBackup"));
-        Assert.Equal("127.0.0.1:16384", ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint(" 127.0.0.1:016384 "));
-        Assert.Equal("localhost:16416", ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint("LOCALHOST:16416"));
+        Assert.Equal("loopback:16384", ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint(" 127.0.0.1:016384 "));
+        Assert.Equal("loopback:16416", ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint("LOCALHOST:16416"));
+        Assert.Equal("loopback:16416", ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint("::1:16416"));
     }
 
     [Fact]
@@ -276,8 +278,172 @@ public class ParallelAdmissionTests
         Assert.Equal(ExecutionConcurrencyClass.EmulatorOnly, plan.Admission.QueueClass);
         Assert.Single(plan.Tasks);
         Assert.Equal("emulator", plan.Tasks[0].Script!.GameMode);
-        Assert.Equal("127.0.0.1:16384", plan.Admission.Resources.EmulatorEndpoints.Single());
+        Assert.Equal("loopback:16384", plan.Admission.Resources.EmulatorEndpoints.Single());
         Assert.Equal(1, plan.TotalTasks);
+    }
+
+    [Fact]
+    public void ResourceSet_LeasesLogsAndAuxiliaryExecutables()
+    {
+        ScriptInstance exactLogA = Script("log-a", mainExe: @"C:\Nexus\runner-a.exe", gameExe: @"C:\Nexus\game-a.exe", logPath: @"C:\NexusLogs\run-a.log");
+        ScriptInstance exactLogB = Script("log-b", mainExe: @"C:\Nexus\runner-b.exe", gameExe: @"C:\Nexus\game-b.exe", logPath: @"C:\NexusLogs\run-b.log");
+        ScriptInstance sameLog = Script("log-c", mainExe: @"C:\Nexus\runner-c.exe", gameExe: @"C:\Nexus\game-c.exe", logPath: @"C:\NexusLogs\run-a.log");
+        ScriptInstance wildcardLog = Script("log-d", mainExe: @"C:\Nexus\runner-d.exe", gameExe: @"C:\Nexus\game-d.exe", logPath: @"C:\NexusLogs\run-*.log");
+
+        Assert.Null(
+            ExecutionAdmissionProfile.ForScript(exactLogA).Resources.FindConflict(
+                ExecutionAdmissionProfile.ForScript(exactLogB).Resources));
+        Assert.StartsWith(
+            "log:",
+            ExecutionAdmissionProfile.ForScript(exactLogA).Resources.FindConflict(
+                ExecutionAdmissionProfile.ForScript(sameLog).Resources));
+        Assert.StartsWith(
+            "log:",
+            ExecutionAdmissionProfile.ForScript(exactLogA).Resources.FindConflict(
+                ExecutionAdmissionProfile.ForScript(wildcardLog).Resources));
+
+        ScriptInstance main = Script("main", mainExe: @"C:\Nexus\shared.exe");
+        ScriptInstance preRun = Script(
+            "pre-run",
+            mainExe: @"C:\Nexus\other.exe",
+            users: new[]
+            {
+                new ScriptUser
+                {
+                    Name = "user",
+                    Enabled = true,
+                    PreRunScript = @"C:\Nexus\shared.exe",
+                },
+            });
+        string? auxiliaryConflict = ExecutionAdmissionProfile.ForScript(main).Resources.FindConflict(
+            ExecutionAdmissionProfile.ForScript(preRun, "user").Resources);
+        Assert.StartsWith("executable:", auxiliaryConflict);
+    }
+
+    [Fact]
+    public void QueueClassification_FailsClosedForInvalidAdbAndUnsupportedPlugins()
+    {
+        var invalidAdb = Script("invalid-adb", gameMode: "emulator", gameExe: "not-an-adb-endpoint");
+        var invalidTask = new PlannedQueueTask(
+            new QueueTask { ScriptInstanceId = invalidAdb.Id },
+            invalidAdb,
+            Array.Empty<string>());
+        Assert.Equal(
+            ExecutionConcurrencyClass.Standard,
+            ExecutionAdmissionProfile.ForQueue(
+                new DispatchQueue { Id = "invalid-adb-queue" },
+                new[] { invalidTask }).QueueClass);
+
+        var specialized = Script(
+            "specialized",
+            gameMode: "emulator",
+            gameExe: "127.0.0.1:16384",
+            pluginType: "unsupported-plugin");
+        var specializedTask = new PlannedQueueTask(
+            new QueueTask { ScriptInstanceId = specialized.Id },
+            specialized,
+            Array.Empty<string>());
+        Assert.Equal(
+            ExecutionConcurrencyClass.Standard,
+            ExecutionAdmissionProfile.ForQueue(
+                new DispatchQueue { Id = "specialized-queue" },
+                new[] { specializedTask },
+                new TestCapabilities()).QueueClass);
+    }
+
+    [Fact]
+    public void QueueTaskCount_ChargesAtLeastOneForMissingOrEmptyUsers()
+    {
+        var noUsers = Script(
+            "no-users",
+            users: Array.Empty<ScriptUser>());
+        var task = new PlannedQueueTask(
+            new QueueTask { ScriptInstanceId = noUsers.Id },
+            noUsers,
+            Array.Empty<string>());
+        var queue = new DispatchQueue
+        {
+            Id = "queue-empty-users",
+            Tasks = new List<QueueTask> { task.Task },
+        };
+        var scripts = new SingleScriptRepository(noUsers);
+        var queues = new SingleQueueRepository(queue);
+        var users = new TestUsers();
+        var builder = new ExecutionPlanBuilder(
+            scripts,
+            queues,
+            users,
+            new ExecutionValidator(scripts, queues, users));
+
+        Assert.Equal(1, builder.BuildQueue(queue.Id).TotalTasks);
+    }
+
+    [Fact]
+    public void AdmissionFailureClassifiesSchedulerConflictsAsTransient()
+    {
+        var policy = new ExecutionAdmissionPolicy();
+        var active = new List<ExecutionAdmissionEntry>
+        {
+            Entry(
+                "run-a",
+                "queue-a",
+                "队列A",
+                new ExecutionAdmissionProfile(
+                    "queue",
+                    ExecutionConcurrencyClass.Standard,
+                    ExecutionResourceSet.Empty,
+                    "none")),
+        };
+        ExecutionAdmissionFailure? duplicate = policy.Evaluate(
+            "queue",
+            "queue-a",
+            "队列A",
+            Profile(ExecutionConcurrencyClass.Standard),
+            active,
+            Array.Empty<CompletionIntent>());
+        Assert.NotNull(duplicate);
+        Assert.Equal(AdmissionFailureDisposition.Transient, duplicate!.Disposition);
+        Assert.Equal("duplicate_target", duplicate.StableCode);
+
+        ExecutionAdmissionFailure? action = policy.Evaluate(
+            "queue",
+            "queue-b",
+            "队列B",
+            new ExecutionAdmissionProfile(
+                "queue",
+                ExecutionConcurrencyClass.EmulatorOnly,
+                ExecutionResourceSet.Empty,
+                "reboot"),
+            Array.Empty<ExecutionAdmissionEntry>(),
+            new[] { new CompletionIntent("run-a", "队列A", "shutdown") });
+        Assert.NotNull(action);
+        Assert.Equal(AdmissionFailureDisposition.Permanent, action!.Disposition);
+        Assert.Equal("completion_action_conflict", action.StableCode);
+    }
+
+    private static ScriptInstance Script(
+        string id,
+        string mainExe = @"C:\Nexus\runner.exe",
+        string logPath = "",
+        string gameMode = "pc",
+        string gameExe = @"C:\Nexus\game.exe",
+        string pluginType = "",
+        IEnumerable<ScriptUser>? users = null)
+    {
+        return new ScriptInstance
+        {
+            Id = id,
+            Name = id,
+            MainExe = mainExe,
+            LogPath = logPath,
+            GameMode = gameMode,
+            GameExe = gameExe,
+            PluginType = pluginType,
+            Users = users?.Select(user => user.Clone()).ToList() ?? new List<ScriptUser>
+            {
+                new() { Name = "user", Enabled = true },
+            },
+        };
     }
 
     private static ExecutionAdmissionProfile Profile(ExecutionConcurrencyClass queueClass)
@@ -347,5 +513,12 @@ public class ParallelAdmissionTests
         {
             return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
         }
+    }
+
+    private sealed class TestCapabilities : IPluginCapabilityResolver
+    {
+        public bool SupportsEmulator(string pluginName) => false;
+
+        public ScriptProfile? ResolveProfile(string pluginName, string rootPath) => null;
     }
 }

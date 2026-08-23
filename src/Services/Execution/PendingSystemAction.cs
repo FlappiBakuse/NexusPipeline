@@ -10,4 +10,7 @@ internal sealed class PendingSystemAction
     public DateTime Deadline { get; set; }
 
     public CancellationTokenSource Cts { get; set; } = new();
+
+    /// <summary>系统调用已完成状态转换；状态锁之外执行实际 OS side effect。</summary>
+    internal bool IsArmed { get; set; }
 }

@@ -7,7 +7,7 @@
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
 > v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
 > v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
-> v0.9.0 并行调度：`ExecutionPlanBuilder` 从仓储快照构建冻结执行计划，`ExecutionAdmissionPolicy` 负责纯资格矩阵/资源/完成操作策略，`ExecutionStateStore` 原子登记 profile 租约并协调完成意图；队列内保持串行，符合条件的模拟器队列和一个标准队列可并行，外部 API 与磁盘结构保持兼容。
+> v0.9.1 并行调度安全性加固：`IExecutionSnapshotProvider` 在同一数据锁内提供队列、脚本和用户配置输入，资源租约覆盖日志模式与前/后置脚本，路径和 ADB 端点按物理身份规范化；`ExecutionStateStore` 增加运行组收尾状态与 CRUD 协调域，`Scheduler` 对瞬时准入冲突保留待重试触发。队列内保持串行，符合条件的模拟器队列和一个标准队列可并行。
 
 ## 总体结构
 
@@ -64,15 +64,15 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
-| `IScriptRepository` / `IQueueRepository` / `IUserRepository` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列和启用用户的显式端口；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
+| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一数据锁内的执行输入快照；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
 | `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
 | `IExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；具体实现仍由现有 `ExecutionCommands`、`NotificationDispatcher`、`PluginManager` 提供 |
 | `ExecutionCommands` | src/Application/Commands/ExecutionCommands.cs | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消应用命令入口 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 兼容执行门面：获取冻结计划、提交准入登记、取消和入口参数编排；不承载后台运行流程 |
-| `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作 |
+| `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作；运行时通过 `IExecutionSnapshotProvider` 获取队列与脚本的原子输入 |
 | `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程预检和任务计数校验 |
-| `ExecutionAdmissionPolicy` | src/Services/Execution/ExecutionAdmissionPolicy.cs | 纯逻辑比较 EmulatorOnly/Standard 矩阵、重复目标、资源冲突、完成操作兼容性和 pending 阻断 |
+| `ExecutionAdmissionPolicy` | src/Services/Execution/ExecutionAdmissionPolicy.cs | 纯逻辑比较 EmulatorOnly/Standard 矩阵、重复目标、资源冲突、完成操作兼容性和 pending 阻断，并标注瞬时/永久失败 |
 | `ExecutionRunner` | src/Services/Execution/ExecutionRunner.cs | 脚本/队列后台生命周期、队列内用户串行、历史落盘、通知和完成意图提交 |
 | `SystemActionExecutor` | src/Services/Execution/SystemActionExecutor.cs | 运行组空闲后的完成操作 arm、pending 倒计时和取消语义 |
 | `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、配置事务和运行收尾；后台任务与历史/通知外层边界由 `ExecutionRunner` 承载 |
@@ -80,7 +80,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `AttemptRunner` | src/Services/Execution/AttemptRunner.cs | 单次尝试执行入口；协调器通过该边界调用前/后置脚本与监控执行 |
 | `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
 | `CleanupManager` / `RunAttemptFinalizer` | src/Services/Execution/ | 执行域清理门面与 Windows 进程/游戏清理基础设施 |
-| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、完成意图与待执行系统操作；保留原子防重入和 100 条历史上限 |
+| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、运行组 `Open/Closing/ActionPending` 状态、完成意图与待执行系统操作，并为配置 CRUD 提供租约协调 |
 | `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、并发安全记录/日志写入与一致快照 |
 | `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
@@ -96,7 +96,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 通过 `INotificationChannelProvider` 分发脚本/队列通知，隔离具体插件实现 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |

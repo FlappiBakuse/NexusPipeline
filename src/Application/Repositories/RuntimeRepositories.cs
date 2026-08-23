@@ -37,6 +37,25 @@ internal sealed class RuntimeQueueRepository : IQueueRepository
     public IReadOnlyList<DispatchQueue> Snapshot() => _snapshot();
 }
 
+/// <summary>运行时执行快照适配器：由组合根在一次 DataLock 内复制队列与脚本引用。</summary>
+internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvider
+{
+    private readonly Func<string, ExecutionScriptSnapshot?> _snapshotScript;
+    private readonly Func<string, ExecutionQueueSnapshot?> _snapshotQueue;
+
+    public RuntimeExecutionSnapshotProvider(
+        Func<string, ExecutionScriptSnapshot?> snapshotScript,
+        Func<string, ExecutionQueueSnapshot?> snapshotQueue)
+    {
+        _snapshotScript = snapshotScript;
+        _snapshotQueue = snapshotQueue;
+    }
+
+    public ExecutionScriptSnapshot? SnapshotScript(string scriptId) => _snapshotScript(scriptId);
+
+    public ExecutionQueueSnapshot? SnapshotQueue(string queueId) => _snapshotQueue(queueId);
+}
+
 internal sealed class RuntimeUserRepository : IUserRepository
 {
     private readonly Action<Action> _withDataLock;

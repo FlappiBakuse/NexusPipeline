@@ -352,7 +352,8 @@ public class GovernanceUnitTests
             TargetName = "队列C",
         };
         Assert.False(store.TryRegister(candidate, reboot, out ExecutionAdmissionFailure? failure));
-        Assert.Equal(ExecutionAdmissionFailureCode.CompletionActionConflict, failure!.Code);
+        Assert.Equal(ExecutionAdmissionFailureCode.ExecutionGroupClosing, failure!.Code);
+        Assert.Equal(ExecutionGroupState.Closing, store.GroupState);
 
         PendingSystemAction? pending = store.Release(second, new CompletionIntent(second.Id, second.TargetName, "shutdown"));
         Assert.NotNull(pending);

@@ -110,7 +110,7 @@ internal sealed class ExecutionValidator
         foreach (QueueTask task in queue.Tasks)
         {
             ScriptInstance? script = _scripts.FindById(task.ScriptInstanceId);
-            totalTasks += script is null ? 1 : _users.EnabledNames(script).Count;
+            totalTasks += script is null ? 1 : Math.Max(1, _users.EnabledNames(script).Count);
         }
         return totalTasks;
     }

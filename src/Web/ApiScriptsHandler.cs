@@ -9,6 +9,7 @@ using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
@@ -196,21 +197,34 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
                 return;
             }
-            lock (IconSync)
-            {
-                IconCache.Remove(existing.Id);
-            }
             // v0.7.2+（KN-04）：锁内完成「查找-替换-保存」整段，避免并发修改导致 IndexOf 落空/越界；锁内不做 await。
-            bool notFound;
-            lock (ctx.DataLock)
-            {
-                int index = ctx.Scripts.IndexOf(existing);
-                notFound = index < 0;
-                if (!notFound)
+            bool notFound = false;
+            bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                context,
+                ctx.Center,
+                existing.Id,
+                null,
+                $"script:{existing.Id}",
+                () =>
                 {
-                    ctx.Scripts[index] = update;
-                    DataStore.SaveScripts(ctx.Scripts);
-                }
+                    lock (IconSync)
+                    {
+                        IconCache.Remove(existing.Id);
+                    }
+                    lock (ctx.DataLock)
+                    {
+                        int index = ctx.Scripts.IndexOf(existing);
+                        notFound = index < 0;
+                        if (!notFound)
+                        {
+                            ctx.Scripts[index] = update;
+                            DataStore.SaveScripts(ctx.Scripts);
+                        }
+                    }
+                }).ConfigureAwait(false);
+            if (!changed)
+            {
+                return;
             }
             if (notFound)
             {
@@ -229,32 +243,49 @@ internal static class ApiScriptsHandler
         if (method == "DELETE" && seg.Length == 2)
         {
             ScriptInstance? removed = ctx.FindScript(seg[1]);
+            SemaphoreSlim? gate = null;
             if (removed is not null)
             {
-                SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
+                gate = ScriptConfigGate.Get(seg[1]);
                 if (!gate.Wait(0))
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法删除" }, 409).ConfigureAwait(false);
                     return;
                 }
-                try
+            }
+            try
+            {
+                bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                    context,
+                    ctx.Center,
+                    seg[1],
+                    null,
+                    $"script:{seg[1]}",
+                    () =>
+                    {
+                        if (removed is not null)
+                        {
+                            UserConfigManager.RemoveScriptData(seg[1]);
+                        }
+                        // v0.7.2+（KN-04）：锁内完成删除与保存，避免与并发请求/后台线程冲突。
+                        lock (ctx.DataLock)
+                        {
+                            ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
+                            DataStore.SaveScripts(ctx.Scripts);
+                        }
+                        lock (IconSync)
+                        {
+                            IconCache.Remove(seg[1]);
+                        }
+                    }).ConfigureAwait(false);
+                if (!changed)
                 {
-                    UserConfigManager.RemoveScriptData(seg[1]);
-                }
-                finally
-                {
-                    gate.Release();
+                    return;
                 }
             }
-            // v0.7.2+（KN-04）：锁内完成删除与保存，避免与并发请求/后台线程冲突。
-            lock (ctx.DataLock)
+            finally
             {
-                ctx.Scripts.RemoveAll(script => script.Id == seg[1]);
-                DataStore.SaveScripts(ctx.Scripts);
-            }
-            lock (IconSync)
-            {
-                IconCache.Remove(seg[1]);
+                gate?.Release();
             }
             ScriptConfigGate.Remove(seg[1]);
             ConfigSwapPrimitives.RemoveMutex(seg[1]);
@@ -552,75 +583,96 @@ internal static class ApiScriptsHandler
                     return;
                 }
                 SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
-                if (!gate.Wait(0))
-                {
-                    await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法新增用户" }, 409).ConfigureAwait(false);
-                    return;
-                }
-                bool gateReleased = false;
-                try
-                {
-                // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/运行线程冲突；锁内不做 await。
-                string? userLimit;
-                lock (ctx.DataLock)
-                {
-                    userLimit = Limits.CheckUserCount(script.Users.Count);
-                    if (userLimit is null
-                        && script.Users.Any(existing => string.Equals(existing.Name, user.Name, StringComparison.OrdinalIgnoreCase)))
+                string? userLimit = null;
+                string? snapError = null;
+                string? gateError = null;
+                bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                    context,
+                    ctx.Center,
+                    seg[1],
+                    null,
+                    $"script:{seg[1]}:users",
+                    () =>
                     {
-                        userLimit = "用户名重复：该脚本已存在同名用户";
-                    }
-                    if (userLimit is null)
-                    {
-                        script.Users.Add(user);
+                        bool gateHeld = false;
                         try
                         {
-                            DataStore.SaveScripts(ctx.Scripts);
+                            if (!gate.Wait(0))
+                            {
+                                gateError = "脚本正在运行或编辑配置中，无法新增用户";
+                                return;
+                            }
+                            gateHeld = true;
+
+                            // v0.7.2+（KN-04）：锁内完成「校验-读-写」整段，避免与并发请求/运行线程冲突；锁内不做 await。
+                            lock (ctx.DataLock)
+                            {
+                                userLimit = Limits.CheckUserCount(script.Users.Count);
+                                if (userLimit is null
+                                    && script.Users.Any(existing => string.Equals(existing.Name, user.Name, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    userLimit = "用户名重复：该脚本已存在同名用户";
+                                }
+                                if (userLimit is null)
+                                {
+                                    script.Users.Add(user);
+                                    try
+                                    {
+                                        DataStore.SaveScripts(ctx.Scripts);
+                                    }
+                                    catch
+                                    {
+                                        script.Users.Remove(user);
+                                        throw;
+                                    }
+                                }
+                            }
+                            if (userLimit is not null)
+                            {
+                                return;
+                            }
+
+                            snapError = UserConfigManager.SnapshotOnAddUser(script, user.Name);
+                            if (snapError is not null)
+                            {
+                                Logger.Warn($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
+                                lock (ctx.DataLock)
+                                {
+                                    script.Users.RemoveAll(existing => ReferenceEquals(existing, user));
+                                    DataStore.SaveScripts(ctx.Scripts);
+                                }
+                            }
                         }
-                        catch
+                        finally
                         {
-                            script.Users.Remove(user);
-                            throw;
+                            if (gateHeld)
+                            {
+                                gate.Release();
+                            }
                         }
-                    }
+                    }).ConfigureAwait(false);
+                if (!changed)
+                {
+                    return;
+                }
+                if (gateError is not null)
+                {
+                    await HttpHelper.WriteJsonAsync(context, new { error = gateError }, 409).ConfigureAwait(false);
+                    return;
                 }
                 if (userLimit is not null)
                 {
-                    gate.Release();
-                    gateReleased = true;
                     await HttpHelper.WriteJsonAsync(context, new { error = userLimit }, 400).ConfigureAwait(false);
                     return;
                 }
-                string? snapError = UserConfigManager.SnapshotOnAddUser(script, user.Name);
                 if (snapError is not null)
                 {
-                    Logger.Warn($"[警告] 用户「{user.Name}」初始配置快照失败：{snapError}");
-                    lock (ctx.DataLock)
-                    {
-                        script.Users.RemoveAll(existing => ReferenceEquals(existing, user));
-                        DataStore.SaveScripts(ctx.Scripts);
-                    }
-                    gate.Release();
-                    gateReleased = true;
                     await HttpHelper.WriteJsonAsync(context, new { error = "初始配置快照失败：" + snapError }, 400).ConfigureAwait(false);
                     return;
                 }
-                // 状态变更（落盘 + 初始快照）已完成，写响应前释放门禁——此前 finally 在响应写出后才释放，
-                // 客户端收到响应后紧接的下一个门禁操作（如 edit-config start）可能抢在释放前到达被 409 拒绝，
-                // CI 上「POST users → 立即 start」稳定复现（本地经人工/浏览器延迟不可见）。
-                gate.Release();
-                gateReleased = true;
                 Audit.Log(Audit.Web, "添加用户", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
                 return;
-                }
-                finally
-                {
-                    if (!gateReleased)
-                    {
-                        gate.Release();
-                    }
-                }
             }
             if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
             {
@@ -648,53 +700,82 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
                     return;
                 }
-                // v0.7.2+（KN-04）：锁内完成「查重-改名-保存」整段（改名仅指集合内对象字段更新，数据目录迁移在锁外做）；
-                // 锁内不做 await。
                 string? userError = null;
-                lock (ctx.DataLock)
-                {
-                    if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase)
-                        && script.Users.Any(u => !ReferenceEquals(u, existing) && string.Equals(u.Name, update.Name, StringComparison.OrdinalIgnoreCase)))
+                string? renameError = null;
+                SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
+                bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                    context,
+                    ctx.Center,
+                    seg[1],
+                    null,
+                    $"script:{seg[1]}:users",
+                    () =>
                     {
-                        userError = "用户名重复：该脚本已存在同名用户";
-                    }
+                        bool gateHeld = false;
+                        try
+                        {
+                            if (!gate.Wait(0))
+                            {
+                                userError = "脚本正在运行或编辑配置中，无法编辑用户";
+                                return;
+                            }
+                            gateHeld = true;
+
+                            // v0.7.2+（KN-04）：锁内完成「查重-改名-保存」整段；执行协调锁同时阻止新计划在检查后插入。
+                            lock (ctx.DataLock)
+                            {
+                                if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase)
+                                    && script.Users.Any(u => !ReferenceEquals(u, existing) && string.Equals(u.Name, update.Name, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    userError = "用户名重复：该脚本已存在同名用户";
+                                }
+                            }
+                            if (userError is not null)
+                            {
+                                return;
+                            }
+
+                            if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase))
+                            {
+                                renameError = UserConfigManager.RenameUserData(seg[1], oldName, update.Name);
+                                if (renameError is not null)
+                                {
+                                    return;
+                                }
+                            }
+
+                            lock (ctx.DataLock)
+                            {
+                                existing.Name = update.Name;
+                                existing.Enabled = update.Enabled;
+                                existing.PreRunScript = update.PreRunScript;
+                                existing.PreRunOnceOnly = update.PreRunOnceOnly;
+                                existing.PostRunScript = update.PostRunScript;
+                                existing.PostRunOnFinalOnly = update.PostRunOnFinalOnly;
+                                DataStore.SaveScripts(ctx.Scripts);
+                            }
+                        }
+                        finally
+                        {
+                            if (gateHeld)
+                            {
+                                gate.Release();
+                            }
+                        }
+                    }).ConfigureAwait(false);
+                if (!changed)
+                {
+                    return;
                 }
                 if (userError is not null)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = userError }, 400).ConfigureAwait(false);
+                    await HttpHelper.WriteJsonAsync(context, new { error = userError }, userError.Contains("运行", StringComparison.Ordinal) ? 409 : 400).ConfigureAwait(false);
                     return;
                 }
-                if (!string.Equals(oldName, update.Name, StringComparison.OrdinalIgnoreCase))
+                if (renameError is not null)
                 {
-                    SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
-                    if (!gate.Wait(0))
-                    {
-                        await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法编辑用户" }, 409).ConfigureAwait(false);
-                        return;
-                    }
-                    try
-                    {
-                        string? renameError = UserConfigManager.RenameUserData(seg[1], oldName, update.Name);
-                        if (renameError is not null)
-                        {
-                            await HttpHelper.WriteJsonAsync(context, new { error = renameError }, 400).ConfigureAwait(false);
-                            return;
-                        }
-                    }
-                    finally
-                    {
-                        gate.Release();
-                    }
-                }
-                lock (ctx.DataLock)
-                {
-                    existing.Name = update.Name;
-                    existing.Enabled = update.Enabled;
-                    existing.PreRunScript = update.PreRunScript;
-                    existing.PreRunOnceOnly = update.PreRunOnceOnly;
-                    existing.PostRunScript = update.PostRunScript;
-                    existing.PostRunOnFinalOnly = update.PostRunOnFinalOnly;
-                    DataStore.SaveScripts(ctx.Scripts);
+                    await HttpHelper.WriteJsonAsync(context, new { error = renameError }, 400).ConfigureAwait(false);
+                    return;
                 }
                 Audit.Log(Audit.Web, "编辑用户", $"{script.Name} / {oldName} → {existing.Name}");
                 await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
@@ -716,25 +797,64 @@ internal static class ApiScriptsHandler
                     return;
                 }
                 SemaphoreSlim gate = ScriptConfigGate.Get(seg[1]);
-                if (!gate.Wait(0))
+                bool notFound = false;
+                string? gateError = null;
+                bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                    context,
+                    ctx.Center,
+                    seg[1],
+                    userName,
+                    $"user:{seg[1]}:{userName}",
+                    () =>
+                    {
+                        bool gateHeld = false;
+                        try
+                        {
+                            if (!gate.Wait(0))
+                            {
+                                gateError = "脚本正在运行或编辑配置中，无法删除用户";
+                                return;
+                            }
+                            gateHeld = true;
+                            // v0.7.2+（KN-04）：在同一协调域内完成用户数据删除与列表落盘。
+                            lock (ctx.DataLock)
+                            {
+                                int scriptIndex = ctx.Scripts.IndexOf(script);
+                                if (scriptIndex < 0
+                                    || script.Users.All(u => !u.Name.Equals(userName, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    notFound = true;
+                                    return;
+                                }
+                            }
+                            UserConfigManager.RemoveUserData(seg[1], userName);
+                            lock (ctx.DataLock)
+                            {
+                                script.Users.RemoveAll(u => u.Name.Equals(userName, StringComparison.OrdinalIgnoreCase));
+                                DataStore.SaveScripts(ctx.Scripts);
+                            }
+                        }
+                        finally
+                        {
+                            if (gateHeld)
+                            {
+                                gate.Release();
+                            }
+                        }
+                    }).ConfigureAwait(false);
+                if (!changed)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法删除用户" }, 409).ConfigureAwait(false);
                     return;
                 }
-                try
+                if (gateError is not null)
                 {
-                    UserConfigManager.RemoveUserData(seg[1], userName);
+                    await HttpHelper.WriteJsonAsync(context, new { error = gateError }, 409).ConfigureAwait(false);
+                    return;
                 }
-                finally
+                if (notFound)
                 {
-                    gate.Release();
-                }
-                // v0.7.2+（KN-04）：锁内删除与保存，避免与并发请求/运行线程冲突。
-                // v0.7.4（KN-37）：按名匹配忽略大小写，与上方存在性校验口径一致。
-                lock (ctx.DataLock)
-                {
-                    script.Users.RemoveAll(u => u.Name.Equals(userName, StringComparison.OrdinalIgnoreCase));
-                    DataStore.SaveScripts(ctx.Scripts);
+                    await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                    return;
                 }
                 Audit.Log(Audit.Web, "删除用户", $"{script.Name} / {userName}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
@@ -890,7 +1010,28 @@ internal static class ApiScriptsHandler
         SemaphoreSlim gate = ScriptConfigGate.Get(scriptId);
         if (action == "start")
         {
-            if (!gate.Wait(0))
+            bool gateAcquired = false;
+            bool gateBusy = false;
+            bool leaseChecked = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                context,
+                ctx.Center,
+                scriptId,
+                user.Name,
+                $"user:{scriptId}:{user.Name}",
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        gateBusy = true;
+                        return;
+                    }
+                    gateAcquired = true;
+                }).ConfigureAwait(false);
+            if (!leaseChecked)
+            {
+                return;
+            }
+            if (gateBusy || !gateAcquired)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中" }, 409).ConfigureAwait(false);
                 return;

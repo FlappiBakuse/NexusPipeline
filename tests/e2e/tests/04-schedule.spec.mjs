@@ -561,8 +561,10 @@ test("队列防重入：运行中重复触发被拒（KN-03）", async () => {
   expect(inRunning, "队列进入运行中状态").toBeTruthy();
 
   const second = await api("POST", "/api/dispatch/queue", { queueId: qid, mode: "manual" });
-  expect(!second.ok && second.status === 400, "运行中重复触发被拒（HTTP 400，实际 " + second.status + "）").toBeTruthy();
+  expect(!second.ok && second.status === 409, "运行中重复触发被拒（HTTP 409，实际 " + second.status + "）").toBeTruthy();
   const errBody = await second.json();
+  expect(errBody.code).toBe("duplicate_target");
+  expect(errBody.retryable).toBeTruthy();
   expect((errBody.error || "").includes("运行"), "拒绝原因含「运行」（" + JSON.stringify(errBody) + "）").toBeTruthy();
 
   expect(await waitNoRunning(120000), "队列运行结束").toBeTruthy();
@@ -651,8 +653,10 @@ test("v0.9.0 并行准入：两个模拟器队列与一个普通队列并行，�
     }, 10000), "普通队列进入运行中").toBeTruthy();
 
     const secondStandard = await api("POST", "/api/dispatch/queue", { queueId: standardB.id, mode: "manual" });
-    expect(!secondStandard.ok && secondStandard.status === 400, "第二个普通队列被准入矩阵拒绝").toBeTruthy();
+    expect(!secondStandard.ok && secondStandard.status === 409, "第二个普通队列被准入矩阵拒绝（HTTP 409，实际 " + secondStandard.status + "）").toBeTruthy();
     const errorBody = await secondStandard.json();
+    expect(errorBody.code).toBe("standard_queue_already_running");
+    expect(errorBody.retryable).toBeTruthy();
     expect(errorBody.error || "").toContain("其他调度队列");
   } finally {
     await waitNoRunning(120000);

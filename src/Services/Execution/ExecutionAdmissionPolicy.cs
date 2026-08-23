@@ -7,13 +7,42 @@ internal enum ExecutionAdmissionFailureCode
     ResourceConflict,
     CompletionActionConflict,
     PendingSystemAction,
+    ExecutionGroupClosing,
+}
+
+internal enum AdmissionFailureDisposition
+{
+    Permanent,
+    Transient,
 }
 
 internal sealed record ExecutionAdmissionFailure(
     ExecutionAdmissionFailureCode Code,
     string Message,
     string? ConflictingRunId = null,
-    string? Resource = null);
+    string? Resource = null)
+{
+    public AdmissionFailureDisposition Disposition => Code switch
+    {
+        ExecutionAdmissionFailureCode.DuplicateTarget
+            or ExecutionAdmissionFailureCode.StandardQueueAlreadyRunning
+            or ExecutionAdmissionFailureCode.ResourceConflict
+            or ExecutionAdmissionFailureCode.PendingSystemAction
+            or ExecutionAdmissionFailureCode.ExecutionGroupClosing => AdmissionFailureDisposition.Transient,
+        _ => AdmissionFailureDisposition.Permanent,
+    };
+
+    public string StableCode => Code switch
+    {
+        ExecutionAdmissionFailureCode.DuplicateTarget => "duplicate_target",
+        ExecutionAdmissionFailureCode.StandardQueueAlreadyRunning => "standard_queue_already_running",
+        ExecutionAdmissionFailureCode.ResourceConflict => "execution_resource_in_use",
+        ExecutionAdmissionFailureCode.CompletionActionConflict => "completion_action_conflict",
+        ExecutionAdmissionFailureCode.PendingSystemAction => "pending_system_action",
+        ExecutionAdmissionFailureCode.ExecutionGroupClosing => "execution_group_closing",
+        _ => "execution_admission_failed",
+    };
+}
 
 /// <summary>
 /// 并行准入纯策略：只比较候选 profile、活动 profile 和未执行完成意图，禁止 IO、RuntimeContext 与可变状态。

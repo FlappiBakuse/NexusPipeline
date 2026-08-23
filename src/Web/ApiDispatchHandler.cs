@@ -4,6 +4,7 @@ using NexusPipeline.App.Commands;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.Web;
 
@@ -49,6 +50,10 @@ internal static class ApiDispatchHandler
                 return;
             }
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+        }
+        catch (ExecutionAdmissionException admission)
+        {
+            await ExecutionConflictResponse.WriteAdmissionAsync(context, admission).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

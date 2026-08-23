@@ -25,6 +25,9 @@ internal class RuntimeContext
         collection.AddSingleton(new HistoryService());
         collection.AddSingleton<IScriptRepository>(_ => new RuntimeScriptRepository(FindScript, SnapshotScripts));
         collection.AddSingleton<IQueueRepository>(_ => new RuntimeQueueRepository(FindQueue, SnapshotQueues));
+        collection.AddSingleton<IExecutionSnapshotProvider>(_ => new RuntimeExecutionSnapshotProvider(
+            SnapshotScriptForExecution,
+            SnapshotQueueForExecution));
         collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(action =>
         {
             lock (DataLock)
@@ -133,6 +136,32 @@ internal class RuntimeContext
         lock (DataLock)
         {
             return Queues.Select(queue => queue.Clone()).ToList();
+        }
+    }
+
+    /// <summary>在一次 DataLock 内复制单个脚本，供执行计划建立原子输入。</summary>
+    internal ExecutionScriptSnapshot? SnapshotScriptForExecution(string id)
+    {
+        lock (DataLock)
+        {
+            ScriptInstance? script = Scripts.FirstOrDefault(item => item.Id == id);
+            return script is null ? null : new ExecutionScriptSnapshot(script.Clone());
+        }
+    }
+
+    /// <summary>在一次 DataLock 内复制队列及全部脚本，避免计划拼出仓储中不存在的混合时刻。</summary>
+    internal ExecutionQueueSnapshot? SnapshotQueueForExecution(string id)
+    {
+        lock (DataLock)
+        {
+            DispatchQueue? queue = Queues.FirstOrDefault(item => item.Id == id);
+            if (queue is null)
+            {
+                return null;
+            }
+            return new ExecutionQueueSnapshot(
+                queue.Clone(),
+                Scripts.Select(script => script.Clone()).ToList());
         }
     }
 }

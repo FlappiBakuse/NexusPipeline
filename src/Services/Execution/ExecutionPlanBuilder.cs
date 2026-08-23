@@ -32,27 +32,33 @@ internal sealed class ExecutionPlanBuilder
     private readonly IQueueRepository _queues;
     private readonly IUserRepository _users;
     private readonly ExecutionValidator _validator;
+    private readonly IExecutionSnapshotProvider? _snapshots;
+    private readonly IPluginCapabilityResolver? _capabilities;
 
     public ExecutionPlanBuilder(
         IScriptRepository scripts,
         IQueueRepository queues,
         IUserRepository users,
-        ExecutionValidator validator)
+        ExecutionValidator validator,
+        IExecutionSnapshotProvider? snapshots = null,
+        IPluginCapabilityResolver? capabilities = null)
     {
         _scripts = scripts;
         _queues = queues;
         _users = users;
         _validator = validator;
+        _snapshots = snapshots;
+        _capabilities = capabilities;
     }
 
     public ScriptExecutionPlan BuildScript(string scriptId, string? userName)
     {
-        ScriptInstance? source = _scripts.Snapshot().FirstOrDefault(item => item.Id == scriptId);
-        if (source is null)
+        ScriptInstance? script = _snapshots?.SnapshotScript(scriptId)?.Script
+            ?? _scripts.Snapshot().FirstOrDefault(item => item.Id == scriptId)?.Clone();
+        if (script is null)
         {
             throw new InvalidOperationException($"脚本实例不存在：{scriptId}");
         }
-        ScriptInstance script = source.Clone();
 
         _validator.ValidateScriptStart(script, userName);
         List<string> users = string.IsNullOrWhiteSpace(userName)
@@ -61,19 +67,30 @@ internal sealed class ExecutionPlanBuilder
         return new ScriptExecutionPlan(
             script,
             users,
-            ExecutionAdmissionProfile.ForScript(script),
+            ExecutionAdmissionProfile.ForScript(script, userName, _capabilities),
             string.IsNullOrWhiteSpace(userName) ? Math.Max(1, users.Count) : 1);
     }
 
     public QueueExecutionPlan BuildQueue(string queueId)
     {
-        List<ScriptInstance> scripts = _scripts.Snapshot().Select(script => script.Clone()).ToList();
-        DispatchQueue? source = _queues.Snapshot().FirstOrDefault(item => item.Id == queueId);
+        ExecutionQueueSnapshot? executionSnapshot = _snapshots?.SnapshotQueue(queueId);
+        List<ScriptInstance> scripts;
+        DispatchQueue? source;
+        if (executionSnapshot is not null)
+        {
+            source = executionSnapshot.Queue;
+            scripts = executionSnapshot.Scripts.Select(script => script.Clone()).ToList();
+        }
+        else
+        {
+            scripts = _scripts.Snapshot().Select(script => script.Clone()).ToList();
+            source = _queues.Snapshot().FirstOrDefault(item => item.Id == queueId)?.Clone();
+        }
         if (source is null)
         {
             throw new InvalidOperationException($"调度队列不存在：{queueId}");
         }
-        DispatchQueue queue = source.Clone();
+        DispatchQueue queue = source;
 
         _validator.ValidateQueueStartSnapshot(queue, scripts);
         List<PlannedQueueTask> tasks = queue.Tasks
@@ -98,8 +115,10 @@ internal sealed class ExecutionPlanBuilder
 
         DispatchQueue queueSnapshot = queue.Clone();
         queueSnapshot.Tasks = tasks.Select(task => CloneTask(task.Task)).ToList();
-        ExecutionAdmissionProfile admission = ExecutionAdmissionProfile.ForQueue(queueSnapshot, tasks);
-        int totalTasks = tasks.Sum(task => task.Script is null ? 1 : task.EnabledUsers.Count);
+        ExecutionAdmissionProfile admission = ExecutionAdmissionProfile.ForQueue(queueSnapshot, tasks, _capabilities);
+        int totalTasks = tasks.Sum(task => task.Script is null || task.EnabledUsers.Count == 0
+            ? 1
+            : task.EnabledUsers.Count);
         return new QueueExecutionPlan(queueSnapshot, tasks, admission, totalTasks);
     }
 

@@ -78,23 +78,37 @@ internal static class ScriptsMenu
                             }
                             else if (Ui.TrySave(() =>
                             {
-                                // v0.7.4（KN-05）：与 Web 端删除对齐——清理 data 目录、释放门禁与跨进程互斥体
-                                // （此前仅移除列表，data 残留 + 静态字典条目随增删累积）。
-                                SemaphoreSlim gate = ScriptConfigGate.Get(removing.Id);
-                                if (!gate.Wait(0))
+                                bool changed = ctx.Center.TryExecuteLeaseMutation(
+                                    removing.Id,
+                                    null,
+                                    () =>
+                                    {
+                                        // v0.7.4（KN-05）：与 Web 端删除对齐——清理 data 目录、释放门禁与跨进程互斥体
+                                        // （此前仅移除列表，data 残留 + 静态字典条目随增删累积）。
+                                        SemaphoreSlim gate = ScriptConfigGate.Get(removing.Id);
+                                        if (!gate.Wait(0))
+                                        {
+                                            throw new InvalidOperationException("脚本正在运行或编辑配置中，无法删除");
+                                        }
+                                        try
+                                        {
+                                            UserConfigManager.RemoveScriptData(removing.Id);
+                                            lock (ctx.DataLock)
+                                            {
+                                                ctx.Scripts.Remove(removing);
+                                                DataStore.SaveScripts(ctx.Scripts);
+                                            }
+                                        }
+                                        finally
+                                        {
+                                            gate.Release();
+                                        }
+                                    },
+                                    out _);
+                                if (!changed)
                                 {
-                                    throw new InvalidOperationException("脚本正在运行或编辑配置中，无法删除");
+                                    throw new InvalidOperationException("执行计划正在引用该脚本，无法删除");
                                 }
-                                try
-                                {
-                                    UserConfigManager.RemoveScriptData(removing.Id);
-                                }
-                                finally
-                                {
-                                    gate.Release();
-                                }
-                                ctx.Scripts.Remove(removing);
-                                DataStore.SaveScripts(ctx.Scripts);
                                 ScriptConfigGate.Remove(removing.Id);
                                 ConfigSwapPrimitives.RemoveMutex(removing.Id);
                             }, "脚本实例"))
@@ -211,7 +225,39 @@ internal static class ScriptsMenu
             }
             else
             {
-                ctx.Scripts[ctx.Scripts.IndexOf(current)] = script;
+                bool changed = ctx.Center.TryExecuteLeaseMutation(
+                    current.Id,
+                    null,
+                    () =>
+                    {
+                        SemaphoreSlim gate = ScriptConfigGate.Get(current.Id);
+                        if (!gate.Wait(0))
+                        {
+                            throw new InvalidOperationException("脚本正在运行或编辑配置中，无法修改");
+                        }
+                        try
+                        {
+                            lock (ctx.DataLock)
+                            {
+                                int currentIndex = ctx.Scripts.FindIndex(item => item.Id == current.Id);
+                                if (currentIndex < 0)
+                                {
+                                    throw new InvalidOperationException("脚本实例不存在，无法修改");
+                                }
+                                ctx.Scripts[currentIndex] = script;
+                                DataStore.SaveScripts(ctx.Scripts);
+                            }
+                        }
+                        finally
+                        {
+                            gate.Release();
+                        }
+                    },
+                    out _);
+                if (!changed)
+                {
+                    throw new InvalidOperationException("执行计划正在引用该脚本，无法修改");
+                }
             }
             DataStore.SaveScripts(ctx.Scripts);
         }, "脚本实例"))

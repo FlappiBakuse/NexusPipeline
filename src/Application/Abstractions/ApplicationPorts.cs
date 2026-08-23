@@ -21,6 +21,20 @@ internal interface IQueueRepository
     IReadOnlyList<DispatchQueue> Snapshot();
 }
 
+/// <summary>执行计划所需的单时刻仓储快照，队列与其脚本引用在同一数据锁内复制。</summary>
+internal interface IExecutionSnapshotProvider
+{
+    ExecutionScriptSnapshot? SnapshotScript(string scriptId);
+
+    ExecutionQueueSnapshot? SnapshotQueue(string queueId);
+}
+
+internal sealed record ExecutionScriptSnapshot(ScriptInstance Script);
+
+internal sealed record ExecutionQueueSnapshot(
+    DispatchQueue Queue,
+    IReadOnlyList<ScriptInstance> Scripts);
+
 /// <summary>脚本用户读取端口，集中处理并发快照与启用用户规则。</summary>
 internal interface IUserRepository
 {

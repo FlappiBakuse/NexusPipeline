@@ -2,6 +2,26 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.1（Pre-release）
+
+### 并行调度安全性加固
+
+- 扩展资源租约模型，覆盖用户数据、日志精确路径与通配模式、前/后置脚本可执行文件及进程，并对现存路径执行物理规范化；统一 ADB loopback 端点别名。
+- 将 EmulatorOnly 分类收紧为 fail-closed：必须具备有效 ADB 端点，专项插件还必须声明模拟器能力。
+- 在同一数据锁内构造队列、脚本和用户快照，补齐缺失脚本与空用户任务的进度计数语义。
+- 将脚本、用户配置 CRUD、配置编辑门禁与执行租约纳入统一协调；Web 冲突返回 HTTP 409 和稳定错误码。
+- 明确完成组收尾边界：首个非 `none` 完成意图后进入 `Closing`，完成操作执行或取消后重新开放。
+- Scheduler 区分瞬时准入冲突与永久校验失败；瞬时冲突保留 pending trigger 并在后续 tick 重试。
+- 新增并行资源、fail-closed 分类、完成组关闭和 Scheduler 重试测试，并保持现有队列内串行语义。
+
+### 验证
+
+- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.1）。
+- 单元测试通过：163/163。
+- 加速档全量 Playwright：86 通过、1 个 CI 预期跳过；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 发布前真实计时档：Playwright 87/87（约 9.0 分钟）；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- `node --check` 与 `git diff --check` 通过；发布使用本版本管理员构建产物。
+
 ## v0.9.0（Pre-release）
 
 ### 并行调度

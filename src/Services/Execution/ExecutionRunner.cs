@@ -114,8 +114,7 @@ internal sealed class ExecutionRunner
 
                 RunRecord record = await session.RunAsync().ConfigureAwait(false);
                 records.Add(record);
-                exec.AddRecord(record);
-                exec.IncrementDoneTasks();
+                exec.AddRecordAndIncrement(record);
                 exec.CurrentStatus = record.Status == "success" ? "运行成功" : (record.Status == "cancelled" ? "已取消" : "运行失败");
                 Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{record.Status}（{record.ResultDetail}）");
                 _history.Save(record, session.AttemptLogs);
@@ -163,8 +162,7 @@ internal sealed class ExecutionRunner
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
                     records.Add(missing);
-                    exec.AddRecord(missing);
-                    exec.IncrementDoneTasks();
+                    exec.AddRecordAndIncrement(missing);
                     _history.Save(missing, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
                     continue;
@@ -189,8 +187,7 @@ internal sealed class ExecutionRunner
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
                     records.Add(skipped);
-                    exec.AddRecord(skipped);
-                    exec.IncrementDoneTasks();
+                    exec.AddRecordAndIncrement(skipped);
                     _history.Save(skipped, new List<string>());
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
