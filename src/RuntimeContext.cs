@@ -2,7 +2,6 @@ using NexusPipeline.App.Commands;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Repositories;
 using Microsoft.Extensions.DependencyInjection;
-using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
@@ -38,12 +37,8 @@ internal class RuntimeContext
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
-            new PluginHostServices(
-                () => Settings,
-                ReloadSettings,
-                type => provider.GetRequiredService(type))));
-        collection.AddSingleton<INotificationChannelProvider>(provider => provider.GetRequiredService<PluginManager>());
-        collection.AddSingleton<IEmulatorCapabilityProvider>(provider => provider.GetRequiredService<PluginManager>());
+            () => Settings,
+            () => provider.GetRequiredService<NotificationDispatcher>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());

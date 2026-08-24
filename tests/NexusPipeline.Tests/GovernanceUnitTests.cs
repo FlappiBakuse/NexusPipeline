@@ -51,9 +51,9 @@ public class GovernanceUnitTests
     [Fact]
     public void NotificationAndCommandBoundaries_UseApplicationPorts()
     {
-        Assert.True(typeof(INotificationChannelProvider).IsAssignableFrom(typeof(PluginManager)));
-        Assert.True(typeof(IEmulatorCapabilityProvider).IsAssignableFrom(typeof(PluginManager)));
-        Assert.Equal(typeof(INotificationChannelProvider), typeof(NotificationDispatcher).GetConstructors()[0].GetParameters()[0].ParameterType);
+        Assert.DoesNotContain(typeof(PluginManager).GetInterfaces(), type => type.Name.Contains("NotificationChannel", StringComparison.Ordinal));
+        Assert.DoesNotContain(typeof(PluginManager).GetInterfaces(), type => type.Name.Contains("EmulatorCapability", StringComparison.Ordinal));
+        Assert.Equal(typeof(ISettingsProvider), typeof(NotificationDispatcher).GetConstructors()[0].GetParameters()[0].ParameterType);
         Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.StartScript)));
         Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.Cancel)));
     }
@@ -194,17 +194,18 @@ public class GovernanceUnitTests
     }
 
     [Fact]
-    public void PluginManager_LoadAll_DoesNotDuplicateBuiltInCapabilities()
+    public void PluginManager_LoadAll_DoesNotExposeRemovedBuiltInPlugins()
     {
         PluginManager manager = RuntimeContext.Instance.Plugins;
         manager.LoadAll();
-        int firstCount = manager.GetCapabilities<IEmulatorCapability>().Count;
+        string[] firstNames = manager.PluginSummaries.Select(plugin => plugin.Name).OrderBy(name => name).ToArray();
 
         manager.LoadAll();
-        int secondCount = manager.GetCapabilities<IEmulatorCapability>().Count;
+        string[] secondNames = manager.PluginSummaries.Select(plugin => plugin.Name).OrderBy(name => name).ToArray();
 
-        Assert.Equal(firstCount, secondCount);
-        Assert.True(manager.HasCapability(AppSettings.EmulatorAdapterPlugin, PluginCapabilityKeys.Emulator));
+        Assert.Equal(firstNames, secondNames);
+        Assert.DoesNotContain("notify", firstNames, StringComparer.OrdinalIgnoreCase);
+        Assert.DoesNotContain("emulator-adapter", firstNames, StringComparer.OrdinalIgnoreCase);
     }
 
     [Fact]

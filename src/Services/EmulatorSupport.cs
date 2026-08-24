@@ -7,9 +7,9 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// 安卓模拟器适配（v0.7.0+）：adb 命令执行、前台应用检测、模拟器关闭。
-/// 关闭链路：MuMu 专项（MuMuManager info 反查 vmindex → control shutdown，官方优雅退出）→ 回退 adb shell reboot -p（Android 系统关机）。
-/// adb 命令均重定向 stdio 并消费（规避 0x800700E8），单命令超时强杀。
+/// 安卓模拟器基础设施：通用 ADB 命令执行、前台应用检测、进程与端点辅助解析。
+/// 通用 ADB 与 MuMuManager 的具体操作分别由 EmulatorDrivers.cs 中的 driver 负责；driver 选定后保持不变。
+/// adb / manager 命令均重定向 stdio 并消费（规避 0x800700E8），单命令超时强杀。
 /// </summary>
 internal static class EmulatorSupport
 {
@@ -220,7 +220,14 @@ internal static class EmulatorSupport
         {
             return _muMuManager.Length == 0 ? null : _muMuManager;
         }
-        string? found = null;
+        string? found = TestHooks.MuMuManagerExe;
+        if (!string.IsNullOrWhiteSpace(found) && File.Exists(found))
+        {
+            _muMuManager = found;
+            Logger.Info($"[模拟器] MuMuManager 解析：测试钩子 NEXUS_MUMU_MANAGER_EXE → {found}");
+            return found;
+        }
+        found = null;
         string? adbDir = string.IsNullOrWhiteSpace(_adbExe) ? null : Path.GetDirectoryName(_adbExe);
         if (adbDir is not null)
         {
@@ -311,75 +318,9 @@ internal static class EmulatorSupport
         return ok ? ParseForegroundPackage(output) : null;
     }
 
-    /// <summary>兼容旧调用方：没有目标包名时不执行任意前台应用清理。</summary>
-    [Obsolete("请使用 ForceStopTargetAppAsync 并传入本次启动目标包名。")]
-    public static async Task ForceStopForegroundAppAsync(string adbExe, string address, CancellationToken token)
+    /// <summary>通用 ADB driver 的关机路径。MuMu driver 不得调用此方法。</summary>
+    public static async Task<(bool Ok, string Message)> ShutdownGenericEmulatorAsync(string adbExe, string address, CancellationToken token)
     {
-        await Task.CompletedTask.ConfigureAwait(false);
-        Logger.Info("[模拟器] 未提供目标包名，跳过任意前台应用清理。");
-    }
-
-    /// <summary>按本次脚本启动参数中的目标包名关闭应用；缺少目标包名时跳过，不接管任意前台应用。</summary>
-    public static async Task ForceStopTargetAppAsync(
-        string adbExe,
-        string address,
-        string? targetPackage,
-        CancellationToken token)
-    {
-        if (string.IsNullOrWhiteSpace(targetPackage))
-        {
-            Logger.Info("[模拟器] 未配置本次启动目标包名，跳过应用关闭。");
-            return;
-        }
-        if (targetPackage is "com.android.systemui" or "com.android.launcher" or "app.lawnchair" or "com.mumu.launcher")
-        {
-            Logger.Info($"[模拟器] 目标包名为桌面/系统界面（{targetPackage}），跳过关闭。");
-            return;
-        }
-        (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "am", "force-stop", targetPackage }, 30, token).ConfigureAwait(false);
-        if (ok)
-        {
-            Logger.Info($"[模拟器] 已关闭目标应用：{targetPackage}。");
-        }
-        else
-        {
-            Logger.Warn($"[模拟器] 关闭目标应用 {targetPackage} 失败：{Truncate(output)}");
-        }
-    }
-
-    /// <summary>
-    /// 关闭整个模拟器（v0.7.0+）：优先 MuMu 专项（MuMuManager info 按 adb 端口反查实例索引 → control shutdown，
-    /// 官方优雅退出且进程完全退出）；MuMuManager 不可用/非 MuMu 模拟器时回退 adb shell reboot -p（Android 系统关机）。
-    /// 每条关闭路径均以轮询确认离线为成功凭据（MuMuManager 退出码不可信时避免虚假成功）。
-    /// 返回 (是否成功, 说明)。
-    /// </summary>
-    public static async Task<(bool Ok, string Message)> ShutdownEmulatorAsync(string adbExe, string address, CancellationToken token)
-    {
-        if (IsLoopbackAdbEndpoint(address) && ParseAdbPort(address) is int port)
-        {
-            string? mm = ResolveMuMuManager();
-            if (mm is not null)
-            {
-                (bool infoOk, string infoOutput) = await RunCommandAsync(mm, new[] { "info", "-v", "all" }, 30, token).ConfigureAwait(false);
-                string? index = infoOk ? ParseMuMuVmIndex(infoOutput, port) : null;
-                if (index is not null)
-                {
-                    (bool shutdownOk, string shutdownOutput) = await RunCommandAsync(mm, new[] { "control", "-v", index, "shutdown" }, 30, token).ConfigureAwait(false);
-                    if (shutdownOk)
-                    {
-                        if (await WaitEmulatorOfflineAsync(adbExe, address, token).ConfigureAwait(false))
-                        {
-                            return (true, $"已通过 MuMuManager 关闭模拟器（实例索引 {index}）");
-                        }
-                        Logger.Warn($"[模拟器] MuMuManager 已发送关闭指令（实例索引 {index}），但等待超时仍未确认模拟器离线。");
-                    }
-                    else
-                    {
-                        Logger.Warn($"[模拟器] MuMuManager 关闭实例 {index} 失败：{Truncate(shutdownOutput)}");
-                    }
-                }
-            }
-        }
         (bool ok, string output) = await AdbShellAsync(adbExe, address, new[] { "reboot", "-p" }, 30, token).ConfigureAwait(false);
         if (ok)
         {
@@ -402,7 +343,7 @@ internal static class EmulatorSupport
             || output.Contains("failed to connect", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async Task<bool> WaitEmulatorOfflineAsync(string adbExe, string address, CancellationToken token)
+    internal static async Task<bool> WaitEmulatorOfflineAsync(string adbExe, string address, CancellationToken token)
     {
         DateTime deadline = DateTime.Now.AddSeconds(TestHooks.ScaledSeconds(60));
         int consecutiveOfflineProbes = 0;
@@ -435,7 +376,7 @@ internal static class EmulatorSupport
     }
 
     /// <summary>执行外部命令（重定向 stdio 并消费，规避 0x800700E8；bat/cmd 经 cmd.exe /d /s /c 包装）；超时强杀进程；返回 (退出码为 0, 输出)。</summary>
-    private static async Task<(bool Ok, string Output)> RunCommandAsync(string exe, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken token)
+    internal static async Task<(bool Ok, string Output)> RunCommandAsync(string exe, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken token)
     {
         ProcessStartInfo psi;
         if (SystemActions.IsCommandFile(exe))

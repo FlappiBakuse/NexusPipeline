@@ -18,14 +18,6 @@ internal sealed class PluginCapabilityRegistry
         _declared.Clear();
     }
 
-    public void Register(IPlugin plugin)
-    {
-        if (plugin is IPluginCapability capability)
-        {
-            _typed.Add((plugin.Name, capability));
-        }
-    }
-
     public void Register(string pluginName, IPluginCapability capability)
     {
         _typed.Add((pluginName, capability));

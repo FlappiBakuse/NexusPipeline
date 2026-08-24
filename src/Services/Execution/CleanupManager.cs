@@ -13,9 +13,9 @@ internal sealed class CleanupManager
 {
     private readonly RunAttemptFinalizer _finalizer;
 
-    public CleanupManager(ScriptInstance script, string modeText)
+    public CleanupManager(ScriptInstance script, string modeText, Func<IEmulatorDriver?> emulatorDriver)
     {
-        _finalizer = new RunAttemptFinalizer(script, modeText);
+        _finalizer = new RunAttemptFinalizer(script, modeText, emulatorDriver);
     }
 
     public bool KillScript(Process? process, string launchExe, string? excludeGame, ProcessOwnership? ownership = null)

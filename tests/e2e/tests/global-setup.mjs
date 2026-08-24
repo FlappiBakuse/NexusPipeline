@@ -6,6 +6,7 @@ export default async function globalSetup() {
   // v0.7.0+：模拟器 e2e 用 stub adb（隔离目录，宿主按 NEXUS_ADB_EXE 解析）。
   const { runtimeDir } = await import("./helpers.mjs");
   process.env.NEXUS_ADB_EXE = runtimeDir + "\\adb-stub\\adb-stub.cmd";
+  process.env.NEXUS_MUMU_MANAGER_EXE = runtimeDir + "\\mumu-stub\\mumu-manager-stub.cmd";
   setupRuntime();
   startService();
   await waitForService();

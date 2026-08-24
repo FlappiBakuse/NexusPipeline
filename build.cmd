@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 rem ����������v0.6.4+����src �ޱ仯ʱ���� dotnet publish����ͬ�� wwwroot/plugins��ǰ�˸Ķ������رࣩ��
 rem ָ���ļ� .build-src-hash ����Ŀ��������⣩��CI ȫ�¼���޴��ļ� = ȫ��������
-for /f "usebackq delims=" %%h in (`pwsh -NoProfile -Command "$h=(Get-ChildItem -LiteralPath '%~dp0src' -Recurse -File | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''; $b=[System.Text.Encoding]::UTF8.GetBytes($h); $d=[System.Security.Cryptography.SHA256]::Create().ComputeHash($b); [System.BitConverter]::ToString($d).Replace('-','')"`) do set SRC_HASH=%%h
+for /f "usebackq delims=" %%h in (`pwsh -NoProfile -Command "$h=(Get-ChildItem -LiteralPath @('%~dp0src','%~dp0plugins') -Recurse -File | Sort-Object FullName | Get-FileHash -Algorithm SHA256 | Select-Object -ExpandProperty Hash) -join ''; $b=[System.Text.Encoding]::UTF8.GetBytes($h); $d=[System.Security.Cryptography.SHA256]::Create().ComputeHash($b); [System.BitConverter]::ToString($d).Replace('-','')"`) do set SRC_HASH=%%h
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
 if not exist "%~dp0.build-src-hash" goto do_publish
 set /p OLD_HASH=<"%~dp0.build-src-hash"

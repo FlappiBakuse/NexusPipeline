@@ -29,7 +29,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 - **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由插件固化脚本驱动），其次成功/失败关键字；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
 - **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态，不只看进程退出码，因此日志监控对文件「重建/截断/追加」三种形态都必须可靠——v0.5.2 起用**文件身份（FileId）检测**替代创建时间检测，根治句柄残留。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
-- **可扩展插件**：通用插件（内置 `IPlugin` + 独立 capability 接口）扩展程序能力；专项插件为**数据化目录形态**（v0.6.3+：`plugin.json` + `data/` 推导配置与判断脚本），v0.7.9 起数据 capability 通过 `capabilities` key 登记，旧 `supportsEmulator` 继续兼容。
+- **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1 使用宿主日志、配置、密钥、通知和调度端口；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记，旧 `supportsEmulator` 继续兼容。
 
 ## 2. 核心概念
 
@@ -311,8 +311,8 @@ flowchart LR
     N -- 队列级汇总 --> Q[NotifyQueueAsync]
     S --> D[NotificationDispatcher]
     Q --> D
-    D --> C1[NotifyPlugin: Webhook 并行 SMTP]
-    D --> C2[其他 INotifyChannel]
+    D --> C1[宿主 Webhook]
+    D --> C2[宿主 SMTP]
 ```
 
 - **脚本实例级**：实例开启通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后）发送该实例运行状态。

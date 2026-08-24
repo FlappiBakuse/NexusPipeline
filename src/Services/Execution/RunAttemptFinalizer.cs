@@ -12,11 +12,13 @@ internal sealed class RunAttemptFinalizer
 {
     private readonly ScriptInstance _script;
     private readonly string _modeText;
+    private readonly Func<IEmulatorDriver?> _emulatorDriver;
 
-    public RunAttemptFinalizer(ScriptInstance script, string modeText)
+    public RunAttemptFinalizer(ScriptInstance script, string modeText, Func<IEmulatorDriver?> emulatorDriver)
     {
         _script = script;
         _modeText = modeText;
+        _emulatorDriver = emulatorDriver;
     }
 
     public static bool ShouldCloseGame(RunAttemptResult result, bool forceCloseGame)
@@ -44,34 +46,41 @@ internal sealed class RunAttemptFinalizer
             string resultStatus = result.Status;
             if (EmulatorSupport.IsEmulator(_script))
             {
-                string? adbExe = EmulatorSupport.ResolveAdbExe();
-                if (adbExe is null)
+                IEmulatorDriver? driver = _emulatorDriver();
+                if (driver is null)
                 {
-                    Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」未找到 adb 可执行文件，跳过模拟器收尾处理。");
+                    Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」未建立模拟器驱动，跳过模拟器收尾处理。");
                 }
-                else if (resultStatus == "failed" || (resultStatus == "cancelled" && _script.ForceCloseGame))
+                else
                 {
-                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{(resultStatus == "failed" ? "任务失败" : "任务取消且启用强制关闭")}，关闭本次目标应用。");
-                    await EmulatorSupport.ForceStopTargetAppAsync(
-                        adbExe,
-                        _script.GameExe,
-                        EmulatorSupport.ParseAmStartPackage(_script.GameArgs),
-                        cleanupToken).ConfigureAwait(false);
-                }
-                bool runEnded = resultStatus is "success" or "cancelled"
-                    || result.IsFatal
-                    || attemptNumber >= Math.Max(1, maxAttempts);
-                if (adbExe is not null && _script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
-                {
-                    Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
-                    (bool shutdownOk, string shutdownMsg) = await EmulatorSupport.ShutdownEmulatorAsync(adbExe, _script.GameExe, cleanupToken).ConfigureAwait(false);
-                    if (shutdownOk)
+                    IEmulatorDriver activeDriver = driver;
+                    if (resultStatus == "failed" || (resultStatus == "cancelled" && _script.ForceCloseGame))
                     {
-                        Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}。");
+                        Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{(resultStatus == "failed" ? "任务失败" : "任务取消且启用强制关闭")}，关闭本次目标应用。");
+                        EmulatorCommandResult stop = await activeDriver.StopAppAsync(
+                            EmulatorSupport.ParseAmStartPackage(_script.GameArgs),
+                            cleanupToken,
+                            30).ConfigureAwait(false);
+                        if (!stop.Ok)
+                        {
+                            Logger.Warn($"[{_modeText}运行] 关闭模拟器目标应用失败：{stop.Output.Trim()}");
+                        }
                     }
-                    else
+                    bool runEnded = resultStatus is "success" or "cancelled"
+                        || result.IsFatal
+                        || attemptNumber >= Math.Max(1, maxAttempts);
+                    if (_script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
                     {
-                        Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」{shutdownMsg}");
+                        Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」运行结束，关闭模拟器。");
+                        EmulatorCommandResult shutdown = await activeDriver.ShutdownAsync(cleanupToken, 30).ConfigureAwait(false);
+                        if (shutdown.Ok)
+                        {
+                            Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」{shutdown.Output}。");
+                        }
+                        else
+                        {
+                            Logger.Warn($"[{_modeText}运行] 脚本「{_script.Name}」{shutdown.Output}");
+                        }
                     }
                 }
             }
@@ -110,14 +119,17 @@ internal sealed class RunAttemptFinalizer
         {
             if (EmulatorSupport.IsEmulator(_script))
             {
-                string? adb = EmulatorSupport.ResolveAdbExe();
-                if (adb is not null)
+                IEmulatorDriver? driver = _emulatorDriver();
+                if (driver is not null)
                 {
-                    await EmulatorSupport.ForceStopTargetAppAsync(
-                        adb,
-                        _script.GameExe,
+                    EmulatorCommandResult stop = await driver.StopAppAsync(
                         EmulatorSupport.ParseAmStartPackage(_script.GameArgs),
-                        cleanupCts.Token).ConfigureAwait(false);
+                        cleanupCts.Token,
+                        30).ConfigureAwait(false);
+                    if (!stop.Ok)
+                    {
+                        Logger.Warn($"[警告] 运行提前结束时关闭模拟器目标应用失败：{stop.Output.Trim()}");
+                    }
                 }
             }
             else

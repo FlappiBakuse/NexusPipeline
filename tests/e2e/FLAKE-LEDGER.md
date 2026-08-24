@@ -58,3 +58,4 @@
 | 2026-08-23 | v0.9.3 开发回归（管理员 shell） | 单测 184/184 ✓；加速 e2e 首轮 86/87 → 更新契约断言后 87/87 ✓；加速 judge 150/150 ✓；加速 chaos 166/166 ✓；真实 e2e 87/87（11.3m）✓；真实 judge 150/150 ✓；真实 chaos 166/166 ✓；build ✓ | 首轮 e2e 唯一失败为插件开关旧断言仍期待立即禁用 capability；报告 V2-08 明确要求 configured/runtime 分离，更新为验证配置关闭、当前 runtime Active 后全量重跑通过 | Scheduler 持久化/冻结计划、插件生命周期、History/通知事务、生命周期关停、模拟器清理和 LogMonitor 修复回归全绿 |
 | 2026-08-23 | v0.9.3 发布前真实计时档（命名修正后，管理员 shell） | 单测 184/184 ✓；真实 e2e 87/87（10.1m）✓；真实 judge 150/150 ✓；真实 chaos 166/166 ✓；build ✓ | 无 | `BaselineReproductionTests.cs` 命名调整后发布候选版本全量门禁通过 |
 | 2026-08-24 | v0.9.4 发布前真实计时档（管理员 shell） | 单测 195/195 ✓；真实 e2e 87/87 ✓；真实 judge 150/150 ✓；真实 chaos 166/166 ✓；build ✓ | 无 | Runtime monitor、RunBudget、进程所有权与稳定退出窗口回归全绿；`RuntimeTests.cs` 命名调整后发布候选版本全量门禁通过 |
+| 2026-08-24 | v0.9.5 发布前真实计时档（管理员 shell） | 单测 197/197 ✓；真实 e2e 87/87 ✓；真实 judge 150/150 ✓；真实 chaos 166/166 ✓；build ✓ | 无 | 宿主通知、严格模拟器 driver 路由、Plugin API v1 与 managed-code 插件运行时发布门禁通过 |

@@ -2,6 +2,28 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.5（Pre-release）
+
+### 宿主通知与模拟器基础设施
+
+- 将 Webhook / SMTP 通知收归宿主通知领域，设置页直接管理配置与测试发送，代码插件可通过 Plugin API v1 调用宿主通知服务。
+- 建立 Generic ADB 与 MuMuManager 独立 driver，运行开始时冻结目标路由；MuMu 目标的连接、应用控制、状态检查和实例关闭均沿用 MuMuManager 路径。
+- 增加旧版通知与模拟器插件配置迁移，插件列表与运行态状态不再承载宿主基础设施职责。
+
+### Plugin API v1 与托管代码插件
+
+- 新增独立的 `NexusPipeline.Plugin.Abstractions` API v1 程序集，提供生命周期、日志、配置、DPAPI 密钥、通知和后台任务调度契约。
+- 增加 managed-code 插件 manifest、程序集隔离加载、API 版本兼容性检查、初始化失败状态、重启语义和插件级配置/密钥存储。
+- 保留现有数据化专项插件兼容，并新增托管代码插件 fixture 覆盖默认关闭、启用、宿主服务调用、API 不兼容和初始化失败路径。
+
+### 测试与验证
+
+- 管理员构建通过，保留项目原有 3 个 nullable 警告。
+- 单元测试通过：197/197。
+- 加速档全量 Playwright 通过：87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- 发布前真实计时档全量通过：Playwright 87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
+- `node --check` 与 `git diff --check` 通过。
+
 ## v0.9.4（Pre-release）
 
 ### 运行监控与预算

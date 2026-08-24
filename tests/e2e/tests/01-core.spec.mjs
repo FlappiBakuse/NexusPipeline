@@ -13,7 +13,7 @@ test("仪表盘：版本 + 状态优先布局", async ({ page }) => {
   const status = await (await fetch(baseUrl + "api/status")).json();
   expect(body.includes(status.version), `版本显示 ${status.version}（x.x.x 不带 v）`).toBeTruthy();
   expect(!body.includes("下一调度队列"), "仪表盘不再显示统计卡行（含下一调度）").toBeTruthy();
-  const disabledPlugins = (await (await fetch(baseUrl + "api/status")).json()).plugins?.filter(plugin => !plugin.enabled) || [];
+  const disabledPlugins = (await (await fetch(baseUrl + "api/status")).json()).plugins?.filter(plugin => !plugin.configuredEnabled) || [];
   expect(await page.locator(".plugin-card").count(), "健康插件不占用仪表盘主视觉").toBe(0);
   expect(await page.locator("#dashboard-plugin-panel").isVisible(), "无异常时插件摘要保持收起").toBe(disabledPlugins.length > 0);
   if (disabledPlugins.length) expect(body.includes(disabledPlugins[0].displayName), "异常插件会在仪表盘提示").toBeTruthy();

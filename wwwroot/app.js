@@ -10,7 +10,7 @@ import { actions as usersActions, pageScriptUsers } from "./views/users.js";
 import { actions as queuesActions, pageQueues } from "./views/queues.js";
 import { actions as dispatchActions, pageDispatch } from "./views/dispatch.js";
 import { actions as historyActions, pageHistory } from "./views/history.js";
-import { actions as pluginsActions, pagePlugins, pagePluginConfig } from "./views/plugins.js";
+import { actions as pluginsActions, pagePlugins } from "./views/plugins.js";
 import { actions as settingsActions, pageSettings } from "./views/settings.js";
 
 const shellActions = {
@@ -48,10 +48,6 @@ function route() {
   const segments = hash.split("/");
   if (segments[0] === "scripts" && segments[1] && segments[2] === "users") {
     pageScriptUsers(segments[1], token);
-    return;
-  }
-  if (segments[0] === "plugins" && segments[1]) {
-    pagePluginConfig(segments[1], token);
     return;
   }
   (routes[segments[0]] || pageDashboard)(token);

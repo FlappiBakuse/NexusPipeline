@@ -1,6 +1,6 @@
-# NexusPipeline 专项插件（数据化形态）开发指南
+# NexusPipeline 插件开发指南
 
-v0.6.3 起专项插件为**纯数据目录形态**（不再编译 DLL）：每个插件一个文件夹，放入 `plugin.json`（根文件，初始化插件）与 `data/`（推导配置、判断脚本、可选默认配置模板）。无需编译即可增删改，随 `build.cmd` 整体复制到 `release/plugins/`。
+数据化专项插件保持纯目录形态；v0.9.5 起同时支持 `managed-code` C# 插件。两类插件共用 `plugins/<名称>/plugin.json` 发现入口，但代码插件通过独立的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
 
 ## 目录结构
 
@@ -19,7 +19,36 @@ plugins/
 ```
 
 - `plugins/` 下的每个子目录视为一个插件；`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
-- 随附四个插件即此形态；用户可整体复制目录自定义插件，可删可替换。外部插件默认启用，显式禁用记入设置 `DisabledPlugins`（重启后仍禁用）。
+- 随附四个插件即数据化形态；数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
+
+## managed-code C# 插件（Plugin API v1）
+
+代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
+
+```text
+plugins/check-in/
+├── plugin.json
+└── CheckInPlugin.dll
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "check-in",
+  "displayName": "自动签到",
+  "description": "按计划执行通用签到任务",
+  "version": "0.1.0",
+  "kind": "managed-code",
+  "apiVersion": "1.0",
+  "entryAssembly": "CheckInPlugin.dll",
+  "entryType": "CheckInPlugin.EntryPoint",
+  "capabilities": ["background-jobs"]
+}
+```
+
+入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
+
+`capabilities` 仅作为发现元数据。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state` 和 `error` 字段中查看。
 
 ## plugin.json（根文件）
 
@@ -30,6 +59,7 @@ plugins/
   "gameName": "原神",
   "description": "BetterGenshinImpact 专项脚本实例配置接管（自动推导主程序、配置、日志路径与自启动参数）",
   "version": "0.1.0",
+  "kind": "data-specialized",
   "resolve": "data/resolve.json",
   "judgeScript": "data/judge.js",
   "configTemplate": "data/config-template"

@@ -23,7 +23,7 @@ function runningMarkup(running) {
 }
 
 function pluginMarkup(status) {
-  const disabled = (status.plugins || []).filter(plugin => !plugin.enabled);
+  const disabled = (status.plugins || []).filter(plugin => !plugin.configuredEnabled);
   if (!disabled.length) return "";
   return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${disabled.length} 个插件当前已禁用：${disabled.map(plugin => esc(plugin.displayName)).join("、")}</p><a class="back-link" href="#/plugins">查看插件</a></div>`;
 }

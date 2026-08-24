@@ -44,7 +44,8 @@ export function releaseController(controller) {
 }
 
 export function notifyAvailable() {
-  return !!(state.plugins || []).find(plugin => plugin.name === "notify" && plugin.enabled && plugin.state !== "InitFailed");
+  // 通知是宿主内置能力，插件状态不再参与通知控件显示。
+  return true;
 }
 
 export function disposePage() {

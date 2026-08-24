@@ -79,13 +79,16 @@ internal static class ApiStatusHandler
                 gameName = plugin.GameName,
                 plugin.Description,
                 plugin.Version,
-                plugin.IsBuiltIn,
                 kind = plugin.Kind,
+                apiVersion = plugin.ApiVersion,
+                capabilities = plugin.Capabilities,
                 supportsEmulator = RuntimeContext.Instance.Plugins.HasCapability(plugin.Name, PluginCapabilityKeys.Emulator),
-                enabled = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name),
+                configuredEnabled = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name),
                 runtimeEnabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
                 state = RuntimeContext.Instance.Plugins.GetRuntimeState(plugin.Name),
                 error = RuntimeContext.Instance.Plugins.GetRuntimeError(plugin.Name),
+                restartRequired = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name)
+                    != RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),
         };
     }

@@ -18,6 +18,9 @@ export const CI_MODE = process.env.NEXUS_CI === "1";
 if (!process.env.NEXUS_ADB_EXE) {
   process.env.NEXUS_ADB_EXE = path.join(__dirname, "..", "runtime", "adb-stub", "adb-stub.cmd");
 }
+if (!process.env.NEXUS_MUMU_MANAGER_EXE) {
+  process.env.NEXUS_MUMU_MANAGER_EXE = path.join(__dirname, "..", "runtime", "mumu-stub", "mumu-manager-stub.cmd");
+}
 
 let child = null;
 
@@ -168,6 +171,13 @@ export function setupRuntime() {
   try {
     fs.rmSync(path.join(stubDir, "calls.log"), { force: true });
   } catch { /* 忽略 */ }
+  // v0.9.5+：MuMuManager stub 只把 16416 映射为 MuMu，16384 等端口仍验证通用 ADB 路由。
+  const mumuDir = path.join(runtimeDir, "mumu-stub");
+  fs.mkdirSync(mumuDir, { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "fixtures", "mumu-manager-stub.cmd"), path.join(mumuDir, "mumu-manager-stub.cmd"));
+  fs.writeFileSync(path.join(mumuDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
+  fs.rmSync(path.join(mumuDir, "mumu-calls.log"), { force: true });
+  fs.rmSync(path.join(mumuDir, "stopped.flag"), { force: true });
   if (!fs.existsSync(runtimeExe)) {
     throw new Error("runtime exe 拷贝失败，拒绝运行（避免测试数据写入项目根）");
   }
@@ -223,7 +233,7 @@ export async function ensureService() {
   } catch { /* 不可达，进入重拉 */ }
   console.warn("[helpers] ensureService：服务不可达，强杀残留并重拉 web 模式服务（级联隔离兜底）");
   await killRuntimeServices();
-  await startService("web", { NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || "" });
+  await startService("web", { NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || "", NEXUS_MUMU_MANAGER_EXE: process.env.NEXUS_MUMU_MANAGER_EXE || "" });
   await waitForService();
 }
 

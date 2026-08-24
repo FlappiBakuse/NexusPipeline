@@ -42,7 +42,7 @@ release/
 └── plugins/             ← 专项插件目录（整体复制）
 ```
 
-- **增量构建（v0.6.4+）**：`src/` 内容未变化时跳过 `dotnet publish`，仅同步 `wwwroot/` 与 `plugins/`（指纹文件 `.build-src-hash`，不入库）；仅改前端/插件时秒级完成。
+- **增量构建（v0.9.5）**：`src/` 或 `plugins/` 内容未变化时跳过 `dotnet publish`，仅同步 `wwwroot/` 与 `plugins/`（指纹文件 `.build-src-hash`，不入库）；managed-code 插件文件变化会触发发布指纹更新。
 - **无 /test 提权版**：`build.cmd` 只产出提权版（唯一构建形态；CI runner 以管理员运行，直接使用提权版）。
 - 重构建前若提示 exe 被占用：`Get-Process nexus-pipeline | Stop-Process`（运行进程会锁定 `release\nexus-pipeline.exe`）。
 - 手动等价命令（如需要指定参数）：
@@ -137,7 +137,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 |---|---|
 | `config/settings\|scripts\|queues.json` | 用户配置（PascalCase，含加密密钥，**永不提交**） |
 | `config/limits.json` | 约束配置（三层校验，FATAL 拒绝启动） |
-| `config/plugins/<插件名>.json` | 插件级配置与密钥 |
+| `config/plugins/<插件名>.json` / `.secrets.json` | managed-code 插件 JSON 配置 / DPAPI 密钥 |
 | `history/YYYY-MM-DD/HH-mm-ss.json` + `-{尝试号}.log` | 运行状态（纯状态，PascalCase）+ 按尝试分批的脚本日志 |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志（审计行 `[审计] 来源 \| 操作`，来源 web/manage/cli/scheduler/system） |
 | `data/{脚本Id}/{用户}/` | 配置交换数据目录（store/store.previous/store.tmp/retry-store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续） |

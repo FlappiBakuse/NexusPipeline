@@ -8,7 +8,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>nexus-pipeline</AssemblyName>
     <RootNamespace>NexusPipeline</RootNamespace>
-    <Version>0.9.4</Version>
+    <Version>0.9.5</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CA1416</NoWarn>
     <ApplicationIcon>NexusPipeline.ico</ApplicationIcon>
@@ -17,7 +17,12 @@
 
   <ItemGroup>
     <Compile Remove="..\tests\NexusPipeline.Tests\**" />
+    <Compile Remove="NexusPipeline.Plugin.Abstractions\**" />
     <None Include="..\tests\NexusPipeline.Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="NexusPipeline.Plugin.Abstractions\NexusPipeline.Plugin.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

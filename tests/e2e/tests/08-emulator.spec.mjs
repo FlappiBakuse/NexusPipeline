@@ -5,17 +5,33 @@ import { baseUrl, runtimeDir, api, waitFor, waitNoRunning, ensureService } from 
 
 await ensureService();
 
-// v0.7.0+ 模拟器适配 e2e：stub adb（NEXUS_ADB_EXE 注入）模拟 MuMu 命令，calls.log 记录调用序列供断言。
+// v0.9.5+ 模拟器 e2e：通用 ADB 与 MuMuManager 使用两个独立 stub，调用序列供路由断言。
 const STUB_DIR = path.join(runtimeDir, "adb-stub");
 const callsLog = path.join(STUB_DIR, "calls.log");
 const foregroundFile = path.join(STUB_DIR, "foreground.txt");
+const MUMU_DIR = path.join(runtimeDir, "mumu-stub");
+const mumuCallsLog = path.join(MUMU_DIR, "mumu-calls.log");
+const mumuForegroundFile = path.join(MUMU_DIR, "foreground.txt");
 const ADB = "127.0.0.1:16384";
+const MUMU_ADB = "127.0.0.1:16416";
 const PKG = "com.example.game";
 const START_ARGS = `-n ${PKG}/.MainActivity`;
 
 function resetStub(foregroundPkg = "app.lawnchair") {
   fs.rmSync(callsLog, { force: true });
   fs.writeFileSync(foregroundFile, `  mCurrentFocus=Window{test u0 ${foregroundPkg}/app.lawnchair.LawnchairLauncher}`, "utf8");
+}
+
+function resetMumuStub(foregroundPkg = "app.lawnchair") {
+  fs.rmSync(mumuCallsLog, { force: true });
+  fs.rmSync(path.join(MUMU_DIR, "stopped.flag"), { force: true });
+  fs.writeFileSync(mumuForegroundFile, `  mCurrentFocus=Window{test u0 ${foregroundPkg}/app.lawnchair.LawnchairLauncher}`, "utf8");
+}
+
+function readMumuCalls() {
+  return fs.existsSync(mumuCallsLog)
+    ? fs.readFileSync(mumuCallsLog, "utf8").split(/\r?\n/).filter(Boolean).map(line => line.replaceAll('"', ""))
+    : [];
 }
 
 function readCalls() {
@@ -253,7 +269,7 @@ test("连接失败：adb connect 输出失败标记时立即判失败，不进�
     await runScript(script.id);
     const rec = await waitHistory(script.id);
     expect(rec.FinalStatus).toBe("failed");
-    expect(rec.ResultDetail).toContain("模拟器连接失败");
+    expect(rec.ResultDetail).toContain("模拟器连接/准备失败");
     await waitFor(() => readCalls().length >= 1, 8000);
     expect(callsContain("connect 127.0.0.1:16385")).toBe(1);
     expect(callsContain("start -n " + PKG)).toBe(0);
@@ -287,43 +303,33 @@ test("am start 失败：输出 Error 标记时立即失败，不做前台确认�
   }
 });
 
-test("插件开关：配置状态与运行态分离，前端按配置隐藏选择器", async ({ page }) => {
+test("MuMu 严格路由：识别后所有模拟器操作均通过 MuMuManager，ADB stub 不产生调用", async () => {
+  const dir = makeEmuDir("mumu");
+  const logFile = path.join(dir, "logs", "run.log");
+  const bat = writeScriptBat(dir, "mumu", logFile, [`echo mumu-fail-line >> "${logFile}"`]);
   resetStub();
-  const disabled = await api("POST", "/api/plugins/emulator-adapter/disable");
-  expect(disabled.ok).toBeTruthy();
-  const disabledBody = await disabled.json();
-  expect(disabledBody.configuredEnabled).toBe(false);
-  expect(disabledBody.runtimeEnabled).toBe(true);
-  expect(disabledBody.state).toBe("Active");
+  resetMumuStub(PKG);
+  const created = await api("POST", "/api/scripts", {
+    name: "mumu-strict", rootPath: dir, mainExe: bat, configPath: path.join(dir, "cfg"), logPath: logFile,
+    failureKeywords: "mumu-fail-line", launchGame: true, gameMode: "emulator", gameExe: MUMU_ADB, gameArgs: START_ARGS,
+    gameWaitSeconds: 10, forceCloseGame: true, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
+  });
+  const script = await created.json();
+  await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
   try {
-    await page.goto(baseUrl + "#/scripts");
-    await page.click('[data-testid="new-script"]');
-    const chooser = await page.$(".new-script-chooser");
-    if (chooser) await page.click('[data-action="open-script-type"][data-plugin=""]');
-    await expect(page.locator("#sm-mode")).toHaveCount(0);
-    await page.click('[data-action="close-modal"]');
-
-    const dir = makeEmuDir("disabled");
-    const logFile = path.join(dir, "logs", "run.log");
-    const bat = writeScriptBat(dir, "disabled", logFile, [`echo emu-ok-line >> "${logFile}"`]);
-    const created = await api("POST", "/api/scripts", {
-      name: "emu-disabled", rootPath: dir, mainExe: bat, configPath: path.join(dir, "cfg"), logPath: logFile,
-      successKeywords: "emu-ok-line", launchGame: true, gameMode: "emulator", gameExe: ADB, gameArgs: START_ARGS,
-      gameWaitSeconds: 10, forceCloseGame: true, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120,
-    });
-    const script = await created.json();
-    await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
-    try {
-      // 配置开关重启生效；当前进程的模拟器 capability 仍保持 Active。
-      resetStub(PKG);
-      await runScript(script.id);
-      const rec = await waitHistory(script.id);
-      expect(rec.FinalStatus).toBe("success");
-      expect(callsContain("start -n " + PKG)).toBe(1);
-    } finally {
-      await deleteScript(script.id);
-    }
+    await runScript(script.id);
+    const rec = await waitHistory(script.id);
+    expect(rec.FinalStatus).toBe("failed");
+    const managerCalls = readMumuCalls();
+    expect(managerCalls.some(line => line.startsWith("info -v all")), "先通过 info -v all 识别 MuMu 实例").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("control -v 0 launch")), "启动使用 MuMuManager control launch").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("adb -v 0 connect")), "连接使用 MuMuManager adb connect").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("adb -v 0 shell am start")), "启动应用使用 MuMuManager adb shell").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("adb -v 0 shell dumpsys")), "前台探测使用 MuMuManager adb shell").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("api -v 0 close_app")), "关闭应用使用 MuMuManager api close_app").toBeTruthy();
+    expect(managerCalls.some(line => line.startsWith("control -v 0 shutdown")), "关闭模拟器使用 MuMuManager control shutdown").toBeTruthy();
+    expect(readCalls(), "MuMu 路由不调用直接 adb.exe").toHaveLength(0);
   } finally {
-    await api("POST", "/api/plugins/emulator-adapter/enable");
+    await deleteScript(script.id);
   }
 });

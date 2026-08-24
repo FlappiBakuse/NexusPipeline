@@ -147,7 +147,7 @@ test("专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上
 
   const st = await (await fetch(baseUrl + "api/status")).json();
   const m7 = (st.plugins || []).find(p => p.name === "march7th");
-  expect(m7 && m7.kind === "specialized" && m7.enabled, "March7thAssistant 专用插件已加载且启用（kind=specialized）").toBeTruthy();
+  expect(m7 && m7.kind === "data-specialized" && m7.configuredEnabled && m7.runtimeEnabled, "March7thAssistant 数据化专项插件已加载且启用").toBeTruthy();
   expect(m7 && m7.gameName === "崩坏：星穹铁道", "March7thAssistant 插件提供游戏名（gameName=崩坏：星穹铁道）").toBeTruthy();
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "march7th" });
@@ -207,7 +207,7 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
 
   const st = await (await fetch(baseUrl + "api/status")).json();
   const z = (st.plugins || []).find(p => p.name === "zzzonedragon");
-  expect(z && z.kind === "specialized" && z.enabled, "ZenlessZoneZeroOneDragon 专用插件已加载且启用（kind=specialized）").toBeTruthy();
+  expect(z && z.kind === "data-specialized" && z.configuredEnabled && z.runtimeEnabled, "ZenlessZoneZeroOneDragon 数据化专项插件已加载且启用").toBeTruthy();
   expect(z && z.gameName === "绝区零", "ZenlessZoneZeroOneDragon 插件提供游戏名（gameName=绝区零）").toBeTruthy();
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: zRoot.replace(/\\/g, "\\\\"), pluginType: "zzzonedragon" });
@@ -255,7 +255,7 @@ test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ pa
 
   const st = await (await fetch(baseUrl + "api/status")).json();
   const m = (st.plugins || []).find(p => p.name === "maaend");
-  expect(m && m.kind === "specialized" && m.enabled, "MaaEnd 专用插件已加载且启用（kind=specialized）").toBeTruthy();
+  expect(m && m.kind === "data-specialized" && m.configuredEnabled && m.runtimeEnabled, "MaaEnd 数据化专项插件已加载且启用").toBeTruthy();
   expect(m && m.gameName === "明日方舟：终末地", "MaaEnd 插件提供游戏名（gameName=明日方舟：终末地）").toBeTruthy();
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: mRoot.replace(/\\/g, "\\\\"), pluginType: "maaend" });
@@ -294,19 +294,13 @@ test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ pa
   await page.click(".modal button:has-text('取消')");
 });
 
-test("插件配置二级页：布局 + 类型选择器 + generic 模板联动与样式", async ({ page }) => {
-  await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("h2");
-  await page.waitForFunction(() => document.body.textContent.includes("通知推送"), null, { timeout: 5000 });
-  const cfgBtn = await page.$('[data-action="plugin-config"]');
-  expect(!!cfgBtn, "通知推送插件有「配置」按钮").toBeTruthy();
-  await page.click('[data-action="plugin-config"]');
-  await page.waitForFunction(() => document.body.textContent.includes("· 配置"), null, { timeout: 5000 });
+test("设置页：内置通知渠道布局 + 类型选择器 + generic 模板联动", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector("#panel-wh");
   const body = await page.textContent("body");
-  expect(body.includes("返回插件"), "插件配置页有返回箭头").toBeTruthy();
-  expect(body.includes("Webhook 通知") && body.includes("SMTP 邮件通知"), "插件配置页含 Webhook/SMTP 折叠面板").toBeTruthy();
-  expect(body.includes("配置信息") && body.includes("启用通知的脚本实例"), "插件配置页含配置信息（统计）").toBeTruthy();
-  expect(body.includes("0 个"), "启用通知统计显示（脚本 0 / 队列 0）").toBeTruthy();
+  expect(body.includes("通知渠道"), "设置页含宿主内置通知渠道").toBeTruthy();
+  expect(body.includes("Webhook 通知") && body.includes("SMTP 邮件通知"), "设置页含 Webhook/SMTP 折叠面板").toBeTruthy();
+  expect(!body.includes("通知推送插件"), "设置页不再把通知描述为插件").toBeTruthy();
   const webhookToggleLayout = await page.$eval("#panel-wh > .switch-row", el => { const style = getComputedStyle(el); const button = el.querySelector("button"); const description = el.querySelector(".switch-copy .muted"); return { flexDirection: style.flexDirection, gap: style.gap, buttonRight: !!button && !!description && button.getBoundingClientRect().right >= description.getBoundingClientRect().right, hasTrack: !!el.querySelector(".switch-track") }; });
   expect(webhookToggleLayout.flexDirection === "row" && webhookToggleLayout.gap !== "0px" && webhookToggleLayout.buttonRight && webhookToggleLayout.hasTrack, "Webhook 开关与设置页服务行为使用统一的右侧控件布局").toBeTruthy();
 
@@ -323,57 +317,35 @@ test("插件配置二级页：布局 + 类型选择器 + generic 模板联动与
 
   await page.click('nav a[href="#/plugins"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("插件"), null, { timeout: 5000 });
-  expect(true, "返回插件列表正常").toBeTruthy();
+  expect(await page.locator('[data-action="plugin-config"]').count(), "插件页不再出现通知配置入口").toBe(0);
 });
 
-test("通知复选框与插件状态绑定（禁用隐藏 / 启用恢复）", async ({ page }) => {
+test("通知能力：宿主内置且不随插件开关消失", async ({ page }) => {
   const gDir = makeScriptDir("gating");
   const created = await createScript({ name: "门禁样式脚本", rootPath: gDir.root, mainExe: gDir.main, configPath: gDir.cfg, logPath: gDir.log });
   expect(created.ok, "预创建样式断言用脚本").toBeTruthy();
-
-  const disable = await api("POST", "/api/plugins/notify/disable");
-  expect(disable.ok, "API 禁用通知推送插件").toBeTruthy();
+  const status = await (await fetch(baseUrl + "api/status")).json();
+  expect(!(status.plugins || []).some(plugin => ["notify", "emulator-adapter"].includes(plugin.name)), "通知与模拟器不再出现在插件列表").toBeTruthy();
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
   await page.waitForSelector(".script-card", { timeout: 5000 });
-  expect(!(await page.$('[data-testid="script-card"] [data-testid="script-notify"]')), "插件禁用时脚本卡片隐藏通知徽章").toBeTruthy();
+  expect(await page.locator('[data-testid="script-card"] [data-testid="script-notify"]').count()).toBeGreaterThan(0);
   await page.click('[data-testid="new-script"]');
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin=""]');
   await page.waitForSelector("#sm-name");
-  expect(!(await page.isVisible("#sm-notify")), "插件禁用时脚本弹窗隐藏「运行通知」切换按钮").toBeTruthy();
+  expect(await page.isVisible("#sm-notify"), "脚本弹窗保留宿主通知切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("调度队列"), null, { timeout: 5000 });
   await page.click('[data-action="open-queue-modal"]');
   await page.waitForSelector("#qm-name");
-  expect(!(await page.isVisible("#qm-notify")), "插件禁用时队列弹窗隐藏「队列通知」切换按钮").toBeTruthy();
+  expect(await page.isVisible("#qm-notify"), "队列弹窗保留宿主通知切换按钮").toBeTruthy();
   await page.click('[data-action="close-modal"]');
-
-  const enable = await api("POST", "/api/plugins/notify/enable");
-  expect(enable.ok, "API 重新启用通知推送插件").toBeTruthy();
-
-  await page.click('nav a[href="#/scripts"]');
-  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
-  await page.waitForSelector(".script-card", { timeout: 5000 });
-  const notifyCell2 = await page.$eval('[data-testid="script-card"] [data-testid="script-notify"]', el => el.textContent.trim());
-  expect(notifyCell2 === "通知未开启", "插件启用后脚本卡片显示通知状态").toBeTruthy();
-  await page.click('[data-testid="new-script"]');
-  await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
-  await page.click('[data-action="open-script-type"][data-plugin=""]');
-  await page.waitForSelector("#sm-name");
-  expect(await page.isVisible("#sm-notify"), "插件启用后脚本弹窗恢复显示「运行通知」切换按钮").toBeTruthy();
-  await page.click('[data-action="close-modal"]');
-
-  await page.click('nav a[href="#/queues"]');
-  await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("调度队列"), null, { timeout: 5000 });
-  await page.click('[data-action="open-queue-modal"]');
-  await page.waitForSelector("#qm-name");
-  expect(await page.isVisible("#qm-notify"), "插件启用后队列弹窗恢复显示「队列通知」切换按钮").toBeTruthy();
-  await page.click('[data-action="close-modal"]');
-
+  const removed = await api("POST", "/api/plugins/notify/disable");
+  expect(removed.status).toBe(404);
   await api("DELETE", "/api/scripts/" + created.id);
 });
 

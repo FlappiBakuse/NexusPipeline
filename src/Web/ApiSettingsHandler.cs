@@ -68,8 +68,7 @@ internal static class ApiSettingsHandler
                             break;
                         }
                         if (field is "secretKey" or "secretValue"
-                            || SecretFields.Contains(field)
-                            || ListFields.Contains(field))
+                            || SecretFields.Contains(field))
                         {
                             continue;
                         }
@@ -213,12 +212,6 @@ internal static class ApiSettingsHandler
     private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "webhookUrl", "webhookSecret", "smtpPassword", "accessToken",
-    };
-
-    /// <summary>集合字段（PUT 不绑定，保持现有语义）。</summary>
-    private static readonly HashSet<string> ListFields = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "enabledPlugins", "disabledPlugins",
     };
 
     /// <summary>约定自动绑定：请求体字段名（camelCase）↔ AppSettings 属性（PascalCase）；带校验字段返回 400 错误文本，非法值按原语义静默忽略。</summary>

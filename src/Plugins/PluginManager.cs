@@ -1,111 +1,114 @@
-using NexusPipeline.Models;
-using NexusPipeline.Extensibility;
+using System.Reflection;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Extensibility;
+using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
-/// <summary>插件统一元数据投影（前端插件列表 / 新建专项脚本选择卡片）。</summary>
+/// <summary>插件统一元数据投影。仅包含真实数据插件和 managed-code 插件。</summary>
 internal sealed record PluginSummary(
-    string Name, string DisplayName, string GameName, string Description,
-    string Version, bool IsBuiltIn, string Kind);
+    string Name,
+    string DisplayName,
+    string GameName,
+    string Description,
+    string Version,
+    string Kind,
+    string ApiVersion,
+    IReadOnlyList<string> Capabilities);
 
 internal enum PluginRuntimeState
 {
     Discovered,
     Disabled,
-    Initializing,
+    Incompatible,
+    Loading,
     Active,
     InitFailed,
     Shutdown,
 }
 
-/// <summary>插件生命周期管理：内置 C# 插件（notify）+ 数据化专项插件（plugins/&lt;名称&gt;/plugin.json）发现、加载、启用开关、能力查询。</summary>
-internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCapabilityProvider, IPluginCapabilityResolver
+internal sealed class PluginManager : IPluginCapabilityResolver
 {
-    private readonly List<IPlugin> _plugins = new();
+    private const int PluginApiMajor = 1;
 
+    private readonly Func<AppSettings> _settings;
+    private readonly Func<NotificationDispatcher> _notifications;
     private readonly List<DataSpecializedPlugin> _dataPlugins = new();
-
+    private readonly List<ManagedPluginDescriptor> _managedPlugins = new();
+    private readonly Dictionary<string, ManagedPluginRuntime> _managedRuntimes = new(StringComparer.OrdinalIgnoreCase);
     private readonly PluginCapabilityRegistry _capabilities = new();
-
-    private readonly PluginHostServices _host;
-
-    private readonly Func<List<IPlugin>> _discoverBuiltIn;
-
+    private readonly Dictionary<string, bool> _configuredEnabled = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, PluginRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _runtimeErrors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<List<DataSpecializedPlugin>> _discoverData;
 
-    private readonly Dictionary<string, bool> _configuredEnabled = new(StringComparer.OrdinalIgnoreCase);
-
-    private readonly Dictionary<string, PluginRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
-
-    private readonly Dictionary<string, string> _runtimeErrors = new(StringComparer.OrdinalIgnoreCase);
-
     internal PluginManager(
-        PluginHostServices host,
-        Func<List<IPlugin>>? discoverBuiltIn = null,
+        Func<AppSettings> settings,
+        Func<NotificationDispatcher> notifications,
         Func<List<DataSpecializedPlugin>>? discoverData = null)
     {
-        _host = host;
-        _discoverBuiltIn = discoverBuiltIn ?? DiscoverBuiltIn;
+        _settings = settings;
+        _notifications = notifications;
         _discoverData = discoverData ?? DiscoverDataPlugins;
     }
 
-    /// <summary>全部已启用的通知通道（内置通道；数据化插件无代码不参与通知）。</summary>
-    public IReadOnlyList<INotifyChannel> NotifyChannels =>
-        _capabilities.GetAll<INotifyChannel>(IsRuntimeEnabled);
-
-    public IReadOnlyList<INotifyChannel> GetNotificationChannels()
-    {
-        return NotifyChannels;
-    }
-
-    public bool IsEnabled()
-    {
-        return IsEnabled(AppSettings.EmulatorAdapterPlugin);
-    }
-
-    /// <summary>插件统一元数据投影（内置 general + 数据化 specialized）。</summary>
+    /// <summary>插件统一元数据投影（专项数据插件 + managed-code 代码插件）。</summary>
     public IReadOnlyList<PluginSummary> PluginSummaries
     {
         get
         {
             var list = new List<PluginSummary>();
-            foreach (IPlugin plugin in _plugins)
-            {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, "", plugin.Description, plugin.Version, plugin.IsBuiltIn, "general"));
-            }
             foreach (DataSpecializedPlugin plugin in _dataPlugins)
             {
-                list.Add(new PluginSummary(plugin.Name, plugin.DisplayName, plugin.GameName, plugin.Description, plugin.Version, plugin.IsBuiltIn, "specialized"));
+                list.Add(new PluginSummary(
+                    plugin.Name,
+                    plugin.DisplayName,
+                    plugin.GameName,
+                    plugin.Description,
+                    plugin.Version,
+                    "data-specialized",
+                    "",
+                    plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray()));
+            }
+            foreach (ManagedPluginDescriptor plugin in _managedPlugins)
+            {
+                list.Add(new PluginSummary(
+                    plugin.Manifest.Name,
+                    plugin.Manifest.DisplayName,
+                    "",
+                    plugin.Manifest.Description,
+                    plugin.Manifest.Version,
+                    "managed-code",
+                    plugin.Manifest.ApiVersion,
+                    plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray()));
             }
             return list;
         }
     }
 
-    /// <summary>专项插件是否支持安卓模拟器启动方式（v0.7.0+，由 plugin.json 的 supportsEmulator 声明，缺省 false）。</summary>
+    /// <summary>专项插件是否支持安卓模拟器启动方式，由插件 manifest capability 声明。</summary>
     public bool SupportsEmulator(string pluginName)
     {
         return HasCapability(pluginName, PluginCapabilityKeys.Emulator);
     }
 
-    /// <summary>按 key 查询数据化 capability；保留给旧 Web/限制门禁作为兼容 façade。</summary>
     public bool HasCapability(string pluginName, string capabilityKey)
     {
-        return _capabilities.HasKey(pluginName, capabilityKey, IsRuntimeEnabled)
-            || capabilityKey.Equals(PluginCapabilityKeys.Emulator, StringComparison.OrdinalIgnoreCase)
-                && _capabilities.Get<IEmulatorCapability>(pluginName, IsRuntimeEnabled) is not null;
+        return _capabilities.HasKey(pluginName, capabilityKey, IsRuntimeEnabled);
     }
 
-    /// <summary>通用 C# capability 查询入口；新增能力无需在 PluginManager 增加类型分支。</summary>
     public IReadOnlyList<T> GetCapabilities<T>() where T : class, IPluginCapability
     {
         return _capabilities.GetAll<T>(IsRuntimeEnabled);
     }
 
-    /// <summary>调用数据化专项插件按根目录推导配置快照；插件不存在/未启用/推导失败返回 null。</summary>
+    /// <summary>调用数据化专项插件按根目录推导配置快照；代码插件只有声明能力，不直接暴露宿主领域模型。</summary>
     public ScriptProfile? ResolveProfile(string pluginName, string rootPath)
     {
         if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
@@ -128,122 +131,76 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
         }
     }
 
-    /// <summary>向全部已启用通知通道分发脚本运行通知（多通道并存，单个通道失败不影响其余）。</summary>
-    public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
-    {
-        foreach (INotifyChannel channel in NotifyChannels)
-        {
-            try
-            {
-                await channel.NotifyScriptAsync(script, record).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[通知] 通道「{channelName(channel)}」发送脚本通知失败：{ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>向全部已启用通知通道分发队列汇总通知（多通道并存，单个通道失败不影响其余）。</summary>
-    public async Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
-    {
-        foreach (INotifyChannel channel in NotifyChannels)
-        {
-            try
-            {
-                await channel.NotifyQueueAsync(queue, records).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[通知] 通道「{channelName(channel)}」发送队列通知失败：{ex.Message}");
-            }
-        }
-    }
-
-    private static string channelName(INotifyChannel channel)
-    {
-        return channel is IPlugin plugin ? plugin.DisplayName : channel.GetType().Name;
-    }
-
-    /// <summary>加载全部插件（v0.6.6+ 幂等：重复调用先清空，避免重复注册）。</summary>
+    /// <summary>
+    /// 扫描 manifest 后按配置启动插件。managed-code 插件在完成 API 兼容性和启用检查前不会加载程序集。
+    /// </summary>
     public void LoadAll()
     {
-        if (_plugins.Count > 0 || _dataPlugins.Count > 0)
+        if (_dataPlugins.Count > 0 || _managedPlugins.Count > 0 || _managedRuntimes.Count > 0)
         {
             ShutdownAll();
         }
-        _plugins.Clear();
         _dataPlugins.Clear();
+        _managedPlugins.Clear();
+        _managedRuntimes.Clear();
         _capabilities.Clear();
         _configuredEnabled.Clear();
         _runtimeStates.Clear();
         _runtimeErrors.Clear();
-        foreach (IPlugin plugin in _discoverBuiltIn())
-        {
-            _plugins.Add(plugin);
-            _capabilities.Register(plugin);
-            _configuredEnabled[plugin.Name] = ReadConfiguredEnabled(plugin.Name, isBuiltIn: true);
-            _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
-        }
+
         foreach (DataSpecializedPlugin plugin in _discoverData())
         {
-            _dataPlugins.Add(plugin);
-            _capabilities.Register(plugin.Name, plugin);
-            _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
-            _configuredEnabled[plugin.Name] = ReadConfiguredEnabled(plugin.Name, isBuiltIn: false);
-            _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
+            AddDataPlugin(plugin);
         }
-        foreach (IPlugin plugin in _plugins)
-        {
-            bool enabled = _configuredEnabled[plugin.Name];
-            if (enabled)
-            {
-                _runtimeStates[plugin.Name] = PluginRuntimeState.Initializing;
-                try
-                {
-                    plugin.Initialize(new PluginContext(plugin.Name, _host));
-                    _runtimeStates[plugin.Name] = PluginRuntimeState.Active;
-                    Logger.Info($"[插件] 已启用：{plugin.DisplayName} v{plugin.Version}");
-                }
-                catch (Exception ex)
-                {
-                    _runtimeStates[plugin.Name] = PluginRuntimeState.InitFailed;
-                    _runtimeErrors[plugin.Name] = ex.Message;
-                    Logger.Warn($"[插件] 插件「{plugin.DisplayName}」初始化失败：{ex.Message}");
-                }
-            }
-            else
-            {
-                _runtimeStates[plugin.Name] = PluginRuntimeState.Disabled;
-                Logger.Info($"[插件] 已禁用：{plugin.DisplayName}");
-            }
-        }
+        DiscoverManagedPlugins();
+
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
-            bool enabled = _configuredEnabled[plugin.Name];
+            bool enabled = ReadConfiguredEnabled(plugin.Name, managedCode: false);
+            _configuredEnabled[plugin.Name] = enabled;
             _runtimeStates[plugin.Name] = enabled ? PluginRuntimeState.Active : PluginRuntimeState.Disabled;
-            Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化）");
+            Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化专项）");
+        }
+        foreach (ManagedPluginDescriptor descriptor in _managedPlugins)
+        {
+            string name = descriptor.Manifest.Name;
+            bool enabled = ReadConfiguredEnabled(name, managedCode: true);
+            _configuredEnabled[name] = enabled;
+            if (!enabled)
+            {
+                _runtimeStates[name] = PluginRuntimeState.Disabled;
+                Logger.Info($"[插件] 已禁用：{descriptor.Manifest.DisplayName}（managed-code，程序集未加载）");
+                continue;
+            }
+            if (!descriptor.Manifest.IsCompatibleWith(PluginApiMajor))
+            {
+                _runtimeStates[name] = PluginRuntimeState.Incompatible;
+                _runtimeErrors[name] = $"不支持 Plugin API v{descriptor.Manifest.ApiVersion}（宿主需要 v{PluginApiMajor}.x）";
+                Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」与 Plugin API 不兼容，程序集未加载。");
+                continue;
+            }
+            StartManagedPlugin(descriptor);
         }
     }
 
     public void ShutdownAll()
     {
-        foreach (IPlugin plugin in _plugins)
+        foreach ((string name, ManagedPluginRuntime runtime) in _managedRuntimes.ToArray())
         {
             try
             {
-                plugin.Shutdown();
-                _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
+                runtime.Stop();
             }
             catch (Exception ex)
             {
-                Logger.Warn($"插件「{plugin.DisplayName}」关停失败：{ex.Message}");
+                Logger.Warn($"插件「{name}」关停失败：{ex.Message}");
             }
             finally
             {
-                _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
+                _runtimeStates[name] = PluginRuntimeState.Shutdown;
             }
         }
+        _managedRuntimes.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -255,12 +212,12 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
         return IsRuntimeEnabled(name);
     }
 
-    /// <summary>配置开关状态；开关写入后运行中能力保持原状，下一次加载才应用。</summary>
+    /// <summary>配置开关状态；保存后运行态保持原状，下一次加载才应用。</summary>
     public bool IsConfiguredEnabled(string name)
     {
         return _configuredEnabled.TryGetValue(name, out bool enabled)
             ? enabled
-            : IsKnownPlugin(name) && ReadConfiguredEnabled(name, IsBuiltIn(name));
+            : IsKnownPlugin(name) && ReadConfiguredEnabled(name, IsManagedCode(name));
     }
 
     public string GetRuntimeState(string name)
@@ -277,44 +234,95 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
 
     public bool IsKnownPlugin(string name)
     {
-        return _plugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
-            || _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
+            || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool SetEnabled(string name, bool enabled, string source = Audit.System)
     {
-        AppSettings settings = _host.Settings;
-        bool isBuiltIn = IsBuiltIn(name);
-        bool isDataPlugin = _dataPlugins.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (!isBuiltIn && !isDataPlugin)
+        if (!IsKnownPlugin(name))
         {
             Logger.Warn($"[插件] 插件「{name}」不存在，已忽略启用开关操作。");
             return false;
         }
-            // 内置插件禁用时同步写入 DisabledPlugins，ConfigStore.Normalize 据此识别用户显式禁用过
-            // emulator-adapter，迁移时保留该选择；运行态能力查询由 _runtimeStates 决定。
-        bool exists = settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
-        if (enabled && !exists)
-        {
-            settings.EnabledPlugins.Add(name);
-        }
-        else if (!enabled && exists)
-        {
-            settings.EnabledPlugins.RemoveAll(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
-        }
-        if (enabled)
-        {
-            settings.DisabledPlugins.RemoveAll(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase));
-        }
-        else if (!settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase))
-        {
-            settings.DisabledPlugins.Add(name);
-        }
+        AppSettings settings = _settings();
+        settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
+        string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
+        settings.PluginPreferences[key] = new PluginPreference { Enabled = enabled };
         ConfigStore.Save(settings);
         _configuredEnabled[name] = enabled;
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
         Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
         return true;
+    }
+
+    private void AddDataPlugin(DataSpecializedPlugin plugin)
+    {
+        if (IsKnownPlugin(plugin.Name))
+        {
+            Logger.Warn($"[插件] 检测到重复插件名「{plugin.Name}」，跳过数据化插件。");
+            return;
+        }
+        _dataPlugins.Add(plugin);
+        _capabilities.Register(plugin.Name, plugin);
+        _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
+        _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
+    }
+
+    private void DiscoverManagedPlugins()
+    {
+        if (!Directory.Exists(AppPaths.PluginsDir))
+        {
+            return;
+        }
+        foreach (string directory in Directory.GetDirectories(AppPaths.PluginsDir))
+        {
+            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out string? error) || manifest is null)
+            {
+                Logger.Warn($"[插件] 跳过无效插件目录：{Path.GetFileName(directory)}（{error}）");
+                continue;
+            }
+            if (manifest.Kind != "managed-code")
+            {
+                continue;
+            }
+            if (IsKnownPlugin(manifest.Name))
+            {
+                Logger.Warn($"[插件] 检测到重复插件名「{manifest.Name}」，跳过 managed-code 插件。");
+                continue;
+            }
+            var descriptor = new ManagedPluginDescriptor(manifest, directory);
+            _managedPlugins.Add(descriptor);
+            _capabilities.RegisterKeys(manifest.Name, manifest.Capabilities);
+            _runtimeStates[manifest.Name] = PluginRuntimeState.Discovered;
+        }
+    }
+
+    private void StartManagedPlugin(ManagedPluginDescriptor descriptor)
+    {
+        string name = descriptor.Manifest.Name;
+        _runtimeStates[name] = PluginRuntimeState.Loading;
+        try
+        {
+            var runtime = new ManagedPluginRuntime(
+                descriptor,
+                _notifications(),
+                ex =>
+                {
+                    _runtimeErrors[name] = ex.Message;
+                    Logger.Warn($"[插件:{name}] 后台任务失败：{ex.Message}");
+                });
+            runtime.Start();
+            _managedRuntimes[name] = runtime;
+            _runtimeStates[name] = PluginRuntimeState.Active;
+            Logger.Info($"[插件] 已启用：{descriptor.Manifest.DisplayName} v{descriptor.Manifest.Version}（managed-code）");
+        }
+        catch (Exception ex)
+        {
+            _runtimeStates[name] = PluginRuntimeState.InitFailed;
+            _runtimeErrors[name] = ex.Message;
+            Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」初始化失败：{ex.Message}");
+        }
     }
 
     private bool IsRuntimeEnabled(string name)
@@ -323,29 +331,19 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
             && state == PluginRuntimeState.Active;
     }
 
-    private bool IsBuiltIn(string name)
+    private bool IsManagedCode(string name)
     {
-        return _plugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        return _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    private bool ReadConfiguredEnabled(string name, bool isBuiltIn)
+    private bool ReadConfiguredEnabled(string name, bool managedCode)
     {
-        AppSettings settings = _host.Settings;
-        return isBuiltIn
-            ? settings.EnabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase)
-            : !settings.DisabledPlugins.Contains(name, StringComparer.OrdinalIgnoreCase);
+        AppSettings settings = _settings();
+        PluginPreference? preference = settings.PluginPreferences?
+            .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
+        return preference?.Enabled ?? !managedCode;
     }
 
-    private static List<IPlugin> DiscoverBuiltIn()
-    {
-        return new List<IPlugin>
-        {
-            new NotifyPlugin(),
-            new EmulatorAdapterPlugin(),
-        };
-    }
-
-    /// <summary>发现数据化专项插件：plugins/ 下每个含有效 plugin.json 的子目录注册一个插件；无效目录仅警告。</summary>
     private static List<DataSpecializedPlugin> DiscoverDataPlugins()
     {
         var list = new List<DataSpecializedPlugin>();
@@ -353,18 +351,103 @@ internal sealed class PluginManager : INotificationChannelProvider, IEmulatorCap
         {
             return list;
         }
-        foreach (string dir in Directory.GetDirectories(AppPaths.PluginsDir))
+        foreach (string directory in Directory.GetDirectories(AppPaths.PluginsDir))
         {
-            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(dir);
+            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out _)
+                || manifest is null
+                || manifest.Kind != "data-specialized")
+            {
+                continue;
+            }
+            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(directory);
             if (plugin is not null)
             {
                 list.Add(plugin);
             }
             else
             {
-                Logger.Warn($"[插件] 跳过无效插件目录：{Path.GetFileName(dir)}（缺少 plugin.json 或 data 引用无效）");
+                Logger.Warn($"[插件] 跳过无效数据化插件目录：{Path.GetFileName(directory)}");
             }
         }
         return list;
+    }
+
+    private sealed record ManagedPluginDescriptor(PluginManifest Manifest, string Directory);
+
+    private sealed class ManagedPluginRuntime
+    {
+        private readonly ManagedPluginDescriptor _descriptor;
+        private readonly NotificationDispatcher _notifications;
+        private readonly Action<Exception> _reportJobError;
+        private PluginLoadContext? _loadContext;
+        private INexusPlugin? _plugin;
+        private PluginHostContext? _hostContext;
+
+        public ManagedPluginRuntime(
+            ManagedPluginDescriptor descriptor,
+            NotificationDispatcher notifications,
+            Action<Exception> reportJobError)
+        {
+            _descriptor = descriptor;
+            _notifications = notifications;
+            _reportJobError = reportJobError;
+        }
+
+        public void Start()
+        {
+            try
+            {
+                string pluginDirectory = Path.GetFullPath(_descriptor.Directory)
+                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                    + Path.DirectorySeparatorChar;
+                string entryPath = Path.GetFullPath(Path.Combine(pluginDirectory, _descriptor.Manifest.EntryAssembly));
+                if (!entryPath.StartsWith(pluginDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("插件 entryAssembly 必须位于插件目录内");
+                }
+                if (!File.Exists(entryPath))
+                {
+                    throw new FileNotFoundException("找不到插件 entryAssembly", entryPath);
+                }
+                _loadContext = new PluginLoadContext(entryPath);
+                Assembly assembly = _loadContext.LoadEntryAssembly(entryPath);
+                Type type = assembly.GetType(_descriptor.Manifest.EntryType, throwOnError: true, ignoreCase: false)
+                    ?? throw new InvalidOperationException($"找不到插件 entryType：{_descriptor.Manifest.EntryType}");
+                if (Activator.CreateInstance(type) is not INexusPlugin plugin)
+                {
+                    throw new InvalidOperationException($"插件类型未实现 INexusPlugin：{_descriptor.Manifest.EntryType}");
+                }
+                _plugin = plugin;
+                _hostContext = new PluginHostContext(_descriptor.Manifest.Name, _notifications, _reportJobError);
+                plugin.InitializeAsync(_hostContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+                plugin.StartAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            }
+            catch
+            {
+                Cleanup();
+                throw;
+            }
+        }
+
+        public void Stop()
+        {
+            try
+            {
+                _plugin?.StopAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+            }
+            finally
+            {
+                Cleanup();
+            }
+        }
+
+        private void Cleanup()
+        {
+            _hostContext?.DisposeScheduler();
+            _plugin = null;
+            _hostContext = null;
+            _loadContext?.Unload();
+            _loadContext = null;
+        }
     }
 }

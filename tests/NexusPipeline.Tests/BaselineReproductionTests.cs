@@ -3,6 +3,7 @@ using System.Text;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
@@ -93,14 +94,14 @@ public sealed class BaselineReproductionTests
     }
 
     [Fact]
-    public async Task NotificationChannel_ShouldHaveHostLevelDeadline()
+    public async Task PluginNotification_UsesHostOwnedDispatcherWithoutPluginChannel()
     {
         var dispatcher = new NotificationDispatcher(
-            new HangingNotificationProvider(),
+            new TestSettingsProvider(),
             TimeSpan.FromMilliseconds(50));
-        Task send = dispatcher.NotifyScriptAsync(
-            new ScriptInstance { Id = "script", Name = "脚本" },
-            new RunRecord { ScriptName = "脚本", StartTime = DateTime.Now });
+        Task send = dispatcher.SendPluginAsync(
+            new PluginNotification("测试", "正文"),
+            CancellationToken.None).AsTask();
 
         Task completed = await Task.WhenAny(send, Task.Delay(TimeSpan.FromMilliseconds(150)));
 
@@ -155,23 +156,6 @@ public sealed class BaselineReproductionTests
         {
             Directory.Delete(root, recursive: true);
         }
-    }
-
-    private sealed class HangingNotificationProvider : INotificationChannelProvider
-    {
-        public IReadOnlyList<INotifyChannel> GetNotificationChannels()
-        {
-            return new INotifyChannel[] { new HangingNotificationChannel() };
-        }
-    }
-
-    private sealed class HangingNotificationChannel : INotifyChannel
-    {
-        public Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
-            => Task.Delay(Timeout.InfiniteTimeSpan);
-
-        public Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
-            => Task.Delay(Timeout.InfiniteTimeSpan);
     }
 
     private static DispatchQueue ScheduledQueue(DateTime now)

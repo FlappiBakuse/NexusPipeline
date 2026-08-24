@@ -88,6 +88,17 @@
 
 **v0.9.4 修复验证结果（2026-08-24）**：上述目标条目均已完成修复并转为回归保护。验证包含管理员构建、单元测试 195/195、加速与真实计时 E2E 87/87、judge 150/150、加速 chaos 167/167、真实 chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
 
+## v0.9.5：Host Notification / Emulator Drivers / Plugin API v1
+
+| 编号 | 已知问题 | 当前确认状态 | 代码位置 | 归属 |
+|---|---|---|---|---|
+| #89 | 通知推送以宿主内置插件身份存在，配置、状态与业务能力边界交叉 | 已修复：Webhook/SMTP 归入宿主通知领域，代码插件通过公开通知契约调用 | `src/Services/Notification/NotificationDispatcher.cs`, `wwwroot/views/settings.js` | v0.9.5 |
+| #90 | 通用 ADB 与 MuMuManager 命令混用，单次执行缺少稳定的模拟器路由 | 已修复：检测结果映射为独立 driver，并在运行期间冻结目标路由 | `src/Services/EmulatorDrivers.cs`, `ExecutionCoordinator.cs` | v0.9.5 |
+| #91 | 插件契约依赖宿主内部类型，第三方 managed-code 插件缺少稳定 API 入口 | 已修复：新增独立 `NexusPipeline.Plugin.Abstractions` API v1 程序集 | `src/NexusPipeline.Plugin.Abstractions/PluginApi.cs` | v0.9.5 |
+| #92 | 托管代码插件缺少隔离加载、版本兼容、配置、密钥和后台任务宿主边界 | 已修复：manifest、隔离加载、状态机、插件配置、DPAPI 密钥与调度服务已建立 | `src/Plugins/Managed/`, `src/Plugins/PluginManager.cs` | v0.9.5 |
+
+**v0.9.5 修复验证结果（2026-08-24）**：上述目标条目均已完成并转为回归保护。验证包含管理员构建、单元测试 197/197、加速与真实计时 E2E 87/87、judge 150/150、chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
+
 ## 已有保留项与语义确认
 
 | 编号 | 内容 | 决策 |

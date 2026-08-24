@@ -822,7 +822,7 @@ test("v0.2.0：幽灵联动 / 字段改名 / fs 浏览 / 通知开关 / 时间�
   await page.waitForSelector("#st-port");
   const setBody = await page.textContent("body");
   expect(!setBody.includes("发送策略"), "设置页已无发送策略").toBeTruthy();
-  expect(!setBody.includes("Webhook 通知"), "设置页不再包含通知配置（已移至插件配置）").toBeTruthy();
+  expect(setBody.includes("Webhook 通知") && setBody.includes("SMTP 邮件通知"), "设置页包含宿主内置 Webhook 与 SMTP 通知配置").toBeTruthy();
 
   await page.click('nav a[href="#/queues"]');
   await page.waitForSelector("h2");
@@ -860,7 +860,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
 
   const st = await (await fetch(baseUrl + "api/status")).json();
   const bgi = (st.plugins || []).find(p => p.name === "bettergi");
-  expect(bgi && bgi.kind === "specialized" && bgi.enabled, "BetterGI 专用插件已加载且启用（kind=specialized）").toBeTruthy();
+  expect(bgi && bgi.kind === "data-specialized" && bgi.configuredEnabled && bgi.runtimeEnabled, "BetterGI 数据化专项插件已加载且启用").toBeTruthy();
   expect(bgi && bgi.gameName === "原神", "BetterGI 插件提供游戏名（gameName=原神）").toBeTruthy();
 
   const probeOk = await api("POST", "/api/scripts/probe", { rootPath: bgiRoot.replace(/\\/g, "\\\\"), pluginType: "bettergi" });

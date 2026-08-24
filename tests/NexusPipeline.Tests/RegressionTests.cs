@@ -99,17 +99,21 @@ public sealed class RegressionTests
         var settings = new AppSettings
         {
             WebPort = 12345,
-            EnabledPlugins = new List<string> { "notify" },
+            PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["notify"] = new PluginPreference { Enabled = true },
+            },
         };
 
         AppSettings clone = settings.Clone();
         clone.WebPort = 23456;
-        clone.EnabledPlugins.Add("demo");
+        clone.PluginPreferences["demo"] = new PluginPreference { Enabled = true };
 
         Assert.Equal(12345, settings.WebPort);
-        Assert.Single(settings.EnabledPlugins);
+        Assert.Single(settings.PluginPreferences);
+        Assert.True(settings.PluginPreferences["notify"].Enabled);
         Assert.Equal(23456, clone.WebPort);
-        Assert.Equal(2, clone.EnabledPlugins.Count);
+        Assert.Equal(2, clone.PluginPreferences.Count);
     }
 
     [Fact]

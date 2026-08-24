@@ -29,8 +29,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// <summary>旧内部查询兼容投影；新代码通过 capability key 查询。</summary>
     public bool SupportsEmulator => _capabilityKeys.Contains(PluginCapabilityKeys.Emulator);
 
-    public bool IsBuiltIn => false;
-
     private string _resolvePath = "";
 
     private string _judgeScriptPath = "";

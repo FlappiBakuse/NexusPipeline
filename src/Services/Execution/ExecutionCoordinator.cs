@@ -3,7 +3,6 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
-using NexusPipeline.Extensibility;
 using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services.Execution;
@@ -18,7 +17,9 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
     private readonly IUserRepository _users;
 
-    private readonly IEmulatorCapabilityProvider _emulator;
+    private EmulatorTarget? _emulatorTarget;
+
+    private IEmulatorDriver? _emulatorDriver;
 
     private CancellationTokenSource? _budgetExpiryCts;
 
@@ -34,12 +35,10 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         Action<int, int>? attemptChanged,
         Action<string>? statusChanged,
         Action<string>? logLine,
-        IUserRepository users,
-        IEmulatorCapabilityProvider emulator)
+        IUserRepository users)
         : base(script, mode, queueId, queueName, userName, token, attemptChanged, statusChanged, logLine)
     {
         _users = users;
-        _emulator = emulator;
         _attemptRunner = new AttemptRunner(this);
     }
 
@@ -391,7 +390,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     internal async Task<RunAttemptResult> RunAttemptCoreAsync(RunAttempt attempt)
     {
         string modeText = _mode == "auto" ? "自动" : "手动";
-        var cleanup = new CleanupManager(_script, modeText);
+        var cleanup = new CleanupManager(_script, modeText, () => _emulatorDriver);
         RunAttemptResult? budgetError = CheckTotalTimeout();
         if (budgetError is not null)
         {
@@ -1167,55 +1166,58 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
     private async Task<RunAttemptResult?> LaunchEmulatorGameCoreAsync(string modeText)
     {
-        if (!_emulator.IsEnabled())
-        {
-            return RunAttemptResult.Failed("模拟器适配已禁用，请到「插件」页启用后重试");
-        }
-        string? adb = EmulatorSupport.ResolveAdbExe();
-        if (adb is null)
-        {
-            return RunAttemptResult.Failed("未找到 adb 可执行文件（请安装 Android 平台工具或 MuMu 等模拟器）");
-        }
         if (!EmulatorSupport.IsValidAdbAddress(_script.GameExe))
         {
             return RunAttemptResult.Failed($"模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）：{_script.GameExe}");
-        }
-        _statusChanged?.Invoke("正在连接模拟器...");
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        (bool connectOk, string connectOutput) = await EmulatorSupport.AdbConnectAsync(adb, _script.GameExe, OperationToken, RemainingCommandSeconds(30)).ConfigureAwait(false);
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        if (!connectOk)
-        {
-            return RunAttemptResult.Failed($"模拟器连接失败（{_script.GameExe}）：{connectOutput.Trim()}");
         }
         string[] startArgs = TextRules.SplitArgs(_script.GameArgs).ToArray();
         if (startArgs.Length == 0)
         {
             return RunAttemptResult.Failed("模拟器模式未填写启动参数（am start 参数，如 -n 包名/Activity）");
         }
+        if (_emulatorDriver is null)
+        {
+            _emulatorTarget = await EmulatorDetector.DetectAsync(
+                _script.GameExe,
+                OperationToken,
+                RemainingCommandSeconds(30)).ConfigureAwait(false);
+            if (_emulatorTarget.Kind == EmulatorKind.DetectionError)
+            {
+                return RunAttemptResult.Failed(_emulatorTarget.DetectionError ?? "模拟器目标识别失败");
+            }
+            _emulatorDriver = EmulatorDriverFactory.Create(_emulatorTarget);
+            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已冻结模拟器驱动：{_emulatorDriver.Kind}（目标 {_script.GameExe}）。");
+        }
+        _statusChanged?.Invoke("正在连接模拟器...");
+        if (RemainingRunSeconds() <= 0)
+        {
+            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
+        }
+        EmulatorCommandResult ready = await _emulatorDriver.EnsureReadyAsync(OperationToken, RemainingCommandSeconds(30)).ConfigureAwait(false);
+        if (RemainingRunSeconds() <= 0)
+        {
+            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
+        }
+        if (!ready.Ok)
+        {
+            return RunAttemptResult.Failed($"模拟器连接/准备失败（{_script.GameExe}）：{ready.Output.Trim()}");
+        }
         _statusChanged?.Invoke("正在启动模拟器应用...");
-        // v0.7.0+：GameArgs 为 am start 参数（如 -n 包名/Activity），宿主拼接 am start 前缀执行。
-        // am start 对 Activity 不存在等错误退出码仍为 0（实测），须按输出 Error 标记识别失败，避免白等前台确认。
-        var shellArgs = new List<string> { "am", "start" };
-        shellArgs.AddRange(startArgs);
         if (RemainingRunSeconds() <= 0)
         {
             return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
         }
-        (bool startOk, string startOutput) = await EmulatorSupport.AdbShellAsync(adb, _script.GameExe, shellArgs.ToArray(), RemainingCommandSeconds(30), OperationToken).ConfigureAwait(false);
+        EmulatorCommandResult start = await _emulatorDriver.StartAppAsync(
+            startArgs,
+            OperationToken,
+            RemainingCommandSeconds(30)).ConfigureAwait(false);
         if (RemainingRunSeconds() <= 0)
         {
             return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
         }
-        if (!startOk || EmulatorSupport.AmStartFailed(startOutput))
+        if (!start.Ok)
         {
-            return RunAttemptResult.Failed($"模拟器应用启动失败：{startOutput.Trim()}");
+            return RunAttemptResult.Failed($"模拟器应用启动失败：{start.Output.Trim()}");
         }
         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」模拟器应用启动命令已执行（{_script.GameExe}，等待 {_script.GameWaitSeconds} 秒确认前台）。");
         string? targetPkg = EmulatorSupport.ParseAmStartPackage(_script.GameArgs);
@@ -1238,8 +1240,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     /// <summary>等待并确认模拟器前台应用为目标包名：每 1 秒轮询 dumpsys window 前台，上限为超时时间。</summary>
     private async Task<bool> WaitForEmulatorAppAsync(TimeSpan timeout, string targetPackage)
     {
-        string? adb = EmulatorSupport.ResolveAdbExe();
-        if (adb is null)
+        if (_emulatorDriver is null)
         {
             return false;
         }
@@ -1250,7 +1251,9 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             {
                 return false;
             }
-            string? foreground = await EmulatorSupport.GetForegroundPackageAsync(adb, _script.GameExe, OperationToken, RemainingCommandSeconds(30)).ConfigureAwait(false);
+            string? foreground = await _emulatorDriver.GetForegroundPackageAsync(
+                OperationToken,
+                RemainingCommandSeconds(30)).ConfigureAwait(false);
             if (string.Equals(foreground, targetPackage, StringComparison.OrdinalIgnoreCase))
             {
                 return true;

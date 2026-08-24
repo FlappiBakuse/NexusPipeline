@@ -1,0 +1,189 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using NexusPipeline.Persistence;
+using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Services.Notification;
+using NexusPipeline.Utilities;
+
+namespace NexusPipeline.Plugins.Managed;
+
+internal sealed class PluginHostContext : IPluginHostContext
+{
+    public PluginHostContext(
+        string pluginName,
+        NotificationDispatcher notifications,
+        Action<Exception> reportJobError)
+    {
+        PluginName = pluginName;
+        Logger = new PluginLogger(pluginName);
+        Config = new PluginConfigStore(pluginName);
+        Secrets = new PluginSecretStore(pluginName);
+        Notifications = new PluginNotificationAdapter(notifications);
+        Scheduler = new PluginJobScheduler(pluginName, reportJobError);
+    }
+
+    public string PluginName { get; }
+
+    public IPluginLogger Logger { get; }
+
+    public IPluginConfigStore Config { get; }
+
+    public IPluginSecretStore Secrets { get; }
+
+    public IPluginNotificationService Notifications { get; }
+
+    public IPluginJobScheduler Scheduler { get; }
+
+    public void DisposeScheduler()
+    {
+        ((PluginJobScheduler)Scheduler).Dispose();
+    }
+}
+
+internal sealed class PluginLogger : IPluginLogger
+{
+    private readonly string _prefix;
+
+    public PluginLogger(string pluginName)
+    {
+        _prefix = $"[插件:{pluginName}] ";
+    }
+
+    public void Debug(string message) => Logger.Debug(_prefix + message);
+
+    public void Info(string message) => Logger.Info(_prefix + message);
+
+    public void Warn(string message) => Logger.Warn(_prefix + message);
+
+    public void Error(string message) => Logger.Error(_prefix + message);
+}
+
+internal static class PluginConfigPath
+{
+    public static string For(string pluginName)
+    {
+        string safe = pluginName;
+        foreach (char c in Path.GetInvalidFileNameChars())
+        {
+            safe = safe.Replace(c, '_');
+        }
+        if (string.IsNullOrWhiteSpace(safe))
+        {
+            safe = "plugin";
+        }
+        return Path.Combine(AppPaths.ConfigDir, "plugins", safe + ".json");
+    }
+
+    public static string ForSecrets(string pluginName)
+    {
+        string path = For(pluginName);
+        return Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + ".secrets.json");
+    }
+}
+
+internal sealed class PluginConfigStore : IPluginConfigStore
+{
+    private readonly string _path;
+
+    public PluginConfigStore(string pluginName)
+    {
+        _path = PluginConfigPath.For(pluginName);
+    }
+
+    public ValueTask<T?> ReadAsync<T>(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!File.Exists(_path))
+        {
+            return ValueTask.FromResult<T?>(default);
+        }
+        try
+        {
+            return ValueTask.FromResult(JsonSerializer.Deserialize<T>(File.ReadAllText(_path), JsonOpts.Default));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"插件配置解析失败（{_path}），按无配置处理：{ex.Message}");
+            return ValueTask.FromResult<T?>(default);
+        }
+    }
+
+    public ValueTask WriteAsync<T>(T value, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        JsonUtil.WriteAtomic(_path, JsonSerializer.Serialize(value, JsonOpts.Indented));
+        return ValueTask.CompletedTask;
+    }
+}
+
+internal sealed class PluginSecretStore : IPluginSecretStore
+{
+    private readonly string _path;
+
+    public PluginSecretStore(string pluginName)
+    {
+        _path = PluginConfigPath.ForSecrets(pluginName);
+    }
+
+    public ValueTask<string?> GetAsync(string key, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        JsonObject root = ReadRoot();
+        string stored = root[key]?.ToString() ?? "";
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            return ValueTask.FromResult<string?>(null);
+        }
+        return ValueTask.FromResult(SecretStore.TryDecrypt(stored, out string? plain) ? plain : null);
+    }
+
+    public ValueTask SetAsync(string key, string? value, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        JsonObject root = ReadRoot();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            root.Remove(key);
+        }
+        else
+        {
+            root[key] = SecretStore.Encrypt(value);
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        JsonUtil.WriteAtomic(_path, root.ToJsonString(JsonOpts.Indented));
+        return ValueTask.CompletedTask;
+    }
+
+    private JsonObject ReadRoot()
+    {
+        if (!File.Exists(_path))
+        {
+            return new JsonObject();
+        }
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"插件配置文件损坏（{_path}），继续写入：{ex.Message}");
+            return new JsonObject();
+        }
+    }
+}
+
+internal sealed class PluginNotificationAdapter : IPluginNotificationService
+{
+    private readonly NotificationDispatcher _dispatcher;
+
+    public PluginNotificationAdapter(NotificationDispatcher dispatcher)
+    {
+        _dispatcher = dispatcher;
+    }
+
+    public ValueTask SendAsync(PluginNotification notification, CancellationToken cancellationToken = default)
+    {
+        return _dispatcher.SendPluginAsync(notification, cancellationToken);
+    }
+}

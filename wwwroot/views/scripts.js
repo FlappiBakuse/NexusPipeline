@@ -14,16 +14,14 @@ let scriptPage = 1;
 const SCRIPT_PAGE_SIZE = 20;
 
 function specializedPlugins() {
-  return (state.plugins || []).filter(p => p.kind === "specialized" && p.enabled && p.state !== "InitFailed");
+  return (state.plugins || []).filter(p => p.kind === "data-specialized" && p.configuredEnabled && p.runtimeEnabled && p.state === "Active");
 }
 
-/** 启动方式选择是否可用（v0.7.0+）：「模拟器适配」插件需已启用（全局能力开关）；通用脚本恒可用；专用插件按 plugin.json 的 supportsEmulator 声明（缺省不支持）。 */
+/** 启动方式选择是否可用：模拟器是宿主基础设施；专项脚本按插件 capability 声明（缺省不支持）。 */
 function emulatorAllowed(pluginType) {
-  const adapter = (state.plugins || []).find(p => p.name === "emulator-adapter");
-  if (adapter && (!adapter.enabled || adapter.state === "InitFailed")) return false;
   if (!pluginType) return true;
   const meta = (state.plugins || []).find(p => p.name === pluginType);
-  return !!meta && meta.enabled && meta.state !== "InitFailed" && !!meta.supportsEmulator;
+  return !!meta && meta.kind === "data-specialized" && meta.configuredEnabled && meta.runtimeEnabled && meta.state === "Active" && !!meta.supportsEmulator;
 }
 
 /** 游戏配置卡（v0.7.0+）：启动方式选择器（仅支持时渲染）+ ADB 地址/游戏路径按模式切换 + 启动参数 + 等待秒数。 */

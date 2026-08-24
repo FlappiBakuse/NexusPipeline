@@ -1,5 +1,4 @@
 using NexusPipeline.App.Abstractions;
-using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
@@ -15,20 +14,17 @@ internal sealed class ExecutionRunner
     private readonly IUserRepository _users;
     private readonly IHistoryStore _history;
     private readonly INotificationService _notifications;
-    private readonly IEmulatorCapabilityProvider _emulator;
     private readonly SystemActionExecutor _systemActions;
 
     public ExecutionRunner(
         IUserRepository users,
         IHistoryStore history,
         INotificationService notifications,
-        IEmulatorCapabilityProvider emulator,
         SystemActionExecutor systemActions)
     {
         _users = users;
         _history = history;
         _notifications = notifications;
-        _emulator = emulator;
         _systemActions = systemActions;
     }
 
@@ -104,8 +100,7 @@ internal sealed class ExecutionRunner
                     },
                     status => exec.CurrentStatus = status,
                     line => exec.AppendLog(line),
-                    _users,
-                    _emulator);
+                    _users);
 
                 try
                 {

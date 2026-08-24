@@ -8,6 +8,7 @@
 > v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
 > v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
 > v0.9.1 并行调度安全性加固：`IExecutionSnapshotProvider` 在同一数据锁内提供队列、脚本和用户配置输入，资源租约覆盖日志模式与前/后置脚本，路径和 ADB 端点按物理身份规范化；`ExecutionStateStore` 增加运行组收尾状态与 CRUD 协调域，`Scheduler` 对瞬时准入冲突保留待重试触发。队列内保持串行，符合条件的模拟器队列和一个标准队列可并行。
+> v0.9.5 扩展边界收敛：Webhook/SMTP 通知和模拟器均归宿主基础设施；模拟器运行开始时冻结 Generic ADB 或 MuMuManager driver。新增独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1，managed-code 插件按 manifest 配置、程序集隔离和重启语义加载；现有数据化专项插件继续兼容。
 
 ## 总体结构
 
@@ -20,10 +21,11 @@ NexusPipeline/
 │   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification 分域）
 │   ├── Persistence/    持久化层（NexusPipeline.Persistence）
 │   ├── Utilities/      工具层（NexusPipeline.Utilities）
-│   ├── Extensibility/  中立扩展契约与宿主服务（NexusPipeline.Extensibility，internal）
+│   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
 │   ├── Web/            HTTP 层（NexusPipeline.Web）
 │   ├── Cli/            命令行层（NexusPipeline.Cli）
-│   └── Plugins/        插件契约与内置插件（NexusPipeline.Plugins）
+│   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
+├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1（无宿主业务引用）
 ├── wwwroot/            前端（零构建 ES modules，浏览器直接加载）
 │   ├── app.js          路由 + 事件委托（唯一入口）
 │   ├── core/           平台层（与业务无关的通用能力）
@@ -50,7 +52,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 - **核心域不得引用 Web/Cli**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
-- **Plugins 通过宿主内置契约接口（`IPlugin` / `INotifyChannel` / `PluginContext`）交互**；跨模块的 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）为纯数据驱动，宿主只读其目录文件。
+- **Plugins 通过数据化 manifest 或独立 Plugin API v1 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
 - **已知偏差（如实记录，见 KNOWN_ISSUES.md KN-49）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复仍保留 `RuntimeContext` 查找脚本，属于启动/恢复兼容路径。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。新服务不得新增这类依赖。
 
@@ -98,19 +100,19 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
-| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 通过 `INotificationChannelProvider` 分发脚本/队列通知，隔离具体插件实现 |
+| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1 DTO 均从此入口发送 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体）；v0.6.9+ 移除 `ReadLogTail`（`/api/logs` 孤儿 API 删除） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册（v0.5.0+） |
 | `MainMenu` + 菜单类 | src/Cli/ | 命令行交互（主菜单/脚本/队列/调度/历史/插件/设置/通知渠道） |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
 | `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
-| `PluginContracts` | src/Extensibility/PluginContracts.cs | `IPluginCapability`、通知/profile/模拟器能力契约、`ScriptProfile` 与显式 `PluginHostServices`；全部 internal |
+| `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
 | `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
 
 ### public / internal 约定
 
-- 仅以下为 **public**（对外契约）：`Program`（入口）与领域模型 `AppSettings`/`ScriptInstance`/`ScriptUser`/`DispatchQueue`/`QueueTask`/`QueueTimeSet`/`RunRecord`/`RunAttempt`。v0.6.3 起插件契约均为宿主内置（`IPlugin`/`INotifyChannel`/`PluginContext`/`ScriptProfile`/`IPluginCapability` 一律 internal），不再对外提供 DLL 插件契约。
+- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API v1。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
 - 其余全部 `internal`：新增类型默认 internal，除非它属于契约清单。
 
 ### 新增 API 的落点
@@ -138,8 +140,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
 | `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
 | `views/history.js` | 历史列表 + 详情弹窗 |
-| `views/plugins.js` | 插件列表 + `#/plugins/{name}` 配置二级页（密钥字段并入「保存设置」提交，仅非空提交） |
-| `views/settings.js` | 系统设置页 |
+| `views/plugins.js` | 数据化专项插件与 managed-code 插件列表、启停状态 |
+| `views/settings.js` | 系统设置页 + Webhook/SMTP 内置通知渠道 |
 | `views/dashboard.js` | 仪表盘（3 秒轮询） |
 | `core/api.js` | 请求封装（JSON/错误/AbortController 生命周期联动） |
 | `core/dom.js` | `$` / `$$` 查询 |
@@ -159,23 +161,27 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ## 插件扩展指南
 
-v0.6.3 起专项插件为**数据化目录形态**（`plugins/<名称>/plugin.json + data/`），无需编译；内置 C# 插件包含 NotifyPlugin（通知推送）与 EmulatorAdapterPlugin（模拟器适配）。v0.7.9 起插件身份/元数据与 capability 分离：C# capability 通过 `PluginCapabilityRegistry` 按接口查询，数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。
+数据化专项插件采用 `plugins/<名称>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。
 
 ### 插件分类
 
 | 类别 | 形态 | 职责 | 启用语义 |
 |---|---|---|---|
-| 通用插件 | 内置 C#（`IPlugin`/能力接口/`PluginContext`） | 为程序添加能力（内置「通知推送」和模拟器适配，`PluginManager.DiscoverBuiltIn` 注册） | 内置白名单 `EnabledPlugins`（默认 notify），只可禁用不可删除 |
-| 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 外部默认启用，显式禁用记入 `DisabledPlugins`（重启后仍禁用） |
+| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1 + manifest | 通过 Logger/Config/Secrets/Notifications/Scheduler 实现联网、签到等主动任务 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
+| 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好写入 `AppSettings.PluginPreferences`，重启后应用 |
 
-> **通知通道（v0.4.4+，v0.8.1 边界收敛）**：`INotifyChannel` 为**多通道并存**语义——`NotificationDispatcher` 通过 `INotificationChannelProvider` 分发至全部已启用通道（NotifyPlugin 内部按 Webhook/SMTP 独立开关并行双发）。单个通道异常仅记警告，不影响其余通道；具体插件类型不再由 `DispatchCenter` 直接引用。
+> **通知通道（v0.9.5）**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
 
 ### Capability 扩展约束（v0.7.9）
 
-- 新增 C# 能力时新增 `IPluginCapability` 子接口并由插件实现；加载器只做一次通用注册，消费者通过 `PluginManager.GetCapabilities<T>()` 或 `HasCapability` 查询，不在 `PluginManager` 增加新的类型分支。
+- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
 - 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。现有 `supportsEmulator` 仍兼容并映射为 `emulator`。
 - `PluginSummary` 只描述展示/发现所需的元数据；Web 状态接口继续单独生成 `supportsEmulator`，因此不会破坏现有前端响应结构。
-- `PluginContext` 通过显式宿主服务读取设置、重载设置和已注册服务；插件配置/密钥文件路径与存储格式不变。
+- Plugin API v1 只提供显式 `IPluginHostContext` 服务端口；配置与 DPAPI 密钥分文件存储于 `config/plugins/`，managed-code 插件停止时后台任务统一取消。
+
+### 编写 managed-code 插件
+
+入口实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync`，manifest 至少声明 `kind: "managed-code"`、`apiVersion: "1.0"`、`entryAssembly` 和 `entryType`。完整示例与字段说明见 [plugins/README.md](../plugins/README.md)。
 
 ### 编写数据化专项插件（示例：`plugins/bettergi/`）
 
@@ -226,7 +232,7 @@ plugins/bettergi/
 
 > **MaaEnd 专项要点（v0.6.1，`plugins/maaend/`）**：主程序 `MaaEnd.exe`（MXU 客户端改名）以 `--autostart --quit-after-run` 启动（任务运行完成时进程自动退出）；配置目录 `config/`（`mxu-MaaEnd.json` 为实例/任务核心配置），v0.6.4 起**提供默认配置模板**（`data/config-template/` 含 `mxu-MaaEnd.json` 与 `maa_option.json`，编辑用户配置会话时 config 目录不存在则整体复制生成——目录型 ConfigPath 模板复制到 ConfigPath 本身，恢复按相对父目录清单精确清理）；日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改 = 当前会话）。判断脚本按「最后一个启用任务的任务完成/任务失败判定行」收尾（MXU 无运行记录机制、无天然选择性补做），失败任务改写 `mxu-MaaEnd.json`（全部 `enabled=false`、失败任务 `enabled=true`）经 `replaceConfigs` 触发选择性重试；启用任务判定**只按 `enabled===true`**（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存不参与分发）。**v0.7.6 还原描述**：判断脚本首次触发时读取 config 提取初始任务启停映射（array 型 `instances[{index}].tasks`）写 `script/config-restore.json`（跨尝试只写一次），宿主收尾同步快照前按描述还原启停（初始启停 + 运行后计数保留）。
 
-> v0.6.3 起插件契约为宿主内置（`IPlugin`/`INotifyChannel`/`PluginContext`/`ScriptProfile` 均 internal），不再对外提供 DLL 插件契约与 `ISpecializedScriptPlugin`。
+> **v0.9.5 起** managed-code 插件使用独立 `NexusPipeline.Plugin.Abstractions` API v1；宿主内部的 `PluginContracts` 仍不作为第三方扩展接口。
 
 ## 功能定位指南（找代码）
 
@@ -238,7 +244,7 @@ plugins/bettergi/
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/AttemptRunner.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/Configuration/ConfigurationTransaction.cs`（事务原语）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
 | 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
-| 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs`、`src/Plugins/NotifyPlugin.cs` |
+| 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
 | 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
@@ -255,5 +261,5 @@ plugins/bettergi/
 ```
 Web 请求 → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
 CLI 菜单 / Scheduler → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
-运行结束 → ExecutionRunner → INotificationService → INotificationChannelProvider → INotifyChannel 实现 → Webhook/SMTP；同时向 ExecutionStateStore 提交完成意图
+运行结束 → ExecutionRunner → INotificationService → NotificationDispatcher → Webhook/SMTP；managed-code 插件 → IPluginNotificationService → NotificationDispatcher；同时向 ExecutionStateStore 提交完成意图
 ```

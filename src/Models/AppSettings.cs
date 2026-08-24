@@ -59,18 +59,20 @@ public class AppSettings
 
     public int SmtpTimeout { get; set; } = 30;
 
-    /// <summary>模拟器适配内置插件名（v0.7.0+）：禁用后模拟器启动方式不可用。</summary>
-    public const string EmulatorAdapterPlugin = "emulator-adapter";
-
-    /// <summary>启用的内置插件白名单（默认 notify + 模拟器适配）；外部插件默认启用，禁用记录在 <see cref="DisabledPlugins"/>。</summary>
-    public List<string> EnabledPlugins { get; set; } = new() { "notify", EmulatorAdapterPlugin };
-
-    /// <summary>显式禁用的外部插件列表（持久化；删除后该插件重新默认启用）。</summary>
-    public List<string> DisabledPlugins { get; set; } = new();
+    /// <summary>
+    /// 插件用户偏好。缺少记录时，数据化专项插件默认启用，managed-code 插件默认禁用；
+    /// 未发现插件的记录继续保留，插件重新安装后仍能恢复用户选择。
+    /// </summary>
+    public Dictionary<string, PluginPreference> PluginPreferences { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>生成与当前设置完全脱钩的候选对象，供设置 PUT 的 clone-on-write 事务使用。</summary>
     public AppSettings Clone()
     {
         return JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(this)) ?? new AppSettings();
     }
+}
+
+public sealed class PluginPreference
+{
+    public bool Enabled { get; set; }
 }
