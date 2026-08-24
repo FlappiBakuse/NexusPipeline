@@ -78,13 +78,15 @@
 
 | 编号 | 已知问题 | 当前确认状态 | 代码位置 | 归属 |
 |---|---|---|---|---|
-| #32 | Monitor、Judge、config sync、timeout、进程检查共用单循环，Judge/config sync 阻塞监控 | 结构性问题已确认；需要拆分 worker 后专项压测 | `src/Services/Execution/ExecutionCoordinator.cs` | v0.9.4 |
-| #36 | TotalTimeout 主要依赖主循环，Judge/config sync 阻塞期间不是严格 wall-clock watchdog | 结构性问题已确认；待独立 RunBudget watchdog | `src/Services/Execution/ExecutionCoordinator.cs`, `RunBudget.cs` | v0.9.4 |
-| #73 | 脚本强杀后短暂自重启/外部 watchdog 重新占用配置，恢复窗口尚未有稳定判据 | 当前复核未稳定复现；按报告保守恢复，等待 0ms/100ms/500ms/1s/3s/5s 专项 harness | `src/Services/ConfigSwap/ConfigSwapRecovery.cs`, `SystemActions.cs` | v0.9.4 专项 |
-| #75 | 瞬时无进程被当作稳定退出 | 风险已确认，稳定窗口需要自重启 harness 才能量化 | `src/Utilities/SystemActions.cs`, `ConfigSwapRecovery.cs` | v0.9.4 |
-| #77 | PID 0 作为“按身份清理” sentinel，API 语义混合 | 代码路径已确认；待拆分 owned PID 与 identity cleanup API | `src/Utilities/SystemActions.cs`, `ExecutionCoordinator.cs` | v0.9.4 |
-| #79 | Root PID 与 GameExe 同名时会被 Game exclusion 排除 | 纯逻辑用例稳定命中；报告安排在身份模型重构中修复 | `src/Utilities/SystemActions.cs` | v0.9.4 |
-| #88 | Launcher 先退出后 detached child 脱离 Toolhelp 追踪 | 需要 launcher/worker 进程 harness 稳定复现 | `src/Utilities/SystemActions.cs` | v0.9.4 |
+| #32 | Monitor、Judge、config sync、timeout、进程检查共用单循环，Judge/config sync 阻塞监控 | 已修复：独立 worker 与单飞判定/配置同步，并通过加速与真实计时回归 | `src/Services/Execution/ExecutionCoordinator.cs` | v0.9.4 |
+| #36 | TotalTimeout 主要依赖主循环，Judge/config sync 阻塞期间不是严格 wall-clock watchdog | 已修复：独立 RunBudget watchdog，195/195 单测与全量回归通过 | `src/Services/Execution/ExecutionCoordinator.cs`, `RunBudget.cs` | v0.9.4 |
+| #73 | 脚本强杀后短暂自重启/外部 watchdog 重新占用配置，恢复窗口尚未有稳定判据 | 已修复：稳定退出窗口覆盖 0ms、100ms、500ms、1s、3s、5s 重启时序 | `src/Services/ConfigSwap/ConfigSwapRecovery.cs`, `SystemActions.cs` | v0.9.4 |
+| #75 | 瞬时无进程被当作稳定退出 | 已修复：稳定退出窗口与进程身份观察共同确认退出 | `src/Utilities/SystemActions.cs`, `ConfigSwapRecovery.cs` | v0.9.4 |
+| #77 | PID 0 作为“按身份清理” sentinel，API 语义混合 | 已修复：拆分 owned PID、Job Object 和 identity cleanup 语义 | `src/Utilities/SystemActions.cs`, `ExecutionCoordinator.cs` | v0.9.4 |
+| #79 | Root PID 与 GameExe 同名时会被 Game exclusion 排除 | 已修复：根进程始终保留，GameExe 排除仅作用于子进程 | `src/Utilities/SystemActions.cs` | v0.9.4 |
+| #88 | Launcher 先退出后 detached child 脱离 Toolhelp 追踪 | 已修复：通过 Job Object 与进程身份模型追踪并清理归属进程 | `src/Utilities/SystemActions.cs` | v0.9.4 |
+
+**v0.9.4 修复验证结果（2026-08-24）**：上述目标条目均已完成修复并转为回归保护。验证包含管理员构建、单元测试 195/195、加速与真实计时 E2E 87/87、judge 150/150、加速 chaos 167/167、真实 chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
 
 ## 已有保留项与语义确认
 

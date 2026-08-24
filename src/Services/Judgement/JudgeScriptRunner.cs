@@ -450,7 +450,7 @@ internal static class JudgeScriptRunner
             }
             catch (OperationCanceledException)
             {
-                SystemActions.KillTree(process.Id);
+                SystemActions.KillOwnedProcessTree(null, process.Id, pythonExe, "判断脚本", rounds: 1, intervalMs: 100);
                 result.JudgeError = $"判断脚本执行超时（{ScriptTimeoutSeconds} 秒）或被取消";
                 return result;
             }

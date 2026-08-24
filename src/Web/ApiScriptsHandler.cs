@@ -1149,7 +1149,12 @@ internal static class ApiScriptsHandler
                         {
                             if (registered.Process is not null)
                             {
-                                SystemActions.KillAndConfirmExited(registered.Process.Id, ResolveLaunchTargetExe(script), "脚本");
+                                SystemActions.KillOwnedProcessTree(
+                                    null,
+                                    registered.Process.Id,
+                                    ResolveLaunchTargetExe(script),
+                                    "脚本",
+                                    stableSeconds: 3);
                             }
                             UserConfigManager.CancelEdit(script.Id, user.Name, script.ConfigPath);
                             UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
@@ -1194,7 +1199,10 @@ internal static class ApiScriptsHandler
                 // 确保配置交换还原前进程已完全退出，消除文件占用导致的交换失败窗口；
                 // 持续自重启杀不干净时拒绝执行文件交换（会话与标记保留，由下次重试自愈）。
                 string launchExe = ResolveLaunchTargetExe(session.Script);
-                if (!SystemActions.KillAndConfirmExited(session.Process?.Id ?? 0, launchExe, "脚本"))
+                bool processClean = session.Process is not null
+                    ? SystemActions.KillOwnedProcessTree(null, session.Process.Id, launchExe, "脚本", stableSeconds: 3)
+                    : SystemActions.KillExistingProcessesByIdentity(launchExe, "脚本", stableSeconds: 3);
+                if (!processClean)
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试" }, 400).ConfigureAwait(false);
                     return;

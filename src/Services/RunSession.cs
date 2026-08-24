@@ -1,6 +1,7 @@
 using System.Text;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
@@ -24,6 +25,7 @@ internal class RunSession
     protected RunBudget? _budget;
     protected ScriptUser? _activeUser;
     protected bool _gameFronted;
+    protected ProcessOwnership? _processOwnership;
     protected List<string>? _pendingReplaceConfigs;
     protected ConfigRunSession? _configRun;
     protected bool _firstSyncDone;
@@ -62,6 +64,7 @@ internal class RunSession
     internal int AttemptLogStart { get => _results.AttemptStart; set => _results.AttemptStart = value; }
     internal ResultCollector Results => _results;
     internal bool GameFronted { get => _gameFronted; set => _gameFronted = value; }
+    internal ProcessOwnership? ProcessOwnership { get => _processOwnership; set => _processOwnership = value; }
     internal List<string>? PendingReplaceConfigs { get => _pendingReplaceConfigs; set => _pendingReplaceConfigs = value; }
     internal ConfigRunSession? ConfigRun { get => _configRun; set => _configRun = value; }
     internal bool FirstSyncDone { get => _firstSyncDone; set => _firstSyncDone = value; }

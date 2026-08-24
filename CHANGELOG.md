@@ -2,6 +2,29 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.4（Pre-release）
+
+### 运行监控与预算
+
+- 将日志监控、判断脚本、配置同步和总预算拆分为独立 worker，判断结果携带尝试快照与日志代次，过期结果自动丢弃。
+- 增加独立的 RunBudget wall-clock watchdog，TotalTimeout 不再依赖监控循环和判断脚本返回时机。
+- 补齐进程退出、日志停滞、最终判断和配置同步的并发收尾语义，保持运行历史与最终结果一致。
+
+### 进程所有权与配置恢复
+
+- 以 PID、启动时间和完整映像路径建立进程身份，并使用 Windows Job Object 管理脚本及脱离启动器的子进程。
+- 增加稳定退出观察窗口，覆盖自重启、外部 watchdog、PID 复用、PID 0、根进程与 GameExe 同名等边界。
+- 收敛脚本清理、配置编辑恢复和重启恢复路径，处理批处理启动器及进程树快照缺失场景。
+
+### 测试与验证
+
+- 运行时专项测试统一命名为 `RuntimeTests.cs`，避免测试文件名绑定具体版本。
+- 管理员构建通过，仅保留基线已有的 3 条 nullable 警告。
+- 单元测试通过：195/195。
+- 加速档全量 Playwright 87/87、`judge-scenarios` 150/150、`chaos-queue` 167/167 全部通过。
+- 发布前真实计时档：Playwright 87/87、`judge-scenarios` 150/150、`chaos-queue` 166/166 全部通过。
+- `git diff --check` 通过。
+
 ## v0.9.3（Pre-release）
 
 ### 调度、持久化与生命周期

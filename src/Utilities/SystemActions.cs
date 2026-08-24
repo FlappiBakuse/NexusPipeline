@@ -6,6 +6,10 @@ namespace NexusPipeline.Utilities;
 
 internal static class SystemActions
 {
+    // v0.9.4：恢复/配置替换至少要跨过专项 harness 覆盖的 0ms、100ms、500ms、1s、3s、5s
+    // 自重启窗口，并留出一次采样抖动余量；测试环境仍通过 TestHooks 缩放墙钟等待。
+    internal const int StableExitSeconds = 6;
+
     public static bool IsCommandFile(string path)
     {
         return Path.GetExtension(path).ToLowerInvariant() is ".bat" or ".cmd" or ".com";
@@ -121,6 +125,17 @@ internal static class SystemActions
         return process;
     }
 
+    /// <summary>启动宿主拥有的进程并立即加入本次 Attempt 的 Job Object。</summary>
+    public static Process? StartOwnedProcess(ProcessStartInfo psi, ProcessOwnership? ownership)
+    {
+        Process? process = Process.Start(psi);
+        if (process is not null)
+        {
+            ownership?.TryAssign(process);
+        }
+        return process;
+    }
+
     private static void BeginOutputDrain(Process process, ProcessStartInfo psi)
     {
         if (psi.RedirectStandardOutput)
@@ -168,13 +183,17 @@ internal static class SystemActions
     /// </summary>
     public static ProcessCleanupResult KillTree(int pid, string? excludeProcessBaseName = null)
     {
+        if (pid <= 0)
+        {
+            return ProcessCleanupResult.Unconfirmed(new[] { pid }, "无效根 PID，禁止使用 PID 0 作为身份清理哨兵");
+        }
         try
         {
             IReadOnlyDictionary<int, ProcessNode> nodes = SnapshotProcesses();
             if (!nodes.ContainsKey(pid))
             {
-                Logger.Info($"进程树无需清理（PID {pid} 已不存在）。");
-                return ProcessCleanupResult.Confirmed("根进程已不存在");
+                Logger.Info($"进程树根 PID {pid} 已不存在，无法仅凭 Toolhelp 快照确认脱离子进程。");
+                return ProcessCleanupResult.Unconfirmed(new[] { pid }, "根进程已不存在，等待稳定退出窗口或由 Job Object 提供所有权证据");
             }
             HashSet<int> targets = CollectTree(pid, nodes, excludeProcessBaseName);
             int killed = 0;
@@ -317,7 +336,9 @@ internal static class SystemActions
             {
                 continue;
             }
-            if (excludeBaseName is not null && IsSameProcessName(node.ExeName, excludeBaseName))
+            // 根 PID 是本次宿主启动得到的 owned root，即便与 GameExe 同名也必须纳入脚本清理；
+            // 只有根的后代匹配游戏身份时才排除该分支。
+            if (pid != rootPid && excludeBaseName is not null && IsSameProcessName(node.ExeName, excludeBaseName))
             {
                 continue;
             }
@@ -357,7 +378,33 @@ internal static class SystemActions
                 CreateNoWindow = true,
             });
             process?.WaitForExit(10000);
-            return process is not null && process.ExitCode == 0;
+            if (process is not null && process.ExitCode == 0)
+            {
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] taskkill 清理 PID {pid} 失败：{ex.Message}，尝试 Process.Kill。");
+        }
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            if (process.HasExited)
+            {
+                return true;
+            }
+            process.Kill(entireProcessTree: false);
+            process.WaitForExit(5000);
+            return process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
         }
         catch
         {
@@ -476,45 +523,363 @@ internal static class SystemActions
         }
     }
 
-    /// <summary>
-    /// 清理脚本进程并确认退出（v0.6.0+）：进程树清理后轮询同名进程，处理「被杀后自重启」的脚本
-    /// （如 BetterGI 防崩溃机制，日志曾出现强杀两轮才干净）——每轮仍存在则按名强杀，直至确认退出或轮数耗尽。
-    /// 确保配置交换还原前脚本进程已完全退出，消除文件占用导致的还原失败窗口。
-    /// 返回 true=已确认退出；false=轮数耗尽后仍在运行（疑似持续自重启，调用方应拒绝执行依赖该进程退出的后续动作）。
-    /// excludeProcessBaseName（v0.6.5+）：与 GameExe 同名的进程不视为脚本树成员（见 <see cref="KillTree"/>），
-    /// 游戏进程由游戏管理逻辑（ForceCloseGame/失败路径按名关闭）处理。
-    /// </summary>
-    public static bool KillAndConfirmExited(int pid, string exePath, string display, int rounds = 5, int intervalMs = 800, string? excludeProcessBaseName = null)
+    /// <summary>按身份观察稳定退出；一次空采样不作为恢复配置的充分条件。</summary>
+    public static bool IsExeStoppedStable(
+        string exePath,
+        int stableSeconds = StableExitSeconds,
+        bool waitIfInitiallyStopped = true)
     {
-        ProcessCleanupResult cleanup = KillTree(pid, excludeProcessBaseName);
-        if (!cleanup.ConfirmedExited && string.IsNullOrWhiteSpace(excludeProcessBaseName))
+        if (string.IsNullOrWhiteSpace(exePath))
         {
-            Logger.Warn($"[警告] {display}进程树清理未确认：{cleanup.Reason}。");
+            return true;
         }
-        else if (!cleanup.ConfirmedExited)
+        if (!waitIfInitiallyStopped && !IsExeRunning(exePath))
         {
-            Logger.Warn($"[警告] {display}进程树清理未确认且启用游戏排除名单：{cleanup.Reason}。");
-            return false;
+            return true;
         }
-        for (int round = 1; round <= rounds; round++)
+        int seconds = Math.Max(1, TestHooks.ScaledSeconds(stableSeconds));
+        var window = new StableExitWindow(TimeSpan.FromSeconds(seconds));
+        // 允许在稳定窗口内捕获一次延迟重启，并为重启后的新窗口留出完整确认时间。
+        DateTime deadline = DateTime.UtcNow.AddSeconds(seconds * 2 + 1);
+        while (DateTime.UtcNow < deadline)
         {
-            bool knownRemaining = cleanup.RemainingPids.Any(IsProcessAlive);
-            if (!IsExeRunning(exePath) && !knownRemaining)
+            if (IsExeRunning(exePath))
+            {
+                window.Observe(hasOwnedProcess: true, DateTime.UtcNow);
+            }
+            else if (window.Observe(hasOwnedProcess: false, DateTime.UtcNow))
             {
                 return true;
             }
-            Logger.Info($"[提示] {display}进程仍在运行（第 {round}/{rounds} 轮按名清理，含自重启产物）。");
-            // v0.7.5（台账外）：自重启轮按名清理同样携带排除名单（游戏名），避免 Process.Kill 全树连带杀死游戏子孙进程。
-            KillByName(exePath, display, excludeProcessBaseName);
-            if (round < rounds)
-            {
-                Thread.Sleep(intervalMs);
-            }
-            cleanup = KillTree(pid, excludeProcessBaseName);
+            Thread.Sleep(Math.Max(10, Math.Min(200, TestHooks.ScaledMs(100))));
         }
-        if (IsExeRunning(exePath) || cleanup.RemainingPids.Any(IsProcessAlive))
+        return window.IsStable;
+    }
+
+    /// <summary>清理本次 Attempt 的 owned tree；Job Object 可在 launcher 退出后继续提供 detached child 证据。</summary>
+    public static bool KillOwnedProcessTree(
+        ProcessOwnership? ownership,
+        int rootPid,
+        string exePath,
+        string display,
+        int rounds = 5,
+        int intervalMs = 800,
+        string? excludeProcessBaseName = null,
+        int? stableSeconds = null)
+    {
+        if (rootPid <= 0)
         {
-            Logger.Warn($"[警告] {display}进程清理后仍在运行（疑似持续自重启），请手动检查：{exePath}");
+            Logger.Warn($"[警告] {display}收到无效 root PID {rootPid}，拒绝执行 owned tree 清理。");
+            return false;
+        }
+
+        ProcessCleanupResult cleanup = KillOwnedAndExpectedProcesses(ownership, rootPid, exePath, excludeProcessBaseName);
+        if (!cleanup.ConfirmedExited)
+        {
+            Logger.Warn($"[警告] {display}进程树初次清理未确认：{cleanup.Reason}。");
+        }
+        return ConfirmStableExit(
+            exePath,
+            display,
+            () => KillOwnedAndExpectedProcesses(ownership, rootPid, exePath, excludeProcessBaseName),
+            () => CaptureOwnedAndExpectedIdentities(ownership, exePath, excludeProcessBaseName, rootPid),
+            rounds,
+            intervalMs,
+            excludeProcessBaseName,
+            cleanup,
+            stableSeconds);
+    }
+
+    /// <summary>没有 root PID 时的显式身份清理入口，供旧进程/编辑会话恢复使用。</summary>
+    public static bool KillExistingProcessesByIdentity(
+        string exePath,
+        string display,
+        int rounds = 5,
+        int intervalMs = 800,
+        string? excludeProcessBaseName = null,
+        int? stableSeconds = null)
+    {
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            return true;
+        }
+        ProcessCleanupResult initial = KillExpectedIdentityProcesses(exePath, excludeProcessBaseName, rootPid: null);
+        return ConfirmStableExit(
+            exePath,
+            display,
+            () => KillExpectedIdentityProcesses(exePath, excludeProcessBaseName, rootPid: null),
+            () => CaptureExecutableIdentities(exePath, excludeProcessBaseName, rootPid: null),
+            rounds,
+            intervalMs,
+            excludeProcessBaseName,
+            initial,
+            stableSeconds);
+    }
+
+    private static ProcessCleanupResult KillOwnedAndExpectedProcesses(
+        ProcessOwnership? ownership,
+        int rootPid,
+        string exePath,
+        string? excludeProcessBaseName)
+    {
+        ProcessCleanupResult owned = ownership is not null && ownership.IsUsable
+            ? KillOwnedFromJob(ownership, rootPid, excludeProcessBaseName)
+            : KillTree(rootPid, excludeProcessBaseName);
+        ProcessCleanupResult expected = KillExpectedIdentityProcesses(exePath, excludeProcessBaseName, rootPid);
+        return CombineCleanup(owned, expected);
+    }
+
+    private static ProcessCleanupResult KillExpectedIdentityProcesses(
+        string exePath,
+        string? excludeProcessBaseName,
+        int? rootPid)
+    {
+        IReadOnlyList<ProcessIdentity> identities = CaptureExecutableIdentities(exePath, excludeProcessBaseName, rootPid);
+        int killed = 0;
+        foreach (ProcessIdentity identity in identities)
+        {
+            if (TryKillIdentity(identity, allowWeakImageName: false))
+            {
+                killed++;
+            }
+        }
+        IReadOnlyList<ProcessIdentity> remaining = CaptureExecutableIdentities(exePath, excludeProcessBaseName, rootPid);
+        if (remaining.Count > 0)
+        {
+            return ProcessCleanupResult.Unconfirmed(
+                remaining.Select(identity => identity.Pid),
+                $"按完整映像身份清理后仍有 {remaining.Count} 个进程存活");
+        }
+        return ProcessCleanupResult.Confirmed($"按完整映像身份清理 {killed} 个进程");
+    }
+
+    private static IReadOnlyList<ProcessIdentity> CaptureExecutableIdentities(
+        string exePath,
+        string? excludeProcessBaseName,
+        int? rootPid)
+    {
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            return Array.Empty<ProcessIdentity>();
+        }
+        string baseName = Path.GetFileNameWithoutExtension(exePath);
+        if (baseName.Length == 0)
+        {
+            return Array.Empty<ProcessIdentity>();
+        }
+        var identities = new List<ProcessIdentity>();
+        try
+        {
+            foreach (Process process in Process.GetProcessesByName(baseName))
+            {
+                try
+                {
+                    ProcessIdentity? identity = ProcessIdentity.Capture(process);
+                    if (identity is null)
+                    {
+                        continue;
+                    }
+                    ProcessIdentity value = identity.Value;
+                    bool isRoot = rootPid == value.Pid;
+                    if (!isRoot && excludeProcessBaseName is not null && IsSameProcessName(value.ImageName, excludeProcessBaseName))
+                    {
+                        continue;
+                    }
+                    if (!IsExpectedImage(value.ImageName, exePath))
+                    {
+                        continue;
+                    }
+                    identities.Add(value);
+                }
+                finally
+                {
+                    process.Dispose();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 按完整映像身份采样失败（{exePath}）：{ex.Message}");
+        }
+        return identities;
+    }
+
+    private static IReadOnlyList<ProcessIdentity> CaptureOwnedAndExpectedIdentities(
+        ProcessOwnership? ownership,
+        string exePath,
+        string? excludeProcessBaseName,
+        int rootPid)
+    {
+        var identities = new List<ProcessIdentity>();
+        if (ownership is not null && ownership.IsUsable)
+        {
+            identities.AddRange(ownership.Snapshot().Where(identity =>
+                identity.Pid == rootPid
+                || excludeProcessBaseName is null
+                || !IsSameProcessName(identity.ImageName, excludeProcessBaseName)));
+        }
+        identities.AddRange(CaptureExecutableIdentities(exePath, excludeProcessBaseName, rootPid));
+        return identities
+            .GroupBy(identity => identity.Pid)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static bool IsExpectedImage(string imageName, string exePath)
+    {
+        try
+        {
+            string expected = Path.GetFullPath(exePath);
+            if (Path.IsPathRooted(imageName) && Path.IsPathRooted(expected))
+            {
+                return string.Equals(Path.GetFullPath(imageName), expected, StringComparison.OrdinalIgnoreCase);
+            }
+            return string.Equals(
+                Path.GetFileNameWithoutExtension(imageName),
+                Path.GetFileNameWithoutExtension(expected),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static ProcessCleanupResult CombineCleanup(ProcessCleanupResult first, ProcessCleanupResult second)
+    {
+        bool confirmed = first.ConfirmedExited && second.ConfirmedExited;
+        IReadOnlyList<int> remaining = first.RemainingPids
+            .Concat(second.RemainingPids)
+            .Distinct()
+            .OrderBy(pid => pid)
+            .ToArray();
+        return new ProcessCleanupResult(
+            confirmed && remaining.Count == 0,
+            remaining,
+            $"{first.Reason}；{second.Reason}");
+    }
+
+    private static ProcessCleanupResult KillOwnedFromJob(ProcessOwnership ownership, int rootPid, string? excludeProcessBaseName)
+    {
+        IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
+        if (owned.Count == 0)
+        {
+            return KillTree(rootPid, excludeProcessBaseName);
+        }
+        int killed = 0;
+        var remaining = new List<ProcessIdentity>();
+        foreach (ProcessIdentity identity in owned)
+        {
+            bool isRoot = identity.Pid == rootPid;
+            if (!isRoot && excludeProcessBaseName is not null && IsSameProcessName(identity.ImageName, excludeProcessBaseName))
+            {
+                continue;
+            }
+            if (TryKillIdentity(identity, allowWeakImageName: true))
+            {
+                killed++;
+            }
+        }
+        foreach (ProcessIdentity identity in ownership.Snapshot())
+        {
+            bool isRoot = identity.Pid == rootPid;
+            if (!isRoot && excludeProcessBaseName is not null && IsSameProcessName(identity.ImageName, excludeProcessBaseName))
+            {
+                continue;
+            }
+            remaining.Add(identity);
+        }
+        if (remaining.Count > 0)
+        {
+            return ProcessCleanupResult.Unconfirmed(remaining.Select(item => item.Pid), $"Job Object 中仍有 {remaining.Count} 个 owned 进程存活");
+        }
+        return ProcessCleanupResult.Confirmed($"Job Object 已清理 {killed} 个 owned 进程");
+    }
+
+    private static bool TryKillIdentity(ProcessIdentity identity, bool allowWeakImageName)
+    {
+        try
+        {
+            if (!allowWeakImageName && !Path.IsPathRooted(identity.ImageName))
+            {
+                return false;
+            }
+            using Process process = Process.GetProcessById(identity.Pid);
+            ProcessIdentity? current = ProcessIdentity.Capture(process);
+            if (current is null || !identity.Matches(current.Value))
+            {
+                return false;
+            }
+            return KillProcess(identity.Pid);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool ConfirmStableExit(
+        string exePath,
+        string display,
+        Func<ProcessCleanupResult> refresh,
+        Func<IReadOnlyList<ProcessIdentity>> observeIdentities,
+        int rounds,
+        int intervalMs,
+        string? excludeProcessBaseName,
+        ProcessCleanupResult initial,
+        int? stableSecondsOverride)
+    {
+        int maxRounds = Math.Max(1, rounds);
+        int killRound = 0;
+        int stableSeconds = Math.Max(1, TestHooks.ScaledSeconds(stableSecondsOverride ?? StableExitSeconds));
+        // deadline 需覆盖“最大专项重启间隔 + 新一轮完整稳定窗口”；仅用 stableSeconds
+        // 会在 3s/5s 延迟重启刚被采样后提前结束，留下未完成的恢复现场。
+        DateTime deadline = DateTime.UtcNow.AddSeconds(
+            stableSeconds * 2
+            + Math.Max(1, maxRounds) * Math.Max(0.1, intervalMs / 1000.0)
+            + 1);
+        var stability = new StableExitWindow(TimeSpan.FromSeconds(stableSeconds));
+        ProcessCleanupResult cleanup = initial;
+
+        while (DateTime.UtcNow < deadline)
+        {
+            bool knownRemaining = cleanup.RemainingPids.Any(IsProcessAlive);
+            IReadOnlyList<ProcessIdentity> observed = observeIdentities();
+            bool identityRunning = observed.Count > 0 || IsExeRunning(exePath);
+            if (!knownRemaining && !identityRunning)
+            {
+                // 批处理启动器的真实映像是 cmd.exe，无法按 .bat 文件名做身份观测。
+                // 根进程/Job 已确认退出且没有可观测映像时，继续等待固定窗口只会拖慢
+                // 前置脚本与普通队列；可观测的 .exe 仍走完整稳定窗口。
+                if (IsCommandFile(exePath))
+                {
+                    return true;
+                }
+                if (stability.Observe(hasOwnedProcess: false, DateTime.UtcNow))
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                stability.Observe(hasOwnedProcess: true, DateTime.UtcNow);
+                if (killRound < maxRounds)
+                {
+                    killRound++;
+                    Logger.Info($"[提示] {display}进程仍在运行（第 {killRound}/{maxRounds} 轮按身份/owned tree 清理）。");
+                    cleanup = refresh();
+                }
+            }
+            Thread.Sleep(Math.Max(10, Math.Min(200, TestHooks.ScaledMs(Math.Max(10, intervalMs)))));
+        }
+
+        cleanup = refresh();
+        bool remains = cleanup.RemainingPids.Any(IsProcessAlive)
+            || observeIdentities().Count > 0
+            || IsExeRunning(exePath);
+        if (remains || !stability.IsStable)
+        {
+            Logger.Warn($"[警告] {display}进程未通过稳定退出窗口（疑似持续自重启或存在脱离追踪的子进程）：{exePath}");
             return false;
         }
         return true;

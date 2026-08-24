@@ -114,14 +114,17 @@ internal static class ConfigSwapRecovery
     {
         // v0.6.6+：脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
-        if (ScriptProcessRunning(scriptId))
+        bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
+            || (!string.IsNullOrWhiteSpace(userName)
+                && File.Exists(ConfigSessionMark.MarkFile(scriptId, userName)));
+        if (hasRecoveryResidue && ScriptProcessRunning(scriptId))
         {
             Logger.Info($"[恢复] 脚本 {scriptId} 进程仍在运行，等待其退出后恢复配置。");
             EnqueuePendingRecover(scriptId, userName);
             return false;
         }
         bool ok = true;
-        if (HasBackupResidue(scriptId, userName) && !RecoverBackupQuiet(scriptId, userName))
+        if (hasRecoveryResidue && HasBackupResidue(scriptId, userName) && !RecoverBackupQuiet(scriptId, userName))
         {
             ok = false;
         }
@@ -217,7 +220,9 @@ internal static class ConfigSwapRecovery
             ? Path.GetDirectoryName(script.MainExe) ?? ""
             : script.RootPath;
         string launchExe = SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
-        return SystemActions.IsExeRunning(launchExe);
+        // 启动扫描只在确有残留会话/备份时调用；当前没有进程即可继续恢复，
+        // 避免每个普通脚本都串行等待完整稳定窗口阻塞 Web 服务接管。
+        return !SystemActions.IsExeStoppedStable(launchExe, waitIfInitiallyStopped: false);
     }
 
     private static bool HasBackupResidue(string scriptId, string? userName)

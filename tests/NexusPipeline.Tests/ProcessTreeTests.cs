@@ -36,11 +36,11 @@ public class ProcessTreeTests
     }
 
     [Fact]
-    public void CollectTree_ExcludeGame_WhenRootIsGame_ReturnsEmpty()
+    public void CollectTree_ExcludeGame_WhenRootIsGame_RetainsRootAndItsNonGameChildren()
     {
         var nodes = Nodes((100, 0, "GenshinImpact.exe"), (101, 100, "child.exe"));
         HashSet<int> tree = SystemActions.CollectTree(100, nodes, "genshinimpact");
-        Assert.Empty(tree);
+        Assert.Equal(new[] { 100, 101 }, tree.OrderBy(x => x).ToArray());
     }
 
     [Fact]
