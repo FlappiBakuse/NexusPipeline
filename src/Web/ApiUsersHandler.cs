@@ -99,6 +99,12 @@ internal static class ApiUsersHandler
             await HttpHelper.WriteJsonAsync(context, new { error = validation }, 400).ConfigureAwait(false);
             return;
         }
+        string? remarkError = ValidateRemark(payload?.Remark);
+        if (remarkError is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = remarkError }, 400).ConfigureAwait(false);
+            return;
+        }
         if (payload!.AutoCheckInEnabled)
         {
             await HttpHelper.WriteJsonAsync(context, new { error = "自动签到将在后续版本通过插件实现" }, 400).ConfigureAwait(false);
@@ -125,6 +131,7 @@ internal static class ApiUsersHandler
                     Id = Guid.NewGuid().ToString("N"),
                     Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
                     Name = payload.Name.Trim(),
+                    Remark = payload.Remark?.Trim() ?? "",
                     AutoCheckInEnabled = false,
                 };
                 ctx.Users.Add(created);
@@ -164,6 +171,12 @@ internal static class ApiUsersHandler
             await HttpHelper.WriteJsonAsync(context, new { error = "自动签到将在后续版本通过插件实现" }, 400).ConfigureAwait(false);
             return;
         }
+        string? remarkError = ValidateRemark(payload?.Remark);
+        if (remarkError is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = remarkError }, 400).ConfigureAwait(false);
+            return;
+        }
 
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? target = ctx.FindUser(userId);
@@ -172,6 +185,7 @@ internal static class ApiUsersHandler
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
         }
+        UserPayload data = payload!;
         string? error = null;
         ctx.Center.WithAdmissionCoordination(() =>
         {
@@ -183,15 +197,17 @@ internal static class ApiUsersHandler
             lock (ctx.DataLock)
             {
                 if (ctx.Users.Any(user => !ReferenceEquals(user, target)
-                    && string.Equals(user.Name, payload.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    && string.Equals(user.Name, data.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
                 {
                     error = "用户名重复：全局用户已存在同名用户";
                     return;
                 }
                 string oldName = target.Name;
                 bool oldAuto = target.AutoCheckInEnabled;
-                target.Name = payload.Name.Trim();
+                string oldRemark = target.Remark;
+                target.Name = data.Name.Trim();
                 target.AutoCheckInEnabled = false;
+                target.Remark = data.Remark?.Trim() ?? "";
                 try
                 {
                     DataStore.SaveUsers(ctx.Users);
@@ -200,6 +216,7 @@ internal static class ApiUsersHandler
                 {
                     target.Name = oldName;
                     target.AutoCheckInEnabled = oldAuto;
+                    target.Remark = oldRemark;
                     throw;
                 }
             }
@@ -375,6 +392,12 @@ internal static class ApiUsersHandler
             await HttpHelper.WriteJsonAsync(context, new { error = validation }, 400).ConfigureAwait(false);
             return;
         }
+        string? runDaysError = ValidateRunDays(payload.RunDays);
+        if (runDaysError is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = runDaysError }, 400).ConfigureAwait(false);
+            return;
+        }
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? user = ctx.FindUser(userId);
         ScriptInstance? script = ctx.FindScript(payload.ScriptInstanceId);
@@ -442,6 +465,12 @@ internal static class ApiUsersHandler
         if (payload is null || validation is not null)
         {
             await HttpHelper.WriteJsonAsync(context, new { error = validation ?? "绑定设置格式不正确" }, 400).ConfigureAwait(false);
+            return;
+        }
+        string? runDaysError = ValidateRunDays(payload.RunDays);
+        if (runDaysError is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = runDaysError }, 400).ConfigureAwait(false);
             return;
         }
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -655,6 +684,7 @@ internal static class ApiUsersHandler
             user.Id,
             user.Index,
             user.Name,
+            user.Remark,
             user.AutoCheckInEnabled,
             avatarUrl = HasAvatar(user.Id) ? $"/api/users/{Uri.EscapeDataString(user.Id)}/avatar" : null,
             bindingCount = user.Bindings.Count,
@@ -678,6 +708,7 @@ internal static class ApiUsersHandler
             binding.PostRunOnFinalOnly,
             binding.NotifyEnabled,
             binding.SmtpTo,
+            binding.RunDays,
         };
     }
 
@@ -716,6 +747,16 @@ internal static class ApiUsersHandler
         return string.IsNullOrWhiteSpace(name) || !ScriptUserRule.IsValidName(name.Trim())
             ? "用户名不能为空且不能包含非法字符"
             : Limits.CheckNameBytes(name.Trim(), 128, "用户名");
+    }
+
+    private static string? ValidateRemark(string? remark)
+    {
+        return Limits.CheckNameBytes(remark?.Trim() ?? "", 512, "备注");
+    }
+
+    private static string? ValidateRunDays(int value)
+    {
+        return value >= -1 ? null : "运行天数只能为 -1（永久）或 0 及以上的整数";
     }
 
     private static string? ValidateSmtp(string? value)
@@ -765,6 +806,8 @@ internal static class ApiUsersHandler
     {
         public string Name { get; set; } = "";
 
+        public string? Remark { get; set; }
+
         public bool AutoCheckInEnabled { get; set; }
     }
 
@@ -786,6 +829,8 @@ internal static class ApiUsersHandler
 
         public string SmtpTo { get; set; } = "";
 
+        public int RunDays { get; set; } = -1;
+
         public UserScriptBinding ToBinding()
         {
             return new UserScriptBinding
@@ -798,6 +843,7 @@ internal static class ApiUsersHandler
                 PostRunOnFinalOnly = PostRunOnFinalOnly,
                 NotifyEnabled = NotifyEnabled,
                 SmtpTo = SmtpTo.Trim(),
+                RunDays = RunDays,
             };
         }
     }

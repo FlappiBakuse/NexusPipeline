@@ -34,6 +34,16 @@ internal class RuntimeContext
                 action();
             }
         }, SnapshotUsers));
+        collection.AddSingleton<IUserRunDaysWriter>(_ => new RuntimeUserRunDaysWriter(
+            action =>
+            {
+                lock (DataLock)
+                {
+                    action();
+                }
+            },
+            () => Users,
+            users => DataStore.SaveUsers(users)));
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(

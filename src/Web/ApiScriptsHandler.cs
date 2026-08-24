@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Net;
@@ -601,7 +601,7 @@ internal static class ApiScriptsHandler
                 .Select(binding => new ScriptUser
                 {
                     Name = user.Name,
-                    Enabled = binding.Enabled,
+                    Enabled = binding.Participates,
                     PreRunScript = binding.PreRunScript,
                     PreRunOnceOnly = binding.PreRunOnceOnly,
                     PostRunScript = binding.PostRunScript,

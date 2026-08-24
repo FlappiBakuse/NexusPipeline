@@ -155,7 +155,9 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   const userDir = path.join(dataDir, user甲.id);
 
   await page.locator('[data-testid="global-user-card"]').filter({ hasText: user }).first().locator('[data-action="open-user-management"]').click();
-  await page.getByRole("button", { name: "编辑配置", exact: true }).click();
+  await page.waitForSelector('[data-testid="um-binding-card"]');
+  await page.locator('[data-testid="um-binding-card"]').first().locator('[data-action="toggle-um-binding"]').click();
+  await page.locator('[data-action="edit-user-config-global"]').click();
   await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   body = await page.textContent("body");
   expect(body.includes("配置编辑中"), "编辑配置弹窗显示提示").toBeTruthy();
@@ -175,7 +177,9 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   expect(!fs.existsSync(path.join(userDir, "original", "configA.txt")), "完成后缓存区已清空").toBeTruthy();
 
   await page.locator('[data-testid="global-user-card"]').filter({ hasText: user }).first().locator('[data-action="open-user-management"]').click();
-  await page.getByRole("button", { name: "编辑配置", exact: true }).click();
+  await page.waitForSelector('[data-testid="um-binding-card"]');
+  await page.locator('[data-testid="um-binding-card"]').first().locator('[data-action="toggle-um-binding"]').click();
+  await page.locator('[data-action="edit-user-config-global"]').click();
   await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   fs.writeFileSync(cfgFile, "HALF");
   await page.click('[data-action="global-edit-config-cancel"]');
@@ -1114,7 +1118,7 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   await page.mouse.click(20, 400);
   expect(await page.$(".modal"), "锁定弹窗：点击遮罩无法关闭").toBeTruthy();
   expect(!(await page.isVisible(".modal-close")), "锁定弹窗：无关闭按钮").toBeTruthy();
-  await page.click('[data-action="edit-config-cancel"]');
+  await page.click('[data-action="global-edit-config-cancel"]');
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
   expect(!fs.existsSync(cfgPath), "取消后本次生成的模板已清理").toBeTruthy();
   expect(fs.existsSync(defaultCfg), "取消后默认配置恢复").toBeTruthy();

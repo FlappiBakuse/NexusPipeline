@@ -173,13 +173,24 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 2, "手机用户高频操作区位于正文之后且完整排列").toBeTruthy();
 
     await userCard.getByRole("button", { name: "用户管理", exact: true }).click();
-    await page.waitForSelector(".modal .switch-row");
-    const toggleLayout = await page.$$eval(".modal .switch-row", rows => rows.map(row => {
+    await page.waitForSelector('[data-testid="um-binding-card"]');
+    await page.locator('[data-action="toggle-um-binding"]').first().click();
+    await page.waitForSelector('.um-binding-card.is-expanded .um-binding-head .mode-toggle.switch-control');
+    const headSwitch = await page.$eval(".um-binding-card.is-expanded .um-binding-head .mode-toggle.switch-control", el => ({
+      track: !!el.querySelector(".switch-track"),
+      visible: !!el.offsetParent,
+    }));
+    expect(headSwitch.track && headSwitch.visible, "展开卡片头部参与运行开关采用轨道视觉且可见").toBeTruthy();
+
+    // 通知推送二级页轨道开关：按钮位于说明文字之后且带轨道视觉。
+    await page.locator("[data-testid='um-binding-card'] [data-action='set-um-subview'][data-view='notify']").click();
+    await page.waitForSelector(".um-binding-card .um-view-notify .switch-row .mode-toggle");
+    const toggleLayout = await page.$$eval(".um-binding-card .um-view-notify .switch-row", rows => rows.map(row => {
       const button = row.querySelector(".mode-toggle")?.getBoundingClientRect();
       const note = row.querySelector(".muted")?.getBoundingClientRect();
       return { buttonAfterNote: !!button && !!note && button.left >= note.left, hasStateVisual: !!row.querySelector(".switch-track") };
     }));
-    expect(toggleLayout.length >= 5, "用户管理弹窗保留自动签到、参与运行、通知和前后置设置").toBeTruthy();
+    expect(toggleLayout.length >= 1, "用户管理弹窗保留轨道开关（通知开关位于二级页）").toBeTruthy();
     expect(toggleLayout.every(item => item.buttonAfterNote && item.hasStateVisual), "用户编辑弹窗切换项采用右侧轨道开关布局").toBeTruthy();
     await page.click('[data-action="close-modal"]');
 

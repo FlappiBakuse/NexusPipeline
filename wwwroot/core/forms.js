@@ -12,6 +12,11 @@ export function valueField(id, label, value, type = "text", extra = "") {
   return `<div class="field"><label class="field-label" for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${extra}>${fieldErrorSlot(id)}</div>`;
 }
 
+/** 多行文本填写框：label 在上，正文 textarea，与单行字段同构。 */
+export function textareaField(id, label, value, extra = "", placeholder = "") {
+  return `<div class="field"><label class="field-label" for="${id}">${label}</label><textarea id="${id}" class="form-textarea" ${placeholder ? `placeholder="${esc(placeholder)}"` : ""} ${extra}>${esc(value)}</textarea>${fieldErrorSlot(id)}</div>`;
+}
+
 /** 长提示输入框：原生 placeholder 超出宽度会被裁剪，改用输入框内滚动提示浮层（空值且未聚焦时显示）。 */
 export function scrollField(id, label, value, placeholder = "") {
   return `<div class="field"><label class="field-label" for="${id}">${label}</label><div class="input-scroll">

@@ -330,7 +330,7 @@ internal static class Limits
             }
             int enabled = ctx.Users.Count > 0
                 ? ctx.Users.Sum(user => user.Bindings.Count(binding =>
-                    binding.Enabled && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                    binding.Participates && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
                 : script.Users.Count(user => user.Enabled);
             return enabled < 1 ? 1 : enabled;
         });

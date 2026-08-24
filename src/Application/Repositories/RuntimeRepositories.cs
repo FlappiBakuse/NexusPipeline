@@ -81,7 +81,7 @@ internal sealed class RuntimeUserRepository : IUserRepository
             {
                 user.Name,
                 Binding = user.Bindings.FirstOrDefault(item =>
-                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
             })
             .Where(item => item.Binding is not null)
             .Select(item => item.Name)
@@ -112,7 +112,7 @@ internal sealed class RuntimeUserRepository : IUserRepository
                 continue;
             }
             UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
-                item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+                item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
             if (binding is not null)
             {
                 return new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
@@ -153,7 +153,7 @@ internal sealed class RuntimeUserRepository : IUserRepository
             {
                 User = user,
                 Binding = user.Bindings.FirstOrDefault(item =>
-                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
             })
             .Where(item => item.Binding is not null)
             .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
@@ -195,4 +195,50 @@ internal sealed class RuntimeSettingsProvider : ISettingsProvider
     }
 
     public AppSettings Current => _current();
+}
+
+/// <summary>
+/// 运行天数写入器（v0.9.7）：调度器每日首次 tick 时把 RunDays &gt; 0 的绑定减 1，
+/// 减至 0 的绑定不再参与运行（Participates = false）。写入在数据锁与持久化路径内完成。
+/// </summary>
+internal sealed class RuntimeUserRunDaysWriter : IUserRunDaysWriter
+{
+    private readonly Action<Action> _withDataLock;
+    private readonly Func<List<NexusUser>> _snapshotUsers;
+    private readonly Action<List<NexusUser>> _saveUsers;
+
+    public RuntimeUserRunDaysWriter(
+        Action<Action> withDataLock,
+        Func<List<NexusUser>> snapshotUsers,
+        Action<List<NexusUser>> saveUsers)
+    {
+        _withDataLock = withDataLock;
+        _snapshotUsers = snapshotUsers;
+        _saveUsers = saveUsers;
+    }
+
+    public bool DecrementDaily()
+    {
+        bool changed = false;
+        _withDataLock(() =>
+        {
+            List<NexusUser> users = _snapshotUsers();
+            foreach (NexusUser user in users)
+            {
+                foreach (UserScriptBinding binding in user.Bindings)
+                {
+                    if (binding.RunDays > 0)
+                    {
+                        binding.RunDays--;
+                        changed = true;
+                    }
+                }
+            }
+            if (changed)
+            {
+                _saveUsers(users);
+            }
+        });
+        return changed;
+    }
 }

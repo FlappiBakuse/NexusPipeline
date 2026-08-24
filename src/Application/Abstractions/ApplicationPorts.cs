@@ -88,7 +88,7 @@ internal interface IUserRepository
                     continue;
                 }
                 UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
-                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
                 return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
             }
             return null;
@@ -124,7 +124,7 @@ internal interface IUserRepository
                 {
                     User = user,
                     Binding = user.Bindings.FirstOrDefault(item =>
-                        item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
                 })
                 .Where(item => item.Binding is not null)
                 .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
@@ -143,6 +143,13 @@ internal interface IUserRepository
 internal interface ISettingsProvider
 {
     AppSettings Current { get; }
+}
+
+/// <summary>运行天数每日递减端口（v0.9.7）：调度器每日首次 tick 调用一次；返回是否有绑定发生递减。</summary>
+internal interface IUserRunDaysWriter
+{
+    /// <summary>对所有 RunDays &gt; 0 的绑定递减 1（降至 0 后不再参与运行）；返回是否发生变化。</summary>
+    bool DecrementDaily();
 }
 
 /// <summary>历史持久化端口，执行域不依赖历史文件实现。</summary>

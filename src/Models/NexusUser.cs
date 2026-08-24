@@ -15,6 +15,9 @@ public class NexusUser
 
     public string Name { get; set; } = "";
 
+    /// <summary>用户备注（v0.9.7），仅展示与编辑，不参与运行逻辑。</summary>
+    public string Remark { get; set; } = "";
+
     /// <summary>v0.9.6 仅作为 UI 占位，宿主不执行签到任务。</summary>
     public bool AutoCheckInEnabled { get; set; }
 
@@ -50,6 +53,15 @@ public class UserScriptBinding
     /// <summary>SMTP 用户级收件人覆盖；为空时继承全局设置。</summary>
     public string SmtpTo { get; set; } = "";
 
+    /// <summary>
+    /// 参与运行天数（v0.9.7）：-1 = 永久运行（默认，不递减）；
+    /// 0 = 不运行该脚本实例（视为不参与运行）；正数 = 运行且每日减 1，减至 0 后不再参与。
+    /// </summary>
+    public int RunDays { get; set; } = -1;
+
+    /// <summary>绑定是否实际参与运行：启用开关打开且运行天数未耗尽（0 = 不参与）。</summary>
+    public bool Participates => Enabled && RunDays != 0;
+
     public UserScriptBinding Clone()
     {
         return new UserScriptBinding
@@ -62,6 +74,7 @@ public class UserScriptBinding
             PostRunOnFinalOnly = PostRunOnFinalOnly,
             NotifyEnabled = NotifyEnabled,
             SmtpTo = SmtpTo,
+            RunDays = RunDays,
         };
     }
 }

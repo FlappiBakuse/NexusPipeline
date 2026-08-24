@@ -1,7 +1,7 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon } from "../core/format.js";
-import { pageHeader, selectField, switchControl, valueField } from "../core/forms.js";
+import { pageHeader, switchControl, textareaField, valueField } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
@@ -131,7 +131,7 @@ export async function pageUsers(token) {
   const sorted = state.users.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   const content = sorted.length
     ? '<section class="card list-surface"><div class="script-grid global-user-list" id="global-user-list">' + sorted.map(userCard).join("") + "</div></section>"
-    : '<div class="empty"><strong>暂无用户</strong><span>创建用户后，再为它绑定一个或多个脚本实例。</span><button class="primary" type="button" data-action="open-global-user-modal">添加用户</button></div>';
+    : '<div class="empty"><strong>暂无用户</strong><span>点击右上角「添加用户」创建用户后，再为它绑定一个或多个脚本实例。</span></div>';
   render(pageHeader("账号管理", "用户管理", "统一管理用户头像、脚本绑定、运行优先级和通知设置。", action) + content);
   const list = $("#global-user-list");
   if (list) initDndList(list, { onDrop: reorderGlobalUsers });
@@ -170,9 +170,7 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"') +
-    switchControl("gu-auto", "自动签到", "该能力将在后续版本通过插件提供", false, "toggle-user-management-switch", 'data-flag="gu-auto" disabled') +
-    '<p class="muted helper-copy">自动签到将在后续版本通过 Plugin API 实现。</p>';
+  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
   showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
@@ -206,43 +204,104 @@ function bindingIdPart(id) {
   return String(id || "script").replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-function bindingSwitch(id, label, description, pressed, field) {
-  return switchControl(id, label, description, pressed, "toggle-user-management-switch", 'data-binding-field="' + esc(field) + '"');
+/** 紧凑开关（v0.9.7）：仅轨道+滑块，用于展开卡片头部等窄空间；标签经 aria-label 表达。 */
+function umSwitch(id, label, pressed, field) {
+  return `<button id="${esc(id)}" class="mode-toggle switch-control" type="button" aria-label="${esc(label)}" aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="toggle-user-management-switch" data-binding-field="${esc(field)}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${pressed ? "已启用" : "已停用"}</span></button>`;
 }
 
-function bindingMarkup(binding, index) {
+function umScriptName(binding) {
   const script = (state.scripts || []).find(item => item.id === binding.scriptInstanceId);
-  const scriptName = binding.scriptName || script?.name || "（脚本实例不存在）";
+  return binding.scriptName || script?.name || "（脚本实例不存在）";
+}
+
+function umBadges(binding) {
+  const enabled = binding.enabled !== false;
+  const runDays = typeof binding.runDays === "number" ? binding.runDays : -1;
+  const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? "已启用" : "已停用"}</span>`;
+  const daysBadge = runDays === 0
+    ? '<span class="badge warn">运行已停止</span>'
+    : runDays > 0
+      ? `<span class="badge blue">剩余 ${runDays} 天</span>`
+      : '<span class="badge muted">永久运行</span>';
+  return stateBadge + daysBadge;
+}
+
+function umBindingCardMarkup(binding) {
   const idPart = bindingIdPart(binding.scriptInstanceId);
+  const name = umScriptName(binding);
   const enabled = binding.enabled !== false;
   const notifyEnabled = binding.notifyEnabled !== false;
-  return '<details class="user-binding-card" data-binding-id="' + esc(binding.scriptInstanceId) + '"' + (index === 0 ? " open" : "") + ">" +
-    '<summary class="user-binding-summary">' +
-      '<span class="user-binding-summary-main">' +
-        '<img class="script-ico user-binding-script-ico" src="' + scriptFallbackIcon + '" alt="" width="36" height="36" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
-        '<span class="user-binding-summary-copy"><strong>' + esc(scriptName) + '</strong><span class="muted">' + (enabled ? "参与运行" : "已暂停运行") + "</span></span>" +
-      "</span>" +
-      '<span class="badge ' + (enabled ? "ok" : "muted") + '">' + (enabled ? "已启用" : "已停用") + "</span>" +
-    "</summary>" +
-    '<div class="user-binding-details">' +
-      bindingSwitch("ub-" + idPart + "-enabled", "参与运行", "停用后不会参与脚本或队列运行", enabled, "enabled") +
-      bindingSwitch("ub-" + idPart + "-notify", "用户运行通知", "脚本实例通知开启时才会发送", notifyEnabled, "notifyEnabled") +
-      valueField("ub-" + idPart + "-smtp", "SMTP 独立收件人", binding.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"') +
-      '<p class="muted helper-copy binding-helper">仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。</p>' +
-      '<div class="subsection"><h3>任务前运行脚本</h3>' +
-        valueField("ub-" + idPart + "-pre", "脚本路径（填写则启用，留空不启用）", binding.preRunScript || "", "text", 'data-binding-field="preRunScript"') +
-        bindingSwitch("ub-" + idPart + "-pre-once", "仅首次执行", "重试时不再执行", !!binding.preRunOnceOnly, "preRunOnceOnly") +
-      "</div>" +
-      '<div class="subsection"><h3>任务后运行脚本</h3>' +
-        valueField("ub-" + idPart + "-post", "脚本路径（填写则启用，留空不启用）", binding.postRunScript || "", "text", 'data-binding-field="postRunScript"') +
-        bindingSwitch("ub-" + idPart + "-post-final", "仅最终完成", "仅最终运行完成启用", !!binding.postRunOnFinalOnly, "postRunOnFinalOnly") +
-      "</div>" +
-      '<div class="binding-actions row-actions">' +
-        '<button class="tertiary" type="button" data-action="edit-user-config-global" data-user-id="' + esc(managementDraft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '">编辑配置</button>' +
+  const runDays = typeof binding.runDays === "number" ? binding.runDays : -1;
+  const preValue = (binding.preRunOnceOnly ? "%FIRST% " : "") + (binding.preRunScript || "");
+  const postValue = (binding.postRunOnFinalOnly ? "%LAST% " : "") + (binding.postRunScript || "");
+  const head =
+    '<div class="um-binding-head">' +
+      '<button class="um-binding-toggle" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="收起或展开脚本实例：' + esc(name) + '">' +
+        '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="36" height="36" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
+        '<span class="um-binding-copy"><strong class="um-binding-name">' + esc(name) + '</strong><span class="um-binding-badges">' + umBadges(binding) + "</span></span>" +
+      "</button>" +
+      '<div class="um-binding-head-actions">' +
+        umSwitch("um-" + idPart + "-enabled", "参与运行", enabled, "enabled") +
+        '<button class="ghost" type="button" data-action="collapse-um-binding" data-testid="um-collapse-binding">返回上级</button>' +
         '<button class="danger" type="button" data-action="delete-user-binding" data-user-id="' + esc(managementDraft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '">移除绑定</button>' +
       "</div>" +
-    "</div>" +
-  "</details>";
+    "</div>";
+  const subhead =
+    '<div class="um-binding-subhead">' +
+      '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="28" height="28" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
+      '<strong class="um-binding-subname">' + esc(name) + '</strong>' +
+      '<span class="um-binding-subtitle" data-subtitle="notify">·通知推送选项</span>' +
+      '<span class="um-binding-subtitle" data-subtitle="advanced">·高级选项</span>' +
+      '<button class="ghost sm" type="button" data-action="set-um-subview" data-view="main">返回上级</button>' +
+    "</div>";
+  const mainView =
+    '<div class="um-view um-view-main">' +
+      '<button class="um-edit-config" type="button" data-action="edit-user-config-global" data-user-id="' + esc(managementDraft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '">' +
+        '<span class="um-edit-config-copy"><strong>编辑配置</strong><span class="muted">启动主程序打开该脚本实例的用户配置</span></span>' +
+        '<span class="um-edit-config-arrow">' + icon("chevronRight") + "</span>" +
+      "</button>" +
+      '<div class="um-option-grid">' +
+        '<div class="um-option-card is-placeholder" role="presentation"><strong>自动签到选项</strong><span class="muted">即将开发</span></div>' +
+        '<button class="um-option-card" type="button" data-action="set-um-subview" data-view="notify"><strong>通知推送选项</strong><span class="muted">用户级通知开关与 SMTP 收件人</span>' + icon("chevronRight", "um-option-arrow") + "</button>" +
+        '<button class="um-option-card" type="button" data-action="set-um-subview" data-view="advanced"><strong>高级选项</strong><span class="muted">任务前后脚本与运行天数</span>' + icon("chevronRight", "um-option-arrow") + "</button>" +
+      "</div>" +
+    "</div>";
+  const notifyView =
+    '<div class="um-view um-view-notify">' +
+      switchControl("um-" + idPart + "-notify", "开启通知推送", "脚本实例通知开启时才会发送", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"') +
+      valueField("um-" + idPart + "-smtp", "SMTP 收件人", binding.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"') +
+      '<p class="muted helper-copy">仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。</p>' +
+    "</div>";
+  const advancedView =
+    '<div class="um-view um-view-advanced">' +
+      valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
+      '<p class="muted helper-copy">开头填写 %FIRST% 仅首次运行。</p>' +
+      valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
+      '<p class="muted helper-copy">开头填写 %LAST% 仅最终运行。</p>' +
+      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" step="1"') +
+      '<p class="muted helper-copy">填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。</p>' +
+    "</div>";
+  return '<article class="um-binding-card" data-testid="um-binding-card" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-subview="main">' +
+    head + subhead +
+    '<div class="um-binding-body">' + mainView + notifyView + advancedView + "</div>" +
+  "</article>";
+}
+
+/** 用户管理界面状态（v0.9.7）：展开卡片、二级页、添加脚本面板与多选集合。 */
+const umState = {
+  expandedId: null,
+  subview: "main",
+  addOpen: false,
+  addSelected: new Set(),
+};
+
+function umAddItemMarkup(script) {
+  const selected = umState.addSelected.has(script.id);
+  return '<button class="um-add-item" type="button" data-action="toggle-um-add-item" data-script-id="' + esc(script.id) + '" aria-pressed="' + (selected ? "true" : "false") + '">' +
+    '<img class="script-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="32" height="32" loading="lazy" data-icon-id="' + esc(script.id) + '">' +
+    '<span class="um-add-item-copy"><strong>' + esc(script.name) + "</strong>" + (script.pluginType ? '<span class="muted">专项脚本</span>' : "") + "</span>" +
+    '<span class="um-add-item-mark" aria-hidden="true">' + icon("check") + "</span>" +
+  "</button>";
 }
 
 function renderUserManagementModal() {
@@ -250,53 +309,98 @@ function renderUserManagementModal() {
   if (!draft) return;
   const user = draft.user;
   const scripts = availableScripts(user);
-  const options = scripts.length
-    ? scripts.map(script => ({ value: script.id, label: script.name }))
-    : [{ value: "", label: "没有可添加的脚本实例" }];
-  const bindingList = (user.bindings || []).length
-    ? '<div class="user-binding-list" id="user-binding-list">' + user.bindings.map(bindingMarkup).join("") + "</div>"
-    : '<div class="empty compact-empty"><strong>尚未绑定脚本实例</strong><span>从上方选择脚本后添加绑定。</span></div>';
+  const addItems = scripts.length
+    ? '<div class="um-add-grid" id="um-add-grid">' + scripts.map(umAddItemMarkup).join("") + "</div>"
+    : '<div class="empty compact-empty"><strong>没有可添加的脚本实例</strong><span>所有脚本实例都已绑定。</span></div>';
+  const addArea =
+    '<div class="um-add-area"' + (umState.addOpen ? " data-open" : "") + ">" +
+      '<button class="um-add-script" type="button" data-action="toggle-um-add-panel" data-testid="um-add-script">' + icon("plus") + "<span>添加脚本</span></button>" +
+      '<div class="um-add-panel" data-testid="um-add-panel">' +
+        '<div class="um-add-head"><h4>选择要绑定的脚本实例</h4><span class="muted">可多选</span></div>' +
+        addItems +
+        '<div class="um-add-actions"><button class="ghost" type="button" data-action="close-um-add-panel">取消</button><button class="primary" type="button" data-action="confirm-um-add-bindings" data-testid="um-add-confirm">确认</button></div>' +
+      "</div>" +
+    "</div>";  const bindingList = user.bindings.length
+    ? '<div class="um-bindings" id="um-binding-list">' + user.bindings.map(umBindingCardMarkup).join("") + "</div>"
+    : '<div class="empty compact-empty"><strong>尚未绑定脚本实例</strong><span>从上方「添加脚本」选择脚本实例后添加绑定。</span></div>';
   const body =
     '<section class="user-management-settings">' +
       valueField("um-name", "用户名 <span class='req'>*</span>", user.name, "text", 'placeholder="全局名称，不区分大小写"') +
-      switchControl("um-auto", "自动签到", "该能力将在后续版本通过插件提供", false, "toggle-user-management-switch", 'data-binding-field="autoCheckInEnabled" disabled') +
-      '<p class="muted helper-copy">自动签到将在后续版本通过 Plugin API 实现。</p>' +
+      textareaField("um-remark", "备注", user.remark || "", 'rows="3"', "为用户添加备注信息（可选）") +
       '<div class="user-avatar-setting">' + (user.avatarUrl ? '<span class="muted">已设置自定义头像</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="' + esc(user.id) + '">移除自定义头像</button>' : '<span class="muted">当前使用用户名生成的默认头像</span>') + "</div>" +
     "</section>" +
     '<section class="subsection user-binding-section">' +
-      '<div class="section-heading"><div><h3>已绑定脚本实例</h3><p class="muted">每个绑定独立保存参与运行、前后置脚本和通知配置。</p></div></div>' +
-      '<div class="binding-add-row">' +
-        selectField("um-script-to-add", "选择未绑定脚本", "", options, scripts.length ? "" : "disabled") +
-        '<button class="primary sm" type="button" data-action="add-binding-from-management" ' + (scripts.length ? "" : "disabled") + ">添加绑定</button>" +
-      "</div>" +
+      '<div class="section-heading"><div><h3>已绑定脚本实例</h3><p class="muted">每个绑定独立保存参与运行、通知和高级选项设置。</p></div></div>' +
+      addArea +
       bindingList +
     "</section>";
   showModal(modalShell("用户管理", body, '<button class="primary" type="button" data-action="save-user-management">保存设置</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), true);
+  syncUmState();
   hydrateIcons(document);
+}
+
+/** 根据 umState 应用到 DOM（不重建弹窗，保留输入值与滚动位置）。 */
+function syncUmState() {
+  const section = document.querySelector(".user-binding-section");
+  if (section) section.classList.toggle("um-section-expanding", !!umState.expandedId);
+  const list = document.getElementById("um-binding-list");
+  if (list) {
+    Array.from(list.querySelectorAll(".um-binding-card")).forEach(card => {
+      const expanded = card.dataset.bindingId === umState.expandedId;
+      card.classList.toggle("is-expanded", expanded);
+      card.dataset.subview = expanded ? umState.subview : "main";
+      const toggle = card.querySelector(".um-binding-toggle");
+      if (toggle) toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+    });
+  }
+  const area = document.querySelector(".um-add-area");
+  if (area) {
+    // 注意：dataset.open = undefined 会写入字符串 "undefined"（[data-open] 仍命中），必须用 removeAttribute。
+    if (umState.addOpen) area.dataset.open = "";
+    else area.removeAttribute("data-open");
+    const scriptButton = area.querySelector(".um-add-script");
+    if (scriptButton) scriptButton.setAttribute("aria-expanded", umState.addOpen ? "true" : "false");
+  }
+  document.querySelectorAll(".um-add-item").forEach(item => {
+    item.setAttribute("aria-pressed", umState.addSelected.has(item.dataset.scriptId) ? "true" : "false");
+  });
 }
 
 export function openUserManagement(userId) {
   const user = userById(userId);
   if (!user) return;
   managementDraft = { userId, user: cloneUser(user) };
+  umState.expandedId = null;
+  umState.subview = "main";
+  umState.addOpen = false;
+  umState.addSelected.clear();
   renderUserManagementModal();
 }
 
 function readBindingPayloads() {
-  return Array.from(document.querySelectorAll("#user-binding-list [data-binding-id]")).map(card => {
+  return Array.from(document.querySelectorAll("#um-binding-list [data-binding-id]")).map(card => {
     const read = field => card.querySelector('[data-binding-field="' + field + '"]');
     const pressed = field => read(field)?.getAttribute("aria-pressed") === "true";
+    const rawRunDays = parseInt((read("runDays")?.value || "-1"), 10);
     return {
       scriptInstanceId: card.dataset.bindingId,
       enabled: pressed("enabled"),
       notifyEnabled: pressed("notifyEnabled"),
       smtpTo: read("smtpTo")?.value.trim() || "",
-      preRunScript: read("preRunScript")?.value.trim() || "",
-      preRunOnceOnly: pressed("preRunOnceOnly"),
-      postRunScript: read("postRunScript")?.value.trim() || "",
-      postRunOnFinalOnly: pressed("postRunOnFinalOnly"),
+      preRunScript: (read("preRunScript")?.value || "").trim(),
+      preRunOnceOnly: (read("preRunScript")?.value || "").trim().startsWith("%FIRST%"),
+      postRunScript: (read("postRunScript")?.value || "").trim(),
+      postRunOnFinalOnly: (read("postRunScript")?.value || "").trim().startsWith("%LAST%"),
+      runDays: Number.isNaN(rawRunDays) ? -1 : rawRunDays,
     };
   });
+}
+
+/** 保存前把 %FIRST%/%LAST% 前缀从路径字段中剥离，仅保留开关语义。 */
+function normalizePrePost(payload) {
+  const pre = (payload.preRunScript || "").replace(/^%FIRST%\s*/, "").trim();
+  const post = (payload.postRunScript || "").replace(/^%LAST%\s*/, "").trim();
+  return { ...payload, preRunScript: pre, postRunScript: post };
 }
 
 export async function saveUserManagement() {
@@ -308,10 +412,11 @@ export async function saveUserManagement() {
     return;
   }
   clearFieldError("um-name");
+  const remark = $("#um-remark")?.value.trim() || "";
   const userId = managementDraft.userId;
-  const bindings = readBindingPayloads();
+  const bindings = readBindingPayloads().map(normalizePrePost);
   try {
-    await api("PUT", "/api/users/" + encodeURIComponent(userId), { name, autoCheckInEnabled: false });
+    await api("PUT", "/api/users/" + encodeURIComponent(userId), { name, remark, autoCheckInEnabled: false });
     for (const binding of bindings) {
       await api("PUT", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(binding.scriptInstanceId), binding);
     }
@@ -336,35 +441,98 @@ async function refreshManagedUser() {
       return;
     }
     managementDraft.user = cloneUser(user);
+    umState.expandedId = null;
+    umState.subview = "main";
+    umState.addOpen = false;
+    umState.addSelected.clear();
     renderUserManagementModal();
   } catch (error) {
     toast(error.message, "error");
   }
 }
 
-export async function addBindingFromManagement() {
+/** 添加脚本面板开合（展开绑定卡片时自动关闭）。 */
+export function toggleUmAddPanel() {
+  umState.addOpen = !umState.addOpen;
+  umState.addSelected.clear();
+  if (umState.addOpen) {
+    umState.expandedId = null;
+    umState.subview = "main";
+  }
+  syncUmState();
+}
+
+export function closeUmAddPanel() {
+  umState.addOpen = false;
+  umState.addSelected.clear();
+  syncUmState();
+}
+
+export function toggleUmAddItem(target) {
+  const id = target.dataset.scriptId;
+  if (umState.addSelected.has(id)) umState.addSelected.delete(id);
+  else umState.addSelected.add(id);
+  syncUmState();
+}
+
+export async function confirmUmAddBindings() {
   if (!managementDraft) return;
-  const scriptId = $("#um-script-to-add")?.value || "";
-  if (!scriptId) {
-    toast("请选择未绑定的脚本实例", "error");
+  const ids = Array.from(umState.addSelected);
+  if (!ids.length) {
+    toast("请选择要绑定的脚本实例", "error");
     return;
   }
   try {
-    await api("POST", "/api/users/" + encodeURIComponent(managementDraft.userId) + "/bindings", {
-      scriptInstanceId: scriptId,
-      enabled: true,
-      notifyEnabled: true,
-      preRunScript: "",
-      preRunOnceOnly: false,
-      postRunScript: "",
-      postRunOnFinalOnly: false,
-      smtpTo: "",
-    });
-    toast("脚本绑定已添加");
+    for (const scriptId of ids) {
+      await api("POST", "/api/users/" + encodeURIComponent(managementDraft.userId) + "/bindings", {
+        scriptInstanceId: scriptId,
+        enabled: true,
+        notifyEnabled: true,
+        preRunScript: "",
+        preRunOnceOnly: false,
+        postRunScript: "",
+        postRunOnFinalOnly: false,
+        smtpTo: "",
+        runDays: -1,
+      });
+    }
+    toast(ids.length > 1 ? "已绑定 " + ids.length + " 个脚本实例" : "脚本绑定已添加");
     await refreshManagedUser();
   } catch (error) {
     toast(error.message, "error");
   }
+}
+
+/** 展开/收回绑定卡片：只能同时展开一个，展开时其他卡片与添加脚本面板自动隐藏。 */
+export function toggleUmBinding(target) {
+  const card = target.closest(".um-binding-card");
+  if (!card) return;
+  const id = card.dataset.bindingId;
+  if (umState.expandedId === id) {
+    umState.expandedId = null;
+    umState.subview = "main";
+  } else {
+    umState.expandedId = id;
+    umState.subview = "main";
+    umState.addOpen = false;
+  }
+  syncUmState();
+}
+
+/** 「返回上级」：收回展开的绑定卡片，还原 1/2 网格布局（效果同再次点击卡片收起）。 */
+export function collapseUmBinding() {
+  umState.expandedId = null;
+  umState.subview = "main";
+  umState.addOpen = false;
+  syncUmState();
+}
+
+/** 展开卡片内的二级页切换（main/notify/advanced）。 */
+export function setUmSubview(target) {
+  const card = target.closest(".um-binding-card");
+  if (!card || card.dataset.bindingId !== umState.expandedId) return;
+  umState.subview = target.dataset.view || "main";
+  syncUmState();
 }
 
 export function deleteGlobalUser(id) {
@@ -512,7 +680,13 @@ export const actions = {
   "save-user-management": target => withBusy(target, () => saveUserManagement()),
   "delete-global-user": target => deleteGlobalUser(target.dataset.userId),
   "confirm-delete-global-user": target => withBusy(target, () => confirmDeleteGlobalUser()),
-  "add-binding-from-management": target => withBusy(target, () => addBindingFromManagement()),
+  "toggle-um-add-panel": () => toggleUmAddPanel(),
+  "close-um-add-panel": () => closeUmAddPanel(),
+  "toggle-um-add-item": target => toggleUmAddItem(target),
+  "confirm-um-add-bindings": target => withBusy(target, () => confirmUmAddBindings()),
+  "toggle-um-binding": target => toggleUmBinding(target),
+  "collapse-um-binding": () => collapseUmBinding(),
+  "set-um-subview": target => setUmSubview(target),
   "delete-user-binding": target => deleteUserBinding(target.dataset.userId, target.dataset.scriptId),
   "confirm-delete-user-binding": target => withBusy(target, () => confirmDeleteUserBinding(target.dataset.userId, target.dataset.scriptId)),
   "upload-user-avatar": target => uploadUserAvatar(target.dataset.userId),

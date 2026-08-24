@@ -42,6 +42,11 @@ internal sealed class Scheduler : IDisposable
 
     private readonly ISchedulerStateStore _stateStore;
 
+    private readonly IUserRunDaysWriter? _runDaysWriter;
+
+    /// <summary>上次执行运行天数递减的本地日期（字符串比较，避免同一天重复递减）。</summary>
+    private string? _lastRunDaysDecayDate;
+
     public Scheduler(
         IQueueRepository queues,
         IHistoryStore history,
@@ -49,7 +54,8 @@ internal sealed class Scheduler : IDisposable
         IExecutionService commands,
         ExecutionValidator validator,
         ExecutionPlanBuilder? plans = null,
-        ISchedulerStateStore? stateStore = null)
+        ISchedulerStateStore? stateStore = null,
+        IUserRunDaysWriter? runDaysWriter = null)
     {
         _queues = queues;
         _history = history;
@@ -58,6 +64,9 @@ internal sealed class Scheduler : IDisposable
         _validator = validator;
         _plans = plans;
         _stateStore = stateStore ?? new MemorySchedulerStateStore();
+        _runDaysWriter = runDaysWriter;
+        // 启动当天不立即递减（避免每次重启就少一天）；只有运行期间跨天、或首次 tick 在启动后的次日触发才递减。
+        _lastRunDaysDecayDate = DateTime.Now.ToString("yyyy-MM-dd");
         RestorePersistedState();
     }
 
@@ -180,7 +189,7 @@ internal sealed class Scheduler : IDisposable
         IReadOnlyList<DispatchQueue>? queueSnapshot = null)
     {
         HashSet<string> scriptIds = user.Bindings
-            .Where(binding => binding.Enabled)
+            .Where(binding => binding.Participates)
             .Select(binding => binding.ScriptInstanceId)
             .ToHashSet(StringComparer.Ordinal);
         if (scriptIds.Count == 0)
@@ -280,6 +289,7 @@ internal sealed class Scheduler : IDisposable
         {
             _lastCleanupDate = today;
             _history.Cleanup(_settings.Current.HistoryRetentionDays);
+            DecayRunDays(today);
         }
 
         List<DispatchQueue> queues = _queues.Snapshot().ToList();
@@ -320,6 +330,28 @@ internal sealed class Scheduler : IDisposable
             }
         }
         SaveState();
+    }
+
+    /// <summary>每日首次 tick：运行天数 &gt; 0 的绑定递减 1（同日重复跳过一次）。</summary>
+    private void DecayRunDays(string today)
+    {
+        if (_runDaysWriter is null || string.Equals(_lastRunDaysDecayDate, today, StringComparison.Ordinal))
+        {
+            return;
+        }
+        _lastRunDaysDecayDate = today;
+        try
+        {
+            if (_runDaysWriter.DecrementDaily())
+            {
+                Audit.Log(Audit.Scheduler, "运行天数每日递减", "绑定运行天数已递减 1");
+                RevalidatePendingPlans();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[调度] 运行天数每日递减失败：{ex.Message}");
+        }
     }
 
     private void EnqueueTrigger(DispatchQueue queue, string occurrenceKey, DateTime originalTriggerTime, bool isStartup)

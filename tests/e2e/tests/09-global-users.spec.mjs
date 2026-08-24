@@ -51,10 +51,22 @@ test("全局用户 API：稳定 UserId、绑定、头像校验与精确删除确
       scriptInstanceId: scriptId,
       enabled: true,
       notifyEnabled: true,
+      runDays: 3,
     });
     expect(binding.ok, "创建全局用户脚本绑定").toBeTruthy();
+    const bound = await binding.json();
+    expect(bound.runDays === 3, "绑定返回运行天数").toBeTruthy();
+    expect(bound.runDays !== 0 && bound.scriptInstanceId === scriptId, "绑定返回脚本实例").toBeTruthy();
     const idDirectory = userDataDir(scriptId, userId);
     expect(fs.existsSync(idDirectory), "绑定配置落在 UserId 目录").toBeTruthy();
+
+    const negativeDays = await api("PUT", `/api/users/${encodeURIComponent(userId)}/bindings/${encodeURIComponent(scriptId)}`, {
+      scriptInstanceId: scriptId,
+      enabled: true,
+      notifyEnabled: true,
+      runDays: -2,
+    });
+    expect(negativeDays.status === 400, "运行天数小于 -1 被拒绝").toBeTruthy();
 
     const png = Buffer.from("89504e470d0a1a0a", "hex");
     const avatarResponse = await api("POST", `/api/users/${encodeURIComponent(userId)}/avatar`, {
@@ -67,10 +79,11 @@ test("全局用户 API：稳定 UserId、绑定、头像校验与精确删除确
 
     const renameResponse = await api("PUT", `/api/users/${encodeURIComponent(userId)}`, {
       name: renamed,
+      remark: "备注内容一",
       autoCheckInEnabled: false,
     });
     const renamedUser = await responseJson(renameResponse);
-    expect(renameResponse.ok && renamedUser?.id === userId && renamedUser.name === renamed, "改名保留 UserId").toBeTruthy();
+    expect(renameResponse.ok && renamedUser?.id === userId && renamedUser.name === renamed && renamedUser.remark === "备注内容一", "改名与备注保存").toBeTruthy();
     expect(fs.existsSync(idDirectory), "改名不移动 UserId 配置目录").toBeTruthy();
 
     const wrongConfirmation = await api("DELETE", `/api/users/${encodeURIComponent(userId)}`, { confirmName: name });
@@ -182,18 +195,38 @@ test("全局用户页面：脚本卡片结构、统一绑定管理与响应式�
     const dialog = page.getByRole("dialog", { name: "用户管理" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "已绑定脚本实例", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "自动签到", exact: true })).toBeDisabled();
-    await expect(dialog.getByRole("combobox", { name: "选择未绑定脚本", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "添加绑定", exact: true })).toBeVisible();
-    await expect(dialog.locator("details.user-binding-card")).toHaveCount(1);
+    await expect(dialog.getByRole("textbox", { name: "用户名", exact: false })).toHaveValue(userName);
+    await expect(dialog.getByRole("textbox", { name: "备注", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "添加脚本", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "自动签到选项", exact: true })).toHaveCount(0);
+    await expect(dialog.locator("[data-testid='um-binding-card']")).toHaveCount(1);
+
+    // 展开绑定卡片：参与运行开关与移除绑定出现在头部，其他入口隐藏。
+    const bindingCard = dialog.locator("[data-testid='um-binding-card']").first();
+    await bindingCard.locator('[data-action="toggle-um-binding"]').click();
     await expect(dialog.getByRole("button", { name: "参与运行", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "用户运行通知", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("textbox", { name: "SMTP 独立收件人", exact: true })).toHaveValue("layout@example.com");
-    await expect(dialog.getByText("仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。", { exact: true })).toBeVisible();
-    await expect(dialog.getByRole("heading", { name: "任务前运行脚本", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("heading", { name: "任务后运行脚本", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "编辑配置", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "移除绑定", exact: true })).toBeVisible();
+    await expect(dialog.locator('[data-action="edit-user-config-global"]')).toBeVisible();
+    await expect(dialog.locator(".um-option-card.is-placeholder")).toContainText("自动签到选项");
+    await expect(dialog.locator(".um-option-card.is-placeholder")).toContainText("即将开发");
+
+    // 通知推送二级页：开关 + SMTP 收件人。
+    await bindingCard.locator('[data-action="set-um-subview"][data-view="notify"]').click();
+    await expect(dialog.getByRole("button", { name: "开启通知推送", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("textbox", { name: "SMTP 收件人", exact: true })).toHaveValue("layout@example.com");
+    await expect(dialog.getByText("仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。", { exact: true })).toBeVisible();
+    await bindingCard.getByRole("button", { name: "返回上级", exact: true }).click();
+
+    // 高级选项二级页：前后置路径与运行天数。
+    await bindingCard.locator('[data-action="set-um-subview"][data-view="advanced"]').click();
+    await expect(dialog.getByRole("textbox", { name: "任务前运行脚本路径", exact: true })).toHaveValue("%FIRST% before.cmd");
+    await expect(dialog.getByRole("textbox", { name: "任务后运行脚本路径", exact: true })).toHaveValue("%LAST% after.cmd");
+    await expect(dialog.getByRole("spinbutton", { name: "运行天数", exact: true })).toHaveValue("-1");
+    await bindingCard.getByRole("button", { name: "返回上级", exact: true }).click();
+
+    // 收回：恢复 1/2 网格布局。
+    await bindingCard.locator('[data-action="toggle-um-binding"]').click();
+    await expect(bindingCard).not.toHaveClass(/is-expanded/);
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
 
     await page.goto(`${baseUrl}#/scripts`, { waitUntil: "domcontentloaded" });
