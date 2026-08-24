@@ -149,6 +149,7 @@ test("约束警告：非法配置告警 + 前端卡片（知道了/不再提醒�
 });
 
 test("Web 端口占用自动 +1 重试（HttpListener 复用崩溃修复验证）", async () => {
+  test.skip(process.env.NEXUS_ELEVATED_SERVICE === "1", "提权隔离宿主无法直接 spawn 非提权 web 子进程；标准 CI 保留端口 +1 重试断言");
   // v0.6.6+：web 模式抢单实例互斥（常驻服务在跑时直接退出），先停服务、用 node 监听占 58731 验证端口 +1。
   await stopService();
   await new Promise(r => setTimeout(r, 400));

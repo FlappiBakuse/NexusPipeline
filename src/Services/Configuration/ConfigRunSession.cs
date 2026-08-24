@@ -24,10 +24,15 @@ internal sealed class ConfigRunSession
     private bool _finalizationCompleted;
     private string? _finalizationError;
 
-    public ConfigRunSession(string scriptId, string? userName, string configPath, bool hasJudgeScript)
+    public ConfigRunSession(string scriptId, string? userKey, string? userName, string configPath, bool hasJudgeScript)
     {
-        _transaction = new ConfigurationTransaction(scriptId, userName, configPath);
+        _transaction = new ConfigurationTransaction(scriptId, userKey, userName, configPath);
         _hasJudgeScript = hasJudgeScript;
+    }
+
+    public ConfigRunSession(string scriptId, string? userName, string configPath, bool hasJudgeScript)
+        : this(scriptId, userName, userName, configPath, hasJudgeScript)
+    {
     }
 
     public bool IsPrepared => _transaction.IsPrepared;
@@ -60,6 +65,11 @@ internal sealed class ConfigRunSession
     public void ApplyReplacements(List<string> replacements)
     {
         _transaction.ApplyReplacements(replacements);
+    }
+
+    public void SyncCompatibilityAlias()
+    {
+        _transaction.SyncCompatibilityAlias();
     }
 
     /// <summary>进程树未能确认退出时锁住配置收尾，保留现场供恢复，而不是继续覆盖/还原文件。</summary>

@@ -69,6 +69,18 @@ internal sealed class FrozenQueueTaskData
     public Models.ScriptInstance? Script { get; set; }
 
     public List<string> EnabledUsers { get; set; } = new();
+
+    /// <summary>v0.9.6 冻结的全局用户身份与绑定设置；旧 scheduler-state 仅有 EnabledUsers 时仍可恢复。</summary>
+    public List<FrozenResolvedUserData> ResolvedUsers { get; set; } = new();
+}
+
+internal sealed class FrozenResolvedUserData
+{
+    public string UserId { get; set; } = "";
+
+    public string UserName { get; set; } = "";
+
+    public Models.UserScriptBinding Binding { get; set; } = new();
 }
 
 internal sealed class FrozenAdmissionProfileData

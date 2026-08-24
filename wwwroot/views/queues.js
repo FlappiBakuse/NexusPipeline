@@ -95,7 +95,7 @@ function queueCardMarkup(queue, scripts) {
     </div>
     <div class="queue-ops row-actions">
       <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">编辑队列</button>
-      <div class="overflow-menu-wrap"><button class="overflow-trigger" type="button" data-action="toggle-more-menu" aria-haspopup="menu" aria-expanded="false" aria-label="更多队列操作">•••</button><div class="overflow-menu" role="menu" hidden><button role="menuitem" class="destructive" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">删除队列</button></div></div>
+      <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">删除队列</button>
     </div>
   </article>`;
 }

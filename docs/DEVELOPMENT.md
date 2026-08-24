@@ -42,7 +42,7 @@ release/
 └── plugins/             ← 专项插件目录（整体复制）
 ```
 
-- **增量构建（v0.9.5）**：`src/` 或 `plugins/` 内容未变化时跳过 `dotnet publish`，仅同步 `wwwroot/` 与 `plugins/`（指纹文件 `.build-src-hash`，不入库）；managed-code 插件文件变化会触发发布指纹更新。
+- **增量构建（v0.9.6）**：`src/` 或 `plugins/` 内容未变化时跳过 `dotnet publish`，仅同步 `wwwroot/` 与 `plugins/`（指纹文件 `.build-src-hash`，不入库）；managed-code 插件文件变化会触发发布指纹更新。
 - **无 /test 提权版**：`build.cmd` 只产出提权版（唯一构建形态；CI runner 以管理员运行，直接使用提权版）。
 - 重构建前若提示 exe 被占用：`Get-Process nexus-pipeline | Stop-Process`（运行进程会锁定 `release\nexus-pipeline.exe`）。
 - 手动等价命令（如需要指定参数）：

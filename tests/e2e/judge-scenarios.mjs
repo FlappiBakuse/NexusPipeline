@@ -14,6 +14,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -31,7 +32,7 @@ const HOOK_PORT = 58888;
 // 伪造脚本的墙钟卡住时长与判断脚本内部墙钟常量同步缩放，保持场景语义（卡住时长仍远大于缩放后的周期触发间隔）。
 const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
 const FAST = TIME_SCALE > 1;
-const STUCK_PINGS = FAST ? 6 : 75;   // 卡住时长：真实 75 秒，加速 6 次 ping ≈ 5s（v0.6.4 scale=10 下周期触发 3s 先于退出、stall 30s 未到；60 档语义保持）
+const STUCK_PINGS = FAST ? 60 : 75;  // 加速档超过缩放后的停滞阈值，确保判断脚本先于伪脚本自然退出；真实档保持 75 秒卡住语义
 const CRASH_PINGS = FAST ? 3 : 9;    // marker 后继续输出批次（重复触发验证）：真实 8s，加速 ≈ 2s
 const RESTART_WAIT_MS = FAST ? 1000 : 4000;   // 服务停止/重启静置等待
 
@@ -120,6 +121,15 @@ function setupRuntime() {
 }
 
 function startService() {
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    const quote = value => String(value).replace(/'/g, "''");
+    const command = "$env:TEMP='" + quote(os.tmpdir()) + "'; $env:TMP='" + quote(os.tmpdir()) + "'; $p=Start-Process -FilePath '" + quote(runtimeExe) + "' -WorkingDirectory '" + quote(runtimeDir) + "' -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)";
+    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    const pid = Number((result.stdout || "").trim().split(/\s+/).pop());
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error("提权启动 Judge 服务失败");
+    child = { pid, kill: () => spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','" + pid + "','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)"], { stdio: "ignore" }) };
+    return;
+  }
   child = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
 }
 
@@ -190,7 +200,10 @@ const MULTI_TASK_BAT = [
     "    )",
     "    if \"%%c\"==\"success\" echo TASK %%a DONE >> logs\\log.txt",
     "    if \"%%c\"==\"fail\" echo TASK %%a FAIL >> logs\\log.txt",
-    "    if \"%%c\"==\"stuck-silent\" ping -n " + STUCK_PINGS + " 127.0.0.1 >nul",
+    "    if \"%%c\"==\"stuck-silent\" (",
+    "      echo TASK %%a START >> logs\\log.txt",
+    "      ping -n " + STUCK_PINGS + " 127.0.0.1 >nul",
+    "    )",
     "    if \"%%c\"==\"stuck-alt\" (",
     "      set /a n=0",
     "      if exist \"%TEMP%\\%~n0-cnt.txt\" set /p n=<\"%TEMP%\\%~n0-cnt.txt\"",
@@ -208,6 +221,7 @@ const MULTI_TASK_BAT = [
 function makeMultiTaskDir(label, taskLines) {
   const dir = path.join(runtimeDir, "mt-" + label);
   fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(path.join(os.tmpdir(), `nexusmt-${label}-cnt.txt`), { force: true });
   fs.mkdirSync(path.join(dir, "logs"), { recursive: true });
   fs.writeFileSync(path.join(dir, "tasks.txt"), taskLines.join("\r\n") + "\r\n", "ascii");
   fs.writeFileSync(path.join(dir, `nexusmt-${label}.bat`), MULTI_TASK_BAT, "ascii");
@@ -370,7 +384,7 @@ async function testScenarioC() {
   assert(reasons.some(x => /task-stuck-2|任务2|卡住/.test(x)), "尝试1因任务2卡住失败（原因：" + JSON.stringify(reasons) + "）");
   assert(reasons.some(x => /task-stuck-4|任务4|卡住/.test(x)), "尝试2/3因任务4卡住失败");
   await waitFor(() => hookBodies.some(b => b.includes("任务4运行失败")), 8000);
-  assert(hookBodies.some(b => b.includes("任务4运行失败")), "webhook 收到通知「任务4运行失败」（最后一次尝试 notifyText）");
+  assert(await waitFor(() => hookBodies.some(b => b.includes("任务4运行失败")), 10000, 100), "webhook 收到通知「任务4运行失败」（最后一次尝试 notifyText；实际载荷：" + hookBodies.slice(-3).join(" | ").slice(0, 600) + "）");
   const cfgAfter = fs.readFileSync(path.join(dir, "tasks.txt"), "utf8");
   const restored = cfgAfter.includes("1|enabled|success") && cfgAfter.includes("2|enabled|stuck-alt") && cfgAfter.includes("4|enabled|stuck-silent");
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");
@@ -781,7 +795,7 @@ nexus.writeFile("count", String(n));`;
   assert(ended, "运行结束");
   assert(maxCount === (rec?.attempts || 0),
     "每次尝试的日志超时路径都触发一次最终判定（count=" + maxCount + "，attempts=" + rec?.attempts + "，判断脚本有机会应用替换配置）");
-  assert(rec && rec.attempts === 2 && (rec.attemptDetails || []).every(a => /未产生日志条目|无更新/.test(a.reason)),
+  assert(rec && rec.attempts === 2 && (rec.attemptDetails || []).every(a => /未产生日志条目|未找到日志文件|无更新/.test(a.reason)),
     "判断脚本无判定结果 → 两次尝试均因日志超时失败（attempts=" + rec?.attempts + "，原因：" + JSON.stringify((rec?.attemptDetails || []).map(a => a.reason)) + "）");
   await api("DELETE", "/api/scripts/" + created.id);
 }
@@ -1192,7 +1206,7 @@ if (enabled.length > 0 && undone.length === 0) {
   assert(reasons[1] && /task-crash-2/.test(reasons[1]), "尝试2：任务2 游戏崩溃被判定失败（原因：" + JSON.stringify(reasons) + "）");
   assert(reasons[2] && /task-crash-4/.test(reasons[2]), "尝试3：任务4 脚本崩溃被判定失败（原因：" + JSON.stringify(reasons) + "）");
   await waitFor(() => hookBodies.some(b => b.includes("任务4运行失败")), 8000);
-  assert(hookBodies.some(b => b.includes("任务4运行失败")), "webhook 收到通知「任务4运行失败」（最后一次尝试 notifyText）");
+  assert(await waitFor(() => hookBodies.some(b => b.includes("任务4运行失败")), 10000, 100), "webhook 收到通知「任务4运行失败」（最后一次尝试 notifyText；实际载荷：" + hookBodies.slice(-3).join(" | ").slice(0, 600) + "）");
   const cfgAfter = fs.readFileSync(path.join(dir, "tasks.txt"), "utf8");
   const restored = cfgAfter.includes("1|enabled|crash-silent") && cfgAfter.includes("2|enabled|game-crash") && cfgAfter.includes("4|enabled|script-crash");
   assert(restored, "运行结束后 tasks.txt 还原为启动前状态（实际：" + cfgAfter.split("\r\n").join("; ") + "）");

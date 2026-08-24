@@ -71,7 +71,7 @@ function serviceDiagnostics() {
   const lines = ["—— 服务启动诊断 ——"];
   try {
     const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
       { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
     lines.push("runtime nexus-pipeline 进程：" + ((r.stdout || "").trim() || "（无）"));
   } catch { lines.push("runtime nexus-pipeline 进程：查询失败"); }
@@ -123,6 +123,37 @@ export function makeScriptDir(label) {
   return { root: dir, main: path.join(dir, `nexustest-${label}.bat`), cfg: path.join(dir, "cfg"), log: path.join(dir, "logs") };
 }
 
+function killRuntimePid(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    const command = "$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','" + pid + "','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)";
+    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    return;
+  }
+  spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+}
+
+function startElevatedRuntime(args, inheritedEnv) {
+  const stamp = Date.now() + "-" + Math.random().toString(36).slice(2);
+  const scriptPath = path.join(runtimeDir, "elevated-start-" + stamp + ".ps1");
+  const launchPidPath = path.join(runtimeDir, "elevated-start-" + stamp + ".pid");
+  const quote = value => String(value).replace(/'/g, "''");
+  const argumentList = args.length ? `-ArgumentList @(${args.map(arg => `'${quote(arg)}'`).join(",")})` : "";
+  const envAssignments = Object.entries(inheritedEnv)
+    .filter(([, value]) => value !== "" && value !== undefined)
+    .map(([key, value]) => `$env:${key}='${quote(value)}'`)
+    .join("; ");
+  const script = [
+    envAssignments,
+    `$p=Start-Process -FilePath '${quote(runtimeExe)}' ${argumentList} -WorkingDirectory '${quote(runtimeDir)}' -WindowStyle Hidden -PassThru`,
+    `Set-Content -LiteralPath '${quote(launchPidPath)}' -Value $p.Id -Encoding ascii`,
+  ].filter(Boolean).join("; ");
+  fs.writeFileSync(scriptPath, script, "utf8");
+  const command = "$p=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','" + quote(scriptPath) + "') -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)";
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+  return { ...result, scriptPath, launchPidPath };
+}
+
 export async function runningCount() {
   const status = await (await fetch(baseUrl + "api/status")).json();
   return (status.running || []).length;
@@ -147,7 +178,7 @@ export function setupRuntime() {
   // 避免 e2e 服务落到 58732 而请求打向残留实例（先跑 judge/chaos 再跑 e2e 的常见工作流踩坑，v0.6.2 修复）。
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
@@ -187,8 +218,40 @@ export function setupRuntime() {
  *  extraEnv（v0.7.0+）：额外注入的环境变量（如 NEXUS_ADB_EXE 指向 stub adb）。 */
 export function startService(mode = "web", extraEnv = {}) {
   const args = mode === "service" ? [] : [mode];
+  // 自重启由产品进程完成，测试服务的 PID 文件不会随新进程更新。
+  // 启动前必须清除旧值，否则提权启动轮询会把旧 PID 误判为本轮启动成功。
+  try {
+    fs.rmSync(pidFile, { force: true });
+  } catch { /* PID 文件仅作启动同步信号，清理失败交由后续写入处理 */ }
   // v0.6.6+：stdin 用 pipe 保持打开（web 模式「按回车停止」阻塞等待；stdio:ignore 的 NUL/无效句柄会被视为 EOF 立即退出）。
-  child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"], env: { ...process.env, ...extraEnv } });
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    const inheritedEnv = {
+      NEXUS_SYSTEM_ACTION_DRYRUN: process.env.NEXUS_SYSTEM_ACTION_DRYRUN || "1",
+      NEXUS_TIME_SCALE: process.env.NEXUS_TIME_SCALE || "",
+      NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || "",
+      NEXUS_MUMU_MANAGER_EXE: process.env.NEXUS_MUMU_MANAGER_EXE || "",
+      ...extraEnv,
+    };
+    // 提权启动没有可保持打开的 stdin。使用无参数常驻服务模式，避免 web 模式把隐藏进程的 EOF 当作停止信号。
+    const result = startElevatedRuntime([], inheritedEnv);
+    const deadline = Date.now() + 15000;
+    let pid = 0;
+    try {
+      while (Date.now() < deadline) {
+        pid = Number(fs.existsSync(result.launchPidPath) ? fs.readFileSync(result.launchPidPath, "utf8").trim() : "");
+        if (Number.isInteger(pid) && pid > 0) break;
+        spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 100"], { stdio: "ignore" });
+      }
+    } finally {
+      fs.rmSync(result.scriptPath, { force: true });
+      fs.rmSync(result.launchPidPath, { force: true });
+    }
+    const details = [result.error?.message, (result.stderr || "").trim(), (result.stdout || "").trim()].filter(Boolean).join(" | ");
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error("提权启动 E2E 服务失败：未获得有效服务 PID" + (details ? "（" + details + "）" : ""));
+    child = { pid, kill: () => killRuntimePid(pid) };
+  } else {
+    child = spawn(runtimeExe, args, { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"], env: { ...process.env, ...extraEnv } });
+  }
   try {
     fs.writeFileSync(pidFile, String(child.pid));
   } catch { /* pid 文件仅作跨进程兜底，写失败不阻塞 */ }
@@ -205,13 +268,16 @@ export async function stopService() {
     try {
       const pid = Number(fs.readFileSync(pidFile, "utf8"));
       if (pid > 0) {
-        spawnSync("taskkill", ["/PID", String(pid), "/F"], { stdio: "ignore" });
+        killRuntimePid(pid);
       }
     } catch { /* 进程已退出 */ }
     try {
       fs.rmSync(pidFile, { force: true });
     } catch { /* 忽略 */ }
     await sleep(500);
+  }
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    await killRuntimeServices(5000);
   }
 }
 
@@ -241,7 +307,35 @@ export async function ensureService() {
  *  v0.6.9+：杀后轮询确认进程完全消失（Stop-Process 异步，固定 600ms 等待存在旧进程互斥体未释放的竞态窗口，
  *  曾致后续 startService("web") 因互斥体被占直接退出——F1/F4 级联 flake），确认消失后才返回。 */
 export async function killRuntimeServices(timeoutMs = 15000) {
+  const listeningPids = () => {
+    try {
+      const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+        "@(Get-NetTCPConnection -LocalPort 58731 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess) -join ','"],
+        { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+      return (r.stdout || "").trim();
+    } catch {
+      return "";
+    }
+  };
+  const processTreePids = () => {
+    try {
+      const root = Number(fs.readFileSync(pidFile, "utf8").trim());
+      if (!Number.isInteger(root) || root <= 0) return "";
+      const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
+        "$all=@(Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\"); $ids=@(" + root + "); do { $children=@($all | Where-Object { $ids -contains $_.ParentProcessId } | Select-Object -ExpandProperty ProcessId); $new=@($children | Where-Object { $ids -notcontains $_ }); $ids += $new } while ($new.Count -gt 0); $found=@($all | Where-Object { $ids -contains $_.ProcessId } | Select-Object -ExpandProperty ProcessId); if ($found.Count -eq 0) { $found=@($all | Select-Object -ExpandProperty ProcessId) }; $found -join ','"],
+        { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
+      return (r.stdout || "").trim();
+    } catch {
+      return "";
+    }
+  };
   const runtimePids = () => {
+    if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+      // HttpListener 的端口归属通常显示为 PID 4（HTTP.sys），不能据此结束系统进程；
+      // 产品自重启产生的新服务进程则通过旧服务 PID 的父子关系追踪。
+      const portPids = listeningPids().split(",").map(value => Number(value)).filter(value => Number.isInteger(value) && value > 4).join(",");
+      return [...new Set([processTreePids(), portPids].join(",").split(",").map(value => value.trim()).filter(Boolean))].join(",");
+    }
     try {
       const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
         "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
@@ -252,13 +346,22 @@ export async function killRuntimeServices(timeoutMs = 15000) {
     }
   };
   try {
+    if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+      for (const pid of runtimePids().split(",").map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0)) {
+        killRuntimePid(pid);
+      }
+    } else {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
       "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
+    }
   } catch { /* 清理失败不阻塞 */ }
   const gone = await waitFor(() => runtimePids() === "", timeoutMs, 300);
   if (!gone) {
     console.warn("[helpers] killRuntimeServices：轮询 " + Math.round(timeoutMs / 1000) + "s 后仍有 runtime 进程残留（" + runtimePids() + "），继续执行");
   }
   child = null;
+  try {
+    fs.rmSync(pidFile, { force: true });
+  } catch { /* 清理失败不阻塞后续测试；下一次 startService 会再次尝试 */ }
 }

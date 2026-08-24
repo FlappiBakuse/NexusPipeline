@@ -174,6 +174,45 @@ internal sealed class Scheduler : IDisposable
         return NextTriggerFor(queue, DateTime.Now);
     }
 
+    /// <summary>用户卡片使用的最近定时队列投影；只考虑已启用绑定引用的脚本。</summary>
+    public (string QueueName, DateTime TriggerTime)? NextTriggerForUser(
+        NexusUser user,
+        IReadOnlyList<DispatchQueue>? queueSnapshot = null)
+    {
+        HashSet<string> scriptIds = user.Bindings
+            .Where(binding => binding.Enabled)
+            .Select(binding => binding.ScriptInstanceId)
+            .ToHashSet(StringComparer.Ordinal);
+        if (scriptIds.Count == 0)
+        {
+            return null;
+        }
+        DateTime now = DateTime.Now;
+        var candidates = new List<(string QueueName, DateTime TriggerTime)>();
+        foreach (DispatchQueue queue in (queueSnapshot ?? _queues.Snapshot())
+            .Where(item => item.AutoRunMode == "scheduled" && item.Tasks.Any(task => scriptIds.Contains(task.ScriptInstanceId))))
+        {
+            DateTime? trigger = NextTriggerFor(queue, now);
+            if (trigger is not null)
+            {
+                candidates.Add((queue.Name, trigger.Value));
+            }
+        }
+        return candidates.OrderBy(item => item.TriggerTime).Cast<(string, DateTime)?>().FirstOrDefault();
+    }
+
+    /// <summary>检测尚未准入的冻结计划是否仍引用用户，供全局用户修改/删除门禁使用。</summary>
+    public bool HasPendingUser(string userId)
+    {
+        lock (_sync)
+        {
+            return _pendingTriggers.Values
+                .Where(item => item.Status is "Triggered" or "Waiting")
+                .Any(item => item.Plan?.Tasks.Any(task => task.ResolvedUsers?.Any(user =>
+                    string.Equals(user.UserId, userId, StringComparison.OrdinalIgnoreCase)) == true) == true);
+        }
+    }
+
     private static DateTime? NextTriggerFor(DispatchQueue queue, DateTime now)
     {
         if (queue.AutoRunMode != "scheduled" || queue.Tasks.Count == 0)

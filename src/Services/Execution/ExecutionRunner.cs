@@ -33,7 +33,7 @@ internal sealed class ExecutionRunner
         ScriptInstance script = plan.Script;
         try
         {
-            List<string?> runUsers = plan.Users.Cast<string?>().ToList();
+            List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, plan.Users, plan.ResolvedUsers);
             List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
             if (records.Count > 0 && records[^1].Status == "cancelled")
             {
@@ -62,17 +62,17 @@ internal sealed class ExecutionRunner
         ScriptInstance script,
         string queueId,
         string queueName,
-        List<string?> users)
+        IReadOnlyList<ResolvedScriptUser> users)
     {
         var records = new List<RunRecord>();
-        foreach (string? runUser in users)
+        foreach (ResolvedScriptUser runUser in users)
         {
             if (exec.Cts.IsCancellationRequested)
             {
                 exec.Status = "cancelled";
                 break;
             }
-            string displayName = runUser is null ? script.Name : $"{script.Name}（{runUser}）";
+            string displayName = $"{script.Name}（{runUser.UserName}）";
             exec.CurrentScriptName = displayName;
             exec.CurrentStatus = "等待开始";
 
@@ -91,7 +91,7 @@ internal sealed class ExecutionRunner
             try
             {
                 session = new ExecutionCoordinator(
-                    script, exec.Mode, queueId, queueName, runUser,
+                    script, exec.Mode, queueId, queueName, runUser.UserName,
                     exec.Cts.Token,
                     (attempt, max) =>
                     {
@@ -100,7 +100,8 @@ internal sealed class ExecutionRunner
                     },
                     status => exec.CurrentStatus = status,
                     line => exec.AppendLog(line),
-                    _users);
+                    _users,
+                    runUser);
 
                 try
                 {
@@ -109,7 +110,8 @@ internal sealed class ExecutionRunner
                 catch (Exception ex)
                 {
                     // Coordinator 异常也必须形成可查询的失败历史，并继续队列后续任务。
-                    record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser, ex);
+                    record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser.UserName, ex);
+                    record.UserId = runUser.UserId;
                     Logger.Error($"[错误] 脚本「{displayName}」协调器异常，已生成失败历史并继续：{ex}");
                 }
             }
@@ -131,12 +133,12 @@ internal sealed class ExecutionRunner
             exec.AddRecordAndIncrement(published);
             exec.CurrentStatus = published.Status == "success" ? "运行成功" : (published.Status == "cancelled" ? "已取消" : "运行失败");
             Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{published.Status}（{published.ResultDetail}）");
-            if (script.NotifyEnabled)
+            if (script.NotifyEnabled && runUser.Binding.NotifyEnabled)
             {
                 try
                 {
                     // 脚本级通知与队列级汇总通知相互独立，按每个用户完成立即发送。
-                    await _notifications.NotifyScriptAsync(script, published).ConfigureAwait(false);
+                    await _notifications.NotifyScriptAsync(script, published, runUser.Binding).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -257,7 +259,7 @@ internal sealed class ExecutionRunner
                 exec.CurrentScriptName = script.Name;
                 exec.CurrentAttempt = 0;
                 exec.CurrentStatus = "等待开始";
-                List<string?> runUsers = planned.EnabledUsers.Cast<string?>().ToList();
+                List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, planned.EnabledUsers, planned.ResolvedUsers);
                 if (runUsers.Count == 0)
                 {
                     var skipped = new RunRecord
@@ -314,5 +316,21 @@ internal sealed class ExecutionRunner
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, completionIntent);
         }
+    }
+
+    private List<ResolvedScriptUser> ResolvePlanUsers(
+        ScriptInstance script,
+        IReadOnlyList<string> names,
+        IReadOnlyList<ResolvedScriptUser>? resolved)
+    {
+        if (resolved is not null)
+        {
+            return resolved.ToList();
+        }
+        return names
+            .Select(name => _users.ResolveEnabledBinding(script, name))
+            .Where(user => user is not null)
+            .Cast<ResolvedScriptUser>()
+            .ToList();
     }
 }

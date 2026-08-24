@@ -7,14 +7,16 @@ namespace NexusPipeline.Services.Execution;
 internal sealed record PlannedQueueTask(
     QueueTask Task,
     ScriptInstance? Script,
-    IReadOnlyList<string> EnabledUsers);
+    IReadOnlyList<string> EnabledUsers,
+    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null);
 
 /// <summary>脚本运行计划，运行期间不再回读共享仓储。</summary>
 internal sealed record ScriptExecutionPlan(
     ScriptInstance Script,
     IReadOnlyList<string> Users,
     ExecutionAdmissionProfile Admission,
-    int TotalTasks);
+    int TotalTasks,
+    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null);
 
 /// <summary>队列运行计划，包含队列、任务、脚本和准入 profile 的同一时刻快照。</summary>
 internal sealed record QueueExecutionPlan(
@@ -53,7 +55,8 @@ internal sealed class ExecutionPlanBuilder
 
     public ScriptExecutionPlan BuildScript(string scriptId, string? userName)
     {
-        ScriptInstance? script = _snapshots?.SnapshotScript(scriptId)?.Script
+        ExecutionScriptSnapshot? executionSnapshot = _snapshots?.SnapshotScript(scriptId);
+        ScriptInstance? script = executionSnapshot?.Script
             ?? _scripts.Snapshot().FirstOrDefault(item => item.Id == scriptId)?.Clone();
         if (script is null)
         {
@@ -61,14 +64,25 @@ internal sealed class ExecutionPlanBuilder
         }
 
         _validator.ValidateScriptStart(script, userName);
+        IReadOnlyList<ResolvedScriptUser> resolvedUsers = _users.ResolveEnabledBindings(script, executionSnapshot?.Users);
+        ResolvedScriptUser? resolvedSingle = string.IsNullOrWhiteSpace(userName)
+            ? null
+            : _users.ResolveEnabledBinding(script, userName, executionSnapshot?.Users);
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            resolvedUsers = resolvedSingle is null
+                ? Array.Empty<ResolvedScriptUser>()
+                : new[] { resolvedSingle };
+        }
         List<string> users = string.IsNullOrWhiteSpace(userName)
-            ? _users.EnabledNames(script).ToList()
-            : new List<string> { userName };
+            ? resolvedUsers.Select(item => item.UserName).ToList()
+            : new List<string> { resolvedSingle?.UserName ?? userName };
         return new ScriptExecutionPlan(
             script,
             users,
-            ExecutionAdmissionProfile.ForScript(script, userName, _capabilities),
-            string.IsNullOrWhiteSpace(userName) ? Math.Max(1, users.Count) : 1);
+            ExecutionAdmissionProfile.ForScript(script, userName, _capabilities, resolvedUsers),
+            string.IsNullOrWhiteSpace(userName) ? Math.Max(1, users.Count) : 1,
+            resolvedUsers);
     }
 
     public QueueExecutionPlan BuildQueue(string queueId)
@@ -92,7 +106,13 @@ internal sealed class ExecutionPlanBuilder
             .Select(item => new PlannedQueueTask(
                 CloneTask(item.Task),
                 item.Script?.Clone(),
-                item.EnabledUsers.ToList()))
+                item.EnabledUsers.ToList(),
+                item.ResolvedUsers.Count > 0
+                    ? item.ResolvedUsers.Select(user => new ResolvedScriptUser(
+                        user.UserId,
+                        user.UserName,
+                        user.Binding.Clone())).ToList()
+                    : ResolveLegacyUsers(item.Script, item.EnabledUsers)))
             .ToList();
         ExecutionAdmissionProfile admission = data.Admission is null
             ? ExecutionAdmissionProfile.ForQueue(queue, tasks, _capabilities)
@@ -113,6 +133,12 @@ internal sealed class ExecutionPlanBuilder
                 Task = CloneTask(task.Task),
                 Script = task.Script?.Clone(),
                 EnabledUsers = task.EnabledUsers.ToList(),
+                ResolvedUsers = task.ResolvedUsers?.Select(user => new FrozenResolvedUserData
+                {
+                    UserId = user.UserId,
+                    UserName = user.UserName,
+                    Binding = user.Binding.Clone(),
+                }).ToList() ?? new List<FrozenResolvedUserData>(),
             }).ToList(),
             Admission = FreezeAdmission(plan.Admission),
         };
@@ -197,10 +223,14 @@ internal sealed class ExecutionPlanBuilder
             .Select(task =>
             {
                 ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId)?.Clone();
+                IReadOnlyList<ResolvedScriptUser> resolvedUsers = script is null
+                    ? Array.Empty<ResolvedScriptUser>()
+                    : _users.ResolveEnabledBindings(script, executionSnapshot?.Users);
                 return new PlannedQueueTask(
                     CloneTask(task),
                     script,
-                    script is null ? Array.Empty<string>() : _users.EnabledNames(script).ToList());
+                    resolvedUsers.Select(user => user.UserName).ToList(),
+                    resolvedUsers);
             })
             .ToList();
 
@@ -231,5 +261,20 @@ internal sealed class ExecutionPlanBuilder
             Index = task.Index,
             ScriptInstanceId = task.ScriptInstanceId,
         };
+    }
+
+    private IReadOnlyList<ResolvedScriptUser> ResolveLegacyUsers(
+        ScriptInstance? script,
+        IReadOnlyList<string> names)
+    {
+        if (script is null)
+        {
+            return Array.Empty<ResolvedScriptUser>();
+        }
+        return names
+            .Select(name => _users.ResolveEnabledBinding(script, name))
+            .Where(user => user is not null)
+            .Cast<ResolvedScriptUser>()
+            .ToList();
     }
 }

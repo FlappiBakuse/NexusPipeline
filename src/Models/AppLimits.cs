@@ -7,6 +7,9 @@ internal class AppLimits
 
     public int MaxUsersPerScript { get; set; } = 10;
 
+    /// <summary>全局用户实体总量上限（v0.9.6）。</summary>
+    public int MaxUsers { get; set; } = 50;
+
     public int MaxQueues { get; set; } = 10;
 
     public int MaxTimeSetsPerQueue { get; set; } = 10;

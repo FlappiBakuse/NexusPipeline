@@ -33,7 +33,7 @@ internal class RuntimeContext
             {
                 action();
             }
-        }));
+        }, SnapshotUsers));
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
@@ -69,6 +69,9 @@ internal class RuntimeContext
     public List<ScriptInstance> Scripts { get; private set; } = new();
 
     public List<DispatchQueue> Queues { get; private set; } = new();
+
+    /// <summary>全局用户实体列表；用户/脚本绑定位于 NexusUser.Bindings。</summary>
+    public List<NexusUser> Users { get; private set; } = new();
 
     public DispatchCenter Center => Resolve<DispatchCenter>();
 
@@ -109,6 +112,15 @@ internal class RuntimeContext
         {
             Scripts = DataStore.LoadScripts();
             Queues = DataStore.LoadQueues();
+            Users = DataStore.LoadUsers();
+        }
+    }
+
+    public NexusUser? FindUser(string id)
+    {
+        lock (DataLock)
+        {
+            return Users.FirstOrDefault(user => string.Equals(user.Id, id, StringComparison.OrdinalIgnoreCase));
         }
     }
 
@@ -146,13 +158,24 @@ internal class RuntimeContext
         }
     }
 
+    /// <summary>全局用户深拷贝快照；排序和绑定读取均基于同一份快照。</summary>
+    internal List<NexusUser> SnapshotUsers()
+    {
+        lock (DataLock)
+        {
+            return Users.Select(user => user.Clone()).ToList();
+        }
+    }
+
     /// <summary>在一次 DataLock 内复制单个脚本，供执行计划建立原子输入。</summary>
     internal ExecutionScriptSnapshot? SnapshotScriptForExecution(string id)
     {
         lock (DataLock)
         {
             ScriptInstance? script = Scripts.FirstOrDefault(item => item.Id == id);
-            return script is null ? null : new ExecutionScriptSnapshot(script.Clone());
+            return script is null
+                ? null
+                : new ExecutionScriptSnapshot(script.Clone(), Users.Select(user => user.Clone()).ToList());
         }
     }
 
@@ -168,7 +191,8 @@ internal class RuntimeContext
             }
             return new ExecutionQueueSnapshot(
                 queue.Clone(),
-                Scripts.Select(script => script.Clone()).ToList());
+                Scripts.Select(script => script.Clone()).ToList(),
+                Users.Select(user => user.Clone()).ToList());
         }
     }
 }

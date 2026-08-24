@@ -92,8 +92,8 @@ export async function pageScripts(token) {
           <div class="meta-line script-meta"><span class="badge muted">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用脚本"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
         </div>
         <div class="script-ops row-actions">
-          <button class="tertiary manage-users" type="button" data-action="manage-users" data-id="${esc(script.id)}">用户管理${(script.users || []).length ? `（${script.users.length}）` : ""}</button>
-          <div class="overflow-menu-wrap"><button class="overflow-trigger" type="button" data-action="toggle-more-menu" aria-haspopup="menu" aria-expanded="false" aria-label="更多脚本操作">•••</button><div class="overflow-menu" role="menu" hidden><button role="menuitem" type="button" data-action="edit-script-menu" data-id="${esc(script.id)}">编辑脚本</button><button role="menuitem" class="destructive" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button></div></div>
+          <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
+          <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
         </div>
       </article>`).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
@@ -479,7 +479,6 @@ export const actions = {
   "open-script-modal": () => openNewScriptChooser(),
   "open-script-type": target => openScriptModal("", target.dataset.plugin || ""),
   "edit-script": target => openScriptModal(target.dataset.id),
-  "edit-script-menu": target => openScriptModal(target.dataset.id),
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "confirm-delete-script": target => withBusy(target, () => confirmDeleteScript(target.dataset.id, target.dataset.name)),
   "save-script": target => withBusy(target, () => saveScript()),

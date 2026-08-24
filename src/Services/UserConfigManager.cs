@@ -63,6 +63,26 @@ internal static class UserConfigManager
         ConfigSwapPaths.CleanupScriptArea(scriptId, userName);
     }
 
+    public static void SyncCompatibilityAlias(string scriptId, string? userKey, string? userName)
+    {
+        ConfigSwapPaths.SyncCompatibilityAlias(scriptId, userKey, userName);
+    }
+
+    public static void AdoptCompatibilityStore(string scriptId, string? userKey, string? userName)
+    {
+        ConfigSwapPaths.AdoptCompatibilityStore(scriptId, userKey, userName);
+    }
+
+    public static void CleanupCompatibilityTransient(string scriptId, string? userName)
+    {
+        ConfigSwapPaths.CleanupCompatibilityTransient(scriptId, userName);
+    }
+
+    public static void CleanupCompatibilityReplacement(string scriptId, string? userName)
+    {
+        ConfigSwapPaths.CleanupCompatibilityReplacement(scriptId, userName);
+    }
+
     public static ScriptUser? FindEnabledUser(ScriptInstance script, string? userName)
     {
         if (string.IsNullOrWhiteSpace(userName))

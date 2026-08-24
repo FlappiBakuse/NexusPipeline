@@ -203,6 +203,25 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .user-card:last-of-type { border-bottom: 0; }
 .user-card:hover { background: var(--hover-bg); }
 .user-card .qk-row { margin-top: 6px; }
+.global-user-card { display: grid; grid-template-columns: 28px 56px minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.global-user-card > .drag-handle { position: static; width: 28px; min-height: 56px; margin: 0; }
+.global-user-leading { position: relative; display: flex; align-items: center; justify-content: center; min-height: 56px; }
+.global-user-avatar { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 750; object-fit: cover; }
+.global-user-avatar-fallback { position: absolute; inset: 4px; }
+.global-user-avatar[src] + .global-user-avatar-fallback { display: none; }
+.avatar-action { position: absolute; right: -5px; bottom: -4px; min-height: 24px; padding: 0 6px; border-radius: 6px; background: var(--panel-solid); font-size: 10px; }
+.global-user-card > .list-item-head { min-width: 0; }
+.global-user-card > .global-user-bindings { grid-column: 3; min-width: 0; margin-top: var(--space-2); }
+.global-user-actions { grid-template-columns: repeat(3, minmax(0, auto)); width: auto; }
+.global-user-actions button { width: auto; }
+.global-user-bindings { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.global-binding-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 9px 0; border-bottom: 1px solid var(--border); }
+.global-binding-row:last-of-type { border-bottom: 0; }
+.global-binding-copy { min-width: 0; }
+.global-binding-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.global-binding-copy .meta-line { margin-top: 5px; }
+.global-binding-row .row-actions { flex: 0 0 auto; }
+.global-user-bindings > .ghost { margin-top: var(--space-2); }
 .back-row { margin: -10px 0 16px; }
 
 button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height); padding: 0 15px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; transition: background .15s, border-color .15s, color .15s; }
@@ -479,7 +498,7 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   #view { padding: 24px 16px 56px; }
   .page-head { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--space-4); margin-bottom: var(--space-5); }
   .page-head-actions { width: 100%; justify-content: stretch; }
-  .page-head-actions > button { width: 100%; min-width: 0; }
+  .page-head-actions > button, .page-head-actions > a { width: 100%; min-width: 0; }
   .history-days-box { justify-content: space-between; width: 100%; }
   .history-days-box select { flex: 1; min-width: 0; }
   .script-card { grid-template-columns: 44px 40px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-4); }
@@ -842,7 +861,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .script-grid .script-card .queue-ops { align-self: center; }
 .script-grid .script-card .badge,
 .user-card .badge { border: 1px solid var(--border-strong); }
-.script-grid .script-card .manage-users,
 .script-grid .script-card .queue-edit { min-width: 96px; }
 .queue-meta { row-gap: 5px; }
 
@@ -1013,7 +1031,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
     margin-top: var(--space-2);
   }
   .user-card .user-actions { width: 100%; justify-content: flex-start; }
-  .script-grid .script-card .manage-users,
   .script-grid .script-card .queue-edit { min-width: 96px; flex: 1 1 auto; }
   .history-panels { grid-template-columns: minmax(0, 1fr); max-height: none; }
   .history-dates-panel { border-right: 0; border-bottom: 1px solid var(--border); }
@@ -1026,4 +1043,186 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 @media (max-width: 700px) {
   .judge-actions { flex-direction: column; align-items: stretch; justify-content: flex-start; }
   .judge-actions > * { flex: 0 1 auto; }
+}
+
+@media (max-width: 820px) {
+  .global-user-card { grid-template-columns: 44px 48px minmax(0, 1fr); }
+  .global-user-card > .drag-handle { grid-column: 1; grid-row: 1; width: 44px; }
+  .global-user-card > .global-user-leading { grid-column: 2; grid-row: 1; }
+  .global-user-card > .list-item-head { grid-column: 3; grid-row: 1; display: block; }
+  .global-user-card > .list-item-head > .action-row { width: 100%; margin-top: var(--space-2); }
+  .global-user-card > .global-user-bindings { grid-column: 3; }
+  .global-binding-row { align-items: flex-start; flex-direction: column; }
+  .global-binding-row .row-actions { width: 100%; justify-content: flex-start; }
+}
+
+@media (max-width: 600px) {
+  .global-user-card { grid-template-columns: 44px 48px minmax(0, 1fr); padding: var(--space-4); }
+  .global-user-card .global-user-actions { display: flex; flex-wrap: wrap; width: 100%; }
+  .global-user-card .global-user-actions button { flex: 1 1 auto; }
+}
+
+/* v0.9.6：全局用户卡片沿用脚本卡四列结构；绑定设置集中在用户管理弹窗。 */
+.global-user-card {
+  grid-template-columns: 26px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+}
+.global-user-card > .global-user-avatar-button { grid-column: 2; grid-row: 1; }
+.global-user-card > .global-user-main { grid-column: 3; grid-row: 1; }
+.global-user-card .drag-handle { width: 26px; min-height: 36px; margin-right: -6px; }
+.global-user-avatar-button {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  box-shadow: none;
+}
+.global-user-avatar-button:hover { background: transparent; }
+.global-user-avatar-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.global-user-avatar {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 750;
+  object-fit: cover;
+}
+.global-user-avatar-mark {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  display: inline-flex;
+  width: 17px;
+  height: 17px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--panel-solid);
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+}
+.global-user-main { min-width: 0; }
+.global-user-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.global-user-meta { margin-top: 7px; }
+.global-user-actions {
+  display: inline-flex;
+  width: auto;
+  grid-template-columns: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+}
+.global-user-actions button { width: auto; }
+.user-management-settings .switch-row { margin-top: var(--space-3); }
+.user-avatar-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--action-gap);
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.user-binding-section { margin-top: var(--space-5); }
+.binding-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--action-gap);
+  margin-bottom: var(--space-3);
+}
+.binding-add-row .field { min-width: 0; margin: 0; }
+.user-binding-list { display: grid; gap: var(--space-2); }
+.user-binding-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+.user-binding-card[open] { background: var(--panel-soft); }
+.user-binding-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 58px;
+  padding: 10px 13px;
+  cursor: pointer;
+  list-style: none;
+}
+.user-binding-summary::-webkit-details-marker { display: none; }
+.user-binding-summary::before {
+  content: "›";
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 20px;
+  transform: rotate(0deg);
+  transition: transform .15s ease;
+}
+.user-binding-card[open] .user-binding-summary::before { transform: rotate(90deg); }
+.user-binding-summary-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.user-binding-script-ico { width: 36px; height: 36px; }
+.user-binding-summary-copy { display: grid; min-width: 0; gap: 3px; }
+.user-binding-summary-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-binding-details { padding: 0 13px 14px; border-top: 1px solid var(--border); }
+.user-binding-details .switch-row { margin-top: var(--space-3); }
+.user-binding-details .field { margin-top: var(--space-3); }
+.binding-helper { margin: 6px 0 0; }
+.binding-actions { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.compact-empty { padding: 24px 16px; }
+
+@media (max-width: 820px) {
+  .global-user-card {
+    grid-template-columns: 44px 36px minmax(0, 1fr);
+    align-items: start;
+    padding: var(--space-4);
+  }
+  .global-user-card .drag-handle { width: 44px; min-height: 36px; margin-right: 0; }
+  .global-user-card .global-user-actions {
+    grid-column: 3;
+    grid-row: 2;
+    width: 100%;
+    margin-top: var(--space-2);
+  }
+}
+
+@media (max-width: 480px) {
+  .global-user-card { grid-template-columns: 44px 36px minmax(0, 1fr); }
+  .global-user-actions { flex-wrap: wrap; }
+  .global-user-actions button { flex: 0 1 auto; }
+  .binding-add-row { grid-template-columns: minmax(0, 1fr); }
+  .binding-add-row button { justify-self: end; }
+  .user-avatar-setting { align-items: flex-start; flex-direction: column; }
+}
+
+/* v0.9.6：脚本与队列卡片的操作入口在桌面端保持同一行、靠右对齐；窄屏允许操作栏折行。 */
+@media (min-width: 821px) {
+  .script-grid .script-card .script-ops,
+  .script-grid .script-card .queue-ops {
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 820px) {
+  .script-grid .script-card .script-ops,
+  .script-grid .script-card .queue-ops {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }

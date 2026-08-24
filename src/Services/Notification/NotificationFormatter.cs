@@ -27,6 +27,10 @@ internal static class NotificationFormatter
         {
             lines.Add($"结束时间：{record.EndTime:yyyy-MM-dd HH:mm:ss}");
         }
+        if (!string.IsNullOrWhiteSpace(record.UserName))
+        {
+            lines.Add($"用户：{record.UserName}");
+        }
         lines.Add($"尝试次数：{record.Attempts}");
         lines.Add($"最终状态：{status}");
         return string.Join("\r\n", lines);

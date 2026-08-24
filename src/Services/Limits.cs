@@ -40,6 +40,7 @@ internal static class Limits
 
         CheckCount(limits.MaxScripts, 25, 50, "MaxScripts（脚本实例上限）", warnings, fatals);
         CheckCount(limits.MaxUsersPerScript, 10, 20, "MaxUsersPerScript（每脚本用户上限）", warnings, fatals);
+        CheckCount(limits.MaxUsers, 50, 150, "MaxUsers（全局用户上限）", warnings, fatals);
         CheckCount(limits.MaxQueues, 10, 50, "MaxQueues（调度队列上限）", warnings, fatals);
         CheckCount(limits.MaxTimeSetsPerQueue, 10, 20, "MaxTimeSetsPerQueue（每队列定时上限）", warnings, fatals);
         CheckCount(limits.MaxQueueTotalUsers, 50, 150, "MaxQueueTotalUsers（队列任务总用户上限）", warnings, fatals);
@@ -111,6 +112,11 @@ internal static class Limits
     public static string? CheckUserCount(int count)
     {
         return count >= Current.MaxUsersPerScript ? $"该脚本的用户数量已达上限（{count}/{Current.MaxUsersPerScript}）" : null;
+    }
+
+    public static string? CheckGlobalUserCount(int count)
+    {
+        return count >= Current.MaxUsers ? $"全局用户数量已达上限（{count}/{Current.MaxUsers}）" : null;
     }
 
     public static string? CheckNameBytes(string name, int maxBytes, string label)
@@ -312,7 +318,7 @@ internal static class Limits
         return total > Current.MaxQueueTotalUsers ? $"任务列表的启用用户总数已达上限（{total}/{Current.MaxQueueTotalUsers}）" : null;
     }
 
-    /// <summary>队列任务的启用用户总数：各任务引用脚本的启用用户数之和，每个任务至少计 1。</summary>
+    /// <summary>队列任务的启用绑定总数：各任务引用脚本的启用绑定数之和，每个任务至少计 1。</summary>
     public static int QueueTotalUsers(RuntimeContext ctx, DispatchQueue queue)
     {
         return queue.Tasks.Sum(task =>
@@ -322,7 +328,10 @@ internal static class Limits
             {
                 return 1;
             }
-            int enabled = script.Users.Count(user => user.Enabled);
+            int enabled = ctx.Users.Count > 0
+                ? ctx.Users.Sum(user => user.Bindings.Count(binding =>
+                    binding.Enabled && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                : script.Users.Count(user => user.Enabled);
             return enabled < 1 ? 1 : enabled;
         });
     }

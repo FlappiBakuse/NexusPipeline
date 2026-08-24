@@ -59,32 +59,129 @@ internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvi
 internal sealed class RuntimeUserRepository : IUserRepository
 {
     private readonly Action<Action> _withDataLock;
+    private readonly Func<List<NexusUser>> _snapshotUsers;
 
-    public RuntimeUserRepository(Action<Action> withDataLock)
+    public RuntimeUserRepository(Action<Action> withDataLock, Func<List<NexusUser>> snapshotUsers)
     {
         _withDataLock = withDataLock;
+        _snapshotUsers = snapshotUsers;
     }
 
     public ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+    {
+        return ResolveEnabledBinding(script, userName)?.ToLegacyScriptUser();
+    }
+
+    public IReadOnlyList<string> EnabledNames(ScriptInstance script)
+    {
+        List<NexusUser> source = _snapshotUsers();
+        List<string> result = source
+            .OrderBy(user => user.Index)
+            .Select(user => new
+            {
+                user.Name,
+                Binding = user.Bindings.FirstOrDefault(item =>
+                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+            })
+            .Where(item => item.Binding is not null)
+            .Select(item => item.Name)
+            .ToList();
+        if (result.Count > 0 || source.Count > 0 || script.Users.Count == 0)
+        {
+            return result;
+        }
+        List<string> legacy = new();
+        _withDataLock(() => legacy = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList());
+        return legacy;
+    }
+
+    public ResolvedScriptUser? ResolveEnabledBinding(
+        ScriptInstance script,
+        string? userName,
+        IReadOnlyList<NexusUser>? users = null)
     {
         if (string.IsNullOrWhiteSpace(userName))
         {
             return null;
         }
-        ScriptUser? result = null;
+        List<NexusUser> source = users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
+        foreach (NexusUser user in source.OrderBy(item => item.Index))
+        {
+            if (!string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
+                item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+            if (binding is not null)
+            {
+                return new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
+            }
+            return null;
+        }
+        // 仅用于旧 fixture/尚未迁移的内存脚本；生产启动会先完成 v0.9.6 迁移。
+        ScriptUser? legacy = null;
         _withDataLock(() =>
         {
-            result = script.Users.FirstOrDefault(user => user.Enabled
-                && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
+            legacy = script.Users.FirstOrDefault(item => item.Enabled
+                && string.Equals(item.Name, userName, StringComparison.OrdinalIgnoreCase));
         });
-        return result;
+        return legacy is null
+            ? null
+            : new ResolvedScriptUser(
+                "",
+                legacy.Name,
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = script.Id,
+                    Enabled = legacy.Enabled,
+                    PreRunScript = legacy.PreRunScript,
+                    PreRunOnceOnly = legacy.PreRunOnceOnly,
+                    PostRunScript = legacy.PostRunScript,
+                    PostRunOnFinalOnly = legacy.PostRunOnFinalOnly,
+                });
     }
 
-    public IReadOnlyList<string> EnabledNames(ScriptInstance script)
+    public IReadOnlyList<ResolvedScriptUser> ResolveEnabledBindings(
+        ScriptInstance script,
+        IReadOnlyList<NexusUser>? users = null)
     {
-        List<string> result = new();
-        _withDataLock(() => result = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList());
-        return result;
+        List<NexusUser> source = users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
+        List<ResolvedScriptUser> result = source
+            .OrderBy(user => user.Index)
+            .Select(user => new
+            {
+                User = user,
+                Binding = user.Bindings.FirstOrDefault(item =>
+                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+            })
+            .Where(item => item.Binding is not null)
+            .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
+            .ToList();
+        if (result.Count > 0 || source.Count > 0 || script.Users.Count == 0)
+        {
+            return result;
+        }
+        List<ResolvedScriptUser> legacy = new();
+        _withDataLock(() =>
+        {
+            legacy = script.Users
+                .Where(user => user.Enabled)
+                .Select(user => new ResolvedScriptUser(
+                    "",
+                    user.Name,
+                    new UserScriptBinding
+                    {
+                        ScriptInstanceId = script.Id,
+                        Enabled = user.Enabled,
+                        PreRunScript = user.PreRunScript,
+                        PreRunOnceOnly = user.PreRunOnceOnly,
+                        PostRunScript = user.PostRunScript,
+                        PostRunOnFinalOnly = user.PostRunOnFinalOnly,
+                    }))
+                .ToList();
+        });
+        return legacy;
     }
 }
 

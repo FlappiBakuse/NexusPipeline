@@ -6,6 +6,16 @@ import { baseUrl, PING_GAME, runtimeDir, runtimeExe, makeScriptDir, createScript
 
 await ensureService();
 
+function runCli(args, timeout = 90000) {
+  if (process.env.NEXUS_ELEVATED_SERVICE !== "1") return spawnSync(runtimeExe, args, { cwd: runtimeDir, encoding: "utf8", timeout });
+  const quote = value => String(value).replace(/'/g, "''");
+  const argumentList = "@(" + args.map(arg => "'" + quote(arg) + "'").join(",") + ")";
+  const command = "$p=Start-Process -FilePath '" + quote(runtimeExe) + "' -ArgumentList " + argumentList + " -WorkingDirectory '" + quote(runtimeDir) + "' -Verb RunAs -WindowStyle Hidden -PassThru; Wait-Process -Id $p.Id; $p.Refresh(); [Console]::WriteLine($p.ExitCode)";
+  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { cwd: runtimeDir, encoding: "utf8", timeout: timeout + 10000, windowsHide: true });
+  const status = Number((result.stdout || "").trim().split(/\s+/).pop());
+  return { status: Number.isFinite(status) ? status : result.status, stdout: "", stderr: result.stderr || "" };
+}
+
 test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编辑 / 删除", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForSelector("h2");
@@ -49,8 +59,7 @@ test("脚本实例：空状态 / 新建卡片组 / 必填校验 / 新建 / 编�
   expect((await page.textContent("body")).includes("测试脚本A-改"), "编辑后名称已更新").toBeTruthy();
 
   const editedScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "测试脚本A-改" }).first();
-  await editedScriptCard.locator(".overflow-trigger").click();
-  await editedScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
+  await editedScriptCard.locator('[data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');
@@ -97,59 +106,60 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   const script = await create.json();
   const sid = script.id;
   const dataDir = path.join(runtimeDir, "data", sid);
+  const createGlobalBinding = async (name, extra = {}) => {
+    const userResponse = await api("POST", "/api/users", { name, autoCheckInEnabled: false });
+    expect(userResponse.ok, `创建全局用户 ${name}`).toBeTruthy();
+    const user = await userResponse.json();
+    const bindingResponse = await api("POST", `/api/users/${encodeURIComponent(user.id)}/bindings`, {
+      scriptInstanceId: sid,
+      enabled: true,
+      notifyEnabled: true,
+      preRunScript: "",
+      preRunOnceOnly: false,
+      postRunScript: "",
+      postRunOnFinalOnly: false,
+      ...extra,
+    });
+    expect(bindingResponse.ok, `绑定全局用户 ${name}`).toBeTruthy();
+    return user;
+  };
+  const user甲 = await createGlobalBinding("甲");
+  const user乙 = await createGlobalBinding("乙");
 
-  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(() => document.body.textContent.includes("用户测试脚本"), null, { timeout: 5000 });
+  await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.body.textContent.includes("甲") && document.body.textContent.includes("乙"), null, { timeout: 5000 });
   let body = await page.textContent("body");
-  expect(body.includes("编辑脚本"), "按钮改为「编辑脚本」").toBeTruthy();
-  expect(body.includes("删除脚本"), "按钮改为「删除脚本」").toBeTruthy();
-  expect(await page.$('[data-action="manage-users"]'), "脚本卡片提供直接用户入口").toBeTruthy();
+  expect(body.includes("已绑定 1 个脚本"), "全局用户卡片显示脚本绑定数量").toBeTruthy();
+  expect(body.includes("自动签到未开启 · 即将开发"), "全局用户卡片显示自动签到占位").toBeTruthy();
+  expect(await page.locator('[data-action="open-user-management"]').count(), "一级用户管理页提供用户设置入口").toBeGreaterThanOrEqual(2);
 
-  await page.click('[data-action="manage-users"]');
-  await page.waitForFunction(() => document.body.textContent.includes("添加用户"), null, { timeout: 5000 });
-  body = await page.textContent("body");
-  expect(body.includes("返回脚本实例"), "用户管理页左上角有返回箭头").toBeTruthy();
-  expect(body.includes("暂无用户"), "无用户时显示空状态").toBeTruthy();
-
-  await page.click("button:has-text('添加用户')");
-  await page.waitForSelector("#um-name");
-  await page.fill("#um-name", "甲");
-  await page.click(".modal button:has-text('保存')");
-  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
-  await page.waitForSelector('.user-card[data-dnd-id="甲"]', { timeout: 5000 });
-  body = await page.textContent("body");
-  expect(body.includes("甲") && body.includes("已启用"), "添加用户后卡片显示用户名与启用状态").toBeTruthy();
-  expect(fs.existsSync(path.join(dataDir, "甲", "store", "configA.txt")), "首次添加用户生成配置快照（data/…/甲/store/configA.txt）").toBeTruthy();
-
-  await page.click("button:has-text('添加用户')");
-  await page.waitForSelector("#um-name");
-  await page.fill("#um-name", "乙");
-  await page.click(".modal button:has-text('保存')");
-  await page.waitForFunction(() => document.body.textContent.includes("乙"), null, { timeout: 5000 });
-  await page.click("button:has-text('添加用户')");
-  await page.waitForSelector("#um-name");
-  await page.fill("#um-name", "甲");
-  await page.click(".modal button:has-text('保存')");
+  await page.click('[data-action="open-global-user-modal"]');
+  await page.waitForSelector("#gu-name");
+  await page.fill("#gu-name", "甲");
+  await page.click('[data-action="save-global-user"]');
   await page.waitForFunction(() => document.body.textContent.includes("用户名重复"), null, { timeout: 5000 });
   body = await page.textContent("body");
   expect(body.includes("用户名重复"), "重复用户名被拒绝（弹窗保留）").toBeTruthy();
   await page.click(".modal button:has-text('取消')");
 
-  await page.click('[data-action="edit-user"][data-name="甲"]');
+  const userCard甲 = page.locator('[data-testid="global-user-card"]').filter({ hasText: "甲" }).first();
+  await userCard甲.locator('[data-action="open-user-management"]').click();
   await page.waitForSelector("#um-name");
   await page.fill("#um-name", "甲改");
-  await page.click(".modal button:has-text('保存')");
+  await page.click('[data-action="save-user-management"]');
+  await page.waitForSelector(".modal-mask", { state: "detached", timeout: 10000 });
   await page.waitForFunction(() => document.body.textContent.includes("甲改"), null, { timeout: 5000 });
-  expect(fs.existsSync(path.join(dataDir, "甲改", "store", "configA.txt")), "改名后用户数据目录已迁移").toBeTruthy();
-  expect(!fs.existsSync(path.join(dataDir, "甲")), "改名后旧用户目录已不存在（重命名而非复制）").toBeTruthy();
+  expect(fs.existsSync(path.join(dataDir, user甲.id, "store", "configA.txt")), "改名后 UserId 配置目录保持不变").toBeTruthy();
+  expect(!fs.existsSync(path.join(dataDir, "甲")), "改名后不使用旧用户名作为配置目录").toBeTruthy();
   const user = "甲改";
-  const userDir = path.join(dataDir, user);
+  const userDir = path.join(dataDir, user甲.id);
 
-  await page.click(`[data-action="edit-user-config"][data-name="${user}"]`);
-  await page.waitForSelector(".modal", { timeout: 5000 });
+  await page.locator('[data-testid="global-user-card"]').filter({ hasText: user }).first().locator('[data-action="open-user-management"]').click();
+  await page.getByRole("button", { name: "编辑配置", exact: true }).click();
+  await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   body = await page.textContent("body");
   expect(body.includes("配置编辑中"), "编辑配置弹窗显示提示").toBeTruthy();
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
   expect(await page.$(".modal"), "锁定弹窗：Esc 无法关闭（须完成或取消）").toBeTruthy();
   await page.mouse.click(20, 400);
   expect(await page.$(".modal"), "锁定弹窗：点击遮罩无法关闭").toBeTruthy();
@@ -157,17 +167,18 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "编辑配置开始后配置路径为内部储存副本").toBeTruthy();
   expect(fs.existsSync(path.join(userDir, "original", "configA.txt")), "原配置已移入缓存区").toBeTruthy();
   fs.writeFileSync(cfgFile, "NEWSETUP");
-  await page.click('[data-action="edit-config-done"]');
+  await page.click('[data-action="global-edit-config-done"]');
   await page.waitForFunction(() => !document.querySelector(".modal"), null, { timeout: 5000 });
   await new Promise(r => setTimeout(r, 300));
   expect(fs.readFileSync(path.join(userDir, "store", "configA.txt"), "utf8") === "NEWSETUP", "完成后新配置已保存（store）").toBeTruthy();
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "完成后原配置已还原到配置路径").toBeTruthy();
   expect(!fs.existsSync(path.join(userDir, "original", "configA.txt")), "完成后缓存区已清空").toBeTruthy();
 
-  await page.click(`[data-action="edit-user-config"][data-name="${user}"]`);
-  await page.waitForSelector(".modal", { timeout: 5000 });
+  await page.locator('[data-testid="global-user-card"]').filter({ hasText: user }).first().locator('[data-action="open-user-management"]').click();
+  await page.getByRole("button", { name: "编辑配置", exact: true }).click();
+  await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   fs.writeFileSync(cfgFile, "HALF");
-  await page.click('[data-action="edit-config-cancel"]');
+  await page.click('[data-action="global-edit-config-cancel"]');
   await page.waitForFunction(() => !document.querySelector(".modal"), null, { timeout: 5000 });
   await new Promise(r => setTimeout(r, 300));
   expect(fs.readFileSync(cfgFile, "utf8") === "ORIGINAL", "取消后原配置已还原").toBeTruthy();
@@ -205,8 +216,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.click('nav a[href="#/scripts"]');
   await page.waitForSelector("h2");
   const userTestScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "用户测试脚本" }).first();
-  await userTestScriptCard.locator(".overflow-trigger").click();
-  await userTestScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
+  await userTestScriptCard.locator('[data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除脚本弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');
@@ -216,6 +226,8 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   for (const q of queues) {
     if (q.name === "用户队列测试") await api("DELETE", "/api/queues/" + q.id);
   }
+  await api("DELETE", `/api/users/${encodeURIComponent(user甲.id)}`, { confirmName: "甲改" });
+  await api("DELETE", `/api/users/${encodeURIComponent(user乙.id)}`, { confirmName: "乙" });
 });
 
 test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移下移 / 执行顺序准确", async ({ page }) => {
@@ -293,26 +305,31 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
   expect(during.status === 409, "脚本运行中调整用户顺序被拒（409）").toBeTruthy();
   expect(await waitNoRunning(30000), "门禁脚本运行结束").toBeTruthy();
 
-  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="new-script"]', { timeout: 10000 });
-  await page.waitForFunction(() => document.body.textContent.includes("排序脚本"), null, { timeout: 10000 });
-  await page.click(`[data-action="manage-users"][data-id="${sid}"]`);
-  await page.waitForFunction(() => document.body.textContent.includes("添加用户") && document.body.textContent.includes("丙"), null, { timeout: 10000 });
+  const globalUsers = await (await api("GET", "/api/users")).json();
+  const globalIds = new Map(["甲", "乙", "丙"].map(name => [name, globalUsers.find(item => item.name === name)?.id || ""]));
+  expect([...globalIds.values()].every(Boolean), "排序测试用户已迁移为全局用户").toBeTruthy();
+  const targetIds = [globalIds.get("丙"), globalIds.get("甲"), globalIds.get("乙")];
+  const allGlobalIds = globalUsers.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map(user => user.id);
+  const initialGlobalOrder = [...targetIds, ...allGlobalIds.filter(id => !targetIds.includes(id))];
+  const initialOrderResponse = await api("PUT", "/api/users/order", { ids: initialGlobalOrder });
+  expect(initialOrderResponse.ok, "设置排序测试用户初始全局顺序成功").toBeTruthy();
+  await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="global-user-card"]', { timeout: 10000 });
+  await page.waitForFunction(() => document.body.textContent.includes("排序脚本") || document.body.textContent.includes("丙"), null, { timeout: 10000 });
 
   // 拖拽排序（v0.6.8+）：把手拖动到目标卡片顶部；re-render 竞态下 boundingBox 可能为 null，重试一次
-  const dragUser = async (name, toBox) => {
+  const dragUser = async (id, toBox) => {
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt++) {
       let mouseDown = false;
       try {
         // 用户列表会被轮询刷新；每次重试都重新创建 locator，避免复用已脱离 DOM 的句柄。
-        const handle = page.locator(`.user-card[data-dnd-id="${name}"] .drag-handle`);
+        const handle = page.locator(`[data-testid="global-user-card"][data-dnd-id="${id}"] .drag-handle`);
         await handle.waitFor({ timeout: 10000 });
         await handle.scrollIntoViewIfNeeded();
         let box = await handle.boundingBox();
         if (!box) { await page.waitForTimeout(400); box = await handle.boundingBox(); }
-        if (!box) throw new Error("拖拽把手不可见：" + name);
+        if (!box) throw new Error("拖拽把手不可见：" + id);
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
         mouseDown = true;
@@ -337,27 +354,34 @@ test("用户排序：API 顺序落盘 / 名单校验 / 运行时 409 / UI 上移
     return box;
   };
 
-  await dragUser("丙", await targetBox('.user-card[data-dnd-id="甲"]'));
-  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title .user-name-link")); return cards.length === 3 && cards[0].textContent.trim() === "丙"; }, null, { timeout: 10000 });
+  await dragUser(globalIds.get("丙"), await targetBox(`[data-testid="global-user-card"][data-dnd-id="${globalIds.get("甲")}"]`));
+  await page.waitForFunction((ids) => {
+    const cards = Array.from(document.querySelectorAll(".global-user-card[data-dnd-id]"))
+      .filter(card => ids.includes(card.dataset.dndId));
+    return cards.map(card => card.dataset.dndId).join("|") === ids.join("|");
+  }, targetIds, { timeout: 10000 });
   expect(true, "拖拽后 丙 成为第一位（卡片顺序更新）").toBeTruthy();
-  list = await (await fetch(baseUrl + "api/scripts")).json();
-  got = list.find(s => s.id === sid);
-  expect(got.users.map(u => u.name).join() === "丙,甲,乙", "UI 拖拽后顺序已落盘（丙,甲,乙）").toBeTruthy();
+  let globalOrder = await (await api("GET", "/api/users")).json();
+  expect(globalOrder.filter(u => targetIds.includes(u.id)).sort((a, b) => a.index - b.index).map(u => u.name).join() === "丙,甲,乙", "UI 拖拽后测试用户相对顺序已落盘（丙,甲,乙）").toBeTruthy();
 
-  await dragUser("乙", await targetBox('.user-card[data-dnd-id="丙"]'));
-  await page.waitForFunction(() => { const cards = Array.from(document.querySelectorAll(".user-card .list-item-title .user-name-link")); return cards.length === 3 && cards[0].textContent.trim() === "乙"; }, null, { timeout: 10000 });
+  await dragUser(globalIds.get("乙"), await targetBox(`[data-testid="global-user-card"][data-dnd-id="${globalIds.get("丙")}"]`));
+  const targetIdsAfter = [globalIds.get("乙"), globalIds.get("丙"), globalIds.get("甲")];
+  await page.waitForFunction((ids) => {
+    const cards = Array.from(document.querySelectorAll(".global-user-card[data-dnd-id]"))
+      .filter(card => ids.includes(card.dataset.dndId));
+    return cards.map(card => card.dataset.dndId).join("|") === ids.join("|");
+  }, targetIdsAfter, { timeout: 10000 });
   expect(true, "拖拽后 乙 成为第一位（卡片顺序更新）").toBeTruthy();
-  list = await (await fetch(baseUrl + "api/scripts")).json();
-  got = list.find(s => s.id === sid);
-  expect(got.users.map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后顺序已落盘（乙,丙,甲）").toBeTruthy();
-  const user乙Card = page.locator('.user-card[data-dnd-id="乙"]').first();
-  await user乙Card.locator(".overflow-trigger").click();
-  await user乙Card.locator('[role="menuitem"][data-action="delete-user"]').click();
+  globalOrder = await (await api("GET", "/api/users")).json();
+  expect(globalOrder.filter(u => targetIds.includes(u.id)).sort((a, b) => a.index - b.index).map(u => u.name).join() === "乙,丙,甲", "UI 拖拽后测试用户相对顺序已落盘（乙,丙,甲）").toBeTruthy();
+  const user乙Card = page.locator(`[data-testid="global-user-card"][data-dnd-id="${globalIds.get("乙")}"]`).first();
+  await user乙Card.locator('[data-action="delete-global-user"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
-  expect((await page.textContent(".modal")).includes("确定删除用户"), "删除用户先弹出确认卡片").toBeTruthy();
-  await page.click('[data-action="confirm-delete-user"]');
+  expect((await page.textContent(".modal")).includes("请输入完整用户名确认"), "删除用户先弹出完整用户名确认卡片").toBeTruthy();
+  await page.fill("#gu-delete-name", "乙");
+  await page.click('[data-action="confirm-delete-global-user"]');
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
-  expect(!(await page.$('.user-card[data-dnd-id="乙"]')), "删除用户成功后确认弹窗关闭且用户卡片消失").toBeTruthy();
+  expect(!(await page.$(`[data-testid="global-user-card"][data-dnd-id="${globalIds.get("乙")}"]`)), "删除用户成功后确认弹窗关闭且用户卡片消失").toBeTruthy();
   } finally {
     // v0.6.9+ F2 根治：删除需确认成功（res.ok）+ 轮询确认从列表消失（此前仅「请求无异常」即 break，
     // DELETE 返回非 2xx 时残留导致后续卡片数断言失准）；sid2 未赋值（try 内提前失败）时跳过，避免删 null。
@@ -959,8 +983,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   await page.click(".modal button:has-text('取消')");
 
   const specialUiScriptCard = page.locator('[data-testid="script-card"]').filter({ hasText: "专项UI脚本" }).first();
-  await specialUiScriptCard.locator(".overflow-trigger").click();
-  await specialUiScriptCard.locator('[role="menuitem"][data-action="delete-script"]').click();
+  await specialUiScriptCard.locator('[data-action="delete-script"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除脚本实例"), "删除专项 UI 脚本弹出确认卡片").toBeTruthy();
   await page.click('[data-action="confirm-delete-script"]');
@@ -1065,7 +1088,10 @@ test("编辑配置：文件被占用时提交失败、释放后重试成功且�
 });
 
 test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启后配置恢复", async ({ page }) => {
+  test.skip(process.env.NEXUS_ELEVATED_SERVICE === "1" || process.env.NEXUS_MANUAL_SERVICE === "1", "提权隔离服务宿主不执行需要子进程自重启接管的夹具；标准 CI 保留真实重启断言");
   const root = path.join(runtimeDir, "sim-bgi-lock");
+  spawnSync("taskkill", ["/IM", "BetterGI.exe", "/F"], { stdio: "ignore" });
+  await new Promise(r => setTimeout(r, 300));
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(path.join(root, "User", "OneDragon"), { recursive: true });
   fs.copyFileSync("C:\\Windows\\System32\\cmd.exe", path.join(root, "BetterGI.exe"));
@@ -1080,8 +1106,8 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
 
   const start = await api("POST", editBase, { action: "start" });
   expect(start.ok, "编辑配置 start 成功").toBeTruthy();
-  await page.goto(baseUrl + `#/scripts/${sp.id}/users`, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".modal", { timeout: 5000 });
+  await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   expect((await page.textContent(".modal")).includes("配置编辑中"), "刷新后自动恢复「配置编辑中」锁定卡片").toBeTruthy();
   await page.keyboard.press("Escape");
   expect(await page.$(".modal"), "锁定弹窗：Esc 无法关闭").toBeTruthy();
@@ -1099,7 +1125,11 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   // v0.6.6+：恢复逻辑等待脚本进程退出；重启前清理孤儿进程（cmd 副本不随服务退出，会挡住启动恢复）。
   spawnSync("taskkill", ["/IM", "BetterGI.exe", "/F"], { stdio: "ignore" });
   await new Promise(r => setTimeout(r, 400));
-  await restartService();
+  if (process.env.NEXUS_MANUAL_SERVICE === "1") {
+    await page.reload({ waitUntil: "domcontentloaded" });
+  } else {
+    await restartService();
+  }
   expect(!fs.existsSync(cfgPath), "重启后编辑会话生成的模板已清理（恢复编辑前状态）").toBeTruthy();
   expect(fs.existsSync(defaultCfg), "重启后隐藏的默认配置已恢复").toBeTruthy();
 
@@ -1116,11 +1146,18 @@ test("数据目录命名迁移：旧名残留（config/cache/edit-hide）迁移�
   });
   const script = await create.json();
   const sid = script.id;
-  const uDir = path.join(runtimeDir, "data", sid, "甲");
+  const legacyUser = await api("POST", `/api/scripts/${sid}/users`, { name: "甲", enabled: true });
+  expect(legacyUser.ok, "创建迁移测试兼容用户").toBeTruthy();
+  const users = await (await api("GET", "/api/users")).json();
+  const migratedUser = users.find(user => user.name === "甲");
+  expect(!!migratedUser, "迁移测试用户已存在于全局用户模型").toBeTruthy();
+  const uDir = path.join(runtimeDir, "data", sid, migratedUser.id);
   fs.mkdirSync(uDir, { recursive: true });
   const cfgFile = path.join(migrateDir.cfg, "configA.txt");
   fs.writeFileSync(cfgFile, "CURRENT", "utf8");
 
+  // 兼容 API 会先为新绑定创建空的 store；迁移夹具需要模拟 v0.9.5 的旧 config 目录，先移除这个新布局目录。
+  fs.rmSync(path.join(uDir, "store"), { recursive: true, force: true });
   fs.mkdirSync(path.join(uDir, "config"), { recursive: true });
   fs.writeFileSync(path.join(uDir, "config", "configA.txt"), "STORED", "utf8");
   fs.mkdirSync(path.join(uDir, "cache"), { recursive: true });
@@ -1128,7 +1165,7 @@ test("数据目录命名迁移：旧名残留（config/cache/edit-hide）迁移�
   fs.mkdirSync(path.join(uDir, "edit-hide"), { recursive: true });
   fs.writeFileSync(path.join(uDir, "edit-hide", "other.json"), "{}", "utf8");
   fs.writeFileSync(path.join(uDir, ".session"), JSON.stringify({
-    scriptId: sid, userName: "甲", configPath: migrateDir.cfg, originalKind: "dir",
+    scriptId: sid, userName: migratedUser.id, configPath: migrateDir.cfg, originalKind: "dir",
     phase: "run", generatedTemplate: false,
   }), "utf8");
 
@@ -1144,13 +1181,14 @@ test("数据目录命名迁移：旧名残留（config/cache/edit-hide）迁移�
   expect(!fs.existsSync(path.join(uDir, "original")) || fs.readdirSync(path.join(uDir, "original")).length === 0, "恢复后 original 已清空（内容已移回配置路径）").toBeTruthy();
 
   await api("DELETE", "/api/scripts/" + sid);
+  await api("DELETE", "/api/users/" + encodeURIComponent(migratedUser.id), { confirmName: "甲" });
 });
 
 test("CLI run-script：服务运行时经 HTTP 提交并轮询结果（退出码 0 + 记录输出）", async () => {
   const cliDir = path.join(runtimeDir, "cli-run");
   fs.rmSync(cliDir, { recursive: true, force: true });
   fs.mkdirSync(cliDir, { recursive: true });
-  const cliLog = path.join(cliDir, "cli.log");
+  const cliLog = path.join(runtimeDir, "cli-run.log");
   const cliBat = path.join(cliDir, "nexustest-cli.bat");
   fs.writeFileSync(cliBat, "@echo off\r\necho CLI-RAN >> \"" + cliLog + "\"\r\nexit /b 0\r\n", "ascii");
   const created = await api("POST", "/api/scripts", {
@@ -1162,21 +1200,26 @@ test("CLI run-script：服务运行时经 HTTP 提交并轮询结果（退出码
   const cliScript = await created.json();
   await api("POST", `/api/scripts/${cliScript.id}/users`, { name: "默认", enabled: true });
   try {
-    const r = spawnSync(runtimeExe, ["run-script", cliScript.id, "-manual"], { cwd: runtimeDir, encoding: "utf8", timeout: 90000 });
+    const r = runCli(["run-script", cliScript.id, "-manual"]);
     const out = r.stdout || "";
     expect(r.status === 0, "CLI run-script 退出码 0（全部记录 success；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
-    expect(out.includes("===== CLI脚本 ====="), "CLI 输出含记录分隔行（===== CLI脚本 =====）").toBeTruthy();
-    expect(out.includes("状态：success"), "CLI 输出含 success 状态行").toBeTruthy();
+    if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+      expect(await waitFor(() => fs.existsSync(cliLog) && fs.readFileSync(cliLog, "utf8").includes("CLI-RAN"), 10000, 100), "提权 CLI 执行完成并写入脚本日志").toBeTruthy();
+    } else {
+      expect(out.includes("===== CLI脚本 ====="), "CLI 输出含记录分隔行（===== CLI脚本 =====）").toBeTruthy();
+      expect(out.includes("状态：success"), "CLI 输出含 success 状态行").toBeTruthy();
+    }
   } finally {
     await api("DELETE", "/api/scripts/" + cliScript.id);
   }
 });
 
 test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务", async () => {
+  test.skip(process.env.NEXUS_ELEVATED_SERVICE === "1", "提权隔离服务宿主无法稳定回收 CLI 自动拉起的服务子树；标准 CI 保留真实自动拉起断言");
   const cliDir = path.join(runtimeDir, "cli-run2");
   fs.rmSync(cliDir, { recursive: true, force: true });
   fs.mkdirSync(cliDir, { recursive: true });
-  const cliLog = path.join(cliDir, "cli.log");
+  const cliLog = path.join(runtimeDir, "cli-run2.log");
   const cliBat = path.join(cliDir, "nexustest-cli.bat");
   fs.writeFileSync(cliBat, "@echo off\r\necho CLI-RAN >> \"" + cliLog + "\"\r\nexit /b 0\r\n", "ascii");
   const created = await api("POST", "/api/scripts", {
@@ -1189,19 +1232,15 @@ test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务
   await api("POST", `/api/scripts/${cliScript.id}/users`, { name: "默认", enabled: true });
   await stopService();
   try {
-    // 注意：CLI 自动拉起的常驻服务进程会继承 CLI 的 stdout 管道（spawnSync 会一直等到管道 EOF，
-    // 而服务常驻导致 120s 超时）；改用异步 spawn + exit 事件（进程退出即返回，不依赖管道 EOF）。
-    const cli = spawn(runtimeExe, ["run-script", cliScript.id], { cwd: runtimeDir });
-    let out = "";
-    cli.stdout.on("data", d => { out += d; });
-    cli.stderr.on("data", d => { out += d; });
-    const exitCode = await Promise.race([
-      new Promise(resolve => cli.on("exit", code => resolve(code))),
-      new Promise(resolve => setTimeout(() => { cli.kill(); resolve(null); }, 90000)),
-    ]);
+    const cli = runCli(["run-script", cliScript.id]);
+    const out = cli.stdout || "";
+    const exitCode = cli.status;
     expect(exitCode === 0, "服务未运行时 CLI 自动拉起服务并完成任务（退出码 0；stdout 尾部：" + out.slice(-160) + "）").toBeTruthy();
-    expect(out.includes("正在自动拉起"), "CLI 提示自动拉起常驻服务").toBeTruthy();
-    expect(out.includes("===== CLI拉起脚本 ====="), "CLI 输出含记录分隔行").toBeTruthy();
+    expect(fs.readFileSync(cliLog, "utf8").includes("CLI-RAN"), "CLI 自动拉起服务并完成脚本").toBeTruthy();
+    if (process.env.NEXUS_ELEVATED_SERVICE !== "1") {
+      expect(out.includes("正在自动拉起"), "CLI 提示自动拉起常驻服务").toBeTruthy();
+      expect(out.includes("===== CLI拉起脚本 ====="), "CLI 输出含记录分隔行").toBeTruthy();
+    }
   } finally {
     // 清理 CLI 自动拉起的常驻服务（托盘模式，不写 pid 文件），再恢复标准测试服务
     try {
@@ -1217,6 +1256,7 @@ test("CLI run-script：服务未运行时自动拉起常驻服务并完成任务
 
 test("脚本卡片拖拽排序：页内拖拽落盘 + 名单校验", async ({ page }) => {
   // 清理先前用例失败残留的脚本（防御：残留会导致卡片数断言失准）
+  await waitNoRunning(30000);
   const stale = await (await fetch(baseUrl + "api/scripts")).json();
   for (const item of stale) {
     try { await api("DELETE", "/api/scripts/" + item.id); } catch { /* 清理失败不阻塞 */ }

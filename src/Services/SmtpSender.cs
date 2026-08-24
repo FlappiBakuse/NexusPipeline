@@ -10,7 +10,7 @@ namespace NexusPipeline.Services;
 
 internal static class SmtpSender
 {
-    public static (bool Ok, string Reason) Status(AppSettings settings)
+    public static (bool Ok, string Reason) Status(AppSettings settings, string? recipientOverride = null)
     {
         if (string.IsNullOrWhiteSpace(settings.SmtpHost))
         {
@@ -28,20 +28,27 @@ internal static class SmtpSender
         {
             return (false, "未配置（密钥无法解密，可能已复制到其他电脑）");
         }
-        if (string.IsNullOrWhiteSpace(settings.SmtpTo))
+        string recipient = string.IsNullOrWhiteSpace(recipientOverride) ? settings.SmtpTo : recipientOverride.Trim();
+        if (string.IsNullOrWhiteSpace(recipient))
         {
             return (false, "未配置（未设置 smtp_to 收件人）");
+        }
+        string? recipientError = ValidateRecipients(recipient);
+        if (recipientError is not null)
+        {
+            return (false, recipientError);
         }
         return (true, "已配置");
     }
 
-    public static async Task<bool> SendAsync(AppSettings settings, string text)
+    public static async Task<bool> SendAsync(AppSettings settings, string text, string? recipientOverride = null)
     {
         string? host = settings.SmtpHost;
         string? user = settings.SmtpUser;
         string? password = SecretStore.TryDecrypt(settings.SmtpPassword, out string? p) ? p : null;
         string? from = string.IsNullOrWhiteSpace(settings.SmtpFrom) ? user : settings.SmtpFrom;
-        List<string> toList = settings.SmtpTo
+        string recipients = string.IsNullOrWhiteSpace(recipientOverride) ? settings.SmtpTo : recipientOverride.Trim();
+        List<string> toList = recipients
             .Split(new[] { ',', '，', ';', '；', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
         if (string.IsNullOrWhiteSpace(host) || string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(password) || toList.Count == 0)
@@ -88,6 +95,28 @@ internal static class SmtpSender
         }
     }
 
+    internal static string? ValidateRecipients(string value)
+    {
+        string[] recipients = value
+            .Split(new[] { ',', '，', ';', '；', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (recipients.Length == 0)
+        {
+            return "SMTP 收件人不能为空";
+        }
+        try
+        {
+            foreach (string recipient in recipients)
+            {
+                _ = MimeKit.MailboxAddress.Parse(recipient);
+            }
+            return null;
+        }
+        catch (Exception ex)
+        {
+            return $"SMTP 收件人格式不正确：{ex.Message}";
+        }
+    }
+
     private static SecureSocketOptions ResolveSecure(int port, string mode)
     {
         return mode switch
@@ -108,7 +137,7 @@ internal static class SmtpSender
 internal static class NotifySender
 {
     /// <summary>按启用开关并行发送启用渠道（Webhook / SMTP 各自独立开关，废弃原发送策略）。</summary>
-    public static async Task<bool> SendAsync(AppSettings settings, string text)
+    public static async Task<bool> SendAsync(AppSettings settings, string text, string? smtpToOverride = null)
     {
         var tasks = new List<Task<bool>>();
         if (settings.WebhookEnabled)
@@ -117,7 +146,7 @@ internal static class NotifySender
         }
         if (settings.SmtpEnabled)
         {
-            tasks.Add(SmtpSender.SendAsync(settings, text));
+            tasks.Add(SmtpSender.SendAsync(settings, text, smtpToOverride));
         }
         if (tasks.Count == 0)
         {

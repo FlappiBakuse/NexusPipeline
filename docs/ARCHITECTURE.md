@@ -9,6 +9,7 @@
 > v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
 > v0.9.1 并行调度安全性加固：`IExecutionSnapshotProvider` 在同一数据锁内提供队列、脚本和用户配置输入，资源租约覆盖日志模式与前/后置脚本，路径和 ADB 端点按物理身份规范化；`ExecutionStateStore` 增加运行组收尾状态与 CRUD 协调域，`Scheduler` 对瞬时准入冲突保留待重试触发。队列内保持串行，符合条件的模拟器队列和一个标准队列可并行。
 > v0.9.5 扩展边界收敛：Webhook/SMTP 通知和模拟器均归宿主基础设施；模拟器运行开始时冻结 Generic ADB 或 MuMuManager driver。新增独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1，managed-code 插件按 manifest 配置、程序集隔离和重启语义加载；现有数据化专项插件继续兼容。
+> v0.9.6 用户领域重构：用户提升为全局 `NexusUser`，脚本通过 `UserScriptBinding` 保存参与运行、配置脚本和用户通知设置；旧脚本内用户在启动阶段迁移并按名称合并。全局用户页负责排序、头像、绑定和删除，脚本页与队列页保留直接右侧操作区。
 
 ## 总体结构
 
@@ -136,7 +137,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 |---|---|
 | `app.js` | 路由表 + 各视图 `actions` 注册表合并分发 + 全局 input 委托。**不加业务逻辑** |
 | `views/scripts.js` | 脚本实例页（紧凑列表行 + 新建卡片组 + 通用/专用弹窗，草稿为模块变量） |
-| `views/users.js` | 用户管理二级页（`#/scripts/{id}/users`） |
+| `views/users.js` | 全局用户页兼容导出层（转发 `global-users.js`） |
+| `views/global-users.js` | 全局用户卡片、头像、脚本绑定、排序、通知和删除确认（`#/users`） |
 | `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
 | `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
 | `views/history.js` | 历史列表 + 详情弹窗 |
@@ -149,7 +151,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/forms.js` | 共享表单模板（pageHeader/valueField/selectField） |
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
-| `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/settings） |
+| `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/users/settings） |
 | `core/dnd.js` | 通用拖拽排序组件（v0.6.8+，无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项（否则落位震荡） |
 
 ### 新增交互的落点

@@ -28,6 +28,17 @@ internal static class RuntimeInitializer
         }
 
         MigrateLegacyConfig();
+        try
+        {
+            // v0.9.6：必须在新模型加载和 ConfigSwap 崩溃恢复之前完成全局用户迁移。
+            UserModelMigration.EnsureMigrated();
+        }
+        catch (Exception ex)
+        {
+            Logger.Fatal($"[致命] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
+            Console.Error.WriteLine($"[FATAL] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
+            return 1;
+        }
         // v0.6.6+：先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
         Limits.Load();
         RuntimeContext ctx = RuntimeContext.Instance;

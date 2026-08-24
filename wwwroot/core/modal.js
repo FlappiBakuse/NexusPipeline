@@ -76,6 +76,13 @@ export function showModal(content, wide = false, locked = false) {
       first.focus();
     }
   });
+  const lockedEscapeHandler = event => {
+    if (event.key !== "Escape" || !isLocked() || !mask.isConnected) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  window.addEventListener("keydown", lockedEscapeHandler, true);
+  mask._lockedEscapeHandler = lockedEscapeHandler;
   document.body.appendChild(mask);
   // v0.7.3+（KN-12）：焦点逃逸兜底——点击弹窗内非焦点区域（activeElement 落 body/外部）后 Tab 不再逃出；
   // 弹窗已移除（关闭流程中）或焦点正常在弹窗内时跳过。
@@ -109,6 +116,7 @@ export function showModal(content, wide = false, locked = false) {
 export function closeModal(restoreFocus = true) {
   const mask = $(".modal-mask");
   if (mask) mask.remove();
+  if (mask?._lockedEscapeHandler) window.removeEventListener("keydown", mask._lockedEscapeHandler, true);
   if (restoreFocus && modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();
   modalReturnFocus = null;
 }

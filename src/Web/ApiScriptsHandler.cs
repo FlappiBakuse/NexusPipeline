@@ -65,7 +65,11 @@ internal static class ApiScriptsHandler
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
             // v0.7.2+（KN-04）：深拷贝快照后序列化——避免枚举/序列化与并发修改冲突（「集合已修改」/越界异常）。
-            List<ScriptInstance> snapshot = ctx.SnapshotScripts().OrderBy(script => script.Index).ToList();
+            List<NexusUser> users = ctx.SnapshotUsers();
+            List<ScriptInstance> snapshot = ctx.SnapshotScripts()
+                .OrderBy(script => script.Index)
+                .Select(script => ProjectScriptForCompatibility(script, users))
+                .ToList();
             await HttpHelper.WriteJsonAsync(context, snapshot).ConfigureAwait(false);
             return;
         }
@@ -150,7 +154,7 @@ internal static class ApiScriptsHandler
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "添加脚本实例", $"{script.Name}（id={script.Id}）");
-            await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2)
@@ -236,7 +240,7 @@ internal static class ApiScriptsHandler
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(Audit.Web, "修改脚本实例", $"{update.Name}（id={update.Id}）");
-            await HttpHelper.WriteJsonAsync(context, update).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(update, ctx.SnapshotUsers())).ConfigureAwait(false);
             return;
             }
             finally
@@ -582,9 +586,43 @@ internal static class ApiScriptsHandler
         return trimmed;
     }
 
+    private static ScriptInstance ProjectScriptForCompatibility(ScriptInstance script, IReadOnlyList<NexusUser> users)
+    {
+        ScriptInstance clone = script.Clone();
+        if (users.Count == 0)
+        {
+            return clone;
+        }
+
+        List<ScriptUser> projected = users
+            .OrderBy(user => user.Index)
+            .SelectMany(user => user.Bindings
+                .Where(binding => string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal))
+                .Select(binding => new ScriptUser
+                {
+                    Name = user.Name,
+                    Enabled = binding.Enabled,
+                    PreRunScript = binding.PreRunScript,
+                    PreRunOnceOnly = binding.PreRunOnceOnly,
+                    PostRunScript = binding.PostRunScript,
+                    PostRunOnFinalOnly = binding.PostRunOnFinalOnly,
+                }))
+            .ToList();
+        // 迁移完成后嵌套用户已不再是权威数据；这里仅为旧客户端保留只读投影。
+        clone.Users = projected;
+        return clone;
+    }
+
     private static async Task HandleScriptUsersAsync(HttpListenerContext context, string method, string[] seg, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
+        // v0.9.6：旧脚本用户 API 保留兼容窗口，但所有写入都转发到全局用户与绑定模型。
+        // 新页面和新客户端应使用 /api/users；兼容响应中的 script.users 只是只读投影。
+        if (File.Exists(AppPaths.UsersPath))
+        {
+            await HandleGlobalScriptUsersCompatibilityAsync(context, method, seg, body).ConfigureAwait(false);
+            return;
+        }
         if (seg.Length >= 3 && seg[2].Equals("users", StringComparison.OrdinalIgnoreCase))
         {
             if (seg.Length == 3 && method == "POST")
@@ -891,6 +929,494 @@ internal static class ApiScriptsHandler
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
+    private static async Task HandleGlobalScriptUsersCompatibilityAsync(
+        HttpListenerContext context,
+        string method,
+        string[] seg,
+        string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        if (seg.Length < 3 || !seg[2].Equals("users", StringComparison.OrdinalIgnoreCase))
+        {
+            await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+            return;
+        }
+
+        ScriptInstance? script = ctx.FindScript(seg[1]);
+        if (script is null)
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 3 && method == "GET")
+        {
+            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 3 && method == "POST")
+        {
+            ScriptUser? payload = HttpHelper.ParseBody<ScriptUser>(body);
+            string? validation = payload is null || !ScriptUserRule.IsValidName(payload.Name)
+                ? "用户名不能为空且不能包含非法字符"
+                : Limits.CheckNameBytes(payload.Name.Trim(), 128, "用户名");
+            if (validation is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = validation }, 400).ConfigureAwait(false);
+                return;
+            }
+            ScriptUser request = payload!;
+
+            SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+            string? error = null;
+            string? snapshotError = null;
+            NexusUser? target = null;
+            UserScriptBinding? binding = null;
+            bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                context,
+                ctx.Center,
+                script.Id,
+                null,
+                $"script:{script.Id}:users",
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法新增用户";
+                        return;
+                    }
+                    try
+                    {
+                        lock (ctx.DataLock)
+                        {
+                            target = ctx.Users.FirstOrDefault(user =>
+                                string.Equals(user.Name, request.Name.Trim(), StringComparison.OrdinalIgnoreCase));
+                            if (target is not null && target.Bindings.Any(item => item.ScriptInstanceId == script.Id))
+                            {
+                                error = "用户名重复：该脚本已存在同名用户";
+                                return;
+                            }
+                            int current = ctx.Users.Sum(user => user.Bindings.Count(item => item.ScriptInstanceId == script.Id));
+                            error = Limits.CheckUserCount(current);
+                            if (error is not null)
+                            {
+                                return;
+                            }
+                            bool created = false;
+                            if (target is null)
+                            {
+                                error = Limits.CheckGlobalUserCount(ctx.Users.Count);
+                                if (error is not null)
+                                {
+                                    return;
+                                }
+                                target = new NexusUser
+                                {
+                                    Id = Guid.NewGuid().ToString("N"),
+                                    Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
+                                    Name = request.Name.Trim(),
+                                };
+                                ctx.Users.Add(target);
+                                created = true;
+                            }
+                            binding = new UserScriptBinding
+                            {
+                                ScriptInstanceId = script.Id,
+                                Enabled = request.Enabled,
+                                PreRunScript = request.PreRunScript,
+                                PreRunOnceOnly = request.PreRunOnceOnly,
+                                PostRunScript = request.PostRunScript,
+                                PostRunOnFinalOnly = request.PostRunOnFinalOnly,
+                            };
+                            target.Bindings.Add(binding);
+                            try
+                            {
+                                DataStore.SaveUsers(ctx.Users);
+                                snapshotError = UserConfigManager.SnapshotOnAddUser(script, target.Id);
+                                if (snapshotError is not null)
+                                {
+                                    error = "初始配置快照失败：" + snapshotError;
+                                    target.Bindings.Remove(binding);
+                                    if (created)
+                                    {
+                                        ctx.Users.Remove(target);
+                                    }
+                                    DataStore.SaveUsers(ctx.Users);
+                                }
+                                else
+                                {
+                                    SyncCompatibilityAlias(script.Id, target.Name, target.Id);
+                                }
+                            }
+                            catch
+                            {
+                                target.Bindings.Remove(binding);
+                                if (created)
+                                {
+                                    ctx.Users.Remove(target);
+                                }
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }).ConfigureAwait(false);
+            if (!changed)
+            {
+                return;
+            }
+            if (error is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error }, error.Contains("运行", StringComparison.Ordinal) ? 409 : 400).ConfigureAwait(false);
+                return;
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(Audit.Web, "添加用户（兼容 API）", $"{script.Name} / {target!.Name}");
+            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
+        {
+            await ReorderGlobalUsersForCompatibilityAsync(context, script, body).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 4 && method == "PUT")
+        {
+            string oldName = Uri.UnescapeDataString(seg[3]);
+            ScriptUser? payload = HttpHelper.ParseBody<ScriptUser>(body);
+            string? validation = payload is null || !ScriptUserRule.IsValidName(payload.Name)
+                ? "用户名不能为空且不能包含非法字符"
+                : Limits.CheckNameBytes(payload.Name.Trim(), 128, "用户名");
+            if (validation is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = validation }, 400).ConfigureAwait(false);
+                return;
+            }
+            ScriptUser request = payload!;
+
+            NexusUser? target;
+            lock (ctx.DataLock)
+            {
+                target = ctx.Users.FirstOrDefault(user =>
+                    string.Equals(user.Name, oldName, StringComparison.OrdinalIgnoreCase)
+                    && user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id));
+            }
+            if (target is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            UserScriptBinding? binding = target.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
+            if (binding is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+
+            string? error = null;
+            bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                context,
+                ctx.Center,
+                script.Id,
+                target.Id,
+                $"user:{script.Id}:{target.Id}",
+                () =>
+                {
+                    SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法编辑用户";
+                        return;
+                    }
+                    try
+                    {
+                        lock (ctx.DataLock)
+                        {
+                            error = CheckCompatibilityUserBusy(ctx, target!);
+                            if (error is not null)
+                            {
+                                return;
+                            }
+                            if (ctx.Users.Any(user => !ReferenceEquals(user, target)
+                                && string.Equals(user.Name, request.Name.Trim(), StringComparison.OrdinalIgnoreCase)))
+                            {
+                                error = "用户名重复：全局用户已存在同名用户";
+                                return;
+                            }
+                            string previousName = target.Name;
+                            UserScriptBinding previousBinding = binding!.Clone();
+                            try
+                            {
+                                RenameCompatibilityAlias(script.Id, previousName, target.Id, request.Name.Trim());
+                                target.Name = request.Name.Trim();
+                                binding.Enabled = request.Enabled;
+                                binding.PreRunScript = request.PreRunScript;
+                                binding.PreRunOnceOnly = request.PreRunOnceOnly;
+                                binding.PostRunScript = request.PostRunScript;
+                                binding.PostRunOnFinalOnly = request.PostRunOnFinalOnly;
+                                DataStore.SaveUsers(ctx.Users);
+                            }
+                            catch
+                            {
+                                target.Name = previousName;
+                                binding.Enabled = previousBinding.Enabled;
+                                binding.PreRunScript = previousBinding.PreRunScript;
+                                binding.PreRunOnceOnly = previousBinding.PreRunOnceOnly;
+                                binding.PostRunScript = previousBinding.PostRunScript;
+                                binding.PostRunOnFinalOnly = previousBinding.PostRunOnFinalOnly;
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }).ConfigureAwait(false);
+            if (!changed)
+            {
+                return;
+            }
+            if (error is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error }, error.Contains("运行", StringComparison.Ordinal) || error.Contains("待执行", StringComparison.Ordinal) ? 409 : 400).ConfigureAwait(false);
+                return;
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 4 && method == "DELETE")
+        {
+            string userName = Uri.UnescapeDataString(seg[3]);
+            NexusUser? target;
+            lock (ctx.DataLock)
+            {
+                target = ctx.Users.FirstOrDefault(user =>
+                    string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase)
+                    && user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id));
+            }
+            if (target is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            UserScriptBinding? binding = target.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
+            string? error = null;
+            bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
+                context,
+                ctx.Center,
+                script.Id,
+                target.Id,
+                $"user:{script.Id}:{target.Id}",
+                () =>
+                {
+                    SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法删除用户";
+                        return;
+                    }
+                    try
+                    {
+                        lock (ctx.DataLock)
+                        {
+                            error = CheckCompatibilityUserBusy(ctx, target!);
+                            if (error is not null)
+                            {
+                                return;
+                            }
+                            int index = target!.Bindings.IndexOf(binding!);
+                            if (index < 0)
+                            {
+                                error = "用户绑定不存在";
+                                return;
+                            }
+                            target.Bindings.RemoveAt(index);
+                            try
+                            {
+                                DataStore.SaveUsers(ctx.Users);
+                                UserConfigManager.RemoveUserData(script.Id, target.Id);
+                                UserConfigManager.RemoveUserData(script.Id, target.Name);
+                            }
+                            catch
+                            {
+                                target.Bindings.Insert(index, binding!);
+                                DataStore.SaveUsers(ctx.Users);
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                    }
+                }).ConfigureAwait(false);
+            if (!changed)
+            {
+                return;
+            }
+            if (error is not null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error }, error.Contains("运行", StringComparison.Ordinal) ? 409 : 400).ConfigureAwait(false);
+                return;
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+            return;
+        }
+
+        if (seg.Length == 5 && method == "POST" && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleEditConfigAsync(context, seg, body).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    private static async Task ReorderGlobalUsersForCompatibilityAsync(HttpListenerContext context, ScriptInstance script, string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        JsonNode? node = HttpHelper.ParseBody(body);
+        List<string>? names = node?["names"] is JsonArray array
+            ? array.Select(item => item?.ToString() ?? "").ToList()
+            : null;
+        string? error = null;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        if (!gate.Wait(0))
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "脚本正在运行或编辑配置中，无法调整用户顺序" }, 409).ConfigureAwait(false);
+            return;
+        }
+        try
+        {
+            lock (ctx.DataLock)
+            {
+                List<NexusUser> bound = ctx.Users
+                    .Where(user => user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id))
+                    .OrderBy(user => user.Index)
+                    .ToList();
+                if (names is null || names.Count != bound.Count || names.Any(string.IsNullOrWhiteSpace)
+                    || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
+                {
+                    error = "用户顺序名单缺失或与当前用户列表不一致";
+                }
+                else
+                {
+                    Dictionary<string, NexusUser> byName = bound.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
+                    if (names.Any(name => !byName.ContainsKey(name)))
+                    {
+                        error = "用户顺序名单与当前用户列表不一致";
+                    }
+                    else
+                    {
+                        HashSet<string> boundIds = bound.Select(user => user.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                        List<NexusUser> ordered = names.Select(name => byName[name])
+                            .Concat(ctx.Users.Where(user => !boundIds.Contains(user.Id)).OrderBy(user => user.Index))
+                            .ToList();
+                        for (int i = 0; i < ordered.Count; i++)
+                        {
+                            ordered[i].Index = i;
+                        }
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+        if (error is not null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error }, 400).ConfigureAwait(false);
+            return;
+        }
+        ctx.Scheduler.RevalidatePendingPlans();
+        await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
+    }
+
+    private static string? CheckCompatibilityUserBusy(RuntimeContext ctx, NexusUser user)
+    {
+        if (ctx.Scheduler.HasPendingUser(user.Id))
+        {
+            return "用户已存在待执行的冻结计划，暂时无法修改";
+        }
+        foreach (UserScriptBinding binding in user.Bindings)
+        {
+            if (ctx.Center.FindLeases(binding.ScriptInstanceId, user.Id).Count > 0)
+            {
+                return "用户绑定正在运行，无法修改";
+            }
+            if (UserConfigManager.EditSessions.Values.Any(session =>
+                session.Script.Id == binding.ScriptInstanceId
+                && string.Equals(session.Mark.UserName, user.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                return "用户绑定正在编辑配置，无法修改";
+            }
+        }
+        return null;
+    }
+
+    private static void SyncCompatibilityAlias(string scriptId, string userName, string userId)
+    {
+        if (string.Equals(userName, userId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        string source = UserConfigManager.UserDir(scriptId, userId);
+        string target = UserConfigManager.UserDir(scriptId, userName);
+        if (!Directory.Exists(source))
+        {
+            return;
+        }
+        if (Directory.Exists(target))
+        {
+            Directory.Delete(target, recursive: true);
+        }
+        CopyDirectory(source, target);
+    }
+
+    private static void RenameCompatibilityAlias(string scriptId, string oldName, string userId, string newName)
+    {
+        if (string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        string oldPath = UserConfigManager.UserDir(scriptId, oldName);
+        string newPath = UserConfigManager.UserDir(scriptId, newName);
+        if (!Directory.Exists(oldPath))
+        {
+            SyncCompatibilityAlias(scriptId, newName, userId);
+            return;
+        }
+        if (Directory.Exists(newPath))
+        {
+            Directory.Delete(newPath, recursive: true);
+        }
+        Directory.Move(oldPath, newPath);
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (string file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)), overwrite: true);
+        }
+        foreach (string directory in Directory.GetDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+    }
+
     /// <summary>脚本实例顺序重排（v0.6.8+）：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
     private static async Task HandleReorderScriptsAsync(HttpListenerContext context, string body)
     {
@@ -1003,11 +1529,25 @@ internal static class ApiScriptsHandler
         }
     }
 
+    internal static Task HandleEditConfigByUserIdAsync(
+        HttpListenerContext context,
+        string scriptId,
+        string userId,
+        string body)
+    {
+        return HandleEditConfigAsync(
+            context,
+            new[] { "scripts", scriptId, "users", Uri.EscapeDataString(userId), "edit-config" },
+            body);
+    }
+
     private static async Task HandleEditConfigAsync(HttpListenerContext context, string[] seg, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         string scriptId = seg[1];
-        string userName = Uri.UnescapeDataString(seg[3]);
+        string userReference = Uri.UnescapeDataString(seg[3]);
+        string userName = userReference;
+        string userKey = userReference;
         string action = HttpHelper.ParseBody(body).Get("action").Str();
         ScriptInstance? script = ctx.FindScript(scriptId);
         if (script is null)
@@ -1016,10 +1556,28 @@ internal static class ApiScriptsHandler
             return;
         }
         ScriptUser? user;
+        NexusUser? globalUser = ctx.FindUser(userReference)
+            ?? ctx.SnapshotUsers().FirstOrDefault(item => string.Equals(item.Name, userReference, StringComparison.OrdinalIgnoreCase));
         lock (ctx.DataLock)
         {
-            // v0.7.2+（KN-04）：锁内枚举用户集合，避免与并发修改冲突。
-            user = script.Users.FirstOrDefault(u => u.Name == userName);
+            if (globalUser is not null)
+            {
+                UserScriptBinding? binding = globalUser.Bindings.FirstOrDefault(item =>
+                    string.Equals(item.ScriptInstanceId, scriptId, StringComparison.Ordinal));
+                user = binding is null
+                    ? null
+                    : new ResolvedScriptUser(globalUser.Id, globalUser.Name, binding.Clone()).ToLegacyScriptUser();
+                if (user is not null)
+                {
+                    userName = user.Name;
+                    userKey = globalUser.Id;
+                }
+            }
+            else
+            {
+                // v0.7.2+（KN-04）：锁内枚举旧嵌套用户集合，兼容旧 API 迁移窗口。
+                user = script.Users.FirstOrDefault(u => u.Name == userName);
+            }
         }
         if (user is null)
         {
@@ -1042,8 +1600,8 @@ internal static class ApiScriptsHandler
                 context,
                 ctx.Center,
                 scriptId,
-                user.Name,
-                $"user:{scriptId}:{user.Name}",
+                userKey,
+                $"user:{scriptId}:{userKey}",
                 () =>
                 {
                     if (!gate.Wait(0))
@@ -1052,7 +1610,7 @@ internal static class ApiScriptsHandler
                         return;
                     }
                     gateAcquired = true;
-                    if (!ctx.Center.TryBeginEditSession(scriptId, user.Name, script.ConfigPath, out editLeaseConflict))
+                    if (!ctx.Center.TryBeginEditSession(scriptId, userKey, script.ConfigPath, out editLeaseConflict))
                     {
                         gate.Release();
                         gateAcquired = false;
@@ -1083,8 +1641,8 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "检测到已打开的脚本，退出脚本后才能编辑配置。" }, 409).ConfigureAwait(false);
                     return;
                 }
-                UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
-                string? prepError = UserConfigManager.PrepareForEdit(script.Id, user.Name, script.ConfigPath);
+                UserConfigManager.RestoreHiddenConfigs(script.Id, userKey, script.ConfigPath);
+                string? prepError = UserConfigManager.PrepareForEdit(script.Id, userKey, script.ConfigPath);
                 if (prepError is not null)
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = "配置交换失败：" + prepError }, 400).ConfigureAwait(false);
@@ -1100,16 +1658,17 @@ internal static class ApiScriptsHandler
                 var editMark = new ConfigSessionMark
                 {
                     ScriptId = script.Id,
-                    UserName = user.Name,
+                    UserName = userKey,
                     ConfigPath = script.ConfigPath,
-                    OriginalKind = ConfigSessionMark.TryRead(script.Id, user.Name)?.OriginalKind
+                    OriginalKind = ConfigSessionMark.TryRead(script.Id, userKey)?.OriginalKind
                         ?? PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)),
                     Phase = "edit",
                     GeneratedTemplate = generatedTemplate,
                     TemplateFiles = generatedTemplateFiles,
                 };
                 editMark.Write();
-                UserConfigManager.HideOtherConfigs(script, script.Id, user.Name);
+                UserConfigManager.HideOtherConfigs(script, script.Id, userKey);
+                SyncCompatibilityAlias(script.Id, userName, userKey);
                 Process? proc;                try
                 {
                     proc = SystemActions.StartVisible(script.MainExe,
@@ -1117,7 +1676,7 @@ internal static class ApiScriptsHandler
                 }
                 catch (Exception ex)
                 {
-                    UserConfigManager.CancelEdit(script.Id, user.Name, script.ConfigPath);
+                    UserConfigManager.CancelEdit(script.Id, userKey, script.ConfigPath);
                     await HttpHelper.WriteJsonAsync(context, new { error = "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试" }, 400).ConfigureAwait(false);
                     return;
                 }
@@ -1156,10 +1715,10 @@ internal static class ApiScriptsHandler
                                     "脚本",
                                     stableSeconds: 3);
                             }
-                            UserConfigManager.CancelEdit(script.Id, user.Name, script.ConfigPath);
-                            UserConfigManager.RestoreHiddenConfigs(script.Id, user.Name, script.ConfigPath);
+                            UserConfigManager.CancelEdit(script.Id, userKey, script.ConfigPath);
+                            UserConfigManager.RestoreHiddenConfigs(script.Id, userKey, script.ConfigPath);
                             UserConfigManager.EditSessions.TryRemove(scriptId, out _);
-                            ctx.Center.EndEditSession(scriptId, user.Name);
+                            ctx.Center.EndEditSession(scriptId, userKey);
                             editLeaseHeld = false;
                         }
                     }
@@ -1177,7 +1736,7 @@ internal static class ApiScriptsHandler
                 {
                     if (editLeaseHeld)
                     {
-                        ctx.Center.EndEditSession(scriptId, user.Name);
+                        ctx.Center.EndEditSession(scriptId, userKey);
                         editLeaseHeld = false;
                     }
                     gate.Release();
@@ -1208,8 +1767,8 @@ internal static class ApiScriptsHandler
                     return;
                 }
                 string? swapError = action == "done"
-                    ? UserConfigManager.CommitEdit(scriptId, user.Name, script.ConfigPath)
-                    : UserConfigManager.CancelEdit(scriptId, user.Name, script.ConfigPath);
+                    ? UserConfigManager.CommitEdit(scriptId, userKey, script.ConfigPath)
+                    : UserConfigManager.CancelEdit(scriptId, userKey, script.ConfigPath);
                 if (swapError is not null)
                 {
                     await HttpHelper.WriteJsonAsync(context, new { error = (action == "done" ? "提交" : "取消") + "失败：" + swapError }, 400).ConfigureAwait(false);
@@ -1219,12 +1778,13 @@ internal static class ApiScriptsHandler
                 {
                     DeleteGeneratedTemplateFiles(session.Mark);
                 }
-                UserConfigManager.RestoreHiddenConfigs(scriptId, user.Name, script.ConfigPath);
+                UserConfigManager.RestoreHiddenConfigs(scriptId, userKey, script.ConfigPath);
+                SyncCompatibilityAlias(scriptId, userName, userKey);
                 // 文件交换成功后才移除会话（失败保留，可原地重试；.session 标记由自愈/后台重试兜底）。
                 sessionRemoved = UserConfigManager.EditSessions.TryRemove(scriptId, out _);
                 if (sessionRemoved)
                 {
-                    ctx.Center.EndEditSession(scriptId, user.Name);
+                    ctx.Center.EndEditSession(scriptId, userKey);
                 }
                 Audit.Log(Audit.Web, action == "done" ? "完成编辑配置" : "取消编辑配置", $"{script.Name} / {user.Name}");
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);

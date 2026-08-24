@@ -74,6 +74,104 @@ internal static class ConfigSwapPaths
         }
     }
 
+    /// <summary>
+    /// 兼容旧版按用户名访问的数据目录：把 UserId 权威目录复制到用户名镜像。
+    /// 镜像只服务旧 API/旧脚本工具，运行与持久化始终使用 userKey（UserId）。
+    /// </summary>
+    public static void SyncCompatibilityAlias(string scriptId, string? userKey, string? userName)
+    {
+        if (string.IsNullOrWhiteSpace(userKey)
+            || string.IsNullOrWhiteSpace(userName)
+            || string.Equals(userKey, userName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string source = UserDir(scriptId, userKey);
+        string target = UserDir(scriptId, userName);
+        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)
+            || !Directory.Exists(source))
+        {
+            return;
+        }
+
+        try
+        {
+            // 保持目标目录始终可见，避免旧 API 在镜像重建的瞬间读到不存在的路径；
+            // 运行临时目录由 CleanupCompatibilityTransient 在生命周期节点精确清理。
+            Directory.CreateDirectory(target);
+            ConfigSwapPrimitives.CopyAs(source, target, PathKind.Dir);
+        }
+        catch (Exception ex)
+        {
+            // 兼容镜像失败不影响 UserId 权威目录及运行结果。
+            Logger.Warn($"[兼容] 用户目录镜像同步失败（{source} → {target}）：{ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 兼容旧版直接编辑用户名 store 目录的工具：运行开始前把镜像快照采纳回 UserId 权威目录。
+    /// 仅采纳持久化 store，不采纳 original、script 或会话标记等运行现场。
+    /// </summary>
+    public static void AdoptCompatibilityStore(string scriptId, string? userKey, string? userName)
+    {
+        if (string.IsNullOrWhiteSpace(userKey)
+            || string.IsNullOrWhiteSpace(userName)
+            || string.Equals(userKey, userName, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string source = StoreDir(scriptId, userKey);
+        string alias = StoreDir(scriptId, userName);
+        if (!Directory.Exists(alias))
+        {
+            return;
+        }
+
+        try
+        {
+            ConfigSwapPrimitives.TryDeleteDir(source);
+            ConfigSwapPrimitives.CopyAs(alias, source, PathKind.Dir);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[兼容] 用户 store 镜像采纳失败（{alias} → {source}）：{ex.Message}");
+        }
+    }
+
+    /// <summary>清理用户名兼容镜像中的运行临时目录，保留 store 供旧 API 读取运行结果。</summary>
+    public static void CleanupCompatibilityTransient(string scriptId, string? userName)
+    {
+        if (string.IsNullOrWhiteSpace(userName))
+        {
+            return;
+        }
+        ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
+        ConfigSwapPrimitives.TryDeleteDir(RetryStoreDir(scriptId, userName));
+    }
+
+    public static void CleanupCompatibilityReplacement(string scriptId, string? userName)
+    {
+        if (!string.IsNullOrWhiteSpace(userName))
+        {
+            ConfigSwapPrimitives.TryDeleteDir(ReplaceBackupDir(scriptId, userName));
+            ConfigSwapPrimitives.TryDeleteDir(CacheDir(scriptId, userName));
+            try
+            {
+                string session = Path.Combine(UserDir(scriptId, userName), ".session");
+                if (File.Exists(session))
+                {
+                    File.Delete(session);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[兼容] 用户目录会话标记清理失败（脚本 {scriptId} / 用户 {userName}）：{ex.Message}");
+            }
+        }
+    }
+
     /// <summary>数据目录命名迁移（v0.6.0）：旧名 → 新名（config→store、cache→original、edit-hide→edit-hidden、replace-backup→swap-backup）。
     /// 幂等：目标名已存在则跳过（保留新现场）；失败仅告警不阻断。启动时在崩溃恢复扫描前调用，确保旧版本残留现场仍可恢复。</summary>
     public static void MigrateLegacyLayout()

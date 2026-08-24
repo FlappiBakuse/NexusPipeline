@@ -172,8 +172,7 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   await api("DELETE", "/api/queues/" + tqGot.id);
 
   const editedQueueCard = page.locator('[data-testid="queue-card"]').filter({ hasText: "测试队列A-改" }).first();
-  await editedQueueCard.locator(".overflow-trigger").click();
-  await editedQueueCard.locator('[role="menuitem"][data-action="delete-queue"]').click();
+  await editedQueueCard.locator('[data-action="delete-queue"]').click();
   await page.waitForSelector(".modal-mask .modal", { timeout: 5000 });
   expect((await page.textContent(".modal")).includes("确定删除调度队列"), "删除队列弹出确认卡片（含确定/取消）").toBeTruthy();
   await page.click('[data-action="confirm-delete-queue"]');

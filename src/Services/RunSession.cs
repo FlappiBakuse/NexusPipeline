@@ -1,4 +1,5 @@
 using System.Text;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
@@ -18,6 +19,8 @@ internal class RunSession
     protected readonly string _queueId;
     protected readonly string _queueName;
     protected readonly string? _userName;
+    protected readonly ResolvedScriptUser? _resolvedUser;
+    protected readonly string? _userKey;
     protected readonly CancellationToken _token;
     protected readonly Action<int, int>? _attemptChanged;
     protected readonly Action<string>? _statusChanged;
@@ -32,6 +35,7 @@ internal class RunSession
     protected bool _preRunCompletedSuccessfully;
 
     protected RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
+        ResolvedScriptUser? resolvedUser = null,
         Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
     {
         _script = script;
@@ -39,6 +43,8 @@ internal class RunSession
         _queueId = queueId;
         _queueName = queueName;
         _userName = userName;
+        _resolvedUser = resolvedUser;
+        _userKey = resolvedUser?.UserKey ?? userName;
         _token = token;
         _attemptChanged = attemptChanged;
         _statusChanged = statusChanged;
@@ -56,6 +62,8 @@ internal class RunSession
     internal ScriptInstance Script => _script;
     internal string Mode => _mode;
     internal string? UserName => _userName;
+    internal string? UserKey => _userKey;
+    internal ResolvedScriptUser? ResolvedUser => _resolvedUser;
     internal CancellationToken Token => _token;
     internal StringBuilder ScriptFullLog => _results.FullLog;
     internal bool ScriptLogTruncated { get => _results.IsTruncated; set => _results.IsTruncated = value; }

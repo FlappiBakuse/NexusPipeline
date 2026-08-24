@@ -246,7 +246,8 @@ internal sealed record ExecutionAdmissionProfile(
     public static ExecutionAdmissionProfile ForScript(
         ScriptInstance script,
         string? userName = null,
-        IPluginCapabilityResolver? capabilities = null)
+        IPluginCapabilityResolver? capabilities = null,
+        IReadOnlyList<ResolvedScriptUser>? resolvedUsers = null)
     {
         IReadOnlyList<string>? users = string.IsNullOrWhiteSpace(userName)
             ? null
@@ -255,7 +256,7 @@ internal sealed record ExecutionAdmissionProfile(
             "script",
             null,
             ExecutionResourceSetBuilder.Build(
-                new[] { new ExecutionResourceInput(script.Id, script, users) },
+                new[] { new ExecutionResourceInput(script.Id, script, users, resolvedUsers) },
                 capabilities),
             "none");
     }
@@ -269,7 +270,7 @@ internal sealed record ExecutionAdmissionProfile(
             && tasks.All(task => task.Script is not null && IsVerifiedEmulator(task.Script, capabilities));
 
         IEnumerable<ExecutionResourceInput> resources = tasks.Select(task =>
-            new ExecutionResourceInput(task.Task.ScriptInstanceId, task.Script, task.EnabledUsers));
+            new ExecutionResourceInput(task.Task.ScriptInstanceId, task.Script, task.EnabledUsers, task.ResolvedUsers));
         return new ExecutionAdmissionProfile(
             "queue",
             emulatorOnly ? ExecutionConcurrencyClass.EmulatorOnly : ExecutionConcurrencyClass.Standard,
@@ -324,7 +325,8 @@ internal sealed record CompletionIntent(
 internal sealed record ExecutionResourceInput(
     string ScriptId,
     ScriptInstance? Script,
-    IReadOnlyCollection<string>? UserNames);
+    IReadOnlyCollection<string>? UserNames,
+    IReadOnlyCollection<ResolvedScriptUser>? ResolvedUsers = null);
 
 internal static class ExecutionResourceSetBuilder
 {
@@ -364,15 +366,21 @@ internal static class ExecutionResourceSetBuilder
 
                 if (script is not null)
                 {
-                    IEnumerable<ScriptUser> users = script.Users.Where(user => user.Enabled);
-                    if (item.UserNames is not null)
+                    IEnumerable<ResolvedScriptUser>? resolvedUsers = item.ResolvedUsers;
+                    IEnumerable<ScriptUser> users = resolvedUsers is not null
+                        ? resolvedUsers.Select(user => user.ToLegacyScriptUser())
+                        : script.Users.Where(user => user.Enabled);
+                    if (item.UserNames is not null && resolvedUsers is null)
                     {
                         users = users.Where(user => item.UserNames.Any(name =>
                             string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));
                     }
                     foreach (ScriptUser user in users)
                     {
-                        userDataKeys.Add($"user:{normalizedScriptId}:{user.Name.Trim()}");
+                        string userKey = resolvedUsers?.FirstOrDefault(item =>
+                            string.Equals(item.UserName, user.Name, StringComparison.OrdinalIgnoreCase))?.UserKey
+                            ?? user.Name.Trim();
+                        userDataKeys.Add($"user:{normalizedScriptId}:{userKey}");
                     }
                 }
             }
@@ -420,8 +428,11 @@ internal static class ExecutionResourceSetBuilder
                 logResources.Add(LogResourceDescriptor.FromPath(script.LogPath));
             }
 
-            IEnumerable<ScriptUser> auxiliaryUsers = script.Users.Where(user => user.Enabled);
-            if (item.UserNames is not null)
+            IEnumerable<ResolvedScriptUser>? resolvedAuxiliaryUsers = item.ResolvedUsers;
+            IEnumerable<ScriptUser> auxiliaryUsers = resolvedAuxiliaryUsers is not null
+                ? resolvedAuxiliaryUsers.Select(user => user.ToLegacyScriptUser())
+                : script.Users.Where(user => user.Enabled);
+            if (item.UserNames is not null && resolvedAuxiliaryUsers is null)
             {
                 auxiliaryUsers = auxiliaryUsers.Where(user => item.UserNames.Any(name =>
                     string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));

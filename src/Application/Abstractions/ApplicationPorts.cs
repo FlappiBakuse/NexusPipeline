@@ -29,11 +29,36 @@ internal interface IExecutionSnapshotProvider
     ExecutionQueueSnapshot? SnapshotQueue(string queueId);
 }
 
-internal sealed record ExecutionScriptSnapshot(ScriptInstance Script);
+internal sealed record ExecutionScriptSnapshot(
+    ScriptInstance Script,
+    IReadOnlyList<NexusUser>? Users = null);
 
 internal sealed record ExecutionQueueSnapshot(
     DispatchQueue Queue,
-    IReadOnlyList<ScriptInstance> Scripts);
+    IReadOnlyList<ScriptInstance> Scripts,
+    IReadOnlyList<NexusUser>? Users = null);
+
+/// <summary>一次执行计划中冻结的用户身份和绑定设置。</summary>
+internal sealed record ResolvedScriptUser(
+    string UserId,
+    string UserName,
+    UserScriptBinding Binding)
+{
+    public string UserKey => string.IsNullOrWhiteSpace(UserId) ? UserName : UserId;
+
+    public ScriptUser ToLegacyScriptUser()
+    {
+        return new ScriptUser
+        {
+            Name = UserName,
+            Enabled = Binding.Enabled,
+            PreRunScript = Binding.PreRunScript,
+            PreRunOnceOnly = Binding.PreRunOnceOnly,
+            PostRunScript = Binding.PostRunScript,
+            PostRunOnFinalOnly = Binding.PostRunOnFinalOnly,
+        };
+    }
+}
 
 /// <summary>脚本用户读取端口，集中处理并发快照与启用用户规则。</summary>
 internal interface IUserRepository
@@ -41,6 +66,77 @@ internal interface IUserRepository
     ScriptUser? FindEnabled(ScriptInstance script, string? userName);
 
     IReadOnlyList<string> EnabledNames(ScriptInstance script);
+
+    /// <summary>
+    /// 按全局用户快照解析一个启用绑定。旧测试/兼容仓储未实现时回退到 ScriptUser，保证旧执行契约可逐步迁移。
+    /// </summary>
+    ResolvedScriptUser? ResolveEnabledBinding(
+        ScriptInstance script,
+        string? userName,
+        IReadOnlyList<NexusUser>? users = null)
+    {
+        if (users is not null)
+        {
+            if (string.IsNullOrWhiteSpace(userName))
+            {
+                return null;
+            }
+            foreach (NexusUser user in users.OrderBy(item => item.Index))
+            {
+                if (!string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
+                    item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+                return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
+            }
+            return null;
+        }
+
+        ScriptUser? legacy = FindEnabled(script, userName);
+        return legacy is null
+            ? null
+            : new ResolvedScriptUser(
+                "",
+                legacy.Name,
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = script.Id,
+                    Enabled = legacy.Enabled,
+                    PreRunScript = legacy.PreRunScript,
+                    PreRunOnceOnly = legacy.PreRunOnceOnly,
+                    PostRunScript = legacy.PostRunScript,
+                    PostRunOnFinalOnly = legacy.PostRunOnFinalOnly,
+                });
+    }
+
+    /// <summary>按全局 Index 返回脚本已绑定且启用的用户；users 为空时兼容旧嵌套模型。</summary>
+    IReadOnlyList<ResolvedScriptUser> ResolveEnabledBindings(
+        ScriptInstance script,
+        IReadOnlyList<NexusUser>? users = null)
+    {
+        if (users is not null)
+        {
+            return users
+                .OrderBy(item => item.Index)
+                .Select(user => new
+                {
+                    User = user,
+                    Binding = user.Bindings.FirstOrDefault(item =>
+                        item.Enabled && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                })
+                .Where(item => item.Binding is not null)
+                .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
+                .ToList();
+        }
+
+        return EnabledNames(script)
+            .Select(name => ResolveEnabledBinding(script, name))
+            .Where(item => item is not null)
+            .Cast<ResolvedScriptUser>()
+            .ToList();
+    }
 }
 
 /// <summary>设置读取端口，避免业务服务为读取设置而反向依赖 RuntimeContext。</summary>
@@ -80,6 +176,11 @@ internal interface IFrozenQueueExecutionService
 internal interface INotificationService
 {
     Task NotifyScriptAsync(ScriptInstance script, RunRecord record);
+
+    Task NotifyScriptAsync(ScriptInstance script, RunRecord record, UserScriptBinding binding)
+    {
+        return NotifyScriptAsync(script, record);
+    }
 
     Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);
 }

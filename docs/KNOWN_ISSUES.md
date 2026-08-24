@@ -99,6 +99,17 @@
 
 **v0.9.5 修复验证结果（2026-08-24）**：上述目标条目均已完成并转为回归保护。验证包含管理员构建、单元测试 197/197、加速与真实计时 E2E 87/87、judge 150/150、chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
 
+## v0.9.6：Global User Management
+
+| 编号 | 已知问题 | 当前确认状态 | 代码位置 | 归属 |
+|---|---|---|---|---|
+| #93 | 用户身份嵌套在脚本实例中，跨脚本同名用户无法统一管理 | 已修复：新增全局 `NexusUser` 与脚本绑定，并在启动阶段迁移同名旧用户 | `src/Models/NexusUser.cs`, `src/Persistence/UserModelMigration.cs` | v0.9.6 |
+| #94 | 用户改名依赖展示名称，多个脚本绑定时配置数据迁移边界不稳定 | 已修复：引入稳定 `UserId`，绑定配置与 API 使用稳定身份，保留兼容目录迁移 | `src/Models/NexusUser.cs`, `src/Services/ConfigSwapPaths.cs`, `src/Web/ApiUsersHandler.cs` | v0.9.6 |
+| #95 | 运行通知只有脚本级开关，无法表达绑定级用户通知和 SMTP 独立收件人 | 已修复：脚本开关与绑定开关共同生效，SMTP 支持绑定级收件人覆盖 | `src/Services/Notification/NotificationDispatcher.cs`, `src/Services/SmtpSender.cs` | v0.9.6 |
+| #96 | 用户配置、排序和删除入口分散在脚本实例页，缺少统一用户管理界面 | 已修复：新增 `#/users` 全局用户页，脚本页移除用户管理入口 | `wwwroot/views/global-users.js`, `wwwroot/views/scripts.js`, `wwwroot/index.html` | v0.9.6 |
+
+**v0.9.6 修复验证结果（2026-08-24）**：上述目标条目均已完成并转为回归保护。验证包含管理员构建、单元测试 200/200、真实计时 Playwright 87 通过/3 跳过、真实计时 judge 150/150、真实计时 chaos 166/166，均无失败；构建保留 3 条基线 nullable 警告。
+
 ## 已有保留项与语义确认
 
 | 编号 | 内容 | 决策 |

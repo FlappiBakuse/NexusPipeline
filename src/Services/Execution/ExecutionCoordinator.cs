@@ -35,8 +35,9 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         Action<int, int>? attemptChanged,
         Action<string>? statusChanged,
         Action<string>? logLine,
-        IUserRepository users)
-        : base(script, mode, queueId, queueName, userName, token, attemptChanged, statusChanged, logLine)
+        IUserRepository users,
+        ResolvedScriptUser? resolvedUser = null)
+        : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
         _attemptRunner = new AttemptRunner(this);
@@ -59,12 +60,15 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             QueueName = _queueName,
             Mode = _mode,
             UserName = _userName ?? "",
+            UserId = _resolvedUser?.UserId ?? "",
             StartTime = DateTime.Now,
         };
 
-        ScriptUser? user = string.IsNullOrWhiteSpace(_userName)
-            ? null
-            : _users.FindEnabled(_script, _userName);
+        ResolvedScriptUser? resolvedUser = _resolvedUser
+            ?? (string.IsNullOrWhiteSpace(_userName)
+                ? null
+                : _users.ResolveEnabledBinding(_script, _userName));
+        ScriptUser? user = resolvedUser?.ToLegacyScriptUser();
         if (!string.IsNullOrWhiteSpace(_userName) && user is null)
         {
             record.Status = "failed";
@@ -102,7 +106,12 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         try
         {
             // 配置运行会话在 try 内创建并准备，任何 Prepare 异常都统一进入幂等 FinalizeRun。
-            _configRun = new ConfigRunSession(_script.Id, user?.Name, _script.ConfigPath, _script.HasJudgeScript());
+            _configRun = new ConfigRunSession(
+                _script.Id,
+                resolvedUser?.UserKey ?? user?.Name,
+                resolvedUser?.UserName ?? user?.Name,
+                _script.ConfigPath,
+                _script.HasJudgeScript());
             _configRun.PrepareScriptArea();
             if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
             {
@@ -674,6 +683,10 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 return false;
             }
 
+            // 旧 API 仍可能读取按用户名命名的兼容镜像；判断脚本可能刚刚写入 script 计数文件，
+            // 在消费结果时同步一次即可让旧工具观测到同一轮运行状态。
+            _configRun?.SyncCompatibilityAlias();
+
             bool isFinal = completed.AttemptId == attemptId
                 && completed.AttemptNumber == attempt.Number
                 && completed.Generation == finalJudgeGeneration;
@@ -833,9 +846,15 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
                 if (judge.IsFailure)
                 {
-                    result = KillScriptAndConfirm()
-                        ? RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败")
-                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                    if (KillScriptAndConfirm())
+                    {
+                        result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
+                        result.NotifyText = judge.NotifyText;
+                    }
+                    else
+                    {
+                        result = RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                    }
                     break;
                 }
 
@@ -971,6 +990,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     else if (judge.IsFailure)
                     {
                         result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
+                        result.NotifyText = judge.NotifyText;
                     }
                     else if (judge.IsMarker)
                     {
@@ -1086,6 +1106,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
             _configRun?.ApplyReplacements(_pendingReplaceConfigs);
+            _configRun?.SyncCompatibilityAlias();
         }
         _pendingReplaceConfigs = null;
 

@@ -31,7 +31,7 @@ const PING_SRC = "C:\\Windows\\System32\\PING.EXE";
 // 测试时间加速（v0.6.2+，v0.6.4 统一 scale=10）：NEXUS_TIME_SCALE 时宿主等待按比例缩放，伪造脚本卡住时长同步缩放（仍远大于缩放后的 stall/周期）。
 const TIME_SCALE = Number(process.env.NEXUS_TIME_SCALE || "1") || 1;
 const FAST = TIME_SCALE > 1;
-const STUCK_PINGS = FAST ? 8 : 75;   // 卡住轮：真实 75 秒，加速 8 次 ping ≈ 7s（v0.6.4 scale=10 下 stall 6s 先于脚本退出触发失败；60 档语义保持）
+const STUCK_PINGS = FAST ? 80 : 75;  // 覆盖缩放变量未随提权服务继承的宿主：超过未缩放的 60 秒停滞阈值；正常加速档仍由缩放阈值提前结束
 const CRASH_PINGS = FAST ? 1 : 25;   // crash 轮持续输出循环：日志写入间隔必须 < 加速后的 stall（1 秒），否则误判 stall
 
 const USERS = [
@@ -153,6 +153,16 @@ function cleanupTempCounters() {
 }
 
 function startService() {
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    const quote = value => String(value).replace(/'/g, "''");
+    const timeScale = process.env.NEXUS_TIME_SCALE || "";
+    const command = "$env:TEMP='" + quote(os.tmpdir()) + "'; $env:TMP='" + quote(os.tmpdir()) + "'; $env:NEXUS_TIME_SCALE='" + quote(timeScale) + "'; $p=Start-Process -FilePath '" + quote(runtimeExe) + "' -WorkingDirectory '" + quote(runtimeDir) + "' -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)";
+    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    const pid = Number((result.stdout || "").trim().split(/\s+/).pop());
+    if (!Number.isInteger(pid) || pid <= 0) throw new Error("提权启动 Chaos 服务失败");
+    child = { pid, kill: () => spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','" + pid + "','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)"], { stdio: "ignore" }) };
+    return;
+  }
   child = spawn(runtimeExe, ["web"], { cwd: runtimeDir, stdio: ["pipe", "ignore", "ignore"] });
 }
 
@@ -376,14 +386,40 @@ function archivedLogWritten(userName, hist) {
 
 /* ---------------- 进程工具（PowerShell / taskkill） ---------------- */
 
-function psOut(script) {
-  return new Promise(resolve => {
-    const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-    let out = "";
-    ps.stdout.on("data", d => { out += d.toString(); });
-    ps.on("close", () => resolve(out.trim()));
-    ps.on("error", () => resolve(""));
+async function psOut(script) {
+  if (process.env.NEXUS_ELEVATED_SERVICE !== "1") {
+    return await new Promise(resolve => {
+      const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+      let out = "";
+      ps.stdout.on("data", d => { out += d.toString(); });
+      ps.on("close", () => resolve(out.trim()));
+      ps.on("error", () => resolve(""));
+    });
+  }
+
+  const quote = value => String(value).replace(/'/g, "''");
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const scriptPath = path.join(os.tmpdir(), `nexus-chaos-query-${token}.ps1`);
+  const outputPath = path.join(os.tmpdir(), `nexus-chaos-query-${token}.out`);
+  fs.writeFileSync(scriptPath, `& { ${script} } | Out-File -LiteralPath '${quote(outputPath)}' -Encoding utf8`, "utf8");
+  const launcher = `Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${quote(scriptPath)}') -Verb RunAs -WindowStyle Hidden -Wait`;
+  await new Promise(resolve => {
+    const ps = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", launcher], { windowsHide: true });
+    ps.on("close", resolve);
+    ps.on("error", resolve);
   });
+  let out = "";
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(outputPath)) {
+      try { out = fs.readFileSync(outputPath, "utf8"); } catch { /* retry */ }
+      if (out || Date.now() + 50 >= deadline) break;
+    }
+    await sleep(50);
+  }
+  try { fs.rmSync(scriptPath, { force: true }); } catch { /* ignore */ }
+  try { fs.rmSync(outputPath, { force: true }); } catch { /* ignore */ }
+  return out.replace(/^\uFEFF/, "").trim();
 }
 
 async function findScriptCmdPid(instanceLabel = "") {
@@ -424,6 +460,27 @@ async function hasCmdLineBat() {
 }
 
 function taskkill(...args) {
+  if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
+    const pidIndex = args.findIndex(arg => arg.toUpperCase() === "/PID");
+    const imageIndex = args.findIndex(arg => arg.toUpperCase() === "/IM");
+    let script;
+    if (pidIndex >= 0 && args[pidIndex + 1]) {
+      const pid = Number(args[pidIndex + 1]);
+      script = `$ids=@(${pid}); do { $children=@(Get-CimInstance Win32_Process | Where-Object { $ids -contains $_.ParentProcessId } | Select-Object -ExpandProperty ProcessId); $new=@($children | Where-Object { $ids -notcontains $_ }); $ids += $new; } while ($new.Count -gt 0); $ids | Sort-Object -Descending | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }`;
+    } else if (imageIndex >= 0 && args[imageIndex + 1]) {
+      const image = String(args[imageIndex + 1]).replace(/'/g, "''").replace(/\.exe$/i, "");
+      script = `Get-Process -Name '${image}' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue`;
+    } else {
+      script = "";
+    }
+    const encoded = Buffer.from(script, "utf16le").toString("base64");
+    const command = `Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','${encoded}') -Verb RunAs -WindowStyle Hidden -Wait`;
+    return new Promise(resolve => {
+      const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", command], { windowsHide: true });
+      p.on("close", resolve);
+      p.on("error", resolve);
+    });
+  }
   return new Promise(resolve => {
     const p = spawn("taskkill.exe", ["/F", ...args]);
     p.on("close", () => resolve());

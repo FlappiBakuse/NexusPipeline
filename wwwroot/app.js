@@ -6,7 +6,7 @@ import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } fr
 import { pagerNavigate } from "./core/pager.js";
 import { pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";
-import { actions as usersActions, pageScriptUsers } from "./views/users.js";
+import { actions as usersActions, pageUsers } from "./views/users.js";
 import { actions as queuesActions, pageQueues } from "./views/queues.js";
 import { actions as dispatchActions, pageDispatch } from "./views/dispatch.js";
 import { actions as historyActions, pageHistory } from "./views/history.js";
@@ -38,7 +38,7 @@ const allActions = {
   ...settingsActions,
 };
 
-const routes = { dashboard: pageDashboard, scripts: pageScripts, queues: pageQueues, dispatch: pageDispatch, history: pageHistory, plugins: pagePlugins, settings: pageSettings };
+const routes = { dashboard: pageDashboard, scripts: pageScripts, users: pageUsers, queues: pageQueues, dispatch: pageDispatch, history: pageHistory, plugins: pagePlugins, settings: pageSettings };
 
 function route() {
   closeModal();
@@ -46,10 +46,6 @@ function route() {
   const hash = (location.hash || "#/dashboard").slice(2) || "dashboard";
   const token = enterPage(hash);
   const segments = hash.split("/");
-  if (segments[0] === "scripts" && segments[1] && segments[2] === "users") {
-    pageScriptUsers(segments[1], token);
-    return;
-  }
   (routes[segments[0]] || pageDashboard)(token);
 }
 
@@ -75,6 +71,11 @@ document.addEventListener("click", event => {
 
 document.addEventListener("keydown", event => {
   if (event.key === "Escape") {
+    if (document.querySelector(".modal[data-locked]")) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     const openMenu = document.querySelector(".overflow-menu:not([hidden])");
     if (openMenu) {
       event.preventDefault();
@@ -89,7 +90,7 @@ document.addEventListener("keydown", event => {
   if (!handler) return;
   event.preventDefault();
   handler(target, event);
-});
+}, true);
 
 document.addEventListener("input", event => {
   if (event.target?.id === "sm-root") syncScriptGhostState();

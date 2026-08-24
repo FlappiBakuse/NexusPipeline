@@ -9,72 +9,109 @@ namespace NexusPipeline.Services.Configuration;
 internal sealed class ConfigurationTransaction
 {
     private readonly string _scriptId;
+    private readonly string? _userKey;
     private readonly string? _userName;
     private readonly string _configPath;
 
-    public ConfigurationTransaction(string scriptId, string? userName, string configPath)
+    public ConfigurationTransaction(string scriptId, string? userKey, string? userName, string configPath)
     {
         _scriptId = scriptId;
+        _userKey = userKey;
         _userName = userName;
         _configPath = configPath;
+    }
+
+    public ConfigurationTransaction(string scriptId, string? userName, string configPath)
+        : this(scriptId, userName, userName, configPath)
+    {
     }
 
     public bool IsPrepared { get; private set; }
 
     public string ScriptId => _scriptId;
 
-    public string ScriptDir => UserConfigManager.ScriptDir(_scriptId, _userName);
+    public string ScriptDir => UserConfigManager.ScriptDir(_scriptId, _userKey);
 
     public void PrepareScriptArea()
     {
-        UserConfigManager.PrepareScriptDir(_scriptId, _userName);
+        UserConfigManager.AdoptCompatibilityStore(_scriptId, _userKey, _userName);
+        UserConfigManager.PrepareScriptDir(_scriptId, _userKey);
+        SyncCompatibilityAlias();
     }
 
     public bool Begin(out string? error)
     {
         error = null;
-        if (string.IsNullOrWhiteSpace(_userName) || string.IsNullOrWhiteSpace(_configPath))
+        if (string.IsNullOrWhiteSpace(_userKey) || string.IsNullOrWhiteSpace(_configPath))
         {
             return true;
         }
-        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userName, _configPath, out error);
+        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error);
+        SyncCompatibilityAlias();
         return IsPrepared;
     }
 
     public string? PrepareRetry()
     {
-        return IsPrepared && !string.IsNullOrWhiteSpace(_userName)
-            ? UserConfigManager.PrepareForRetry(_scriptId, _userName, _configPath)
-            : null;
+        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey))
+        {
+            return null;
+        }
+        string? error = UserConfigManager.PrepareForRetry(_scriptId, _userKey, _configPath);
+        SyncCompatibilityAlias();
+        return error;
     }
 
     public void SyncToStore(bool firstCheck)
     {
-        if (IsPrepared && !string.IsNullOrWhiteSpace(_userName))
+        if (IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
         {
-            UserConfigManager.SyncConfigToStore(_scriptId, _userName, _configPath, firstCheck);
+            UserConfigManager.SyncConfigToStore(_scriptId, _userKey, _configPath, firstCheck);
+            SyncCompatibilityAlias();
         }
     }
 
     public void ApplyReplacements(List<string> replacements)
     {
-        UserConfigManager.ApplyConfigReplacements(_scriptId, _userName, _configPath, replacements);
+        UserConfigManager.ApplyConfigReplacements(_scriptId, _userKey, _configPath, replacements);
+        SyncCompatibilityAlias();
     }
 
     public bool RestoreReplacements()
     {
-        return UserConfigManager.RestoreConfigReplacements(_scriptId, _userName);
+        bool restored = UserConfigManager.RestoreConfigReplacements(_scriptId, _userKey);
+        SyncCompatibilityAlias();
+        return restored;
     }
 
     public void CleanupScriptArea()
     {
-        UserConfigManager.CleanupScriptArea(_scriptId, _userName);
+        UserConfigManager.CleanupScriptArea(_scriptId, _userKey);
+        UserConfigManager.CleanupCompatibilityTransient(_scriptId, _userName);
     }
 
     public string? Restore()
     {
-        return IsPrepared && !string.IsNullOrWhiteSpace(_userName)
-            ? UserConfigManager.RestoreAfterRun(_scriptId, _userName, _configPath)
-            : null;
+        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey))
+        {
+            return null;
+        }
+        string? error = null;
+        try
+        {
+            error = UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath);
+        }
+        finally
+        {
+            SyncCompatibilityAlias();
+            UserConfigManager.CleanupCompatibilityTransient(_scriptId, _userName);
+            UserConfigManager.CleanupCompatibilityReplacement(_scriptId, _userName);
+        }
+        return error;
+    }
+
+    public void SyncCompatibilityAlias()
+    {
+        UserConfigManager.SyncCompatibilityAlias(_scriptId, _userKey, _userName);
     }
 }
