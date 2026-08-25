@@ -25,6 +25,7 @@ internal static class SettingsMenu
                 $"6. 日志级别（当前：{s.LogLevel}，即时生效）",
                 $"7. 通知渠道（Webhook：{webhookReason} | SMTP：{smtpReason} | 开关：Webhook {(s.WebhookEnabled ? "开" : "关")} / SMTP {(s.SmtpEnabled ? "开" : "关")}）",
                 "8. 清理过期历史与日志",
+                $"9. 更新（自动检查：{(s.UpdateCheckEnabled ? "开" : "关")}，渠道：{s.UpdateChannel}）",
                 "0. 返回上级",
             };
             int width = options.Max(option => option.Length);
@@ -68,7 +69,7 @@ internal static class SettingsMenu
                     (EditResult result, string value) = Ui.PromptEdit($"保留天数（当前：{s.HistoryRetentionDays}，回车=不变）：");
                     if (result == EditResult.Entered && int.TryParse(value.Trim(), out int days))
                     {
-                        // v0.7.1+（KN-52）：与 Web 端 Limits.CheckRetentionDays 口径一致（1-上限），
+                        // 与 Web 端 Limits.CheckRetentionDays 口径一致（1-上限），
                         // 此前仅校验 >= 1，越界输入被 ConfigStore.Normalize 静默重置为 7。
                         if (days < 1 || days > Limits.Current.MaxHistoryRetentionDays)
                         {
@@ -126,6 +127,9 @@ internal static class SettingsMenu
                 case "8":
                     ctx.History.Cleanup(s.HistoryRetentionDays);
                     Audit.Log(Audit.Manage, "清理过期历史", $"保留 {s.HistoryRetentionDays} 天");
+                    break;
+                case "9":
+                    UpdateMenu.Show(ctx);
                     break;
                 default:
                     Console.WriteLine("[提示] 无效选项。");

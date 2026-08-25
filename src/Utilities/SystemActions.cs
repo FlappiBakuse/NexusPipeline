@@ -6,7 +6,7 @@ namespace NexusPipeline.Utilities;
 
 internal static class SystemActions
 {
-    // v0.9.4：恢复/配置替换至少要跨过专项 harness 覆盖的 0ms、100ms、500ms、1s、3s、5s
+    // 恢复/配置替换至少要跨过专项 harness 覆盖的 0ms、100ms、500ms、1s、3s、5s
     // 自重启窗口，并留出一次采样抖动余量；测试环境仍通过 TestHooks 缩放墙钟等待。
     internal const int StableExitSeconds = 6;
 
@@ -175,7 +175,7 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 清理进程树（v0.6.5+ 自实现）：Toolhelp 快照枚举父子关系后 BFS 遍历，逐进程 taskkill /F（不带 /T）。
+    /// 清理进程树（自实现）：Toolhelp 快照枚举父子关系后 BFS 遍历，逐进程 taskkill /F（不带 /T）。
     /// excludeProcessBaseName 非空时（与 GameExe 同名的进程名，不含扩展名、忽略大小写）跳过该进程整棵子树——
     /// 脚本自启动的游戏进程即使父进程是脚本，只要进程名与游戏配置一致就视为「游戏进程」而非脚本树成员，
     /// 其生杀归游戏管理（ForceCloseGame / 失败路径按名关闭），不被脚本进程树连带清理。
@@ -206,7 +206,7 @@ internal static class SystemActions
             }
             if (targets.Count == 0)
             {
-                // v0.7.4（KN-28）：根进程仍存在但树为空——可能被排除进程名（游戏）跳过，文案不再误称「PID 已不存在」。
+                // 根进程仍存在但树为空——可能被排除进程名（游戏）跳过，文案不再误称「PID 已不存在」。
                 Logger.Info($"进程树无需清理（PID {pid} 下无待清理进程，或进程与排除名单同名被跳过）。");
             }
             else if (killed == targets.Count)
@@ -501,7 +501,7 @@ internal static class SystemActions
                 {
                     if (excludeProcessBaseName is not null)
                     {
-                        // v0.7.5（台账外）：按名清理携带排除名单时走 Toolhelp 树清理——此前 Process.Kill(entireProcessTree: true)
+                        // （台账外）：按名清理携带排除名单时走 Toolhelp 树清理——此前 Process.Kill(entireProcessTree: true)
                         // 会把脚本自启动的游戏子孙进程一并杀死，与「游戏进程不属脚本树、生杀归游戏管理」的声明不一致。
                         KillTree(process.Id, excludeProcessBaseName);
                     }
@@ -921,7 +921,7 @@ internal static class SystemActions
         Run("shutdown.exe", "/h");
     }
 
-    /// <summary>取消 Windows 关机/重启倒计时（shutdown /a；无倒计时时是无害空操作，v0.6.3 取消完成操作卡片用）。</summary>
+    /// <summary>取消 Windows 关机/重启倒计时（shutdown /a；无倒计时时是无害空操作， 取消完成操作卡片用）。</summary>
     public static bool CancelShutdown()
     {
         if (DryRun())
@@ -952,7 +952,7 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 后台前置进程窗口（v0.6.5+，仅启动时一次）：fire-and-forget 但观察异常（宿主为常驻服务进程，P/Invoke 均在后台线程执行）。
+    /// 后台前置进程窗口（，仅启动时一次）：fire-and-forget 但观察异常（宿主为常驻服务进程，P/Invoke 均在后台线程执行）。
     /// 编辑用户配置（主程序窗口前置）与运行脚本实例/调度队列（游戏窗口前置）共用。
     /// </summary>
     public static void BringToFrontFireAndForget(int pid, string what)
@@ -975,7 +975,7 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 后台最小化进程窗口（v0.6.5+，仅启动时一次）：fire-and-forget 但观察异常。
+    /// 后台最小化进程窗口（，仅启动时一次）：fire-and-forget 但观察异常。
     /// 运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出），游戏窗口前置以利截图识别。
     /// </summary>
     public static void MinimizeWindowFireAndForget(int pid, string what)
@@ -998,7 +998,7 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 将指定进程的可见主窗口前置（v0.6.5+ 强化）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
+    /// 将指定进程的可见主窗口前置（强化）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
     /// 找到后组合前置——还原最小化 + AttachThreadInput 模拟前台线程输入（绕过 Windows 前台锁定，
     /// 后台常驻服务进程直接 SetForegroundWindow 几乎必然失败）+ BringWindowToTop 置顶 Z 序 + SetForegroundWindow 激活；
     /// 前置失败（前台被其他窗口占据/窗口尚未就绪）每 1 秒重试，直至成功或超时。
@@ -1027,7 +1027,7 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 将指定进程的可见主窗口最小化（v0.6.5+）：轮询窗口出现后 ShowWindow(SW_MINIMIZE)（GUI 脚本让位，
+    /// 将指定进程的可见主窗口最小化：轮询窗口出现后 ShowWindow(SW_MINIMIZE)（GUI 脚本让位，
     /// 控制台脚本经 cmd 包装已无窗口，静默跳过）。用于运行脚本实例/调度队列时脚本主窗口最小化。
     /// </summary>
     public static bool MinimizeWindow(int pid, int timeoutSeconds = 30)

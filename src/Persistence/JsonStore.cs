@@ -67,7 +67,7 @@ internal static class JsonUtil
 internal static class JsonStore
 {
     /// <summary>
-    /// 损坏配置文件改名保留（v0.7.2+，KN-01）：解析失败时先把原文件改名为 {path}.corrupt-{时间戳}，
+    /// 损坏配置文件改名保留：解析失败时先把原文件改名为 {path}.corrupt-{时间戳}，
     /// 避免后续任意一次保存静默覆盖损坏文件导致原数据不可恢复；用户可手动用保留文件恢复。
     /// 返回保留路径；改名失败返回空字符串（不中断加载流程）。
     /// </summary>

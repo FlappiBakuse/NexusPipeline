@@ -72,7 +72,7 @@ export async function pageDashboard(token) {
       <section class="content-section list-surface" data-testid="running-panel">${runningPanelMarkup(status)}</section>
       <section class="content-section" id="dashboard-plugin-panel" hidden>${pluginPanelMarkup(status)}</section>`);
   } else {
-    // 局部更新（v0.6.7+）：不整页重渲染，避免滚动/焦点重置；区域缺失时静默跳过。
+    // 局部更新：不整页重渲染，避免滚动/焦点重置；区域缺失时静默跳过。
     const statePanel = document.querySelector("#dashboard-state");
     if (statePanel) {
       const active = (status.running || []).length > 0;

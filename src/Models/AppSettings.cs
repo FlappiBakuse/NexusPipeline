@@ -30,7 +30,7 @@ public class AppSettings
 
     public string WebhookType { get; set; } = "feishu";
 
-    /// <summary>Webhook 类型白名单（v0.7.4 单源化，KN-26）：ConfigStore.Normalize 校验与 WebhookSender 状态/映射共用，避免双份维护漂移。</summary>
+    /// <summary>Webhook 类型白名单（单源化）：ConfigStore.Normalize 校验与 WebhookSender 状态/映射共用，避免双份维护漂移。</summary>
     public static readonly string[] WebhookTypes = { "feishu", "dingtalk", "wecom", "slack", "discord", "generic" };
 
     public string WebhookUrl { get; set; } = "";
@@ -58,6 +58,15 @@ public class AppSettings
     public string SmtpSubjectPrefix { get; set; } = "[NexusPipeline]";
 
     public int SmtpTimeout { get; set; } = 30;
+
+    /// <summary>启动时自动检查一次更新（仅检查不下载）。</summary>
+    public bool UpdateCheckEnabled { get; set; } = true;
+
+    /// <summary>更新接受渠道：stable / prerelease（前项目全是 Pre-release，默认 prerelease 才能收到更新）。</summary>
+    public string UpdateChannel { get; set; } = "prerelease";
+
+    /// <summary>可选更新镜像源（GitHub Releases API 兼容 JSON）；空 = 默认 GitHub。</summary>
+    public string UpdateSourceUrl { get; set; } = "";
 
     /// <summary>
     /// 插件用户偏好。缺少记录时，数据化专项插件默认启用，managed-code 插件默认禁用；

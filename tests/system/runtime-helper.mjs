@@ -56,7 +56,7 @@ function runtimePids() {
   const filter = powershellLiteral(runtimeDir + "\\");
   const command = `$p = Get-CimInstance Win32_Process -Filter "Name='nexus-pipeline.exe'" | Where-Object { $_.ExecutablePath -like '${filter}*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','`;
   try {
-    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
     return (result.stdout || "").trim().split(/\s*,\s*/).filter(Boolean).map(Number);
   } catch {
     return [];
@@ -77,7 +77,7 @@ function killPid(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return;
   if (process.env.NEXUS_SYSTEM_SMOKE_ELEVATED === "1") {
     const command = `$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','${pid}','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)`;
-    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
     return;
   }
   spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
@@ -100,8 +100,8 @@ function startElevatedRuntime(args, env) {
     `Set-Content -LiteralPath '${powershellLiteral(launchPidPath)}' -Value $p.Id -Encoding ascii`,
   ].filter(Boolean).join("; ");
   fs.writeFileSync(scriptPath, script, "utf8");
-  const command = `$p=Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${powershellLiteral(scriptPath)}') -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)`;
-  const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+  const command = `$p=Start-Process -FilePath 'pwsh.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${powershellLiteral(scriptPath)}') -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)`;
+  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
   let pid = 0;
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
@@ -109,7 +109,7 @@ function startElevatedRuntime(args, env) {
       pid = Number(fs.readFileSync(launchPidPath, "utf8").trim());
       if (Number.isInteger(pid) && pid > 0) break;
     }
-    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 100"], { stdio: "ignore", windowsHide: true });
+    spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 100"], { stdio: "ignore", windowsHide: true });
   }
   fs.rmSync(scriptPath, { force: true });
   fs.rmSync(launchPidPath, { force: true });

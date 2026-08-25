@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
@@ -9,7 +10,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// 配置交换会话/恢复层（v0.5.0 从 UserConfigManager 拆出）：配置替换（replaceConfigs）、
+/// 配置交换会话/恢复层（从 UserConfigManager 拆出）：配置替换（replaceConfigs）、
 /// .session 标记、操作前自愈 + 启动扫描恢复 + 后台延迟重试。文件原语见 <see cref="ConfigSwapPrimitives"/>，
 /// 数据目录定位见 <see cref="ConfigSwapPaths"/>。
 /// </summary>
@@ -80,7 +81,7 @@ internal static class ConfigSwapSession
         if (newFiles.Count > 0 || (Directory.Exists(backupDir) && Directory.EnumerateFileSystemEntries(backupDir).Any()))
         {
             Directory.CreateDirectory(backupDir);
-            // v0.7.5（KN-55）：.meta 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取侧兼容旧版 camelCase。
+            // .meta 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取侧兼容旧版 camelCase。
             JsonUtil.WriteAtomic(metaPath, JsonSerializer.Serialize(new { ConfigPath = configPath, NewFiles = newFiles }));
         }
         return null;
@@ -97,7 +98,7 @@ internal static class ConfigSwapSession
         try
         {
             JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-            // v0.7.5（KN-55）：兼容旧版 camelCase 键（旧版本崩溃现场）。
+            // 兼容旧版 camelCase 键（旧版本崩溃现场）。
             JsonArray? files = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
             if (files is not null)
             {
@@ -134,7 +135,7 @@ internal static class ConfigSwapSession
             try
             {
                 JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-                // v0.7.5（KN-55）：兼容旧版 camelCase 键（旧版本崩溃现场）。
+                // 兼容旧版 camelCase 键（旧版本崩溃现场）。
                 configPath = node?["ConfigPath"]?.ToString() ?? node?["configPath"]?.ToString();
                 JsonArray? metaFiles = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
                 if (metaFiles is not null)
@@ -245,9 +246,9 @@ internal static class ConfigSwapSession
         }
     }
 
-    /* ---------------- 自动更新配置（v0.7.6）：config → store 全量镜像同步 ---------------- */
+    /* ---------------- 自动更新配置：config → store 全量镜像同步 ---------------- */
 
-    /// <summary>自动更新配置同步（v0.7.6）：把运行生效的 config 当前内容全量镜像到用户快照 store。
+    /// <summary>自动更新配置同步：把运行生效的 config 当前内容全量镜像到用户快照 store。
     /// 插队文件（swap-backup/.meta 清单内）有还原描述（script/config-restore.json）时先还原启停字段再写入；
     /// 无还原描述时跳过（store 保持原样）。失败仅告警不阻断运行收尾；不改 .session 标记、不清 swap-backup。</summary>
     public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
@@ -266,9 +267,9 @@ internal static class ConfigSwapSession
                 string store = ConfigSwapPaths.StoreDir(scriptId, userName);
                 // 2. 基础有效性校验：config 缺失/为空/文件数骤降 → 跳过（防坏态入库永久污染快照）。
                 if (!ValidForSync(configPath, store)) return;
-                // 3. 稳定性检查（v0.7.6 评估后扩展为全部同步）：短间隔两次采样不一致 = 脚本（含外部守护进程）
-                //    仍在写配置 → 跳过本次，保留旧快照（收尾同步同样执行——进程确认退出后仍不一致说明有
-                //    外部写入者在半写，此时入库存在污染风险）。
+                // 3. 稳定性检查（评估后扩展为全部同步）：短间隔两次采样不一致 = 脚本（含外部守护进程）
+                // 仍在写配置 → 跳过本次，保留旧快照（收尾同步同样执行——进程确认退出后仍不一致说明有
+                // 外部写入者在半写，此时入库存在污染风险）。
                 if (!StableConfig(configPath))
                 {
                     Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」配置仍在变化（{SyncPhaseText(firstCheck)}，保留旧快照）。");
@@ -397,7 +398,7 @@ internal static class ConfigSwapSession
         return true;
     }
 
-    /// <summary>内容有效性探测（v0.7.8）：JSON 型文件（.json 扩展名或明确 JSON 内容）必须可解析；
+    /// <summary>内容有效性探测：JSON 型文件（.json 扩展名或明确 JSON 内容）必须可解析；
     /// 非 JSON 型文本不校验。大文件不再直接视为有效，避免半写内容绕过保护。
     /// 只读探测不重写；解析失败视为写入中断（脚本被杀瞬间半写），跳过同步保留旧快照。</summary>
     internal static bool ContentValidForSync(string configPath, PathKind kind)
@@ -518,7 +519,7 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>还原描述：判断脚本首次触发写入 script/config-restore.json，宿主仅执行、不解析插件语义。
-    /// 契约见 plugins/README.md（v0.7.6）。</summary>
+    /// 契约见 plugins/README.md。</summary>
     internal sealed class ConfigRestoreDescriptor
     {
         public List<FileRestore> Files { get; set; } = new();
@@ -1071,31 +1072,54 @@ internal static class ConfigSwapSession
 
     /* ---------------- 会话与恢复（兼容 façade） ---------------- */
 
+    private static ConfigSwapRecovery? _recovery;
+
+    /// <summary>
+    /// 装配配置交换恢复：组合根在进程初始化时注入脚本/用户快照数据源；
+    /// 恢复路径不再反向依赖 RuntimeContext。未装配时调用恢复入口视为编程错误。
+    /// </summary>
+    public static void ConfigureRecovery(IConfigRecoveryDataSource dataSource)
+    {
+        _recovery = new ConfigSwapRecovery(dataSource);
+    }
+
+    private static ConfigSwapRecovery Recovery
+    {
+        get
+        {
+            if (_recovery is null)
+            {
+                throw new InvalidOperationException("配置交换恢复未装配（请先调用 ConfigSwapSession.ConfigureRecovery）。");
+            }
+            return _recovery;
+        }
+    }
+
     /// <summary>操作前自愈：恢复逻辑由 ConfigSwapRecovery 统一负责。</summary>
     public static void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {
-        ConfigSwapRecovery.RecoverIfNeeded(scriptId, userName, configPath);
+        Recovery.RecoverIfNeeded(scriptId, userName, configPath);
     }
 
     /// <summary>启动恢复扫描：恢复逻辑由 ConfigSwapRecovery 统一负责。</summary>
     public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
     {
-        ConfigSwapRecovery.RecoverInterrupted(users);
+        Recovery.RecoverInterrupted(users);
     }
 
     public static void StartRecoveryRetry()
     {
-        ConfigSwapRecovery.StartRecoveryRetry();
+        Recovery.StartRecoveryRetry();
     }
 
     public static void StopRecoveryRetry()
     {
-        ConfigSwapRecovery.StopRecoveryRetry();
+        Recovery.StopRecoveryRetry();
     }
 
     public static void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
     {
-        ConfigSwapRecovery.DoRestore(scriptId, userName, mark);
+        Recovery.DoRestore(scriptId, userName, mark);
     }
 
 }

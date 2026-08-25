@@ -5,7 +5,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
 /// <summary>
-/// 数据化专项插件（v0.6.3+）：纯目录形态 plugins/&lt;名称&gt;/——
+/// 数据化专项插件：纯目录形态 plugins/&lt;名称&gt;/——
 /// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）、
 /// 可选 data/config-template/（默认配置模板目录，编辑会话生成用）。
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
@@ -75,7 +75,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                     }
                 }
             }
-            // v0.7.0+ plugin.json compatibility: the former boolean declaration is a capability key.
+            // plugin.json compatibility: the former boolean declaration is a capability key.
             if (node?["supportsEmulator"]?.GetValue<bool>() == true)
             {
                 plugin._capabilityKeys.Add(PluginCapabilityKeys.Emulator);
@@ -170,7 +170,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         {
             return null;
         }
-        // v0.7.4（KN-07）：多占位符模板（如 `{launcher} --config {assistant}`）解析只替换第一个占位符、
+        // ：多占位符模板（如 `{launcher} --config {assistant}`）解析只替换第一个占位符、
         // 其余内容静默丢弃——显式校验并整体推导失败（Warn 可观测），禁止静默截断。
         string[] pathFields = { "mainExe", "configPath", "logPath" };
         string argsTemplate = paths["args"]?.ToString() ?? "";
@@ -307,7 +307,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         return rel.StartsWith(".\\", StringComparison.Ordinal) || rel.StartsWith("..\\", StringComparison.Ordinal) ? rel : ".\\" + rel;
     }
 
-    /// <summary>统计模板中的占位符数量（{var} / {rel:var} 形式；v0.7.4 KN-07 多占位符显式校验用）。</summary>
+    /// <summary>统计模板中的占位符数量（{var} / {rel:var} 形式； 多占位符显式校验用）。</summary>
     private static int CountPlaceholders(string template)
     {
         int count = 0;

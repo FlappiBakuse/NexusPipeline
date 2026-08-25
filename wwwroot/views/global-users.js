@@ -204,7 +204,7 @@ function bindingIdPart(id) {
   return String(id || "script").replace(/[^a-zA-Z0-9_-]/g, "-");
 }
 
-/** 紧凑开关（v0.9.7）：仅轨道+滑块，用于展开卡片头部等窄空间；标签经 aria-label 表达。 */
+/** 紧凑开关：仅轨道+滑块，用于展开卡片头部等窄空间；标签经 aria-label 表达。 */
 function umSwitch(id, label, pressed, field) {
   return `<button id="${esc(id)}" class="mode-toggle switch-control" type="button" aria-label="${esc(label)}" aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="toggle-user-management-switch" data-binding-field="${esc(field)}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${pressed ? "已启用" : "已停用"}</span></button>`;
 }
@@ -288,7 +288,7 @@ function umBindingCardMarkup(binding) {
   "</article>";
 }
 
-/** 用户管理界面状态（v0.9.7）：展开卡片、二级页、添加脚本面板与多选集合。 */
+/** 用户管理界面状态：展开卡片、二级页、添加脚本面板与多选集合。 */
 const umState = {
   expandedId: null,
   subview: "main",

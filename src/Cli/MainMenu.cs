@@ -1,4 +1,4 @@
-﻿using NexusPipeline.Models;
+using NexusPipeline.Models;
 using NexusPipeline.Services;
 namespace NexusPipeline.Cli;
 
@@ -11,7 +11,7 @@ internal static class MainMenu
         {
             Ui.ClearScreen();
             RuntimeContext ctx = RuntimeContext.Instance;
-            // v0.6.6+：常驻服务运行中时菜单直写配置可能与 Web 端修改互相覆盖，顶部提示。
+            // 常驻服务运行中时菜单直写配置可能与 Web 端修改互相覆盖，顶部提示。
             bool serviceRunning = CliTransport.FindServicePort(ctx.Settings.WebPort) is not null;
             string[] options =
             {
@@ -22,6 +22,7 @@ internal static class MainMenu
                 "5. 插件",
                 "6. 设置",
                 "7. 查看状态",
+                "8. 维护",
                 "0. 退出（关闭窗口）",
             };
             string title = "NexusPipeline 枢链 管理菜单";
@@ -72,6 +73,9 @@ internal static class MainMenu
                     break;
                 case "7":
                     ShowStatus();
+                    break;
+                case "8":
+                    MaintenanceMenu.Show(ctx);
                     break;
                 default:
                     Console.WriteLine("[提示] 无效选项。");

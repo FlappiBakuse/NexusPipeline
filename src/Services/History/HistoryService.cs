@@ -11,7 +11,7 @@ internal class HistoryService : IHistoryStore
 {
     private static readonly object Sync = new();
 
-    /// <summary>保存运行历史（v0.5.3 精简）：.json 纯运行状态 + 按尝试分批 .log（{base}-{尝试号}.log）。</summary>
+    /// <summary>保存运行历史（精简）：.json 纯运行状态 + 按尝试分批 .log（{base}-{尝试号}.log）。</summary>
     public HistorySaveResult Save(RunRecord record, List<string> attemptLogs)
     {
         if (record.StartTime == DateTime.MinValue)
@@ -50,7 +50,7 @@ internal class HistoryService : IHistoryStore
         }
     }
 
-    /// <summary>读取某天的运行记录：直接扫描 .json 目录（v0.5.3 起无 jsonl 索引）。</summary>
+    /// <summary>读取某天的运行记录：直接扫描 .json 目录（起无 jsonl 索引）。</summary>
     private static List<RunRecord> ReadDayRecords(DateTime date)
     {
         var records = new List<RunRecord>();
@@ -131,7 +131,7 @@ internal class HistoryService : IHistoryStore
         return true;
     }
 
-    /// <summary>按 Id 查找历史记录：默认窗口取保留天数上限（v0.7.5 KN-35：此前固定 31 天，与保留上限
+    /// <summary>按 Id 查找历史记录：默认窗口取保留天数上限：此前固定 31 天，与保留上限
     /// （默认 180、可配 365）不一致——超出窗口的记录点详情 404；显式传 days 时沿用原语义。</summary>
     public RunRecord? FindById(string id, int days = 0)
     {
@@ -156,7 +156,7 @@ internal class HistoryService : IHistoryStore
         return null;
     }
 
-    /// <summary>读取某次尝试的脚本日志（.log 按尝试分批文件，v0.5.3+）。</summary>
+    /// <summary>读取某次尝试的脚本日志（.log 按尝试分批文件）。</summary>
     public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record, int attemptNo)
     {
         RunAttempt? attempt = record.AttemptDetails.FirstOrDefault(a => a.Number == attemptNo);
@@ -203,7 +203,7 @@ internal class HistoryService : IHistoryStore
         DateTime cutoff = DateTime.Today.AddDays(-(retentionDays - 1));
         int removed = 0;
 
-        // v0.6.9+（P4）：与 Save 共享 Sync 锁——此前无锁时删除中的 dayDir 若被 Save 的 CreateDirectory 重建，
+        // （P4）：与 Save 共享 Sync 锁——此前无锁时删除中的 dayDir 若被 Save 的 CreateDirectory 重建，
         // 递归删除会清掉刚写入的历史文件（历史丢失）。
         lock (Sync)
         {

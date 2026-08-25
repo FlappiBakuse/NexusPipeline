@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace NexusPipeline.Models;
 
 /// <summary>
-/// 全局用户实体（v0.9.6）。用户身份由稳定的 Id 表示，Name 只负责展示并允许修改。
+/// 全局用户实体。用户身份由稳定的 Id 表示，Name 只负责展示并允许修改。
 /// </summary>
 public class NexusUser
 {
@@ -15,10 +15,10 @@ public class NexusUser
 
     public string Name { get; set; } = "";
 
-    /// <summary>用户备注（v0.9.7），仅展示与编辑，不参与运行逻辑。</summary>
+    /// <summary>用户备注，仅展示与编辑，不参与运行逻辑。</summary>
     public string Remark { get; set; } = "";
 
-    /// <summary>v0.9.6 仅作为 UI 占位，宿主不执行签到任务。</summary>
+    /// <summary> 仅作为 UI 占位，宿主不执行签到任务。</summary>
     public bool AutoCheckInEnabled { get; set; }
 
     public List<UserScriptBinding> Bindings { get; set; } = new();
@@ -54,7 +54,7 @@ public class UserScriptBinding
     public string SmtpTo { get; set; } = "";
 
     /// <summary>
-    /// 参与运行天数（v0.9.7）：-1 = 永久运行（默认，不递减）；
+    /// 参与运行天数：-1 = 永久运行（默认，不递减）；
     /// 0 = 不运行该脚本实例（视为不参与运行）；正数 = 运行且每日减 1，减至 0 后不再参与。
     /// </summary>
     public int RunDays { get; set; } = -1;

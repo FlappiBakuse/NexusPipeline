@@ -119,7 +119,7 @@ internal sealed class RuntimeUserRepository : IUserRepository
             }
             return null;
         }
-        // 仅用于旧 fixture/尚未迁移的内存脚本；生产启动会先完成 v0.9.6 迁移。
+        // 仅用于旧 fixture/尚未迁移的内存脚本；生产启动会先完成 迁移。
         ScriptUser? legacy = null;
         _withDataLock(() =>
         {
@@ -197,8 +197,27 @@ internal sealed class RuntimeSettingsProvider : ISettingsProvider
     public AppSettings Current => _current();
 }
 
+/// <summary>配置交换恢复专用只读数据源适配器：脚本查找与用户快照由组合根装配注入。</summary>
+internal sealed class RuntimeConfigRecoveryDataSource : IConfigRecoveryDataSource
+{
+    private readonly Func<string, ScriptInstance?> _findScript;
+    private readonly Func<List<NexusUser>> _snapshotUsers;
+
+    public RuntimeConfigRecoveryDataSource(
+        Func<string, ScriptInstance?> findScript,
+        Func<List<NexusUser>> snapshotUsers)
+    {
+        _findScript = findScript;
+        _snapshotUsers = snapshotUsers;
+    }
+
+    public ScriptInstance? FindScript(string scriptId) => _findScript(scriptId);
+
+    public IReadOnlyList<NexusUser> SnapshotUsers() => _snapshotUsers();
+}
+
 /// <summary>
-/// 运行天数写入器（v0.9.7）：调度器每日首次 tick 时把 RunDays &gt; 0 的绑定减 1，
+/// 运行天数写入器：调度器每日首次 tick 时把 RunDays &gt; 0 的绑定减 1，
 /// 减至 0 的绑定不再参与运行（Participates = false）。写入在数据锁与持久化路径内完成。
 /// </summary>
 internal sealed class RuntimeUserRunDaysWriter : IUserRunDaysWriter

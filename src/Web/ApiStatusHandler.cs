@@ -23,7 +23,7 @@ internal static class ApiStatusHandler
         AppSettings settings = RuntimeContext.Instance.Settings;
         var next = RuntimeContext.Instance.Scheduler.NextTrigger();
         PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
-        // v0.7.2+（KN-04）：锁内读取计数，避免与并发修改冲突（「集合已修改」）。
+        // 锁内读取计数，避免与并发修改冲突（「集合已修改」）。
         int scriptCount, queueCount, enabledScripts, enabledQueues;
         lock (RuntimeContext.Instance.DataLock)
         {
@@ -37,7 +37,7 @@ internal static class ApiStatusHandler
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,
-            // v0.7.4（KN-47）：实际监听端口（端口冲突 +1 漂移/未重启时与配置端口不同），侧栏地址文案据此显示。
+            // 实际监听端口（端口冲突 +1 漂移/未重启时与配置端口不同），侧栏地址文案据此显示。
             actualPort = WebServer.Current?.Port ?? settings.WebPort,
             version = typeof(WebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
             scriptCount,

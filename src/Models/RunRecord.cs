@@ -12,7 +12,7 @@ public class RunAttempt
 
     public string Reason { get; set; } = "";
 
-    /// <summary>本尝试脚本日志文件名（如 HH-mm-ss-1.log，按尝试分批落盘，v0.5.3+）。</summary>
+    /// <summary>本尝试脚本日志文件名（如 HH-mm-ss-1.log，按尝试分批落盘）。</summary>
     public string LogFile { get; set; } = "";
 }
 
@@ -62,7 +62,7 @@ public class RunRecord
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移；CustomNotifyText 与历史行为一致不复制）。</summary>
+    /// <summary>深拷贝（改序列化往返，避免手工逐字段复制随新增字段漂移；CustomNotifyText 与历史行为一致不复制）。</summary>
     public RunRecord Clone()
     {
         return System.Text.Json.JsonSerializer.Deserialize<RunRecord>(

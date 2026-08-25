@@ -30,7 +30,7 @@ function nearBottom(element) {
   return element.scrollHeight - element.scrollTop - element.clientHeight < 40;
 }
 
-/** 局部更新单个运行任务（v0.7.3，KN-16）：只更新状态行/进度/日志文本，不重建 DOM——保留取消按钮焦点与日志选区。 */
+/** 局部更新单个运行任务（）：只更新状态行/进度/日志文本，不重建 DOM——保留取消按钮焦点与日志选区。 */
 function updateRunningItem(el, record) {
   const qk = el.querySelector(".qk-row");
   if (qk) qk.textContent = `当前：${record.currentScriptName || "-"} ${record.currentStatus || ""} · 第 ${record.currentAttempt}/${record.currentMaxAttempts} 次`;
@@ -52,7 +52,7 @@ function updateRunningItem(el, record) {
   }
 }
 
-/** 运行面板局部更新（v0.7.3，KN-16）：按 runId 增删改任务卡片，标题计数经 aria-live 播报，替代整块 innerHTML。 */
+/** 运行面板局部更新（）：按 runId 增删改任务卡片，标题计数经 aria-live 播报，替代整块 innerHTML。 */
 function updateRunning(status) {
   const panel = $("#dispatch-running");
   if (!panel) return;

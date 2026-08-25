@@ -1,4 +1,4 @@
-﻿namespace NexusPipeline.Persistence;
+namespace NexusPipeline.Persistence;
 
 internal static class AppPaths
 {
@@ -39,4 +39,24 @@ internal static class AppPaths
 
     /// <summary>定时 occurrence 与待执行冻结计划的持久化状态。</summary>
     public static readonly string SchedulerStatePath = Path.Combine(AppRoot, "scheduler-state.json");
+
+    /// <summary>内建更新的运行时目录：任务标记、staging、下载包（安装目录内，随安装一起被替换）。</summary>
+    public static readonly string UpdateDir = Path.Combine(AppRoot, ".nxp-update");
+
+    /// <summary>更新任务标记（mode: apply|defer|completed + 目标版本 + staging 路径）。</summary>
+    public static readonly string UpdateTaskFile = Path.Combine(UpdateDir, "task.json");
+
+    /// <summary>应用前旧版本备份（nexus-pipeline.exe + wwwroot + plugins）。</summary>
+    public static readonly string UpdateBackupDir = Path.Combine(AppRoot, ".nxp-backup", "previous");
+
+    /// <summary>应用成功标记（内容 = 目标版本），供新实例启动收尾读取。</summary>
+    public static readonly string UpdateVersionFile = Path.Combine(AppRoot, ".nxp-version");
+
+    /// <summary>下载包文件名（与发布资产命名一致）。</summary>
+    public static string UpdatePackageZipName(string version) => $"NexusPipeline-v{version}-win-x64.zip";
+
+    public static string UpdatePackageShaName(string version) => UpdatePackageZipName(version) + ".sha256";
+
+    /// <summary>staging 目录：解压+校验后的新版本文件（宿主按 version 建子目录）。</summary>
+    public static string UpdateStagingDir(string version) => Path.Combine(UpdateDir, "staging", version);
 }

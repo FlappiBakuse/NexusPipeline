@@ -26,7 +26,7 @@ public class DispatchQueue
 
     public string Name { get; set; } = "";
 
-    /// <summary>列表展示顺序（v0.6.8+ 拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
+    /// <summary>列表展示顺序（拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
     public int Index { get; set; }
 
     public string AutoRunMode { get; set; } = "none";
@@ -44,7 +44,7 @@ public class DispatchQueue
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
+    /// <summary>深拷贝（改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
     public DispatchQueue Clone()
     {
         return System.Text.Json.JsonSerializer.Deserialize<DispatchQueue>(

@@ -48,6 +48,55 @@ public class SchedulerTests
         Assert.Equal(1, commands.SuccessfulStarts);
     }
 
+    /// <summary>
+    /// 语义保留（v0.10.0 语义审计，见 DESIGN.md §8.1）：定时触发为秒级 tick，跨整点错过不补跑——
+    /// 触发时间若在过去且不属于当前 tick 窗口，不补发历史 occurrence。
+    /// </summary>
+    [Fact]
+    public void ScheduledTrigger_DoesNotBackfillMissedOccurrence()
+    {
+        DateTime now = DateTime.Now;
+        // 触发分钟取「5 分钟前且与当前分钟不同」（不同分钟才能证明不在 (now-1min, now] 窗口内）。
+        string triggerMinutes = now.AddMinutes(-5).ToString("mm");
+        if (triggerMinutes == now.ToString("mm"))
+        {
+            triggerMinutes = now.AddMinutes(-5).AddMinutes(now.Minute % 2 == 0 ? 1 : -1).ToString("mm");
+        }
+        var queue = new DispatchQueue
+        {
+            Id = "missed-queue",
+            Name = "错过队列",
+            AutoRunMode = "scheduled",
+            Tasks = new List<QueueTask>
+            {
+                new() { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" },
+            },
+            TimeSets = new List<QueueTimeSet>
+            {
+                new() { Enabled = true, Days = new List<int> { (int)now.DayOfWeek }, Time = $"{now:HH}:{triggerMinutes}" },
+            },
+        };
+        var queues = new TestQueueRepository(queue);
+        var commands = new TestExecutionService(failFirst: false);
+        var validator = new ExecutionValidator(
+            new EmptyScriptRepository(),
+            queues,
+            new EmptyUserRepository());
+        using var scheduler = new Scheduler(
+            queues,
+            new EmptyHistoryStore(),
+            new TestSettingsProvider(),
+            commands,
+            validator);
+
+        scheduler.TickForTest();
+        scheduler.TickForTest();
+        scheduler.TickForTest();
+
+        Assert.Equal(0, commands.Attempts);
+        Assert.Equal(0, PendingCount(scheduler));
+    }
+
     private static async Task EventuallyAsync(Func<bool> condition)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(3);

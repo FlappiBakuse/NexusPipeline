@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -162,7 +162,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     StartTime = DateTime.Now,
                 };
                 record.AttemptDetails.Add(attempt);
-                // v0.7.4（KN-25）：段起点设置在「开始」头之前——此前段含「结束」头不含「开始」头（首尾不对称），
+                // 段起点设置在「开始」头之前——此前段含「结束」头不含「开始」头（首尾不对称），
                 // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
                 _attemptLogStart = _scriptFullLog.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
@@ -405,8 +405,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             return budgetError;
         }
-        // Attempt 起点一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
-        Dictionary<string, LogCandidateSnapshot> logCandidatesAtAttemptStart = CaptureLogCandidates(_script.LogPath);
+        // Attempt 起点日志环境：一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
+        var logEnv = new AttemptLogEnvironment(_script, modeText);
 
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
@@ -536,15 +536,15 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             ownership?.Dispose();
             return await FinishEarlyAsync(RunAttemptResult.Failed("脚本启动失败：未能创建进程")).ConfigureAwait(false);
         }
-        // v0.6.5+：运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出；控制台脚本无窗口自动跳过），
+        // 运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出；控制台脚本无窗口自动跳过），
         // 游戏窗口另由 BringToFrontFireAndForget 前置以利截图识别。
         SystemActions.MinimizeWindowFireAndForget(process.Id, "脚本");
         _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
 
-        // v0.6.5+：统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
+        // 统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
         // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
-        // v0.7.0+：模拟器模式跳过（adb 命令行工具，无窗口前置需求）。
+        // 模拟器模式跳过（adb 命令行工具，无窗口前置需求）。
         if (!EmulatorSupport.IsEmulator(_script))
         {
             BringGameToFrontIfRunning();
@@ -578,58 +578,17 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             return confirmed;
         }
 
-        string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
         // 启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，也只从 Attempt 起点长度续读。
-        LogCandidateSnapshot? snapshotBeforeStart = resolvedBeforeStart is null
-            ? null
-            : SnapshotForCandidate(resolvedBeforeStart, logCandidatesAtAttemptStart);
+        string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
         DateTime attemptStart = DateTime.Now;
-        LogMonitor? monitor = resolvedBeforeStart is null ? null : NewMonitor(resolvedBeforeStart, snapshotBeforeStart, modeText);
+        LogMonitor? monitor = logEnv.CreateMonitor(resolvedBeforeStart);
         var attemptMonitor = new AttemptMonitor();
         var judge = new SessionJudge(_script);
-        bool judgeConfigured = judge.IsConfigured;
         bool scriptMode = judge.ScriptMode;
         DateTime? firstEntryAt = null;
         RunAttemptResult? result = null;
 
         string attemptId = $"{_script.Id}:{attempt.Number}:{attempt.StartTime.Ticks}";
-        int judgeGeneration = 0;
-        int finalJudgeGeneration = -1;
-        bool finalJudgeRequested = false;
-        bool finalJudgeQueuePending = false;
-        bool finalJudgeCompleted = false;
-        bool terminalObservation = false;
-        string terminalFailureReason = "进程退出但未检测到完成标志";
-
-        await using var judgeWorker = new SingleFlightJudgeWorker(async (snapshot, workerToken) =>
-        {
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, OperationToken);
-            JudgeScriptResult judgeResult = await JudgeScriptRunner.ExecuteAsync(
-                snapshot.Script,
-                snapshot.InputJson,
-                snapshot.Files.Select(file => new JudgeScriptInputFile
-                {
-                    Root = file.Root,
-                    Path = file.Path,
-                    Abs = file.Abs,
-                }).ToList(),
-                snapshot.Script.ConfigPath,
-                snapshot.ScriptDir,
-                linked.Token).ConfigureAwait(false);
-            return new JudgeWorkerResult(
-                snapshot.AttemptId,
-                snapshot.AttemptNumber,
-                snapshot.Generation,
-                judgeResult,
-                DateTime.Now);
-        });
-
-        await using var configSyncWorker = new ConfigSyncWorker(request =>
-        {
-            OperationToken.ThrowIfCancellationRequested();
-            _configRun?.SyncToStore(request.FirstCheck);
-            OperationToken.ThrowIfCancellationRequested();
-        });
 
         JudgeSnapshot CaptureJudgeSnapshot(int generation)
         {
@@ -664,163 +623,41 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 files);
         }
 
-        bool ConsumeConfigSyncResult()
-        {
-            if (!configSyncWorker.TryTakeCompleted(out _, out Exception? error))
+        // Judge/配置同步单飞 worker 与最终判定请求收敛在 RuntimeWorkers；终局状态转移收敛在 AttemptTerminator。
+        var workers = new RuntimeWorkers(
+            attemptId,
+            attempt.Number,
+            OperationToken,
+            modeText,
+            _script.Name,
+            judge,
+            status => _statusChanged?.Invoke(status),
+            CaptureJudgeSnapshot,
+            replace => _pendingReplaceConfigs = replace,
+            request =>
             {
-                return false;
-            }
-            if (error is not null)
-            {
-                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」自动更新配置同步失败：{error.Message}");
-            }
-            return true;
-        }
-
-        bool ConsumeJudgeResult()
-        {
-            if (!judgeWorker.TryTakeCompleted(out JudgeWorkerResult completed, out Exception? error))
-            {
-                return false;
-            }
-
-            bool isFinal = completed.AttemptId == attemptId
-                && completed.AttemptNumber == attempt.Number
-                && completed.Generation == finalJudgeGeneration;
-            if (error is not null)
-            {
-                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」判断脚本执行错误（视为继续运行）：{error.Message}");
-                if (isFinal)
-                {
-                    finalJudgeCompleted = true;
-                }
-                return true;
-            }
-
-            bool current = completed.AttemptId == attemptId
-                && completed.AttemptNumber == attempt.Number
-                && completed.Generation == judgeGeneration;
-            if (!current)
-            {
-                Logger.Info($"[{modeText}运行] 丢弃脚本「{_script.Name}」过期判断结果（AttemptId/Generation 不匹配）。");
-                if (isFinal)
-                {
-                    finalJudgeRequested = false;
-                    finalJudgeQueuePending = true;
-                }
-                return true;
-            }
-
-            JudgeScriptResult judgeResult = completed.Result;
-            if (judgeResult.JudgeError is not null)
-            {
-                Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」判断脚本执行错误（视为继续运行）：{judgeResult.JudgeError}");
-            }
-            else
-            {
-                SessionJudge.JudgeOutcome outcome = judge.ApplyJudgeResult(
-                    judgeResult.Status,
-                    judgeResult.Reason,
-                    judgeResult.NotifyText,
-                    judgeResult.ReplaceConfigs,
-                    replace =>
-                    {
-                        // v0.6.9+（P6）：仅记录待替换配置，不立即应用——应用推迟到尝试收尾（杀进程确认退出后），
-                        // 消除进程仍运行时复制覆盖 config 的文件占用/半写窗口。
-                        _pendingReplaceConfigs = replace;
-                        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本请求替换配置（{replace.Count} 个文件），收尾后应用并重试。");
-                    });
-                if (outcome == SessionJudge.JudgeOutcome.Success)
-                {
-                    _statusChanged?.Invoke("判断脚本判定成功，等待脚本退出...");
-                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本判定成功：{judgeResult.Reason}");
-                }
-                else if (outcome == SessionJudge.JudgeOutcome.Failure)
-                {
-                    _statusChanged?.Invoke("判断脚本判定失败");
-                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」判断脚本判定失败：{judgeResult.Reason}");
-                }
-            }
-            if (isFinal)
-            {
-                finalJudgeCompleted = true;
-            }
-            return true;
-        }
-
-        bool QueueJudge(bool final)
-        {
-            int generation = judgeGeneration + 1;
-            JudgeSnapshot snapshot = CaptureJudgeSnapshot(generation);
-            if (!judgeWorker.TryStart(snapshot))
-            {
-                if (final)
-                {
-                    finalJudgeQueuePending = true;
-                }
-                return false;
-            }
-            judgeGeneration = generation;
-            judge.TouchJudge();
-            if (final)
-            {
-                finalJudgeRequested = true;
-                finalJudgeQueuePending = false;
-                finalJudgeGeneration = generation;
-            }
-            return true;
-        }
-
-        void RequestFinalJudge(string fallbackReason)
-        {
-            terminalObservation = true;
-            terminalFailureReason = fallbackReason;
-            if (!finalJudgeRequested && !finalJudgeCompleted)
-            {
-                QueueJudge(final: true);
-            }
-        }
-
-        bool ApplyFinalJudgeDecision()
-        {
-            if (!terminalObservation || !finalJudgeCompleted)
-            {
-                return false;
-            }
-            if (judge.IsFailure)
-            {
-                result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
-                result.NotifyText = judge.NotifyText;
-            }
-            else if (judge.IsMarker)
-            {
-                result = RunAttemptResult.Success(judge.Reason ?? "判断脚本判定成功");
-                result.NotifyText = judge.NotifyText;
-            }
-            else
-            {
-                result = RunAttemptResult.Failed(terminalFailureReason);
-            }
-            return true;
-        }
+                OperationToken.ThrowIfCancellationRequested();
+                _configRun?.SyncToStore(request.FirstCheck);
+                OperationToken.ThrowIfCancellationRequested();
+            });
+        var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
+        await using var workersScope = workers;
 
         try
         {
             while (result is null)
             {
                 OperationToken.ThrowIfCancellationRequested();
-                ConsumeConfigSyncResult();
-                ConsumeJudgeResult();
-                if (finalJudgeQueuePending && !finalJudgeRequested && !finalJudgeCompleted)
-                {
-                    QueueJudge(final: true);
-                }
-                if (ApplyFinalJudgeDecision())
+                workers.ConsumeConfigSyncResult();
+                workers.ConsumeJudgeResult();
+                workers.TryQueuePendingFinalJudge();
+                result = terminator.TryApplyFinalDecision();
+                if (result is not null)
                 {
                     break;
                 }
 
-                // v0.7.6：自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
+                // 自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
                 // config → store（捕获脚本启动后自行更新的任务配置；重试轮不检测）。
                 // 并入主循环避免后台任务与收尾还原的竞态；关/开模式共有。
                 if (!_firstSyncDone && attempt.Number == 1 && _configRun is not null && _configRun.IsPrepared
@@ -828,14 +665,14 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 {
                     _firstSyncDone = true;
                     Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」自动更新配置首次检测（运行开始 15 秒后）。");
-                    if (!configSyncWorker.TryStart(new ConfigSyncRequest(attemptId, attempt.Number, true, DateTime.Now)))
+                    if (!workers.TryStartConfigSync(new ConfigSyncRequest(attemptId, attempt.Number, true, DateTime.Now)))
                     {
                         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」配置同步 worker 当前繁忙，本次首次检测已并入已有同步。");
                     }
                 }
 
-                // v0.6.6+：游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
-                // v0.7.0+：模拟器模式跳过窗口前置。
+                // 游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
+                // 模拟器模式跳过窗口前置。
                 if (!EmulatorSupport.IsEmulator(_script))
                 {
                     BringGameToFrontIfRunning();
@@ -862,43 +699,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     break;
                 }
 
-                if (!string.IsNullOrWhiteSpace(_script.LogPath))
-                {
-                    string? resolved = LogPattern.ResolveFile(_script.LogPath);
-                    if (resolved is not null)
-                    {
-                        if (monitor is null)
-                        {
-                            monitor = NewMonitor(
-                                resolved,
-                                SnapshotForCandidate(resolved, logCandidatesAtAttemptStart),
-                                modeText);
-                        }
-                        else if (!string.Equals(resolved, monitor.Path, StringComparison.OrdinalIgnoreCase))
-                        {
-                            monitor.Dispose();
-                            monitor = NewMonitor(
-                                resolved,
-                                SnapshotForCandidate(resolved, logCandidatesAtAttemptStart),
-                                modeText,
-                                rotated: true);
-                        }
-                        else
-                        {
-                            try
-                            {
-                                if (monitor.FileReplaced(resolved))
-                                {
-                                    monitor.ReopenFromStart();
-                                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志文件被替换，已重新从头读取：{resolved}");
-                                }
-                            }
-                            catch (Exception)
-                            {
-                            }
-                        }
-                    }
-                }
+                monitor = logEnv.RefreshMonitor(monitor);
 
                 string newContent = attemptMonitor.ReadLog(monitor);
                 if (newContent.Length > 0)
@@ -926,25 +727,26 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     }
                 }
 
-                // v0.7.5（台账外，修正）：周期触发与退出/stall 最终触发同轮先后命中时跳过最终触发——
+                // （台账外，修正）：周期触发与退出/stall 最终触发同轮先后命中时跳过最终触发——
                 // 周期触发输入为「无新内容」状态，同轮内日志段不变，最终触发属完全重复执行；
                 // 批次触发（有新内容）后的同轮最终触发**必须保留**（进程退出是新事实，判断脚本可能
                 // 基于自身状态文件在第二次执行给出最终判定，如计数器——06 spec「进程退出时最终触发」用例）。
                 bool skipFinalJudge = false;
                 if (scriptMode && newContent.Length > 0 && result is null && !judge.IsMarker)
                 {
-                    QueueJudge(final: false);
+                    workers.QueueJudge(final: false);
                 }
                 else if (scriptMode && newContent.Length == 0 && result is null
                     && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
                 {
                     _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
                     skipFinalJudge = true;
-                    QueueJudge(final: false);
+                    workers.QueueJudge(final: false);
                 }
 
-                ConsumeJudgeResult();
-                if (ApplyFinalJudgeDecision())
+                workers.ConsumeJudgeResult();
+                result = terminator.TryApplyFinalDecision();
+                if (result is not null)
                 {
                     break;
                 }
@@ -952,75 +754,14 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 bool scriptExited = attemptMonitor.IsScriptExited(process, launchExe, _processOwnership, excludeGame);
                 if (scriptExited)
                 {
-                    if (terminalObservation)
-                    {
-                        // 已经进入最终判定等待状态；让 worker 完成后由循环顶部统一应用结果。
-                    }
-                    else if (monitor is null && !string.IsNullOrWhiteSpace(_script.LogPath))
-                    {
-                        if (scriptMode && !skipFinalJudge)
-                        {
-                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
-                            RequestFinalJudge("已配置日志路径但未找到日志文件，进程退出且未检测到完成标志");
-                        }
-                        else
-                        {
-                            result = RunAttemptResult.Failed("已配置日志路径但未找到日志文件，进程退出且未检测到完成标志");
-                        }
-                    }
-                    else if (monitor is null)
-                    {
-                        if (scriptMode && !skipFinalJudge)
-                        {
-                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
-                            RequestFinalJudge("未配置日志路径，判断脚本无法触发，进程已退出");
-                        }
-                        else if (scriptMode)
-                        {
-                            result = RunAttemptResult.Failed("未配置日志路径，判断脚本无法触发，进程已退出");
-                        }
-                        else
-                        {
-                            result = RunAttemptResult.Success("进程自行退出（未配置日志监控，按退出判定成功）");
-                        }
-                    }
-                    else if (judge.IsFailure)
-                    {
-                        result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
-                        result.NotifyText = judge.NotifyText;
-                    }
-                    else if (judge.IsMarker)
-                    {
-                        result = RunAttemptResult.Success(judge.Reason ?? "日志出现完成标志，脚本正常运行结束");
-                        result.NotifyText = judge.NotifyText;
-                    }
-                    else if (judgeConfigured)
-                    {
-                        if (scriptMode && !skipFinalJudge)
-                        {
-                            _statusChanged?.Invoke("脚本已退出，触发判断脚本最终判定...");
-                            RequestFinalJudge("进程退出但未检测到完成标志");
-                        }
-                        else if (scriptMode)
-                        {
-                            result = RunAttemptResult.Failed("进程退出但未检测到完成标志");
-                        }
-                        else
-                        {
-                            result = RunAttemptResult.Failed("进程退出但未检测到完成标志");
-                        }
-                    }
-                    else
-                    {
-                        result = RunAttemptResult.Success("进程自行退出（未配置完成标志，按退出判定成功）");
-                    }
-                    if (ApplyFinalJudgeDecision() || result is not null)
+                    result = terminator.OnScriptExited(monitor is null, !string.IsNullOrWhiteSpace(_script.LogPath), skipFinalJudge);
+                    if (result is not null)
                     {
                         break;
                     }
                 }
 
-                if (terminalObservation)
+                if (terminator.TerminalObservation)
                 {
                     await Task.Delay(TestHooks.ScaledMs(50), OperationToken).ConfigureAwait(false);
                     continue;
@@ -1036,16 +777,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                         _script.LogStallTimeoutMinutes);
                     if (stall.Hit)
                     {
-                        if (scriptMode && !skipFinalJudge)
-                        {
-                            _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
-                            RequestFinalJudge(stall.Reason);
-                        }
-                        else
-                        {
-                            result = RunAttemptResult.Failed(stall.Reason);
-                        }
-                        if (ApplyFinalJudgeDecision() || result is not null)
+                        result = terminator.OnStall(stall, skipFinalJudge);
+                        if (result is not null)
                         {
                             break;
                         }
@@ -1081,10 +814,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         // 先收拢后台 worker，再进入进程清理与 ConfigRunSession.FinalizeRun，
         // 防止旧 Attempt 的 Judge/配置同步在收尾阶段继续写入状态或文件。
-        ConsumeJudgeResult();
-        ConsumeConfigSyncResult();
-        await judgeWorker.StopAsync().ConfigureAwait(false);
-        await configSyncWorker.StopAsync().ConfigureAwait(false);
+        await workers.StopAsync().ConfigureAwait(false);
 
         monitor?.Dispose();
         monitor = null;
@@ -1097,7 +827,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             result = RunAttemptResult.Fatal("脚本进程清理未确认，已保留配置现场并阻断后续操作");
         }
 
-        // v0.6.9+（P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
+        // （P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
         // 复制覆盖 config 存在文件占用/半写窗口）；仅本次尝试失败时应用，重试循环将使用新配置。
         if (cleanupConfirmed && _pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
         {
@@ -1107,7 +837,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         _pendingReplaceConfigs = null;
 
         RunAttemptResult finalResult = result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
-        // v0.6.5+：运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
+        // 运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
         process?.Dispose();
         process = null;
         try
@@ -1165,7 +895,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     }
 
     /// <summary>
-    /// 模拟器模式游戏启动（v0.7.0+）：连接模拟器 → am start 启动应用 → 前台确认。
+    /// 模拟器模式游戏启动：连接模拟器 → am start 启动应用 → 前台确认。
     /// 目标包名从启动参数 -n 解析；解析不到时仅确认 adb connect 与 am start 命令成功（宽松兜底）。
     /// 返回 null = 成功，否则为失败结果。
     /// </summary>
@@ -1288,46 +1018,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         return _budget?.RemainingCommandSeconds(cap) ?? cap;
     }
 
-    private static Dictionary<string, LogCandidateSnapshot> CaptureLogCandidates(string? pattern)
-    {
-        var snapshots = new Dictionary<string, LogCandidateSnapshot>(StringComparer.OrdinalIgnoreCase);
-        if (string.IsNullOrWhiteSpace(pattern))
-        {
-            return snapshots;
-        }
-        foreach (string candidate in LogPattern.ResolveFiles(pattern))
-        {
-            LogCandidateSnapshot? snapshot = LogMonitor.CaptureSnapshot(candidate);
-            if (snapshot is not null)
-            {
-                snapshots[SnapshotKey(candidate)] = snapshot;
-            }
-        }
-        return snapshots;
-    }
-
-    private static LogCandidateSnapshot? SnapshotForCandidate(
-        string path,
-        IReadOnlyDictionary<string, LogCandidateSnapshot> snapshots)
-    {
-        return snapshots.TryGetValue(SnapshotKey(path), out LogCandidateSnapshot? snapshot)
-            ? snapshot
-            : null;
-    }
-
-    private static string SnapshotKey(string path)
-    {
-        try
-        {
-            return System.IO.Path.GetFullPath(path);
-        }
-        catch
-        {
-            return path;
-        }
-    }
-
-    /// <summary>统一游戏窗口前置（v0.6.5+，v0.6.6+ 轮询检测）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）
+    /// <summary>统一游戏窗口前置（， 轮询检测）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）
     /// 存在即后台前置其可见主窗口。游戏由启动器延迟拉起时启动瞬间检测不到——监控循环每轮调用本方法，
     /// 游戏出现即前置（复用 BringToFront 30 秒窗口覆盖「进程出现但窗口未建」），前置一次后由 _gameFronted 停止重复。
     /// 游戏启动方式复杂（启动器常驻/必须以启动器启动等）由脚本专门适配，宿主不重复启动游戏；此处仅做窗口前置。
@@ -1361,15 +1052,5 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             Logger.Warn($"[警告] 检测游戏进程失败：{ex.Message}");
         }
-    }
-
-    /// <summary>创建日志监控：文件在尝试开始前不存在（本次新建）或被轮换 → 从头读；否则从「尝试开始时长度」续读（忽略残留旧内容）。</summary>
-    private LogMonitor NewMonitor(string resolved, LogCandidateSnapshot? beforeStart, string modeText, bool rotated = false)
-    {
-        LogCandidateSnapshot? current = LogMonitor.CaptureSnapshot(resolved);
-        (bool fresh, long initialPosition) = LogMonitor.DecideStart(beforeStart, current);
-        var monitor = new LogMonitor(resolved, readFromStart: fresh, initialPosition: initialPosition);
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」{(rotated ? "日志轮换，改监控" : "开始监控")}：{resolved}（{(fresh ? "从头" : "续读")}）");
-        return monitor;
     }
 }

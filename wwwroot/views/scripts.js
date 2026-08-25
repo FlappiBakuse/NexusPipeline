@@ -24,7 +24,7 @@ function emulatorAllowed(pluginType) {
   return !!meta && meta.kind === "data-specialized" && meta.configuredEnabled && meta.runtimeEnabled && meta.state === "Active" && !!meta.supportsEmulator;
 }
 
-/** 游戏配置卡（v0.7.0+）：启动方式选择器（仅支持时渲染）+ ADB 地址/游戏路径按模式切换 + 启动参数 + 等待秒数。 */
+/** 游戏配置卡：启动方式选择器（仅支持时渲染）+ ADB 地址/游戏路径按模式切换 + 启动参数 + 等待秒数。 */
 function gameBoxHtml(d, emulatorOk) {
   const isEmu = emulatorOk && d.gameMode === "emulator";
   const modeRow = emulatorOk
@@ -39,7 +39,7 @@ function gameBoxHtml(d, emulatorOk) {
   return `<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
 }
 
-/** 启动方式切换（v0.7.0+）：更新游戏路径/ADB 地址字段的标签与提示。 */
+/** 启动方式切换：更新游戏路径/ADB 地址字段的标签与提示。 */
 export function changeGameMode() {
   const isEmu = $dom("#sm-mode")?.value === "emulator";
   const exe = $dom("#sm-game-exe");
@@ -399,7 +399,7 @@ export async function saveScript() {
     toast(`最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`, "error");
     return;
   }
-  // v0.7.0：-1 = 不超时（长时脚本），必须成对出现
+  // -1 = 不超时（长时脚本），必须成对出现
   const longStall = stall === -1;
   const longTotal = total === -1;
   if (longStall !== longTotal) {

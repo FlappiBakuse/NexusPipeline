@@ -114,7 +114,26 @@ internal static class Bootstrap
         return true;
     }
 
-    /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护（v0.6.5+）：单步异常不影响其余清理步骤执行。</summary>
+    /// <summary>
+    /// 更新应用后的宿主退出：常驻服务走完成操作退出门禁；
+    /// web 模式没有 WinForms 消息循环（Application.Exit 无效），直接延时退出进程——单实例互斥体随进程终止释放，
+    /// apply-update 子进程接管切换。
+    /// </summary>
+    internal static bool TryRequestUpdateExit()
+    {
+        if (ApplicationHost.IsWebOnly)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TestHooks.ScaledMs(1500)).ConfigureAwait(false);
+                Environment.Exit(0);
+            });
+            return true;
+        }
+        return TryRequestCompletionExit();
+    }
+
+    /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护：单步异常不影响其余清理步骤执行。</summary>
     public static void Shutdown(WebServer? web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;

@@ -129,6 +129,18 @@
 | KN-80 | `AutoUpdateConfig=false` 仍执行首次约 15 秒同步，收尾不同步 | 用户已确认的产品语义，保持现状 |
 | KN-81 | 快速失败脚本可能错过首次检测同步 | 用户已确认可接受；开关开启时由收尾同步兜底 |
 
+## v0.10.0 语义保留项审计（B6）
+
+> 以下四项经调研报告审计确认为**既定语义**，保持现状并以文档/测试锁死（见 `docs/DESIGN.md` §5.3 与 §8.1），不按缺陷修复。
+
+| 项 | 内容 | 决策 |
+|---|---|---|
+| KN-49 | `ConfigSwapRecovery` 兼容恢复直接查组合根 | **已解决**（v0.10.0 B2）：改为构造注入 `IConfigRecoveryDataSource`，组合根装配；见 ARCHITECTURE.md |
+| — | Python 判断脚本可读写边界无法技术强制 | 语义保留（信任边界）：config 只读 + script 可写以文档契约约束，DESIGN.md §5.3 明确 |
+| — | Scheduler 秒级 tick，跨整点/休眠错过不补跑 | 语义保留：DESIGN.md §8 第 4 条 + L1 测试 `ScheduledTrigger_DoesNotBackfillMissedOccurrence` 锁死 |
+| — | `IsExeRunning` 按进程名检测同名进程可能误报 | 语义保留（保守优先）：DESIGN.md §8 第 7 条注明，不改逻辑 |
+| — | 通知单通道失败仅告警不阻断 | 语义保留（通道隔离）：DESIGN.md §7.1 注明，不改逻辑 |
+
 ## v0.9.2 修复门槛
 
 v0.9.2 完成前，目标条目必须满足：

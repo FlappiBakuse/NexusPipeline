@@ -22,12 +22,12 @@ internal sealed class ConfigSessionMark
     /// <summary>本次编辑会话由宿主生成了配置模板（重启恢复时清理 config 位置的编辑产物，还原编辑前状态）。</summary>
     public bool GeneratedTemplate { get; set; }
 
-    /// <summary>模板目录复制生成的文件清单（相对 configPath 父目录，v0.6.3+ 模板目录形态；cancel/重启恢复按清单精确清理）。</summary>
+    /// <summary>模板目录复制生成的文件清单（相对 configPath 父目录， 模板目录形态；cancel/重启恢复按清单精确清理）。</summary>
     public List<string> TemplateFiles { get; set; } = new();
 
     private static readonly JsonSerializerOptions Options = new()
     {
-        // v0.7.5（KN-55）：写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；PropertyNameCaseInsensitive
+        // 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；PropertyNameCaseInsensitive
         // 兼容读取旧版 camelCase 标记（旧版本崩溃现场仍可完整恢复，无需迁移）。
         PropertyNameCaseInsensitive = true,
         WriteIndented = true,

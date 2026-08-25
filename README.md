@@ -1,4 +1,4 @@
-﻿# NexusPipeline（枢链）
+# NexusPipeline（枢链）
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/FlappiBakuse/NexusPipeline/actions)
@@ -32,6 +32,7 @@
 - **游戏联动**：可选在脚本前启动游戏、运行中自动把游戏窗口置前（防截图识别被遮挡）、失败时强制结束游戏进程。
 - **安卓模拟器基础设施（v0.9.5）**：脚本实例可选择「安卓模拟器」启动方式——填模拟器 ADB 地址（如 `127.0.0.1:16384`）+ am start 参数，运行前自动连接模拟器、启动/关闭应用、失败重试时关闭目标应用。通用目标使用独立 ADB driver；被 MuMuManager 精确识别的目标从连接、启动、探测到收尾始终使用 MuMuManager。专用插件是否支持模拟器由 capability 声明（目前仅 MaaEnd 专项支持）。
 - **通知推送**：Webhook / SMTP 双通道并行，属于宿主内置通知能力，配置入口位于「设置」页，密钥本地加密存储（DPAPI）。
+- **内建更新（v0.10.0）**：设置页可检查 GitHub 最新版本、下载校验（SHA256）后就绪、「立即更新」或「下次启动更新」；应用走独立切换进程（备份旧版本、失败自动回滚、启动自愈），只替换程序文件与前端，配置/历史/用户数据一律不触碰。
 - **命令行**：不开网页也能全功能管理（`manage` 交互菜单）；支持 `run-script`、`run-queue`、`cancel` 等脚本化调用。
 
 ## 安装
@@ -43,7 +44,7 @@
 5. （可选）在「设置」里开启**开机自启动**，登录 Windows 时自动以最高权限静默启动。
 
 > 需要 .NET 8 运行时：未安装时从 [dotnet.microsoft.com](https://dotnet.microsoft.com/download/dotnet/8.0) 下载「.NET Desktop Runtime 8.x」（大多数情况下系统已内置）。
-> 升级：下载新版本 zip 解压，**整体替换整个文件夹**即可（`config/` 配置与历史记录会自动保留/迁移）。
+> 升级：解压新版本 zip 后**整体替换整个文件夹**即可（`config/` 配置与历史记录会自动保留/迁移）；v0.10.0 起也可以在「设置 → 更新」里直接检查并应用更新，无需手动换包。
 
 ## 快速上手（以 BetterGI 原神专项为例）
 

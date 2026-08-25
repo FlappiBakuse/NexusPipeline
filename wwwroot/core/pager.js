@@ -2,7 +2,7 @@ const pagers = new Map();
 
 export function pagerMarkup(key, page, pageSize, total) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  // v0.7.3+（用户需求）：未达分页条件（仅一页）时隐藏整个分页条（含条数信息）。
+  // （用户需求）：未达分页条件（仅一页）时隐藏整个分页条（含条数信息）。
   if (totalPages <= 1) return "";
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);

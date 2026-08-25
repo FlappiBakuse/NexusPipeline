@@ -10,6 +10,7 @@ using NexusPipeline.Web;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
@@ -23,7 +24,7 @@ internal static class ApplicationHost
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
-    /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web，v0.6.5+）：该模式不支持自动重启，仅常驻服务模式支持。</summary>
+    /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web）：该模式不支持自动重启，仅常驻服务模式支持。</summary>
     internal static bool IsWebOnly { get; set; }
 
     [STAThread]
@@ -44,7 +45,7 @@ internal static class ApplicationHost
         {
             Logger.Debug($"设置控制台输出编码失败：{ex.Message}");
         }
-        // v0.6.3：stdout 重定向（管道/文件）下 Console.OutputEncoding 不生效（实测仍按系统 ANSI 代码页写 GBK），
+        // stdout 重定向（管道/文件）下 Console.OutputEncoding 不生效（实测仍按系统 ANSI 代码页写 GBK），
         // 显式用 UTF-8 流包装 stdout，保证 CLI 管道输出中文正确（e2e CLI 断言依赖；控制台模式不受影响）。
         if (Console.IsOutputRedirected)
         {
@@ -93,6 +94,8 @@ internal static class ApplicationHost
                 return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
             case "restart":
                 return StartupPipeline.RunRestart();
+            case "apply-update":
+                return RunUpdateApplyCli(args.Skip(1).ToArray());
             case "run-script":
                 return RunScriptCli(args.Skip(1).ToArray());
             case "run-queue":
@@ -114,6 +117,34 @@ internal static class ApplicationHost
                 Console.WriteLine($"[错误] 未知命令：{args[0]}");
                 PrintUsage();
                 return 1;
+        }
+    }
+
+    /// <summary>apply-update 子进程命令（，仅由宿主更新流程拉起）：等待主实例退出后执行文件交换并重新拉起宿主。</summary>
+    private static int RunUpdateApplyCli(string[] args)
+    {
+        string? staged = null;
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i].Equals("--staged", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                staged = args[i + 1];
+                i++;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(staged))
+        {
+            Console.WriteLine("[错误] 用法：nexus-pipeline.exe apply-update --staged <暂存目录>");
+            return 1;
+        }
+        try
+        {
+            return UpdateApply.RunApplyWorker(staged);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[错误] 更新应用失败：{ex.Message}");
+            return 1;
         }
     }
 
@@ -179,7 +210,7 @@ internal static class ApplicationHost
     }
 
     /// <summary>
-    /// 通过常驻服务 HTTP API 提交任务并轮询结果（v0.6.3+）：提交 POST /api/dispatch/{kind}，
+    /// 通过常驻服务 HTTP API 提交任务并轮询结果：提交 POST /api/dispatch/{kind}，
     /// 成功后轮询 GET /api/dispatch/{runId} 直至结束，输出贴近原 WaitCli 风格；全部记录 success 返回 0。
     /// </summary>
     private static int RunCliViaHttp(string kind, object body, string displayName)
@@ -212,7 +243,7 @@ internal static class ApplicationHost
         }
     }
 
-    /// <summary>从提交响应中解析运行 ID（v0.6.7+ 容错：响应非 JSON/字段缺失返回 null，交由调用方区分「已提交但无法轮询」）。</summary>
+    /// <summary>从提交响应中解析运行 ID（容错：响应非 JSON/字段缺失返回 null，交由调用方区分「已提交但无法轮询」）。</summary>
     private static string? ResolveRunId(HttpResponseMessage resp)
     {
         try
@@ -225,7 +256,7 @@ internal static class ApplicationHost
         }
     }
 
-    /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1；总时长上限 6 小时（v0.6.7+，防挂死）。</summary>
+    /// <summary>轮询运行结果：每 1 秒查询一次，状态变化时打印进度；结束后输出各记录明细。连续 3 次网络失败退出 1；总时长上限 6 小时（，防挂死）。</summary>
     private static int PollCliRun(int port, string runId)
     {
         string lastStatus = "";

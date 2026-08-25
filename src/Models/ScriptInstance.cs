@@ -6,7 +6,7 @@ public class ScriptInstance
 
     public string Name { get; set; } = "";
 
-    /// <summary>列表展示顺序（v0.6.8+ 拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
+    /// <summary>列表展示顺序（拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
     public int Index { get; set; }
 
     /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由专用插件在保存时固化。</summary>
@@ -24,7 +24,7 @@ public class ScriptInstance
 
     public bool LaunchGame { get; set; }
 
-    /// <summary>启动方式（v0.7.0+）：""/"pc" = PC 客户端（默认，游戏按可执行文件启动），"emulator" = 安卓模拟器（GameExe 为 ADB 地址、GameArgs 为 am start 参数）。</summary>
+    /// <summary>启动方式：""/"pc" = PC 客户端（默认，游戏按可执行文件启动），"emulator" = 安卓模拟器（GameExe 为 ADB 地址、GameArgs 为 am start 参数）。</summary>
     public string GameMode { get; set; } = "";
 
     public string GameExe { get; set; } = "";
@@ -41,7 +41,7 @@ public class ScriptInstance
 
     public int TotalTimeoutMinutes { get; set; } = 120;
 
-    /// <summary>成功关键字（自定义完成标志）：每行一组，组内逗号分隔为 AND（v0.7.1 起在整个尝试日志中跨行累积、与顺序无关），换行之间为 OR；留空表示不启用。</summary>
+    /// <summary>成功关键字（自定义完成标志）：每行一组，组内逗号分隔为 AND（起在整个尝试日志中跨行累积、与顺序无关），换行之间为 OR；留空表示不启用。</summary>
     public string SuccessKeywords { get; set; } = "";
 
     /// <summary>失败关键字：语法同成功关键字；留空表示不启用。</summary>
@@ -58,7 +58,7 @@ public class ScriptInstance
 
     public bool NotifyEnabled { get; set; }
 
-    /// <summary>自动更新配置（v0.7.6）：默认开。开 = 每次运行收尾把 config 最终状态全量镜像回用户快照 store
+    /// <summary>自动更新配置：默认开。开 = 每次运行收尾把 config 最终状态全量镜像回用户快照 store
     /// （保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）；关 = 仅运行开始 15 秒后检测同步一次。
     /// 专项脚本由前端固化恒 true；无用户或 ConfigPath 为空时开关不生效。</summary>
     public bool AutoUpdateConfig { get; set; } = true;
@@ -70,7 +70,7 @@ public class ScriptInstance
         PropertyNameCaseInsensitive = true,
     };
 
-    /// <summary>深拷贝（v0.6.6+ 改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
+    /// <summary>深拷贝（改序列化往返，避免手工逐字段复制随新增字段漂移）。</summary>
     public ScriptInstance Clone()
     {
         return System.Text.Json.JsonSerializer.Deserialize<ScriptInstance>(
@@ -89,6 +89,6 @@ public class ScriptInstance
         return !string.IsNullOrWhiteSpace(SuccessKeywords) || !string.IsNullOrWhiteSpace(FailureKeywords);
     }
 
-    /// <summary>是否长时脚本（v0.7.0）：日志无更新超时与运行总时间超时均为 -1（无限超时，挂机场景）。</summary>
+    /// <summary>是否长时脚本：日志无更新超时与运行总时间超时均为 -1（无限超时，挂机场景）。</summary>
     public bool IsLongRunning => LogStallTimeoutMinutes == -1 && TotalTimeoutMinutes == -1;
 }

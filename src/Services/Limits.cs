@@ -56,7 +56,7 @@ internal static class Limits
         Warnings.AddRange(warnings);
         Fatals.Clear();
         Fatals.AddRange(fatals);
-        // v0.6.6+：同步历史保留天数上限到 ConfigStore（settings Normalize 使用，消除硬编码 180）。
+        // 同步历史保留天数上限到 ConfigStore（settings Normalize 使用，消除硬编码 180）。
         ConfigStore.ApplyMaxHistoryRetentionDays(limits.MaxHistoryRetentionDays);
     }
 
@@ -148,7 +148,7 @@ internal static class Limits
     }
 
     /// <summary>
-    /// 超时成对校验（v0.7.0 长时脚本）：-1（不超时）必须成对出现——任一为 -1 而另一为正常值 → 拒绝（避免半长时语义歧义）；
+    /// 超时成对校验（长时脚本）：-1（不超时）必须成对出现——任一为 -1 而另一为正常值 → 拒绝（避免半长时语义歧义）；
     /// 均正常时回退各自区间校验。
     /// </summary>
     public static string? CheckScriptTimeouts(int stallMinutes, int totalMinutes)
@@ -165,7 +165,7 @@ internal static class Limits
     }
 
     /// <summary>
-    /// 队列长时/普通混排校验（v0.7.0）：队列链式串行执行，长时脚本（两个超时均为 -1）会无限阻塞后续任务——
+    /// 队列长时/普通混排校验：队列链式串行执行，长时脚本（两个超时均为 -1）会无限阻塞后续任务——
     /// 长时脚本实例不能与普通脚本实例编排进同一队列。任务不足两项或全部同类时通过。
     /// </summary>
     public static string? CheckQueueMix(IEnumerable<ScriptInstance> scripts, DispatchQueue queue)
@@ -197,7 +197,7 @@ internal static class Limits
     /// 脚本实例路径校验（Web + CLI 共用）：
     /// 通用脚本——根目录/主程序/配置文件必须存在（主程序还需可执行），日志路径仅格式合规（不查存在性，支持日期占位符与通配符）；
     /// 专项脚本——仅校验根目录存在（主程序/配置/日志由插件固化，不做存在性校验）；
-    /// 游戏配置（v0.7.0+ 按启动方式分叉）——PC 客户端：游戏路径一律必填且必须为存在的可执行文件；安卓模拟器：ADB 地址必填且格式合法（主机:端口）。
+    /// 游戏配置（按启动方式分叉）——PC 客户端：游戏路径一律必填且必须为存在的可执行文件；安卓模拟器：ADB 地址必填且格式合法（主机:端口）。
     /// 返回错误信息或 null。
     /// </summary>
     public static string? CheckScriptPaths(ScriptInstance script, IPluginCapabilityResolver capabilities)

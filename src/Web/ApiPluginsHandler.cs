@@ -15,7 +15,7 @@ internal static class ApiPluginsHandler
             return;
         }
         string name = seg[1];
-        // v0.7.4（KN-40）：显式校验 enable/disable，其余字符串 400（此前任意字符串都按 disable 处理）。
+        // 显式校验 enable/disable，其余字符串 400（此前任意字符串都按 disable 处理）。
         string verb = seg[2].ToLowerInvariant();
         if (verb is not ("enable" or "disable"))
         {

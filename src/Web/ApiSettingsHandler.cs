@@ -61,7 +61,7 @@ internal static class ApiSettingsHandler
                     foreach (KeyValuePair<string, JsonNode?> pair in json)
                     {
                         string field = pair.Key;
-                        // v0.7.2+（KN-32）：空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
+                        // 空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
                         if (string.IsNullOrEmpty(field))
                         {
                             bindError = "请求体包含空字段名";
@@ -104,7 +104,7 @@ internal static class ApiSettingsHandler
                 }
                 if (bindError is null)
                 {
-                    // v0.7.4（KN-30）：allowRemoteAccess 已在上方 BindField 通用反射路径绑定。
+                    // allowRemoteAccess 已在上方 BindField 通用反射路径绑定。
                     // 候选对象完成校验、密钥处理和规范化后才写盘；写盘失败时当前引用保持不变。
                     ConfigStore.Save(candidate);
                     ctx.ReplaceSettings(candidate);
@@ -295,7 +295,7 @@ internal static class ApiSettingsHandler
             settings.WebhookEnabled,
             settings.SmtpEnabled,
             settings.WebhookType,
-            // v0.7.2+（KN-10）：密钥一律不回显明文——空=未设置；非空（无论是否 DPAPI 加密，含旧版明文遗留
+            // 密钥一律不回显明文——空=未设置；非空（无论是否 DPAPI 加密，含旧版明文遗留
             // 与手工编辑的明文）统一返回占位符，杜绝明文泄露；前端协议为「非空=已设置，留空不变」。
             webhookUrl = string.IsNullOrWhiteSpace(settings.WebhookUrl) ? "" : "enc:***",
             webhookSecret = string.IsNullOrWhiteSpace(settings.WebhookSecret) ? "" : "enc:***",
@@ -313,6 +313,9 @@ internal static class ApiSettingsHandler
             settings.LogLevel,
             settings.AllowRemoteAccess,
             accessToken = string.IsNullOrWhiteSpace(settings.AccessToken) ? "" : "enc:***",
+            settings.UpdateCheckEnabled,
+            settings.UpdateChannel,
+            settings.UpdateSourceUrl,
         };
     }
 

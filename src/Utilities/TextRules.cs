@@ -68,7 +68,7 @@ internal static class TextRules
     }
 }
 
-/// <summary>自定义完成标志关键字规则：每行一组，组内逗号分隔为 AND（v0.7.1+：整个日志中分别出现即命中，跨行累积），换行之间为 OR。</summary>
+/// <summary>自定义完成标志关键字规则：每行一组，组内逗号分隔为 AND：整个日志中分别出现即命中，跨行累积），换行之间为 OR。</summary>
 internal static class KeywordRule
 {
     public static List<List<string>> Parse(string text)

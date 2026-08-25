@@ -111,7 +111,7 @@ async function loadDayRecords(token) {
   render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天 · 按日期查看运行记录`, daysAction()) + panelsMarkup(records));
 }
 
-/** 天数范围切换（v0.8.7+）：扩展为 7/15/30/60/90/120/180 天，切换后重拉日期列表并回落最新日期。 */
+/** 天数范围切换：扩展为 7/15/30/60/90/120/180 天，切换后重拉日期列表并回落最新日期。 */
 export function historyDaysChange(target) {
   const days = Number(target.value) || 30;
   if (days === historyDays) return;

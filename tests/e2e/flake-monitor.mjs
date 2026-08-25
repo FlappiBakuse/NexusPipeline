@@ -33,7 +33,7 @@ function stamp() {
 
 /** 常驻 PowerShell 采样循环：每 500ms 输出一行 `pid1,pid2|True|PID`（nexus-pipeline 进程 PID 列表 | 58731 监听中 | 监听进程 PID）。
  *  按进程名 + 端口判定（测试监控进程可能无管理员权限，查不到服务进程的 ExecutablePath）。 */
-const ps = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command", `
+const ps = spawn("pwsh", ["-NoProfile", "-NonInteractive", "-Command", `
   $ErrorActionPreference = 'SilentlyContinue';
   while ($true) {
     $p = Get-Process nexus-pipeline -ErrorAction SilentlyContinue;

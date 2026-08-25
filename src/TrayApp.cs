@@ -13,7 +13,7 @@ internal class TrayApp : ApplicationContext
     {
         _icon = new NotifyIcon
         {
-            // v0.8.7：托盘使用 exe 内置品牌图标（侧边栏 N 徽章），提取失败回退系统默认图标。
+            // 托盘使用 exe 内置品牌图标（侧边栏 N 徽章），提取失败回退系统默认图标。
             Icon = ExtractAppIcon(),
             Text = "NexusPipeline 枢链",
             Visible = true,
@@ -40,7 +40,7 @@ internal class TrayApp : ApplicationContext
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        // v0.6.9+（P11）：轻量模式未启动 Web 服务，禁用「打开管理页面」避免打开 404 页面
+        // （P11）：轻量模式未启动 Web 服务，禁用「打开管理页面」避免打开 404 页面
         var openWebItem = new ToolStripMenuItem("打开管理页面", null, (_, _) => OpenWeb());
         if (RuntimeContext.Instance.Settings.LightweightMode)
         {
@@ -63,13 +63,13 @@ internal class TrayApp : ApplicationContext
 
     public static void OpenWeb()
     {
-        // v0.6.9+（P11）：轻量模式防御（双击图标同样走此入口）
+        // （P11）：轻量模式防御（双击图标同样走此入口）
         if (RuntimeContext.Instance.Settings.LightweightMode)
         {
             Logger.Warn("[警告] 轻量运行模式未启动 Web 服务，无法打开管理页面（请使用「命令行管理菜单」）。");
             return;
         }
-        // v0.7.1+（KN-51）：用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
+        // 用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
         int port = WebServer.Current?.Port
             ?? CliTransport.FindServicePort(RuntimeContext.Instance.Settings.WebPort)
             ?? RuntimeContext.Instance.Settings.WebPort;

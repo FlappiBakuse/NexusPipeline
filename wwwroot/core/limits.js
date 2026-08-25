@@ -31,7 +31,7 @@ export function shouldShowWarning() {
 
 let warningReturnFocus = null;
 
-/** 约束警告层（v0.7.3，KN-13 补齐无障碍）：role=alertdialog + aria-labelledby + 初始焦点 + 焦点陷阱 + Esc + 焦点恢复。 */
+/** 约束警告层（ 补齐无障碍）：role=alertdialog + aria-labelledby + 初始焦点 + 焦点陷阱 + Esc + 焦点恢复。 */
 export function showWarning() {
   if (!shouldShowWarning()) return;
   if (document.getElementById("limits-warning")) return;

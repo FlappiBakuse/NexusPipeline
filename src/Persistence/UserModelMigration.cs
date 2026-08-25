@@ -5,7 +5,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Persistence;
 
 /// <summary>
-/// v0.9.5 → v0.9.6 用户领域迁移器。
+/// → 用户领域迁移器。
 ///
 /// 迁移同时涉及 scripts.json、users.json 和多个用户数据目录，因此用 journal 记录计划与每个目录
 /// 的完成状态。任意阶段重启都从 journal 继续，遇到 source/target 同时存在时直接拒绝启动，保留现场。

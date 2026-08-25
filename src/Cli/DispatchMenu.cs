@@ -3,7 +3,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Services;
 namespace NexusPipeline.Cli;
 
-/// <summary>调度中心子菜单：手动执行脚本/队列、取消运行（v0.6.6+ 统一经常驻服务 HTTP 通道，
+/// <summary>调度中心子菜单：手动执行脚本/队列、取消运行（统一经常驻服务 HTTP 通道，
 /// 与 CLI run-script/run-queue 同通道——Web 端可见运行任务，消除进程内直调与 HTTP 通道割裂）。</summary>
 internal static class DispatchMenu
 {

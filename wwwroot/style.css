@@ -363,6 +363,7 @@ td.ops { white-space: nowrap; }
 .table-actions { display: inline-flex; align-items: center; gap: var(--action-gap); }
 .progress-line { height: 7px; margin-top: 10px; overflow: hidden; border-radius: 6px; background: var(--panel-soft); }
 .progress-line > div { height: 100%; border-radius: inherit; background: var(--accent-strong); transition: width .4s ease; }
+.update-notes { margin-top: 12px; color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
 .run-log { height: 170px; margin-top: 10px; }
 pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--log-bg); color: var(--log-text); font-family: Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
 

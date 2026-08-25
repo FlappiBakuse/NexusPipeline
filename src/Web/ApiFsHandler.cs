@@ -57,7 +57,7 @@ internal static class ApiFsHandler
         }
     }
 
-    /// <summary>浏览白名单（v0.6.4+）：仅允许已配置脚本的根目录、配置路径、游戏路径及其子路径，防止经 API 遍历任意磁盘。</summary>
+    /// <summary>浏览白名单：仅允许已配置脚本的根目录、配置路径、游戏路径及其子路径，防止经 API 遍历任意磁盘。</summary>
     private static bool IsWhitelisted(string path)
     {
         string full;
@@ -69,7 +69,7 @@ internal static class ApiFsHandler
         {
             return false;
         }
-        // v0.7.2+（KN-04）：快照后遍历，避免与并发修改冲突。
+        // 快照后遍历，避免与并发修改冲突。
         foreach (ScriptInstance script in RuntimeContext.Instance.SnapshotScripts())
         {
             foreach (string prefix in AllowedPrefixes(script))

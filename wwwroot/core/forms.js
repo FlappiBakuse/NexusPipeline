@@ -26,7 +26,7 @@ export function scrollField(id, label, value, placeholder = "") {
 }
 
 export function selectField(id, label, value, options, extra = "") {
-  // v0.7.4（KN-44）：option 的 value 与文本经 esc() 转义（此前值含引号/尖括号会破坏 HTML 结构）。
+  // option 的 value 与文本经 esc 转义（此前值含引号/尖括号会破坏 HTML 结构）。
   return `<div class="field"><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(t)}</option>`; }).join("")}</select>${fieldErrorSlot(id)}</div>`;
 }
 
@@ -38,7 +38,7 @@ export function switchControl(id, label, description, pressed, action, extra = "
   </div>`;
 }
 
-/** 完成操作倒计时卡片（v0.6.3+）：队列全部完成后 60 秒倒计时窗口，可取消；无待执行操作返回空串。 */
+/** 完成操作倒计时卡片：队列全部完成后 60 秒倒计时窗口，可取消；无待执行操作返回空串。 */
 export function systemActionCard(action) {
   // 退出软件在协调器中立即执行，不展示可取消的倒计时卡片。
   if (!action || action.action === "exit") return "";

@@ -8,7 +8,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
-/// <summary>全局用户实体与脚本绑定 API（v0.9.6）。</summary>
+/// <summary>全局用户实体与脚本绑定 API。</summary>
 [ApiRoute("users")]
 internal static class ApiUsersHandler
 {

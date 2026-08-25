@@ -150,7 +150,7 @@ function syncQueueDraftFromDom() {
   const mode = $("#qm-mode"); if (mode) queueDraft.autoRunMode = mode.value;
   const action = $("#qm-action"); if (action) queueDraft.completionAction = action.value;
   const notify = $("#qm-notify"); if (notify) queueDraft.notifyEnabled = notify.getAttribute("aria-pressed") === "true";
-  // v0.7.0：按元素携带的 data-ts-idx（渲染下标，随拖拽移动）写回原数组项——DOM 顺序与数组顺序脱钩后仍正确。
+  // 按元素携带的 data-ts-idx（渲染下标，随拖拽移动）写回原数组项——DOM 顺序与数组顺序脱钩后仍正确。
   $$(".timeset-card").forEach(card => {
     const target = queueDraft.timeSets[+card.dataset.tsIdx]; if (!target) return;
     const enabled = card.querySelector("[data-ts-enable]"); if (enabled) target.enabled = enabled.getAttribute("aria-pressed") === "true";
@@ -192,13 +192,13 @@ export function renderQueueModal(skipOpenCapture = false) {
     nextBody.scrollTop = queueModalScroll.top;
   };
   requestAnimationFrame(() => { restoreModalScroll(); requestAnimationFrame(restoreModalScroll); });
-  // v0.7.0：定时列表与任务列表拖拽排序（复用 core/dnd.js；DOM 已重排，onDrop 按 data-dnd-id 重排数组）。
+  // 定时列表与任务列表拖拽排序（复用 core/dnd.js；DOM 已重排，onDrop 按 data-dnd-id 重排数组）。
   initDndList($("#qm-timesets"), { onDrop: ids => reorderTimeSets(ids) });
-  // v0.7.1：任务列表为空时不渲染列表容器（qm-tasks 节点不存在），须条件注册拖拽。
+  // 任务列表为空时不渲染列表容器（qm-tasks 节点不存在），须条件注册拖拽。
   if (d.tasks.length) initDndList($("#qm-tasks"), { onDrop: ids => reorderTasks(ids) });
 }
 
-/** 定时列表拖拽排序（v0.7.0）：值已由 sync 按 data-ts-idx 写回原数组项，按 data-dnd-id（渲染下标）顺序重排数组；
+/** 定时列表拖拽排序：值已由 sync 按 data-ts-idx 写回原数组项，按 data-dnd-id（渲染下标）顺序重排数组；
  *  随后把 DOM 卡的 data-ts-idx 与新数组下标对齐——renderQueueModal 开头 sync 依赖它，避免重排后旧索引错写值。 */
 function reorderTimeSets(ids) {
   syncQueueDraftFromDom();
@@ -207,7 +207,7 @@ function reorderTimeSets(ids) {
   renderQueueModal();
 }
 
-/** 任务列表拖拽排序（v0.7.0）：同定时列表；index 字段随之重排（执行顺序）。 */
+/** 任务列表拖拽排序：同定时列表；index 字段随之重排（执行顺序）。 */
 function reorderTasks(ids) {
   syncQueueDraftFromDom();
   queueDraft.tasks = ids.map(id => queueDraft.tasks[+id]);
@@ -257,7 +257,7 @@ export async function saveQueue() {
   if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(`定时列表已达上限（${draft.timeSets.length}/${l.maxTimeSetsPerQueue}）`, "error"); return; }
   const totalUsers = queueTotalUsers();
   if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(`任务列表的启用用户总数已达上限（${totalUsers}/${l.maxQueueTotalUsers}）`, "error"); return; }
-  // v0.7.0：长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本会无限阻塞队列后续任务）
+  // 长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本会无限阻塞队列后续任务）
   const taskScripts = draft.tasks.map(task => state.scripts.find(item => item.id === task.scriptInstanceId)).filter(Boolean);
   const hasLong = taskScripts.some(script => script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1);
   const hasNormal = taskScripts.some(script => !(script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1));

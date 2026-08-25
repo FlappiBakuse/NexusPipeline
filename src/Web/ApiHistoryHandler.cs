@@ -17,7 +17,7 @@ internal static class ApiHistoryHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        // v0.8.7：日期索引——范围内有记录的日期（倒序、含当日条数），供历史页左侧日期列表。
+        // 日期索引——范围内有记录的日期（倒序、含当日条数），供历史页左侧日期列表。
         if (seg.Length == 2 && seg[1].ToLowerInvariant() == "dates")
         {
             int rangeDays = int.TryParse(context.Request.QueryString["days"], out int rangeD) ? rangeD : 3;
@@ -80,7 +80,7 @@ internal static class ApiHistoryHandler
             }).ConfigureAwait(false);
             return;
         }
-        // v0.8.7：按日期取记录——当日全部记录按开始时间升序（顺序执行），附 historyDir 供前端展示记录文件绝对路径。
+        // 按日期取记录——当日全部记录按开始时间升序（顺序执行），附 historyDir 供前端展示记录文件绝对路径。
         string? dateParam = context.Request.QueryString["date"];
         if (!string.IsNullOrWhiteSpace(dateParam))
         {

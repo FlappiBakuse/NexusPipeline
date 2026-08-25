@@ -4,7 +4,7 @@ using NexusPipeline.Services;
 namespace NexusPipeline.Web;
 
 /// <summary>
-/// 系统操作（v0.6.3+）：取消队列完成操作（休眠/重启/关机）的 60 秒倒计时。
+/// 系统操作：取消队列完成操作（休眠/重启/关机）的 60 秒倒计时。
 /// 子路由用 seg 判断（cancel），不得用方法级 [ApiRoute("cancel")]——会与既有 /api/cancel 路由冲突。
 /// </summary>
 [ApiRoute("system-action")]

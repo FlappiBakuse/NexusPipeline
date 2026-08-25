@@ -56,21 +56,27 @@
 
 | 项目 | 规则 |
 |---|---|
-| tag | `vX.Y.Z`（如 `v0.3.1`） |
+| tag | `vX.Y.Z`（如 `v0.10.0`） |
 | release 标题 | `vX.Y.Z`（纯版本号） |
 | pre-release 标记 | v1.0.0 前一律 `--prerelease` |
 | zip 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip` |
 | SHA 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip.sha256`（与 zip 同名成对，内容纯 hash） |
 
-- zip 打包内容：exe + wwwroot + plugins + README + LICENSE，**排除 config/**（用户配置永不打包）；
+- **zip 布局（v0.10.0 起标准化，更新引擎可见性依赖此约定）**：扁平根 = `nexus-pipeline.exe` + `wwwroot/` + `plugins/` + `README` + `LICENSE`，**排除 `config/`、`data/`、`history/`、`logs/`**（用户配置与运行数据永不打包）；更新引擎同时兼容「包内单个顶层目录」形态（自动归一），拒绝含绝对路径 / `..` / 重复目录的条目。
 - SHA 文件内容为**纯 hash**，**不含文件名**、不含空格，UTF-8 无 BOM；禁止 `SHA256.txt` 汇总格式（v0.3.1 错误先例）。
 - 生成方式示例（PowerShell）：
 
 ```powershell
-$zip = "NexusPipeline-v0.3.2-win-x64.zip"
+$zip = "NexusPipeline-v0.10.0-win-x64.zip"
 Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
     Set-Content -Path "$zip.sha256" -Encoding ascii -NoNewline
 ```
+
+### 更新引擎可见性自检（v0.10.0+，每次发布后必做）
+
+- 每次 `gh release create --prerelease` 必须**同时上传 zip 与 sha256**，且都上传完成后更新引擎才能发现新版本（缺失任一资产会被清单过滤跳过）；
+- 上传并校验后，在本机服务设置页点击「检查更新」（或 `POST /api/update/check`）应返回 `available=true` 且最新版本为刚发布的 `vX.Y.Z`；
+- 若检查不到：先核对资产是否齐全（`gh release view vX.Y.Z` 的 assets 列表），再核对 zip 布局（flat root 是否含 `nexus-pipeline.exe` 与 `wwwroot/`）。
 
 ## 5. Release Notes 格式
 

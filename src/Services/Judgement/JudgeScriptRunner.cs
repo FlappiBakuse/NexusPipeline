@@ -41,7 +41,7 @@ internal class JudgeScriptInputFile
 /// - JavaScript 用内置 Jint 引擎（无 Node 库，注入 __NEXUS_INPUT__ / nexus.readFile / nexus.writeFile（限 script 目录）/ nexus.listFiles / console.log）；
 /// - Python 用系统 python.exe（sys.argv[1] 为输入 JSON 路径；可读写约定由文档约束，进程权限无法技术限制）；
 /// - 输出契约：stdout 最后一行 JSON {"status":"success|failed","reason":"...","notifyText":"可选","replaceConfigs":["相对script目录路径"]}，status/reason 必填；
-/// - 单次执行 30 秒上限（真实墙钟，v0.6.6+ 不随 NEXUS_TIME_SCALE 缩放——外部进程冷启动（如 Python 首次运行）可达数秒，缩放会把真实执行误判为超时）；任何执行错误均返回 JudgeError（继续运行，不误判失败）。
+/// - 单次执行 30 秒上限（真实墙钟， 不随 NEXUS_TIME_SCALE 缩放——外部进程冷启动（如 Python 首次运行）可达数秒，缩放会把真实执行误判为超时）；任何执行错误均返回 JudgeError（继续运行，不误判失败）。
 /// </summary>
 internal static class JudgeScriptRunner
 {
@@ -324,7 +324,7 @@ internal static class JudgeScriptRunner
     }
 
     /// <summary>
-    /// 解析 python.exe 完整路径（v0.6.6+）：① PATH 顺序搜索，跳过 WindowsApps 目录的 Store 执行别名
+    /// 解析 python.exe 完整路径：① PATH 顺序搜索，跳过 WindowsApps 目录的 Store 执行别名
     /// （别名在服务进程环境下启动会失败/挂起）；② PATH 未命中时探测常见安装位置（%LOCALAPPDATA%\Programs\Python
     /// 与 %ProgramFiles%\Python 下任意 python.exe，覆盖 PATH 缺失的部署）；全部未命中回退 "python.exe"
     /// （保持原有「未安装或不在 PATH」错误语义）。
@@ -359,7 +359,7 @@ internal static class JudgeScriptRunner
         catch (Exception)
         {
         }
-        // v0.7.5（KN-39）：多 Python 安装时 Directory.GetFiles 顺序未定义——按目录名解析版本号降序取最新
+        // 多 Python 安装时 Directory.GetFiles 顺序未定义——按目录名解析版本号降序取最新
         // （Python313 > Python312；Python39 与 Python310 按数值比较 3.9 < 3.10，避免字符串序误判）；解析失败排最后。
         return candidates.Count > 0
             ? candidates.OrderByDescending(candidate => candidate, PythonVersionComparer.Instance).First()
@@ -408,7 +408,7 @@ internal static class JudgeScriptRunner
         {
             File.WriteAllText(pyPath, code, new UTF8Encoding(false));
             File.WriteAllText(inputPath, inputJson, new UTF8Encoding(false));
-            // v0.6.6+：显式解析 python.exe 完整路径（PATH 搜索跳过 WindowsApps 的 Store 别名——别名进程在
+            // 显式解析 python.exe 完整路径（PATH 搜索跳过 WindowsApps 的 Store 别名——别名进程在
             // 服务（管理员 + 重定向）环境下启动会挂起，曾致判断脚本执行超时）。
             string pythonExe = ResolvePythonExe();
             var psi = new ProcessStartInfo(pythonExe, $"\"{pyPath}\" \"{inputPath}\"")
@@ -416,7 +416,7 @@ internal static class JudgeScriptRunner
                 WorkingDirectory = Path.GetTempPath(),
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                // v0.6.6+：显式重定向 stdin（不写入）——避免 python 继承服务进程的 stdin 句柄
+                // 显式重定向 stdin（不写入）——避免 python 继承服务进程的 stdin 句柄
                 // （服务由外部进程以管道启动时，继承链上的管道句柄会让 python 进程初始化挂起）。
                 RedirectStandardInput = true,
                 UseShellExecute = false,
@@ -435,7 +435,7 @@ internal static class JudgeScriptRunner
             var stdout = new List<string>();
             var stderr = new List<string>();
             process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.Add(e.Data); };
-            // v0.6.9+（P5）：stderr 独立收集——此前并入 stdout 被静默吞掉，无合法 JSON 输出时无法观测 traceback
+            // （P5）：stderr 独立收集——此前并入 stdout 被静默吞掉，无合法 JSON 输出时无法观测 traceback
             process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.Add(e.Data); };
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
@@ -444,7 +444,7 @@ internal static class JudgeScriptRunner
             try
             {
                 await process.WaitForExitAsync(linked.Token).ConfigureAwait(false);
-                // v0.7.4（KN-11）：进程退出瞬间异步输出事件可能未投递完（stdout 尾行 JSON 契约有丢失风险），
+                // 进程退出瞬间异步输出事件可能未投递完（stdout 尾行 JSON 契约有丢失风险），
                 // 同步 WaitForExit 排空输出缓冲——进程已退出，仅等待事件排空，无阻塞风险。
                 process.WaitForExit();
             }

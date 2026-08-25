@@ -8,7 +8,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// 配置储存管理对外门面（v0.5.0 拆分）：保持全部外部 API 签名不变。
+/// 配置储存管理对外门面（拆分）：保持全部外部 API 签名不变。
 /// 实现分层：文件原语 <see cref="ConfigSwapPrimitives"/>（安全移动/原子替换/重试/跨进程互斥）、
 /// 会话与恢复 <see cref="ConfigSwapSession"/>（.session 标记/门禁/回滚/finally 还原/启动扫描恢复）、
 /// 数据目录 <see cref="ConfigSwapPaths"/>。数据保全序：original（原配置）&gt; config &gt; store（可重建）。
@@ -243,7 +243,7 @@ internal static class UserConfigManager
         bool dirKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath));
         string? parentDir = Path.GetDirectoryName(script.ConfigPath);
         // 目录型 ConfigPath（无扩展名，如 MaaEnd 的 config\）：目录为合法配置形态，绝不递归删除——
-        // 第二次编辑会话时目录是刚从 store 还原的用户配置快照，误删会造成用户数据损失（v0.7.4 修复）。
+        // 第二次编辑会话时目录是刚从 store 还原的用户配置快照，误删会造成用户数据损失（修复）。
         // 目录非空即视为用户已有配置，直接跳过模板生成；空目录仍复制模板兜底。
         if (dirKind && Directory.Exists(script.ConfigPath))
         {
@@ -458,7 +458,7 @@ internal static class UserConfigManager
         return ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
     }
 
-    /// <summary>自动更新配置同步（v0.7.6）：把运行生效的 config 当前内容全量镜像到用户快照 store。
+    /// <summary>自动更新配置同步：把运行生效的 config 当前内容全量镜像到用户快照 store。
     /// 插队文件按还原描述还原启停后写入；失败仅告警不阻断运行收尾。</summary>
     public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
     {

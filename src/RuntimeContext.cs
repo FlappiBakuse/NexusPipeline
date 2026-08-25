@@ -8,6 +8,7 @@ using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
+using NexusPipeline.Services.Update;
 
 namespace NexusPipeline;
 
@@ -63,12 +64,18 @@ internal class RuntimeContext
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionCommands>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
+        collection.AddSingleton<UserDataPruner>(provider => new UserDataPruner(SnapshotUsers, provider.GetRequiredService<ExecutionStateStore>()));
+        collection.AddSingleton<UpdateService>(provider => new UpdateService(
+            () => Settings,
+            AppPaths.AppRoot,
+            () => Bootstrap.CanRequestDirectExit(out _),
+            Bootstrap.TryRequestUpdateExit));
         _services = collection.BuildServiceProvider();
     }
 
     public AppSettings Settings { get; private set; } = new();
 
-    /// <summary>脚本/队列共享列表读写锁（v0.7.2+，KN-04）：Web 请求线程与调度/运行后台线程并发访问时保护枚举与修改；
+    /// <summary>脚本/队列共享列表读写锁：Web 请求线程与调度/运行后台线程并发访问时保护枚举与修改；
     /// 修改侧一律在锁内完成「读-改-写」整段，读取侧经 <see cref="FindScript"/> / <see cref="FindQueue"/> /
     /// <see cref="SnapshotScripts"/> / <see cref="SnapshotQueues"/> 或在锁内枚举，避免「集合已修改」/越界异常。</summary>
     internal readonly object DataLock = new();
@@ -150,7 +157,7 @@ internal class RuntimeContext
         }
     }
 
-    /// <summary>脚本列表深拷贝快照（v0.7.2+，KN-04）：跨线程读取/序列化用，避免与修改并发抛「集合已修改」。</summary>
+    /// <summary>脚本列表深拷贝快照：跨线程读取/序列化用，避免与修改并发抛「集合已修改」。</summary>
     internal List<ScriptInstance> SnapshotScripts()
     {
         lock (DataLock)
@@ -159,7 +166,7 @@ internal class RuntimeContext
         }
     }
 
-    /// <summary>队列列表深拷贝快照（v0.7.2+，KN-04）：跨线程读取/序列化用。</summary>
+    /// <summary>队列列表深拷贝快照：跨线程读取/序列化用。</summary>
     internal List<DispatchQueue> SnapshotQueues()
     {
         lock (DataLock)

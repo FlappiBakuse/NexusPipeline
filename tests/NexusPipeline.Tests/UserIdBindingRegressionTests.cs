@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Reflection;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.App.Repositories;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -53,6 +54,8 @@ public sealed class UserIdRecoveryTests
     public void Recovery_IgnoresUnboundUsernameResidue()
     {
         RuntimeContext context = RuntimeContext.Instance;
+        // v0.10.0（B2）：恢复数据源由组合根装配；测试直接构造等价适配器。
+        ConfigSwapSession.ConfigureRecovery(new RuntimeConfigRecoveryDataSource(context.FindScript, context.SnapshotUsers));
         string scriptId = "regression-recovery-" + Guid.NewGuid().ToString("N");
         string legacyName = "LegacyName-" + Guid.NewGuid().ToString("N");
         string configPath = Path.Combine(Path.GetTempPath(), "np-regression-recovery-" + Guid.NewGuid().ToString("N"), "config.json");

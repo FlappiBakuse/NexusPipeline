@@ -1,3 +1,4 @@
+using NexusPipeline.App.Repositories;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -30,7 +31,7 @@ internal static class RuntimeInitializer
         MigrateLegacyConfig();
         try
         {
-            // v0.9.6：必须在新模型加载和 ConfigSwap 崩溃恢复之前完成全局用户迁移。
+            // 必须在新模型加载和 ConfigSwap 崩溃恢复之前完成全局用户迁移。
             UserModelMigration.EnsureMigrated();
         }
         catch (Exception ex)
@@ -39,11 +40,14 @@ internal static class RuntimeInitializer
             Console.Error.WriteLine($"[FATAL] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
             return 1;
         }
-        // v0.6.6+：先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
+        // 先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
         Limits.Load();
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.ReloadSettings();
         ctx.ReloadData();
+        // 配置交换恢复的数据源由组合根装配（恢复路径不再反向依赖 RuntimeContext；
+        // 所有进程模式共用，service/web 的 StartupPipeline 启动恢复与 CLI 运行时自愈均由此覆盖）。
+        ConfigSwapSession.ConfigureRecovery(new RuntimeConfigRecoveryDataSource(ctx.FindScript, ctx.SnapshotUsers));
         if (Limits.Fatals.Count > 0)
         {
             foreach (string fatal in Limits.Fatals)

@@ -1,15 +1,28 @@
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
-internal static class ConfigSwapRecovery
+/// <summary>
+/// 配置交换恢复：脚本/用户读取经 <see cref="IConfigRecoveryDataSource"/> 注入，
+/// 不再反向依赖组合根。仅改调用方式，磁盘协议与判定语义不变；实例由组合根装配（RuntimeInitializer），
+/// 恢复重试循环为进程内单实例。
+/// </summary>
+internal sealed class ConfigSwapRecovery
 {
+    private readonly IConfigRecoveryDataSource _dataSource;
+
+    public ConfigSwapRecovery(IConfigRecoveryDataSource dataSource)
+    {
+        _dataSource = dataSource;
+    }
+
     /* ---------------- 会话与恢复 ---------------- */
 
     /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
-    public static void RecoverIfNeeded(string scriptId, string userName, string configPath)
+    public void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark is null)
@@ -19,7 +32,7 @@ internal static class ConfigSwapRecovery
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
-            // v0.6.9+（P2）：语义对齐 TryRecoverItem——GeneratedTemplate（编辑会话模板产物）仍需 DoRestore
+            // （P2）：语义对齐 TryRecoverItem——GeneratedTemplate（编辑会话模板产物）仍需 DoRestore
             // 清理（恢复编辑前状态）；非模板会话 cache 空 = 现场已还原，仅清标记（避免窄窗口误删用户新写入的 config）。
             if (mark.GeneratedTemplate)
             {
@@ -46,7 +59,7 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>启动恢复：只处理当前全局用户绑定对应的 UserId 目录与脚本级目录。</summary>
-    public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
+    public void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
     {
         try
         {
@@ -78,9 +91,9 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store.previous，临时目录只作为未完成事务清理。</summary>
-    private static Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
+    private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
-        IEnumerable<NexusUser> source = users ?? RuntimeContext.Instance.SnapshotUsers();
+        IEnumerable<NexusUser> source = users ?? _dataSource.SnapshotUsers();
         var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (NexusUser user in source)
         {
@@ -105,7 +118,7 @@ internal static class ConfigSwapRecovery
         return result;
     }
 
-    private static void RecoverStoreTransactions(IReadOnlyDictionary<string, HashSet<string>> userKeysByScript)
+    private void RecoverStoreTransactions(IReadOnlyDictionary<string, HashSet<string>> userKeysByScript)
     {
         if (!Directory.Exists(AppPaths.DataDir))
         {
@@ -145,16 +158,16 @@ internal static class ConfigSwapRecovery
 
     /* ---------------- 延迟恢复重试（崩溃后脚本孤儿进程退出后自动还原） ---------------- */
 
-    private static readonly List<(string ScriptId, string? UserName)> PendingRecovers = new();
+    private readonly List<(string ScriptId, string? UserName)> _pendingRecovers = new();
 
-    private static readonly object PendingSync = new();
+    private readonly object _pendingSync = new();
 
-    private static CancellationTokenSource? _retryCts;
+    private CancellationTokenSource? _retryCts;
 
     /// <summary>尝试恢复一个脚本/用户的全部残留（配置替换 + 配置交换）；返回是否已完全恢复，失败记入待办。</summary>
-    private static bool TryRecoverItem(string scriptId, string? userName)
+    private bool TryRecoverItem(string scriptId, string? userName)
     {
-        // v0.6.6+：脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
+        // 脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
         bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
             || (!string.IsNullOrWhiteSpace(userName)
@@ -184,7 +197,7 @@ internal static class ConfigSwapRecovery
                 string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
                 if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
                 {
-                    // v0.6.9+（P2）：与 RecoverIfNeeded 语义对齐——GeneratedTemplate（编辑会话模板产物）仍需
+                    // （P2）：与 RecoverIfNeeded 语义对齐——GeneratedTemplate（编辑会话模板产物）仍需
                     // DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；非模板会话 cache 空 =
                     // 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」删除
                     // config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
@@ -211,9 +224,9 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>会话标记损坏时，使用当前脚本固化的 ConfigPath 和 original 目录形态做保守恢复。</summary>
-    private static bool RecoverCorruptMark(string scriptId, string userName)
+    private bool RecoverCorruptMark(string scriptId, string userName)
     {
-        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        ScriptInstance? script = _dataSource.FindScript(scriptId);
         if (script is null || string.IsNullOrWhiteSpace(script.ConfigPath))
         {
             Logger.Error($"[错误] 配置会话标记损坏且无法找到脚本配置路径：脚本 {scriptId} / 用户 {userName}");
@@ -251,9 +264,9 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false（保持旧恢复行为）。</summary>
-    private static bool ScriptProcessRunning(string scriptId)
+    private bool ScriptProcessRunning(string scriptId)
     {
-        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        ScriptInstance? script = _dataSource.FindScript(scriptId);
         if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
         {
             return false;
@@ -267,13 +280,13 @@ internal static class ConfigSwapRecovery
         return !SystemActions.IsExeStoppedStable(launchExe, waitIfInitiallyStopped: false);
     }
 
-    private static bool HasBackupResidue(string scriptId, string? userName)
+    private bool HasBackupResidue(string scriptId, string? userName)
     {
         string dir = ConfigSwapPaths.ReplaceBackupDir(scriptId, userName);
         return Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any();
     }
 
-    private static bool RecoverBackupQuiet(string scriptId, string? userName)
+    private bool RecoverBackupQuiet(string scriptId, string? userName)
     {
         Logger.Info($"[恢复] 检测到未还原的配置替换，还原脚本 {scriptId} 用户 {userName ?? "(无用户)"} 的配置。");
         try
@@ -290,7 +303,7 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>恢复编辑会话隐藏的配置（幂等）：编辑会话崩溃/重启后，把暂存在 edit-hidden 的配置移回 config 目录并清理目录。</summary>
-    private static void RestoreHiddenQuiet(string scriptId, string userName, string configPath)
+    private void RestoreHiddenQuiet(string scriptId, string userName, string configPath)
     {
         string hideDir = ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
         if (!Directory.Exists(hideDir) || !Directory.EnumerateFileSystemEntries(hideDir).Any())
@@ -333,7 +346,7 @@ internal static class ConfigSwapRecovery
         }
     }
 
-    private static bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
+    private bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
     {        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
         try
         {
@@ -349,19 +362,19 @@ internal static class ConfigSwapRecovery
         }
     }
 
-    private static void EnqueuePendingRecover(string scriptId, string? userName)
+    private void EnqueuePendingRecover(string scriptId, string? userName)
     {
-        lock (PendingSync)
+        lock (_pendingSync)
         {
-            if (!PendingRecovers.Any(item => item.ScriptId == scriptId && item.UserName == userName))
+            if (!_pendingRecovers.Any(item => item.ScriptId == scriptId && item.UserName == userName))
             {
-                PendingRecovers.Add((scriptId, userName));
+                _pendingRecovers.Add((scriptId, userName));
             }
         }
     }
 
     /// <summary>启动后台恢复重试循环：每 10 秒尝试还原待办项（孤儿进程退出/文件解锁后自动完成），直至全部成功或进程退出。</summary>
-    public static void StartRecoveryRetry()
+    public void StartRecoveryRetry()
     {
         if (_retryCts is not null)
         {
@@ -373,7 +386,7 @@ internal static class ConfigSwapRecovery
         Logger.Info("配置恢复重试循环已启动。");
     }
 
-    public static void StopRecoveryRetry()
+    public void StopRecoveryRetry()
     {
         try
         {
@@ -385,16 +398,16 @@ internal static class ConfigSwapRecovery
         _retryCts = null;
     }
 
-    private static async Task RecoveryRetryLoopAsync(CancellationToken token)
+    private async Task RecoveryRetryLoopAsync(CancellationToken token)
     {
         while (!token.IsCancellationRequested)
         {
             try
             {
                 List<(string ScriptId, string? UserName)> pending;
-                lock (PendingSync)
+                lock (_pendingSync)
                 {
-                    pending = new List<(string, string?)>(PendingRecovers);
+                    pending = new List<(string, string?)>(_pendingRecovers);
                 }
                 foreach ((string scriptId, string? userName) in pending)
                 {
@@ -402,9 +415,9 @@ internal static class ConfigSwapRecovery
                     {
                         if (TryRecoverItem(scriptId, userName))
                         {
-                            lock (PendingSync)
+                            lock (_pendingSync)
                             {
-                                PendingRecovers.RemoveAll(item => item.ScriptId == scriptId && item.UserName == userName);
+                                _pendingRecovers.RemoveAll(item => item.ScriptId == scriptId && item.UserName == userName);
                             }
                             Logger.Info($"[恢复] 延迟重试成功：脚本 {scriptId} / 用户 {userName ?? "(无用户)"} 的配置已还原。");
                         }
@@ -434,7 +447,7 @@ internal static class ConfigSwapRecovery
     /// original 为空（首次会话）时：清理会话期间在 config 位置产生的文件/目录，还原为编辑前状态——
     /// ① 编辑会话生成的配置模板（GeneratedTemplate）；② 运行会话原配置形态为 Missing（运行前 config 位置不存在，
     /// 运行生效的 store 快照为会话产物，必须删除，否则残留污染 config 位置与后续快照）。</summary>
-    public static void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
+    public void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
     {
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
@@ -446,7 +459,7 @@ internal static class ConfigSwapRecovery
                 PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
                 if (current != PathKind.Missing)
                 {
-                    // 模板目录形态（v0.6.3+）：先按清单删除复制生成的模板文件，再对 configPath 位置兜底清理（防残留）
+                    // 模板目录形态：先按清单删除复制生成的模板文件，再对 configPath 位置兜底清理（防残留）
                     DeleteTemplateFiles(mark);
                     // 删除失败自然抛出（ClearPath 带重试），标记保留，交由调用方（自愈/后台延迟重试）再次尝试
                     ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
@@ -456,7 +469,7 @@ internal static class ConfigSwapRecovery
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
-        // v0.7.5（台账外）：cache 非空路径同样先按清单删除模板兄弟文件——StartVisible 失败/CancelEdit 且原配置存在时，
+        // （台账外）：cache 非空路径同样先按清单删除模板兄弟文件——StartVisible 失败/CancelEdit 且原配置存在时，
         // 文件型 config 模板复制到父目录的非 ConfigPath 同名文件（如 maa_option.json）此前残留。
         DeleteTemplateFiles(mark);
         PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
@@ -466,7 +479,7 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>按 TemplateFiles 清单删除编辑会话生成的模板文件（相对 ConfigPath 父目录）；删除失败保留标记交自愈重试。</summary>
-    private static void DeleteTemplateFiles(ConfigSessionMark mark)
+    private void DeleteTemplateFiles(ConfigSessionMark mark)
     {
         if (mark.TemplateFiles.Count == 0)
         {

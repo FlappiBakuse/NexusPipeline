@@ -29,9 +29,9 @@ internal static class HttpHelper
             _ => "application/octet-stream",
         };
         context.Response.ContentType = contentType;
-        // v0.6.9+（P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data:/blob: 图标）；
+        // （P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data:/blob: 图标）；
         // 缓存保持 no-cache（零构建无版本号，浏览器每次校验）。
-        // v0.7.10：重启服务需要跨端口探测；同时允许当前访问主机的任意端口，覆盖 LAN/主机名/IPv6 远程访问，
+        // 重启服务需要跨端口探测；同时允许当前访问主机的任意端口，覆盖 LAN/主机名/IPv6 远程访问，
         // 不把 connect-src 扩大到任意主机。
         Uri? requestUrl = context.Request.Url;
         string requestScheme = requestUrl?.Scheme ?? "http";
@@ -56,7 +56,7 @@ internal static class HttpHelper
         byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOpts.Web));
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json; charset=utf-8";
-        // v0.7.0+：API 响应补 no-cache（与静态文件一致；此前缺失致浏览器启发式缓存 /api/status，
+        // API 响应补 no-cache（与静态文件一致；此前缺失致浏览器启发式缓存 /api/status，
         // 插件状态变更后刷新页面仍读到旧值——复现：禁用「模拟器适配」后前端选择器残留）。
         context.Response.Headers["Cache-Control"] = "no-cache";
         context.Response.ContentLength64 = data.Length;

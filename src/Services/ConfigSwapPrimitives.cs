@@ -59,7 +59,7 @@ internal static class ScriptConfigGate
         return Gates.GetOrAdd(scriptId, _ => new SemaphoreSlim(1, 1));
     }
 
-    /// <summary>脚本删除时清理门禁（v0.6.5+）：移除并释放条目，避免静态字典随脚本增删累积。</summary>
+    /// <summary>脚本删除时清理门禁：移除并释放条目，避免静态字典随脚本增删累积。</summary>
     public static void Remove(string scriptId)
     {
         if (Gates.TryRemove(scriptId, out SemaphoreSlim? gate))
@@ -70,7 +70,7 @@ internal static class ScriptConfigGate
 }
 
 /// <summary>
-/// 配置交换文件原语层（v0.5.0 从 UserConfigManager 拆出）：安全移动/原子替换/重试/跨进程互斥/形态判断。
+/// 配置交换文件原语层（从 UserConfigManager 拆出）：安全移动/原子替换/重试/跨进程互斥/形态判断。
 /// 数据保全序：original（原配置）&gt; config &gt; store（可重建）。
 /// </summary>
 internal static class ConfigSwapPrimitives
@@ -88,7 +88,7 @@ internal static class ConfigSwapPrimitives
         return Mutexes.GetOrAdd(scriptId, id => new Mutex(false, "NexusPipeline.ConfigSwap." + id));
     }
 
-    /// <summary>脚本删除时清理跨进程互斥体（v0.6.5+）：内核句柄不随进程生命周期释放，删除脚本时移除条目。</summary>
+    /// <summary>脚本删除时清理跨进程互斥体：内核句柄不随进程生命周期释放，删除脚本时移除条目。</summary>
     public static void RemoveMutex(string scriptId)
     {
         if (Mutexes.TryRemove(scriptId, out Mutex? mutex))
@@ -101,6 +101,37 @@ internal static class ConfigSwapPrimitives
             {
             }
         }
+    }
+
+    /// <summary>交换锁空闲探测（B3，维护工具守卫）：立即尝试获取互斥体，成功 = 空闲并即时释放。</summary>
+    public static bool TryProbeSwapLock(string scriptId)
+    {
+        Mutex mutex = OpenMutex(scriptId);
+        bool acquired;
+        try
+        {
+            acquired = mutex.WaitOne(0);
+        }
+        catch (AbandonedMutexException)
+        {
+            acquired = true;
+        }
+        catch (ObjectDisposedException)
+        {
+            return true;
+        }
+        if (acquired)
+        {
+            try
+            {
+                mutex.ReleaseMutex();
+            }
+            catch
+            {
+            }
+            return true;
+        }
+        return false;
     }
 
     public static void WithSwapLock(string scriptId, Action action)
@@ -117,7 +148,7 @@ internal static class ConfigSwapPrimitives
         }
         catch (ObjectDisposedException)
         {
-            // v0.7.2+（KN-36）：删除脚本（RemoveMutex）与配置交换并发时互斥体被 Dispose，WaitOne 抛
+            // 删除脚本（RemoveMutex）与配置交换并发时互斥体被 Dispose，WaitOne 抛
             // ObjectDisposedException——移除条目重取一次（条目已删除则重建新互斥体；极端并发下可能误删
             // 重建条目，下一次 WaitOne 仍可恢复，不影响正确性）。
             Mutexes.TryRemove(scriptId, out _);

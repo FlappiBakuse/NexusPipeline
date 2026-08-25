@@ -15,7 +15,7 @@ export function render(html) {
   initAutoScroll(view);
   syncAllModeToggles(view);
   syncAllSwitchControls(view);
-  // v0.7.3+（P1-2）：路由渲染后焦点移到主内容区（tabindex=-1 的 #view），键盘用户切页后从页面开头继续导航；
+  // （P1-2）：路由渲染后焦点移到主内容区（tabindex=-1 的 #view），键盘用户切页后从页面开头继续导航；
   // preventScroll 避免打断视口位置。
   view.focus({ preventScroll: true });
 }
@@ -60,7 +60,7 @@ export function closeMoreMenus({ restoreFocus = false } = {}) {
   });
 }
 
-/** 弹出卡定位（v0.8.7）：列表容器 overflow:hidden 会裁掉绝对定位弹出卡（底部卡片处被卡片边截断），
+/** 弹出卡定位：列表容器 overflow:hidden 会裁掉绝对定位弹出卡（底部卡片处被卡片边截断），
  *  改为 fixed + 触发器视口坐标（脱离祖先裁剪）；视口底部空间不足时翻转到触发器上方，水平方向完整可见。 */
 function positionMoreMenu(menu, trigger) {
   const GAP = 6; // 与 CSS .overflow-menu 的 calc(100% + 6px) 保持一致
@@ -194,7 +194,7 @@ export function toast(message, kind = "info") {
 
 let countdownTimer = null;
 
-/** 下一调度倒计时（v0.6.7+ 清理旧定时器）：仪表盘 3 秒重渲染会重复调用，注册前清理模块级旧 interval，避免累积；路由切换由 disposePage 统一清理。 */
+/** 下一调度倒计时（清理旧定时器）：仪表盘 3 秒重渲染会重复调用，注册前清理模块级旧 interval，避免累积；路由切换由 disposePage 统一清理。 */
 export function startCountdown(targetId, timeValue) {
   const target = new Date(timeValue).getTime();
   if (countdownTimer !== null) clearInterval(countdownTimer);
@@ -216,7 +216,7 @@ export function startCountdown(targetId, timeValue) {
   countdownTimer = registerInterval(setInterval(update, 1000));
 }
 
-/** 停止下一调度倒计时（v0.6.7+，仪表盘局部更新时下一调度消失用）。 */
+/** 停止下一调度倒计时（，仪表盘局部更新时下一调度消失用）。 */
 export function stopCountdown() {
   if (countdownTimer !== null) {
     clearInterval(countdownTimer);
@@ -226,7 +226,7 @@ export function stopCountdown() {
 
 let systemActionTimer = null;
 
-/** 完成操作倒计时（v0.6.3+）：每秒更新卡片剩余秒数（「N 秒后将{动作}」，归零显示「即将执行」）。
+/** 完成操作倒计时：每秒更新卡片剩余秒数（「N 秒后将{动作}」，归零显示「即将执行」）。
  *  注册前清理旧定时器（仪表盘每 3 秒重渲染会重复调用，避免累积）；路由切换由 disposePage 统一清理。 */
 export function startSystemActionCountdown() {
   const card = document.querySelector('[data-testid="system-action-card"]');
@@ -248,14 +248,14 @@ export function setNavOpen(open) {
   document.body.classList.toggle("nav-open", open);
   const sidebar = $("#sidebar");
   if (sidebar) sidebar.setAttribute("aria-hidden", String(!open && window.innerWidth <= 820));
-  // v0.7.3+（P1-3）：菜单按钮展开态反馈（aria-expanded/aria-controls）。
+  // （P1-3）：菜单按钮展开态反馈（aria-expanded/aria-controls）。
   $$('[data-action="open-nav"]').forEach(button => {
     button.setAttribute("aria-expanded", String(open));
     button.setAttribute("aria-controls", "sidebar");
   });
 }
 
-/** 取消完成操作倒计时（v0.6.4+ 全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
+/** 取消完成操作倒计时（全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
 export async function cancelSystemAction() {
   const card = document.querySelector('[data-testid="system-action-card"]');
   const verb = card?.dataset.actionVerb || "执行";
@@ -274,7 +274,7 @@ export async function cancelSystemAction() {
 }
 
 export function initTheme() {
-  // v0.7.4（KN-45）：localStorage 读取加异常保护——隐私模式/禁用存储下 getItem 抛异常会导致白屏。
+  // localStorage 读取加异常保护——隐私模式/禁用存储下 getItem 抛异常会导致白屏。
   let stored = "system";
   try {
     stored = localStorage.getItem("nexus-theme") || "system";
@@ -348,7 +348,7 @@ export function clearFieldErrors(ids) {
   ids.forEach(id => clearFieldError(id));
 }
 
-/** 提交按钮忙碌态（v0.7.3+，P2-2）：请求期间禁用按钮并显示 spinner，防止重复提交；按钮随弹窗销毁时安全。 */
+/** 提交按钮忙碌态（，P2-2）：请求期间禁用按钮并显示 spinner，防止重复提交；按钮随弹窗销毁时安全。 */
 export async function withBusy(button, fn) {
   if (!button || button.disabled) return;
   button.disabled = true;

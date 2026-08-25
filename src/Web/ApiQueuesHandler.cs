@@ -15,7 +15,7 @@ internal static class ApiQueuesHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询调度队列列表", $"{ctx.Queues.Count} 条");
-            // v0.7.2+（KN-04）：深拷贝快照后序列化——避免枚举/序列化与并发修改冲突。
+            // 深拷贝快照后序列化——避免枚举/序列化与并发修改冲突。
             List<DispatchQueue> snapshot = ctx.SnapshotQueues();
             var result = snapshot.OrderBy(queue => queue.Index).Select(queue => new
             {
@@ -45,7 +45,7 @@ internal static class ApiQueuesHandler
                 return;
             }
             NormalizeQueue(queue);
-            // v0.9.2（#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
+            // （#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
             string? limitError = null;
             ctx.Center.WithAdmissionCoordination(() =>
             {
@@ -103,7 +103,7 @@ internal static class ApiQueuesHandler
                 {
                     lock (ctx.DataLock)
                     {
-                        // v0.9.3（#63）：队列租约检查与查找-校验-替换-保存处于同一准入协调域。
+                        // （#63）：队列租约检查与查找-校验-替换-保存处于同一准入协调域。
                         existing = ctx.FindQueue(seg[1]);
                         limitError = existing is null ? null
                             : Limits.CheckNameBytes(update.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
@@ -150,7 +150,7 @@ internal static class ApiQueuesHandler
                 $"队列:{seg[1]}",
                 () =>
                 {
-                    // v0.9.3（#63）：删除与活动队列租约检查在同一准入协调域内完成。
+                    // （#63）：删除与活动队列租约检查在同一准入协调域内完成。
                     lock (ctx.DataLock)
                     {
                         removed = ctx.Queues.FirstOrDefault(queue => queue.Id == seg[1]);
@@ -169,7 +169,7 @@ internal static class ApiQueuesHandler
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
-    /// <summary>队列顺序重排（v0.6.8+）：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
+    /// <summary>队列顺序重排：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
     private static async Task HandleReorderQueuesAsync(HttpListenerContext context, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -177,7 +177,7 @@ internal static class ApiQueuesHandler
         List<string>? ids = node?["ids"] is JsonArray array
             ? array.Select(item => item?.ToString() ?? "").ToList()
             : null;
-        // v0.7.2+（KN-04）：锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await。
+        // 锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await。
         string? error = null;
         if (!await ExecutionConflictResponse.TryExecuteAnyQueueLeaseMutationAsync(
             context,
@@ -225,7 +225,7 @@ internal static class ApiQueuesHandler
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
-    /// <summary>定时时间严格 HH:mm 校验（v0.6.9+ P9）：「8:00」无前导零会被 Scheduler 解析失败静默跳过（定时不触发）。
+    /// <summary>定时时间严格 HH:mm 校验（P9）：「8:00」无前导零会被 Scheduler 解析失败静默跳过（定时不触发）。
     /// 保存即 400 报错，避免静默回退掩盖输入错误（NormalizeQueue 的回退保留给旧数据兼容）。</summary>
     private static string? CheckTimeFormat(DispatchQueue queue)
     {

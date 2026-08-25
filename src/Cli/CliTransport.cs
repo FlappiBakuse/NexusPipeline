@@ -8,7 +8,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Cli;
 
-/// <summary>CLI/菜单侧到常驻服务的 HTTP 通道工具（v0.6.6+ 从 Program 提取，Program 与 DispatchMenu 共用，
+/// <summary>CLI/菜单侧到常驻服务的 HTTP 通道工具（从 Program 提取，Program 与 DispatchMenu 共用，
 /// 消除「manage 菜单进程内直调 vs CLI 走 HTTP」双执行通道割裂——菜单调度统一经常驻服务执行，Web 端可见）。</summary>
 internal static class CliTransport
 {

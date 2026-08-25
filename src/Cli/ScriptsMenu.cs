@@ -71,7 +71,7 @@ internal static class ScriptsMenu
                         if (Ui.IsYes(answer))
                         {
                             string removedName = removing.Name;
-                            // v0.7.4（KN-05）：运行中脚本拒绝删除，避免删掉正在使用的配置现场。
+                            // 运行中脚本拒绝删除，避免删掉正在使用的配置现场。
                             if (ExecutionValidator.IsScriptRunning(removing))
                             {
                                 Console.WriteLine("[错误] 脚本正在运行中，无法删除。");
@@ -83,7 +83,7 @@ internal static class ScriptsMenu
                                     null,
                                     () =>
                                     {
-                                        // v0.7.4（KN-05）：与 Web 端删除对齐——清理 data 目录、释放门禁与跨进程互斥体
+                                        // 与 Web 端删除对齐——清理 data 目录、释放门禁与跨进程互斥体
                                         // （此前仅移除列表，data 残留 + 静态字典条目随增删累积）。
                                         SemaphoreSlim gate = ScriptConfigGate.Get(removing.Id);
                                         if (!gate.Wait(0))

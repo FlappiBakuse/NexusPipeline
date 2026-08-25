@@ -2,6 +2,34 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.0（Pre-release）
+
+### 内建更新（设置 → 更新）
+
+- 新增更新服务：检查（GitHub Releases 兼容源，支持渠道 stable/prerelease 与镜像源）、下载（https 白名单 + 200MB 上限 + SHA256 强校验 + zip 条目防穿越/布局归一）、「立即更新」与「下次启动更新」。
+- 更新只替换 `nexus-pipeline.exe`、`wwwroot/`、`plugins/`（保留包内不存在的用户自加插件目录）；`config/`、`data/`、`history/`、`logs/` 一律不写入。
+- 应用走独立 `apply-update` 进程：等待宿主退出 → 备份旧版本 → 交换文件 → 重新拉起宿主；失败自动回滚、启动自愈（完成清理 / 失败回滚 / defer 自动应用三重保障）。
+- 应用前与「退出/重启」同一安全门禁（无活动运行 / 无编辑会话 / 无待执行系统操作），busy 时前端提供「下次启动更新」。
+- 新增 API：`/api/update/check|status|download|apply|cancel`；CLI「设置 → 更新」子菜单复用常驻服务 HTTP 通道；设置新增 `UpdateCheckEnabled` / `UpdateChannel` / `UpdateSourceUrl`。
+- RELEASING.md 标准化 zip 布局（flat root = exe + wwwroot + plugins + README + LICENSE）并新增「更新引擎可见性自检」清单。
+
+### 工程整改（B1–B6）
+
+- B2 架构依赖净化：`ConfigSwapRecovery` 改由 `IConfigRecoveryDataSource` 构造注入（组合根装配），不再反向依赖 `RuntimeContext`；ARCHITECTURE「已知偏差」更新。
+- B3 数据模型收敛：新增 `UserDataPruner` 历史用户名目录维护工具（CLI「维护 → 清理历史用户名目录」+ `/api/maintenance/legacy-users`），带活动运行/编辑会话/交换锁三重守卫，默认不自动执行。
+- B4 结构拆分：`ExecutionCoordinator` 抽出 `AttemptLogEnvironment`（日志监控生命周期）、`RuntimeWorkers`（Judge/配置同步单飞与过期判定）、`AttemptTerminator`（终局判定状态机），协调器净减约 320 行，行为零变化。
+- B5 前端归位：`views/limits.js` 移入 `core/limits.js`，ARCHITECTURE 模块表登记。
+- B1 注释治理：清理全部代码注释中的版本号后缀与 KN 编号引用（210+ 行），约定写入 CONTRIBUTING.md（注释只写「为什么」，版本追溯用 git blame）。
+- B6 语义审计：DESIGN.md 新增「判断脚本信任边界」（§5.3）与「语义保留项审计」（§8.1）；Scheduler「错过不补跑」补 L1 测试锁死；KNOWN_ISSUES 更新（KN-49 已解决 + 四项语义保留）。
+
+### 测试与验证
+
+- Unit/Component：275/275（新增更新域 34、UserDataPruner 4、语义锁死 1）。
+- Web Logic：8/8；Smoke spec 与 system smoke `node --check` 全部通过。
+- UI Smoke：17/17（4 specs，加速档 41.6 秒，含更新「检查→下载→就绪→应用→服务重启→恢复」端到端）。
+- System Smoke（update-smoke.mjs）：3/3（14.7 秒，apply 切换 / 启动回滚 / defer 自动应用；过程中修复：spawnSync 管道句柄被重拉宿主继承导致阻塞，改 `stdio: "ignore"`；staging 改自 release/wwwroot 干净源；`CleanupAfterCompletion` 补删 `.nxp-update`/`.nxp-backup` 根目录；移除与收尾清理竞态的中间态断言）。
+- release build 通过；保留项目原有 3 个 nullable 警告；`git diff --check` 通过。
+
 ## v0.9.10（Pre-release）
 
 ### 用户管理界面

@@ -1,7 +1,9 @@
-﻿# NexusPipeline 架构说明
+# NexusPipeline 架构说明
 
 本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
+
+> 注释与文档治理（v0.10.0 起）：产品行为以 DESIGN.md 为唯一权威；代码注释禁止堆版本号后缀与 KN 编号（版本追溯用 git blame），台账见 KNOWN_ISSUES.md；详见 CONTRIBUTING.md §6.0。
 
 > v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
@@ -56,7 +58,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过数据化 manifest 或独立 Plugin API v1 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录，见 KNOWN_ISSUES.md KN-49）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复仍保留 `RuntimeContext` 查找脚本，属于启动/恢复兼容路径。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）也保持不变。新服务不得新增这类依赖。
+- **已知偏差（如实记录）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复已改为构造注入 `IConfigRecoveryDataSource`（v0.10.0 B2，`RuntimeConfigRecoveryDataSource` 在组合根装配），不再反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是已声明的最小例外，保持不变。新服务不得新增这类依赖。
 
 ### 关键类职责
 
@@ -96,7 +98,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换兼容 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
-| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单 |
+| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的 `IConfigRecoveryDataSource`（v0.10.0 B2） |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位、受限迁移与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
@@ -153,6 +155,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/users/settings） |
+| `core/limits.js` | 跨视图共享的约束警告层（v0.10.0 由 views 归位 core）：加载 `/api/limits`、忽略状态持久化、alertdialog 警告层与「知道了/不再提醒」分发 |
 | `core/dnd.js` | 通用拖拽排序组件（v0.6.8+，无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项（否则落位震荡） |
 
 ### 新增交互的落点
@@ -255,7 +258,7 @@ plugins/bettergi/
 
 > **v0.5.0 分层变更**：核心域按子域重组（`Models/`、`Services/`、`Persistence/`、`Utilities/` 对应命名空间）；Web 路由改特性路由；`RuntimeContext` 引入壳式 DI（`ServiceProvider` + `Resolve<T>()`，外部访问方式不变）；`RunSession` 判定策略拆出 `SessionJudge`；`UserConfigManager` 拆为门面 + 原语/会话恢复/数据目录三层。public 契约清单不变，extensions 三插件工程对齐后仍可编译。v0.6.3 起专项插件数据化（extensions/ 工程移除，见「插件扩展指南」）。
 >
-> **v0.5.1 变更**：插件级配置（`PluginContext.GetConfig/SetConfig/GetSecret/SetSecret`，落盘 `config/plugins/<插件名>.json`，DPAPI `enc:` 前缀）；e2e 迁移 @playwright/test（tests/ 按域 7 文件 46 用例，旧 test.mjs 移除）；`core/limits.js` 归位 `views/limits.js`。
+> **v0.5.1 变更**：插件级配置（`PluginContext.GetConfig/SetConfig/GetSecret/SetSecret`，落盘 `config/plugins/<插件名>.json`，DPAPI `enc:` 前缀）；e2e 迁移 @playwright/test（tests/ 按域 7 文件 46 用例，旧 test.mjs 移除）；`core/limits.js` 归位 `views/limits.js`（v0.10.0 又归位 `core/limits.js`，行为跨视图共享属 core，见模块表）。
 >
 > **v0.5.2 变更**：日志监控文件替换检测改 FileId（`LogMonitor.FileReplaced`，根治 move+重建场景句柄残留）；初始监控严格 fresh（`LastWriteTime ≥ attemptStart`）；判断脚本输入按尝试切片（本次尝试日志段，跨尝试不污染判定）；RunAsync finally 还原顺序调整（先配置替换还原、后配置交换还原）。
 

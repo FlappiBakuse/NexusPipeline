@@ -42,3 +42,41 @@ test("设置页面：手机宽度无溢出且通知面板可展开", async ({ pa
     await page.setViewportSize({ width: 1280, height: 900 });
   }
 });
+
+test("更新区：检查→下载→就绪按钮流（本地 stub 更新源）", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("update-section")).toBeVisible();
+  // 等待可能的启动自动检查结束（状态机空闲后再手动检查）。
+  await expect.poll(async () => (await (await api("GET", "/api/update/status")).json()).state, { timeout: 20000 }).toBe("idle");
+  await page.getByTestId("update-check").click();
+  await expect(page.getByTestId("update-download")).toBeVisible({ timeout: 15000 });
+  await page.getByTestId("update-download").click();
+  await expect(page.getByTestId("update-apply")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByTestId("update-defer")).toBeVisible();
+});
+
+test("更新区：立即应用→服务重启→页面恢复（末位用例）", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("update-apply")).toBeVisible({ timeout: 30000 });
+  await page.getByTestId("update-apply").click();
+  // 应用后服务退出并重拉；重启窗口内连接被拒属预期，手写循环捕获异常重试
+  // （expect.poll 回调抛错会立即失败，不能用于服务重启窗口探测）。
+  let restored = false;
+  const deadlinePoll = Date.now() + 120000;
+  while (Date.now() < deadlinePoll) {
+    try {
+      if ((await fetch(baseUrl + "api/status", { cache: "no-store" })).ok) {
+        restored = true;
+        break;
+      }
+    } catch { /* 服务重启窗口 */ }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+  expect(restored, "更新应用后服务未在超时时间内恢复").toBe(true);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("update-section")).toBeVisible();
+  // 新实例启动后状态为 idle（重启窗口内 API 可能仍短暂不可达，用 toPass 容忍异常重试）。
+  await expect(async () => {
+    expect((await (await api("GET", "/api/update/status")).json()).state).toBe("idle");
+  }).toPass({ timeout: 15000 });
+});

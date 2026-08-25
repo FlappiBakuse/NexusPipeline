@@ -145,7 +145,7 @@ internal interface ISettingsProvider
     AppSettings Current { get; }
 }
 
-/// <summary>运行天数每日递减端口（v0.9.7）：调度器每日首次 tick 调用一次；返回是否有绑定发生递减。</summary>
+/// <summary>运行天数每日递减端口：调度器每日首次 tick 调用一次；返回是否有绑定发生递减。</summary>
 internal interface IUserRunDaysWriter
 {
     /// <summary>对所有 RunDays &gt; 0 的绑定递减 1（降至 0 后不再参与运行）；返回是否发生变化。</summary>
@@ -198,4 +198,15 @@ internal interface IPluginCapabilityResolver
     bool SupportsEmulator(string pluginName);
 
     ScriptProfile? ResolveProfile(string pluginName, string rootPath);
+}
+
+/// <summary>
+/// 配置交换恢复的只读数据源端口：恢复路径按脚本/用户快照工作，
+/// 不再反向依赖组合根 RuntimeContext。具体适配由组合根在启动时注入（RuntimeInitializer 装配）。
+/// </summary>
+internal interface IConfigRecoveryDataSource
+{
+    ScriptInstance? FindScript(string scriptId);
+
+    IReadOnlyList<NexusUser> SnapshotUsers();
 }

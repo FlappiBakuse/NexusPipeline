@@ -23,7 +23,7 @@ internal sealed class WebServer : IDisposable
 
     private const int AuthLockSeconds = 60;
 
-    /// <summary>v0.7.5（KN-31）：无活动条目保留宽限（超过即清理，防远端 IP 字典无限增长）。</summary>
+    /// <summary>：无活动条目保留宽限（超过即清理，防远端 IP 字典无限增长）。</summary>
     private const int AuthFailIdlePruneSeconds = 600;
 
     private sealed class AuthFailState
@@ -39,7 +39,7 @@ internal sealed class WebServer : IDisposable
 
     private static long _lastAuthPruneTicks;
 
-    /// <summary>v0.7.5（KN-31）：每 60 秒清理一次「超过宽限无活动」的远端认证失败条目（锁定中条目保留至锁定过期）。
+    /// <summary>：每 60 秒清理一次「超过宽限无活动」的远端认证失败条目（锁定中条目保留至锁定过期）。
     /// 仅在远程访问开启且收到请求时触发，避免后台空闲轮询。</summary>
     private static void PruneAuthFails(long now)
     {
@@ -114,7 +114,7 @@ internal sealed class WebServer : IDisposable
     public int Port => _port;
 
     /// <summary>
-    /// 当前已启动的 Web 服务实例（v0.7.1+，KN-51）：托盘「打开管理页面」等需用实际监听端口
+    /// 当前已启动的 Web 服务实例：托盘「打开管理页面」等需用实际监听端口
     /// （设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
     /// </summary>
     public static WebServer? Current { get; private set; }
@@ -219,7 +219,7 @@ internal sealed class WebServer : IDisposable
             }
             catch (Exception ex)
             {
-                // v0.6.8+：正常停止（_cts.Cancel → Stop 已先调用）时 token 已取消，属预期路径；
+                // ：正常停止（_cts.Cancel → Stop 已先调用）时 token 已取消，属预期路径；
                 // 其余异常（如 http.sys 故障）时 Web 服务静默死亡不可接受，必须记录。
                 if (!token.IsCancellationRequested)
                 {
@@ -266,7 +266,7 @@ internal sealed class WebServer : IDisposable
                 return;
             }
             string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-            // 静态文件路径包含校验（v0.6.3+，纵深防御）：HttpListener 已规范化拒绝 .. 段，此处兜底防止路径逃逸出 wwwroot。
+            // 静态文件路径包含校验（，纵深防御）：HttpListener 已规范化拒绝 .. 段，此处兜底防止路径逃逸出 wwwroot。
             string fullPath = Path.GetFullPath(filePath);
             string rootFull = Path.GetFullPath(AppPaths.WwwRootDir).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
             if (!fullPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
@@ -290,7 +290,7 @@ internal sealed class WebServer : IDisposable
         }
     }
 
-    /// <summary>跨站请求防护（v0.6.4+）：带 Origin 头的浏览器请求必须来自合法源（回环或本机局域网地址、且与请求 Host 端口一致），
+    /// <summary>跨站请求防护：带 Origin 头的浏览器请求必须来自合法源（回环或本机局域网地址、且与请求 Host 端口一致），
     /// 阻止任意网页触发的 CSRF 简单请求与 DNS rebinding；无 Origin 的非浏览器请求（CLI/curl）不受限——它们无法自动携带认证凭证。</summary>
     private static bool IsAllowedOrigin(HttpListenerContext context, out string? detail)
     {
@@ -364,7 +364,7 @@ internal sealed class WebServer : IDisposable
             token = plain;
         }
         string? auth = context.Request.Headers["Authorization"];
-        // v0.6.9+（P13）：令牌比较改常量时间（此前字符串 Ordinal 比较非常量时间，可被时序侧信道探测）。
+        // （P13）：令牌比较改常量时间（此前字符串 Ordinal 比较非常量时间，可被时序侧信道探测）。
         bool ok = token is not null && auth is not null && TokenEquals(auth, "Bearer " + token);
         if (ok)
         {
@@ -388,7 +388,7 @@ internal sealed class WebServer : IDisposable
         return false;
     }
 
-    /// <summary>常量时间令牌比较（v0.6.9+ P13）：FixedTimeEquals 要求等长字节，先比较长度再定长比较。</summary>
+    /// <summary>常量时间令牌比较（P13）：FixedTimeEquals 要求等长字节，先比较长度再定长比较。</summary>
     private static bool TokenEquals(string left, string right)
     {
         byte[] a = Encoding.UTF8.GetBytes(left);

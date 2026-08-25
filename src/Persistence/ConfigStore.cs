@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 using System.Text.Json.Nodes;
@@ -7,7 +7,7 @@ namespace NexusPipeline.Persistence;
 
 internal static class ConfigStore
 {
-    /// <summary>历史保留天数上限（v0.6.6+ 由 limits.json 约束，消除硬编码 180；Limits.Load 时同步，避免 Persistence 反向依赖 Services）。</summary>
+    /// <summary>历史保留天数上限（由 limits.json 约束，消除硬编码 180；Limits.Load 时同步，避免 Persistence 反向依赖 Services）。</summary>
     private static int _maxHistoryRetentionDays = 180;
 
     public static void ApplyMaxHistoryRetentionDays(int maxDays)
@@ -38,7 +38,7 @@ internal static class ConfigStore
             }
         }
         Normalize(settings);
-        // v0.6.6+：加载后刷新日志阈值缓存（即时生效）。
+        // 加载后刷新日志阈值缓存（即时生效）。
         Logger.RefreshLevel();
         return settings;
     }
@@ -48,7 +48,7 @@ internal static class ConfigStore
         Normalize(settings);
         Directory.CreateDirectory(AppPaths.ConfigDir);
         JsonUtil.WriteAtomic(AppPaths.ConfigPath, JsonSerializer.Serialize(settings, JsonOpts.Indented));
-        // v0.6.6+：保存后刷新日志阈值缓存（即时生效）。
+        // 保存后刷新日志阈值缓存（即时生效）。
         Logger.RefreshLevel();
     }
 
@@ -69,7 +69,7 @@ internal static class ConfigStore
         settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
         settings.PluginPreferences.Remove("notify");
         settings.PluginPreferences.Remove("emulator-adapter");
-        // v0.7.4（KN-26）：Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
+        // Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
         if (!AppSettings.WebhookTypes.Contains(settings.WebhookType))
         {
             settings.WebhookType = "feishu";
@@ -90,10 +90,21 @@ internal static class ConfigStore
         {
             settings.SmtpTimeout = 30;
         }
+        // 更新渠道白名单（stable/prerelease）；镜像源仅校验格式，空=默认 GitHub。
+        if (settings.UpdateChannel is not ("stable" or "prerelease"))
+        {
+            settings.UpdateChannel = "prerelease";
+        }
+        if (!string.IsNullOrWhiteSpace(settings.UpdateSourceUrl)
+            && (!Uri.TryCreate(settings.UpdateSourceUrl.Trim(), UriKind.Absolute, out Uri? sourceUri)
+                || sourceUri.Scheme != Uri.UriSchemeHttps))
+        {
+            settings.UpdateSourceUrl = "";
+        }
     }
 
     /// <summary>
-    /// 将 v0.9.4 及更早版本的 EnabledPlugins/DisabledPlugins 一次性迁移为插件偏好。
+    /// 将 及更早版本的 EnabledPlugins/DisabledPlugins 一次性迁移为插件偏好。
     /// 通知和模拟器已成为宿主内建能力，历史开关被有意丢弃。
     /// </summary>
     private static void MigrateLegacyPluginPreferences(AppSettings settings, JsonNode? raw)

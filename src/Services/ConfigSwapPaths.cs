@@ -3,7 +3,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
-/// <summary>数据目录管理层（v0.5.0 从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。</summary>
+/// <summary>数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。</summary>
 internal static class ConfigSwapPaths
 {
     public static string UserDir(string scriptId, string userKey)

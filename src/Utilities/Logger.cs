@@ -6,7 +6,7 @@ internal static class Logger
 {
     private static readonly object Sync = new();
 
-    /// <summary>日志阈值缓存（v0.6.6+：避免每次日志调用访问 RuntimeContext 提前构造 DI 容器；设置加载/保存后经 <see cref="RefreshLevel"/> 失效重解析）。</summary>
+    /// <summary>日志阈值缓存：避免每次日志调用访问 RuntimeContext 提前构造 DI 容器；设置加载/保存后经 <see cref="RefreshLevel"/> 失效重解析）。</summary>
     private static LogLevel? _levelCache;
 
     /// <summary>设置加载/保存后调用：清空阈值缓存，下次日志调用按最新配置解析（保持「阈值即时生效」契约）。</summary>
@@ -61,7 +61,7 @@ internal static class Logger
         {
             try
             {
-                // v0.6.9+（P3/P10）：不依赖 Persistence.AppPaths（解除 Utilities→Persistence 反向依赖环）；
+                // （P3/P10）：不依赖 Persistence.AppPaths（解除 Utilities→Persistence 反向依赖环）；
                 // 日志文件按天实时求值，跨午夜自动滚动（原 static readonly 启动时固定，跨午夜写入错误文件）。
                 string logDir = Path.Combine(AppContext.BaseDirectory, "logs");
                 string logFile = Path.Combine(logDir, $"nexus-pipeline-{DateTime.Now:yyyy-MM-dd}.log");

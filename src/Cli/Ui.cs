@@ -36,13 +36,13 @@ internal static class Ui
         return PromptEditCore(label, masked: true);
     }
 
-    /// <summary>行编辑通用实现（v0.7.4 合并，KN-41）：Esc=放弃（Clear），回车空=不变（Keep）；masked=true 时输入显示为 *。</summary>
+    /// <summary>行编辑通用实现（合并）：Esc=放弃（Clear），回车空=不变（Keep）；masked=true 时输入显示为 *。</summary>
     private static (EditResult Result, string Value) PromptEditCore(string label, bool masked)
     {
         Console.Write(label);
         if (Console.IsInputRedirected)
         {
-            // v0.7.1+（KN-56）：输入重定向（管道/自动化）时 ReadKey 抛 InvalidOperationException（Cannot read keys...），
+            // ：输入重定向（管道/自动化）时 ReadKey 抛 InvalidOperationException（Cannot read keys...），
             // 降级 ReadLine——空行/null = 不变（与「回车=不变」语义一致），非空 = 输入值；Esc 清空仅交互终端可用。
             string? line = Console.ReadLine();
             return string.IsNullOrEmpty(line) ? (EditResult.Keep, "") : (EditResult.Entered, line);
@@ -87,7 +87,7 @@ internal static class Ui
         return answer is not null && answer.Trim().StartsWith("Y", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>菜单保存兜底（v0.6.6+）：执行保存动作，IO 异常时提示且不退出菜单；返回是否保存成功。</summary>
+    /// <summary>菜单保存兜底：执行保存动作，IO 异常时提示且不退出菜单；返回是否保存成功。</summary>
     public static bool TrySave(Action save, string what)
     {
         try

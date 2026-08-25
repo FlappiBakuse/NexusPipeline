@@ -84,7 +84,7 @@ export function showModal(content, wide = false, locked = false) {
   window.addEventListener("keydown", lockedEscapeHandler, true);
   mask._lockedEscapeHandler = lockedEscapeHandler;
   document.body.appendChild(mask);
-  // v0.7.3+（KN-12）：焦点逃逸兜底——点击弹窗内非焦点区域（activeElement 落 body/外部）后 Tab 不再逃出；
+  // 焦点逃逸兜底——点击弹窗内非焦点区域（activeElement 落 body/外部）后 Tab 不再逃出；
   // 弹窗已移除（关闭流程中）或焦点正常在弹窗内时跳过。
   mask.addEventListener("focusout", event => {
     if (!mask.isConnected) return;

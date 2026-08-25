@@ -30,7 +30,7 @@ function killPid(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return;
   if (process.env.NEXUS_ELEVATED_SERVICE === "1") {
     const command = `$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','${pid}','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)`;
-    spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
     return;
   }
   spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
@@ -39,7 +39,7 @@ function killPid(pid) {
 function cleanupRuntimeProcesses() {
   const runtimePrefix = psQuote(runtimeDir + "\\");
   const command = `$p=Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '${runtimePrefix}*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`;
-  spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { stdio: "ignore", windowsHide: true });
+  spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { stdio: "ignore", windowsHide: true });
 }
 
 export function setupRuntime() {
@@ -65,14 +65,14 @@ export function setupRuntime() {
 }
 
 function startElevatedRuntime(env) {
-  const inheritedKeys = ["NEXUS_SYSTEM_ACTION_DRYRUN", "NEXUS_TIME_SCALE", "NEXUS_ADB_EXE", "NEXUS_MUMU_MANAGER_EXE"];
+  const inheritedKeys = ["NEXUS_SYSTEM_ACTION_DRYRUN", "NEXUS_TIME_SCALE", "NEXUS_ADB_EXE", "NEXUS_MUMU_MANAGER_EXE", "NEXUS_UPDATE_URL"];
   const previousValues = new Map(inheritedKeys.map(key => [key, process.env[key]]));
   try {
     for (const key of inheritedKeys) {
       if (env[key]) process.env[key] = env[key];
     }
     const command = `$p=Start-Process -FilePath '${psQuote(runtimeExe)}' -WorkingDirectory '${psQuote(runtimeDir)}' -WindowStyle Hidden -Verb RunAs -PassThru; [Console]::WriteLine($p.Id)`;
-    const result = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
     const pid = Number(String(result.stdout || "").trim().split(/\r?\n/).pop());
     if (!Number.isInteger(pid) || pid <= 0) {
       throw new Error(`提权启动 UI Smoke runtime 失败：${result.stderr || result.error?.message || "未获得 PID"}`);
@@ -119,6 +119,8 @@ export async function stopService() {
   killPid(activePid);
   child = null;
   fs.rmSync(pidFile, { force: true });
+  // 更新应用会重拉服务进程（新 PID），按 runtimeDir 前缀兜底清理全部残留。
+  cleanupRuntimeProcesses();
   await sleep(500);
 }
 

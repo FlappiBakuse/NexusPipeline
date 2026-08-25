@@ -119,7 +119,7 @@ export function initDndList(container, { onDrop } = {}) {
     s.item.style.zIndex = "";
   });
 
-  // v0.7.3+（P2-3）：键盘替代——焦点在 .drag-handle 上时按 ↑/↓ 移动该项并提交新顺序
+  // （P2-3）：键盘替代——焦点在 .drag-handle 上时按 ↑/↓ 移动该项并提交新顺序
   // （拖拽对键盘用户不可用，此为其等价的键控重排）。
   container.addEventListener("keydown", event => {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
@@ -147,7 +147,7 @@ function updatePlacement(clientY) {
   let placeBefore = null;
   for (const el of s.container.children) {
     // 只跳过被拖拽项自身；带 .dnd-drop-before 的插入位置标记元素就是真正的候选目标，不得跳过
-    // （跳过它会因「当前插入线元素不可见」而把落位震荡到其后一项——v0.6.8 拖拽排序踩坑）。
+    // （跳过它会因「当前插入线元素不可见」而把落位震荡到其后一项—— 拖拽排序踩坑）。
     if (el === s.item) continue;
     const rect = el.getBoundingClientRect();
     if (clientY < rect.top + rect.height / 2) {

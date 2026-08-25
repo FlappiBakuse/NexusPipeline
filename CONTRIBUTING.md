@@ -128,6 +128,12 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 
 ## 6. 代码风格要求
 
+### 6.0 注释与文档治理（v0.10.0 起）
+
+- **产品行为的唯一权威是 `docs/DESIGN.md`**（与实现冲突时以 DESIGN.md 为准并修正实现或文档）；`docs/KNOWN_ISSUES.md` 只记录未修复/保留项与版本归属台账。
+- **代码注释禁止再堆版本号后缀（`vX.Y.Z+`）与 KN 编号**：注释只写「为什么这样做」与边界；历史版本如何引入用 `git blame` 追溯，不在注释里留痕。
+- 维护台账类的版本引用只出现在 `KNOWN_ISSUES.md`、`ROADMAP.md`、`CHANGELOG.md` 等文档中；提交信息仍按第 5 节规范。
+
 ### 6.1 后端（C#）
 
 - **分层与命名空间**：`NexusPipeline`（入口/组合根）/ `Models` / `Services` / `Persistence` / `Utilities` / `Web` / `Cli` / `Plugins`；依赖方向 Models → Services → Persistence → Utilities（详见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)）。

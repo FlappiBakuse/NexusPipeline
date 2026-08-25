@@ -14,6 +14,8 @@ outputs/
 logs/
 tests/e2e/node_modules/
 tests/e2e/runtime/
+tests/system/runtime/
+tests/stress/runtime/
 tests/e2e/browsers/
 tests/e2e/test-results/
 tests/e2e/flake-monitor-logs/

@@ -64,7 +64,7 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            // v0.7.2+（KN-04）：深拷贝快照后序列化——避免枚举/序列化与并发修改冲突（「集合已修改」/越界异常）。
+            // 深拷贝快照后序列化——避免枚举/序列化与并发修改冲突（「集合已修改」/越界异常）。
             List<NexusUser> users = ctx.SnapshotUsers();
             List<ScriptInstance> snapshot = ctx.SnapshotScripts()
                 .OrderBy(script => script.Index)
@@ -125,14 +125,14 @@ internal static class ApiScriptsHandler
             string? limitError;
             lock (ctx.DataLock)
             {
-                // v0.9.2（#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
+                // （#61）：最终校验、生成 Id、加入集合和落盘必须位于同一 DataLock 临界区。
                 limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
                     ?? Limits.CheckNameBytes(script.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
                     ?? Limits.CheckAttempts(script.MaxAttempts)
                     ?? Limits.CheckScriptTimeouts(script.LogStallTimeoutMinutes, script.TotalTimeoutMinutes);
                 if (limitError is null)
                 {
-                    // v0.7.1+（KN-02）：新建一律重新生成 Id。
+                    // 新建一律重新生成 Id。
                     script.Id = Guid.NewGuid().ToString("N");
                     script.Index = ctx.Scripts.Count == 0 ? 0 : ctx.Scripts.Max(item => item.Index) + 1;
                     ctx.Scripts.Add(script);
@@ -204,7 +204,7 @@ internal static class ApiScriptsHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = pathError }, 400).ConfigureAwait(false);
                 return;
             }
-            // v0.7.2+（KN-04）：锁内完成「查找-替换-保存」整段，避免并发修改导致 IndexOf 落空/越界；锁内不做 await。
+            // 锁内完成「查找-替换-保存」整段，避免并发修改导致 IndexOf 落空/越界；锁内不做 await。
             bool notFound = false;
             bool changed = await ExecutionConflictResponse.TryExecuteLeaseMutationAsync(
                 context,
@@ -271,7 +271,7 @@ internal static class ApiScriptsHandler
                     $"script:{seg[1]}",
                     () =>
                     {
-                        // v0.9.2（#62）：先完成新元数据落盘，再将数据目录移入隔离区；
+                        // （#62）：先完成新元数据落盘，再将数据目录移入隔离区；
                         // 元数据保存失败时不触碰用户数据，目录移动失败也保留可恢复现场。
                         lock (ctx.DataLock)
                         {
@@ -334,7 +334,7 @@ internal static class ApiScriptsHandler
         script.SuccessKeywords = "";
         script.FailureKeywords = "";
         script.AutoUpdateConfig = true;
-        // v0.6.0+：专项脚本判断脚本由插件固化（用户不可编辑），语言按数据化插件判断脚本扩展名（.js 内置引擎 / .py 系统解释器）。
+        // 专项脚本判断脚本由插件固化（用户不可编辑），语言按数据化插件判断脚本扩展名（.js 内置引擎 / .py 系统解释器）。
         script.JudgeScriptEnabled = !string.IsNullOrWhiteSpace(profile.JudgeScript);
         script.JudgeScriptLanguage = string.IsNullOrWhiteSpace(profile.JudgeScriptLanguage) ? "javascript" : profile.JudgeScriptLanguage;
         script.JudgeScript = profile.JudgeScript ?? "";
@@ -390,7 +390,7 @@ internal static class ApiScriptsHandler
         context.Response.StatusCode = 200;
         context.Response.ContentType = "image/png";
         context.Response.Headers["Cache-Control"] = "no-cache";
-        // v0.7.5（KN-27）：icon 响应补安全头（此前手工写响应漏 nosniff/CSP 等，与静态文件不一致）。
+        // icon 响应补安全头（此前手工写响应漏 nosniff/CSP 等，与静态文件不一致）。
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Referrer-Policy"] = "no-referrer";
         context.Response.ContentLength64 = icon.Length;
@@ -1057,7 +1057,7 @@ internal static class ApiScriptsHandler
         return null;
     }
 
-    /// <summary>脚本实例顺序重排（v0.6.8+）：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
+    /// <summary>脚本实例顺序重排：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
     private static async Task HandleReorderScriptsAsync(HttpListenerContext context, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -1065,7 +1065,7 @@ internal static class ApiScriptsHandler
         List<string>? ids = node?["ids"] is JsonArray array
             ? array.Select(item => item?.ToString() ?? "").ToList()
             : null;
-        // v0.7.2+（KN-04）：锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await，结果在锁外响应。
+        // 锁内完成「校验-重排-保存」整段，避免与并发请求冲突；锁内不做 await，结果在锁外响应。
         string? error = null;
         lock (ctx.DataLock)
         {
@@ -1221,7 +1221,7 @@ internal static class ApiScriptsHandler
                     script,
                     RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
                 bool generatedTemplate = generatedTemplateFiles.Count > 0;
-                // v0.7.5（台账外）：模板生成后立即持久化标记（GeneratedTemplate/TemplateFiles）——此前补写发生在
+                // （台账外）：模板生成后立即持久化标记（GeneratedTemplate/TemplateFiles）——此前补写发生在
                 // 主程序启动之后（StartVisible 失败路径的 CancelEdit 与崩溃窗口内标记仍为 PrepareForRun 的无模板版本，
                 // 文件型 config 的模板兄弟文件无清单记录永久残留）。
                 var editMark = new ConfigSessionMark
@@ -1248,7 +1248,7 @@ internal static class ApiScriptsHandler
                     await HttpHelper.WriteJsonAsync(context, new { error = "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试" }, 400).ConfigureAwait(false);
                     return;
                 }
-                // v0.6.5+：编辑配置场景主程序窗口前置（用户需在窗口内编辑配置），避免被浏览器等前台窗口遮挡。
+                // 编辑配置场景主程序窗口前置（用户需在窗口内编辑配置），避免被浏览器等前台窗口遮挡。
                 SystemActions.BringToFrontFireAndForget(proc?.Id ?? 0, "编辑配置");
                 var editSession = new EditSession
                 {
@@ -1267,7 +1267,7 @@ internal static class ApiScriptsHandler
             {
                 if (keepGate)
                 {
-                    // v0.7.2+（KN-42）：会话已注册（keepGate=true）后发生异常（如响应写入失败/客户端断开）时
+                    // 会话已注册（keepGate=true）后发生异常（如响应写入失败/客户端断开）时
                     // 主动清理现场——结束已启动的编辑进程、还原配置交换与隐藏配置、移除会话并释放门禁，
                     // 避免门禁永久占住脚本直到重启；清理失败保留标记交由自愈/后台重试兜底。
                     try
@@ -1322,7 +1322,7 @@ internal static class ApiScriptsHandler
             bool sessionRemoved = false;
             try
             {
-                // v0.6.6+：done/cancel 自动结束脚本进程并确认退出（按启动目标名轮询强杀，处理防崩溃自重启脚本），
+                // done/cancel 自动结束脚本进程并确认退出（按启动目标名轮询强杀，处理防崩溃自重启脚本），
                 // 确保配置交换还原前进程已完全退出，消除文件占用导致的交换失败窗口；
                 // 持续自重启杀不干净时拒绝执行文件交换（会话与标记保留，由下次重试自愈）。
                 string launchExe = ResolveLaunchTargetExe(session.Script);
@@ -1362,7 +1362,7 @@ internal static class ApiScriptsHandler
             }
             finally
             {
-                // v0.6.10 修复：仅会话成功移除（提交/取消成功）才释放门禁——失败路径会话保留（可原地重试），
+                // 修复：仅会话成功移除（提交/取消成功）才释放门禁——失败路径会话保留（可原地重试），
                 // 门禁随之保持；此前无条件 Release 导致重试成功路径 finally 二次 Release，
                 // SemaphoreSlim(1,1) 溢出「Adding the specified count...」（CI 曾现）。
                 if (sessionRemoved)
@@ -1375,7 +1375,7 @@ internal static class ApiScriptsHandler
         await HttpHelper.WriteJsonAsync(context, new { error = "未知操作：" + action }, 400).ConfigureAwait(false);
     }
 
-    /// <summary>按会话标记的模板文件清单清理编辑会话生成的模板（v0.6.3+ 模板目录形态；无清单回退清理 ConfigPath 单文件）。</summary>
+    /// <summary>按会话标记的模板文件清单清理编辑会话生成的模板（模板目录形态；无清单回退清理 ConfigPath 单文件）。</summary>
     private static void DeleteGeneratedTemplateFiles(ConfigSessionMark mark)
     {
         if (mark.TemplateFiles.Count > 0)

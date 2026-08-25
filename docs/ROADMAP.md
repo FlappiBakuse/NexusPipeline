@@ -1,10 +1,23 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-25｜ **当前版本**：v0.9.10（Pre-release）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-26｜ **当前版本**：v0.10.0（Pre-release）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 CHANGELOG、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题台账见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
 
 ---
+
+## v0.10.0：内建更新与工程整改
+
+- [x] 内建更新：设置页/API/CLI 完成「检查→下载（SHA256 校验）→就绪→应用→重启切换」，失败回滚与启动自愈。
+- [x] B4 结构拆分：`ExecutionCoordinator` 拆分 `AttemptLogEnvironment`/`RuntimeWorkers`/`AttemptTerminator`（行为零变更）。
+- [x] B5 前端归位：`limits.js` 移入 `core/`。
+- [x] B2 架构依赖净化：`ConfigSwapRecovery` 去 `RuntimeContext` 依赖（`IConfigRecoveryDataSource` 注入）。
+- [x] B3 数据收敛：`UserDataPruner` 历史用户名目录维护工具（CLI + 确认型 API，默认不自动执行）。
+- [x] B1 注释治理：版本号后缀与 KN 编号清理 + CONTRIBUTING 立项约定。
+- [x] B6 语义审计：DESIGN.md §5.3/§8.1 增补、Scheduler 不补跑 L1 测试、KNOWN_ISSUES 台账更新。
+- [x] 发布侧：RELEASING.md zip 布局标准化与「更新引擎可见性自检」清单。
+
+**v0.10.0 阶段验证（2026-08-26）**：Unit/Component 275/275；Web Logic 8/8；UI Smoke 17/17（加速档 41.6s，含更新端到端）。
 
 ## v0.9.10：用户管理界面与绑定卡片交互优化
 
