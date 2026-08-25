@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-and-test:
-    name: 构建 + e2e 测试
+    name: 构建 + 分层测试
     runs-on: windows-latest
     timeout-minutes: 15
     env:
@@ -31,21 +31,27 @@ jobs:
         with:
           node-version: 20
 
-      - name: 安装测试依赖
+      - name: 安装 Playwright 依赖
         working-directory: tests/e2e
         run: npm ci
+
+      - name: 运行 Unit + Component 测试
+        run: dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
+
+      - name: 运行 Web Logic 测试
+        run: node --test tests/web/*.test.mjs
+
+      - name: 检查 UI Smoke 脚本语法
+        shell: pwsh
+        run: Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
 
       - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
         run: .\build.cmd
 
-      - name: 运行单元测试（毫秒级，覆盖判定/解析/校验纯逻辑）
-        run: dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
-
-      - name: 运行 e2e 测试（核心回归集，加速档）
+      - name: 运行 Playwright UI Smoke
         shell: cmd
         working-directory: tests/e2e
         env:
-          NEXUS_CI: "1"
           NEXUS_TIME_SCALE: "10"
         run: npx playwright test
 
@@ -53,7 +59,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-diagnostics
+          name: smoke-diagnostics
           path: |
             tests/e2e/runtime/logs/*.log
             tests/e2e/test-results/**

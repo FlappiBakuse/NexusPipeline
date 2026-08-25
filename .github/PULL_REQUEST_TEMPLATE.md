@@ -21,7 +21,7 @@
 - [ ] `build.cmd`
 - [ ] 单元测试
 - [ ] Playwright E2E
-- [ ] judge / chaos 专项测试（适用时）
+- [ ] System Smoke / Stress 测试（按修改范围适用时）
 - [ ] 文档与测试命令已同步
 
 ## 安全与配置影响

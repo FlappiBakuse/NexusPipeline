@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.8（Pre-release）
+
+### 测试体系分层重构
+
+- 建立 Unit、Component、Web Logic、System Smoke、UI Smoke 五层测试模型，明确各层测试归属和默认门禁。
+- 将限额、脚本判断执行、路径安全和 UTF-8 边界补充到 xUnit/Node 内建测试，降低规则验证对产品进程和浏览器的依赖。
+- 新增 `tests/system/`，覆盖 release binary、HTTP 状态、端口回退、fatal startup、JavaScript/Python 解释器以及 Generic ADB/MuMu driver 边界。
+- Playwright 收敛为 4 个 UI Smoke spec、15 个关键用户路径；旧功能全集迁移至 `tests/e2e/legacy/` 供专项核对。
+- `judge-scenarios` 迁移到 `tests/stress/legacy/`，`chaos-queue` 调整为 `tests/stress/` 按需压力工具，Stress/Chaos 不进入默认 CI 和固定发布硬门禁。
+- 精简 UI Smoke 生命周期 helper，移除默认服务自动修复路径；更新稳定 `data-testid`、CI 工作流、开发规范和发布门禁。
+
+### 构建与验证
+
+- Unit/Component：231/231。
+- Web Logic：8/8。
+- UI Smoke：15/15，4 个 spec，40.5 秒。
+- System Smoke：9/9，44.6 秒。
+- release build 通过，保留 3 个既有 nullable 警告；Node 语法检查与 `git diff --check` 通过。
+
 ## v0.9.7（Pre-release）
 
 ### 用户管理界面重构

@@ -4,6 +4,11 @@ rem Foreground app is controlled by foreground.txt; call history appended to cal
 set STUB=%~dp0
 set CALLS=%STUB%calls.log
 if "%~1"=="connect" (
+  if exist "%STUB%rebooted.flag" (
+    echo failed to connect to %~2
+    echo connect %~2 >> "%CALLS%"
+    exit /b 1
+  )
   if "%~2"=="127.0.0.1:16385" (
     echo cannot connect to %~2: Connection refused
     echo connect %~2 >> "%CALLS%"
@@ -22,6 +27,7 @@ if "%~1"=="-s" (
     if "%~4"=="reboot" (
       echo Done
       echo reboot >> "%CALLS%"
+      > "%STUB%rebooted.flag" echo offline
       exit /b 0
     )
     if "%~4"=="dumpsys" (

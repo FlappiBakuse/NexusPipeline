@@ -1,5 +1,5 @@
 /**
- * chaos-queue.mjs — 混沌调度队列专项压力测试（独立文件，不影响 judge-scenarios.mjs 与 tests/ 54 用例）
+ * chaos-queue.mjs — 混沌调度队列专项压力测试（独立按需工具，不计入默认 UI Smoke）
  *
  * 覆盖内容：
  *  - 混沌队列（notifyEnabled=true）：S1(1用户)/S2(2用户)/S3(3用户) 共 6 用户串行执行
@@ -9,7 +9,7 @@
  *  - 随机种子轮（seed 随机，只断言不变量）
  *  - 脚本级自定义通知（另建小队列 notifyEnabled=false + 脚本 notifyEnabled=true）
  *
- * 运行：node chaos-queue.mjs   （先跑 build.cmd；管理员 shell）
+ * 运行：node tests/stress/chaos-queue.mjs   （先跑 build.cmd；管理员 shell；按需运行）
  */
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
@@ -115,10 +115,10 @@ async function waitNoRunning(timeoutMs = 600000, intervalMs = 500) {
 /* ---------------- 准备阶段 ---------------- */
 
 function setupRuntime() {
-  // 清理上次残留的测试服务（占用 58731），仅杀 tests/e2e/runtime 目录下的 nexus-pipeline.exe（v0.6.2）
+  // 清理上次残留的压力测试服务（占用 58731），仅杀 tests/stress/runtime 目录下的 nexus-pipeline.exe。
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\stress\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 忽略 */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });

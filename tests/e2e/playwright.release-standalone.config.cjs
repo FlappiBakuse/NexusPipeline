@@ -2,8 +2,9 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: "./tests",
-  timeout: 300000,
-  expect: { timeout: 15000 },
+  testMatch: "**/*.smoke.spec.mjs",
+  timeout: 120000,
+  expect: { timeout: 10000 },
   workers: 1,
   fullyParallel: false,
   retries: 0,

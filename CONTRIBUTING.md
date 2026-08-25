@@ -151,9 +151,10 @@ BREAKING CHANGE: IPlugin.Init 改为异步签名
 
 | 改动范围 | 必跑 |
 |---|---|
-| 仅前端 | `build.cmd` + e2e 全量（局部迭代可按域筛选） |
-| 涉及后端 | `build.cmd` + e2e 全量 + judge-scenarios + chaos-queue + 单元测试，默认加速档 |
-| 版本发布前 | **真实计时档**全量（不设 `NEXUS_TIME_SCALE`） |
+| 默认改动 | `dotnet test` + Web Logic + `build.cmd` + UI Smoke |
+| 涉及进程/解释器/模拟器/插件边界 | 默认流程 + 管理员 System Smoke |
+| 压力或长时调度风险 | 按需运行 `tests/stress/` 工具并记录结果 |
+| 版本发布前 | UI Smoke + 适用的 System Smoke；Stress 按风险决定 |
 
 常用命令：
 
@@ -164,22 +165,28 @@ build.cmd                                     # 提权版（增量构建：src �
 # 2. 单元测试（毫秒级，无管理员）
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
-# 3. e2e（先 build.cmd；加速档为日常迭代默认）
+# 3. Web Logic + UI Smoke（先 build.cmd；加速档为日常迭代默认）
+node --test tests\web\*.test.mjs
+Get-ChildItem tests\e2e\tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
 Push-Location tests\e2e
 $env:PLAYWRIGHT_BROWSERS_PATH = "browsers"
 $env:NEXUS_TIME_SCALE = "10"
-npx playwright test                            # 全量回归
-$env:NEXUS_CI = "1"; npx playwright test       # CI 核心集
+npx playwright test                            # UI Smoke
 Remove-Item Env:NEXUS_TIME_SCALE               # 切回真实计时档
-
-# 4. 专项测试（需管理员 shell；先 build.cmd）
-$env:NEXUS_TIME_SCALE = "10"
-node judge-scenarios.mjs
-node chaos-queue.mjs
 Pop-Location
+
+# 4. System Smoke（需管理员 shell；先 build.cmd）
+$env:NEXUS_SYSTEM_SMOKE = "1"
+node --test --test-concurrency=1 tests\system\runtime-smoke.mjs tests\system\judge-smoke.mjs tests\system\emulator-smoke.mjs
+Remove-Item Env:NEXUS_SYSTEM_SMOKE
+
+# 5. Stress/Soak（按风险运行；管理员 shell；先 build.cmd）
+$env:NEXUS_TIME_SCALE = "10"
+node tests\stress\chaos-queue.mjs
+Remove-Item Env:NEXUS_TIME_SCALE
 ```
 
 - 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`tests\e2e\run-e2e.cmd` 已默认内置；
 - 测试数量与断言数量只记录在 CHANGELOG、Release Notes 或 CI 验证结果中；
-- 发布前真实计时档全量回归 + flake 台账（`tests/e2e/FLAKE-LEDGER.md`）更新；
+- 发布前运行 UI Smoke 与适用的 System Smoke；Stress/Soak 结果按风险记录，flake 台账（`tests/e2e/FLAKE-LEDGER.md`）持续更新；
 - 永不提交：`release/`、`config/`、`history/`、`logs/`、`tests/e2e/runtime/`、密钥与账号信息。

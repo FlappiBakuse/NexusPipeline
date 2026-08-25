@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { api, baseUrl, CI_MODE, createScript, ensureService, makeScriptDir } from "./helpers.mjs";
+import { api, baseUrl, createScript, ensureService, makeScriptDir } from "./helpers.mjs";
 
 await ensureService();
 
@@ -233,7 +233,6 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
 });
 
 test("响应式外壳：手机 / 平板 / 电脑 + 主题 + 粒子效果", async ({ page }) => {
-  test.skip(CI_MODE, "CI 模式跳过响应式外壳外观用例");
   const sizes = [
     { width: 360, height: 800, name: "手机" },
     { width: 768, height: 900, name: "平板" },

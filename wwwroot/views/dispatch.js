@@ -112,7 +112,7 @@ export async function pageDispatch(token) {
         <div class="field"><label class="field-label" for="dc-kind">目标类型</label><select id="dc-kind" data-action="dispatch-kind"><option value="script">脚本实例</option><option value="queue">调度队列</option></select></div>
         <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}">${esc(script.name)}</option>`).join("")}</select></div>
         <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div>
-        <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current">执行脚本</button></div>
+        <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
       </div>
     </section>`);
   applyProgress();

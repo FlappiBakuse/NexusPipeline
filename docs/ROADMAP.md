@@ -1,10 +1,22 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-24｜ **当前版本**：v0.9.7（开发中）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-25｜ **当前版本**：v0.9.8（Pre-release）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 CHANGELOG、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题台账见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
 
 ---
+
+## v0.9.8：测试体系精简与分层重构
+
+- [x] 建立 Unit / Component / Web Logic / System Smoke / UI Smoke 五层测试模型与长期规范。
+- [x] 将限额、用户/脚本/队列 mutation、判定、配置事务、调度和模拟器路由等确定性契约下沉到 xUnit 或 Node 内建测试。
+- [x] 将 Playwright 收敛为 12～18 个关键用户路径，最终不超过 20 个 testcase。
+- [x] 新增不依赖 Playwright 的 `tests/system/`，覆盖进程、HTTP、解释器和模拟器 driver 的少量跨层契约。
+- [x] 将 `judge-scenarios` 迁移为确定性测试与 System Smoke；将 `chaos-queue` 调整为按需 stress/soak 工具，移出默认 CI 与发布硬门禁。
+- [x] 重写 CI、开发文档和测试命令，取消 `NEXUS_CI` 双测试集与默认 flake 自动修复路径。
+- [x] 完成构建、分层测试和发布前 System Smoke 验证，记录最终测试规模与耗时。
+
+**v0.9.8 阶段验证（2026-08-25）**：Unit/Component 231/231；Web Logic 8/8；UI Smoke 15/15（4 specs，40.5 秒，含 360 宽度）；System Smoke 9/9（44.6 秒，UAC runtime）；release build 通过，保留 3 个既有 nullable 警告；所有新增/迁移 Node 脚本 `node --check` 与 `git diff --check` 通过。Stress/Chaos 已移至按需目录，本轮未纳入默认门禁。
 
 ## v0.9.4：Runtime Monitor & Process Ownership Hardening
 

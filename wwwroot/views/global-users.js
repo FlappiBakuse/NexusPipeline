@@ -127,7 +127,7 @@ export async function pageUsers(token) {
   state.users = users || [];
   const limit = state.limits?.maxUsers ?? 50;
   const atLimit = state.users.length >= limit;
-  const action = '<button class="primary" type="button" data-action="open-global-user-modal" ' + (atLimit ? "disabled" : "") + ">添加用户" + (atLimit ? "（" + state.users.length + "/" + limit + "）" : "") + "</button>";
+  const action = '<button class="primary" type="button" data-action="open-global-user-modal" data-testid="open-global-user-modal" ' + (atLimit ? "disabled" : "") + ">添加用户" + (atLimit ? "（" + state.users.length + "/" + limit + "）" : "") + "</button>";
   const sorted = state.users.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   const content = sorted.length
     ? '<section class="card list-surface"><div class="script-grid global-user-list" id="global-user-list">' + sorted.map(userCard).join("") + "</div></section>"
@@ -171,7 +171,7 @@ async function restoreEditSessionCard() {
 
 export function openGlobalUserModal() {
   const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
-  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
+  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
 export async function saveGlobalUser() {
@@ -541,7 +541,7 @@ export function deleteGlobalUser(id) {
   deleteDraft = user;
   const body = '<p class="modal-copy">删除「' + esc(user.name) + '」会解除全部脚本绑定并清理该用户的配置数据。请输入完整用户名确认。</p>' +
     valueField("gu-delete-name", "确认用户名 <span class='req'>*</span>", "", "text", 'placeholder="' + esc(user.name) + '"');
-  showModal(modalShell("删除用户", body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user">确认删除</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
+  showModal(modalShell("删除用户", body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user" data-testid="confirm-delete-global-user">确认删除</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
 }
 
 export async function confirmDeleteGlobalUser() {

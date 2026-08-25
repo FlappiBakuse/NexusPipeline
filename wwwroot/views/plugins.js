@@ -29,7 +29,7 @@ function runtimeClass(plugin) {
 
 function pluginRow(plugin) {
   const apiLabel = plugin.apiVersion ? ` · API v${esc(plugin.apiVersion)}` : "";
-  return `<article class="plugin-row"><div class="plugin-row-main"><strong class="plugin-name-scroll" tabindex="0" title="${esc(plugin.displayName)}"><span class="plugin-name-scroll-inner">${esc(plugin.displayName)}</span></strong><span class="muted">${esc(plugin.description || "本地扩展能力")} · ${esc(plugin.version || "未标注")}${apiLabel}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div><span class="badge ${runtimeClass(plugin)}">${runtimeLabel(plugin)}</span><div class="plugin-row-action row-actions"><button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
+  return `<article class="plugin-row"><div class="plugin-row-main"><strong class="plugin-name-scroll" tabindex="0" title="${esc(plugin.displayName)}"><span class="plugin-name-scroll-inner">${esc(plugin.displayName)}</span></strong><span class="muted">${esc(plugin.description || "本地扩展能力")} · ${esc(plugin.version || "未标注")}${apiLabel}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div><span class="badge ${runtimeClass(plugin)}" data-testid="plugin-status">${runtimeLabel(plugin)}</span><div class="plugin-row-action row-actions"><button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
 }
 
 export async function pagePlugins(token) {

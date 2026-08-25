@@ -35,7 +35,8 @@
 1. 确认本地构建与测试全绿：
    - `build.cmd`（提权版）；
     - 单元测试 `dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`；
-   - **真实计时档**（不设 `NEXUS_TIME_SCALE`）全量回归：e2e + judge-scenarios + chaos-queue。
+   - UI Smoke 全量回归；涉及进程、端口、解释器、模拟器或插件边界时运行管理员 System Smoke。
+   - Stress/Chaos 根据本版本风险选择运行，结果记录在验证记录中；不作为所有版本的固定硬门禁。
 2. **文档一致性自检（v0.6.2+）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/plugins-README 只做简引）。
 3. 核对 ROADMAP 勾选状态与 KNOWN_ISSUES 台账（本版应修项状态）。
 

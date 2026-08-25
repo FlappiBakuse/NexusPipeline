@@ -67,37 +67,35 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 4. 运行测试
 
-### 4.1 测试套件总览
+完整测试分层、归属规则、CI 和发布门禁见 [TESTING.md](TESTING.md)。v0.9.8 起默认执行以下顺序：
 
-| 套件 | 命令 | 断言数 | 耗时 | 管理员 |
-|---|---|---|---|---|
-| 单元测试 | `dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo` | 纯逻辑回归 | 毫秒级 | 否 |
-| e2e（全量） | 在 `tests/e2e/` 执行 `npx playwright test`（先 build.cmd） | 完整浏览器回归 | 加速档数分钟 | 是 |
-| e2e（CI 核心集） | 在 `tests/e2e/` 设置 `NEXUS_CI=1` 后执行 `npx playwright test` | CI 核心回归 | 加速档数分钟 | 是 |
-| 专项稳定性 | 在 `tests/e2e/` 执行 `node judge-scenarios.mjs` | 判定与配置专项回归 | 加速档数分钟 | 是 |
-| 混沌压力 | 在 `tests/e2e/` 执行 `node chaos-queue.mjs` | 调度队列稳定性回归 | 加速档数分钟 | 是 |
+```powershell
+# L1/L2：Unit + Component
+dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
-### 4.2 时间加速档（日常迭代默认）
+# L3：原生 ES module 纯函数
+node --test tests/web/*.test.mjs
 
-- **加速档**：`$env:NEXUS_TIME_SCALE = "10"`——宿主等待按比例缩放（1 分钟 stall → 6 秒、周期触发 30 秒 → 3 秒、marker 宽限 60 秒 → 6 秒、监控循环 1 秒 → 100ms）。`tests\e2e\run-e2e.cmd` 已默认内置加速档。
-- **真实计时档**：不设 `NEXUS_TIME_SCALE`（`Remove-Item Env:NEXUS_TIME_SCALE`）——**发布前必须真实计时档全量回归**。
-- **注意**：判断脚本单次执行 30 秒上限不随加速缩放（外部进程冷启动可达数秒）；测试伪造脚本与判断脚本必须按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放墙钟常量（契约见 AGENTS.md「加速档测试契约」）。
+# 静态检查新增 UI Smoke
+Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
 
-### 4.3 测试隔离与 flake 治理
+# 构建隔离 runtime
+build.cmd
 
-- e2e 自带 `tests/e2e/runtime/` 隔离目录（复制 release 版 exe + wwwroot + plugins），不污染项目根；服务生命周期由 `tests/e2e/tests/global-setup|teardown.mjs` 管理（PID 文件跨进程兜底）。
-- 测试中日期一律用 `localDate()`（本地时区），禁止 `new Date().toISOString()`（UTC 跨午夜断言失败）。
-- flake 台账 `tests/e2e/FLAKE-LEDGER.md` + 采样器 `tests/e2e/flake-monitor.mjs`（进程/端口 500ms 采样）；每次全量回归更新台账直至清零。
+# L5：Playwright UI Smoke（在 tests/e2e/ 下执行）
+Push-Location tests\e2e
+$env:PLAYWRIGHT_BROWSERS_PATH = "browsers"
+npx playwright test
+Pop-Location
+```
 
-### 4.4 测试范围分层（改动后必跑）
+System Smoke 需要管理员终端并依赖已完成的 `build.cmd`：
 
-| 改动范围 | 必跑 |
-|---|---|
-| 仅前端（wwwroot/ 与 `tests/e2e/tests` 断言） | `build.cmd` + e2e 全量（局部迭代可按域筛选，如 `npx playwright test tests/04-schedule.spec.mjs`） |
-| 涉及后端（src/、plugins/） | `build.cmd` + e2e 全量 + judge-scenarios + chaos-queue + `dotnet test`，默认加速档 |
-| 版本发布前 | 真实计时档全量（e2e + judge + chaos）+ 单测 |
+```powershell
+tests\system\run-system.cmd
+```
 
-> 测试用例或断言发生变化时，更新 CHANGELOG、Release Notes 或 CI 验证记录；长期规范文档只维护测试套件、命令和通过要求。
+时间缩放只用于明确依赖宿主等待的专项脚本；判断脚本单次执行 30 秒上限保持真实墙钟语义。测试运行时数据位于 `tests/e2e/runtime/`、`tests/system/runtime/` 或 `tests/stress/runtime/`，日期断言使用项目现有 `localDate()` 规则。`tests/e2e/FLAKE-LEDGER.md` 保留历史记录，`flake-monitor.mjs` 按需启动。
 
 ## 5. 调试技巧
 
@@ -114,7 +112,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 |---|---|
 | `NEXUS_TIME_SCALE` | 缩放宿主等待时长（见 4.2） |
 | `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 系统操作（休眠/重启/关机）仅记录日志不真正执行——e2e global-setup 设置，防止 CI 真关机 |
-| `NEXUS_CI=1` | e2e 核心回归集（剔除响应式外壳外观用例） |
+| `NEXUS_SYSTEM_SMOKE=1` | 启用管理员 System Smoke（进程/端口/解释器/模拟器边界） |
 
 ### 5.3 Windows 环境陷阱（曾踩坑，勿重蹈；pwsh 7 + 系统 UTF-8 后大部分已消除）
 

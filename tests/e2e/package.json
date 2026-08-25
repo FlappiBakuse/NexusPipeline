@@ -1,1 +1,1 @@
-{"name":"nexuspipeline-e2e","private":true,"version":"1.0.0","dependencies":{"playwright":"^1.62.1"},"devDependencies":{"@playwright/test":"^1.62.1"}}
+{"name":"nexuspipeline-e2e","private":true,"version":"1.0.0","scripts":{"test":"playwright test","test:smoke":"playwright test","test:web":"node --test ../web/*.test.mjs","test:system":"node --test --test-concurrency=1 ../system/runtime-smoke.mjs ../system/judge-smoke.mjs ../system/emulator-smoke.mjs"},"dependencies":{"playwright":"^1.62.1"},"devDependencies":{"@playwright/test":"^1.62.1"}}
