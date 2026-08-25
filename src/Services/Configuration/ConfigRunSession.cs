@@ -67,11 +67,6 @@ internal sealed class ConfigRunSession
         _transaction.ApplyReplacements(replacements);
     }
 
-    public void SyncCompatibilityAlias()
-    {
-        _transaction.SyncCompatibilityAlias();
-    }
-
     /// <summary>进程树未能确认退出时锁住配置收尾，保留现场供恢复，而不是继续覆盖/还原文件。</summary>
     public void MarkProcessCleanupUnconfirmed(string reason)
     {

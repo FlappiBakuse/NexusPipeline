@@ -45,14 +45,14 @@ internal static class ConfigSwapRecovery
         }
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；original 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。
-    /// 还原失败（如脚本孤儿进程仍占用配置目录）记入待办，由 <see cref="StartRecoveryRetry"/> 后台循环延迟重试。</summary>
-    public static void RecoverInterrupted()
+    /// <summary>启动恢复：只处理当前全局用户绑定对应的 UserId 目录与脚本级目录。</summary>
+    public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
     {
         try
         {
-            ConfigSwapPaths.MigrateLegacyLayout();
-            RecoverStoreTransactions();
+            Dictionary<string, HashSet<string>> userKeysByScript = BuildRecoveryUserKeys(users);
+            ConfigSwapPaths.MigrateLegacyLayoutForRecovery(AppPaths.DataDir, userKeysByScript);
+            RecoverStoreTransactions(userKeysByScript);
             if (!Directory.Exists(AppPaths.DataDir))
             {
                 return;
@@ -61,10 +61,13 @@ internal static class ConfigSwapRecovery
             {
                 string scriptId = Path.GetFileName(scriptDir);
                 TryRecoverItem(scriptId, null);
-                foreach (string userDir in Directory.GetDirectories(scriptDir))
+                if (!userKeysByScript.TryGetValue(scriptId, out HashSet<string>? userKeys))
                 {
-                    string userName = Path.GetFileName(userDir);
-                    TryRecoverItem(scriptId, userName);
+                    continue;
+                }
+                foreach (string userKey in userKeys)
+                {
+                    TryRecoverItem(scriptId, userKey);
                 }
             }
         }
@@ -75,28 +78,67 @@ internal static class ConfigSwapRecovery
     }
 
     /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store.previous，临时目录只作为未完成事务清理。</summary>
-    private static void RecoverStoreTransactions()
+    private static Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
+    {
+        IEnumerable<NexusUser> source = users ?? RuntimeContext.Instance.SnapshotUsers();
+        var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (NexusUser user in source)
+        {
+            if (string.IsNullOrWhiteSpace(user.Id))
+            {
+                continue;
+            }
+            foreach (UserScriptBinding binding in user.Bindings)
+            {
+                if (string.IsNullOrWhiteSpace(binding.ScriptInstanceId))
+                {
+                    continue;
+                }
+                if (!result.TryGetValue(binding.ScriptInstanceId, out HashSet<string>? keys))
+                {
+                    keys = new HashSet<string>(StringComparer.Ordinal);
+                    result[binding.ScriptInstanceId] = keys;
+                }
+                keys.Add(user.Id);
+            }
+        }
+        return result;
+    }
+
+    private static void RecoverStoreTransactions(IReadOnlyDictionary<string, HashSet<string>> userKeysByScript)
     {
         if (!Directory.Exists(AppPaths.DataDir))
         {
             return;
         }
-        foreach (string temp in Directory.GetDirectories(AppPaths.DataDir, "store.tmp", SearchOption.AllDirectories))
+        foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
         {
-            string store = temp[..^4];
-            string previous = store + ".previous";
-            try
+            string scriptId = Path.GetFileName(scriptDir);
+            var allowedDirectories = new List<string> { scriptDir };
+            if (userKeysByScript.TryGetValue(scriptId, out HashSet<string>? userKeys))
             {
-                if (!Directory.Exists(store) && Directory.Exists(previous))
-                {
-                    Directory.Move(previous, store);
-                    Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复旧用户快照：{store}");
-                }
-                ConfigSwapPrimitives.TryDeleteDir(temp);
+                allowedDirectories.AddRange(userKeys.Select(userKey => Path.Combine(scriptDir, userKey)));
             }
-            catch (Exception ex)
+            foreach (string allowedDirectory in allowedDirectories.Where(Directory.Exists))
             {
-                Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
+                foreach (string temp in Directory.GetDirectories(allowedDirectory, "store.tmp", SearchOption.TopDirectoryOnly))
+                {
+                    string store = temp[..^4];
+                    string previous = store + ".previous";
+                    try
+                    {
+                        if (!Directory.Exists(store) && Directory.Exists(previous))
+                        {
+                            Directory.Move(previous, store);
+                            Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复用户快照：{store}");
+                        }
+                        ConfigSwapPrimitives.TryDeleteDir(temp);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
+                    }
+                }
             }
         }
     }

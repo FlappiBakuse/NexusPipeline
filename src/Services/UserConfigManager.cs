@@ -63,26 +63,6 @@ internal static class UserConfigManager
         ConfigSwapPaths.CleanupScriptArea(scriptId, userName);
     }
 
-    public static void SyncCompatibilityAlias(string scriptId, string? userKey, string? userName)
-    {
-        ConfigSwapPaths.SyncCompatibilityAlias(scriptId, userKey, userName);
-    }
-
-    public static void AdoptCompatibilityStore(string scriptId, string? userKey, string? userName)
-    {
-        ConfigSwapPaths.AdoptCompatibilityStore(scriptId, userKey, userName);
-    }
-
-    public static void CleanupCompatibilityTransient(string scriptId, string? userName)
-    {
-        ConfigSwapPaths.CleanupCompatibilityTransient(scriptId, userName);
-    }
-
-    public static void CleanupCompatibilityReplacement(string scriptId, string? userName)
-    {
-        ConfigSwapPaths.CleanupCompatibilityReplacement(scriptId, userName);
-    }
-
     public static ScriptUser? FindEnabledUser(ScriptInstance script, string? userName)
     {
         if (string.IsNullOrWhiteSpace(userName))
@@ -96,10 +76,10 @@ internal static class UserConfigManager
 
     /* ---------------- 对外操作 ---------------- */
 
-    /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。源不存在时建立空快照。</summary>
-    public static string? SnapshotOnAddUser(ScriptInstance script, string userName)
+    /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。</summary>
+    public static string? SnapshotOnAddUser(ScriptInstance script, string userKey)
     {
-        string store = StoreDir(script.Id, userName);
+        string store = StoreDir(script.Id, userKey);
         string? error = null;
         ConfigSwapPrimitives.WithSwapLock(script.Id, () =>
         {
@@ -115,11 +95,16 @@ internal static class UserConfigManager
                     Directory.CreateDirectory(store);
                     return;
                 }
+                if (PathKindUtil.KindOf(script.ConfigPath) == PathKind.Missing)
+                {
+                    throw new IOException($"配置路径不存在：{script.ConfigPath}");
+                }
                 ConfigSwapPrimitives.CopyAs(script.ConfigPath, store, PathKind.Dir);
-                Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userName} → {store}");
+                Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userKey} → {store}");
             }
             catch (Exception ex)
             {
+                ConfigSwapPrimitives.TryDeleteDir(store);
                 error = ex.Message;
             }
         });
@@ -492,10 +477,10 @@ internal static class UserConfigManager
         ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
     }
 
-    /// <summary>启动恢复：扫描全部残留标记并还原（幂等；original 为空则仅清标记，不动现场）；同时恢复未还原的配置替换。</summary>
-    public static void RecoverInterrupted()
+    /// <summary>启动恢复：按当前全局用户绑定的 UserId 白名单处理会话标记与配置替换，并保留脚本级现场。</summary>
+    public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
     {
-        ConfigSwapSession.RecoverInterrupted();
+        ConfigSwapSession.RecoverInterrupted(users);
     }
 
     /// <summary>启动后台恢复重试循环：每 10 秒尝试还原待办项（孤儿进程退出/文件解锁后自动完成），直至全部成功或进程退出。</summary>
@@ -515,15 +500,9 @@ internal static class UserConfigManager
         return ConfigSwapPaths.RemoveScriptData(scriptId);
     }
 
-    /// <summary>删除用户时清理其数据目录。</summary>
-    public static void RemoveUserData(string scriptId, string userName)
+    /// <summary>删除用户绑定时清理其 UserId 数据目录。</summary>
+    public static void RemoveUserData(string scriptId, string userKey)
     {
-        ConfigSwapPaths.RemoveUserData(scriptId, userName);
-    }
-
-    /// <summary>用户改名时迁移其数据目录；失败返回错误信息（由调用方决定不落盘，名称与数据保持原样）。</summary>
-    public static string? RenameUserData(string scriptId, string oldName, string newName)
-    {
-        return ConfigSwapPaths.RenameUserData(scriptId, oldName, newName);
+        ConfigSwapPaths.RemoveUserData(scriptId, userKey);
     }
 }

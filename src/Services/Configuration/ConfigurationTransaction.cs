@@ -10,20 +10,18 @@ internal sealed class ConfigurationTransaction
 {
     private readonly string _scriptId;
     private readonly string? _userKey;
-    private readonly string? _userName;
     private readonly string _configPath;
 
     public ConfigurationTransaction(string scriptId, string? userKey, string? userName, string configPath)
+        : this(scriptId, userKey, configPath)
+    {
+    }
+
+    public ConfigurationTransaction(string scriptId, string? userKey, string configPath)
     {
         _scriptId = scriptId;
         _userKey = userKey;
-        _userName = userName;
         _configPath = configPath;
-    }
-
-    public ConfigurationTransaction(string scriptId, string? userName, string configPath)
-        : this(scriptId, userName, userName, configPath)
-    {
     }
 
     public bool IsPrepared { get; private set; }
@@ -34,9 +32,7 @@ internal sealed class ConfigurationTransaction
 
     public void PrepareScriptArea()
     {
-        UserConfigManager.AdoptCompatibilityStore(_scriptId, _userKey, _userName);
         UserConfigManager.PrepareScriptDir(_scriptId, _userKey);
-        SyncCompatibilityAlias();
     }
 
     public bool Begin(out string? error)
@@ -47,7 +43,6 @@ internal sealed class ConfigurationTransaction
             return true;
         }
         IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error);
-        SyncCompatibilityAlias();
         return IsPrepared;
     }
 
@@ -57,9 +52,7 @@ internal sealed class ConfigurationTransaction
         {
             return null;
         }
-        string? error = UserConfigManager.PrepareForRetry(_scriptId, _userKey, _configPath);
-        SyncCompatibilityAlias();
-        return error;
+        return UserConfigManager.PrepareForRetry(_scriptId, _userKey, _configPath);
     }
 
     public void SyncToStore(bool firstCheck)
@@ -67,27 +60,22 @@ internal sealed class ConfigurationTransaction
         if (IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
         {
             UserConfigManager.SyncConfigToStore(_scriptId, _userKey, _configPath, firstCheck);
-            SyncCompatibilityAlias();
         }
     }
 
     public void ApplyReplacements(List<string> replacements)
     {
         UserConfigManager.ApplyConfigReplacements(_scriptId, _userKey, _configPath, replacements);
-        SyncCompatibilityAlias();
     }
 
     public bool RestoreReplacements()
     {
-        bool restored = UserConfigManager.RestoreConfigReplacements(_scriptId, _userKey);
-        SyncCompatibilityAlias();
-        return restored;
+        return UserConfigManager.RestoreConfigReplacements(_scriptId, _userKey);
     }
 
     public void CleanupScriptArea()
     {
         UserConfigManager.CleanupScriptArea(_scriptId, _userKey);
-        UserConfigManager.CleanupCompatibilityTransient(_scriptId, _userName);
     }
 
     public string? Restore()
@@ -96,22 +84,6 @@ internal sealed class ConfigurationTransaction
         {
             return null;
         }
-        string? error = null;
-        try
-        {
-            error = UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath);
-        }
-        finally
-        {
-            SyncCompatibilityAlias();
-            UserConfigManager.CleanupCompatibilityTransient(_scriptId, _userName);
-            UserConfigManager.CleanupCompatibilityReplacement(_scriptId, _userName);
-        }
-        return error;
-    }
-
-    public void SyncCompatibilityAlias()
-    {
-        UserConfigManager.SyncCompatibilityAlias(_scriptId, _userKey, _userName);
+        return UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath);
     }
 }

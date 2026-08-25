@@ -21,7 +21,7 @@ internal static class StartupPipeline
         ctx.ReloadSettings();
         ctx.ReloadData();
         // v0.6.6+：崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底），避免多进程并发恢复竞争文件。
-        UserConfigManager.RecoverInterrupted();
+        UserConfigManager.RecoverInterrupted(ctx.SnapshotUsers());
         TaskRegistration.SyncWithSettings(ctx.Settings);
         Bootstrap.StartServices();
 
@@ -150,7 +150,7 @@ internal static class StartupPipeline
         ApplicationHost.IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
         // v0.6.6+：崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
-        UserConfigManager.RecoverInterrupted();
+        UserConfigManager.RecoverInterrupted(ctx.SnapshotUsers());
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
         if (web is null)

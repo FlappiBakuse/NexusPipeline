@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.9.9（Pre-release）
+
+### UserId 数据一致性与绑定准入
+
+- 将配置交换、判断脚本目录、自动更新事务和启动恢复统一到 `data/{脚本Id}/{UserId}`；`NexusUser.Name` 只承担展示与旧 API 查找，历史用户名目录作为惰性遗留保留并跳过运行与恢复。
+- 兼容 `/api/scripts/{scriptId}/users` API 统一解析全局用户后使用 UserId，改名不迁移配置目录，解绑只清理 UserId 目录。
+- 新增全局用户绑定纳入脚本级活动运行租约和 `ScriptConfigGate`；初始配置快照在 `DataLock` 外复制，快照失败时绑定元数据保持回滚。
+- 增加 `Scheduler.HasPendingBinding(userId, scriptId)`；待执行冻结计划引用的绑定在更新和删除时返回 HTTP 409。
+- 新增 UserId-only 恢复、绑定运行冲突、快照失败回滚和冻结计划精确匹配回归测试。
+
+### 测试与验证
+
+- Unit/Component：236/236。
+- Web Logic：8/8；Smoke spec `node --check` 全部通过。
+- UI Smoke：15/15，4 个 spec，40.3 秒。
+- System Smoke：9/9（runtime 5/5、Judge 2/2、Emulator 2/2）。
+- release build 通过；保留项目原有 3 个 nullable 警告；`git diff --check` 通过。
+
 ## v0.9.8（Pre-release）
 
 ### 测试体系分层重构

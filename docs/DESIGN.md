@@ -181,7 +181,7 @@ flowchart TD
 ### 4.1 数据目录
 
 ```
-data/{脚本Id}/{用户名}/
+data/{脚本Id}/{UserId}/
 ├── store/          用户配置快照（添加用户时从 configPath 复制；v0.7.6 起运行后自动更新回写——任务完成记录/计数保留延续；可重建）
 ├── store.previous/ 上一份完整用户快照（自动更新事务保留，崩溃恢复用）
 ├── store.tmp       自动更新事务临时目录
@@ -192,6 +192,8 @@ data/{脚本Id}/{用户名}/
 ├── edit-hidden/    编辑会话隐藏配置暂存（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）
 └── .session        会话标记（崩溃恢复用）
 ```
+
+`NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 仅用于展示与旧 API 的用户查找。旧用户名目录属于惰性遗留，运行和恢复均跳过，兼容 API 先按 Name 解析当前全局用户，再使用解析出的 UserId 访问数据。磁盘 `.session` 的 `UserName` 字段继续承载该存储键，以保持已有现场可读。
 
 ### 4.2 运行前（PrepareForRun）与运行后（RestoreAfterRun）
 

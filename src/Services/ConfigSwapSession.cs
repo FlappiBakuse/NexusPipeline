@@ -1078,9 +1078,9 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>启动恢复扫描：恢复逻辑由 ConfigSwapRecovery 统一负责。</summary>
-    public static void RecoverInterrupted()
+    public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)
     {
-        ConfigSwapRecovery.RecoverInterrupted();
+        ConfigSwapRecovery.RecoverInterrupted(users);
     }
 
     public static void StartRecoveryRetry()

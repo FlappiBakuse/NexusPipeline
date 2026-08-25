@@ -633,7 +633,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         JudgeSnapshot CaptureJudgeSnapshot(int generation)
         {
-            string scriptDir = _configRun?.ScriptDir ?? UserConfigManager.ScriptDir(_script.Id, _activeUser?.Name);
+            string scriptDir = _configRun?.ScriptDir
+                ?? UserConfigManager.ScriptDir(_script.Id, _resolvedUser?.UserKey ?? _activeUser?.Name);
             List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir)
                 .Select(file => new JudgeScriptInputFile
                 {
@@ -682,10 +683,6 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             {
                 return false;
             }
-
-            // 旧 API 仍可能读取按用户名命名的兼容镜像；判断脚本可能刚刚写入 script 计数文件，
-            // 在消费结果时同步一次即可让旧工具观测到同一轮运行状态。
-            _configRun?.SyncCompatibilityAlias();
 
             bool isFinal = completed.AttemptId == attemptId
                 && completed.AttemptNumber == attempt.Number
@@ -1106,7 +1103,6 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
             _configRun?.ApplyReplacements(_pendingReplaceConfigs);
-            _configRun?.SyncCompatibilityAlias();
         }
         _pendingReplaceConfigs = null;
 

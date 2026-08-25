@@ -222,6 +222,20 @@ internal sealed class Scheduler : IDisposable
         }
     }
 
+    /// <summary>检测尚未准入的冻结计划是否仍引用指定脚本的指定用户绑定。</summary>
+    public bool HasPendingBinding(string userId, string scriptId)
+    {
+        lock (_sync)
+        {
+            return _pendingTriggers.Values
+                .Where(item => item.Status is "Triggered" or "Waiting")
+                .Any(item => item.Plan?.Tasks.Any(task =>
+                    string.Equals(task.Script?.Id ?? task.Task.ScriptInstanceId, scriptId, StringComparison.Ordinal)
+                    && task.ResolvedUsers?.Any(user =>
+                        string.Equals(user.UserId, userId, StringComparison.OrdinalIgnoreCase)) == true) == true);
+        }
+    }
+
     private static DateTime? NextTriggerFor(DispatchQueue queue, DateTime now)
     {
         if (queue.AutoRunMode != "scheduled" || queue.Tasks.Count == 0)

@@ -10,6 +10,7 @@
 > v0.9.1 并行调度安全性加固：`IExecutionSnapshotProvider` 在同一数据锁内提供队列、脚本和用户配置输入，资源租约覆盖日志模式与前/后置脚本，路径和 ADB 端点按物理身份规范化；`ExecutionStateStore` 增加运行组收尾状态与 CRUD 协调域，`Scheduler` 对瞬时准入冲突保留待重试触发。队列内保持串行，符合条件的模拟器队列和一个标准队列可并行。
 > v0.9.5 扩展边界收敛：Webhook/SMTP 通知和模拟器均归宿主基础设施；模拟器运行开始时冻结 Generic ADB 或 MuMuManager driver。新增独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1，managed-code 插件按 manifest 配置、程序集隔离和重启语义加载；现有数据化专项插件继续兼容。
 > v0.9.6 用户领域重构：用户提升为全局 `NexusUser`，脚本通过 `UserScriptBinding` 保存参与运行、配置脚本和用户通知设置；旧脚本内用户在启动阶段迁移并按名称合并。全局用户页负责排序、头像、绑定和删除，脚本页与队列页保留直接右侧操作区。
+> v0.9.9 用户数据一致性收敛：`UserId` 成为配置目录、运行交换与恢复扫描的唯一存储键；旧脚本用户 API 按 Name 解析全局用户后使用 UserId，历史用户名目录保留为惰性遗留并跳过读写与恢复。新增绑定纳入脚本级运行/编辑门禁，冻结计划引用的绑定在更新和删除时返回 409。
 
 ## 总体结构
 
@@ -95,9 +96,9 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换兼容 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
-| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；不改变原磁盘布局 |
+| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单 |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
-| `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{用户名} 子目录定位与清理 |
+| `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位、受限迁移与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |

@@ -140,7 +140,7 @@ tests\system\run-system.cmd
 | `config/plugins/<插件名>.json` / `.secrets.json` | managed-code 插件 JSON 配置 / DPAPI 密钥 |
 | `history/YYYY-MM-DD/HH-mm-ss.json` + `-{尝试号}.log` | 运行状态（纯状态，PascalCase）+ 按尝试分批的脚本日志 |
 | `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志（审计行 `[审计] 来源 \| 操作`，来源 web/manage/cli/scheduler/system） |
-| `data/{脚本Id}/{用户}/` | 配置交换数据目录（store/store.previous/store.tmp/retry-store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续） |
+| `data/{脚本Id}/{UserId}/` | 配置交换数据目录（store/store.previous/store.tmp/retry-store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续）；Name 只用于展示，历史用户名目录作为惰性遗留跳过 |
 
 - 磁盘 JSON = PascalCase；Web API 返回 camelCase；读测试 JSON 前先 `.replace(/^\uFEFF/, "")` 去 BOM。
 - 历史/管理器日志按保留天数每日清理（启动时 + 调度器每日首次 tick）。
@@ -156,4 +156,4 @@ tests\system\run-system.cmd
 | Web 打不开 / ECONNREFUSED | 确认服务在运行、端口正确、轻量模式未开启（轻量模式无 Web） |
 | 测试全量级联失败 | 服务残留：`tests/e2e/runtime` 清理残留进程后再跑；检查 `tests/e2e/flake-monitor-logs/` 采样 |
 | 脚本判定异常 | 检查 `logs/` 管理器日志与 `history/` 按尝试分批日志；判断脚本模式看 JudgeError 输出 |
-| 配置还原异常 | `data/{脚本Id}/{用户}/` 的 `.session` 标记与 swap-backup；重启服务触发自愈 |
+| 配置还原异常 | `data/{脚本Id}/{UserId}/` 的 `.session` 标记与 swap-backup；重启服务按当前用户绑定触发自愈 |

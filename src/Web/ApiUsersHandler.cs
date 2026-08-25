@@ -408,49 +408,96 @@ internal static class ApiUsersHandler
         }
         UserScriptBinding binding = payload.ToBinding();
         string? error = null;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        bool gateHeld = false;
         ctx.Center.WithAdmissionCoordination(() =>
         {
-            error = CheckBindingBusy(ctx, user.Id, script.Id);
-            if (error is not null)
+            try
             {
-                return;
-            }
-            lock (ctx.DataLock)
-            {
-                if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                if (ctx.Center.FindLeases(script.Id).Count > 0)
                 {
-                    error = "该用户已绑定此脚本实例";
+                    error = "脚本正在运行，无法新增绑定";
                     return;
                 }
-                int current = ctx.Users.Sum(item => item.Bindings.Count(bindingItem =>
-                    string.Equals(bindingItem.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
-                error = Limits.CheckUserCount(current);
+                if (UserConfigManager.EditSessions.Values.Any(session => session.Script.Id == script.Id))
+                {
+                    error = "脚本正在编辑配置中，无法新增绑定";
+                    return;
+                }
+                if (!gate.Wait(0))
+                {
+                    error = "脚本正在运行或编辑配置中，无法新增绑定";
+                    return;
+                }
+                gateHeld = true;
+
+                error = CheckBindingBusy(ctx, user.Id, script.Id);
                 if (error is not null)
                 {
                     return;
                 }
-                user.Bindings.Add(binding);
-                try
+
+                ScriptInstance snapshotScript;
+                lock (ctx.DataLock)
                 {
-                    DataStore.SaveUsers(ctx.Users);
-                    string? snapshotError = UserConfigManager.SnapshotOnAddUser(script, user.Id);
-                    if (snapshotError is not null)
+                    if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
                     {
-                        error = "初始配置快照失败：" + snapshotError;
-                        user.Bindings.Remove(binding);
+                        error = "该用户已绑定此脚本实例";
+                        return;
+                    }
+                    int current = ctx.Users.Sum(item => item.Bindings.Count(bindingItem =>
+                        string.Equals(bindingItem.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
+                    error = Limits.CheckUserCount(current);
+                    if (error is not null)
+                    {
+                        return;
+                    }
+                    snapshotScript = script.Clone();
+                }
+
+                string? snapshotError = UserConfigManager.SnapshotOnAddUser(snapshotScript, user.Id);
+                if (snapshotError is not null)
+                {
+                    error = "初始配置快照失败：" + snapshotError;
+                    return;
+                }
+
+                lock (ctx.DataLock)
+                {
+                    if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                    {
+                        error = "该用户已绑定此脚本实例";
+                        return;
+                    }
+                    user.Bindings.Add(binding);
+                    try
+                    {
                         DataStore.SaveUsers(ctx.Users);
                     }
+                    catch
+                    {
+                        user.Bindings.Remove(binding);
+                        throw;
+                    }
                 }
-                catch
+            }
+            finally
+            {
+                if (gateHeld)
                 {
-                    user.Bindings.Remove(binding);
-                    throw;
+                    gate.Release();
+                    gateHeld = false;
                 }
             }
         });
         if (error is not null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error }, error.Contains("运行", StringComparison.Ordinal) ? 409 : 400).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, new { error },
+                error.Contains("运行", StringComparison.Ordinal)
+                    || error.Contains("编辑", StringComparison.Ordinal)
+                    || error.Contains("待执行", StringComparison.Ordinal)
+                    ? 409
+                    : 400).ConfigureAwait(false);
             return;
         }
         ctx.Scheduler.RevalidatePendingPlans();
@@ -738,6 +785,10 @@ internal static class ApiUsersHandler
             session.Script.Id == scriptId && string.Equals(session.Mark.UserName, userId, StringComparison.OrdinalIgnoreCase)))
         {
             return "用户绑定正在编辑配置，无法修改";
+        }
+        if (ctx.Scheduler.HasPendingBinding(userId, scriptId))
+        {
+            return "该用户绑定已存在待执行的冻结计划，暂时无法修改";
         }
         return null;
     }

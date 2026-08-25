@@ -3,34 +3,34 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
-/// <summary>数据目录管理层（v0.5.0 从 UserConfigManager 拆出）：data/{脚本Id}/{用户名} 各类子目录的定位与清理。</summary>
+/// <summary>数据目录管理层（v0.5.0 从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。</summary>
 internal static class ConfigSwapPaths
 {
-    public static string UserDir(string scriptId, string userName)
+    public static string UserDir(string scriptId, string userKey)
     {
-        return Path.Combine(AppPaths.DataDir, scriptId, userName);
+        return Path.Combine(AppPaths.DataDir, scriptId, userKey);
     }
 
-    public static string StoreDir(string scriptId, string userName)
+    public static string StoreDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userName), "store");
+        return Path.Combine(UserDir(scriptId, userKey), "store");
     }
 
-    public static string CacheDir(string scriptId, string userName)
+    public static string CacheDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userName), "original");
+        return Path.Combine(UserDir(scriptId, userKey), "original");
     }
 
     /// <summary>当前运行重试轮使用的临时配置快照；不等同于用户永久 store。</summary>
-    public static string RetryStoreDir(string scriptId, string userName)
+    public static string RetryStoreDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userName), "retry-store");
+        return Path.Combine(UserDir(scriptId, userKey), "retry-store");
     }
 
     /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
-    public static string HiddenConfigDir(string scriptId, string userName)
+    public static string HiddenConfigDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userName), "edit-hidden");
+        return Path.Combine(UserDir(scriptId, userKey), "edit-hidden");
     }
 
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
@@ -75,112 +75,12 @@ internal static class ConfigSwapPaths
     }
 
     /// <summary>
-    /// 兼容旧版按用户名访问的数据目录：把 UserId 权威目录复制到用户名镜像。
-    /// 镜像只服务旧 API/旧脚本工具，运行与持久化始终使用 userKey（UserId）。
+    /// 启动恢复使用的受限目录迁移：脚本根目录保留无用户现场，用户目录只处理当前全局用户绑定对应的 UserId。
+    /// 用户名遗留目录不会进入此路径。
     /// </summary>
-    public static void SyncCompatibilityAlias(string scriptId, string? userKey, string? userName)
-    {
-        if (string.IsNullOrWhiteSpace(userKey)
-            || string.IsNullOrWhiteSpace(userName)
-            || string.Equals(userKey, userName, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        string source = UserDir(scriptId, userKey);
-        string target = UserDir(scriptId, userName);
-        if (string.Equals(Path.GetFullPath(source), Path.GetFullPath(target), StringComparison.OrdinalIgnoreCase)
-            || !Directory.Exists(source))
-        {
-            return;
-        }
-
-        try
-        {
-            // 保持目标目录始终可见，避免旧 API 在镜像重建的瞬间读到不存在的路径；
-            // 运行临时目录由 CleanupCompatibilityTransient 在生命周期节点精确清理。
-            Directory.CreateDirectory(target);
-            ConfigSwapPrimitives.CopyAs(source, target, PathKind.Dir);
-        }
-        catch (Exception ex)
-        {
-            // 兼容镜像失败不影响 UserId 权威目录及运行结果。
-            Logger.Warn($"[兼容] 用户目录镜像同步失败（{source} → {target}）：{ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// 兼容旧版直接编辑用户名 store 目录的工具：运行开始前把镜像快照采纳回 UserId 权威目录。
-    /// 仅采纳持久化 store，不采纳 original、script 或会话标记等运行现场。
-    /// </summary>
-    public static void AdoptCompatibilityStore(string scriptId, string? userKey, string? userName)
-    {
-        if (string.IsNullOrWhiteSpace(userKey)
-            || string.IsNullOrWhiteSpace(userName)
-            || string.Equals(userKey, userName, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        string source = StoreDir(scriptId, userKey);
-        string alias = StoreDir(scriptId, userName);
-        if (!Directory.Exists(alias))
-        {
-            return;
-        }
-
-        try
-        {
-            ConfigSwapPrimitives.TryDeleteDir(source);
-            ConfigSwapPrimitives.CopyAs(alias, source, PathKind.Dir);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[兼容] 用户 store 镜像采纳失败（{alias} → {source}）：{ex.Message}");
-        }
-    }
-
-    /// <summary>清理用户名兼容镜像中的运行临时目录，保留 store 供旧 API 读取运行结果。</summary>
-    public static void CleanupCompatibilityTransient(string scriptId, string? userName)
-    {
-        if (string.IsNullOrWhiteSpace(userName))
-        {
-            return;
-        }
-        ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
-        ConfigSwapPrimitives.TryDeleteDir(RetryStoreDir(scriptId, userName));
-    }
-
-    public static void CleanupCompatibilityReplacement(string scriptId, string? userName)
-    {
-        if (!string.IsNullOrWhiteSpace(userName))
-        {
-            ConfigSwapPrimitives.TryDeleteDir(ReplaceBackupDir(scriptId, userName));
-            ConfigSwapPrimitives.TryDeleteDir(CacheDir(scriptId, userName));
-            try
-            {
-                string session = Path.Combine(UserDir(scriptId, userName), ".session");
-                if (File.Exists(session))
-                {
-                    File.Delete(session);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[兼容] 用户目录会话标记清理失败（脚本 {scriptId} / 用户 {userName}）：{ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>数据目录命名迁移（v0.6.0）：旧名 → 新名（config→store、cache→original、edit-hide→edit-hidden、replace-backup→swap-backup）。
-    /// 幂等：目标名已存在则跳过（保留新现场）；失败仅告警不阻断。启动时在崩溃恢复扫描前调用，确保旧版本残留现场仍可恢复。</summary>
-    public static void MigrateLegacyLayout()
-    {
-        MigrateLegacyLayout(AppPaths.DataDir);
-    }
-
-    /// <summary>迁移指定数据根目录；内部重载用于隔离测试，生产入口仍使用 AppPaths.DataDir。</summary>
-    internal static void MigrateLegacyLayout(string dataDir)
+    internal static void MigrateLegacyLayoutForRecovery(
+        string dataDir,
+        IReadOnlyDictionary<string, HashSet<string>> userKeysByScript)
     {
         if (!Directory.Exists(dataDir))
         {
@@ -200,10 +100,53 @@ internal static class ConfigSwapPaths
                 {
                     TryRenameDir(oldPath, Path.Combine(scriptDir, newName), $"{scriptId}（无用户）");
                 }
-                foreach (string userDir in Directory.GetDirectories(scriptDir))
+            }
+
+            if (!userKeysByScript.TryGetValue(scriptId, out HashSet<string>? userKeys))
+            {
+                continue;
+            }
+            foreach (string userKey in userKeys)
+            {
+                string userDir = Path.Combine(scriptDir, userKey);
+                if (!Directory.Exists(userDir))
                 {
-                    string userName = Path.GetFileName(userDir);
-                    TryRenameDir(Path.Combine(userDir, oldName), Path.Combine(userDir, newName), $"{scriptId} / {userName}");
+                    continue;
+                }
+                foreach ((string oldName, string newName) in LegacyDirMap)
+                {
+                    TryRenameDir(
+                        Path.Combine(userDir, oldName),
+                        Path.Combine(userDir, newName),
+                        $"{scriptId} / {userKey}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// 迁移指定数据根目录的脚本级旧目录命名；保留给旧布局隔离测试。
+    /// 生产启动恢复使用上面的 UserId 白名单重载，避免枚举脚本根下的任意用户目录。
+    /// </summary>
+    internal static void MigrateLegacyLayout(string dataDir)
+    {
+        if (!Directory.Exists(dataDir))
+        {
+            return;
+        }
+        foreach (string scriptDir in Directory.GetDirectories(dataDir))
+        {
+            string scriptId = Path.GetFileName(scriptDir);
+            foreach ((string oldName, string newName) in LegacyDirMap)
+            {
+                string oldPath = Path.Combine(scriptDir, oldName);
+                if (LooksLikeUserDataDir(oldPath))
+                {
+                    Logger.Warn($"[迁移] 跳过疑似保留名用户目录，避免误改用户数据：{oldPath}");
+                }
+                else
+                {
+                    TryRenameDir(oldPath, Path.Combine(scriptDir, newName), $"{scriptId}（无用户）");
                 }
             }
         }
@@ -273,10 +216,10 @@ internal static class ConfigSwapPaths
         }
     }
 
-    /// <summary>删除用户时清理其数据目录。</summary>
-    public static void RemoveUserData(string scriptId, string userName)
+    /// <summary>删除用户绑定时清理其 UserId 数据目录。</summary>
+    public static void RemoveUserData(string scriptId, string userKey)
     {
-        string dir = UserDir(scriptId, userName);
+        string dir = UserDir(scriptId, userKey);
         try
         {
             if (Directory.Exists(dir))
@@ -290,39 +233,4 @@ internal static class ConfigSwapPaths
         }
     }
 
-    /// <summary>用户改名时迁移其数据目录；失败返回错误信息（由调用方决定不落盘，名称与数据保持原样）。</summary>
-    public static string? RenameUserData(string scriptId, string oldName, string newName)
-    {
-        if (string.Equals(oldName, newName, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        string oldDir = UserDir(scriptId, oldName);
-        string newDir = UserDir(scriptId, newName);
-        try
-        {
-            if (!Directory.Exists(oldDir))
-            {
-                return null;
-            }
-            if (Directory.Exists(newDir))
-            {
-                Directory.Delete(newDir, recursive: true);
-            }
-            try
-            {
-                Directory.Move(oldDir, newDir);
-            }
-            catch (IOException)
-            {
-                ConfigSwapPrimitives.MoveAs(oldDir, newDir, PathKind.Dir);
-            }
-            return null;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 用户数据目录迁移失败（{oldDir} → {newDir}）：{ex.Message}");
-            return $"用户数据目录迁移失败：{ex.Message}";
-        }
-    }
 }
