@@ -9,7 +9,9 @@ NexusPipeline（枢链）：C#/.NET 8 (net8.0-windows) WinForms 托盘 + 纯静�
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo   # CI 每次必跑
 
 # 2. Web Logic + 静态检查
-node --test tests\web\*.test.mjs
+$webTests = @(Get-ChildItem tests\web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
+if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
+node --test $webTests
 Get-ChildItem tests\e2e\tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
 
 # 3. 构建（产物输出到 release/，不提交）
@@ -175,4 +177,4 @@ Pop-Location
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.9.8+）**：默认顺序为 `dotnet test`、`node --test tests/web/*.test.mjs`、新增 UI Smoke 语法检查、`build.cmd`、Playwright UI Smoke；涉及进程、端口、真实解释器、模拟器 driver 或 managed plugin 的改动，再运行管理员 System Smoke；Judge 旧专项位于 `tests/stress/legacy/` 仅供迁移核对，Chaos 位于 `tests/stress/` 按需运行。UI Smoke 保持四个 spec、总 testcase 不超过 20 个；发布前记录各层实际通过数与耗时，并覆盖至少一档手机/平板/电脑视口。
+- **测试范围分层（v0.9.8+）**：默认顺序为 `dotnet test`、PowerShell 枚举 `tests/web/*.test.mjs` 后运行 `node --test`、新增 UI Smoke 语法检查、`build.cmd`、Playwright UI Smoke；涉及进程、端口、真实解释器、模拟器 driver 或 managed plugin 的改动，再运行管理员 System Smoke；Judge 旧专项位于 `tests/stress/legacy/` 仅供迁移核对，Chaos 位于 `tests/stress/` 按需运行。UI Smoke 保持四个 spec、总 testcase 不超过 20 个；发布前记录各层实际通过数与耗时，并覆盖至少一档手机/平板/电脑视口。

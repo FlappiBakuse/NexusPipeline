@@ -74,7 +74,9 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
 # L3：原生 ES module 纯函数
-node --test tests/web/*.test.mjs
+$webTests = @(Get-ChildItem tests/web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
+if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
+node --test $webTests
 
 # 静态检查新增 UI Smoke
 Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }

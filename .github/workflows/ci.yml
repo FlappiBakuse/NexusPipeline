@@ -39,7 +39,11 @@ jobs:
         run: dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
       - name: 运行 Web Logic 测试
-        run: node --test tests/web/*.test.mjs
+        shell: pwsh
+        run: |
+          $webTests = @(Get-ChildItem tests/web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
+          if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
+          node --test $webTests
 
       - name: 检查 UI Smoke 脚本语法
         shell: pwsh
@@ -54,13 +58,3 @@ jobs:
         env:
           NEXUS_TIME_SCALE: "10"
         run: npx playwright test
-
-      - name: 上传诊断日志（e2e 失败时排查用）
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: smoke-diagnostics
-          path: |
-            tests/e2e/runtime/logs/*.log
-            tests/e2e/test-results/**
-          retention-days: 7

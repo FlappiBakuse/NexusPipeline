@@ -51,7 +51,9 @@
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
 # L3
-node --test tests/web/*.test.mjs
+$webTests = @(Get-ChildItem tests/web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
+if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
+node --test $webTests
 
 # 静态语法检查
 Get-ChildItem tests\e2e\tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
@@ -102,7 +104,7 @@ tests/e2e/tests/
 CI 顺序：
 
 1. `dotnet test`；
-2. `node --test tests/web/*.test.mjs` 与 `node --check`；
+2. PowerShell 枚举 `tests/web/*.test.mjs` 后运行 `node --test`，并执行 `node --check`；
 3. `build.cmd`；
 4. Playwright UI Smoke。
 
@@ -116,4 +118,4 @@ flake 视为测试或产品同步问题。处理顺序为：降低测试层级�
 
 ## 测试隔离与清理
 
-运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime/` 或 `tests/stress/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，删除 PID、停止信号、临时 runtime、test-results 和专项日志；失败诊断需要上传的文件应在清理前完成收集。
+运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime/` 或 `tests/stress/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，删除 PID、停止信号、临时 runtime、test-results 和专项日志。

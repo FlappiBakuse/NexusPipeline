@@ -166,7 +166,9 @@ build.cmd                                     # 提权版（增量构建：src �
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
 
 # 3. Web Logic + UI Smoke（先 build.cmd；加速档为日常迭代默认）
-node --test tests\web\*.test.mjs
+$webTests = @(Get-ChildItem tests\web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
+if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
+node --test $webTests
 Get-ChildItem tests\e2e\tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
 Push-Location tests\e2e
 $env:PLAYWRIGHT_BROWSERS_PATH = "browsers"
