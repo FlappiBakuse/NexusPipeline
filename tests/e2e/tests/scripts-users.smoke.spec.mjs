@@ -78,15 +78,15 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
   try {
     await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
     const card = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
-    await card.getByRole("button", { name: "用户管理", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "用户管理" });
+    await card.getByRole("button", { name: "编辑用户", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "编辑用户" });
     await expect(dialog.getByTestId("um-binding-card")).toHaveCount(1);
     const binding = dialog.getByTestId("um-binding-card").first();
     await binding.locator('[data-action="toggle-um-binding"]').click();
     await binding.locator('[data-action="set-um-subview"][data-view="notify"]').click();
     await dialog.getByLabel("SMTP 收件人", { exact: true }).fill("new@example.com");
-    await binding.getByRole("button", { name: "返回上级", exact: true }).click();
-    await dialog.getByRole("button", { name: "保存设置", exact: true }).click();
+    await dialog.getByRole("button", { name: "返回上级", exact: true }).click();
+    await dialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(dialog).toBeHidden();
 
     const updated = await (await api("GET", `/api/users/${encodeURIComponent(user.id)}`)).json();

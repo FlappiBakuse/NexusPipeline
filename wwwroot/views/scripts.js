@@ -91,7 +91,7 @@ export async function pageScripts(token) {
           <button class="entity-link" type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="编辑脚本实例：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
           <div class="meta-line script-meta"><span class="badge muted">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用脚本"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
         </div>
-        <div class="script-ops row-actions">
+        <div class="script-ops row-actions entity-actions">
           <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
           <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
         </div>

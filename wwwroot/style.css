@@ -1155,7 +1155,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-add-script {
   display: inline-flex;
   width: 100%;
-  min-height: 48px;
+  min-height: 120px;
   gap: var(--space-2);
   border-style: dashed;
   border-color: var(--border-strong);
@@ -1179,6 +1179,8 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   box-shadow: var(--shadow);
 }
 .um-add-area[data-open] .um-add-panel { display: grid; }
+.um-add-area[data-open] > .um-add-script { display: none; }
+.um-add-area[data-open] .um-add-panel { position: static; margin-top: var(--space-2); }
 .um-add-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
 .um-add-head h4 { margin: 0; }
 .um-add-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
@@ -1249,11 +1251,31 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-binding-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .um-binding-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .um-binding-head-actions { display: none; flex: 0 0 auto; align-items: center; gap: var(--space-2); }
-.um-binding-subhead { display: none; align-items: center; gap: 10px; padding: 10px 13px; background: var(--panel-soft); }
+.um-binding-section-heading { align-items: flex-start; }
+.um-binding-section-heading > div { min-width: 0; }
+.um-binding-edit-toggle { flex: 0 0 auto; margin-left: auto; }
+.um-binding-remove { display: none; flex: 0 0 auto; }
+.um-binding-bottom-arrow { display: none; flex: 0 0 auto; margin-left: auto; color: var(--accent); }
+.um-binding-bottom-arrow .icon { width: 20px; height: 20px; }
+.um-binding-subhead {
+  display: none;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 13px;
+  border: 0;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.um-binding-subhead:hover { background: var(--accent-soft); color: var(--text); }
+.um-binding-subhead:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
 .um-binding-subname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .um-binding-subtitle { display: none; color: var(--muted); }
 .um-binding-subhead .ghost { margin-left: auto; }
 .um-binding-body { display: none; padding: var(--space-4); border-top: 1px solid var(--border); background: var(--panel-soft); }
+.um-binding-body .um-view:not(.um-view-main) { padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--panel); }
 .um-binding-body .um-view .switch-row, .um-binding-body .um-view .field { margin-top: var(--space-3); }
 .um-binding-body .um-view .field:first-child, .um-binding-body .um-view .switch-row:first-child { margin-top: 0; }
 .um-binding-body .helper-copy { margin: 6px 0 0; }
@@ -1267,16 +1289,27 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-binding-card.is-expanded .um-binding-toggle { cursor: pointer; }
 .um-binding-card[data-subview="main"] .um-binding-subhead { display: none; }
 .um-binding-card[data-subview="main"] .um-binding-head { display: flex; }
+.um-binding-card[data-subview="general"] .um-binding-head { display: none; }
 .um-binding-card[data-subview="notify"] .um-binding-head { display: none; }
 .um-binding-card[data-subview="advanced"] .um-binding-head { display: none; }
+.um-binding-card[data-subview="general"] .um-binding-subhead { display: flex; }
 .um-binding-card[data-subview="notify"] .um-binding-subhead { display: flex; }
 .um-binding-card[data-subview="advanced"] .um-binding-subhead { display: flex; }
+.um-binding-card[data-subview="general"] > .um-binding-subhead .um-binding-bottom-arrow,
+.um-binding-card[data-subview="notify"] > .um-binding-subhead .um-binding-bottom-arrow,
+.um-binding-card[data-subview="advanced"] > .um-binding-subhead .um-binding-bottom-arrow,
+.um-binding-card.is-expanded > .um-binding-head .um-binding-bottom-arrow { display: inline-flex; }
+.um-binding-card[data-subview="general"] [data-subtitle="general"] { display: inline; }
 .um-binding-card[data-subview="notify"] [data-subtitle="notify"] { display: inline; }
 .um-binding-card[data-subview="advanced"] [data-subtitle="advanced"] { display: inline; }
 .um-binding-card .um-view { display: none; }
 .um-binding-card[data-subview="main"] .um-view-main { display: block; }
+.um-binding-card[data-subview="general"] .um-view-general { display: block; }
 .um-binding-card[data-subview="notify"] .um-view-notify { display: block; }
 .um-binding-card[data-subview="advanced"] .um-view-advanced { display: block; }
+.user-binding-section.um-binding-editing .um-binding-remove { display: inline-flex; }
+.user-binding-section.um-binding-editing .um-binding-bottom-arrow { display: none; }
+.user-binding-section.um-binding-editing .um-binding-toggle:disabled { cursor: default; opacity: 1; color: var(--text); }
 
 /* 编辑配置：1/1 宽，高度加倍、文字居中 */
 .um-edit-config {
@@ -1326,6 +1359,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 
 /* 展开时隐藏其他卡片与添加脚本面板（v0.9.7：只能展开一个） */
 .user-binding-section.um-section-expanding .um-add-area { display: none; }
+.user-binding-section.um-binding-editing .um-add-area { display: none; }
 .user-binding-section.um-section-expanding .um-bindings .um-binding-card:not(.is-expanded) { display: none; }
 
 .compact-empty { padding: 24px 16px; }
@@ -1352,5 +1386,38 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   .script-grid .script-card .queue-ops {
     flex-wrap: nowrap;
     justify-content: flex-end;
+  }
+}
+
+/* v0.9.10：用户、脚本实例和调度队列卡片的编辑/删除操作统一尺寸；移动端按 3:1 分配操作栏。 */
+.entity-actions > button {
+  width: 96px;
+  min-width: 96px;
+  margin-left: 0;
+}
+
+@media (max-width: 820px) {
+  .script-grid .script-card .script-ops,
+  .script-grid .script-card .queue-ops,
+  .global-user-card > .global-user-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 1fr);
+    gap: var(--space-2);
+    width: 100%;
+    justify-content: stretch;
+  }
+  .script-grid .script-card .script-ops > button,
+  .script-grid .script-card .queue-ops > button,
+  .global-user-card > .global-user-actions > button {
+    width: 100%;
+    min-width: 0;
+    padding-inline: var(--space-2);
+  }
+  .global-user-card {
+    grid-template-columns: 44px 40px minmax(0, 1fr);
+  }
+  .global-user-card > .global-user-actions {
+    grid-column: 2 / -1;
+    grid-row: 2;
   }
 }

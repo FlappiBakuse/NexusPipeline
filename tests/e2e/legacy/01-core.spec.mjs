@@ -172,7 +172,7 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     expect(userLayout.handleWidth >= 44, "手机用户卡片拖拽把手保持触控尺寸").toBeTruthy();
     expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 2, "手机用户高频操作区位于正文之后且完整排列").toBeTruthy();
 
-    await userCard.getByRole("button", { name: "用户管理", exact: true }).click();
+    await userCard.getByRole("button", { name: "编辑用户", exact: true }).click();
     await page.waitForSelector('[data-testid="um-binding-card"]');
     await page.locator('[data-action="toggle-um-binding"]').first().click();
     await page.waitForSelector('.um-binding-card.is-expanded .um-binding-head .mode-toggle.switch-control');

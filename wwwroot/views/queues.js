@@ -93,7 +93,7 @@ function queueCardMarkup(queue, scripts) {
       <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="编辑调度队列：${esc(queue.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
       <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${timeBadge}${notifyBadge}</div>
     </div>
-    <div class="queue-ops row-actions">
+    <div class="queue-ops row-actions entity-actions">
       <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">编辑队列</button>
       <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">删除队列</button>
     </div>

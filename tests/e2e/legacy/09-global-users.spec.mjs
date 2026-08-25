@@ -187,45 +187,51 @@ test("全局用户页面：脚本卡片结构、统一绑定管理与响应式�
     await expect(card.locator(".drag-handle")).toHaveAttribute("aria-label", "拖拽调整全局用户顺序");
     await expect(card.locator(".global-user-avatar-button")).toHaveAttribute("aria-label", new RegExp("点击上传或更换"));
     await expect(card.locator(".global-user-bindings")).toHaveCount(0);
-    await expect(card.getByRole("button", { name: "用户管理", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "编辑用户", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "删除用户", exact: true })).toBeVisible();
     await expect(card.getByText("自动签到未开启 · 即将开发", { exact: true })).toBeVisible();
 
-    await card.getByRole("button", { name: "用户管理", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "用户管理" });
+    await card.getByRole("button", { name: "编辑用户", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "编辑用户" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "已绑定脚本实例", exact: true })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "用户名", exact: false })).toHaveValue(userName);
     await expect(dialog.getByRole("textbox", { name: "备注", exact: true })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "添加脚本", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "自动签到选项", exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "通用选项", exact: true })).toBeVisible();
     await expect(dialog.locator("[data-testid='um-binding-card']")).toHaveCount(1);
 
-    // 展开绑定卡片：参与运行开关与移除绑定出现在头部，其他入口隐藏。
+    // 展开绑定卡片：顶部操作按钮移除，右侧显示下箭头，底部按钮负责返回上级。
     const bindingCard = dialog.locator("[data-testid='um-binding-card']").first();
     await bindingCard.locator('[data-action="toggle-um-binding"]').click();
-    await expect(dialog.getByRole("button", { name: "参与运行", exact: true })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "移除绑定", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "参与运行", exact: true })).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "移除绑定", exact: true })).toHaveCount(0);
+    await expect(bindingCard.locator(".um-binding-bottom-arrow")).toBeVisible();
     await expect(dialog.locator('[data-action="edit-user-config-global"]')).toBeVisible();
-    await expect(dialog.locator(".um-option-card.is-placeholder")).toContainText("自动签到选项");
-    await expect(dialog.locator(".um-option-card.is-placeholder")).toContainText("即将开发");
+    await expect(dialog.locator('[data-action="set-um-subview"][data-view="general"]')).toContainText("通用选项");
+
+    // 通用选项二级页：启用开关与运行天数共同呈现，运行天数决定启动状态。
+    await bindingCard.locator('[data-action="set-um-subview"][data-view="general"]').click();
+    await expect(dialog.getByRole("button", { name: "是否启用", exact: true })).toBeVisible();
+    await expect(dialog.getByRole("spinbutton", { name: "运行天数", exact: true })).toHaveValue("-1");
+    await expect(dialog.getByRole("spinbutton", { name: "运行天数", exact: true })).toHaveAttribute("placeholder", "填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。");
+    await dialog.locator(".um-binding-subhead").click();
 
     // 通知推送二级页：开关 + SMTP 收件人。
     await bindingCard.locator('[data-action="set-um-subview"][data-view="notify"]').click();
     await expect(dialog.getByRole("button", { name: "开启通知推送", exact: true })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "SMTP 收件人", exact: true })).toHaveValue("layout@example.com");
     await expect(dialog.getByText("仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。", { exact: true })).toBeVisible();
-    await bindingCard.getByRole("button", { name: "返回上级", exact: true }).click();
+    await dialog.getByRole("button", { name: "返回上级", exact: true }).click();
 
-    // 高级选项二级页：前后置路径与运行天数。
+    // 高级选项二级页：前后置路径。
     await bindingCard.locator('[data-action="set-um-subview"][data-view="advanced"]').click();
     await expect(dialog.getByRole("textbox", { name: "任务前运行脚本路径", exact: true })).toHaveValue("%FIRST% before.cmd");
     await expect(dialog.getByRole("textbox", { name: "任务后运行脚本路径", exact: true })).toHaveValue("%LAST% after.cmd");
-    await expect(dialog.getByRole("spinbutton", { name: "运行天数", exact: true })).toHaveValue("-1");
-    await bindingCard.getByRole("button", { name: "返回上级", exact: true }).click();
+    await dialog.getByRole("button", { name: "返回上级", exact: true }).click();
 
     // 收回：恢复 1/2 网格布局。
-    await bindingCard.locator('[data-action="toggle-um-binding"]').click();
+    await dialog.getByRole("button", { name: "返回上级", exact: true }).click();
     await expect(bindingCard).not.toHaveClass(/is-expanded/);
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
 
