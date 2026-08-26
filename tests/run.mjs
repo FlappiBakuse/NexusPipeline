@@ -8,7 +8,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const e2eDir = path.join(projectRoot, "tests", "e2e");
 const systemDir = path.join(projectRoot, "tests", "system");
 const nodeCommand = process.execPath;
-const npmCommand = process.platform === "win32" ? "npx.cmd" : "npx";
+const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 
 function runProcess(command, args, options = {}) {
   return new Promise(resolve => {
@@ -102,7 +102,7 @@ async function runUi(args) {
   if (!requireAdmin("UI Smoke", "ui")) return 2;
   const env = { ...process.env };
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
-  return runProcess(npmCommand, ["--no-install", "playwright", "test"], { cwd: e2eDir, env });
+  return runProcess(nodeCommand, [playwrightCli, "test"], { cwd: e2eDir, env });
 }
 
 async function runSystem(args) {
