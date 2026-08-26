@@ -67,11 +67,16 @@ export function setupRuntime() {
 function startElevatedRuntime(env) {
   const inheritedKeys = ["NEXUS_SYSTEM_ACTION_DRYRUN", "NEXUS_TIME_SCALE", "NEXUS_ADB_EXE", "NEXUS_MUMU_MANAGER_EXE", "NEXUS_UPDATE_URL"];
   const previousValues = new Map(inheritedKeys.map(key => [key, process.env[key]]));
+  const environmentAssignments = inheritedKeys
+    .filter(key => env[key])
+    .map(key => `$env:${key} = '${psQuote(env[key])}'`)
+    .join("; ");
   try {
     for (const key of inheritedKeys) {
       if (env[key]) process.env[key] = env[key];
     }
-    const command = `$p=Start-Process -FilePath '${psQuote(runtimeExe)}' -WorkingDirectory '${psQuote(runtimeDir)}' -WindowStyle Hidden -Verb RunAs -PassThru; [Console]::WriteLine($p.Id)`;
+    const wrapperCommand = `${environmentAssignments}; & '${psQuote(runtimeExe)}'`;
+    const command = `$p=Start-Process -FilePath 'pwsh.exe' -ArgumentList @('-NoProfile','-NonInteractive','-Command','${psQuote(wrapperCommand)}') -WorkingDirectory '${psQuote(runtimeDir)}' -WindowStyle Hidden -Verb RunAs -PassThru; [Console]::WriteLine($p.Id)`;
     const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
     const pid = Number(String(result.stdout || "").trim().split(/\r?\n/).pop());
     if (!Number.isInteger(pid) || pid <= 0) {

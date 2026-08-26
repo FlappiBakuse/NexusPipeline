@@ -20,8 +20,9 @@
 
 - [ ] `build.cmd`
 - [ ] 单元测试
-- [ ] Playwright E2E
+- [ ] UI Smoke
 - [ ] System Smoke / Stress 测试（按修改范围适用时）
+- [ ] 文档一致性检查（涉及文档、模板或 CI 文案时）
 - [ ] 文档与测试命令已同步
 
 ## 安全与配置影响

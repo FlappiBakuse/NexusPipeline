@@ -45,6 +45,9 @@ jobs:
           if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
           node --test $webTests
 
+      - name: 检查文档一致性
+        run: node --test tests\documentation\documentation-consistency.mjs
+
       - name: 检查 UI Smoke 脚本语法
         shell: pwsh
         run: Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }

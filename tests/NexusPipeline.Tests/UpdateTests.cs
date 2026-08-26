@@ -471,8 +471,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                 var releases = new JsonArray();
                 var release = new JsonObject
                 {
-                    ["tag_name"] = "v0.10.2",
-                    ["name"] = "v0.10.2",
+                    ["tag_name"] = "v0.10.3",
+                    ["name"] = "v0.10.3",
                     ["draft"] = false,
                     ["prerelease"] = true,
                     ["body"] = "更新说明",
@@ -480,13 +480,13 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                     {
                         new JsonObject
                         {
-                            ["name"] = "NexusPipeline-v0.10.2-win-x64.zip",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.2-win-x64.zip",
+                            ["name"] = "NexusPipeline-v0.10.3-win-x64.zip",
+                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.3-win-x64.zip",
                         },
                         new JsonObject
                         {
-                            ["name"] = "NexusPipeline-v0.10.2-win-x64.zip.sha256",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.2-win-x64.zip.sha256",
+                            ["name"] = "NexusPipeline-v0.10.3-win-x64.zip.sha256",
+                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.3-win-x64.zip.sha256",
                         },
                     },
                 };
@@ -559,7 +559,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
         Assert.Equal(UpdateState.Idle, status.State);
         Assert.True(status.Available);
-        Assert.Equal("0.10.2", status.Latest);
+        Assert.Equal("0.10.3", status.Latest);
         Assert.Contains("更新说明", status.Notes);
     }
 
@@ -576,7 +576,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         UpdateStatusSnapshot status = service.GetStatus();
         Assert.True(string.IsNullOrEmpty(status.Error));
         string stagingRoot = Path.Combine(_installDir!, ".nxp-update", "staging");
-        string staging = Assert.Single(Directory.GetDirectories(stagingRoot, "0.10.2.g*", SearchOption.TopDirectoryOnly));
+        string staging = Assert.Single(Directory.GetDirectories(stagingRoot, "0.10.3.g*", SearchOption.TopDirectoryOnly));
         Assert.True(File.Exists(Path.Combine(staging, "nexus-pipeline.exe")));
         Assert.True(File.Exists(Path.Combine(staging, "wwwroot", "index.js")));
     }
@@ -663,7 +663,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             UpdateTask? task = UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json"));
             Assert.NotNull(task);
             Assert.Equal("apply", task!.Mode);
-            Assert.Equal("0.10.2", task.Version);
+            Assert.Equal("0.10.3", task.Version);
         }
         finally
         {

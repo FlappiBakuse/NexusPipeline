@@ -1,6 +1,6 @@
 # NexusPipeline 插件开发指南
 
-数据化专项插件保持纯目录形态；v0.9.5 起同时支持 `managed-code` C# 插件。两类插件共用 `plugins/<名称>/plugin.json` 发现入口，但代码插件通过独立的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。两类插件共用 `plugins/<名称>/plugin.json` 发现入口；代码插件通过独立的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
 
 ## 目录结构
 
@@ -103,7 +103,7 @@ plugins/check-in/
 - 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|failed","reason":"…","notifyText":"…","replaceConfigs":[…]}`；宿主固化 `JudgeScriptEnabled=true` 且用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
 
-## 配置还原描述（config-restore.json，v0.7.6+）
+## 配置还原描述（config-restore.json）
 
 **自动更新配置**（专项恒开）下，判断脚本插队文件（`replaceConfigs` 目标）在运行收尾同步快照前，宿主会按还原描述把任务启停字段还原为初始值，再连同运行后计数/其他字段一并写入用户快照 store（保留游戏脚本自身写入的完成记录/计数/新任务）。
 

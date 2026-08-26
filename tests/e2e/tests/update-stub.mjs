@@ -7,12 +7,12 @@ import { spawnSync } from "node:child_process";
 import { runtimeDir } from "./helpers.mjs";
 
 /**
- * 更新源 stub（v0.10.1，e2e）：以本地 http 服务模拟 GitHub Releases API 兼容源。
+ * 更新源 stub（下一候选版本，e2e）：以本地 http 服务模拟 GitHub Releases API 兼容源。
  * zip 内容 = 当前 release 构建（exe + wwwroot + plugins），布局与发布资产一致（flat root）。
  * global setup 启动、global teardown 关闭；服务经 NEXUS_UPDATE_URL 指向本 stub。
  */
 export const UPDATE_PORT = 58931;
-export const UPDATE_VERSION = "0.10.2";
+export const UPDATE_VERSION = "0.10.3";
 export const UPDATE_BASE = `http://127.0.0.1:${UPDATE_PORT}/`;
 
 let server = null;

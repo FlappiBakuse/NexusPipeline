@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.2（Pre-release）
+
+### 文档体系治理
+
+- 建立 README、DESIGN、ARCHITECTURE、DEVELOPMENT、TESTING、CONTRIBUTING、RELEASING、SECURITY、ROADMAP 与 KNOWN_ISSUES 的职责边界和单一事实源（SSOT）导航。
+- 清理历史重复内容、已完成路线、过期问题编号、旧版本标签、陈旧测试路径和不再存在的报告引用，保留当前行为、有效约束与仍需跟踪的问题。
+- 统一升级、插件契约、测试、发布、代理协作和安全文档的当前说明；补充发布包布局、更新可见性和发布后清理规则。
+
+### 工程质量
+
+- 新增 Node.js 内建模块文档一致性检查，覆盖 Markdown 本地链接、CHANGELOG 重复标题、ROADMAP 版本重叠、README 导航和弃用路径，并接入 CI 独立步骤。
+- 修正 UI Smoke 更新夹具与 System Smoke 更新候选版本，确保版本号提升后测试语义保持有效。
+- 修正管理员权限下 UI Smoke 的运行时环境传递，完成完整质量门禁与管理员 System Smoke 验证。
+
 ## v0.10.1（Pre-release）
 
 ### 更新安全与恢复
@@ -19,7 +33,6 @@
 - 历史 E2E、Judge、Chaos 和 flake 资料统一迁入 `tests/legacy/`；诊断采样器归档到 `tests/stress/diagnostics/`。
 - 阶段验证：Unit/Component 281/281、Web Logic 8/8、UI Smoke 17/17、System Smoke runtime 5/5 + judge 2/2 + execution-resilience 10/10 + emulator 2/2 + update 3/3；Release build 通过，保留项目原有 3 条 nullable 警告。
 
-## v0.10.0（Pre-release）
 ## v0.10.0（Pre-release）
 
 ### 内建更新（设置 → 更新）

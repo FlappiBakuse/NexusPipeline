@@ -1,53 +1,49 @@
-﻿# NexusPipeline 开发环境搭建与调试指南
+# NexusPipeline 开发环境搭建与调试指南
 
-本文件面向**开发者**：如何从源码编译、搭建运行环境、运行测试、排查故障。项目协作规范（Issue/PR/提交信息/代码风格）见 [CONTRIBUTING.md](../CONTRIBUTING.md)；版本发布流程见 [RELEASING.md](RELEASING.md)；核心设计理念见 [DESIGN.md](DESIGN.md)；模块导航见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+本文件面向开发者，说明源码构建、运行方式、调试技巧、运行时数据和环境排查。协作流程见 [CONTRIBUTING.md](../CONTRIBUTING.md)；测试层级与完整命令见 [TESTING.md](TESTING.md)；发布流程见 [RELEASING.md](RELEASING.md)；核心设计见 [DESIGN.md](DESIGN.md)；模块导航见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
-> **AI 协作（重要）**：使用 AI 工具（opencode 等）参与开发时，以根目录 `AGENTS.md` 为操作级权威规范（构建/测试顺序、运行时数据、环境陷阱、前端强约束）。本文件与 AGENTS.md 冲突时以 AGENTS.md 为准。
-
-## 目录
-
-1. [环境要求](#1-环境要求)
-2. [从源码编译](#2-从源码编译)
-3. [运行程序](#3-运行程序)
-4. [运行测试](#4-运行测试)
-5. [调试技巧](#5-调试技巧)
-6. [运行时数据](#6-运行时数据)
-7. [常见故障排查](#7-常见故障排查)
-
----
+> 使用 AI 工具参与开发时，操作级约束以根目录 `AGENTS.md` 为准。本文件提供环境和调试背景，不复制产品语义或完整测试命令。
 
 ## 1. 环境要求
 
 | 依赖 | 版本 | 用途 |
 |---|---|---|
 | Windows | 10/11 | 唯一支持平台（WinForms 托盘 + Win32 API） |
-| .NET SDK | 8.x | 编译与运行（`dotnet --version` 验证；正式版 exe 为框架依赖，部署机仅需 .NET 8 Desktop Runtime） |
-| Node.js（仅测试） | 20.x | Playwright 端到端测试（`tests/e2e/` 已装入依赖，不全局安装） |
+| .NET SDK | 8.x | 编译与运行；部署机需要 .NET 8 Desktop Runtime |
+| Node.js | 20.x | Web Logic、System Smoke 和 Playwright 测试 |
 
-- **无其他外部依赖**：不依赖数据库、云平台、前端构建链；网页管理界面为纯静态 ES modules，浏览器直接加载。
-- **管理员权限**：程序必须以管理员身份运行（正式版构建带 `requireAdministrator` 清单，双击自动提权；非管理员启动拒绝并退出，exit 2）。开发调试请使用管理员 shell。
+- 网页管理界面为纯静态 ES modules，浏览器直接加载；源码构建不需要前端打包链。
+- 程序必须以管理员身份运行。正式构建带 `requireAdministrator` 清单，开发调试请使用管理员 shell。
+- `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见 [TESTING.md](TESTING.md)。
 
 ## 2. 从源码编译
 
-```
+在项目根目录执行：
+
+```text
 build.cmd
 ```
 
-双击或在 PowerShell/cmd 中执行即可，产物输出到 `release/`（与源码分离，不入库）：
+产物输出到隔离的 `release/` 目录：
 
-```
+```text
 release/
-├── nexus-pipeline.exe   ← 主程序（单文件，框架依赖 .NET 8；提权版 requireAdministrator）
-├── wwwroot/             ← 网页管理界面（纯静态，整体复制）
-└── plugins/             ← 专项插件目录（整体复制）
+├── nexus-pipeline.exe   ← 框架依赖的单文件、requireAdministrator
+├── wwwroot/              ← 纯静态网页
+└── plugins/              ← 专项插件目录
 ```
 
-- **增量构建（v0.9.6）**：`src/` 或 `plugins/` 内容未变化时跳过 `dotnet publish`，仅同步 `wwwroot/` 与 `plugins/`（指纹文件 `.build-src-hash`，不入库）；managed-code 插件文件变化会触发发布指纹更新。
-- **无 /test 提权版**：`build.cmd` 只产出提权版（唯一构建形态；CI runner 以管理员运行，直接使用提权版）。
-- 重构建前若提示 exe 被占用：`Get-Process nexus-pipeline | Stop-Process`（运行进程会锁定 `release\nexus-pipeline.exe`）。
-- 手动等价命令（如需要指定参数）：
+构建脚本根据源码指纹执行增量发布；源码未变化时可以只同步 `wwwroot/` 与 `plugins/`。`release/` 属于运行产物，不提交到版本库。
 
+重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
+
+```powershell
+Get-Process nexus-pipeline | Stop-Process
 ```
+
+需要指定参数时可使用等价的 .NET 发布命令：
+
+```text
 dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o release
 ```
 
@@ -55,105 +51,76 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 命令 | 行为 |
 |---|---|
-| `release\nexus-pipeline.exe` | 常驻服务模式：托盘 + Web + 调度器 |
-| `... exe web` | 仅网页模式（退出循环：按回车 / stdin EOF） |
-| `... exe manage` | 交互式命令行管理菜单 |
-| `... exe status` | 查看状态 |
-| `... exe run-script / run-queue / cancel` | 经常驻服务 HTTP 通道提交任务并轮询 |
-| `... exe register / unregister` | 注册/取消开机自启动（计划任务 onlogon + highest） |
+| `release\nexus-pipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
+| `release\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
+| `release\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
+| `release\nexus-pipeline.exe status` | 查看当前状态 |
+| `release\nexus-pipeline.exe run-script ...` / `run-queue ...` / `cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
+| `release\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
 
-- 网页管理界面默认 `http://127.0.0.1:58731/`（端口被占用自动 +1，最多试 20 次）。
-- 首次运行注意：配置迁移（旧版配置文件自动从 exe 同目录迁入 `config/`）、崩溃恢复扫描自动执行。
+网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会执行旧配置迁移和崩溃恢复扫描。
 
-## 4. 运行测试
+## 4. 测试入口
 
-完整测试分层、归属规则、CI 和发布门禁见 [TESTING.md](TESTING.md)。v0.9.8 起默认执行以下顺序：
-
-```powershell
-# L1/L2：Unit + Component
-dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
-
-# L3：原生 ES module 纯函数
-$webTests = @(Get-ChildItem tests/web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
-if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
-node --test $webTests
-
-# 静态检查新增 UI Smoke
-Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
-
-# 构建隔离 runtime
-build.cmd
-
-# L5：Playwright UI Smoke（在 tests/e2e/ 下执行）
-Push-Location tests\e2e
-$env:PLAYWRIGHT_BROWSERS_PATH = "browsers"
-npx playwright test
-Pop-Location
-```
-
-System Smoke 需要管理员终端并依赖已完成的 `build.cmd`：
-
-```powershell
-tests\system\run-system.cmd
-```
-
-时间缩放只用于明确依赖宿主等待的专项脚本；判断脚本单次执行 30 秒上限保持真实墙钟语义。测试运行时数据位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/stress/runtime/` 或 `tests/legacy/runtime/`，日期断言使用项目现有 `localDate()` 规则。历史 flake 记录位于 `tests/legacy/history/FLAKE-LEDGER.md`，诊断工具 `tests/stress/diagnostics/flake-monitor.mjs` 按需启动。
+测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。每次改动按照修改范围执行对应门禁；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加管理员 System Smoke。
 
 ## 5. 调试技巧
 
 ### 5.1 日志
 
-- 管理器日志：`logs/nexus-pipeline-YYYY-MM-DD.log`，带级别 `[HH:mm:ss.fff] [LEVEL]`，阈值取设置 `LogLevel`（即时生效）。
-- 脚本日志：按尝试分批落盘 `history/YYYY-MM-DD/HH-mm-ss-{尝试号}.log`（运行结束随历史保存）。
-- 控制台按级别着色（WARN 黄 / ERROR 红 / FATAL 红底白字），仅未重定向时生效。
-- 设置 `LogLevel` 为 debug 可看到 Web 请求级日志（`GET /api/status` 轮询豁免）。
+- 管理器日志：`logs/nexus-pipeline-YYYY-MM-DD.log`，包含级别、来源和审计行。
+- 脚本日志：`history/YYYY-MM-DD/HH-mm-ss-{attempt}.log`，按尝试分批保存。
+- `LogLevel=debug` 可以查看 Web 请求级日志；`GET /api/status` 轮询不记录。
+- 判断脚本异常时，结合管理器日志中的 JudgeError、历史状态文件和对应尝试日志定位。
 
-### 5.2 测试钩子（生产零影响）
+### 5.2 测试钩子
+
+以下环境变量只用于测试或调试：
 
 | 环境变量 | 作用 |
 |---|---|
-| `NEXUS_TIME_SCALE` | 缩放宿主等待时长（见 4.2） |
-| `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 系统操作（休眠/重启/关机）仅记录日志不真正执行——e2e global-setup 设置，防止 CI 真关机 |
-| `NEXUS_SYSTEM_SMOKE=1` | 启用管理员 System Smoke（进程/端口/解释器/模拟器边界） |
+| `NEXUS_TIME_SCALE` | 缩放宿主等待时长；判断脚本单次 30 秒上限保持真实墙钟语义 |
+| `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 记录休眠、重启或关机请求，不执行真实系统操作 |
+| `NEXUS_SYSTEM_SMOKE=1` | 启用管理员 System Smoke 运行模式 |
 
-### 5.3 Windows 环境陷阱（曾踩坑，勿重蹈；pwsh 7 + 系统 UTF-8 后大部分已消除）
+### 5.3 Windows 环境注意事项
 
-- **工具链基线（v0.7.0 起）**：系统级 UTF-8 默认（ACP/OEMCP/MACCP=65001）+ opencode 使用 pwsh 7（profile 强制控制台/管道 UTF-8、`PYTHONUTF8=1`）；控制台/管道/文件写入默认 UTF-8，GBK 乱码与有损往返坑已根治。**Python 优先**：测试/批量文件操作/数据处理/临时脚本一律用 `python`（本机 Python 3.13），必须用 pwsh 的场景才用 pwsh。
-- `Set-Content` 破坏 UTF-8 中文的坑（5.1 时代）已消除；稳妥起见写中文文件仍用编辑工具或 `[IO.File]::WriteAllText(..., [Text.Encoding]::UTF8)`（无 BOM）。
-- **0x800700E8**：无控制台父进程启动 cmd/bat 必须带有效 stdio（`CreateProcess + RedirectStandardOutput/Error=true` 并消费）；**禁止**对 bat 用 `UseShellExecute`、禁止无重定向启动 cmd。
-- **Win32Exception 740**：目标程序要求管理员——程序已强制管理员运行，仍出现时明确报错失败；**禁止 runas 降级提权**。
-- `build.cmd` / `run-e2e.cmd` 不得加入无条件 `pause`（CI/PowerShell 调用会挂死）。
-- 脚本自启动参数（Args）以显式路径开头（`X:\`、`\\`、`.\`、`..\`）= 运行时启动目标（管理端/执行端分离），`?` 后为参数；**Args 一律禁止引号**。
-- gh 中文操作（曾踩坑）：修改已发布 release 前先备份原正文；含中文的 gh 写操作建议走文件（`--notes-file`，UTF-8 无 BOM）。
+- 控制台、管道和文件使用 UTF-8；批处理和中文文件操作应保持无 BOM 的 UTF-8。
+- 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
+- 脚本运行必须在管理员上下文中完成。目标程序返回 Win32Exception 740 时应明确失败，保留管理员运行边界。
+- 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
+- 使用 PowerShell 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
 
-### 5.4 单元测试
+### 5.4 单元与组件测试定位
 
-- 工程：`tests/NexusPipeline.Tests/`（xUnit，`InternalsVisibleTo` 暴露 internal 契约）。
-- 覆盖：判定状态机（SessionJudge）、关键字规则（KeywordRule）、日志路径解析（LogPattern）、模型规则校验（ScriptUserRule/QueueRule）、进程树清理（ProcessTreeTests）、自动更新配置同步（ConfigSwapSyncTests：还原描述执行器 array/map/稳定 ID 定位/事务镜像/内容有效性校验/首次检测时机，v0.7.6+）。
+工程位于 `tests/NexusPipeline.Tests/`，通过 `InternalsVisibleTo` 覆盖宿主内部契约。常见定位方向包括：
+
+- `SessionJudge`、`KeywordRule`：完成判定和关键字规则；
+- `LogPattern`、`LogMonitor`：日志路径解析和增量读取；
+- `ScriptUserRule`、`QueueRule`：模型约束；
+- `ConfigSwapSyncTests`：快照同步、还原描述和事务镜像；
+- `ProcessTreeTests`、执行准入和更新测试：进程清理、资源租约和更新状态机。
 
 ## 6. 运行时数据
 
 | 位置 | 内容 |
 |---|---|
-| `config/settings\|scripts\|queues.json` | 用户配置（PascalCase，含加密密钥，**永不提交**） |
-| `config/limits.json` | 约束配置（三层校验，FATAL 拒绝启动） |
-| `config/plugins/<插件名>.json` / `.secrets.json` | managed-code 插件 JSON 配置 / DPAPI 密钥 |
-| `history/YYYY-MM-DD/HH-mm-ss.json` + `-{尝试号}.log` | 运行状态（纯状态，PascalCase）+ 按尝试分批的脚本日志 |
-| `logs/nexus-pipeline-YYYY-MM-DD.log` | 管理器日志（审计行 `[审计] 来源 \| 操作`，来源 web/manage/cli/scheduler/system） |
-| `data/{脚本Id}/{UserId}/` | 配置交换数据目录（store/store.previous/store.tmp/retry-store/original/script/swap-backup/edit-hidden/.session；v0.7.6 起 store 运行后自动更新回写——任务完成记录/计数保留延续）；Name 只用于展示，历史用户名目录作为惰性遗留跳过 |
+| `config/settings.json`、`scripts.json`、`queues.json` | 用户配置、密钥和脚本/队列数据，永不提交 |
+| `config/limits.json` | 约束配置 |
+| `config/plugins/` | managed-code 插件配置和 DPAPI 密钥 |
+| `history/YYYY-MM-DD/` | 运行状态 JSON 与按尝试分批的脚本日志 |
+| `logs/` | 管理器日志 |
+| `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 
-- 磁盘 JSON = PascalCase；Web API 返回 camelCase；读测试 JSON 前先 `.replace(/^\uFEFF/, "")` 去 BOM。
-- 历史/管理器日志按保留天数每日清理（启动时 + 调度器每日首次 tick）。
+磁盘 JSON 使用 PascalCase，Web API 返回 camelCase。测试和调试应使用隔离 runtime，不能把运行时数据写入项目根目录。
 
 ## 7. 常见故障排查
 
 | 现象 | 排查方向 |
 |---|---|
-| 启动即退出（exit 2） | 非管理员运行；用提权版或以管理员身份启动 |
-| 「检测到已在运行」 | 单实例互斥体占用：检查任务管理器残留进程；强杀后首次启动会接管遗弃互斥体（v0.6.5+ 自动处理） |
-| 端口被占用自动 +1 | 预期行为；检查是否有旧实例残留 |
-| 重构建报 exe 锁定 | `Get-Process nexus-pipeline \| Stop-Process` 后重试 |
-| Web 打不开 / ECONNREFUSED | 确认服务在运行、端口正确、轻量模式未开启（轻量模式无 Web） |
-| 测试全量级联失败 | 服务残留：按对应 suite 清理 `tests/e2e/runtime`、`tests/system/runtime*`、`tests/stress/runtime` 或 `tests/legacy/runtime` 的残留进程；需要时检查 `tests/stress/diagnostics/flake-monitor-logs/` 采样 |
-| 脚本判定异常 | 检查 `logs/` 管理器日志与 `history/` 按尝试分批日志；判断脚本模式看 JudgeError 输出 |
-| 配置还原异常 | `data/{脚本Id}/{UserId}/` 的 `.session` 标记与 swap-backup；重启服务按当前用户绑定触发自愈 |
+| 启动即退出 | 确认以管理员身份运行，检查程序启动日志和 exit code |
+| 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
+| Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
+| 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |
+| 测试出现级联失败 | 检查对应 suite 的隔离 runtime 和残留进程，按 [TESTING.md](TESTING.md) 清理 |
+| 配置还原异常 | 检查 `data/{脚本Id}/{UserId}/` 下的 `.session`、`original/` 和 `swap-backup/`，保留现场后再进行恢复操作 |

@@ -9,7 +9,7 @@ body:
     attributes:
       label: NexusPipeline 版本
       description: 请填写版本号或提交版本。
-      placeholder: v0.8.3
+      placeholder: 例如：vX.Y.Z 或提交短 SHA
     validations:
       required: true
   - type: input

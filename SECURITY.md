@@ -4,17 +4,19 @@ NexusPipeline 需要管理员权限运行，并提供本地/远程 Web 管理、
 
 ## 支持范围
 
-| 版本 | 安全修复支持 |
+| 分支或版本 | 安全修复支持 |
 |---|---|
-| 最新 v0.8.x Pre-release | ✅ |
+| 最新 GitHub Release | ✅ |
 | `main` 分支 | ✅ |
-| 其他历史版本 | ❌ |
+| 更早 Release | 原则上不提供回溯安全修复 |
+
+安全支持以最新发布物和当前主分支为准，不在文档中维护会随发布过期的固定版本矩阵。
 
 ## 报告漏洞
 
 请通过 GitHub 的[私密漏洞报告入口](https://github.com/FlappiBakuse/NexusPipeline/security/advisories/new)提交安全问题。安全报告应包含：
 
-- 受影响的 NexusPipeline 版本；
+- 受影响的 NexusPipeline 版本或提交；
 - Windows 版本与运行方式；
 - 可复现步骤或最小复现材料；
 - 影响范围与潜在后果；

@@ -1,8 +1,8 @@
 # NexusPipeline 发布流程手册（Releasing）
 
-本文件是版本发布（tag / release / 资产）的操作手册，供维护者使用。开发环境搭建见 [DEVELOPMENT.md](DEVELOPMENT.md)；协作规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)；版本路线见 [ROADMAP.md](ROADMAP.md)。
+本文件只说明版本发布、tag、Release、发布资产和发布后收尾。开发环境与调试见 [DEVELOPMENT.md](DEVELOPMENT.md)，测试层级与完整门禁见 [TESTING.md](TESTING.md)，协作规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)，版本路线见 [ROADMAP.md](ROADMAP.md)。
 
-> **发布权（最高优先级）**：commit、push、tag、Pull Request 和 Release 由项目维护者按根目录 `AGENTS.md` 授权规则执行。未经维护者授权不得发布。
+> **发布权**：commit、push、tag、Pull Request 和 Release 由项目维护者按根目录 `AGENTS.md` 授权规则执行。未经明确授权不得发布。
 
 ## 目录
 
@@ -11,76 +11,82 @@
 3. [发布流程](#3-发布流程)
 4. [资产与 SHA 规则](#4-资产与-sha-规则)
 5. [Release Notes 格式](#5-release-notes-格式)
-6. [gh/PowerShell 中文操作三坑](#6-ghpowershell-中文操作三坑)
+6. [gh 与 PowerShell 操作注意事项](#6-gh-与-powershell-操作注意事项)
 7. [发布后收尾](#7-发布后收尾)
-
----
 
 ## 1. 版本号规则
 
-- 采用 SemVer `X.Y.Z`，tag 为 `vX.Y.Z`（纯版本号，无其他前缀）。
-- 版本增量映射：
-
-| 提交类型 | 版本增量 |
-|---|---|
-| `fix`（含 perf、docs 等非新功能） | PATCH（+1 到 Z） |
-| `feat` | MINOR（+1 到 Y） |
-| BREAKING CHANGE（任何类型带 `!`） | v1.0.0 前：MINOR（+1 到 Y）；v1.0.0 起：MAJOR（+1 到 X） |
-
-- v1.0.0 之前所有版本发布均标记 **Pre-release**；版本号 bump 仅随用户要求的版本开发进行，不得擅自递增。
-- **版本号同步（强约束）**：用户给出新版本号并开始该版本开发时，**开工即同步** `src/NexusPipeline.csproj` 的 `<Version>`（与版本展示相关配置），发布流程中不再单独改（除非发布时发现遗漏）。
+- 采用 SemVer `X.Y.Z`，tag 为 `vX.Y.Z`。
+- `fix`、`perf` 和文档/工程治理的补丁性变更使用 PATCH；`feat` 使用 MINOR；带 `!` 或 `BREAKING CHANGE` 的变更按项目当前阶段升级。
+- v1.0.0 之前所有版本发布均标记 Pre-release；v1.0.0 起按正式版本规则发布。
+- 用户指定新版本并开始开发后，立即同步 `src/NexusPipeline.csproj` 的 `<Version>` 和版本展示所需配置；发布流程不重复 bump。
+- 版本开发期间的本地 `backup/vX.Y.Z-*` 还原点只存在本地，不推送到 origin。
 
 ## 2. 发布前置
 
-1. 确认本地构建与测试全绿：
-   - `build.cmd`（提权版）；
-    - 单元测试 `dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo`；
-   - UI Smoke 全量回归；涉及进程、端口、解释器、模拟器或插件边界时运行管理员 System Smoke。
-   - Stress/Chaos 根据本版本风险选择运行，结果记录在验证记录中；不作为所有版本的固定硬门禁。
-2. **文档一致性自检（v0.6.2+）**：全文检索旧语义关键词（如「固化标志」「插件标志」「0.0.0.0」「StarRailAssistant」「三模式」），确认文档表述与当前实现一致（判定语义以 `docs/DESIGN.md` §5 为唯一权威，README/AGENTS/plugins-README 只做简引）。
-3. 核对 ROADMAP 勾选状态与 KNOWN_ISSUES 台账（本版应修项状态）。
+1. 确认版本开发计划、CHANGELOG、ROADMAP 和 KNOWN_ISSUES 已反映当前状态；
+2. 按 [TESTING.md](TESTING.md) 执行默认质量门禁，并运行修改范围适用的 System Smoke、Stress 或 Soak；
+3. 确认 `git diff --check` 通过，工作树中没有运行产物、用户配置、日志、密钥和测试 runtime；
+4. 核对发布包只包含程序运行所需文件，用户配置和运行数据不进入资产；
+5. 确认 Release Notes 使用当前版本的真实变更，SHA 资产与 zip 一一对应。
 
 ## 3. 发布流程
 
-1. 按已授权的版本计划完成版本 bump 提交并推送（提交信息见 CONTRIBUTING.md）；
-2. 打 tag：`git tag vX.Y.Z` → `git push origin vX.Y.Z`（按根目录 `AGENTS.md` 的发布权规则执行）；
-3. 编写 release notes 到临时文件（`gh release create` 引号坑，用 `--notes-file`）；
-4. `gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file <file>`（v1.0.0 起不加 `--prerelease`）；
-5. 上传资产：
+以下步骤需要维护者明确授权：
+
+1. 完成版本开发并获得全部适用质量门禁结果；
+2. 按协作策略提交并推送版本变更；
+3. 创建 tag：`git tag vX.Y.Z`，再按授权推送 `git push origin vX.Y.Z`；
+4. 将 Release Notes 写入 UTF-8 无 BOM 临时文件；
+5. v1.0.0 前执行：
+
+   ```text
+   gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file <file>
    ```
-   gh release upload vX.Y.Z NexusPipeline-vX.Y.Z-win-x64.zip NexusPipeline-vX.Y.Z-win-x64.zip.sha256
-   ```
-6. 校验：`Get-FileHash` 与 `.sha256` 内容一致；下载 zip 重新计算复核。
+
+6. 上传 zip 与 SHA 资产；
+7. 在本地校验 SHA，并下载 Release 资产重新计算复核；
+8. 在设置页或更新 API 执行一次更新可见性检查，确认新版本和两项资产均被识别。
 
 ## 4. 资产与 SHA 规则
 
 | 项目 | 规则 |
 |---|---|
-| tag | `vX.Y.Z`（如 `v0.10.0`） |
-| release 标题 | `vX.Y.Z`（纯版本号） |
-| pre-release 标记 | v1.0.0 前一律 `--prerelease` |
+| tag | `vX.Y.Z` |
+| Release 标题 | `vX.Y.Z` |
+| Pre-release | v1.0.0 前使用 `--prerelease` |
 | zip 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip` |
-| SHA 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip.sha256`（与 zip 同名成对，内容纯 hash） |
+| SHA 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip.sha256` |
 
-- **zip 布局（v0.10.0 起标准化，更新引擎可见性依赖此约定）**：扁平根 = `nexus-pipeline.exe` + `wwwroot/` + `plugins/` + `README` + `LICENSE`，**排除 `config/`、`data/`、`history/`、`logs/`**（用户配置与运行数据永不打包）；更新引擎同时兼容「包内单个顶层目录」形态（自动归一），拒绝含绝对路径 / `..` / 重复目录的条目。
-- SHA 文件内容为**纯 hash**，**不含文件名**、不含空格，UTF-8 无 BOM；禁止 `SHA256.txt` 汇总格式（v0.3.1 错误先例）。
-- 生成方式示例（PowerShell）：
+发布包采用扁平根布局：
+
+```text
+nexus-pipeline.exe
+wwwroot/
+plugins/
+README.md
+LICENSE
+```
+
+包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎兼容包内单个顶层目录形态，并拒绝绝对路径、`..` 路径和重复目录条目。
+
+SHA 文件内容为纯 hash，不含文件名和空格，使用 UTF-8 无 BOM。PowerShell 示例：
 
 ```powershell
-$zip = "NexusPipeline-v0.10.0-win-x64.zip"
+$zip = "NexusPipeline-vX.Y.Z-win-x64.zip"
 Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
     Set-Content -Path "$zip.sha256" -Encoding ascii -NoNewline
 ```
 
-### 更新引擎可见性自检（v0.10.0+，每次发布后必做）
+### 更新引擎可见性自检
 
-- 每次 `gh release create --prerelease` 必须**同时上传 zip 与 sha256**，且都上传完成后更新引擎才能发现新版本（缺失任一资产会被清单过滤跳过）；
-- 上传并校验后，在本机服务设置页点击「检查更新」（或 `POST /api/update/check`）应返回 `available=true` 且最新版本为刚发布的 `vX.Y.Z`；
-- 若检查不到：先核对资产是否齐全（`gh release view vX.Y.Z` 的 assets 列表），再核对 zip 布局（flat root 是否含 `nexus-pipeline.exe` 与 `wwwroot/`）。
+- Release 必须同时具备 zip 与 sha256 资产；缺少任一项时更新清单会跳过该版本；
+- 上传后在本机设置页点击“检查更新”，或调用 `POST /api/update/check`，确认 `available=true` 且版本为刚发布的 tag；
+- 如果检查不到，先核对 `gh release view vX.Y.Z` 的资产列表、资产命名和 zip 根布局。
 
 ## 5. Release Notes 格式
 
-```
+```text
 ## vX.Y.Z（Pre-release）
 
 ### 功能分组标题
@@ -93,21 +99,19 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
 ```
 
-- 第一行：`## vX.Y.Z（Pre-release）`（v1.0.0 起为 `## vX.Y.Z`）；
-- 按功能分组使用 `### 标题` + 无序要点列表，不用面面俱到的逐条罗列提交；
-- 结尾注明 SHA 见附件。
+按用户价值或工程主题分组，列出可核对的结果。版本历史的完整记录进入 [CHANGELOG.md](../CHANGELOG.md)。
 
-## 6. gh/PowerShell 中文操作三坑
+## 6. gh 与 PowerShell 操作注意事项
 
-（曾踩坑，修复 release 时中招——严格遵守）
-
-1. **多行输出被拆成数组**：`gh api ... --jq .body` 多行输出被 PowerShell 5.1 捕获为 `string[]`，`[IO.File]::WriteAllText(路径, 数组)` 会用空格连接、换行全部丢失。必须先 `[Console]::OutputEncoding = UTF8`，并用 `($body -join "`n")` 显式转字符串。
-2. **GBK 误读中文**：未设 UTF8 输出编码时 gh 的 UTF-8 中文被 GBK 误读（mojibake），且经 GB18030 往返**有损不可逆**；含中文的 gh 写操作一律走文件：`gh release edit --notes-file`（UTF-8 无 BOM），命令内不写中文字面量。
-3. **修改已发布 release 前先备份**：edit body / 资产前，先 `gh api ... --jq .body` 把原正文备份到本地文件，再动手。
+1. 修改已发布 Release 的正文或资产前，先通过 `gh api` 备份原正文到本地文件；
+2. 多行 gh 输出在 PowerShell 中可能成为字符串数组，写入文件前显式合并换行；
+3. 含中文的 Release Notes 使用 UTF-8 无 BOM 文件和 `--notes-file`，避免命令行转义与编码转换；
+4. 修改已发布 Release 属于外部状态变更，先确认授权和目标版本。
 
 ## 7. 发布后收尾
 
-- 更新 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) 台账（本版修复项状态 → 已修复）；
-- 更新 [ROADMAP.md](ROADMAP.md)（版本状态勾选）；
-- 将本次发布的 flake 或环境异常写入版本 verification section 或 issue；历史 flake 资料保留在 `tests/legacy/history/FLAKE-LEDGER.md`，发布流程不再追加该历史台账；
-- 确认 CHANGELOG.md 已含本版条目（Keep a Changelog 规范，见 [CHANGELOG.md](../CHANGELOG.md)）。
+- 将发布版本的已知问题状态同步到 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，并从 [ROADMAP.md](ROADMAP.md) 移出已完成计划；
+- 确认远端 Release 资产上传成功、下载复核和 SHA256 校验全部通过；
+- 完成确认后，清理项目内本次发布的 zip、`.sha256`、Release Notes 临时文件和打包暂存目录；
+- 清理仅针对当前项目内已核对的精确路径，不删除源码、测试、插件、用户运行数据或后续开发所需目录；
+- 备份 tag 只保留最近三个版本的现存里程碑，删除旧 tag 前先核对保留清单和删除清单。

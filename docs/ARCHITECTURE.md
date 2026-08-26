@@ -1,19 +1,10 @@
 # NexusPipeline 架构说明
 
-本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。v0.2.0 起生效。
+本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
-> 注释与文档治理（v0.10.0 起）：产品行为以 DESIGN.md 为唯一权威；代码注释禁止堆版本号后缀与 KN 编号（版本追溯用 git blame），台账见 KNOWN_ISSUES.md；详见 CONTRIBUTING.md §6.0。
-> 命名治理：以 `NexusPipeline.*` 命名的目录只用于独立 .NET project，目录名应与 csproj / assembly identity 保持一致；普通领域目录使用 `Application` / `Services` / `Web` / `Cli` 等语义名称。本版本保持现有 Plugin API、测试工程和 fixture assembly identity 不变。
-
-> v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
-> v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
-> v0.8.1 后端领域边界收敛：`RunSession` 仅保存一次运行状态，`ExecutionCoordinator` 负责运行级编排，`AttemptRunner`/`RetryPolicy`/`CleanupManager`/`ResultCollector` 分别承载尝试执行、重试、资源清理和结果收集；配置事务、通知/模拟器 capability 与 Application Command 均有独立 internal 边界，保持现有外部行为兼容。
-> v0.8.2 后端架构第三次优化：`DispatchCenter` 收敛为执行门面，`ExecutionValidator`、`ExecutionRunner`、`SystemActionExecutor` 分别承载门禁校验、后台生命周期和系统完成操作；脚本/队列/用户/设置/历史/执行/通知/插件能力通过 `Application/Abstractions/` 显式端口连接，保留共享列表和旧兼容入口。
-> v0.9.1 并行调度安全性加固：`IExecutionSnapshotProvider` 在同一数据锁内提供队列、脚本和用户配置输入，资源租约覆盖日志模式与前/后置脚本，路径和 ADB 端点按物理身份规范化；`ExecutionStateStore` 增加运行组收尾状态与 CRUD 协调域，`Scheduler` 对瞬时准入冲突保留待重试触发。队列内保持串行，符合条件的模拟器队列和一个标准队列可并行。
-> v0.9.5 扩展边界收敛：Webhook/SMTP 通知和模拟器均归宿主基础设施；模拟器运行开始时冻结 Generic ADB 或 MuMuManager driver。新增独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1，managed-code 插件按 manifest 配置、程序集隔离和重启语义加载；现有数据化专项插件继续兼容。
-> v0.9.6 用户领域重构：用户提升为全局 `NexusUser`，脚本通过 `UserScriptBinding` 保存参与运行、配置脚本和用户通知设置；旧脚本内用户在启动阶段迁移并按名称合并。全局用户页负责排序、头像、绑定和删除，脚本页与队列页保留直接右侧操作区。
-> v0.9.9 用户数据一致性收敛：`UserId` 成为配置目录、运行交换与恢复扫描的唯一存储键；旧脚本用户 API 按 Name 解析全局用户后使用 UserId，历史用户名目录保留为惰性遗留并跳过读写与恢复。新增绑定纳入脚本级运行/编辑门禁，冻结计划引用的绑定在更新和删除时返回 409。
+> 产品行为以 [DESIGN.md](DESIGN.md) 为唯一详细来源；版本演化进入 [CHANGELOG.md](../CHANGELOG.md)，当前未解决风险进入 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，协作与文档治理规则见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
+> 命名治理：以 `NexusPipeline.*` 命名的目录只用于独立 .NET project，目录名应与 csproj / assembly identity 保持一致；普通领域目录使用 `Application` / `Services` / `Web` / `Cli` 等语义名称。现有 Plugin API、测试工程和 fixture assembly identity 保持不变。
 
 ## 总体结构
 
@@ -40,6 +31,7 @@ NexusPipeline/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
 │   ├── system/               Windows 真实进程 System Smoke（runtime/judge/execution-resilience/emulator/update）
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
+│   ├── documentation/        Node 内建模块文档一致性检查
 │   └── legacy/               历史考据与专项诊断资产（不进入 CI/发布门禁）
 ```
 
@@ -61,7 +53,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过数据化 manifest 或独立 Plugin API v1 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录）**：v0.8.2 已将执行核心、调度器和配置编辑的插件能力消费改为显式端口，并将大部分运行期数据读取改为 `Application/Abstractions/` 仓储；`ConfigSwapRecovery` 的损坏标记兼容恢复已改为构造注入 `IConfigRecoveryDataSource`（v0.10.0 B2，`RuntimeConfigRecoveryDataSource` 在组合根装配），不再反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是已声明的最小例外，保持不变。新服务不得新增这类依赖。
+- **已知偏差（如实记录）**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期数据读取通过 `Application/Abstractions/` 仓储完成；`ConfigSwapRecovery` 的损坏标记兼容恢复通过构造注入的 `IConfigRecoveryDataSource` 获取数据，不反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是保留的最小例外。新服务不得新增这类依赖。
 
 ### 关键类职责
 
@@ -72,7 +64,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
-| `RuntimeContext` | src/RuntimeContext.cs | 组合根（壳式 DI，v0.5.0+）：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `RuntimeContext` | src/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
 | `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一数据锁内的执行输入快照；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
 | `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
 | `IExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；具体实现仍由现有 `ExecutionCommands`、`NotificationDispatcher`、`PluginManager` 提供 |
@@ -95,22 +87,22 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
 | `ConfigurationTransaction` | src/Services/Configuration/ConfigurationTransaction.cs | 配置 prepare/retry/sync/replace/rollback 原语边界，兼容现有 `ConfigSwap` 磁盘协议 |
 | `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
-| `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机（v0.5.0 拆分）：判断脚本/关键字两模式，判定状态与输入 |
-| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：输入 JSON 生成（脚本字段+用户+config（只读）与 script（可读写）目录全递归文件清单+**本次尝试日志段**（v0.5.2+，超过 4MB 截断尾部并置 logTruncated））、JS 内置 Jint 引擎（注入 `__NEXUS_INPUT__`/`nexus.readFile`（限 config/script 范围 2MB）/`nexus.writeFile`（限 script 目录防逃逸）/`nexus.listFiles()`/`console.log`）、Python 系统解释器进程、30 秒超时、stdout 尾行 JSON 解析（含 `replaceConfigs`） |
-| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断（v0.6.9+：部分截断从新尾续读、归零从头读）/替换（FileId 对比 `GetFileInformationByHandle` 卷序列号+文件索引，v0.5.2+ 根治句柄残留）三形态；忽略运行前已有内容（末尾读） |
-| `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面（v0.5.0 拆分），实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；自动更新配置同步（`SyncConfigToStore`，v0.7.6）转发 |
+| `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
+| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时和 stdout 尾行 JSON 解析（含 `replaceConfigs`） |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断/替换三形态；替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
+| `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；转发自动更新配置同步 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换兼容 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
-| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的 `IConfigRecoveryDataSource`（v0.10.0 B2） |
+| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的 `IConfigRecoveryDataSource` |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位、受限迁移与清理 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1 DTO 均从此入口发送 |
-| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件（v0.6.9+：nosniff/Referrer-Policy/CSP 安全头）、特性路由表（[ApiRoute] 反射扫描注册，v0.5.0+）；远程令牌校验 v0.6.9+ 改常量时间比较 |
-| `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体）；v0.6.9+ 移除 `ReadLogTail`（`/api/logs` 孤儿 API 删除） |
-| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册（v0.5.0+） |
+| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
+| `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
+| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
 | `MainMenu` + 菜单类 | src/Cli/ | 命令行交互（主菜单/脚本/队列/调度/历史/插件/设置/通知渠道） |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
 | `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
@@ -124,7 +116,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 ### 新增 API 的落点
 
-- HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**（v0.5.0+）。
+- HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
 - 命令行菜单：在 `src/Cli/` 对应菜单类加 case。
 - 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
 
@@ -158,15 +150,15 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/users/settings） |
-| `core/limits.js` | 跨视图共享的约束警告层（v0.10.0 由 views 归位 core）：加载 `/api/limits`、忽略状态持久化、alertdialog 警告层与「知道了/不再提醒」分发 |
-| `core/dnd.js` | 通用拖拽排序组件（v0.6.8+，无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项（否则落位震荡） |
+| `core/limits.js` | 跨视图共享的约束警告层：加载 `/api/limits`、忽略状态持久化、alertdialog 警告层与「知道了/不再提醒」分发 |
+| `core/dnd.js` | 通用拖拽排序组件（无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项 |
 
 ### 新增交互的落点
 
 1. 在对应域视图新增导出函数 + 加入该视图的 `actions` 对象（`data-action` 名与处理器映射）。
 2. 视图模板使用 `data-action` + 稳定的 `data-testid`（e2e 契约）。
 3. 需要路由的新页面：视图导出 `pageXxx(token)`，在 `app.js` 的 `routes` 表注册一行；二级路由在 `route()` 特判分支转发。
-4. 列表拖拽排序（v0.6.8+，弹窗内 v0.6.10+）：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）；**弹窗内（队列编辑弹窗的定时列表/任务列表）**：onDrop 按 `data-dnd-id`（渲染下标）重排 `queueDraft` 数组即可（时间卡无 Index 字段、任务卡重排时同步重设 `index`），sync 按元素携带下标（`data-ts-idx`/`data-task-idx`）写回原数组项，DOM 顺序与数组顺序脱钩后仍正确。
+4. 列表拖拽排序：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）；**弹窗内（队列编辑弹窗的定时列表/任务列表）**：onDrop 按 `data-dnd-id`（渲染下标）重排 `queueDraft` 数组，任务卡重排时同步重设 `index`，sync 按元素携带下标（`data-ts-idx`/`data-task-idx`）写回原数组项。
 
 ## 插件扩展指南
 
@@ -179,69 +171,22 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1 + manifest | 通过 Logger/Config/Secrets/Notifications/Scheduler 实现联网、签到等主动任务 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
 | 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好写入 `AppSettings.PluginPreferences`，重启后应用 |
 
-> **通知通道（v0.9.5）**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
+> **通知通道**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
 
-### Capability 扩展约束（v0.7.9）
+### Capability 扩展约束
 
 - 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
 - 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。现有 `supportsEmulator` 仍兼容并映射为 `emulator`。
 - `PluginSummary` 只描述展示/发现所需的元数据；Web 状态接口继续单独生成 `supportsEmulator`，因此不会破坏现有前端响应结构。
 - Plugin API v1 只提供显式 `IPluginHostContext` 服务端口；配置与 DPAPI 密钥分文件存储于 `config/plugins/`，managed-code 插件停止时后台任务统一取消。
 
-### 编写 managed-code 插件
+### 编写插件
 
-入口实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync`，manifest 至少声明 `kind: "managed-code"`、`apiVersion: "1.0"`、`entryAssembly` 和 `entryType`。完整示例与字段说明见 [plugins/README.md](../plugins/README.md)。
+插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [plugins/README.md](../plugins/README.md)；本文件只说明宿主模块边界和代码定位。
 
-### 编写数据化专项插件（示例：`plugins/bettergi/`）
-
-```
-plugins/bettergi/
-├── plugin.json               # 根文件：元数据 + 引用 data 文件（初始化专项插件）
-└── data/
-    ├── resolve.json          # 推导配置：require 校验 + paths 模板
-    ├── judge.js              # 判断脚本（.js = Jint / .py = 系统 python.exe）
-    └── config-template/      # 可选：默认配置模板目录（编辑会话生成用）
-        └── NexusPipeline.json
-```
-
-```json
-// plugin.json
-{
-  "name": "bettergi",
-  "displayName": "BetterGI",
-  "gameName": "原神",
-  "description": "BetterGenshinImpact 专项脚本实例配置接管",
-  "version": "0.1.0",
-  "resolve": "data/resolve.json",
-  "judgeScript": "data/judge.js",
-  "configTemplate": "data/config-template"
-}
-```
-
-```json
-// data/resolve.json（March7th 示例：管理端 Launcher + 执行端 Assistant 上级目录搜索）
-{
-  "require": [
-    { "var": "launcher", "file": "March7th Launcher.exe" },
-    { "var": "assistant", "file": "March7th Assistant.exe", "searchUpward": true }
-  ],
-  "paths": {
-    "mainExe": "{launcher}",
-    "args": "{rel:assistant}",
-    "configPath": "config.yaml",
-    "logPath": "logs/{YYYY-MM-DD}.log"
-  }
-}
-```
-
-- `require` 全部满足才推导成功；`searchUpward: true` 时逐级向上搜索（最多 4 层）；`{var}` = 绑定文件绝对路径、`{rel:var}` = 相对脚本根目录的相对路径；无占位符的路径字段按相对脚本根目录拼接、`args` 原样返回。
-- 宿主在保存专用脚本实例时调用 `Resolve` 固化快照（POST/PUT 时覆盖 MainExe/Args/ConfigPath/LogPath/JudgeScript 与语言，`ConfigTemplateDir` 仅编辑会话现取不落盘）；前端简化弹窗通过 `POST /api/scripts/probe` 预校验。
-- `config-template/` 目录在编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置，复制清单随 `.session` 标记持久化（cancel/重启恢复按清单清理）。
-- 完整 schema 见 `plugins/README.md`。
-
-> **MaaEnd 专项要点（v0.6.1，`plugins/maaend/`）**：主程序 `MaaEnd.exe`（MXU 客户端改名）以 `--autostart --quit-after-run` 启动（任务运行完成时进程自动退出）；配置目录 `config/`（`mxu-MaaEnd.json` 为实例/任务核心配置），v0.6.4 起**提供默认配置模板**（`data/config-template/` 含 `mxu-MaaEnd.json` 与 `maa_option.json`，编辑用户配置会话时 config 目录不存在则整体复制生成——目录型 ConfigPath 模板复制到 ConfigPath 本身，恢复按相对父目录清单精确清理）；日志 `debug/{YYYY-MM-DD}-*.log`（前端写入，文件名带 `-n` 自增序号、启动时自动清理旧文件，通配取最新修改 = 当前会话）。判断脚本按「最后一个启用任务的任务完成/任务失败判定行」收尾（MXU 无运行记录机制、无天然选择性补做），失败任务改写 `mxu-MaaEnd.json`（全部 `enabled=false`、失败任务 `enabled=true`）经 `replaceConfigs` 触发选择性重试；启用任务判定**只按 `enabled===true`**（与 MXU 运行分发一致，`enabledByController` 仅 UI 缓存不参与分发）。**v0.7.6 还原描述**：判断脚本首次触发时读取 config 提取初始任务启停映射（array 型 `instances[{index}].tasks`）写 `script/config-restore.json`（跨尝试只写一次），宿主收尾同步快照前按描述还原启停（初始启停 + 运行后计数保留）。
-
-> **v0.9.5 起** managed-code 插件使用独立 `NexusPipeline.Plugin.Abstractions` API v1；宿主内部的 `PluginContracts` 仍不作为第三方扩展接口。
+- managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContext` 使用宿主提供的日志、配置、密钥、通知和后台任务端口。
+- 数据化专项插件由 `plugins/<名称>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册，宿主在保存脚本实例时固化解析结果。
+- 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 
 ## 功能定位指南（找代码）
 
@@ -258,12 +203,6 @@ plugins/bettergi/
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
 | 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
 | 历史记录格式 | `src/Services/History/HistoryService.cs`、`src/Models/RunRecord.cs` |
-
-> **v0.5.0 分层变更**：核心域按子域重组（`Models/`、`Services/`、`Persistence/`、`Utilities/` 对应命名空间）；Web 路由改特性路由；`RuntimeContext` 引入壳式 DI（`ServiceProvider` + `Resolve<T>()`，外部访问方式不变）；`RunSession` 判定策略拆出 `SessionJudge`；`UserConfigManager` 拆为门面 + 原语/会话恢复/数据目录三层。public 契约清单不变，extensions 三插件工程对齐后仍可编译。v0.6.3 起专项插件数据化（extensions/ 工程移除，见「插件扩展指南」）。
->
-> **v0.5.1 变更**：插件级配置（`PluginContext.GetConfig/SetConfig/GetSecret/SetSecret`，落盘 `config/plugins/<插件名>.json`，DPAPI `enc:` 前缀）；e2e 迁移 @playwright/test（tests/ 按域 7 文件 46 用例，旧 test.mjs 移除）；`core/limits.js` 归位 `views/limits.js`（v0.10.0 又归位 `core/limits.js`，行为跨视图共享属 core，见模块表）。
->
-> **v0.5.2 变更**：日志监控文件替换检测改 FileId（`LogMonitor.FileReplaced`，根治 move+重建场景句柄残留）；初始监控严格 fresh（`LastWriteTime ≥ attemptStart`）；判断脚本输入按尝试切片（本次尝试日志段，跨尝试不污染判定）；RunAsync finally 还原顺序调整（先配置替换还原、后配置交换还原）。
 
 ## 数据流速览
 

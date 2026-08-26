@@ -20,7 +20,7 @@ import {
 } from "./runtime-helper.mjs";
 
 /**
- * 内建更新 System Smoke（v0.10.1）：在隔离安装副本上验证 apply-update 的
+ * 内建更新 System Smoke（下一候选版本）：在隔离安装副本上验证 apply-update 的
  * 「备份 → 交换 → 重拉」、config/history/用户自加插件保留、启动收尾清理、失败回滚与 defer 自动应用。
  * 运行方式：管理员终端执行 `$env:NEXUS_SYSTEM_SMOKE="1"; node --test tests/system/update-smoke.mjs`。
  */
@@ -34,11 +34,12 @@ const updateDir = path.join(runtimeDir, ".nxp-update");
 const backupDir = path.join(runtimeDir, ".nxp-backup", "previous");
 const versionFile = path.join(runtimeDir, ".nxp-version");
 const taskFile = path.join(updateDir, "task.json");
-const stagingRoot = path.join(updateDir, "staging", "0.10.2");
+const updateVersion = "0.10.3";
+const stagingRoot = path.join(updateDir, "staging", updateVersion);
 
 function writeTask(mode, stagedDir = stagingRoot) {
   fs.mkdirSync(updateDir, { recursive: true });
-  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: "0.10.2", StagedDir: stagedDir }), "utf8");
+  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: updateVersion, StagedDir: stagedDir }), "utf8");
 }
 
 /** 从发布构建构造「新版本」staging：exe + wwwroot（release 干净源，无旧安装标记）+ plugins（含运行时保留观察物）。 */
@@ -47,7 +48,7 @@ function prepareStaging() {
   fs.mkdirSync(stagingRoot, { recursive: true });
   fs.copyFileSync(runtimeExe, path.join(stagingRoot, "nexus-pipeline.exe"));
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(stagingRoot, "wwwroot"), { recursive: true });
-  fs.writeFileSync(path.join(stagingRoot, "wwwroot", "new-version-marker.txt"), "v0.10.2", "utf8");
+  fs.writeFileSync(path.join(stagingRoot, "wwwroot", "new-version-marker.txt"), `v${updateVersion}`, "utf8");
   if (fs.existsSync(path.join(runtimeDir, "plugins"))) {
     fs.cpSync(path.join(runtimeDir, "plugins"), path.join(stagingRoot, "plugins"), { recursive: true });
   }
@@ -176,7 +177,7 @@ test("apply-update：备份→交换→保留用户插件与数据→重拉宿�
   assert.equal(result.status, 0, `apply-update 退出码非 0：${resultSummary}`);
   // 交换完成：新 wwwroot 标记到位、旧标记消失、用户自加插件保留、数据目录原样。
   // （versionFile/backup 是交换后到收尾前的中间态，重拉宿主启动即清理，不做时序性断言）
-  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.2");
+  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), `v${updateVersion}`);
   assert.equal(fs.existsSync(path.join(runtimeDir, "wwwroot", "old-version-marker.txt")), false);
   assert.equal(fs.existsSync(path.join(runtimeDir, "plugins", "user-custom", "note.txt")), true);
   assert.equal(fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").includes("58731"), true);
@@ -223,7 +224,7 @@ test("defer 标记：下次启动自动应用并重拉服务", { skip }, async (
   startRuntime(["web"]);
   await waitForService(baseUrl, 90000);
 
-  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.2");
+  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), `v${updateVersion}`);
   await waitFor(() => !fs.existsSync(versionFile), 30000);
   assertMarkersCleaned();
   const audit = logTail();
