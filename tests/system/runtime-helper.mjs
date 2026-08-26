@@ -1,7 +1,14 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isAdministrator,
+  isProcessAlive,
+  killProcessTree,
+  readPidFile,
+  waitForExit,
+} from "../support/windows-process.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
@@ -12,6 +19,7 @@ if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
 }
 export const runtimeDir = path.join(here, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
+export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
 export const baseUrl = "http://127.0.0.1:58731/";
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
 export const mumuStub = path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd");
@@ -23,17 +31,20 @@ let stderr = "";
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function isElevated() {
-  if (process.env.NEXUS_SYSTEM_SMOKE_ELEVATED === "1") return true;
-  try {
-    return spawnSync("net", ["session"], { stdio: "ignore", windowsHide: true }).status === 0;
-  } catch {
-    return false;
-  }
+  return isAdministrator();
+}
+
+function ownedPids() {
+  const pids = new Set();
+  const marked = readPidFile(servicePidPath);
+  if (marked) pids.add(marked);
+  if (child?.pid) pids.add(Number(child.pid));
+  return [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
 }
 
 export function prepareRuntime() {
-  // 提权服务退出后，Windows 可能在极短窗口内仍持有 exe/日志句柄；这是运行时清理，
-  // 使用 fs.rm 的有界句柄重试完成目录隔离，不影响测试断言或业务重试语义。
+  // 测试只清理自身 runtime 写入的 service.pid 所指向进程，避免全局进程扫描误杀用户实例。
+  for (const pid of ownedPids()) killProcessTree(pid);
   fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
@@ -54,92 +65,8 @@ export function prepareRuntime() {
   fs.writeFileSync(path.join(runtimeDir, "mumu-stub", "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
 }
 
-function powershellLiteral(value) {
-  return String(value).replaceAll("'", "''");
-}
-
-function runtimePids() {
-  const filter = powershellLiteral(runtimeDir + "\\");
-  const command = `$p = Get-CimInstance Win32_Process -Filter "Name='nexus-pipeline.exe'" | Where-Object { $_.ExecutablePath -like '${filter}*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','`;
-  const markerPath = path.join(runtimeDir, "service.pid");
-  const markerPids = [];
-  try {
-    const markerPid = Number(fs.readFileSync(markerPath, "utf8").trim());
-    if (Number.isInteger(markerPid) && markerPid > 0) {
-      // 跨完整性级别下 process.kill(pid, 0) 可能返回 EPERM，即使进程真实存在；
-      // service.pid 由目标 runtime 写入，交给精确 taskkill 处理，避免误判为已退出。
-      markerPids.push(markerPid);
-    }
-  } catch {
-  }
-  try {
-    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
-    return [...new Set([...markerPids, ...(result.stdout || "").trim().split(/\s*,\s*/).filter(Boolean).map(Number)])];
-  } catch {
-    return markerPids;
-  }
-}
-
 export function isRuntimeAlive(pid) {
-  return runtimePids().includes(Number(pid));
-}
-
-function killRuntimeProcesses() {
-  const markerPath = path.join(runtimeDir, "service.pid");
-  let markerPid = 0;
-  try {
-    markerPid = Number(fs.readFileSync(markerPath, "utf8").trim());
-  } catch {
-  }
-  for (const pid of runtimePids()) {
-    if (killPid(pid) && pid === markerPid) {
-      fs.rmSync(markerPath, { force: true });
-    }
-  }
-}
-
-function killPid(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  if (process.env.NEXUS_SYSTEM_SMOKE_ELEVATED === "1") {
-    const command = `$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','${pid}','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)`;
-    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
-    return result.status === 0 || String(result.stdout || "").trim().endsWith("0");
-  }
-  return spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).status === 0;
-}
-
-function startElevatedRuntime(args, env) {
-  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const scriptPath = path.join(runtimeDir, `elevated-start-${stamp}.ps1`);
-  const launchPidPath = path.join(runtimeDir, `elevated-start-${stamp}.pid`);
-  const argumentList = args.length
-    ? `-ArgumentList @(${args.map(arg => `'${powershellLiteral(arg)}'`).join(",")})`
-    : "";
-  const forwarded = ["NEXUS_SYSTEM_ACTION_DRYRUN", "NEXUS_TIME_SCALE", "NEXUS_ADB_EXE", "NEXUS_MUMU_MANAGER_EXE"]
-    .filter(key => env[key])
-    .map(key => `$env:${key}='${powershellLiteral(env[key])}'`)
-    .join("; ");
-  const script = [
-    forwarded,
-    `$p=Start-Process -FilePath '${powershellLiteral(runtimeExe)}' ${argumentList} -WorkingDirectory '${powershellLiteral(runtimeDir)}' -WindowStyle Hidden -PassThru`,
-    `Set-Content -LiteralPath '${powershellLiteral(launchPidPath)}' -Value $p.Id -Encoding ascii`,
-  ].filter(Boolean).join("; ");
-  fs.writeFileSync(scriptPath, script, "utf8");
-  const command = `$p=Start-Process -FilePath 'pwsh.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${powershellLiteral(scriptPath)}') -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)`;
-  const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
-  let pid = 0;
-  const deadline = Date.now() + 15000;
-  while (Date.now() < deadline) {
-    if (fs.existsSync(launchPidPath)) {
-      pid = Number(fs.readFileSync(launchPidPath, "utf8").trim());
-      if (Number.isInteger(pid) && pid > 0) break;
-    }
-    spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Milliseconds 100"], { stdio: "ignore", windowsHide: true });
-  }
-  fs.rmSync(scriptPath, { force: true });
-  fs.rmSync(launchPidPath, { force: true });
-  if (!pid) throw new Error(`提权启动 System Smoke runtime 失败：${result.stderr || result.error?.message || "未获得 PID"}`);
-  return { pid, kill: () => killPid(pid) };
+  return isProcessAlive(Number(pid));
 }
 
 export function startRuntime(args = [], extraEnv = {}) {
@@ -152,25 +79,22 @@ export function startRuntime(args = [], extraEnv = {}) {
     NEXUS_MUMU_MANAGER_EXE: mumuStub,
     ...extraEnv,
   };
-  child = process.env.NEXUS_SYSTEM_SMOKE_ELEVATED === "1"
-    ? startElevatedRuntime(args[0] === "web" ? [] : args, env)
-    : spawn(runtimeExe, args, {
-      cwd: runtimeDir,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-      windowsHide: true,
-    });
+  child = spawn(runtimeExe, args, {
+    cwd: runtimeDir,
+    env,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+  });
   child.stdout?.on("data", chunk => { stdout += chunk.toString(); });
   child.stderr?.on("data", chunk => { stderr += chunk.toString(); });
-  child.on?.("error", error => { stderr += error.stack || error.message; });
+  child.on("error", error => { stderr += error.stack || error.message; });
   return child;
 }
 
 export async function stopRuntime() {
-  if (child && !child.killed) killPid(Number(child.pid));
-  killRuntimeProcesses();
-  const deadline = Date.now() + 10000;
-  while (Date.now() < deadline && runtimePids().length > 0) await sleep(250);
+  const pids = ownedPids();
+  for (const pid of pids) killProcessTree(pid);
+  for (const pid of pids) await waitForExit(pid, 10000, 250);
   child = null;
 }
 

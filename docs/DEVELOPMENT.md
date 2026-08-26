@@ -33,12 +33,12 @@ release/
 └── plugins/              ← 专项插件目录
 ```
 
-构建脚本根据源码指纹执行增量发布；源码未变化时可以只同步 `wwwroot/` 与 `plugins/`。`release/` 属于运行产物，不提交到版本库。
+构建脚本由 `build.cmd` 调用 `tools/source-hash.mjs` 计算 `src/` 与 `plugins/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`；源码未变化时可以只同步 `wwwroot/` 与 `plugins/`。`release/` 属于运行产物，不提交到版本库。
 
 重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
 
-```powershell
-Get-Process nexus-pipeline | Stop-Process
+```cmd
+taskkill /IM nexus-pipeline.exe /T /F
 ```
 
 需要指定参数时可使用等价的 .NET 发布命令：
@@ -62,7 +62,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 4. 测试入口
 
-测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。每次改动按照修改范围执行对应门禁；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加管理员 System Smoke。
+测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。统一入口为 `node tests/run.mjs default|ui|system|all`；每次改动按照修改范围执行对应门禁；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加管理员 System Smoke。
 
 ## 5. 调试技巧
 
@@ -89,7 +89,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
 - 脚本运行必须在管理员上下文中完成。目标程序返回 Win32Exception 740 时应明确失败，保留管理员运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
-- 使用 PowerShell 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
+- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
 
 ### 5.4 单元与组件测试定位
 
@@ -111,6 +111,10 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `history/YYYY-MM-DD/` | 运行状态 JSON 与按尝试分批的脚本日志 |
 | `logs/` | 管理器日志 |
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
+| `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |
+| `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的内部运行状态；旧根目录状态由取得单实例所有权的服务幂等迁移 |
+
+`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录，不纳入普通运行状态收纳迁移。旧版本的根目录 `service.pid`、`web.port` 会在服务取得单实例互斥体后作为过期标记清理；旧 `scheduler-state.json` 在新文件不存在时原子移动，新旧同时存在时旧文件进入 `.nxp/state/recovery/`。
 
 磁盘 JSON 使用 PascalCase，Web API 返回 camelCase。测试和调试应使用隔离 runtime，不能把运行时数据写入项目根目录。
 

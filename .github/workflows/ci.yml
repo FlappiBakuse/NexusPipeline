@@ -33,34 +33,18 @@ jobs:
 
       - name: 安装 Playwright 依赖
         working-directory: tests/e2e
+        shell: cmd
         run: npm ci
 
-      - name: 运行 Unit + Component 测试
-        run: dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
-
-      - name: 运行 Web Logic 测试
-        shell: pwsh
-        run: |
-          $webTests = @(Get-ChildItem tests/web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
-          if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
-          node --test $webTests
-
-      - name: 检查文档一致性
-        run: node --test tests\documentation\documentation-consistency.mjs
-
-      - name: 检查 UI Smoke 脚本语法
-        shell: pwsh
-        run: Get-ChildItem tests/e2e/tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
-
-      - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
-        run: .\build.cmd
+      - name: 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
+        shell: cmd
+        run: node tests\run.mjs default
 
       - name: 运行 Playwright UI Smoke
         shell: cmd
-        working-directory: tests/e2e
         env:
           NEXUS_TIME_SCALE: "10"
-        run: npx playwright test
+        run: node tests\run.mjs ui
 
   system-tests:
     name: Windows System Smoke
@@ -82,11 +66,11 @@ jobs:
           node-version: 20
 
       - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
-        run: .\build.cmd
+        shell: cmd
+        run: node tests\run.mjs build
 
       - name: 运行完整 System Smoke
         shell: cmd
         env:
-          NEXUS_SYSTEM_SMOKE_ELEVATED: "1"
           NEXUS_TIME_SCALE: "10"
-        run: tests\system\run-system.cmd
+        run: node tests\run.mjs system

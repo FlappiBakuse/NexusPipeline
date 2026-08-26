@@ -46,36 +46,28 @@
 
 ## 默认命令
 
-以下命令均在项目根目录执行，顺序与 CI 保持一致：
+统一 Node 调度器是活动测试的规范入口。以下命令均在项目根目录执行：
 
-```powershell
-# L1/L2：Unit + Component
-dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo
-
-# L3：Web Logic
-$webTests = @(Get-ChildItem tests\web -Filter *.test.mjs -File | ForEach-Object { $_.FullName })
-if ($webTests.Count -eq 0) { throw "未找到 Web Logic 测试文件" }
-node --test $webTests
-
-# 文档一致性检查
-node --test tests\documentation\documentation-consistency.mjs
-
-# UI Smoke 脚本静态语法检查
-Get-ChildItem tests\e2e\tests -Filter *.smoke.spec.mjs | ForEach-Object { node --check $_.FullName }
-
-# 构建隔离 release runtime
-build.cmd
+```text
+node tests\run.mjs default
+node tests\run.mjs unit
+node tests\run.mjs web
+node tests\run.mjs docs
+node tests\run.mjs syntax
+node tests\run.mjs build
 ```
+
+`default` 按 Unit + Component → Web Logic → 文档一致性 → UI Smoke 语法 → 构建顺序执行，并实时转发每个子进程的输出。
 
 ## UI Smoke
 
-在完成 `build.cmd` 后，从管理员 PowerShell 在 `tests/e2e/` 目录执行：
+在完成构建后，从管理员终端执行：
 
-```powershell
-.\run-e2e.cmd
+```text
+node tests\run.mjs ui
 ```
 
-`nexus-pipeline.exe` 带有 `requireAdministrator` 清单；直接从普通权限 shell 执行 `npx playwright test` 会在 runtime 启动阶段失败。CI runner 已处于管理员上下文时可以直接调用 Playwright，开发机使用 `run-e2e.cmd` 入口。
+入口会使用 `whoami /groups` 的完整性 SID 检查 High/System integrity。非管理员环境立即以 exit code `2` 退出，不在测试内部触发 UAC；`tests/e2e/run-e2e.cmd` 仅保留为兼容转发入口。
 
 当前 UI Smoke 使用四个 spec 文件：
 
@@ -93,25 +85,25 @@ tests/e2e/tests/
 
 ## System Smoke
 
-System Smoke 需要管理员终端和已完成的 `build.cmd`，统一入口为：
+System Smoke 需要管理员终端和已完成的构建，统一入口为：
 
-```powershell
-tests\system\run-system.cmd
+```text
+node tests\run.mjs system
 ```
 
-统一入口当前按顺序覆盖 runtime、judge、execution-resilience、emulator 和 update 五类跨层场景。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。
+统一入口当前按顺序覆盖 runtime、judge、execution-resilience、emulator 和 update 五类跨层场景。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
 
 ## 按需诊断与历史资产
 
 历史 Chaos 场景需要在完成 `build.cmd` 后运行，并确认使用历史工具自己的隔离 runtime：
 
-```powershell
+```cmd
 node tests\legacy\chaos\chaos-queue.mjs
 ```
 
 持续 flake 诊断工具：
 
-```powershell
+```cmd
 node tests\stress\diagnostics\flake-monitor.mjs
 ```
 
@@ -119,16 +111,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 顺序为：
-
-1. `dotnet test`；
-2. 枚举 `tests/web/*.test.mjs` 后运行 Web Logic；
-3. 独立运行文档一致性检查；
-4. 检查 UI Smoke 脚本语法；
-5. `build.cmd`；
-6. Playwright UI Smoke。
-
-独立的 `system-tests` job 执行 `build.cmd` 与 `tests/system/run-system.cmd`，不加载 legacy。发布前运行 UI Smoke 和适用的 System Smoke，并记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和五阶段 System Smoke，不加载 legacy。发布前运行 UI Smoke 和适用的 System Smoke，并记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 

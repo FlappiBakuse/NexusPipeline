@@ -27,12 +27,16 @@ NexusPipeline/
 │   ├── core/           平台层（与业务无关的通用能力）
 │   ├── views/          业务视图（一域一文件）
 │   └── effects/        独立视觉效果
+├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
 │   ├── system/               Windows 真实进程 System Smoke（runtime/judge/execution-resilience/emulator/update）
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
 │   ├── documentation/        Node 内建模块文档一致性检查
-│   └── legacy/               历史考据与专项诊断资产（不进入 CI/发布门禁）
+│   ├── support/               Windows 进程、版本解析与测试公共设施
+│   └── legacy/                历史考据与专项诊断资产（不进入 CI/发布门禁）
+├── tools/source-hash.mjs      Node 源码指纹计算（排除 bin/obj）
+└── tests/run.mjs              统一测试调度入口
 ```
 
 ## 后端分层（src/）
@@ -63,6 +67,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化后的命令分发与 CLI 处理 |
 | `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
+| `RuntimeStateLayout` | src/Persistence/RuntimeStateLayout.cs | 取得 service ownership 后创建 `.nxp` 目录、迁移旧运行状态、保存冲突现场和提供旧端口兼容读取 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `RuntimeContext` | src/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
 | `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一数据锁内的执行输入快照；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |

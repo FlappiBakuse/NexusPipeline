@@ -1,7 +1,6 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { spawnSync } from "node:child_process";
 import {
   api,
   deleteScript,
@@ -16,6 +15,11 @@ import {
   waitForService,
   waitNoRunning,
 } from "./runtime-helper.mjs";
+import {
+  isProcessAlive,
+  killProcessTree,
+  readPidFile,
+} from "../support/windows-process.mjs";
 
 /*
  * Execution Resilience System Suite
@@ -155,27 +159,6 @@ function managerLogText() {
   const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const file = pathJoin(runtimeDir, "logs", `nexus-pipeline-${stamp}.log`);
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
-}
-
-function markerProcessIds(marker) {
-  const command = `$p = Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*${marker}*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','`;
-  try {
-    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], {
-      encoding: "utf8",
-      windowsHide: true,
-    });
-    return (result.stdout || "").trim().split(/\s*,\s*/).filter(Boolean).map(Number);
-  } catch {
-    return [];
-  }
-}
-
-function killExactPids(pids) {
-  for (const pid of pids) {
-    if (Number.isInteger(pid) && pid > 0) {
-      spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
-    }
-  }
 }
 
 test("ER01 Batch Judge → Final Judge：进程退出后的最终判定仍执行", { skip }, async () => {
@@ -343,9 +326,11 @@ if (log.includes("ER06-FAIL")) {
 
 test("ER07 Script crash + cleanup：异常退出后清理子进程并保留正确历史", { skip }, async () => {
   const fixture = makeFixture("er07-script-crash");
+  const childPidPath = path.join(fixture.dir, "long-lived-child.pid");
+  const childFixture = path.join(projectRoot, "tests", "system", "fixtures", "long-lived-child.mjs");
   writeBatchCode(fixture, [
     "cd /d \"%~dp0\"",
-    `start \"\" /b pwsh.exe -NoProfile -Command \"Start-Sleep -Seconds 30; Write-Output NEXUS_ER07_CHILD\"`,
+    `start \"\" /b \"${process.execPath}\" \"${childFixture}\" \"${childPidPath}\"`,
     `echo ER07-START>>\"${fixture.log}\"`,
   ], 1);
   const script = await createScript(fixture, {
@@ -363,9 +348,16 @@ if ((input.log || "").includes("ER07-START")) {
     const record = await runScript(script.id, undefined, 60000);
     assert.equal(recordStatus(record), "failed");
     assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER07/);
-    assert.equal(await waitFor(() => markerProcessIds("NEXUS_ER07_CHILD").length === 0, 10000, 200), true);
+    let childPid = null;
+    await waitFor(() => {
+      childPid = readPidFile(childPidPath);
+      return childPid !== null;
+    }, 10000, 200);
+    assert.ok(childPid, "ER07 fixture 未写入 child PID");
+    assert.equal(await waitFor(() => !isProcessAlive(childPid), 10000, 200), true);
   } finally {
-    killExactPids(markerProcessIds("NEXUS_ER07_CHILD"));
+    const childPid = readPidFile(childPidPath);
+    if (childPid) killProcessTree(childPid);
     await deleteScript(script.id);
   }
 });

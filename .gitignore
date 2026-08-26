@@ -12,6 +12,13 @@ queues.json
 history/
 outputs/
 logs/
+.nxp/
+service.pid
+scheduler-state.json
+.nxp-update/
+.nxp-backup/
+.nxp-version
+.nxp-update-worker-*.exe
 tests/e2e/node_modules/
 tests/e2e/runtime/
 tests/system/runtime/

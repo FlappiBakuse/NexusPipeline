@@ -69,24 +69,20 @@ internal static class CliTransport
         return null;
     }
 
-    private static IEnumerable<int> CandidatePorts(int configuredPort)
+    internal static IEnumerable<int> CandidatePorts(int configuredPort)
+    {
+        return CandidatePorts(configuredPort, AppPaths.WebPortPath, AppPaths.LegacyWebPortPath);
+    }
+
+    internal static IEnumerable<int> CandidatePorts(int configuredPort, string markedPath, string legacyMarkedPath)
     {
         var seen = new HashSet<int>();
-        int marked = 0;
-        try
+        foreach (int marked in ReadMarkedPorts(markedPath, legacyMarkedPath))
         {
-            if (File.Exists(AppPaths.WebPortPath))
+            if (marked is >= 1024 and <= 65535 && seen.Add(marked))
             {
-                int.TryParse(File.ReadAllText(AppPaths.WebPortPath), out marked);
+                yield return marked;
             }
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug($"读取 Web 实际端口标记失败：{ex.Message}");
-        }
-        if (marked is >= 1024 and <= 65535 && seen.Add(marked))
-        {
-            yield return marked;
         }
         for (int offset = 0; offset < 20; offset++)
         {
@@ -96,6 +92,28 @@ internal static class CliTransport
                 yield return port;
             }
         }
+    }
+
+    private static IEnumerable<int> ReadMarkedPorts(string markedPath, string legacyMarkedPath)
+    {
+        var ports = new List<int>();
+        foreach (string path in new[] { markedPath, legacyMarkedPath })
+        {
+            try
+            {
+                if (File.Exists(path)
+                    && int.TryParse(File.ReadAllText(path), System.Globalization.NumberStyles.Integer,
+                        System.Globalization.CultureInfo.InvariantCulture, out int marked))
+                {
+                    ports.Add(marked);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"读取 Web 实际端口标记失败：{ex.Message}");
+            }
+        }
+        return ports;
     }
 
     private static int? ProbeActualPort(int port, int timeoutMs)

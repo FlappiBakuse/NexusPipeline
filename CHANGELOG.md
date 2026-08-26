@@ -2,6 +2,14 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.3（Pre-release）
+
+### 测试基础设施与运行状态治理
+
+- 新增统一 Node 测试调度器，System/UI Smoke 由管理员入口前置检查并直接持有被测进程；活动构建、测试与 CI 路径移除 PowerShell 中间层。
+- Update Smoke 从项目 `<Version>` 自动派生候选版本，测试 fixture 使用语义 marker，不再维护下一正式版本号常量。
+- `service.pid`、`web.port` 与 `scheduler-state.json` 收纳至 `.nxp/runtime/` 与 `.nxp/state/`，旧布局提供幂等迁移、冲突 recovery 和 CLI 端口兼容读取；更新事务目录协议保持不变。
+
 ## v0.10.2（Pre-release）
 
 ### 文档体系治理

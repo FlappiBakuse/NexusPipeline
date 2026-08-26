@@ -18,6 +18,7 @@ internal static class StartupPipeline
             TrayApp.OpenWeb();
             return;
         }
+        AppPaths.RuntimeState.EnsureMigrated();
         // 更新事务启动收尾（完成清理 / 失败回滚 / defer 自动应用）；
         // defer 应用时已拉起 apply-update 子进程，本进程退出（互斥体随退出释放）。
         if (UpdateApply.RunStartupFinalization())
@@ -161,6 +162,7 @@ internal static class StartupPipeline
             Console.WriteLine("[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。");
             return 1;
         }
+        AppPaths.RuntimeState.EnsureMigrated();
         // web 模式同样执行更新事务启动收尾（defer 时退出由本模式专用退出端口处理）。
         if (UpdateApply.RunStartupFinalization())
         {

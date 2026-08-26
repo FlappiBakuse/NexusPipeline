@@ -341,6 +341,26 @@ flowchart LR
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限由 `config/limits.json` 的 `MaxHistoryRetentionDays` 约束（默认 180、允许 1-365）；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
 
+### 7.3 运行状态目录与旧布局迁移
+
+正常服务运行产生的三类内部状态集中在安装目录下的 `.nxp/`：
+
+```text
+.nxp/
+├── runtime/
+│   ├── service.pid
+│   └── web.port
+└── state/
+    ├── scheduler-state.json
+    └── recovery/                    # 新旧状态冲突时保留旧文件
+```
+
+`service.pid` 与 `web.port` 是可重建的 ephemeral runtime metadata；服务正常退出时清理，旧根目录标记在取得单实例互斥体后作为 stale marker 删除。`scheduler-state.json` 保存定时 occurrence、重试状态、冻结队列计划及恢复所需快照，属于 internal durable runtime state，不按缓存处理。
+
+升级自旧布局时，`RuntimeStateLayout` 在服务获得单实例 ownership 后执行幂等迁移：旧 scheduler state 且新文件不存在时用同卷原子移动；新旧同时存在时新位置保持权威，旧文件移动到 `.nxp/state/recovery/scheduler-state.legacy-conflict-<timestamp>.json`，任何一份数据都不会静默覆盖。迁移失败保留旧现场，后续启动继续重试。CLI 端口发现保留新路径、旧根目录和配置端口漂移的读取顺序一个版本周期。
+
+`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 与根目录 update worker 继续作为更新 crash-recovery protocol 的组成部分，保持原路径和生命周期。
+
 ## 8. 已知行为与边界
 
 以下行为属**设计语义**（如实记录，非缺陷）：

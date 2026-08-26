@@ -45,8 +45,11 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## 最短验证入口
 
-按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在默认门禁后运行管理员入口：
+按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。活动测试统一经 Node 调度器运行；涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在默认门禁后从管理员终端运行：
 
 ```text
-tests\system\run-system.cmd
+node tests\run.mjs default
+node tests\run.mjs system
 ```
+
+UI Smoke 使用 `node tests\run.mjs ui`；`tests\system\run-system.cmd` 与 `tests\e2e\run-e2e.cmd` 仅保留为兼容转发入口。服务普通运行状态位于 `.nxp\runtime\` 与 `.nxp\state\`，更新事务目录仍按原协议留在安装根目录。

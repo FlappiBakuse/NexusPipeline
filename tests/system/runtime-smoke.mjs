@@ -48,6 +48,18 @@ test("status 与 limits API 在同一服务实例可用", { skip }, async () => 
   assert.equal(payload.limits.maxQueues, 10);
 });
 
+test("普通运行状态集中在 .nxp，安装根不再散落运行标记", { skip }, () => {
+  const internalDir = path.join(runtimeDir, ".nxp");
+  const runtimeStateDir = path.join(internalDir, "runtime");
+  const stateDir = path.join(internalDir, "state");
+  assert.equal(fs.existsSync(path.join(runtimeDir, "service.pid")), false);
+  assert.equal(fs.existsSync(path.join(runtimeDir, "web.port")), false);
+  assert.equal(fs.existsSync(path.join(runtimeDir, "scheduler-state.json")), false);
+  assert.equal(fs.existsSync(path.join(runtimeStateDir, "service.pid")), true);
+  assert.equal(fs.existsSync(path.join(runtimeStateDir, "web.port")), true);
+  assert.equal(fs.existsSync(stateDir), true);
+});
+
 test("58731 被占用时服务回退到下一个端口", { skip }, async () => {
   await stopRuntime();
   const blocker = net.createServer();

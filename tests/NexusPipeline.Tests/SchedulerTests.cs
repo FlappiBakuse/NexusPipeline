@@ -35,7 +35,9 @@ public class SchedulerTests
             validator);
 
         scheduler.TickForTest();
-        await EventuallyAsync(() => commands.Attempts >= 1);
+        await EventuallyAsync(() => commands.Attempts >= 1
+            && PendingStatus(scheduler) == "Waiting"
+            && PendingAttemptCount(scheduler) == 0);
 
         Assert.Equal(1, commands.Attempts);
         Assert.Equal(1, PendingCount(scheduler));
@@ -117,6 +119,26 @@ public class SchedulerTests
             .GetField("_pendingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
             .GetValue(scheduler)!;
         return ((System.Collections.IDictionary)value).Count;
+    }
+
+    private static string? PendingStatus(Scheduler scheduler)
+    {
+        object value = typeof(Scheduler)
+            .GetField("_pendingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(scheduler)!;
+        foreach (System.Collections.DictionaryEntry entry in (System.Collections.IDictionary)value)
+        {
+            return entry.Value?.GetType().GetProperty("Status")?.GetValue(entry.Value)?.ToString();
+        }
+        return null;
+    }
+
+    private static int PendingAttemptCount(Scheduler scheduler)
+    {
+        object value = typeof(Scheduler)
+            .GetField("_attemptingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(scheduler)!;
+        return (int)value.GetType().GetProperty("Count")!.GetValue(value)!;
     }
 
     private static void MakePendingTriggersDue(Scheduler scheduler)

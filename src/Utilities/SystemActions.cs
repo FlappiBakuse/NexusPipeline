@@ -152,7 +152,7 @@ internal static class SystemActions
 
     /// <summary>
     /// 可见窗口启动（编辑配置模式）。所有路径都通过 CreateProcess + 重定向管道启动：
-    /// 无控制台父进程也能为 cmd.exe、PowerShell 等控制台程序提供有效 stdio，避免 ERROR_NO_DATA(0x800700E8)。
+    /// 无控制台父进程也能为 cmd.exe 等控制台程序提供有效 stdio，避免 ERROR_NO_DATA(0x800700E8)。
     /// 批处理仅作为启动器静默运行，直接启动的编辑器保留可见窗口。
     /// NexusPipeline 已强制以管理员身份运行，目标程序要求管理员权限时（740）直接报错，不再降级提权。
     /// </summary>
