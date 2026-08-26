@@ -6,12 +6,14 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   baseUrl,
+  fetchWithTimeout,
   isElevated,
   isRuntimeAlive,
   prepareRuntime,
   projectRoot,
   runtimeExe,
   runtimeDir,
+  runtimeDiagnostic,
   startRuntime,
   stopRuntime,
   waitForService,
@@ -35,7 +37,7 @@ after(async () => {
 });
 
 test("release binary 启动并提供 status API", { skip }, async () => {
-  const response = await fetch(baseUrl + "api/status");
+  const response = await fetchWithTimeout(baseUrl + "api/status");
   assert.equal(response.status, 200);
   const status = await response.json();
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
@@ -48,12 +50,13 @@ test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip
     input,
     encoding: "utf8",
     env: { ...process.env, NEXUS_SYSTEM_SMOKE: "1" },
+    timeout: 10000,
     windowsHide: true,
   });
 
   for (const args of [["status", "--json"], ["script", "list", "--json"], ["run", "list", "--json"]]) {
     const result = runCli(args);
-    assert.equal(result.status, 0, `${args.join(" ")} stderr: ${result.stderr}`);
+    assert.equal(result.status, 0, `${args.join(" ")} error: ${result.error?.message || ""}; stderr: ${result.stderr}`);
     const lines = result.stdout.trim().split(/\r?\n/).filter(Boolean);
     assert.equal(lines.length, 1, `${args.join(" ")} stdout: ${result.stdout}`);
     const payload = JSON.parse(lines[0]);
@@ -70,7 +73,7 @@ test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip
 });
 
 test("status 与 limits API 在同一服务实例可用", { skip }, async () => {
-  const response = await fetch(baseUrl + "api/limits");
+  const response = await fetchWithTimeout(baseUrl + "api/limits");
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.limits.maxScripts, 25);
@@ -96,16 +99,37 @@ test("58731 被占用时服务回退到下一个端口", { skip }, async () => {
     blocker.once("error", reject);
     blocker.listen(58731, "127.0.0.1", resolve);
   });
+  const failures = [];
   try {
     startRuntime(["web"]);
     await waitForService("http://127.0.0.1:58732/", 30000);
-    const response = await fetch("http://127.0.0.1:58732/api/status");
+    const response = await fetchWithTimeout("http://127.0.0.1:58732/api/status");
     assert.equal(response.status, 200);
+  } catch (error) {
+    failures.push(`端口回退启动阶段失败：${error.stack || error.message}\n${runtimeDiagnostic()}`);
   } finally {
-    await stopRuntime();
-    await new Promise(resolve => blocker.close(resolve));
-    startRuntime();
-    await waitForService();
+    try {
+      await stopRuntime();
+    } catch (error) {
+      failures.push(`端口回退清理阶段停止 runtime 失败：${error.stack || error.message}`);
+    }
+    try {
+      await new Promise((resolve, reject) => {
+        blocker.once("error", reject);
+        blocker.close(resolve);
+      });
+    } catch (error) {
+      failures.push(`端口回退清理阶段释放 58731 失败：${error.stack || error.message}`);
+    }
+    try {
+      startRuntime();
+      await waitForService();
+    } catch (error) {
+      failures.push(`端口回退后的默认 runtime 恢复失败：${error.stack || error.message}\n${runtimeDiagnostic()}`);
+    }
+  }
+  if (failures.length > 0) {
+    throw new Error(failures.join("\n\n"));
   }
 });
 

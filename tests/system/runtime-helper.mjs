@@ -102,20 +102,47 @@ export function runtimeOutput() {
   return { stdout, stderr };
 }
 
+export function runtimeDiagnostic() {
+  return [
+    `runtime PID: ${child?.pid ?? "unknown"}`,
+    `stdout:\n${stdout || "(empty)"}`,
+    `stderr:\n${stderr || "(empty)"}`,
+  ].join("\n");
+}
+
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`HTTP 请求超时（${timeoutMs}ms）：${url}`, { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function waitForService(url = baseUrl, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
+  let attempts = 0;
   while (Date.now() < deadline) {
+    attempts++;
     try {
-      const response = await fetch(url + "api/status");
+      const requestTimeoutMs = Math.min(3000, Math.max(1, deadline - Date.now()));
+      const response = await fetchWithTimeout(url + "api/status", {}, requestTimeoutMs);
       if (response.ok) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
       lastError = error.message;
     }
-    await sleep(250);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs > 0) await sleep(Math.min(250, remainingMs));
   }
-  throw new Error(`System Smoke 服务未启动：${url}；${lastError}\n${runtimeOutput().stderr}`);
+  throw new Error(`System Smoke 服务未启动：${url}；尝试 ${attempts} 次；${lastError}\n${runtimeDiagnostic()}`);
 }
 
 export async function waitFor(predicate, timeoutMs = 30000, intervalMs = 250) {
@@ -133,7 +160,7 @@ export async function api(method, pathName, body, url = baseUrl) {
     options.headers = { "Content-Type": "application/json" };
     options.body = JSON.stringify(body);
   }
-  return fetch(url + pathName.replace(/^\/+/, ""), options);
+  return fetchWithTimeout(url + pathName.replace(/^\/+/, ""), options);
 }
 
 export function makeFixture(label) {

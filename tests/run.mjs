@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAdministrator } from "./support/windows-process.mjs";
+import { isAdministrator, killProcessTree } from "./support/windows-process.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const e2eDir = path.join(projectRoot, "tests", "e2e");
@@ -12,6 +12,20 @@ const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 
 function runProcess(command, args, options = {}) {
   return new Promise(resolve => {
+    const label = [command, ...args].join(" ");
+    const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+      ? options.timeoutMs
+      : null;
+    const timeoutCode = options.timeoutCode ?? 124;
+    let timeoutHandle = null;
+    let settled = false;
+    let timedOut = false;
+    const finish = code => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      resolve(code);
+    };
     const child = spawn(command, args, {
       cwd: options.cwd || projectRoot,
       env: options.env || process.env,
@@ -20,16 +34,37 @@ function runProcess(command, args, options = {}) {
     });
     child.once("error", error => {
       console.error(`[错误] 启动 ${command} 失败：${error.message}`);
-      resolve(1);
+      finish(timedOut ? timeoutCode : 1);
     });
     child.once("exit", (code, signal) => {
+      if (timedOut) {
+        finish(timeoutCode);
+        return;
+      }
       if (signal) {
         console.error(`[错误] ${command} 被信号 ${signal} 终止`);
-        resolve(1);
+        finish(1);
       } else {
-        resolve(code ?? 1);
+        finish(code ?? 1);
       }
     });
+    if (timeoutMs !== null && !settled) {
+      timeoutHandle = setTimeout(() => {
+        if (settled) return;
+        timedOut = true;
+        console.error(`[错误] ${label} 超时（${timeoutMs}ms），正在终止进程树`);
+        try {
+          if (process.platform === "win32" && child.pid) {
+            killProcessTree(child.pid);
+          } else {
+            child.kill("SIGTERM");
+          }
+        } catch (error) {
+          console.error(`[错误] 终止超时进程失败：${error.message}`);
+        }
+        finish(timeoutCode);
+      }, timeoutMs);
+    }
   });
 }
 
@@ -119,9 +154,18 @@ async function runSystem(args) {
     ["runtime-emulator", "emulator-smoke.mjs"],
     ["runtime-update", "update-smoke.mjs"],
   ];
+  const suiteTimeoutMs = 5 * 60 * 1000;
   for (const [runtimeName, file] of suites) {
     const suiteEnv = { ...env, NEXUS_SYSTEM_RUNTIME_NAME: runtimeName };
-    const code = await runProcess(nodeCommand, ["--test", "--test-concurrency=1", path.join(systemDir, file)], { env: suiteEnv });
+    const label = `${runtimeName} (${file})`;
+    console.error(`[System Smoke] 开始 ${label}`);
+    const startedAt = Date.now();
+    const code = await runProcess(
+      nodeCommand,
+      ["--test", "--test-concurrency=1", path.join(systemDir, file)],
+      { env: suiteEnv, timeoutMs: suiteTimeoutMs },
+    );
+    console.error(`[System Smoke] 结束 ${label}：exit=${code}，耗时 ${Date.now() - startedAt}ms`);
     if (code !== 0) return code;
   }
   return 0;
