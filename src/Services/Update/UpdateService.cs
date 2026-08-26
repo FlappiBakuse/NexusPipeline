@@ -1,36 +1,42 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Update;
 
-/// <summary>更新状态机状态：Idle → Checking → Idle；Idle → Downloading → Ready → Applying →（进程退出）；
-/// 下载失败回 Idle（error 可读）；一次只允许一个操作，取消仅作用于 Checking/Downloading。</summary>
+/// <summary>更新状态机。每个网络操作带 generation 与 CTS，过期 worker 不得修改当前状态或清理新操作现场。</summary>
 internal enum UpdateState
 {
     Idle,
     Checking,
     Downloading,
     Ready,
+    ApplyPending,
     Applying,
+    RecoveryPending,
 }
 
 /// <summary>
-/// 内建更新服务：检查更新、下载校验、申请应用（立即/下次启动）。只自动检查，绝不自动下载/应用；
-/// 下载与应用均为显式操作；应用前与「退出/重启」同一套安全门禁。单操作互斥经 _gate 收敛。
+/// 内建更新服务：检查、下载校验、申请应用（立即/下次启动）。
+/// Immediate Apply 使用 Host Maintenance Lease 原子冻结宿主准入；Defer Apply 只记录 journal，不要求当前空闲。
 /// </summary>
 internal sealed class UpdateService
 {
-    private static readonly HttpClient Http = new()
+    private static readonly HttpClient Http = new(new HttpClientHandler
+    {
+        AllowAutoRedirect = false,
+    })
     {
         Timeout = TimeSpan.FromMinutes(10),
     };
 
     private readonly Func<AppSettings> _settings;
     private readonly string _installDir;
-    private readonly Func<bool> _canApply;
+    private readonly Func<bool> _canApplyFallback;
     private readonly Func<bool> _requestExit;
+    private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
     private readonly object _gate = new();
 
     private UpdateState _state = UpdateState.Idle;
@@ -38,19 +44,33 @@ internal sealed class UpdateService
     private string _error = "";
     private long _bytesRead;
     private long _bytesTotal;
-    private CancellationTokenSource? _downloadCts;
-    private Task? _downloadTask;
+    private long _generation;
+    private UpdateOperation? _operation;
+    private string? _readyStagingDir;
+    private HostMaintenanceLease? _maintenanceLease;
 
     public UpdateService(
         Func<AppSettings> settings,
         string installDir,
         Func<bool> canApply,
-        Func<bool> requestExit)
+        Func<bool> requestExit,
+        Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null)
     {
         _settings = settings;
         _installDir = installDir;
-        _canApply = canApply;
+        _canApplyFallback = canApply;
         _requestExit = requestExit;
+        if (acquireMaintenance is not null)
+        {
+            _acquireMaintenance = acquireMaintenance;
+        }
+        else
+        {
+            _acquireMaintenance = () => _canApplyFallback()
+                ? (new HostMaintenanceLease(), (string?)null)
+                : ((HostMaintenanceLease?)null, "存在活动运行、编辑会话或待执行系统操作，暂不能应用更新");
+        }
+        _state = HasRecoveryArtifacts() ? UpdateState.RecoveryPending : UpdateState.Idle;
     }
 
     public UpdateState State
@@ -93,17 +113,7 @@ internal sealed class UpdateService
     {
         lock (_gate)
         {
-            return new UpdateStatusSnapshot(
-                _state,
-                _state == UpdateState.Downloading ? BytesToPercent(_bytesRead, _bytesTotal) : null,
-                _bytesRead,
-                _bytesTotal,
-                _error,
-                CurrentVersion,
-                _latest?.VersionText,
-                EffectiveChannel(_settings()),
-                _latest is not null,
-                _latest?.Notes ?? "");
+            return BuildSnapshotLocked();
         }
     }
 
@@ -113,21 +123,33 @@ internal sealed class UpdateService
 
     private string TaskFile => Path.Combine(UpdateDir, "task.json");
 
-    private string StagingDir(string version) => Path.Combine(UpdateDir, "staging", version);
+    private string BackupDir => Path.Combine(_installDir, ".nxp-backup", "previous");
 
-    /// <summary>检查更新：拉取清单、比较版本、构造 UpdateInfo；结束回到 Idle（error 可读）。</summary>
+    private string StagingDir(string version, long generation) => Path.Combine(UpdateDir, "staging", $"{version}.g{generation}");
+
+    private bool HasRecoveryArtifacts()
+    {
+        return File.Exists(TaskFile)
+            || Directory.Exists(BackupDir)
+            || File.Exists(BackupDir)
+            || File.Exists(Path.Combine(_installDir, ".nxp-version"));
+    }
+
+    /// <summary>检查更新：只允许 Idle 开始；Ready、ApplyPending、Applying 等状态不会被覆盖。</summary>
     public async Task<UpdateStatusSnapshot> CheckAsync(string auditSource)
     {
-        UpdateStatusSnapshot snapshot;
+        UpdateOperation operation;
         lock (_gate)
         {
-            if (_state is UpdateState.Checking or UpdateState.Downloading)
+            if (_state != UpdateState.Idle)
             {
-                return GetStatus();
+                return BuildSnapshotLocked();
             }
-            _state = UpdateState.Checking;
+            operation = BeginOperationLocked(UpdateState.Checking);
+            _readyStagingDir = null;
             _error = "";
         }
+
         try
         {
             AppSettings settings = _settings();
@@ -135,75 +157,70 @@ internal sealed class UpdateService
             string? validationError = UpdateCatalog.ValidateSource(source);
             if (validationError is not null)
             {
-                Fail(validationError);
-                Audit.Log(auditSource, "检查更新失败", validationError);
+                throw new InvalidDataException(validationError);
             }
-            else
+            UpdateSourcePolicy policy = new(source);
+            string channel = EffectiveChannel(settings);
+            (int, int, int) current = ParseCurrent();
+            using HttpResponseMessage response = await policy.GetAsync(
+                Http,
+                policy.SourceUri,
+                manifest: true,
+                "NexusPipeline-update/" + CurrentVersion,
+                operation.Cts.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
             {
-                string channel = EffectiveChannel(settings);
-                (int, int, int) current = ParseCurrent();
-                ReleaseInfo? best;
-                using (var request = new HttpRequestMessage(HttpMethod.Get, string.IsNullOrWhiteSpace(source) ? UpdateCatalog.DefaultSourceUrl : source))
-                {
-                    request.Headers.TryAddWithoutValidation("User-Agent", "NexusPipeline-update/" + CurrentVersion);
-                    request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
-                    using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, CancellationToken.None).ConfigureAwait(false);
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        throw new IOException($"清单请求失败：HTTP {(int)response.StatusCode}");
-                    }
-                    string json = await response.Content.ReadAsStringAsync(CancellationToken.None).ConfigureAwait(false);
-                    best = UpdateCatalog.PickRelease(JsonNode.Parse(json), channel, current);
-                }
-                lock (_gate)
-                {
-                    _latest = best;
-                }
-                Audit.Log(auditSource, best is null ? "检查更新" : "发现新版本", best is null
-                    ? $"当前 v{CurrentVersion}，渠道 {channel}，无可用更新"
-                    : $"v{CurrentVersion} → v{best.VersionText}（渠道 {channel}）");
-                if (best is not null)
-                {
-                    Logger.Info($"[更新] 发现新版本：v{CurrentVersion} → v{best.VersionText}（{best.Name}）");
-                }
+                throw new IOException($"清单请求失败：HTTP {(int)response.StatusCode}");
             }
+            string json = await response.Content.ReadAsStringAsync(operation.Cts.Token).ConfigureAwait(false);
+            operation.Cts.Token.ThrowIfCancellationRequested();
+            ReleaseInfo? best = UpdateCatalog.PickRelease(JsonNode.Parse(json), channel, current);
+            lock (_gate)
+            {
+                if (!IsCurrentLocked(operation))
+                {
+                    return BuildSnapshotLocked();
+                }
+                _latest = best;
+            }
+            Audit.Log(auditSource, best is null ? "检查更新" : "发现新版本", best is null
+                ? $"当前 v{CurrentVersion}，渠道 {channel}，无可用更新"
+                : $"v{CurrentVersion} → v{best.VersionText}（渠道 {channel}）");
+            if (best is not null)
+            {
+                Logger.Info($"[更新] 发现新版本：v{CurrentVersion} → v{best.VersionText}（{best.Name}）");
+            }
+        }
+        catch (OperationCanceledException) when (operation.Cts.IsCancellationRequested)
+        {
+            // CancelDownload 已经把当前 operation 转为 Idle；过期完成不再触碰新 operation。
         }
         catch (Exception ex)
         {
-            Fail(ex.Message);
-            Audit.Log(auditSource, "检查更新失败", ex.Message);
+            if (FailOperation(operation, ex.Message))
+            {
+                Audit.Log(auditSource, "检查更新失败", ex.Message);
+            }
         }
         finally
         {
-            lock (_gate)
-            {
-                if (_state == UpdateState.Checking)
-                {
-                    _state = UpdateState.Idle;
-                }
-                snapshot = new UpdateStatusSnapshot(
-                    _state,
-                    null,
-                    0,
-                    0,
-                    _error,
-                    CurrentVersion,
-                    _latest?.VersionText,
-                    EffectiveChannel(_settings()),
-                    _latest is not null,
-                    _latest?.Notes ?? "");
-            }
+            CompleteOperation(operation, UpdateState.Checking);
         }
-        return snapshot;
+        return GetStatus();
     }
 
-    /// <summary>开始下载并校验到 staging（后台任务，进度经 GetStatus 轮询）。返回 null=已开始，否则拒绝原因。</summary>
+    /// <summary>开始下载并校验到 staging（后台任务，进度经 GetStatus 轮询）。</summary>
     public string? StartDownload(string auditSource)
     {
         ReleaseInfo? latest;
+        UpdateOperation operation;
+        string version;
+        string stagingDir;
+        string zipPath;
+        string shaPath;
         lock (_gate)
         {
-            if (_state is UpdateState.Checking or UpdateState.Downloading or UpdateState.Applying)
+            if (_state != UpdateState.Idle)
             {
                 return "已有更新操作进行中";
             }
@@ -212,25 +229,48 @@ internal sealed class UpdateService
             {
                 return "尚未检查到可用更新";
             }
-            _state = UpdateState.Downloading;
+            if (File.Exists(TaskFile))
+            {
+                return "已有更新事务待处理，请先完成启动恢复";
+            }
+            if (Directory.Exists(BackupDir) || File.Exists(BackupDir))
+            {
+                return "检测到未恢复的更新 backup，请先完成启动恢复";
+            }
+            version = latest.VersionText;
+            long nextGeneration = checked(_generation + 1);
+            stagingDir = StagingDir(version, nextGeneration);
+            zipPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version) + $".g{nextGeneration}");
+            shaPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageShaName(version) + $".g{nextGeneration}");
+            operation = BeginOperationLocked(UpdateState.Downloading, zipPath, shaPath, stagingDir);
+            _readyStagingDir = null;
             _bytesRead = 0;
             _bytesTotal = 0;
             _error = "";
-            _downloadCts = new CancellationTokenSource();
         }
-        string version = latest.VersionText;
-        string stagingDir = StagingDir(version);
-        string zipPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version));
-        string shaPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageShaName(version));
-        CancellationToken token = _downloadCts.Token;
-        _downloadTask = Task.Run(async () =>
+
+        _ = Task.Run(async () =>
         {
             try
             {
                 string source = EffectiveSourceUrl(_settings());
+                string? sourceError = UpdateCatalog.ValidateSource(source);
+                if (sourceError is not null)
+                {
+                    throw new InvalidDataException(sourceError);
+                }
+                UpdateSourcePolicy policy = new(source);
+                var progress = new Progress<UpdateDownloadProgress>(value => UpdateProgress(operation, value));
                 (bool ok, string? downloadError) = await UpdatePackage.DownloadAsync(
-                    Http, source, latest.ZipUrl, latest.ShaUrl, zipPath, shaPath, token).ConfigureAwait(false);
-                token.ThrowIfCancellationRequested();
+                    Http,
+                    policy,
+                    latest.ZipUrl,
+                    latest.ShaUrl,
+                    zipPath,
+                    shaPath,
+                    progress,
+                    operation.Cts.Token).ConfigureAwait(false);
+                operation.Cts.Token.ThrowIfCancellationRequested();
                 if (!ok)
                 {
                     throw new IOException(downloadError ?? "下载失败");
@@ -239,201 +279,320 @@ internal sealed class UpdateService
                 {
                     throw new IOException(verifyError ?? "SHA256 校验失败");
                 }
-                token.ThrowIfCancellationRequested();
+                operation.Cts.Token.ThrowIfCancellationRequested();
                 string? extractError = UpdatePackage.Extract(zipPath, stagingDir);
-                token.ThrowIfCancellationRequested();
+                operation.Cts.Token.ThrowIfCancellationRequested();
                 if (extractError is not null)
                 {
                     throw new IOException(extractError);
                 }
-                Audit.Log(auditSource, "更新下载完成", $"v{version}（SHA256 校验通过，已就绪）");
-                lock (_gate)
+                if (!TrySetReady(operation))
                 {
-                    _state = UpdateState.Ready;
+                    return;
                 }
+                Audit.Log(auditSource, "更新下载完成", $"v{version}（SHA256 校验通过，已就绪）");
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (operation.Cts.IsCancellationRequested)
             {
-                // 取消：静默回到 Idle（由 CancelDownload 处理状态，这里只清理现场）。
-                CleanupDownloadArtifacts();
+                CleanupDownloadArtifacts(operation);
             }
             catch (Exception ex)
             {
-                CleanupDownloadArtifacts();
-                Fail(ex.Message);
-                Audit.Log(auditSource, "更新下载失败", ex.Message);
+                CleanupDownloadArtifacts(operation);
+                if (FailOperation(operation, ex.Message))
+                {
+                    Audit.Log(auditSource, "更新下载失败", ex.Message);
+                }
             }
             finally
             {
-                lock (_gate)
-                {
-                    if (_state == UpdateState.Downloading)
-                    {
-                        _state = UpdateState.Idle;
-                    }
-                }
+                CompleteOperation(operation, UpdateState.Downloading);
             }
         });
         Audit.Log(auditSource, "开始下载更新", $"v{version}（staging: {stagingDir}）");
         return null;
     }
 
-    /// <summary>取消下载/清理 staging（仅 Checking/Downloading 有效）。</summary>
+    /// <summary>取消检查/下载。取消只释放当前状态，过期 worker 仍受 generation 和现场归属保护。</summary>
     public bool CancelDownload()
     {
         CancellationTokenSource? cts;
+        UpdateOperation? operation;
         lock (_gate)
         {
-            if (_state is not (UpdateState.Checking or UpdateState.Downloading))
+            if (_state is not (UpdateState.Checking or UpdateState.Downloading) || _operation is null)
             {
                 return false;
             }
-            cts = _downloadCts;
-            _downloadCts = null;
+            operation = _operation;
+            cts = operation.Cts;
+            _operation = null;
+            _generation++;
             _state = UpdateState.Idle;
             _error = "已取消";
+            _readyStagingDir = null;
+            _bytesRead = 0;
+            _bytesTotal = 0;
         }
         try
         {
-            cts?.Cancel();
+            cts.Cancel();
         }
         catch
         {
         }
-        Logger.Info("[更新] 下载已取消。");
+        Logger.Info($"[更新] 操作已取消（generation={operation.Generation}）。");
         return true;
     }
 
-    /// <summary>申请应用：立即（defer=false，门禁通过后拉起 apply-update 并请求宿主退出）或下次启动（defer=true）。
-    /// 返回 InvokeResult.Error 时带结构化错误码供 API 映射。</summary>
+    /// <summary>
+    /// 申请应用：Immediate 必须先取得维护租约并成功拉起 worker；Defer 只写入可恢复 journal，不要求当前空闲。
+    /// </summary>
     public UpdateApplyResult RequestApply(bool defer, string auditSource)
     {
         ReleaseInfo? latest;
-        string error;
+        string version;
+        string stagingDir;
         lock (_gate)
         {
             latest = _latest;
             if (_state != UpdateState.Ready || latest is null)
             {
-                error = "更新尚未就绪（请先检查并下载更新）";
-                return UpdateApplyResult.Busy("not-ready", error);
+                return UpdateApplyResult.Busy("not-ready", "更新尚未就绪（请先检查并下载更新）");
             }
-        }
-        if (!_canApply())
-        {
-            error = "存在活动运行、编辑会话或待执行系统操作，暂不能应用更新";
-            return UpdateApplyResult.Busy("busy", error);
-        }
-        string version = latest.VersionText;
-        string stagingDir = StagingDir(version);
-        if (!File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
-        {
-            error = "暂存文件不完整，请重新下载";
-            return UpdateApplyResult.Busy("not-ready", error);
-        }
-        if (!defer)
-        {
-            lock (_gate)
+            if (File.Exists(TaskFile))
             {
-                _state = UpdateState.Applying;
+                return UpdateApplyResult.Busy("transaction-pending", "已有更新事务待处理，请先完成启动恢复");
             }
-            new UpdateTask("apply", version, stagingDir).Write(TaskFile);
+            if (Directory.Exists(BackupDir) || File.Exists(BackupDir))
+            {
+                return UpdateApplyResult.Busy("recovery-pending", "检测到未恢复的更新 backup，请先完成启动恢复");
+            }
+            version = latest.VersionText;
+            stagingDir = _readyStagingDir ?? "";
+            if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
+            {
+                return UpdateApplyResult.Busy("not-ready", "暂存文件不完整，请重新下载");
+            }
+        }
+
+        if (defer)
+        {
+            try
+            {
+                lock (_gate)
+                {
+                    if (_state != UpdateState.Ready)
+                    {
+                        return UpdateApplyResult.Busy("busy", "更新状态已变化，请刷新后重试");
+                    }
+                    new UpdateTask("defer", version, stagingDir, UpdatePhase.Deferred, DateTimeOffset.UtcNow).Write(TaskFile);
+                    _state = UpdateState.ApplyPending;
+                }
+                Audit.Log(auditSource, "申请下次启动更新", $"v{version}");
+                Logger.Info($"[更新] 已登记「下次启动更新」（v{version}），退出后下次启动自动应用。");
+                return UpdateApplyResult.Ok(true);
+            }
+            catch (Exception ex)
+            {
+                return UpdateApplyResult.Busy("journal-write-failed", $"登记下次启动更新失败：{ex.Message}");
+            }
+        }
+
+        (HostMaintenanceLease? lease, string? leaseReason) = _acquireMaintenance();
+        if (lease is null)
+        {
+            return UpdateApplyResult.Busy("busy", leaseReason ?? "宿主当前繁忙，暂不能应用更新");
+        }
+        lock (_gate)
+        {
+            if (_state != UpdateState.Ready)
+            {
+                lease.Dispose();
+                return UpdateApplyResult.Busy("busy", "更新状态已变化，请刷新后重试");
+            }
+            _state = UpdateState.Applying;
+            _maintenanceLease = lease;
+        }
+
+        bool workerLaunched = false;
+        try
+        {
+            new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow).Write(TaskFile);
+            if (!UpdateApply.LaunchApplyWorker(stagingDir))
+            {
+                throw new InvalidOperationException("apply-update 子进程未能拉起");
+            }
+            workerLaunched = true;
             Audit.Log(auditSource, "应用更新", $"v{version}（staging: {stagingDir}）");
-            // 先响应请求再执行切换：拉起子进程并请求宿主退出（退出由组合根注入的端口执行）。
-            _ = Task.Run(() =>
+            Logger.Info("[更新] apply-update 子进程已确认拉起，正在请求宿主退出。");
+            bool exitRequested;
+            try
             {
-                try
-                {
-                    Thread.Sleep(TestHooks.ScaledMs(1000));
-                    UpdateApply.LaunchApplyWorker(stagingDir);
-                    Logger.Info("[更新] 已拉起 apply-update 子进程，即将退出当前进程。");
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"[更新] 拉起 apply-update 子进程失败：{ex.Message}");
-                    return;
-                }
-                try
-                {
-                    if (!_requestExit())
-                    {
-                        Logger.Warn("[更新] 当前进程仍有活动执行或编辑会话，已拒绝退出；新进程可能需要手动处理。");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Error($"[更新] 退出当前进程失败：{ex.Message}");
-                    try
-                    {
-                        Environment.Exit(0);
-                    }
-                    catch
-                    {
-                    }
-                }
-            });
+                exitRequested = _requestExit();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[更新] 宿主退出请求抛出异常，但 apply-update 已拉起；保留 journal 与维护租约：{ex.Message}");
+                exitRequested = false;
+            }
+            if (!exitRequested)
+            {
+                // 维护租约仍然有效；worker 会等待宿主稍后释放互斥体，当前宿主不会再准入新操作。
+                Logger.Warn("[更新] 宿主退出请求未立即完成，更新事务与维护租约保留，等待下一次安全退出。");
+            }
             return UpdateApplyResult.Ok(false);
         }
-        new UpdateTask("defer", version, stagingDir).Write(TaskFile);
-        Audit.Log(auditSource, "申请下次启动更新", $"v{version}");
-        Logger.Info($"[更新] 已登记「下次启动更新」（v{version}），退出后下次启动自动应用。");
-        return UpdateApplyResult.Ok(true);
+        catch (Exception ex)
+        {
+            Logger.Error($"[更新] 应用请求失败：{ex.Message}");
+            if (workerLaunched)
+            {
+                // worker 已经 armed，任何后续通知/退出异常都不能删除它的 journal。
+                return UpdateApplyResult.Ok(false);
+            }
+            lock (_gate)
+            {
+                if (_state == UpdateState.Applying)
+                {
+                    _state = UpdateState.Ready;
+                }
+                _maintenanceLease = null;
+            }
+            lease.Dispose();
+            UpdateTask.Clear(TaskFile);
+            return UpdateApplyResult.Busy("worker-launch-failed", $"无法启动更新切换：{ex.Message}");
+        }
     }
 
-    private void Fail(string message)
+    private UpdateOperation BeginOperationLocked(
+        UpdateState state,
+        string? zipPath = null,
+        string? shaPath = null,
+        string? stagingDir = null)
+    {
+        _generation++;
+        _operation = new UpdateOperation(_generation, state, zipPath, shaPath, stagingDir);
+        _state = state;
+        return _operation;
+    }
+
+    private bool IsCurrentLocked(UpdateOperation operation)
+    {
+        return ReferenceEquals(_operation, operation) && _generation == operation.Generation;
+    }
+
+    private void UpdateProgress(UpdateOperation operation, UpdateDownloadProgress progress)
     {
         lock (_gate)
         {
-            _error = message;
-            _latest = null;
-            if (_state == UpdateState.Downloading)
+            if (!IsCurrentLocked(operation) || _state != UpdateState.Downloading)
             {
-                _state = UpdateState.Idle;
+                return;
             }
-            _bytesRead = 0;
-            _bytesTotal = 0;
+            _bytesRead = progress.BytesRead;
+            _bytesTotal = progress.BytesTotal;
         }
     }
 
-    private void CleanupDownloadArtifacts()
+    private bool TrySetReady(UpdateOperation operation)
     {
+        lock (_gate)
+        {
+            if (!IsCurrentLocked(operation) || _state != UpdateState.Downloading)
+            {
+                return false;
+            }
+            _state = UpdateState.Ready;
+            _readyStagingDir = operation.StagingDir;
+            _bytesRead = 0;
+            _bytesTotal = 0;
+            return true;
+        }
+    }
+
+    private bool FailOperation(UpdateOperation operation, string message)
+    {
+        lock (_gate)
+        {
+            if (!IsCurrentLocked(operation))
+            {
+                return false;
+            }
+            _error = message;
+            _latest = null;
+            _state = UpdateState.Idle;
+            _readyStagingDir = null;
+            _bytesRead = 0;
+            _bytesTotal = 0;
+            return true;
+        }
+    }
+
+    private void CompleteOperation(UpdateOperation operation, UpdateState expectedState)
+    {
+        lock (_gate)
+        {
+            if (!IsCurrentLocked(operation))
+            {
+                operation.Cts.Dispose();
+                return;
+            }
+            if (_state == expectedState)
+            {
+                _state = UpdateState.Idle;
+            }
+            _operation = null;
+            operation.Cts.Dispose();
+        }
+    }
+
+    private void CleanupDownloadArtifacts(UpdateOperation operation)
+    {
+        lock (_gate)
+        {
+            // 每个 generation 使用独立 ZIP/SHA/staging 路径；持有状态锁让取消、启动和清理的归属判断保持一致。
+            TryDeleteFile(operation.ZipPath);
+            TryDeleteFile(operation.ShaPath);
+            TryDeleteDirectory(operation.StagingDir);
+        }
+    }
+
+    private static void TryDeleteFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
         try
         {
-            string dir = UpdateDir;
-            if (Directory.Exists(dir))
+            if (File.Exists(path))
             {
-                foreach (string file in Directory.GetFiles(dir))
-                {
-                    string name = Path.GetFileName(file);
-                    if (name.StartsWith("NexusPipeline-v", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-                        || name.EndsWith(".zip.sha256", StringComparison.OrdinalIgnoreCase))
-                    {
-                        try
-                        {
-                            File.Delete(file);
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
+                File.Delete(path);
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[更新] 清理下载残留失败：{ex.Message}");
+            Logger.Warn($"[更新] 清理下载文件失败（{path}）：{ex.Message}");
+        }
+    }
+
+    private static void TryDeleteDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
         }
         try
         {
-            string staging = Path.Combine(UpdateDir, "staging");
-            if (Directory.Exists(staging))
+            if (Directory.Exists(path))
             {
-                Directory.Delete(staging, recursive: true);
+                Directory.Delete(path, recursive: true);
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[更新] 清理 staging 失败：{ex.Message}");
+            Logger.Warn($"[更新] 清理 staging 失败（{path}）：{ex.Message}");
         }
     }
 
@@ -444,9 +603,44 @@ internal sealed class UpdateService
             : (0, 0, 0);
     }
 
+    private UpdateStatusSnapshot BuildSnapshotLocked()
+    {
+        return new UpdateStatusSnapshot(
+            _state,
+            _state == UpdateState.Downloading ? BytesToPercent(_bytesRead, _bytesTotal) : null,
+            _bytesRead,
+            _bytesTotal,
+            _error,
+            CurrentVersion,
+            _latest?.VersionText,
+            _latest?.Prerelease,
+            EffectiveChannel(_settings()),
+            _latest is not null,
+            _latest?.Notes ?? "");
+    }
+
     private static int? BytesToPercent(long bytesRead, long bytesTotal)
     {
         return bytesTotal > 0 ? (int)Math.Clamp(bytesRead * 100 / bytesTotal, 0, 100) : null;
+    }
+
+    private sealed class UpdateOperation
+    {
+        public long Generation { get; }
+        public UpdateState State { get; }
+        public string? ZipPath { get; }
+        public string? ShaPath { get; }
+        public string? StagingDir { get; }
+        public CancellationTokenSource Cts { get; } = new();
+
+        public UpdateOperation(long generation, UpdateState state, string? zipPath, string? shaPath, string? stagingDir)
+        {
+            Generation = generation;
+            State = state;
+            ZipPath = zipPath;
+            ShaPath = shaPath;
+            StagingDir = stagingDir;
+        }
     }
 }
 
@@ -459,11 +653,12 @@ internal sealed record UpdateStatusSnapshot(
     string Error,
     string Current,
     string? Latest,
+    bool? LatestPrerelease,
     string Channel,
     bool Available,
     string Notes);
 
-/// <summary>应用请求结果：Succeeded=true 表示已受理（Deferred 区分立即/下次启动）；busy/not-ready 为门禁拒绝。</summary>
+/// <summary>应用请求结果：Succeeded=true 表示已受理（Deferred 区分立即/下次启动）。</summary>
 internal sealed record UpdateApplyResult(bool Succeeded, bool Deferred, string? Code, string? Error)
 {
     public static UpdateApplyResult Ok(bool deferred) => new(true, deferred, null, null);

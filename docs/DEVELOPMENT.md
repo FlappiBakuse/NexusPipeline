@@ -97,7 +97,7 @@ System Smoke 需要管理员终端并依赖已完成的 `build.cmd`：
 tests\system\run-system.cmd
 ```
 
-时间缩放只用于明确依赖宿主等待的专项脚本；判断脚本单次执行 30 秒上限保持真实墙钟语义。测试运行时数据位于 `tests/e2e/runtime/`、`tests/system/runtime/` 或 `tests/stress/runtime/`，日期断言使用项目现有 `localDate()` 规则。`tests/e2e/FLAKE-LEDGER.md` 保留历史记录，`flake-monitor.mjs` 按需启动。
+时间缩放只用于明确依赖宿主等待的专项脚本；判断脚本单次执行 30 秒上限保持真实墙钟语义。测试运行时数据位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/stress/runtime/` 或 `tests/legacy/runtime/`，日期断言使用项目现有 `localDate()` 规则。历史 flake 记录位于 `tests/legacy/history/FLAKE-LEDGER.md`，诊断工具 `tests/stress/diagnostics/flake-monitor.mjs` 按需启动。
 
 ## 5. 调试技巧
 
@@ -154,6 +154,6 @@ tests\system\run-system.cmd
 | 端口被占用自动 +1 | 预期行为；检查是否有旧实例残留 |
 | 重构建报 exe 锁定 | `Get-Process nexus-pipeline \| Stop-Process` 后重试 |
 | Web 打不开 / ECONNREFUSED | 确认服务在运行、端口正确、轻量模式未开启（轻量模式无 Web） |
-| 测试全量级联失败 | 服务残留：`tests/e2e/runtime` 清理残留进程后再跑；检查 `tests/e2e/flake-monitor-logs/` 采样 |
+| 测试全量级联失败 | 服务残留：按对应 suite 清理 `tests/e2e/runtime`、`tests/system/runtime*`、`tests/stress/runtime` 或 `tests/legacy/runtime` 的残留进程；需要时检查 `tests/stress/diagnostics/flake-monitor-logs/` 采样 |
 | 脚本判定异常 | 检查 `logs/` 管理器日志与 `history/` 按尝试分批日志；判断脚本模式看 JudgeError 输出 |
 | 配置还原异常 | `data/{脚本Id}/{UserId}/` 的 `.session` 标记与 swap-backup；重启服务按当前用户绑定触发自愈 |

@@ -1,4 +1,5 @@
 using NexusPipeline.Cli;
+using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
@@ -23,6 +24,8 @@ internal static class StartupPipeline
         {
             return;
         }
+
+        WriteServicePid();
 
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.ReloadSettings();
@@ -59,6 +62,7 @@ internal static class StartupPipeline
 
         WaitForSafeShutdown();
         Bootstrap.Shutdown(web);
+        ClearServicePid();
         Logger.Info("NexusPipeline 已退出。");
     }
 
@@ -162,6 +166,7 @@ internal static class StartupPipeline
         {
             return 0;
         }
+        WriteServicePid();
         ApplicationHost.IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
         // 崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
@@ -170,6 +175,7 @@ internal static class StartupPipeline
         WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
         if (web is null)
         {
+            ClearServicePid();
             Console.WriteLine("[错误] 无法启动 Web 服务（端口均被占用）。");
             return 1;
         }
@@ -213,7 +219,35 @@ internal static class StartupPipeline
         }
         WaitForSafeShutdown();
         Bootstrap.Shutdown(web);
+        ClearServicePid();
         return 0;
+    }
+
+    private static void WriteServicePid()
+    {
+        try
+        {
+            File.WriteAllText(AppPaths.ServicePidPath, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[运行时] 写入 service.pid 失败：{ex.Message}");
+        }
+    }
+
+    private static void ClearServicePid()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.ServicePidPath))
+            {
+                File.Delete(AppPaths.ServicePidPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[运行时] 清理 service.pid 失败：{ex.Message}");
+        }
     }
 
     /// <summary>启动时按设置自动检查一次更新（仅检查不下载，；复用状态机互斥，失败仅告警）。</summary>

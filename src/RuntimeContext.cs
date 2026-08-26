@@ -69,7 +69,8 @@ internal class RuntimeContext
             () => Settings,
             AppPaths.AppRoot,
             () => Bootstrap.CanRequestDirectExit(out _),
-            Bootstrap.TryRequestUpdateExit));
+            Bootstrap.TryRequestUpdateExit,
+            () => Bootstrap.TryAcquireUpdateMaintenanceLease()));
         _services = collection.BuildServiceProvider();
     }
 

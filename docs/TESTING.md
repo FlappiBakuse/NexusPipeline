@@ -75,13 +75,13 @@ System Smoke 需要管理员终端和已完成的 `build.cmd`：
 tests\system\run-system.cmd
 ```
 
-按需运行压力工具：
+确定性的执行状态机套件由 System Smoke 统一入口运行；随机压力工具按需运行：
 
 ```powershell
-node tests\stress\chaos-queue.mjs
+node tests\legacy\chaos\chaos-queue.mjs
 ```
 
-Judge 的业务规则由 xUnit replacement 覆盖；真实解释器边界由 `tests/system/judge-smoke.mjs` 覆盖。历史专项 harness 保留在 `tests/stress/legacy/` 供迁移核对和专项诊断使用。
+Judge 的业务规则由 xUnit replacement 覆盖；真实解释器边界由 `tests/system/judge-smoke.mjs` 覆盖；执行状态机的确定性真实进程场景由 `tests/system/execution-resilience.mjs` 覆盖。完整历史 E2E、Judge、Chaos 和 flake 资料统一保留在 `tests/legacy/`，供迁移核对和专项诊断使用。
 
 ## Playwright Smoke 约束
 
@@ -107,15 +107,16 @@ CI 顺序：
 2. PowerShell 枚举 `tests/web/*.test.mjs` 后运行 `node --test`，并执行 `node --check`；
 3. `build.cmd`；
 4. Playwright UI Smoke。
+5. 独立 `system-tests` job 执行 `build.cmd` 与 `tests/system/run-system.cmd`，不加载 legacy。
 
-发布前增加 System Smoke，并记录 Unit/Component、Web Logic、UI Smoke、System Smoke 的实际通过数与耗时。Stress/Chaos 按修改范围和专项风险手动运行，结果写入验证记录。
+发布前增加 System Smoke，并记录 Unit/Component、Web Logic、UI Smoke、System Smoke 的实际通过数与耗时。System Smoke 必须包含 runtime、judge、execution-resilience、emulator、update 五个阶段；Stress/Chaos 按修改范围和专项风险手动运行，结果写入验证记录。
 
 `NEXUS_CI` 不再划分两套隐式 Playwright 集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。
 
 ## Flake 处理
 
-flake 视为测试或产品同步问题。处理顺序为：降低测试层级、去除共享状态、注入时钟或外部端口、缩小跨层场景。`tests/e2e/FLAKE-LEDGER.md` 保留历史记录，`flake-monitor.mjs` 只在诊断或专项调查时启动。
+flake 视为测试或产品同步问题。处理顺序为：降低测试层级、去除共享状态、注入时钟或外部端口、缩小跨层场景。历史记录位于 `tests/legacy/history/FLAKE-LEDGER.md`，`tests/stress/diagnostics/flake-monitor.mjs` 只在诊断或专项调查时启动；新 flake 写入当版本 verification section 或 issue。
 
 ## 测试隔离与清理
 
-运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime/` 或 `tests/stress/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，删除 PID、停止信号、临时 runtime、test-results 和专项日志。
+运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/stress/runtime/` 或历史工具专用的 `tests/legacy/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，删除 PID、停止信号、临时 runtime、test-results 和专项日志。

@@ -9,6 +9,7 @@ internal enum ExecutionAdmissionFailureCode
     PendingSystemAction,
     ExecutionGroupClosing,
     ProcessConflict,
+    HostMaintenance,
 }
 
 internal enum AdmissionFailureDisposition
@@ -30,7 +31,8 @@ internal sealed record ExecutionAdmissionFailure(
             or ExecutionAdmissionFailureCode.ResourceConflict
             or ExecutionAdmissionFailureCode.PendingSystemAction
             or ExecutionAdmissionFailureCode.ExecutionGroupClosing
-            or ExecutionAdmissionFailureCode.ProcessConflict => AdmissionFailureDisposition.Transient,
+            or ExecutionAdmissionFailureCode.ProcessConflict
+            or ExecutionAdmissionFailureCode.HostMaintenance => AdmissionFailureDisposition.Transient,
         _ => AdmissionFailureDisposition.Permanent,
     };
 
@@ -43,6 +45,7 @@ internal sealed record ExecutionAdmissionFailure(
         ExecutionAdmissionFailureCode.PendingSystemAction => "pending_system_action",
         ExecutionAdmissionFailureCode.ExecutionGroupClosing => "execution_group_closing",
         ExecutionAdmissionFailureCode.ProcessConflict => "process_conflict",
+        ExecutionAdmissionFailureCode.HostMaintenance => "host_maintenance",
         _ => "execution_admission_failed",
     };
 }

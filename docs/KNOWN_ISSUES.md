@@ -120,6 +120,28 @@
 
 **v0.9.9 回归保护**：`UserIdBindingRegressionTests.cs` 覆盖 UserId 目录不采纳旧用户名现场、恢复扫描白名单、脚本级运行冲突、快照失败回滚和冻结计划精确匹配。
 
+## v0.10.1：Correctness & Update Safety Hotfix
+
+| 编号 | 已知问题 | 稳定复现/确认方式 | 代码位置 | 归属 |
+|---|---|---|---|---|
+| U01 | preserve 用户自加插件后失败回滚会因 backup 内容被搬走而永久丢失插件 | `PreserveUserPlugins` 将 backup 子目录 Move 到新安装后再触发后续失败 | `src/Services/Update/UpdateApply.cs` | v0.10.1 |
+| U02 | rollback 失败后 `CleanupAfterFailure` 删除 journal、task 和 version marker，启动无法继续恢复 | rollback 异常路径随后无条件清理更新凭据 | `src/Services/Update/UpdateApply.cs` | v0.10.1 |
+| U03 | backup 删除吞错导致 Retry fail-open，残留旧 backup 可污染下一次事务 | `Retry(() => TryDeleteDir(...))` 中的删除函数吞掉异常 | `src/Services/Update/UpdateApply.cs` | v0.10.1 |
+| U04 | Immediate Apply 检查空闲与退出之间存在 admission TOCTOU | `_canApply()` 与 worker/宿主退出之间存在可提交新任务的窗口 | `src/Services/Update/UpdateService.cs`, `src/Bootstrap.cs`, `src/Services/Execution/ExecutionStateStore.cs` | v0.10.1 |
+| U05 | 系统繁忙时 Defer Apply 也被同一 idle 门禁拒绝 | `RequestApply` 在区分 defer 前统一执行 `_canApply()` | `src/Services/Update/UpdateService.cs` | v0.10.1 |
+| U06 | apply worker 拉起失败仍可能写入/保留 apply 状态并请求宿主退出 | `LaunchApplyWorker` 返回值未被调用方作为事务结果处理 | `src/Services/Update/UpdateService.cs`, `src/Services/Update/UpdateApply.cs` | v0.10.1 |
+| U07 | Checking 取消未取消真实 HTTP 请求，旧检查完成后可覆盖新操作状态 | `CheckAsync` 使用 `CancellationToken.None`，完成回调没有 generation | `src/Services/Update/UpdateService.cs` | v0.10.1 |
+| U08 | 取消下载后立即重下，旧 worker 的全局 cleanup 可删除新 staging/下载包 | `CancelDownload` 立即回 Idle，旧 finally 使用全局 `CleanupDownloadArtifacts` | `src/Services/Update/UpdateService.cs` | v0.10.1 |
+| U09 | CheckAsync 可覆盖 Ready/Applying，破坏已就绪或正在应用的状态 | 状态守卫只排除 Checking/Downloading | `src/Services/Update/UpdateService.cs` | v0.10.1 |
+| U10 | ZIP/SHA scheme、SHA host 和 redirect destination 校验不完整 | 下载仅检查 ZIP host，HttpClient 默认跟随重定向 | `src/Services/Update/UpdateCatalog.cs`, `UpdatePackage.cs` | v0.10.1 |
+| U11 | 仅限制压缩包下载大小，未限制解压总量、条目数量和单条目大小 | `Extract` 直接逐条 `ExtractToFile` | `src/Services/Update/UpdatePackage.cs` | v0.10.1 |
+| U12 | 下载期间 bytesRead/bytesTotal 未持续更新 | `UpdatePackage.DownloadAsync` 没有 progress callback | `src/Services/Update/UpdateService.cs`, `UpdatePackage.cs` | v0.10.1 |
+| U13 | API `prerelease` 字段表达“存在 latest”，不是 release 的真实 prerelease 值 | `ApiUpdateHandler` 使用 `status.Latest is not null` | `src/Web/ApiUpdateHandler.cs`, `UpdateCatalog.cs` | v0.10.1 |
+
+修复状态：已完成。以上条目均按报告中的 v0.10.1 Definition of Done 完成代码修复和回归保护。
+
+**v0.10.1 验证结果（2026-08-26）**：Unit/Component 281/281；Web Logic 8/8；UI Smoke 17/17；System Smoke runtime 5/5、judge 2/2、execution-resilience 10/10、emulator 2/2、update 3/3；Release build 通过。完整更新故障注入矩阵仍作为后续专项验证项，当前核心路径由 Component、System Smoke 和 UI Smoke 覆盖。
+
 ## 已有保留项与语义确认
 
 | 编号 | 内容 | 决策 |

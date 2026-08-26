@@ -9,7 +9,7 @@
  *  - BUG 验证：新文件残留（B-2）/ 路径逃逸（B-3）/ marker 后重复触发（B-4）/ PostRun 覆盖通知文本（B-5）/
  *    API 空代码保存（B-8）/ 判断脚本超时与容错
  *
- * 运行：node tests/stress/legacy/judge-scenarios.mjs   （先跑 build.cmd；按需运行）
+ * 运行：node tests/legacy/judge/judge-scenarios.mjs   （先跑 build.cmd；按需运行）
  */
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
@@ -19,7 +19,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(__dirname, "..", "..");
+const projectRoot = path.resolve(__dirname, "..", "..", "..");
 const releaseDir = path.join(projectRoot, "release");
 const runtimeDir = path.join(__dirname, "..", "runtime");
 const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
@@ -99,7 +99,7 @@ async function waitNoRunning(timeoutMs = 120000, intervalMs = 300) {
 }
 
 function setupRuntime() {
-  // 清理上次残留的压力测试服务（占用 58731），仅杀 tests/stress/runtime 目录下的 nexus-pipeline.exe。
+  // 清理上次残留的压力测试服务（占用 58731），仅杀 tests/legacy/runtime 目录下的 nexus-pipeline.exe。
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
       "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\stress\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],

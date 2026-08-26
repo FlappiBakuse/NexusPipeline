@@ -1,6 +1,7 @@
 using System.Net;
 using NexusPipeline.Web;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
@@ -83,6 +84,12 @@ internal static class Bootstrap
             return false;
         }
         return true;
+    }
+
+    internal static (HostMaintenanceLease? Lease, string? Reason) TryAcquireUpdateMaintenanceLease()
+    {
+        HostMaintenanceLease? lease = RuntimeContext.Instance.Center.TryAcquireMaintenanceLease(out string reason);
+        return (lease, lease is null ? reason : null);
     }
 
     internal static bool TryRequestDirectExit()

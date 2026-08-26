@@ -20,7 +20,7 @@ import {
 } from "./runtime-helper.mjs";
 
 /**
- * 内建更新 System Smoke（v0.10.0）：在隔离安装副本上验证 apply-update 的
+ * 内建更新 System Smoke（v0.10.1）：在隔离安装副本上验证 apply-update 的
  * 「备份 → 交换 → 重拉」、config/history/用户自加插件保留、启动收尾清理、失败回滚与 defer 自动应用。
  * 运行方式：管理员终端执行 `$env:NEXUS_SYSTEM_SMOKE="1"; node --test tests/system/update-smoke.mjs`。
  */
@@ -34,11 +34,11 @@ const updateDir = path.join(runtimeDir, ".nxp-update");
 const backupDir = path.join(runtimeDir, ".nxp-backup", "previous");
 const versionFile = path.join(runtimeDir, ".nxp-version");
 const taskFile = path.join(updateDir, "task.json");
-const stagingRoot = path.join(updateDir, "staging", "0.10.1");
+const stagingRoot = path.join(updateDir, "staging", "0.10.2");
 
 function writeTask(mode, stagedDir = stagingRoot) {
   fs.mkdirSync(updateDir, { recursive: true });
-  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: "0.10.1", StagedDir: stagedDir }), "utf8");
+  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: "0.10.2", StagedDir: stagedDir }), "utf8");
 }
 
 /** 从发布构建构造「新版本」staging：exe + wwwroot（release 干净源，无旧安装标记）+ plugins（含运行时保留观察物）。 */
@@ -47,7 +47,7 @@ function prepareStaging() {
   fs.mkdirSync(stagingRoot, { recursive: true });
   fs.copyFileSync(runtimeExe, path.join(stagingRoot, "nexus-pipeline.exe"));
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(stagingRoot, "wwwroot"), { recursive: true });
-  fs.writeFileSync(path.join(stagingRoot, "wwwroot", "new-version-marker.txt"), "v0.10.1", "utf8");
+  fs.writeFileSync(path.join(stagingRoot, "wwwroot", "new-version-marker.txt"), "v0.10.2", "utf8");
   if (fs.existsSync(path.join(runtimeDir, "plugins"))) {
     fs.cpSync(path.join(runtimeDir, "plugins"), path.join(stagingRoot, "plugins"), { recursive: true });
   }
@@ -64,15 +64,46 @@ function prepareLegacyInstall() {
   fs.writeFileSync(path.join(runtimeDir, "plugins", "user-custom", "note.txt"), "keep-me", "utf8");
 }
 
-function runApplyWorker(stagedDir) {
+async function runApplyWorker(stagedDir) {
   // stdio 必须 ignore：apply-update 成功路径会用 Start-Process 重拉宿主，
   // 重拉的宿主若继承本 spawnSync 的管道写端，spawnSync 会永远等待管道 EOF 而卡死。
-  const result = spawnSync(runtimeExe, ["apply-update", "--staged", stagedDir], {
-    cwd: runtimeDir,
-    stdio: "ignore",
-    windowsHide: true,
-  });
-  return result;
+  // worker 不能直接使用安装目录中的目标 exe，否则 worker 自身会锁住待替换镜像。
+  const workerExe = path.join(runtimeDir, `.nxp-update-worker-test-${Date.now()}-${Math.random().toString(36).slice(2)}.exe`);
+  const resultFile = `${workerExe}.result`;
+  const scriptPath = `${workerExe}.ps1`;
+  const psLiteral = value => String(value).replaceAll("'", "''");
+  fs.copyFileSync(runtimeExe, workerExe);
+  fs.rmSync(resultFile, { force: true });
+  try {
+    const workerScript = [
+      `$p=Start-Process -FilePath '${psLiteral(workerExe)}' -ArgumentList @('apply-update','--staged','${psLiteral(stagedDir)}') -WorkingDirectory '${psLiteral(runtimeDir)}' -WindowStyle Hidden -PassThru`,
+      `$p.WaitForExit()`,
+      `Set-Content -LiteralPath '${psLiteral(resultFile)}' -Value $p.ExitCode -Encoding ascii`,
+    ].join("; ");
+    fs.writeFileSync(scriptPath, workerScript, "utf8");
+    const command = `$p=Start-Process -FilePath 'pwsh.exe' -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File','${psLiteral(scriptPath)}') -Verb RunAs -WindowStyle Hidden -PassThru; [Console]::WriteLine($p.Id)`;
+    const launch = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    const deadline = Date.now() + 120000;
+    while (!fs.existsSync(resultFile) && Date.now() < deadline) {
+      await sleep(100);
+    }
+    const status = fs.existsSync(resultFile)
+      ? Number(fs.readFileSync(resultFile, "utf8").trim())
+      : null;
+    return {
+      status: Number.isInteger(status) ? status : null,
+      signal: null,
+      error: launch.error,
+      stderr: launch.stderr,
+    };
+  } finally {
+    fs.rmSync(workerExe, { force: true, maxRetries: 20, retryDelay: 250 });
+    fs.rmSync(resultFile, { force: true, maxRetries: 20, retryDelay: 250 });
+    fs.rmSync(scriptPath, { force: true, maxRetries: 20, retryDelay: 250 });
+  }
 }
 
 function logTail() {
@@ -134,12 +165,18 @@ test("apply-update：备份→交换→保留用户插件与数据→重拉宿�
   prepareStaging();
   writeTask("apply");
 
-  const result = runApplyWorker(stagingRoot);
+  const result = await runApplyWorker(stagingRoot);
 
-  assert.equal(result.status, 0, `apply-update 退出码非 0：${result.stderr}`);
+  const resultSummary = JSON.stringify({
+    status: result.status,
+    signal: result.signal,
+    error: result.error?.message,
+    errno: result.error?.code,
+  });
+  assert.equal(result.status, 0, `apply-update 退出码非 0：${resultSummary}`);
   // 交换完成：新 wwwroot 标记到位、旧标记消失、用户自加插件保留、数据目录原样。
   // （versionFile/backup 是交换后到收尾前的中间态，重拉宿主启动即清理，不做时序性断言）
-  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.1");
+  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.2");
   assert.equal(fs.existsSync(path.join(runtimeDir, "wwwroot", "old-version-marker.txt")), false);
   assert.equal(fs.existsSync(path.join(runtimeDir, "plugins", "user-custom", "note.txt")), true);
   assert.equal(fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").includes("58731"), true);
@@ -186,7 +223,7 @@ test("defer 标记：下次启动自动应用并重拉服务", { skip }, async (
   startRuntime(["web"]);
   await waitForService(baseUrl, 90000);
 
-  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.1");
+  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "new-version-marker.txt"), "utf8"), "v0.10.2");
   await waitFor(() => !fs.existsSync(versionFile), 30000);
   assertMarkersCleaned();
   const audit = logTail();

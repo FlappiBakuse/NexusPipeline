@@ -1,7 +1,7 @@
 # Flake 台账（v0.6.9+）
 
 **用途**：记录测试系统 flake 现象 / 复现条件 / 根因归属 / 处置，每次全量回归后更新，直至清零。
-**配套工具**：`tests/e2e/flake-monitor.mjs`（进程/端口监控采样器，与全量回归并行运行，输出 `tests/e2e/test-results/flake-monitor.log`）。
+**配套工具**：`tests/stress/diagnostics/flake-monitor.mjs`（进程/端口监控采样器，按需与专项回归并行运行，输出 `tests/stress/diagnostics/flake-monitor-logs/flake-monitor.log`）。
 
 | # | 现象 | 复现条件 | 根因 | 处置（v0.6.9） | 状态 |
 |---|---|---|---|---|---|

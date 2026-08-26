@@ -70,7 +70,7 @@ function serviceDiagnostics() {
   const lines = ["—— 服务启动诊断 ——"];
   try {
     const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\legacy\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { \"$($_.ProcessId) \" + $_.CreationDate }"],
       { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
     lines.push("runtime nexus-pipeline 进程：" + ((r.stdout || "").trim() || "（无）"));
   } catch { lines.push("runtime nexus-pipeline 进程：查询失败"); }
@@ -173,11 +173,11 @@ export function latestHistoryDay() {
 }
 
 export function setupRuntime() {
-  // 清理上次残留的测试服务（崩溃/中断遗留仍占用 58731）：仅杀 tests/e2e/runtime 目录下的 nexus-pipeline.exe，
+  // 清理上次残留的测试服务（崩溃/中断遗留仍占用 58731）：仅杀 tests/legacy/runtime 目录下的 nexus-pipeline.exe，
   // 避免 e2e 服务落到 58732 而请求打向残留实例（先跑 judge/chaos 再跑 e2e 的常见工作流踩坑，v0.6.2 修复）。
   try {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\legacy\\runtime\\*' }; if (-not $p -and $env:NEXUS_ELEVATED_SERVICE -eq '1') { $p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
   } catch { /* 清理失败不阻塞（后续 startService 端口 +1 重试兜底） */ }
   fs.rmSync(runtimeDir, { recursive: true, force: true });
@@ -196,7 +196,7 @@ export function setupRuntime() {
   // v0.7.0+：模拟器 e2e 用 stub adb（fixtures 复制到隔离目录，经 NEXUS_ADB_EXE 注入服务进程）。
   const stubDir = path.join(runtimeDir, "adb-stub");
   fs.mkdirSync(stubDir, { recursive: true });
-  fs.copyFileSync(path.join(__dirname, "..", "tests", "fixtures", "adb-stub.cmd"), path.join(stubDir, "adb-stub.cmd"));
+  fs.copyFileSync(path.join(projectRoot, "tests", "e2e", "tests", "fixtures", "adb-stub.cmd"), path.join(stubDir, "adb-stub.cmd"));
   fs.writeFileSync(path.join(stubDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
   try {
     fs.rmSync(path.join(stubDir, "calls.log"), { force: true });
@@ -204,7 +204,7 @@ export function setupRuntime() {
   // v0.9.5+：MuMuManager stub 只把 16416 映射为 MuMu，16384 等端口仍验证通用 ADB 路由。
   const mumuDir = path.join(runtimeDir, "mumu-stub");
   fs.mkdirSync(mumuDir, { recursive: true });
-  fs.copyFileSync(path.join(__dirname, "..", "tests", "fixtures", "mumu-manager-stub.cmd"), path.join(mumuDir, "mumu-manager-stub.cmd"));
+  fs.copyFileSync(path.join(projectRoot, "tests", "e2e", "tests", "fixtures", "mumu-manager-stub.cmd"), path.join(mumuDir, "mumu-manager-stub.cmd"));
   fs.writeFileSync(path.join(mumuDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
   fs.rmSync(path.join(mumuDir, "mumu-calls.log"), { force: true });
   fs.rmSync(path.join(mumuDir, "stopped.flag"), { force: true });
@@ -302,7 +302,7 @@ export async function ensureService() {
   await waitForService();
 }
 
-/** 强杀 tests/e2e/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。
+/** 强杀 tests/legacy/runtime 目录下全部 nexus-pipeline 进程（v0.6.5+：自重启后新进程未登记 PID 文件，需按路径清理）。
  *  v0.6.9+：杀后轮询确认进程完全消失（Stop-Process 异步，固定 600ms 等待存在旧进程互斥体未释放的竞态窗口，
  *  曾致后续 startService("web") 因互斥体被占直接退出——F1/F4 级联 flake），确认消失后才返回。 */
 export async function killRuntimeServices(timeoutMs = 15000) {
@@ -337,7 +337,7 @@ export async function killRuntimeServices(timeoutMs = 15000) {
     }
     try {
       const r = spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
+        "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\legacy\\runtime\\*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','"],
         { stdio: ["ignore", "pipe", "ignore"], encoding: "utf8" });
       return (r.stdout || "").trim();
     } catch {
@@ -351,7 +351,7 @@ export async function killRuntimeServices(timeoutMs = 15000) {
       }
     } else {
     spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\e2e\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+      "$p = Get-CimInstance Win32_Process -Filter \"Name='nexus-pipeline.exe'\" | Where-Object { $_.ExecutablePath -like '*tests\\legacy\\runtime\\*' }; $p | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
       { stdio: "ignore" });
     }
   } catch { /* 清理失败不阻塞 */ }

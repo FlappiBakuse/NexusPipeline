@@ -1,8 +1,24 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-26｜ **当前版本**：v0.10.0（Pre-release）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-26｜ **当前版本**：v0.10.1（已发布，Pre-release）｜ **下一开发版本**：待定｜ **发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 CHANGELOG、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题台账见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
+
+---
+
+## v0.10.1：Correctness & Update Safety Hotfix
+
+- [x] 更新事务使用不可变旧版本快照，覆盖用户插件保留、交换故障、回滚故障和启动恢复。
+- [x] 更新 journal 记录事务阶段；回滚未确认成功时保留 backup、journal 和 staging。
+- [x] 修复更新检查/下载取消的 generation 竞态，补齐 Ready、ApplyPending、Applying 的状态迁移约束。
+- [x] Immediate Apply 使用 Host Maintenance Lease 原子冻结执行、编辑和系统操作准入；Defer Apply 忽略当前运行繁忙状态。
+- [x] 统一更新源 URI/重定向校验，增加 SHA 格式、下载进度和归档解压上限。
+- [x] 新增确定性的 execution-resilience System Suite，并把 runtime/judge/execution-resilience/emulator/update 五阶段 System Smoke 接入 CI 与发布门禁。
+- [x] 将历史专项测试收敛到 `tests/legacy/`，保持插件程序集与现有 .NET project identity 不变；更新事务关键恢复路径已由单元/Component 与 update smoke 锁定，故障矩阵的进一步注入点作为后续专项验证保留。
+
+**v0.10.1 开工基线**：`v0.10.0` / `87e39092302c946fe594a32a4a5d71bbc380bbae`；本地恢复点 `backup/v0.10.1-dev`。
+
+**v0.10.1 阶段验证（2026-08-26）**：Unit/Component 281/281；Web Logic 8/8；active Node 脚本语法检查 36 个文件通过；UI Smoke 17/17（4 specs，40.1 秒）；System Smoke 五阶段全部通过：runtime 5/5、judge 2/2、execution-resilience 10/10、emulator 2/2、update 3/3；Release build 通过并保留项目原有 3 条 nullable 警告。更新事务核心恢复路径已由 Component、System Smoke 和 UI Smoke 锁定，完整故障注入矩阵作为后续专项验证保留。
 
 ---
 
@@ -34,7 +50,7 @@
 - [x] 将限额、用户/脚本/队列 mutation、判定、配置事务、调度和模拟器路由等确定性契约下沉到 xUnit 或 Node 内建测试。
 - [x] 将 Playwright 收敛为 12～18 个关键用户路径，最终不超过 20 个 testcase。
 - [x] 新增不依赖 Playwright 的 `tests/system/`，覆盖进程、HTTP、解释器和模拟器 driver 的少量跨层契约。
-- [x] 将 `judge-scenarios` 迁移为确定性测试与 System Smoke；将 `chaos-queue` 调整为按需 stress/soak 工具，移出默认 CI 与发布硬门禁。
+- [x] 将 `judge-scenarios` 与 `chaos-queue` 归档到 `tests/legacy/`；当前确定性执行状态机保护由 `tests/system/execution-resilience.mjs` 与 System Smoke 承担，历史工具移出默认 CI 与发布硬门禁。
 - [x] 重写 CI、开发文档和测试命令，取消 `NEXUS_CI` 双测试集与默认 flake 自动修复路径。
 - [x] 完成构建、分层测试和发布前 System Smoke 验证，记录最终测试规模与耗时。
 
@@ -120,7 +136,7 @@
 
 - [ ] 在真实机器人环境完成钉钉/飞书签名推送验证。
 - [ ] 评估 judge、chaos 等专项测试进入 CI 的执行时长与资源隔离方案。
-- [ ] 持续维护 `tests/e2e/FLAKE-LEDGER.md`，记录每次全量回归的 flake 现象、根因和处置。
+- [x] 将历史 flake 台账归档到 `tests/legacy/history/FLAKE-LEDGER.md`；新 flake 写入当版本 verification section 或 issue。
 - [ ] 持续维护版本号动态展示、真实计时回归和 Release 资产校验。
 - [ ] 评估模拟器能力与并行调度矩阵的后续扩展边界。
 - [ ] 评估判断脚本宿主接口扩展，如窗口、进程和 HTTP 探针能力。

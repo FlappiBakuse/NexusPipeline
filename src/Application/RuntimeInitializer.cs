@@ -1,6 +1,7 @@
 using NexusPipeline.App.Repositories;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
@@ -28,6 +29,7 @@ internal static class RuntimeInitializer
             return 2;
         }
 
+        UpdateApply.CleanupWorkerImages();
         MigrateLegacyConfig();
         try
         {

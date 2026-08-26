@@ -27,9 +27,9 @@ npx playwright test            # 仅运行 *.smoke.spec.mjs；先跑 build.cmd
 Pop-Location
 ```
 
-- `tests/e2e/runtime/`、`tests/system/runtime/` 与 `tests/stress/runtime/` 是隔离运行时目录（复制 release exe、wwwroot、plugins），**不得污染项目根**；UI Smoke 由 global setup/teardown 各启动和关闭一次服务，System Smoke 使用 `tests/system/runtime-helper.mjs` 管理自身生命周期。
-- Judge 业务规则进入 xUnit，真实 JavaScript/Python 解释器边界进入 `tests/system/judge-smoke.mjs`；旧专项 harness 与 Chaos 压力工具位于 `tests/stress/`，按需运行，不进入默认 CI 或每版本发布硬门禁。
-- `tests/e2e/flake-monitor.mjs` 仅作为按需诊断工具，`tests/e2e/FLAKE-LEDGER.md` 保留历史台账；服务意外退出应直接失败，禁止测试辅助层自动修复并掩盖产品异常。
+- `tests/e2e/runtime/`、`tests/system/runtime*/` 与 `tests/stress/runtime/` 是隔离运行时目录（复制 release exe、wwwroot、plugins），**不得污染项目根**；UI Smoke 由 global setup/teardown 各启动和关闭一次服务，System Smoke 使用 `tests/system/runtime-helper.mjs` 管理自身生命周期。
+- Judge 业务规则进入 xUnit，真实 JavaScript/Python 解释器边界进入 `tests/system/judge-smoke.mjs`；确定性的执行状态机保护由 `tests/system/execution-resilience.mjs` 承担，历史专项 harness 与 Chaos 资产统一位于 `tests/legacy/`，按需运行，不进入默认 CI 或每版本发布硬门禁。
+- `tests/stress/diagnostics/flake-monitor.mjs` 仅作为按需诊断工具，`tests/legacy/history/FLAKE-LEDGER.md` 保留历史台账；服务意外退出应直接失败，禁止测试辅助层自动修复并掩盖产品异常。
 - **加速档测试契约**：测试伪造脚本和判断脚本按 `NEXUS_TIME_SCALE`/`input.timeScale` 同步缩放宿主等待常量；判断脚本 30 秒单次执行上限保持真实墙钟语义。
 - **判断脚本执行上限与解释器解析**：判断脚本单次执行 30 秒上限**不随加速缩放**（v0.6.6+：外部进程冷启动可达数秒，如 Python 首次运行；缩放 30s→3s 会把真实执行误判为超时——曾致 CI e2e 失败）；解释器解析：PATH 跳过 WindowsApps Store 别名 + 常见安装位置兜底，stdin 显式重定向（避免继承服务管道句柄挂起）。
 - 测试中日期一律用 `localDate()`（本地时区）；**禁止 `new Date().toISOString()`**（UTC 日期在跨午夜时使历史/日志断言失败——曾踩坑）。
@@ -177,4 +177,4 @@ Pop-Location
 - **提示文字规范（v0.5.4+）**：placeholder/label 说明采用通用路径与参数示例（不出现具体软件/插件名）；不提示配置状态（如访问令牌统一「留空=不修改」）；超长 API/契约说明不放入原生 placeholder，改弹窗内常驻 `muted` 说明（placeholder 仅一行摘要）。
 - **响应式细节（v0.5.4+）**：侧边栏无关闭按钮（关闭靠遮罩点击与路由切换）；toast 手机端 `width: max-content` + `max-width: 50vw`（短文字自适应、长文字限半屏换行）。
 - 粒子效果必须使用独立 `effects/particles.js`，`pointer-events:none`，默认低透明度（v0.3.6 起：粒子点 0.12 / 连线 0.05 / 数量 ≤48 / 连线距离 ≤90px）；必须响应 `prefers-reduced-motion`、页面隐藏和窗口尺寸变化，不得阻塞主业务交互。
-- **测试范围分层（v0.9.8+）**：默认顺序为 `dotnet test`、PowerShell 枚举 `tests/web/*.test.mjs` 后运行 `node --test`、新增 UI Smoke 语法检查、`build.cmd`、Playwright UI Smoke；涉及进程、端口、真实解释器、模拟器 driver 或 managed plugin 的改动，再运行管理员 System Smoke；Judge 旧专项位于 `tests/stress/legacy/` 仅供迁移核对，Chaos 位于 `tests/stress/` 按需运行。UI Smoke 保持四个 spec、总 testcase 不超过 20 个；发布前记录各层实际通过数与耗时，并覆盖至少一档手机/平板/电脑视口。
+- **测试范围分层（v0.10.1）**：默认顺序为 `dotnet test`、PowerShell 枚举 `tests/web/*.test.mjs` 后运行 `node --test`、新增 UI Smoke 语法检查、`build.cmd`、Playwright UI Smoke；涉及进程、端口、真实解释器、模拟器 driver、managed plugin、执行状态机或更新事务的改动，再运行管理员 `tests/system/run-system.cmd`。`tests/system/` 的 runtime/judge/execution-resilience/emulator/update 五个阶段进入 PR 与 main CI；`tests/legacy/` 仅供历史核对和专项诊断，Stress/Soak 按需运行。UI Smoke 保持四个 spec、总 testcase 不超过 20 个；发布前记录各层实际通过数与耗时，并覆盖至少一档手机/平板/电脑视口。

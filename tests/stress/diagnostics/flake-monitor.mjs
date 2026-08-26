@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const runtimeDir = path.join(__dirname, "runtime");
+const runtimeDir = path.resolve(__dirname, "..", "runtime");
 // 独立目录存放（playwright 每轮会清空 test-results/，放那里会被删）
 const resultsDir = path.join(__dirname, "flake-monitor-logs");
 const logFile = path.join(resultsDir, "flake-monitor.log");
@@ -105,7 +105,7 @@ fs.mkdirSync(resultsDir, { recursive: true });
 fs.writeFileSync(logFile, "", "utf8");
 try { fs.rmSync(stopFile, { force: true }); } catch { /* 忽略 */ }
 emit("BOOT", `flake 监控采样器启动（runtime=${runtimeDir}，端口 ${PORT}，500ms 采样）`);
-emit("BOOT", "停止方式：touch tests/e2e/flake-monitor-logs/flake-monitor.stop 或 Ctrl+C");
+emit("BOOT", "停止方式：touch tests/stress/diagnostics/flake-monitor-logs/flake-monitor.stop 或 Ctrl+C");
 
 const stopTimer = setInterval(() => {
   if (fs.existsSync(stopFile)) {

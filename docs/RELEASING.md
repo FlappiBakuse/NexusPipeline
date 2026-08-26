@@ -109,5 +109,5 @@ SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
 
 - 更新 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) 台账（本版修复项状态 → 已修复）；
 - 更新 [ROADMAP.md](ROADMAP.md)（版本状态勾选）；
-- 更新 `tests/e2e/FLAKE-LEDGER.md`（发布前回归的 flake 记录）；
+- 将本次发布的 flake 或环境异常写入版本 verification section 或 issue；历史 flake 资料保留在 `tests/legacy/history/FLAKE-LEDGER.md`，发布流程不再追加该历史台账；
 - 确认 CHANGELOG.md 已含本版条目（Keep a Changelog 规范，见 [CHANGELOG.md](../CHANGELOG.md)）。

@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.1（Pre-release）
+
+### 更新安全与恢复
+
+- 更新事务使用完整旧版本 Copy 快照；用户自加插件通过复制保留，commit 前 backup 保持完整。
+- journal 记录 Deferred、ApplyRequested、BackupReady、Swap、Commit、RollbackPending 等阶段；回滚未确认成功时保留 journal、backup 和 staging，启动流程继续恢复。
+- Immediate Apply 使用 Host Maintenance Lease 原子冻结执行、编辑和系统操作准入；Defer Apply 允许当前运行继续完成。
+- 更新检查与下载使用真实 CancellationToken、操作 generation 和显式 FSM，陈旧操作无法改写新操作状态。
+- 自定义更新源统一执行 manifest、ZIP、SHA 和重定向 URI 策略；下载进度、SHA-256 格式、归档条目/容量/压缩比限制完成闭环，API 使用 manifest 的真实 prerelease 字段。
+
+### 测试与工程治理
+
+- 新增确定性的 `tests/system/execution-resilience.mjs`，覆盖 ER01–ER10 真实进程/文件系统/异步执行场景；`run-system.cmd` 纳入 runtime、judge、execution-resilience、emulator、update 五阶段。
+- CI 新增独立 Windows `system-tests` job，PR 与 main push 均执行 System Smoke。
+- 历史 E2E、Judge、Chaos 和 flake 资料统一迁入 `tests/legacy/`；诊断采样器归档到 `tests/stress/diagnostics/`。
+- 阶段验证：Unit/Component 281/281、Web Logic 8/8、UI Smoke 17/17、System Smoke runtime 5/5 + judge 2/2 + execution-resilience 10/10 + emulator 2/2 + update 3/3；Release build 通过，保留项目原有 3 条 nullable 警告。
+
+## v0.10.0（Pre-release）
 ## v0.10.0（Pre-release）
 
 ### 内建更新（设置 → 更新）

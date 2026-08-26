@@ -6,7 +6,11 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
 export const releaseDir = path.join(projectRoot, "release");
-export const runtimeDir = path.join(here, "runtime");
+const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
+if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
+  throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
+}
+export const runtimeDir = path.join(here, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const baseUrl = "http://127.0.0.1:58731/";
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
@@ -28,7 +32,9 @@ export function isElevated() {
 }
 
 export function prepareRuntime() {
-  fs.rmSync(runtimeDir, { recursive: true, force: true });
+  // 提权服务退出后，Windows 可能在极短窗口内仍持有 exe/日志句柄；这是运行时清理，
+  // 使用 fs.rm 的有界句柄重试完成目录隔离，不影响测试断言或业务重试语义。
+  fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) {
@@ -55,11 +61,22 @@ function powershellLiteral(value) {
 function runtimePids() {
   const filter = powershellLiteral(runtimeDir + "\\");
   const command = `$p = Get-CimInstance Win32_Process -Filter "Name='nexus-pipeline.exe'" | Where-Object { $_.ExecutablePath -like '${filter}*' }; ($p | ForEach-Object { $_.ProcessId }) -join ','`;
+  const markerPath = path.join(runtimeDir, "service.pid");
+  const markerPids = [];
+  try {
+    const markerPid = Number(fs.readFileSync(markerPath, "utf8").trim());
+    if (Number.isInteger(markerPid) && markerPid > 0) {
+      // 跨完整性级别下 process.kill(pid, 0) 可能返回 EPERM，即使进程真实存在；
+      // service.pid 由目标 runtime 写入，交给精确 taskkill 处理，避免误判为已退出。
+      markerPids.push(markerPid);
+    }
+  } catch {
+  }
   try {
     const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
-    return (result.stdout || "").trim().split(/\s*,\s*/).filter(Boolean).map(Number);
+    return [...new Set([...markerPids, ...(result.stdout || "").trim().split(/\s*,\s*/).filter(Boolean).map(Number)])];
   } catch {
-    return [];
+    return markerPids;
   }
 }
 
@@ -68,19 +85,27 @@ export function isRuntimeAlive(pid) {
 }
 
 function killRuntimeProcesses() {
+  const markerPath = path.join(runtimeDir, "service.pid");
+  let markerPid = 0;
+  try {
+    markerPid = Number(fs.readFileSync(markerPath, "utf8").trim());
+  } catch {
+  }
   for (const pid of runtimePids()) {
-    killPid(pid);
+    if (killPid(pid) && pid === markerPid) {
+      fs.rmSync(markerPath, { force: true });
+    }
   }
 }
 
 function killPid(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return;
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   if (process.env.NEXUS_SYSTEM_SMOKE_ELEVATED === "1") {
     const command = `$p=Start-Process -FilePath 'taskkill.exe' -ArgumentList @('/PID','${pid}','/T','/F') -Verb RunAs -WindowStyle Hidden -Wait -PassThru; [Console]::WriteLine($p.ExitCode)`;
-    spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
-    return;
+    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-Command", command], { encoding: "utf8", windowsHide: true });
+    return result.status === 0 || String(result.stdout || "").trim().endsWith("0");
   }
-  spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+  return spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }).status === 0;
 }
 
 function startElevatedRuntime(args, env) {

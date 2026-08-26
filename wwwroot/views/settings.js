@@ -79,7 +79,7 @@ function renderUpdateStatus(data) {
   const state = data.state || "idle";
   const current = data.current || "—";
   const channelText = data.channel === "stable" ? "稳定版" : "预发布（Pre-release）";
-  let actions = `<button type="button" data-action="update-check" data-testid="update-check">检查更新</button>`;
+  let actions = state === "recoverypending" ? "" : `<button type="button" data-action="update-check" data-testid="update-check">检查更新</button>`;
   if (data.available && state === "idle") {
     actions += ` <button type="button" class="primary" data-action="update-download" data-testid="update-download">下载更新 v${esc(data.latest)}</button>`;
   }
@@ -102,7 +102,9 @@ function renderUpdateStatus(data) {
   if (state === "checking") stateText = '<p class="muted helper-copy">正在检查更新...</p>';
   else if (state === "downloading") stateText = '<p class="muted helper-copy">正在下载并校验更新包...</p>';
   else if (state === "ready") stateText = '<p class="muted helper-copy">更新已就绪，应用前请确认没有正在运行的任务。</p>';
-  else if (state === "applying") stateText = '<p class="muted helper-copy">正在应用更新，服务即将重启...</p>';
+  else if (state === "applypending") stateText = '<p class="muted helper-copy">更新已登记，将在下次启动时应用。</p>';
+ else if (state === "applying") stateText = '<p class="muted helper-copy">正在应用更新，服务即将重启...</p>';
+  else if (state === "recoverypending") stateText = '<p class="callout callout-warning">检测到未完成的更新恢复现场，请重启服务完成恢复后再检查更新。</p>';
   else if (state === "idle" && data.available) stateText = `<p class="muted helper-copy">发现新版本 v${esc(data.latest)}${data.prerelease ? "（Pre-release）" : ""}。</p>`;
   else if (state === "idle" && !data.available && data.error) stateText = `<p class="callout callout-warning">检查失败：${esc(data.error)}</p>`;
   else if (state === "idle") stateText = '<p class="muted helper-copy">当前已是最新版本。</p>';

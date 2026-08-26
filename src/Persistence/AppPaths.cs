@@ -40,6 +40,9 @@ internal static class AppPaths
     /// <summary>定时 occurrence 与待执行冻结计划的持久化状态。</summary>
     public static readonly string SchedulerStatePath = Path.Combine(AppRoot, "scheduler-state.json");
 
+    /// <summary>常驻 service/web 进程 PID；用于提权测试与异常退出后的精确接管清理。</summary>
+    public static readonly string ServicePidPath = Path.Combine(AppRoot, "service.pid");
+
     /// <summary>内建更新的运行时目录：任务标记、staging、下载包（安装目录内，随安装一起被替换）。</summary>
     public static readonly string UpdateDir = Path.Combine(AppRoot, ".nxp-update");
 

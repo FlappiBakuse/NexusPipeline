@@ -118,7 +118,8 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", zipUrl, shaUrl);
+            bool prerelease = release["prerelease"]?.GetValue<bool>() == true;
+            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", prerelease, zipUrl, shaUrl);
             if (best is null || Compare(version, best.Version) > 0)
             {
                 best = candidate;
@@ -130,20 +131,15 @@ internal static class UpdateCatalog
     /// <summary>更新源校验：必须是 https；回环 http（127.0.0.1/::1/localhost）为测试预留。</summary>
     public static string? ValidateSource(string? sourceUrl)
     {
-        string source = string.IsNullOrWhiteSpace(sourceUrl) ? DefaultSourceUrl : sourceUrl.Trim();
-        if (!Uri.TryCreate(source, UriKind.Absolute, out Uri? uri))
+        try
+        {
+            UpdateSourcePolicy policy = new(sourceUrl);
+            return policy.ValidateManifestUri(policy.SourceUri);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UriFormatException)
         {
             return "更新源地址无效";
         }
-        if (uri.Scheme == Uri.UriSchemeHttps)
-        {
-            return null;
-        }
-        if (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)
-        {
-            return null;
-        }
-        return "更新源必须是 https 地址";
     }
 
     /// <summary>下载主机白名单：默认源只放行 api.github.com / github.com（release 资产实际落在 github.com）；
@@ -154,15 +150,14 @@ internal static class UpdateCatalog
         {
             return false;
         }
-        string source = string.IsNullOrWhiteSpace(sourceUrl) ? DefaultSourceUrl : sourceUrl.Trim();
-        if (Uri.TryCreate(source, UriKind.Absolute, out Uri? src)
-            && string.Equals(src.Host, host, StringComparison.OrdinalIgnoreCase))
+        try
         {
-            return true;
+            return new UpdateSourcePolicy(sourceUrl).IsAllowedHost(host);
         }
-        return string.IsNullOrWhiteSpace(sourceUrl)
-            && (string.Equals(host, "api.github.com", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(host, "github.com", StringComparison.OrdinalIgnoreCase));
+        catch (Exception ex) when (ex is ArgumentException or UriFormatException)
+        {
+            return false;
+        }
     }
 
     public static string Format((int Major, int Minor, int Patch) version)
@@ -177,6 +172,7 @@ internal sealed record ReleaseInfo(
     string Tag,
     string Name,
     string Notes,
+    bool Prerelease,
     string ZipUrl,
     string ShaUrl)
 {

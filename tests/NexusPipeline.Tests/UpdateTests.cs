@@ -70,6 +70,7 @@ public sealed class UpdateCatalogTests
         Assert.Equal("v0.10.1", release!.Tag);
         Assert.Equal("0.10.1", release.VersionText);
         Assert.Equal("更新说明", release.Notes);
+        Assert.True(release.Prerelease);
     }
 
     [Fact]
@@ -145,6 +146,37 @@ public sealed class UpdateCatalogTests
         Assert.NotNull(UpdateCatalog.ValidateSource("http://example.com/releases"));
         Assert.NotNull(UpdateCatalog.ValidateSource("not a url"));
         Assert.NotNull(UpdateCatalog.ValidateSource("ftp://example.com/x"));
+    }
+
+    [Fact]
+    public async Task SourcePolicy_RejectsAssetSchemeAndRedirectEscape()
+    {
+        UpdateSourcePolicy policy = new("https://mirror.example.com/releases");
+
+        Assert.Null(policy.ValidateAssetUri(new Uri("https://mirror.example.com/releases/pkg.zip")));
+        Assert.NotNull(policy.ValidateAssetUri(new Uri("http://mirror.example.com/releases/pkg.zip")));
+        Assert.NotNull(policy.ValidateAssetUri(new Uri("https://evil.example.com/pkg.zip")));
+
+        using var http = new HttpClient(new RedirectEscapeHandler());
+        await Assert.ThrowsAsync<InvalidDataException>(() => policy.GetAsync(
+            http,
+            new Uri("https://mirror.example.com/releases/pkg.zip"),
+            manifest: false,
+            "test",
+            CancellationToken.None));
+    }
+
+    private sealed class RedirectEscapeHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                RequestMessage = request,
+            };
+            response.Headers.Location = new Uri("https://evil.example.com/pkg.zip");
+            return Task.FromResult(response);
+        }
     }
 }
 
@@ -262,6 +294,41 @@ public sealed class UpdatePackageTests
     }
 
     [Fact]
+    public void Extract_RejectsArchiveEntryCountAndCompressionRatio()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string countZip = Path.Combine(root, "count.zip");
+            using (var stream = File.Create(countZip))
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
+            {
+                for (int index = 0; index <= UpdatePackage.MaxArchiveEntries; index++)
+                {
+                    archive.CreateEntry($"empty-{index}/");
+                }
+                using StreamWriter writer = new(archive.CreateEntry("nexus-pipeline.exe").Open(), new UTF8Encoding(false));
+                writer.Write("exe");
+            }
+            Assert.NotNull(UpdatePackage.Extract(countZip, Path.Combine(root, "count-staging")));
+
+            string ratioZip = Path.Combine(root, "ratio.zip");
+            using (var stream = File.Create(ratioZip))
+            using (var archive = new ZipArchive(stream, ZipArchiveMode.Create))
+            {
+                ZipArchiveEntry entry = archive.CreateEntry("nexus-pipeline.exe", CompressionLevel.Optimal);
+                using Stream output = entry.Open();
+                output.Write(new byte[1024 * 1024]);
+            }
+            Assert.NotNull(UpdatePackage.Extract(ratioZip, Path.Combine(root, "ratio-staging")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void VerifySha256_MatchesAndDetectsTampering()
     {
         string root = NewTempDir();
@@ -305,7 +372,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     private bool _exited;
     private List<string> _launched = new();
 
-    public async Task InitializeAsync()
+    public Task InitializeAsync()
     {
         _root = Path.Combine(Path.GetTempPath(), "np-update-l2-" + Guid.NewGuid().ToString("N"));
         _installDir = Path.Combine(_root, "install");
@@ -341,6 +408,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
         _settings = new AppSettings { UpdateChannel = "prerelease" };
         _settings.UpdateSourceUrl = SourceUrl;
+        return Task.CompletedTask;
     }
 
     public Task DisposeAsync()
@@ -403,8 +471,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                 var releases = new JsonArray();
                 var release = new JsonObject
                 {
-                    ["tag_name"] = "v0.10.1",
-                    ["name"] = "v0.10.1",
+                    ["tag_name"] = "v0.10.2",
+                    ["name"] = "v0.10.2",
                     ["draft"] = false,
                     ["prerelease"] = true,
                     ["body"] = "更新说明",
@@ -412,13 +480,13 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                     {
                         new JsonObject
                         {
-                            ["name"] = "NexusPipeline-v0.10.1-win-x64.zip",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.1-win-x64.zip",
+                            ["name"] = "NexusPipeline-v0.10.2-win-x64.zip",
+                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.2-win-x64.zip",
                         },
                         new JsonObject
                         {
-                            ["name"] = "NexusPipeline-v0.10.1-win-x64.zip.sha256",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.1-win-x64.zip.sha256",
+                            ["name"] = "NexusPipeline-v0.10.2-win-x64.zip.sha256",
+                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v0.10.2-win-x64.zip.sha256",
                         },
                     },
                 };
@@ -491,7 +559,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
         Assert.Equal(UpdateState.Idle, status.State);
         Assert.True(status.Available);
-        Assert.Equal("0.10.1", status.Latest);
+        Assert.Equal("0.10.2", status.Latest);
         Assert.Contains("更新说明", status.Notes);
     }
 
@@ -507,7 +575,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         await WaitStateAsync(service, UpdateState.Ready);
         UpdateStatusSnapshot status = service.GetStatus();
         Assert.True(string.IsNullOrEmpty(status.Error));
-        string staging = Path.Combine(_installDir!, ".nxp-update", "staging", "0.10.1");
+        string stagingRoot = Path.Combine(_installDir!, ".nxp-update", "staging");
+        string staging = Assert.Single(Directory.GetDirectories(stagingRoot, "0.10.2.g*", SearchOption.TopDirectoryOnly));
         Assert.True(File.Exists(Path.Combine(staging, "nexus-pipeline.exe")));
         Assert.True(File.Exists(Path.Combine(staging, "wwwroot", "index.js")));
     }
@@ -594,7 +663,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             UpdateTask? task = UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json"));
             Assert.NotNull(task);
             Assert.Equal("apply", task!.Mode);
-            Assert.Equal("0.10.1", task.Version);
+            Assert.Equal("0.10.2", task.Version);
         }
         finally
         {
@@ -646,6 +715,59 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         {
             UpdateApply.LaunchApplyOverride = null;
         }
+    }
+
+    [Fact]
+    public async Task Apply_DeferIsAllowedWhenImmediateGateIsBusy()
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+        _canApply = false;
+
+        UpdateApplyResult result = service.RequestApply(defer: true, "test");
+
+        Assert.True(result.Succeeded);
+        Assert.True(result.Deferred);
+        Assert.Equal(UpdateState.ApplyPending, service.State);
+    }
+
+    [Fact]
+    public async Task Apply_WorkerLaunchFailureKeepsHostRunningAndReturnsReady()
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+        UpdateApply.LaunchApplyOverride = _ => false;
+        try
+        {
+            UpdateApplyResult result = service.RequestApply(defer: false, "test");
+
+            Assert.False(result.Succeeded);
+            Assert.Equal("worker-launch-failed", result.Code);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.False(_exited);
+            Assert.False(File.Exists(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        }
+        finally
+        {
+            UpdateApply.LaunchApplyOverride = null;
+        }
+    }
+
+    [Fact]
+    public async Task Check_DoesNotOverwriteReadyState()
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+
+        UpdateStatusSnapshot status = await service.CheckAsync("test");
+
+        Assert.Equal(UpdateState.Ready, status.State);
     }
 }
 
@@ -720,6 +842,7 @@ public sealed class UpdateApplyFinalizationTests
         {
             string stagedDir = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
             Directory.CreateDirectory(stagedDir);
+            File.WriteAllText(Path.Combine(stagedDir, "nexus-pipeline.exe"), "fake");
             WriteTask("defer", "0.10.1", stagedDir);
             List<string> launched = new();
             UpdateApply.LaunchApplyOverride = dir =>

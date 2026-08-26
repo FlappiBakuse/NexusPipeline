@@ -58,3 +58,32 @@ jobs:
         env:
           NEXUS_TIME_SCALE: "10"
         run: npx playwright test
+
+  system-tests:
+    name: Windows System Smoke
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
+        run: .\build.cmd
+
+      - name: 运行完整 System Smoke
+        shell: cmd
+        env:
+          NEXUS_SYSTEM_SMOKE_ELEVATED: "1"
+          NEXUS_TIME_SCALE: "10"
+        run: tests\system\run-system.cmd

@@ -4,6 +4,7 @@
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
 > 注释与文档治理（v0.10.0 起）：产品行为以 DESIGN.md 为唯一权威；代码注释禁止堆版本号后缀与 KN 编号（版本追溯用 git blame），台账见 KNOWN_ISSUES.md；详见 CONTRIBUTING.md §6.0。
+> 命名治理：以 `NexusPipeline.*` 命名的目录只用于独立 .NET project，目录名应与 csproj / assembly identity 保持一致；普通领域目录使用 `Application` / `Services` / `Web` / `Cli` 等语义名称。本版本保持现有 Plugin API、测试工程和 fixture assembly identity 不变。
 
 > v0.7.9 扩展性治理：运行总预算、配置交换运行作用域、attempt 收尾和插件 capability 注册均有独立的 internal 边界；本轮不新增用户可见业务能力，也不改变现有 API、磁盘格式或数据化插件旧字段语义。
 > v0.8.0 后端架构强化：应用入口/启动流程、运行状态存储、配置交换恢复分别收敛到 `Application/`、`Services/Execution/`、`Services/ConfigSwap/`；本轮仍保持现有 API、磁盘布局和运行语义兼容。
@@ -37,7 +38,9 @@ NexusPipeline/
 │   └── effects/        独立视觉效果
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
-│   └── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
+│   ├── system/               Windows 真实进程 System Smoke（runtime/judge/execution-resilience/emulator/update）
+│   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
+│   └── legacy/               历史考据与专项诊断资产（不进入 CI/发布门禁）
 ```
 
 ## 后端分层（src/）

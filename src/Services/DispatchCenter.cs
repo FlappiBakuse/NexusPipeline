@@ -51,6 +51,9 @@ internal sealed class DispatchCenter
             return true;
         });
 
+    public HostMaintenanceLease? TryAcquireMaintenanceLease(out string reason)
+        => _state.TryAcquireMaintenanceLease(out reason);
+
     public bool TryExecuteLeaseMutation(
         string scriptId,
         string? userName,

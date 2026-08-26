@@ -196,5 +196,5 @@ Remove-Item Env:NEXUS_TIME_SCALE
 
 - 时间加速（v0.6.4+）：唯一加速档 `NEXUS_TIME_SCALE=10`，`tests\e2e\run-e2e.cmd` 已默认内置；
 - 测试数量与断言数量只记录在 CHANGELOG、Release Notes 或 CI 验证结果中；
-- 发布前运行 UI Smoke 与适用的 System Smoke；Stress/Soak 结果按风险记录，flake 台账（`tests/e2e/FLAKE-LEDGER.md`）持续更新；
+- 发布前运行 UI Smoke 与适用的 System Smoke；Stress/Soak 结果按风险记录，新 flake 写入当版本 verification section 或 issue，历史台账位于 `tests/legacy/history/FLAKE-LEDGER.md`；
 - 永不提交：`release/`、`config/`、`history/`、`logs/`、`tests/e2e/runtime/`、密钥与账号信息。
