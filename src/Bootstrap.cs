@@ -20,7 +20,7 @@ internal static class Bootstrap
     }
 
     /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener Start 失败后不可复用，否则抛 ObjectDisposedException 导致进程崩溃）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
-    public static WebServer? StartWebWithRetry(int basePort)
+    public static WebServer? StartWebWithRetry(int basePort, WebServerOptions? options = null)
     {
         int port = basePort;
         for (int attempt = 0; attempt < 20; attempt++)
@@ -28,7 +28,7 @@ internal static class Bootstrap
             try
             {
                 var web = new WebServer();
-                web.Start(port);
+                web.Start(port, options);
                 return web;
             }
             catch (HttpListenerException)
@@ -49,7 +49,7 @@ internal static class Bootstrap
     /// <summary>Web 服务启动成功后的收尾：远程访问模式确保防火墙入站规则存在。</summary>
     public static void AfterWebStarted(WebServer web)
     {
-        if (RuntimeContext.Instance.Settings.AllowRemoteAccess)
+        if (web.AllowsRemoteAccess)
         {
             FirewallRule.EnsureAllowInbound();
         }

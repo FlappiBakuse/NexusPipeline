@@ -9,6 +9,28 @@ internal static class ApiPluginsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)
     {
+        if (method == "GET" && seg.Length == 1)
+        {
+            PluginManager manager = RuntimeContext.Instance.Plugins;
+            await HttpHelper.WriteJsonAsync(context, manager.PluginSummaries.Select(plugin => new
+            {
+                plugin.Name,
+                plugin.DisplayName,
+                gameName = plugin.GameName,
+                plugin.Description,
+                plugin.Version,
+                kind = plugin.Kind,
+                apiVersion = plugin.ApiVersion,
+                capabilities = plugin.Capabilities,
+                configuredEnabled = manager.IsConfiguredEnabled(plugin.Name),
+                runtimeEnabled = manager.IsEnabled(plugin.Name),
+                state = manager.GetRuntimeState(plugin.Name),
+                error = manager.GetRuntimeError(plugin.Name),
+                restartRequired = manager.IsConfiguredEnabled(plugin.Name)
+                    != manager.IsEnabled(plugin.Name),
+            })).ConfigureAwait(false);
+            return;
+        }
         if (method != "POST" || seg.Length != 3)
         {
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);

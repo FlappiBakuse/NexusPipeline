@@ -64,7 +64,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | 类 | 位置 | 职责 |
 |---|---|---|
 | `Program` | src/Application/ProgramEntry.cs | 进程入口，仅转交 `ApplicationHost.Run(args)` |
-| `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化后的命令分发与 CLI 处理 |
+| `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化、服务生命周期入口和兼容命令分发 |
 | `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `RuntimeStateLayout` | src/Persistence/RuntimeStateLayout.cs | 取得 service ownership 后创建 `.nxp` 目录、迁移旧运行状态、保存冲突现场和提供旧端口兼容读取 |
@@ -74,6 +74,10 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
 | `IExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；具体实现仍由现有 `ExecutionCommands`、`NotificationDispatcher`、`PluginManager` 提供 |
 | `ExecutionCommands` | src/Application/Commands/ExecutionCommands.cs | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消应用命令入口 |
+| `ScriptCommands` / `QueueCommands` / `UserCommands` / `SettingsCommands` | src/Application/Commands/ | 脚本、队列、全局用户、绑定、头像、设置及旧脚本用户兼容 URL 的校验、租约协调、持久化和副作用收尾；Web 只负责请求解析与兼容投影 |
+| `ScriptCommands` / `QueueCommands` / `UserCommands` / `SettingsCommands` / `ConfigEditCommands` | src/Application/Commands/ | 脚本、队列、全局用户、绑定、头像、设置、配置编辑生命周期及旧脚本用户兼容 URL 的校验、租约协调、持久化和副作用收尾；Web 只负责请求解析与兼容投影 |
+| `OperationResult<T>` | src/Application/Contracts/OperationResult.cs | 与 HTTP/CLI 无关的成功、错误分类和候选目标结果契约 |
+| `TargetResolver` | src/Application/TargetResolver.cs | 统一执行 ID 优先、唯一名称匹配和歧义候选返回 |
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 兼容执行门面：获取冻结计划、提交准入登记、取消和入口参数编排；不承载后台运行流程 |
 | `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作；运行时通过 `IExecutionSnapshotProvider` 获取队列与脚本的原子输入 |
@@ -108,7 +112,10 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
-| `MainMenu` + 菜单类 | src/Cli/ | 命令行交互（主菜单/脚本/队列/调度/历史/插件/设置/通知渠道） |
+| `CliArguments` / `CliCommandRouter` | src/Cli/ | noun/subcommand 参数解析、兼容别名和正式命令分派 |
+| `CliApiClient` / `CliTransport` | src/Cli/ | CLI 到 owning service 的本机 HTTP 控制通道、自动拉起与端口发现 |
+| `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
+| `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
 | `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
 | `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
@@ -122,8 +129,21 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 ### 新增 API 的落点
 
 - HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
-- 命令行菜单：在 `src/Cli/` 对应菜单类加 case。
+- 控制命令：先在 owning service 的 `ApiXxxHandler` 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `RuntimeContext` 持久化集合。
+- 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
 - 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
+
+### 控制面边界
+
+常驻服务持有 `RuntimeContext`、执行状态和持久化写入。Web 与 CLI 都是协议适配层：
+
+```text
+Web 请求      ─┐
+CLI / manage ─┼→ Control API → ApiXxxHandler → Application Command/核心服务 → DataStore/Logger
+Scheduler    ─┘                         └→ ExecutionStateStore/ExecutionRunner
+```
+
+`manage` 的菜单类保留旧入口签名以兼容宿主调用，但不再直接读取或修改 `Scripts`、`Queues`、`Users`、`Settings` 集合，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
 
 ## 前端分层（wwwroot/）
 
@@ -212,7 +232,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 ## 数据流速览
 
 ```
-Web 请求 → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
-CLI 菜单 / Scheduler → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+Web 请求      → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
+CLI / manage  → CliApiClient → Control API → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+Scheduler     → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
 运行结束 → ExecutionRunner → INotificationService → NotificationDispatcher → Webhook/SMTP；managed-code 插件 → IPluginNotificationService → NotificationDispatcher；同时向 ExecutionStateStore 提交完成意图
 ```

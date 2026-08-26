@@ -9,6 +9,9 @@ internal static class Logger
     /// <summary>日志阈值缓存：避免每次日志调用访问 RuntimeContext 提前构造 DI 容器；设置加载/保存后经 <see cref="RefreshLevel"/> 失效重解析）。</summary>
     private static LogLevel? _levelCache;
 
+    /// <summary>CLI machine mode 下将诊断输出转到 stderr，保证 stdout 只承载协议 JSON。</summary>
+    internal static bool ConsoleOutputToError { get; set; }
+
     /// <summary>设置加载/保存后调用：清空阈值缓存，下次日志调用按最新配置解析（保持「阈值即时生效」契约）。</summary>
     public static void RefreshLevel()
     {
@@ -78,6 +81,11 @@ internal static class Logger
     {
         try
         {
+            if (ConsoleOutputToError)
+            {
+                Console.Error.WriteLine(line);
+                return;
+            }
             if (Console.IsOutputRedirected)
             {
                 Console.WriteLine(line);

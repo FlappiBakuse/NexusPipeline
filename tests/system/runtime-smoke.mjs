@@ -1,5 +1,6 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +10,7 @@ import {
   isRuntimeAlive,
   prepareRuntime,
   projectRoot,
+  runtimeExe,
   runtimeDir,
   startRuntime,
   stopRuntime,
@@ -38,6 +40,33 @@ test("release binary 启动并提供 status API", { skip }, async () => {
   const status = await response.json();
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
   assert.ok(Array.isArray(status.running));
+});
+
+test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip }, () => {
+  const runCli = (args, input = "") => spawnSync(runtimeExe, args, {
+    cwd: runtimeDir,
+    input,
+    encoding: "utf8",
+    env: { ...process.env, NEXUS_SYSTEM_SMOKE: "1" },
+    windowsHide: true,
+  });
+
+  for (const args of [["status", "--json"], ["script", "list", "--json"], ["run", "list", "--json"]]) {
+    const result = runCli(args);
+    assert.equal(result.status, 0, `${args.join(" ")} stderr: ${result.stderr}`);
+    const lines = result.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.equal(lines.length, 1, `${args.join(" ")} stdout: ${result.stdout}`);
+    const payload = JSON.parse(lines[0]);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.code, "ok");
+    assert.ok(Object.hasOwn(payload, "data"));
+  }
+
+  const invalid = runCli(["script", "create", "--json", "--file", "-"], "{invalid json");
+  assert.equal(invalid.status, 2, invalid.stdout + invalid.stderr);
+  const failure = JSON.parse(invalid.stdout.trim());
+  assert.equal(failure.ok, false);
+  assert.equal(failure.code, "validation_error");
 });
 
 test("status 与 limits API 在同一服务实例可用", { skip }, async () => {

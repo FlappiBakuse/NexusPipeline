@@ -1,9 +1,9 @@
 using System.Diagnostics;
 using System.Net;
-using System.Reflection;
 using System.Text.Json.Nodes;
+using NexusPipeline.App.Commands;
+using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
-using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
@@ -45,84 +45,20 @@ internal static class ApiSettingsHandler
         if (method == "PUT" && seg.Length == 1)
         {
             JsonNode? node = HttpHelper.ParseBody(body);
-            if (node is null)
+            if (node is not JsonObject patch)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "请求体无效" }, 400).ConfigureAwait(false);
                 return;
             }
-            AppSettings candidate;
-            string secretDetail = "";
-            string? bindError = null;
-            lock (ctx.SettingsMutationLock)
+            OperationResult<AppSettings> result = SettingsCommands.Update(patch);
+            if (!result.Succeeded)
             {
-                candidate = ctx.Settings.Clone();
-                if (node is JsonObject json)
-                {
-                    foreach (KeyValuePair<string, JsonNode?> pair in json)
-                    {
-                        string field = pair.Key;
-                        // 空字段名显式 400（此前走 BindField 的 field[0] 抛 IndexOutOfRange → 500）。
-                        if (string.IsNullOrEmpty(field))
-                        {
-                            bindError = "请求体包含空字段名";
-                            break;
-                        }
-                        if (field is "secretKey" or "secretValue"
-                            || SecretFields.Contains(field))
-                        {
-                            continue;
-                        }
-                        JsonNode? value = pair.Value;
-                        if (value is null)
-                        {
-                            continue;
-                        }
-                        bindError = BindField(candidate, field, value);
-                        if (bindError is not null)
-                        {
-                            break;
-                        }
-                    }
-                }
-                if (bindError is null && node.Get("secretKey") is not null && node.Get("secretValue") is not null)
-                {
-                    string key = node.Get("secretKey").Str();
-                    string value = node.Get("secretValue").Str();
-                    if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
-                    {
-                        if (string.IsNullOrWhiteSpace(value))
-                        {
-                            ClearSecret(candidate, key);
-                            secretDetail = $"，清除密钥 {key}";
-                        }
-                        else
-                        {
-                            SetSecret(candidate, key, value);
-                            secretDetail = $"，更新密钥 {key}";
-                        }
-                    }
-                }
-                if (bindError is null)
-                {
-                    // allowRemoteAccess 已在上方 BindField 通用反射路径绑定。
-                    // 候选对象完成校验、密钥处理和规范化后才写盘；写盘失败时当前引用保持不变。
-                    ConfigStore.Save(candidate);
-                    ctx.ReplaceSettings(candidate);
-                }
-            }
-            if (bindError is not null)
-            {
-                await HttpHelper.WriteJsonAsync(context, new { error = bindError }, 400).ConfigureAwait(false);
+                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
                 return;
             }
-            AppSettings current = ctx.Settings;
-            if (current.AllowRemoteAccess)
-            {
-                FirewallRule.EnsureAllowInbound();
-            }
-            TaskRegistration.SyncWithSettings(current);
-            Audit.Log(Audit.Web, "保存设置", $"WebPort={current.WebPort}，AutoStart={(current.AutoStart ? "开" : "关")}，轻量={(current.LightweightMode ? "开" : "关")}{secretDetail}");
-            await HttpHelper.WriteJsonAsync(context, new { ok = true, settings = MaskedSettings(current) }).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(
+                context,
+                new { ok = true, settings = MaskedSettings(result.Value!) }).ConfigureAwait(false);
             return;
         }
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "test")
@@ -136,11 +72,6 @@ internal static class ApiSettingsHandler
         }
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "restart")
         {
-            if (ctx.Settings.LightweightMode)
-            {
-                await HttpHelper.WriteJsonAsync(context, new { error = "轻量模式未启动 Web 服务，请手动重启程序" }, 400).ConfigureAwait(false);
-                return;
-            }
             if (ApplicationHost.IsWebOnly)
             {
                 await HttpHelper.WriteJsonAsync(context, new { error = "当前为仅网页模式（web），不支持自动重启，请手动重启" }, 400).ConfigureAwait(false);
@@ -208,80 +139,6 @@ internal static class ApiSettingsHandler
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
-    /// <summary>密钥字段（DPAPI 加密，仅经 secretKey/secretValue 协议写入；明文键不参与自动绑定）。</summary>
-    private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "webhookUrl", "webhookSecret", "smtpPassword", "accessToken",
-    };
-
-    /// <summary>约定自动绑定：请求体字段名（camelCase）↔ AppSettings 属性（PascalCase）；带校验字段返回 400 错误文本，非法值按原语义静默忽略。</summary>
-    private static string? BindField(AppSettings settings, string field, JsonNode value)
-    {
-        switch (field)
-        {
-            case "historyRetentionDays":
-                int days = value.Int(settings.HistoryRetentionDays);
-                string? check = Limits.CheckRetentionDays(days);
-                if (check is not null)
-                {
-                    return check;
-                }
-                settings.HistoryRetentionDays = days;
-                return null;
-            case "webPort":
-                int port = value.Int(settings.WebPort);
-                if (port is >= 1024 and <= 65535)
-                {
-                    settings.WebPort = port;
-                }
-                return null;
-            case "webhookTimeout":
-                int timeout = value.Int(settings.WebhookTimeout);
-                if (timeout >= 1)
-                {
-                    settings.WebhookTimeout = timeout;
-                }
-                return null;
-            case "smtpPort":
-                int smtpPort = value.Int(settings.SmtpPort);
-                if (smtpPort is >= 1 and <= 65535)
-                {
-                    settings.SmtpPort = smtpPort;
-                }
-                return null;
-            case "smtpTimeout":
-                int smtpTimeout = value.Int(settings.SmtpTimeout);
-                if (smtpTimeout >= 1)
-                {
-                    settings.SmtpTimeout = smtpTimeout;
-                }
-                return null;
-            case "logLevel":
-                string level = value.Str().Trim().ToLowerInvariant();
-                if (LogLevelUtil.IsValid(level))
-                {
-                    settings.LogLevel = level;
-                }
-                return null;
-        }
-        string propertyName = char.ToUpperInvariant(field[0]) + field[1..];
-        PropertyInfo? property = typeof(AppSettings).GetProperty(propertyName);
-        if (property is null || !property.CanWrite)
-        {
-            return null;
-        }
-        if (property.PropertyType == typeof(bool))
-        {
-            bool currentValue = property.GetValue(settings) is bool b && b;
-            property.SetValue(settings, value.Bool(currentValue));
-        }
-        else if (property.PropertyType == typeof(string))
-        {
-            property.SetValue(settings, value.Str());
-        }
-        return null;
-    }
-
     private static object MaskedSettings(AppSettings settings)
     {
         return new
@@ -319,42 +176,4 @@ internal static class ApiSettingsHandler
         };
     }
 
-    private static void SetSecret(AppSettings settings, string key, string value)
-    {
-        string encrypted = SecretStore.Encrypt(value);
-        switch (key)
-        {
-            case "webhookUrl":
-                settings.WebhookUrl = encrypted;
-                break;
-            case "webhookSecret":
-                settings.WebhookSecret = encrypted;
-                break;
-            case "smtpPassword":
-                settings.SmtpPassword = encrypted;
-                break;
-            case "accessToken":
-                settings.AccessToken = encrypted;
-                break;
-        }
-    }
-
-    private static void ClearSecret(AppSettings settings, string key)
-    {
-        switch (key)
-        {
-            case "webhookUrl":
-                settings.WebhookUrl = "";
-                break;
-            case "webhookSecret":
-                settings.WebhookSecret = "";
-                break;
-            case "smtpPassword":
-                settings.SmtpPassword = "";
-                break;
-            case "accessToken":
-                settings.AccessToken = "";
-                break;
-        }
-    }
 }

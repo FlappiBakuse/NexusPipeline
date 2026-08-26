@@ -109,9 +109,15 @@ internal sealed class WebServer : IDisposable
 
     private int _port;
 
+    private WebServerOptions _options = new(true, false);
+
     private static volatile bool RemoteAccessBound;
 
     public int Port => _port;
+
+    public bool ServesWebUi => _options.ServeWebUi;
+
+    public bool AllowsRemoteAccess => _options.AllowRemoteAccess;
 
     /// <summary>
     /// 当前已启动的 Web 服务实例：托盘「打开管理页面」等需用实际监听端口
@@ -119,11 +125,14 @@ internal sealed class WebServer : IDisposable
     /// </summary>
     public static WebServer? Current { get; private set; }
 
-    public void Start(int port)
+    public void Start(int port, WebServerOptions? options = null)
     {
         _port = port;
         Current = this;
-        bool remote = RuntimeContext.Instance.Settings.AllowRemoteAccess;
+        _options = options ?? WebServerOptions.FromSettings(
+            RuntimeContext.Instance.Settings.LightweightMode,
+            RuntimeContext.Instance.Settings.AllowRemoteAccess);
+        bool remote = _options.AllowRemoteAccess;
         RemoteAccessBound = remote;
         // 远程访问绑定 http.sys 强通配符 +（所有接口）；0.0.0.0 不是合法前缀主机（绑定必失败）。
         string prefix = remote ? $"http://+:{port}/" : $"http://127.0.0.1:{port}/";
@@ -231,7 +240,7 @@ internal sealed class WebServer : IDisposable
         }
     }
 
-    private static async Task HandleAsync(HttpListenerContext context, CancellationToken token)
+    private async Task HandleAsync(HttpListenerContext context, CancellationToken token)
     {
         try
         {
@@ -243,7 +252,14 @@ internal sealed class WebServer : IDisposable
             }
             if (path == "/" || path == "/index.html")
             {
-                HttpHelper.ServeFile(context, Path.Combine(AppPaths.WwwRootDir, "index.html"));
+                if (_options.ServeWebUi)
+                {
+                    HttpHelper.ServeFile(context, Path.Combine(AppPaths.WwwRootDir, "index.html"));
+                }
+                else
+                {
+                    await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                }
                 return;
             }
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
@@ -263,6 +279,11 @@ internal sealed class WebServer : IDisposable
                     return;
                 }
                 await HandleApiAsync(context, method, path, token).ConfigureAwait(false);
+                return;
+            }
+            if (!_options.ServeWebUi)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
             string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));

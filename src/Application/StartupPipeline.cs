@@ -36,22 +36,28 @@ internal static class StartupPipeline
         TaskRegistration.SyncWithSettings(ctx.Settings);
         Bootstrap.StartServices();
 
-        WebServer? web = null;
-        if (!ctx.Settings.LightweightMode)
+        WebServerOptions webOptions = WebServerOptions.FromSettings(
+            ctx.Settings.LightweightMode,
+            ctx.Settings.AllowRemoteAccess);
+        WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort, webOptions);
+        if (web is not null)
         {
-            web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
-            if (web is not null)
+            Bootstrap.AfterWebStarted(web);
+            if (webOptions.ServeWebUi && ctx.Settings.AutoOpenBrowser)
             {
-                Bootstrap.AfterWebStarted(web);
-                if (ctx.Settings.AutoOpenBrowser)
-                {
-                    TrayApp.OpenWeb(web.Port);
-                }
+                TrayApp.OpenWeb(web.Port);
             }
         }
-        else
+        if (!webOptions.ServeWebUi)
         {
-            Logger.Info("轻量运行模式：不启动 Web 服务与浏览器，仅命令行操作。");
+            Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
+        }
+        if (web is null)
+        {
+            Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
+            Bootstrap.Shutdown(null);
+            ClearServicePid();
+            return;
         }
 
         // 启动时按设置自动检查一次更新（仅检查不下载）。
@@ -174,7 +180,9 @@ internal static class StartupPipeline
         // 崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
         UserConfigManager.RecoverInterrupted(ctx.SnapshotUsers());
         Bootstrap.StartServices();
-        WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort);
+        WebServer? web = Bootstrap.StartWebWithRetry(
+            ctx.Settings.WebPort,
+            new WebServerOptions(ServeWebUi: true, AllowRemoteAccess: ctx.Settings.AllowRemoteAccess));
         if (web is null)
         {
             ClearServicePid();

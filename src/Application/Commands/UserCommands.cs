@@ -1,0 +1,1196 @@
+using NexusPipeline.App.Contracts;
+using NexusPipeline.Models;
+using NexusPipeline.Persistence;
+using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
+
+namespace NexusPipeline.App.Commands;
+
+/// <summary>
+/// 全局用户、绑定与头像的应用命令。配置数据与运行租约的协调统一在服务进程内完成。
+/// </summary>
+internal static class UserCommands
+{
+    private const int MaxAvatarBytes = 5 * 1024 * 1024;
+
+    public static OperationResult<NexusUser> Create(
+        string? name,
+        string? remark,
+        bool autoCheckInEnabled,
+        string source = Audit.Web)
+    {
+        if (ValidateName(name) is string nameError)
+        {
+            return Validation<NexusUser>(nameError);
+        }
+        if (ValidateRemark(remark) is string remarkError)
+        {
+            return Validation<NexusUser>(remarkError);
+        }
+        if (autoCheckInEnabled)
+        {
+            return Validation<NexusUser>("自动签到将在后续版本通过插件实现");
+        }
+
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? created = null;
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                lock (ctx.DataLock)
+                {
+                    string normalizedName = name!.Trim();
+                    error = Limits.CheckGlobalUserCount(ctx.Users.Count)
+                        ?? (ctx.Users.Any(user => string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase))
+                            ? "用户名重复：全局用户已存在同名用户"
+                            : null);
+                    if (error is not null)
+                    {
+                        return;
+                    }
+                    created = new NexusUser
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
+                        Name = normalizedName,
+                        Remark = remark?.Trim() ?? "",
+                        AutoCheckInEnabled = false,
+                    };
+                    ctx.Users.Add(created);
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        ctx.Users.Remove(created);
+                        throw;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return Validation<NexusUser>(error);
+            }
+            Audit.Log(source, "添加全局用户", $"{created!.Name}（id={created.Id}）");
+            return OperationResult<NexusUser>.Ok(created!);
+        }
+        catch (Exception ex)
+        {
+            return Internal<NexusUser>(ex);
+        }
+    }
+
+    public static OperationResult<NexusUser> Update(
+        string userId,
+        string? name,
+        string? remark,
+        bool autoCheckInEnabled,
+        string source = Audit.Web)
+    {
+        if (ValidateName(name) is string nameError)
+        {
+            return Validation<NexusUser>(nameError);
+        }
+        if (autoCheckInEnabled)
+        {
+            return Validation<NexusUser>("自动签到将在后续版本通过插件实现");
+        }
+        if (ValidateRemark(remark) is string remarkError)
+        {
+            return Validation<NexusUser>(remarkError);
+        }
+
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? target = ctx.FindUser(userId);
+        if (target is null)
+        {
+            return NotFound<NexusUser>($"未找到用户：{userId}");
+        }
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckUserMutationBusy(ctx, target);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    string normalizedName = name!.Trim();
+                    if (ctx.Users.Any(user => !ReferenceEquals(user, target)
+                        && string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        error = "用户名重复：全局用户已存在同名用户";
+                        return;
+                    }
+                    string oldName = target.Name;
+                    bool oldAuto = target.AutoCheckInEnabled;
+                    string oldRemark = target.Remark;
+                    target.Name = normalizedName;
+                    target.AutoCheckInEnabled = false;
+                    target.Remark = remark?.Trim() ?? "";
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        target.Name = oldName;
+                        target.AutoCheckInEnabled = oldAuto;
+                        target.Remark = oldRemark;
+                        throw;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<NexusUser>("resource_busy", error)
+                    : Validation<NexusUser>(error);
+            }
+            Audit.Log(source, "编辑全局用户", $"{userId} → {target.Name}");
+            return OperationResult<NexusUser>.Ok(target);
+        }
+        catch (Exception ex)
+        {
+            return Internal<NexusUser>(ex);
+        }
+    }
+
+    /// <summary>删除不存在的 ID 仍返回成功，保持既有 Web API 的幂等语义。</summary>
+    public static OperationResult<bool> Delete(
+        string userId,
+        string? confirmName,
+        string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? target = ctx.FindUser(userId);
+        if (target is null)
+        {
+            return NotFound<bool>($"未找到用户：{userId}");
+        }
+        if (!string.Equals(confirmName, target.Name, StringComparison.Ordinal))
+        {
+            return Validation<bool>("请完整输入用户名以确认删除");
+        }
+
+        List<UserScriptBinding> bindings = target.Bindings.Select(binding => binding.Clone()).ToList();
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckUserMutationBusy(ctx, target);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    int index = ctx.Users.IndexOf(target);
+                    if (index < 0)
+                    {
+                        error = "用户不存在";
+                        return;
+                    }
+                    ctx.Users.RemoveAt(index);
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        ctx.Users.Insert(index, target);
+                        throw;
+                    }
+                }
+                foreach (UserScriptBinding binding in bindings)
+                {
+                    UserConfigManager.RemoveUserData(binding.ScriptInstanceId, target.Id);
+                }
+                DeleteAvatarFiles(target.Id);
+            });
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<bool>("resource_busy", error)
+                    : Validation<bool>(error);
+            }
+            Audit.Log(source, "删除全局用户", $"{target.Name}（id={target.Id}）");
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
+    public static OperationResult<bool> Reorder(IReadOnlyList<string>? ids, string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        try
+        {
+            string? error = null;
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                lock (ctx.DataLock)
+                {
+                    if (ids is null || ids.Count != ctx.Users.Count
+                        || ids.Any(string.IsNullOrWhiteSpace)
+                        || ids.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ids.Count)
+                    {
+                        error = "用户顺序名单缺失或与当前全局用户列表不一致";
+                        return;
+                    }
+                    HashSet<string> existing = new(ctx.Users.Select(user => user.Id), StringComparer.OrdinalIgnoreCase);
+                    if (ids.Any(id => !existing.Contains(id)))
+                    {
+                        error = "用户顺序名单与当前全局用户列表不一致";
+                        return;
+                    }
+                    Dictionary<string, NexusUser> byId = ctx.Users.ToDictionary(user => user.Id, StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < ids.Count; i++)
+                    {
+                        byId[ids[i]].Index = i;
+                    }
+                    DataStore.SaveUsers(ctx.Users);
+                }
+            });
+            if (error is not null)
+            {
+                return Validation<bool>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "调整全局用户顺序", $"{ids!.Count} 个用户");
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
+    /// <summary>旧脚本用户 URL 的新增适配，数据仍由全局用户与脚本绑定模型统一持有。</summary>
+    public static OperationResult<NexusUser> AddCompatibilityBinding(
+        string scriptId,
+        ScriptUser candidate,
+        string source = Audit.Web)
+    {
+        if (ValidateName(candidate.Name) is string nameError)
+        {
+            return Validation<NexusUser>(nameError);
+        }
+
+        RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptInstance? script = ctx.FindScript(scriptId);
+        if (script is null)
+        {
+            return NotFound<NexusUser>($"未找到脚本实例：{scriptId}");
+        }
+
+        NexusUser? target = null;
+        UserScriptBinding? binding = null;
+        string? error = null;
+        bool created = false;
+        bool gateHeld = false;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        try
+        {
+            bool changed = ctx.Center.TryExecuteLeaseMutation(
+                script.Id,
+                null,
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法新增用户";
+                        return;
+                    }
+                    gateHeld = true;
+                    try
+                    {
+                        if (UserConfigManager.EditSessions.Values.Any(session => session.Script.Id == script.Id))
+                        {
+                            error = "脚本正在编辑配置中，无法新增用户";
+                            return;
+                        }
+
+                        ScriptInstance snapshotScript;
+                        lock (ctx.DataLock)
+                        {
+                            string normalizedName = candidate.Name.Trim();
+                            target = ctx.Users.FirstOrDefault(user =>
+                                string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
+                            if (target is not null && target.Bindings.Any(item => item.ScriptInstanceId == script.Id))
+                            {
+                                error = "用户名重复：该脚本已存在同名用户";
+                                return;
+                            }
+                            error = Limits.CheckUserCount(ctx.Users.Sum(user => user.Bindings.Count(item => item.ScriptInstanceId == script.Id)));
+                            if (error is not null)
+                            {
+                                return;
+                            }
+                            if (target is null)
+                            {
+                                error = Limits.CheckGlobalUserCount(ctx.Users.Count);
+                                if (error is not null)
+                                {
+                                    return;
+                                }
+                                target = new NexusUser
+                                {
+                                    Id = Guid.NewGuid().ToString("N"),
+                                    Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
+                                    Name = normalizedName,
+                                };
+                                ctx.Users.Add(target);
+                                created = true;
+                            }
+                            binding = CompatibilityBinding(candidate, script.Id);
+                            target.Bindings.Add(binding);
+                            snapshotScript = script.Clone();
+                        }
+
+                        string? snapshotError = UserConfigManager.SnapshotOnAddUser(snapshotScript, target.Id);
+                        if (snapshotError is not null)
+                        {
+                            error = "初始配置快照失败：" + snapshotError;
+                            lock (ctx.DataLock)
+                            {
+                                target.Bindings.Remove(binding);
+                                if (created)
+                                {
+                                    ctx.Users.Remove(target);
+                                }
+                            }
+                            return;
+                        }
+
+                        lock (ctx.DataLock)
+                        {
+                            try
+                            {
+                                DataStore.SaveUsers(ctx.Users);
+                            }
+                            catch
+                            {
+                                target.Bindings.Remove(binding);
+                                if (created)
+                                {
+                                    ctx.Users.Remove(target);
+                                }
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                        gateHeld = false;
+                    }
+                },
+                out IReadOnlyList<ExecutionLeaseReference> leases);
+            if (!changed)
+            {
+                return LeaseConflict<NexusUser>(leases, $"script:{script.Id}:users");
+            }
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<NexusUser>("resource_busy", error)
+                    : Validation<NexusUser>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "添加用户（兼容 API）", $"{script.Name} / {target!.Name}");
+            return OperationResult<NexusUser>.Ok(target!);
+        }
+        catch (Exception ex)
+        {
+            return Internal<NexusUser>(ex);
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    /// <summary>旧脚本用户 URL 的编辑适配，用户名变化与绑定变化作为一次服务内事务落盘。</summary>
+    public static OperationResult<NexusUser> UpdateCompatibilityBinding(
+        string scriptId,
+        string userReference,
+        ScriptUser candidate,
+        string source = Audit.Web)
+    {
+        if (ValidateName(candidate.Name) is string nameError)
+        {
+            return Validation<NexusUser>(nameError);
+        }
+
+        RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptInstance? script = ctx.FindScript(scriptId);
+        if (script is null)
+        {
+            return NotFound<NexusUser>($"未找到脚本实例：{scriptId}");
+        }
+        NexusUser? target = FindUserByIdOrName(ctx, userReference);
+        UserScriptBinding? binding = target?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
+        if (target is null || binding is null)
+        {
+            return NotFound<NexusUser>("用户绑定不存在");
+        }
+
+        string? error = null;
+        bool gateHeld = false;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        try
+        {
+            bool changed = ctx.Center.TryExecuteLeaseMutation(
+                script.Id,
+                target.Id,
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法编辑用户";
+                        return;
+                    }
+                    gateHeld = true;
+                    try
+                    {
+                        error = CheckUserMutationBusy(ctx, target);
+                        if (error is not null)
+                        {
+                            return;
+                        }
+                        lock (ctx.DataLock)
+                        {
+                            int index = target.Bindings.IndexOf(binding);
+                            if (index < 0)
+                            {
+                                error = "用户绑定不存在";
+                                return;
+                            }
+                            string normalizedName = candidate.Name.Trim();
+                            if (ctx.Users.Any(user => !ReferenceEquals(user, target)
+                                && string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                error = "用户名重复：全局用户已存在同名用户";
+                                return;
+                            }
+
+                            string previousName = target.Name;
+                            UserScriptBinding previousBinding = binding.Clone();
+                            UserScriptBinding replacement = CompatibilityBinding(candidate, script.Id);
+                            try
+                            {
+                                target.Name = normalizedName;
+                                target.Bindings[index] = replacement;
+                                DataStore.SaveUsers(ctx.Users);
+                                binding = replacement;
+                            }
+                            catch
+                            {
+                                target.Name = previousName;
+                                target.Bindings[index] = previousBinding;
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                        gateHeld = false;
+                    }
+                },
+                out IReadOnlyList<ExecutionLeaseReference> leases);
+            if (!changed)
+            {
+                return LeaseConflict<NexusUser>(leases, $"user:{script.Id}:{target.Id}");
+            }
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<NexusUser>("resource_busy", error)
+                    : Validation<NexusUser>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "编辑用户（兼容 API）", $"{script.Name} / {target.Name}");
+            return OperationResult<NexusUser>.Ok(target);
+        }
+        catch (Exception ex)
+        {
+            return Internal<NexusUser>(ex);
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    /// <summary>旧脚本用户 URL 的删除适配；保留全局用户，移除该脚本下的绑定与配置数据。</summary>
+    public static OperationResult<bool> DeleteCompatibilityBinding(
+        string scriptId,
+        string userReference,
+        string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptInstance? script = ctx.FindScript(scriptId);
+        if (script is null)
+        {
+            return NotFound<bool>($"未找到脚本实例：{scriptId}");
+        }
+        NexusUser? target = FindUserByIdOrName(ctx, userReference);
+        UserScriptBinding? binding = target?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
+        if (target is null || binding is null)
+        {
+            return NotFound<bool>("用户绑定不存在");
+        }
+
+        string? error = null;
+        bool gateHeld = false;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        try
+        {
+            bool changed = ctx.Center.TryExecuteLeaseMutation(
+                script.Id,
+                target.Id,
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法删除用户";
+                        return;
+                    }
+                    gateHeld = true;
+                    try
+                    {
+                        error = CheckUserMutationBusy(ctx, target);
+                        if (error is not null)
+                        {
+                            return;
+                        }
+                        lock (ctx.DataLock)
+                        {
+                            int index = target.Bindings.IndexOf(binding);
+                            if (index < 0)
+                            {
+                                error = "用户绑定不存在";
+                                return;
+                            }
+                            target.Bindings.RemoveAt(index);
+                            try
+                            {
+                                DataStore.SaveUsers(ctx.Users);
+                                UserConfigManager.RemoveUserData(script.Id, target.Id);
+                            }
+                            catch
+                            {
+                                target.Bindings.Insert(index, binding);
+                                DataStore.SaveUsers(ctx.Users);
+                                throw;
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                        gateHeld = false;
+                    }
+                },
+                out IReadOnlyList<ExecutionLeaseReference> leases);
+            if (!changed)
+            {
+                return LeaseConflict<bool>(leases, $"user:{script.Id}:{target.Id}");
+            }
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<bool>("resource_busy", error)
+                    : Validation<bool>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "解除用户绑定（兼容 API）", $"{script.Name} / {target.Name}");
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    /// <summary>旧脚本用户 URL 的排序适配，按绑定用户顺序重排全局用户索引。</summary>
+    public static OperationResult<bool> ReorderCompatibility(
+        string scriptId,
+        IReadOnlyList<string>? names,
+        string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptInstance? script = ctx.FindScript(scriptId);
+        if (script is null)
+        {
+            return NotFound<bool>($"未找到脚本实例：{scriptId}");
+        }
+
+        string? error = null;
+        bool gateHeld = false;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        try
+        {
+            bool changed = ctx.Center.TryExecuteLeaseMutation(
+                script.Id,
+                null,
+                () =>
+                {
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法调整用户顺序";
+                        return;
+                    }
+                    gateHeld = true;
+                    try
+                    {
+                        lock (ctx.DataLock)
+                        {
+                            List<NexusUser> bound = ctx.Users
+                                .Where(user => user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id))
+                                .OrderBy(user => user.Index)
+                                .ToList();
+                            if (names is null || names.Count != bound.Count || names.Any(string.IsNullOrWhiteSpace)
+                                || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
+                            {
+                                error = "用户顺序名单缺失或与当前用户列表不一致";
+                                return;
+                            }
+                            Dictionary<string, NexusUser> byName = bound.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
+                            if (names.Any(name => !byName.ContainsKey(name)))
+                            {
+                                error = "用户顺序名单与当前用户列表不一致";
+                                return;
+                            }
+                            HashSet<string> boundIds = bound.Select(user => user.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                            List<NexusUser> ordered = names.Select(name => byName[name])
+                                .Concat(ctx.Users.Where(user => !boundIds.Contains(user.Id)).OrderBy(user => user.Index))
+                                .ToList();
+                            for (int i = 0; i < ordered.Count; i++)
+                            {
+                                ordered[i].Index = i;
+                            }
+                            DataStore.SaveUsers(ctx.Users);
+                        }
+                    }
+                    finally
+                    {
+                        gate.Release();
+                        gateHeld = false;
+                    }
+                },
+                out IReadOnlyList<ExecutionLeaseReference> leases);
+            if (!changed)
+            {
+                return LeaseConflict<bool>(leases, $"script:{script.Id}:users");
+            }
+            if (error is not null)
+            {
+                return Validation<bool>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "调整用户顺序（兼容 API）", script.Name);
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    public static OperationResult<UserScriptBinding> AddBinding(
+        string userId,
+        UserScriptBinding candidate,
+        string source = Audit.Web)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.ScriptInstanceId))
+        {
+            return Validation<UserScriptBinding>("必须指定脚本实例");
+        }
+        if (ValidateSmtp(candidate.SmtpTo) is string smtpError)
+        {
+            return Validation<UserScriptBinding>(smtpError);
+        }
+        if (ValidateRunDays(candidate.RunDays) is string runDaysError)
+        {
+            return Validation<UserScriptBinding>(runDaysError);
+        }
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? user = ctx.FindUser(userId);
+        ScriptInstance? script = ctx.FindScript(candidate.ScriptInstanceId);
+        if (user is null || script is null)
+        {
+            return NotFound<UserScriptBinding>("用户或脚本实例不存在");
+        }
+        candidate = NormalizeBinding(candidate, script.Id);
+        string? error = null;
+        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        bool gateHeld = false;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                try
+                {
+                    if (ctx.Center.FindLeases(script.Id).Count > 0)
+                    {
+                        error = "脚本正在运行，无法新增绑定";
+                        return;
+                    }
+                    if (UserConfigManager.EditSessions.Values.Any(session => session.Script.Id == script.Id))
+                    {
+                        error = "脚本正在编辑配置中，无法新增绑定";
+                        return;
+                    }
+                    if (!gate.Wait(0))
+                    {
+                        error = "脚本正在运行或编辑配置中，无法新增绑定";
+                        return;
+                    }
+                    gateHeld = true;
+                    error = CheckBindingBusy(ctx, user.Id, script.Id);
+                    if (error is not null)
+                    {
+                        return;
+                    }
+
+                    ScriptInstance snapshotScript;
+                    lock (ctx.DataLock)
+                    {
+                        if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                        {
+                            error = "该用户已绑定此脚本实例";
+                            return;
+                        }
+                        int current = ctx.Users.Sum(item => item.Bindings.Count(binding =>
+                            string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
+                        error = Limits.CheckUserCount(current);
+                        if (error is not null)
+                        {
+                            return;
+                        }
+                        snapshotScript = script.Clone();
+                    }
+
+                    string? snapshotError = UserConfigManager.SnapshotOnAddUser(snapshotScript, user.Id);
+                    if (snapshotError is not null)
+                    {
+                        error = "初始配置快照失败：" + snapshotError;
+                        return;
+                    }
+
+                    lock (ctx.DataLock)
+                    {
+                        if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                        {
+                            error = "该用户已绑定此脚本实例";
+                            return;
+                        }
+                        user.Bindings.Add(candidate);
+                        try
+                        {
+                            DataStore.SaveUsers(ctx.Users);
+                        }
+                        catch
+                        {
+                            user.Bindings.Remove(candidate);
+                            throw;
+                        }
+                    }
+                }
+                finally
+                {
+                    if (gateHeld)
+                    {
+                        gate.Release();
+                        gateHeld = false;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<UserScriptBinding>("resource_busy", error)
+                    : Validation<UserScriptBinding>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "绑定全局用户脚本", $"{user.Name} / {script.Name}");
+            return OperationResult<UserScriptBinding>.Ok(candidate);
+        }
+        catch (Exception ex)
+        {
+            return Internal<UserScriptBinding>(ex);
+        }
+        finally
+        {
+            if (gateHeld)
+            {
+                gate.Release();
+            }
+        }
+    }
+
+    public static OperationResult<UserScriptBinding> UpdateBinding(
+        string userId,
+        string scriptId,
+        UserScriptBinding candidate,
+        string source = Audit.Web)
+    {
+        if (ValidateSmtp(candidate.SmtpTo) is string smtpError)
+        {
+            return Validation<UserScriptBinding>(smtpError);
+        }
+        if (ValidateRunDays(candidate.RunDays) is string runDaysError)
+        {
+            return Validation<UserScriptBinding>(runDaysError);
+        }
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? user = ctx.FindUser(userId);
+        UserScriptBinding? existing = user?.Bindings.FirstOrDefault(binding => binding.ScriptInstanceId == scriptId);
+        if (user is null || existing is null)
+        {
+            return NotFound<UserScriptBinding>("用户绑定不存在");
+        }
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckBindingBusy(ctx, user.Id, scriptId);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    UserScriptBinding old = existing.Clone();
+                    UserScriptBinding replacement = NormalizeBinding(candidate, scriptId);
+                    int index = user.Bindings.IndexOf(existing);
+                    user.Bindings[index] = replacement;
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        user.Bindings[index] = old;
+                        throw;
+                    }
+                    existing = replacement;
+                }
+            });
+            if (error is not null)
+            {
+                return Conflict<UserScriptBinding>("resource_busy", error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            return OperationResult<UserScriptBinding>.Ok(existing!);
+        }
+        catch (Exception ex)
+        {
+            return Internal<UserScriptBinding>(ex);
+        }
+    }
+
+    public static OperationResult<bool> DeleteBinding(
+        string userId,
+        string scriptId,
+        string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? user = ctx.FindUser(userId);
+        UserScriptBinding? binding = user?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == scriptId);
+        if (user is null || binding is null)
+        {
+            return NotFound<bool>("用户绑定不存在");
+        }
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckBindingBusy(ctx, user.Id, scriptId);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    int index = user.Bindings.IndexOf(binding);
+                    if (index < 0)
+                    {
+                        error = "绑定不存在";
+                        return;
+                    }
+                    user.Bindings.RemoveAt(index);
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                        UserConfigManager.RemoveUserData(scriptId, user.Id);
+                    }
+                    catch
+                    {
+                        user.Bindings.Insert(index, binding);
+                        try { DataStore.SaveUsers(ctx.Users); } catch { }
+                        throw;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return Conflict<bool>("resource_busy", error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "解除全局用户脚本绑定", $"{user.Name} / {scriptId}");
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
+    public static OperationResult<bool> SetAvatar(string userId, string? mimeType, byte[]? data)
+    {
+        if (RuntimeContext.Instance.FindUser(userId) is null)
+        {
+            return NotFound<bool>($"未找到用户：{userId}");
+        }
+        string mime = mimeType?.Trim().ToLowerInvariant() ?? "";
+        string extension = mime switch
+        {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            _ => "",
+        };
+        if (extension.Length == 0 || data is null || data.Length == 0
+            || data.Length > MaxAvatarBytes || !HasMatchingMagic(mime, data))
+        {
+            return Validation<bool>("头像文件格式或大小不符合要求（上限 5 MiB）");
+        }
+        try
+        {
+            string dir = Path.Combine(AppPaths.UserAssetsDir, userId);
+            Directory.CreateDirectory(dir);
+            string target = Path.Combine(dir, "avatar." + extension);
+            File.WriteAllBytes(target, data);
+            foreach (string file in Directory.GetFiles(dir, "avatar.*"))
+            {
+                if (!string.Equals(file, target, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(file);
+                }
+            }
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
+    public static OperationResult<bool> RemoveAvatar(string userId)
+    {
+        if (RuntimeContext.Instance.FindUser(userId) is null)
+        {
+            return NotFound<bool>($"未找到用户：{userId}");
+        }
+        try
+        {
+            DeleteAvatarFiles(userId);
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
+    private static UserScriptBinding CompatibilityBinding(ScriptUser candidate, string scriptId)
+    {
+        return new UserScriptBinding
+        {
+            ScriptInstanceId = scriptId,
+            Enabled = candidate.Enabled,
+            PreRunScript = candidate.PreRunScript.Trim(),
+            PreRunOnceOnly = candidate.PreRunOnceOnly,
+            PostRunScript = candidate.PostRunScript.Trim(),
+            PostRunOnFinalOnly = candidate.PostRunOnFinalOnly,
+        };
+    }
+
+    private static NexusUser? FindUserByIdOrName(RuntimeContext ctx, string reference)
+    {
+        NexusUser? byId = ctx.FindUser(reference);
+        if (byId is not null)
+        {
+            return byId;
+        }
+        lock (ctx.DataLock)
+        {
+            return ctx.Users.FirstOrDefault(user =>
+                string.Equals(user.Name, reference, StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    private static UserScriptBinding NormalizeBinding(UserScriptBinding candidate, string scriptId)
+    {
+        return new UserScriptBinding
+        {
+            ScriptInstanceId = scriptId.Trim(),
+            Enabled = candidate.Enabled,
+            PreRunScript = candidate.PreRunScript.Trim(),
+            PreRunOnceOnly = candidate.PreRunOnceOnly,
+            PostRunScript = candidate.PostRunScript.Trim(),
+            PostRunOnFinalOnly = candidate.PostRunOnFinalOnly,
+            NotifyEnabled = candidate.NotifyEnabled,
+            SmtpTo = candidate.SmtpTo.Trim(),
+            RunDays = candidate.RunDays,
+        };
+    }
+
+    private static string? CheckUserMutationBusy(RuntimeContext ctx, NexusUser user)
+    {
+        if (ctx.Scheduler.HasPendingUser(user.Id))
+        {
+            return "用户已存在待执行的冻结计划，暂时无法修改";
+        }
+        foreach (UserScriptBinding binding in user.Bindings)
+        {
+            if (CheckBindingBusy(ctx, user.Id, binding.ScriptInstanceId) is string error)
+            {
+                return error;
+            }
+        }
+        return null;
+    }
+
+    private static string? CheckBindingBusy(RuntimeContext ctx, string userId, string scriptId)
+    {
+        if (ctx.Center.FindLeases(scriptId, userId).Count > 0)
+        {
+            return "用户绑定正在运行，无法修改";
+        }
+        if (UserConfigManager.EditSessions.Values.Any(session =>
+            session.Script.Id == scriptId
+            && string.Equals(session.Mark.UserName, userId, StringComparison.OrdinalIgnoreCase)))
+        {
+            return "用户绑定正在编辑配置，无法修改";
+        }
+        if (ctx.Scheduler.HasPendingBinding(userId, scriptId))
+        {
+            return "该用户绑定已存在待执行的冻结计划，暂时无法修改";
+        }
+        return null;
+    }
+
+    internal static string? GetBindingBusyReason(RuntimeContext ctx, string userId, string scriptId) =>
+        CheckBindingBusy(ctx, userId, scriptId);
+
+    private static string? ValidateName(string? name)
+    {
+        return string.IsNullOrWhiteSpace(name) || !ScriptUserRule.IsValidName(name.Trim())
+            ? "用户名不能为空且不能包含非法字符"
+            : Limits.CheckNameBytes(name.Trim(), 128, "用户名");
+    }
+
+    private static string? ValidateRemark(string? remark) =>
+        Limits.CheckNameBytes(remark?.Trim() ?? "", 512, "备注");
+
+    private static string? ValidateRunDays(int value) =>
+        value >= -1 ? null : "运行天数只能为 -1（永久）或 0 及以上的整数";
+
+    private static string? ValidateSmtp(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : SmtpSender.ValidateRecipients(value.Trim());
+
+    private static bool IsBusy(string error) =>
+        error.Contains("运行", StringComparison.Ordinal)
+        || error.Contains("编辑", StringComparison.Ordinal)
+        || error.Contains("待执行", StringComparison.Ordinal);
+
+    private static void DeleteAvatarFiles(string userId)
+    {
+        string dir = Path.Combine(AppPaths.UserAssetsDir, userId);
+        if (!Directory.Exists(dir))
+        {
+            return;
+        }
+        foreach (string file in Directory.GetFiles(dir, "avatar.*"))
+        {
+            try { File.Delete(file); } catch (Exception ex) { Logger.Warn($"[警告] 清理用户头像失败（{file}）：{ex.Message}"); }
+        }
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+        }
+        catch { }
+    }
+
+    private static bool HasMatchingMagic(string mime, byte[] data)
+    {
+        return mime switch
+        {
+            "image/png" => data.Length >= 8
+                && data.AsSpan(0, 8).SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }),
+            "image/jpeg" => data.Length >= 3 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF,
+            "image/webp" => data.Length >= 12
+                && data.AsSpan(0, 4).SequenceEqual("RIFF"u8)
+                && data.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => false,
+        };
+    }
+
+    private static OperationResult<T> Validation<T>(string message) =>
+        OperationResult<T>.Failure("validation_error", message, OperationErrorKind.Validation);
+
+    private static OperationResult<T> NotFound<T>(string message) =>
+        OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
+
+    private static OperationResult<T> Conflict<T>(string code, string message) =>
+        OperationResult<T>.Failure(code, message, OperationErrorKind.Conflict);
+
+    private static OperationResult<T> LeaseConflict<T>(
+        IReadOnlyList<ExecutionLeaseReference> leases,
+        string resource) =>
+        OperationResult<T>.Failure(
+            "execution_resource_in_use",
+            $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",
+            OperationErrorKind.Conflict,
+            leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray());
+
+    private static OperationResult<T> Internal<T>(Exception exception) =>
+        OperationResult<T>.Failure("internal_error", exception.Message, OperationErrorKind.Internal);
+}

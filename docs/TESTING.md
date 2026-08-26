@@ -26,6 +26,7 @@
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
 - API payload 转换中可以独立出的业务规则。
+- CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
 
 以下行为进入 UI Smoke：
 
@@ -37,6 +38,7 @@
 以下行为进入 System Smoke：
 
 - release binary 启动、状态 API、端口回退和重启；
+- release binary 的正式 CLI：`--json` 单 envelope、stderr 诊断、stdin JSON 校验和稳定退出码；
 - fatal startup、进程树清理、detached child 和 Job Object；
 - 真实 JavaScript/Python interpreter 边界；
 - Generic ADB 与 MuMuManager stub command sequence；
@@ -91,7 +93,7 @@ System Smoke 需要管理员终端和已完成的构建，统一入口为：
 node tests\run.mjs system
 ```
 
-统一入口当前按顺序覆盖 runtime、judge、execution-resilience、emulator 和 update 五类跨层场景。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
+统一入口当前按顺序覆盖 runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 五类跨层场景。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
 
 ## 按需诊断与历史资产
 

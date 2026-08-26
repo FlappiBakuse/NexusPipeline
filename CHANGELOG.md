@@ -2,6 +2,22 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.4（Pre-release）
+
+### 统一控制面与可脚本化 CLI
+
+- 常驻服务在 Normal 与 Lightweight 模式均启动 Control API；轻量模式仅绑定 `127.0.0.1`，保留 `/api/*` 控制能力并关闭静态 Web UI 与浏览器自动打开。
+- 新增统一 noun/subcommand CLI：脚本实例、全局用户、调度队列、运行任务、历史、设置、插件、更新、维护和系统操作均可查询或调用；`run-script`、`run-queue`、`cancel` 等既有入口继续兼容。
+- 复杂对象统一支持 `--file <json|->`，目标解析遵循 ID 精确优先、名称唯一匹配和歧义候选返回。
+- 正式命令支持 `--json` machine envelope、稳定错误码与退出码；诊断和运行进度与标准输出分流，便于 PowerShell、批处理和其他自动化工具消费。
+- `manage` 交互菜单迁移为 Control API 适配层，菜单进程不再直接写入运行时集合或 JSON 配置。
+- 脚本、队列、用户/绑定、头像、设置和配置编辑生命周期统一进入 Application Commands；旧脚本用户 URL 保留兼容投影，业务写入仍由 owning service 完成。
+
+### 测试与文档
+
+- 新增 CLI/Control API 契约测试，System Smoke 增加真实发布进程的 CLI JSON、stdin 校验和退出码验证。
+- 同步 README、DESIGN、ARCHITECTURE、TESTING 与 ROADMAP 的控制面、轻量模式和 CLI 说明。
+
 ## v0.10.3（Pre-release）
 
 ### 测试基础设施与运行状态治理

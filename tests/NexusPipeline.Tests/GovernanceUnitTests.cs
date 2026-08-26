@@ -59,6 +59,22 @@ public class GovernanceUnitTests
     }
 
     [Fact]
+    public void ResourceMutations_ExposeSharedApplicationCommandBoundaries()
+    {
+        Assert.NotNull(typeof(ScriptCommands).GetMethod("Create"));
+        Assert.NotNull(typeof(ScriptCommands).GetMethod("Update"));
+        Assert.NotNull(typeof(ScriptCommands).GetMethod("Delete"));
+        Assert.NotNull(typeof(QueueCommands).GetMethod("Create"));
+        Assert.NotNull(typeof(QueueCommands).GetMethod("Update"));
+        Assert.NotNull(typeof(QueueCommands).GetMethod("Delete"));
+        Assert.NotNull(typeof(UserCommands).GetMethod("Create"));
+        Assert.NotNull(typeof(UserCommands).GetMethod("AddBinding"));
+        Assert.NotNull(typeof(SettingsCommands).GetMethod("Update"));
+        Assert.NotNull(typeof(ConfigEditCommands).GetMethod("Start"));
+        Assert.NotNull(typeof(ConfigEditCommands).GetMethod("Complete"));
+    }
+
+    [Fact]
     public void ExecutionBoundary_SplitsFacadeValidationRunnerAndSystemActions()
     {
         Assert.Null(typeof(DispatchCenter).GetMethod("RunScriptAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));

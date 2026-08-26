@@ -12,7 +12,7 @@ namespace NexusPipeline.Cli;
 /// 消除「manage 菜单进程内直调 vs CLI 走 HTTP」双执行通道割裂——菜单调度统一经常驻服务执行，Web 端可见）。</summary>
 internal static class CliTransport
 {
-    /// <summary>确保常驻服务可达：探测失败时轻量模式报错退出，否则自动拉起服务进程并等待（最多 30 秒）。返回实际端口或 null。</summary>
+    /// <summary>确保常驻服务可达：探测失败时自动拉起服务进程并等待（最多 30 秒）。轻量模式同样提供仅本机的 Control API。</summary>
     public static int? EnsureService()
     {
         int port = RuntimeContext.Instance.Settings.WebPort;
@@ -21,15 +21,15 @@ internal static class CliTransport
         {
             return existing;
         }
-        if (RuntimeContext.Instance.Settings.LightweightMode)
-        {
-            Console.WriteLine("[错误] 服务处于轻量运行模式，未启动 Web 接口，无法提交任务");
-            return null;
-        }
-        Console.WriteLine($"[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...");
+        CliOutput.WriteDiagnostic($"[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...");
         try
         {
             string exePath = Environment.ProcessPath ?? "";
+            if (string.IsNullOrWhiteSpace(exePath))
+            {
+                CliOutput.WriteDiagnostic("[错误] 无法确定 NexusPipeline 程序路径");
+                return null;
+            }
             Process.Start(new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
@@ -38,7 +38,7 @@ internal static class CliTransport
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[错误] 自动拉起常驻服务失败：{ex.Message}");
+            CliOutput.WriteDiagnostic($"[错误] 自动拉起常驻服务失败：{ex.Message}");
             return null;
         }
         DateTime deadline = DateTime.Now.AddSeconds(30);
@@ -51,7 +51,7 @@ internal static class CliTransport
                 return discovered;
             }
         }
-        Console.WriteLine("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
+        CliOutput.WriteDiagnostic("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
         return null;
     }
 
@@ -169,17 +169,25 @@ internal static class CliTransport
     /// <summary>POST JSON 到常驻服务 API（5 秒超时）。</summary>
     public static HttpResponseMessage Post(int port, string apiPath, object body)
     {
-        using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(5);
-        return client.PostAsync($"http://127.0.0.1:{port}{apiPath}",
-            new StringContent(JsonSerializer.Serialize(body, JsonOpts.Default), Encoding.UTF8, "application/json")).GetAwaiter().GetResult();
+        JsonNode? node = JsonSerializer.SerializeToNode(body, JsonOpts.Default);
+        return Send(port, "POST", apiPath, node);
     }
 
     /// <summary>GET 常驻服务 API（5 秒超时）。</summary>
     public static HttpResponseMessage Get(int port, string apiPath)
     {
-        using var client = new HttpClient();
-        client.Timeout = TimeSpan.FromSeconds(5);
-        return client.GetAsync($"http://127.0.0.1:{port}{apiPath}").GetAwaiter().GetResult();
+        return Send(port, "GET", apiPath, null);
+    }
+
+    /// <summary>向常驻服务发送 JSON 请求，供正式 CLI 与交互菜单共用。</summary>
+    public static HttpResponseMessage Send(int port, string method, string apiPath, JsonNode? body)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var request = new HttpRequestMessage(new HttpMethod(method), $"http://127.0.0.1:{port}{apiPath}");
+        if (body is not null)
+        {
+            request.Content = new StringContent(body.ToJsonString(JsonOpts.Web), Encoding.UTF8, "application/json");
+        }
+        return client.SendAsync(request).GetAwaiter().GetResult();
     }
 }

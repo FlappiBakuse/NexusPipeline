@@ -33,7 +33,7 @@
 - **安卓模拟器基础设施**：脚本实例可选择「安卓模拟器」启动方式——填模拟器 ADB 地址（如 `127.0.0.1:16384`）+ am start 参数，运行前自动连接模拟器、启动/关闭应用、失败重试时关闭目标应用。通用目标使用独立 ADB driver；被 MuMuManager 精确识别的目标从连接、启动、探测到收尾始终使用 MuMuManager。专用插件是否支持模拟器由 capability 声明（目前仅 MaaEnd 专项支持）。
 - **通知推送**：Webhook / SMTP 双通道并行，属于宿主内置通知能力，配置入口位于「设置」页，密钥本地加密存储（DPAPI）。
 - **内建更新**：设置页可检查 GitHub 最新版本、下载校验（SHA256）后就绪、「立即更新」或「下次启动更新」；应用走独立切换进程（备份旧版本、失败自动回滚、启动自愈），只替换程序文件与前端，配置/历史/用户数据一律不触碰。
-- **命令行**：不开网页也能全功能管理（`manage` 交互菜单）；支持 `run-script`、`run-queue`、`cancel` 等脚本化调用。
+- **命令行与控制面**：`manage`、正式 noun/subcommand CLI、网页和后续自动化入口共享常驻服务控制面；支持脚本/用户/队列/运行/历史/设置/插件/更新/维护等操作，并提供稳定的 `--json` 输出。
 
 ## 安装
 
@@ -64,8 +64,26 @@
 ## 三种使用形态
 
 1. **服务模式（默认）**：双击启动 → 托盘常驻 → 网页管理 + 自动调度。适合日常挂机。
-2. **轻量命令行模式**：设置中开启（重启生效）——不起网页服务，托盘/命令行交互。适合低配环境。
+2. **轻量命令行模式**：设置中开启（重启生效）——仍启动仅绑定 `127.0.0.1` 的 Control API，不提供静态 Web UI 与浏览器，托盘/命令行交互经控制面完成。适合低配环境。
 3. **单次命令**：`nexus-pipeline.exe run-script <脚本名>` 等命令直接提交任务并等待结果（常驻服务未运行时自动拉起），可被其他程序脚本化调用。
+
+## CLI 控制接口
+
+正式 CLI 的复杂操作使用 noun/subcommand 形式；脚本、用户和队列的复杂对象通过 JSON 文件或标准输入传入：
+
+```text
+nexus-pipeline.exe status --json
+nexus-pipeline.exe script list --json
+nexus-pipeline.exe script create --file script.json
+nexus-pipeline.exe user create --name "我的账号" --remark "主号"
+nexus-pipeline.exe user binding add "我的账号" --script "BetterGI" --file binding.json
+nexus-pipeline.exe user binding config start "我的账号" "BetterGI"
+nexus-pipeline.exe queue update <队列 ID 或名称> --file queue.json
+nexus-pipeline.exe run script <脚本 ID 或名称> --detach --json
+nexus-pipeline.exe cancel <运行 ID> --json
+```
+
+带 `--json` 的正式命令在标准输出中返回单个 envelope：成功为 `{ "ok": true, "code": "ok", "data": ... }`，失败为 `{ "ok": false, "code": ..., "message": ... }`；诊断与运行进度写入标准错误。目标参数按“ID 精确匹配 → 名称唯一匹配”解析，同名目标返回 `ambiguous_target` 与候选 ID。未运行的常驻服务会由 CLI 自动拉起，控制 API 的实际监听端口由服务状态发现。
 
 ## 常见问题
 
