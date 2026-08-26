@@ -7,6 +7,7 @@ import {
   deleteScript,
   isElevated,
   makeFixture,
+  projectRoot,
   prepareRuntime,
   runtimeDir,
   sleep,
