@@ -396,12 +396,12 @@ async function testScenarioC() {
 /* ---------------- MaaEnd 专项判断脚本场景（v0.6.1） ---------------- */
 
 /**
- * MaaEnd 默认判断脚本：从数据化插件目录 plugins/maaend/data/judge.js 读取
+ * MaaEnd 默认判断脚本：从相邻的 NexusPipeline-Plugins 仓库读取
  * （v0.6.3 起判断脚本为独立文件，保证测试用的即发布代码）。
  */
 function maaendJudgeScript() {
-  const file = path.join(projectRoot, "plugins", "maaend", "data", "judge.js");
-  if (!fs.existsSync(file)) throw new Error("无法读取 plugins/maaend/data/judge.js");
+  const file = path.join(projectRoot, "..", "NexusPipeline-Plugins", "plugins", "maaend", "data", "judge.js");
+  if (!fs.existsSync(file)) throw new Error("无法读取 NexusPipeline-Plugins/plugins/maaend/data/judge.js");
   return fs.readFileSync(file, "utf8");
 }
 

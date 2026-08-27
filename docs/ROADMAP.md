@@ -1,6 +1,6 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-27｜**当前版本**：v0.10.7（Pre-release，已完成）｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-27｜**当前版本**：v0.10.8（Pre-release，开发中）｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
 

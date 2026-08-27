@@ -519,7 +519,7 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>还原描述：判断脚本首次触发写入 script/config-restore.json，宿主仅执行、不解析插件语义。
-    /// 契约见 plugins/README.md。</summary>
+    /// 契约见 docs/PLUGIN_API.md。</summary>
     internal sealed class ConfigRestoreDescriptor
     {
         public List<FileRestore> Files { get; set; } = new();

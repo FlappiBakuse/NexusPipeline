@@ -693,6 +693,15 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
 .plugin-row-main strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .plugin-row-main .muted { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row .plugin-row-action { min-width: 72px; }
+.plugin-tabs { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.plugin-store-list { display: grid; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel); }
+.plugin-store-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(170px, auto); align-items: center; gap: var(--space-4); min-height: 70px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.plugin-store-row:last-child { border-bottom: 0; }
+.plugin-store-row:hover { background: var(--hover-bg); }
+.plugin-store-actions { min-width: 170px; flex-wrap: wrap; }
+.plugin-store-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-3); }
+.proxy-custom-fields { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
+.proxy-custom-fields[hidden] { display: none; }
 
 .dispatch-runbar { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1.55fr) auto; align-items: end; gap: var(--space-3); padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel); }
 .dispatch-runbar .field { min-width: 0; }
@@ -726,6 +735,10 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
   .plugin-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
   .plugin-row .plugin-row-action { grid-column: 2; grid-row: 1 / span 2; }
   .plugin-row .badge { grid-column: 1; grid-row: 2; justify-self: start; }
+  .plugin-store-row { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); }
+  .plugin-store-row .badge { grid-column: 2; grid-row: 1; align-self: start; }
+  .plugin-store-actions { grid-column: 1 / -1; min-width: 0; justify-content: flex-start; }
+  .plugin-store-footer { align-items: flex-start; flex-direction: column; }
 }
 
 @media (max-width: 480px) {

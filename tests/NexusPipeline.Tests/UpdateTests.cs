@@ -389,14 +389,14 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         _installDir = Path.Combine(_root, "install");
         Directory.CreateDirectory(_installDir);
 
-        // 构造与发布资产同名的 zip：exe + wwwroot + plugins。
+        // 构造与发布资产同名的 zip：exe + wwwroot + plugins/.nxp-root 兼容根标记。
         using (var stream = new MemoryStream())
         {
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
             {
                 AddEntry(archive, "nexus-pipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
                 AddEntry(archive, "wwwroot/index.js", "// fake");
-                AddEntry(archive, "plugins/README.md", "fake");
+                AddEntry(archive, "plugins/.nxp-root", "{\"owner\":\"NexusPipeline\",\"purpose\":\"plugin-runtime-root\",\"version\":1}");
             }
             _zipBytes = stream.ToArray();
         }
@@ -912,6 +912,48 @@ public sealed class UpdateApplyFinalizationTests
             DeleteExact(AppPaths.UpdateDir);
             DeleteExact(AppPaths.UpdateBackupDir);
             DeleteExact(Path.Combine(AppPaths.AppRoot, "wwwroot"));
+        }
+    }
+
+    [Fact]
+    public void Finalization_LegacyBackupRestoresPluginsDuringRollback()
+    {
+        try
+        {
+            // v0.10.7 updater 将 plugins 纳入 backup；若交换后中断，v0.10.8 仍需还原旧目录。
+            string backupWww = Path.Combine(AppPaths.UpdateBackupDir, "wwwroot");
+            string backupPlugins = Path.Combine(AppPaths.UpdateBackupDir, "plugins", "bettergi");
+            Directory.CreateDirectory(backupWww);
+            Directory.CreateDirectory(backupPlugins);
+            File.WriteAllText(Path.Combine(backupWww, "marker.txt"), "old-www");
+            File.WriteAllText(Path.Combine(backupPlugins, "marker.txt"), "old-plugin");
+
+            string installWww = Path.Combine(AppPaths.AppRoot, "wwwroot");
+            string installPlugins = Path.Combine(AppPaths.AppRoot, "plugins");
+            Directory.CreateDirectory(installWww);
+            Directory.CreateDirectory(installPlugins);
+            File.WriteAllText(Path.Combine(installWww, "marker.txt"), "new-partial-www");
+            File.WriteAllText(Path.Combine(installPlugins, ".nxp-root"), "new-root");
+
+            string staging = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
+            Directory.CreateDirectory(staging);
+            WriteTask("apply", "0.10.1", staging);
+
+            bool exit = UpdateApply.RunStartupFinalization();
+
+            Assert.False(exit);
+            Assert.Equal("old-www", File.ReadAllText(Path.Combine(installWww, "marker.txt")));
+            Assert.Equal("old-plugin", File.ReadAllText(Path.Combine(installPlugins, "bettergi", "marker.txt")));
+            Assert.False(File.Exists(AppPaths.UpdateTaskFile));
+            Assert.False(Directory.Exists(AppPaths.UpdateBackupDir));
+        }
+        finally
+        {
+            UpdateTask.Clear();
+            DeleteExact(AppPaths.UpdateDir);
+            DeleteExact(AppPaths.UpdateBackupDir);
+            DeleteExact(Path.Combine(AppPaths.AppRoot, "wwwroot"));
+            DeleteExact(Path.Combine(AppPaths.AppRoot, "plugins"));
         }
     }
 

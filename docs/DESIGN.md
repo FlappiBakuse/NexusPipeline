@@ -31,6 +31,8 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 - **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态，不只看进程退出码，因此日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
 - **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1 使用宿主日志、配置、密钥、通知和调度端口；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记，旧 `supportsEmulator` 继续兼容。
+- **插件分发与运行解耦**：插件仓库以固定官方 `catalog.json` 提供版本和 SHA256，安装包在本地完成校验后以 pending 事务跨重启交换；宿主更新只替换宿主文件，用户插件目录持续保留。
+- **宿主网络出口可控**：外部 HTTP 请求统一经过可即时读取设置的网络出口，支持无代理、系统代理和自定义 HTTP/HTTPS 代理；本机控制面、MCP、SMTP 与插件子进程保持原有网络边界。
 
 ## 2. 核心概念
 
@@ -58,6 +60,9 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 配置运行作用域（ConfigRunSession） | 编排一次运行的事务动作并固定最终收尾顺序 |
 | 日志监控（LogMonitor） | 对脚本日志文件的增量读取器，支持追加/截断/替换三种文件形态（见第 6 节） |
 | 插件 capability | 与插件身份/元数据分离的可查询能力；C# 按接口注册，数据化插件按 key 登记 |
+| 插件仓库 catalog | 固定官方源发布的插件索引；客户端校验 schema、名称、SemVer、宿主兼容性、包 URL、大小和 SHA256 |
+| 插件 pending 事务 | 插件包下载并校验后写入 staging 与 `pending.json`，下次启动在插件扫描前完成安装、更新或卸载 |
+| 宿主外部 HTTP 出口 | 依据 `ProxyMode` 选择无代理、系统代理或自定义代理；外部请求读取最新设置，loopback 强制直连 |
 | 应用命令（ExecutionCommands） | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消入口 |
 | 控制面（Control API） | 常驻服务拥有运行时数据与执行状态；Web、CLI、manage 通过本机 HTTP 控制 API 提交查询与变更 |
 
@@ -304,7 +309,7 @@ flowchart LR
 
 - **事务化全量镜像**：先复制 config → store.tmp（全部文件），复制期间源配置变化则放弃本次同步；成功后将旧 store 移动为 store.previous，再将 store.tmp 移动为 store，避免逐文件写入造成混合快照。
 - **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时从旧 store 保留原文件，不写入插队编排产物。
-- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `plugins/README.md`「配置还原描述」。
+- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `PLUGIN_API.md`「配置还原描述」。
 
 **守护机制**（防止坏态写入并污染快照）：
 
@@ -398,7 +403,35 @@ flowchart LR
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限由 `config/limits.json` 的 `MaxHistoryRetentionDays` 约束（默认 180、允许 1-365）；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
 
-### 7.3 运行状态目录与旧布局迁移
+### 7.3 插件仓库与安装事务
+
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，每个条目包含名称、显示信息、SemVer、插件类型、最低宿主版本、官方 Release 包地址、包大小和 SHA256。客户端对 catalog 做 schema、重复名称、官方 URL、版本、大小和 SHA256 格式校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
+
+插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。仓库请求在内存缓存有效期内复用结果；过期请求失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。
+
+插件安装/更新按以下顺序执行：
+
+1. 从 catalog 下载包，限制响应大小并校验声明大小与 SHA256；
+2. 将 ZIP 解压到 `.nxp/state/plugins/staging/`，拒绝绝对路径、`..`、重复条目、越界路径和超过资源上限的压缩内容；
+3. 检查根 `plugin.json` 与 catalog 的名称、版本、类型、API 和 capability 一致，并验证数据插件文件或 managed-code 入口程序集存在；
+4. 写入 `pending.json`，返回“重启后生效”；
+5. 下次启动先由 `PluginInstallRecovery` 完成备份、目录交换、归属记录和清理，再进入 `PluginManager.LoadAll`。交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
+
+插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为目录缓存，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+
+### 7.4 宿主代理设置与网络边界
+
+设置页提供三个代理模式：
+
+| 模式 | 宿主外部 HTTP 行为 |
+|---|---|
+| `none` | 直接连接 |
+| `system` | 使用 Windows `HttpClientHandler` 的系统代理设置 |
+| `http` | 使用设置中的 HTTP/HTTPS 代理地址，可附带用户名和 DPAPI 加密密码 |
+
+`OutboundHttpClientProvider` 为每次请求按当前设置创建 client，因此保存代理后新请求立即读取新配置。插件 catalog、插件包、软件更新和 Webhook 统一使用该出口；SMTP、Control API、MCP、本地 loopback 请求和插件子进程保持各自网络行为。localhost、`127.0.0.1` 与 `::1` 始终直连。设置 API 只返回代理密码占位符，密码不会进入界面响应、审计详情或日志。
+
+### 7.5 运行状态目录与旧布局迁移
 
 正常服务运行产生的三类内部状态集中在安装目录下的 `.nxp/`：
 
@@ -454,4 +487,4 @@ flowchart LR
 - [ROADMAP.md](ROADMAP.md)：版本路线与后续开发清单
 - [KNOWN_ISSUES.md](KNOWN_ISSUES.md)：已知问题台账
 - [CHANGELOG.md](../CHANGELOG.md)：版本历史
-- [plugins/README.md](../plugins/README.md)：专项插件（数据化形态）开发指南
+- [PLUGIN_API.md](PLUGIN_API.md)：专项插件（数据化形态）开发指南

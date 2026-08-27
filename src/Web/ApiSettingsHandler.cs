@@ -4,6 +4,7 @@ using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
@@ -64,7 +65,10 @@ internal static class ApiSettingsHandler
         {
             AppSettings settings = ctx.Settings;
             string text = $"[NexusPipeline] 通知测试\r\n时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n如果你收到这条消息，说明通知渠道配置正确。";
-            bool ok = await NotifySender.SendAsync(settings, text).ConfigureAwait(false);
+            bool ok = await NotifySender.SendAsync(
+                settings,
+                text,
+                outbound: ctx.Resolve<OutboundHttpClientProvider>()).ConfigureAwait(false);
             Audit.Log(Audit.Web, "发送测试通知", ok ? "成功" : "失败");
             if (!ok)
             {
@@ -112,6 +116,10 @@ internal static class ApiSettingsHandler
             settings.McpEnabled,
             settings.McpPort,
             settings.McpAllowDestructiveTools,
+            settings.ProxyMode,
+            settings.ProxyUrl,
+            settings.ProxyUsername,
+            proxyPassword = string.IsNullOrWhiteSpace(settings.ProxyPassword) ? "" : "enc:***",
             settings.WebhookEnabled,
             settings.SmtpEnabled,
             settings.WebhookType,

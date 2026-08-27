@@ -13,6 +13,7 @@ internal static class UpdatePhase
     public const string BackupReady = "BackupReady";
     public const string SwapInProgress = "SwapInProgress";
     public const string SwapReady = "SwapReady";
+    // 兼容读取旧版本 journal；v0.10.8 不再有插件保留阶段。
     public const string PreserveComplete = "PreserveComplete";
     public const string Committed = "Committed";
     public const string RollbackPending = "RollbackPending";
@@ -91,7 +92,7 @@ internal sealed record UpdateTask(
 /// <summary>
 /// 更新应用的切换与收尾：apply-update 子进程（备份→交换→标记→重拉）与新实例启动收尾。
 /// 旧版本备份在 commit 前始终是 immutable snapshot；回滚失败时 backup、journal、staging 全部保留。
-/// 只替换 nexus-pipeline.exe、wwwroot/、plugins/，config/、data/、history/、logs/ 一律不写入。
+/// 只替换 nexus-pipeline.exe、wwwroot/；plugins、config、data、history、logs 均属于用户运行数据。
 /// </summary>
 internal static class UpdateApply
 {
@@ -147,18 +148,11 @@ internal static class UpdateApply
 
             string oldExe = Path.Combine(installDir, "nexus-pipeline.exe");
             string oldWww = Path.Combine(installDir, "wwwroot");
-            string oldPlugins = Path.Combine(installDir, "plugins");
             journal = journal with { Phase = UpdatePhase.SwapInProgress };
             journal.Write();
             SwapInto(Path.Combine(stagedDir, "nexus-pipeline.exe"), oldExe);
             SwapInto(Path.Combine(stagedDir, "wwwroot"), oldWww);
-            SwapInto(Path.Combine(stagedDir, "plugins"), oldPlugins);
             journal = journal with { Phase = UpdatePhase.SwapReady };
-            journal.Write();
-
-            // 用户自加插件目录只从 immutable backup Copy 回新安装，绝不从 backup Move 走。
-            PreserveUserPlugins(Path.Combine(backup, "plugins"), oldPlugins);
-            journal = journal with { Phase = UpdatePhase.PreserveComplete };
             journal.Write();
 
             WriteVersionFile(targetVersion);
@@ -367,7 +361,6 @@ internal static class UpdateApply
     {
         CopySnapshotItem(Path.Combine(installDir, "nexus-pipeline.exe"), Path.Combine(backup, "nexus-pipeline.exe"));
         CopySnapshotItem(Path.Combine(installDir, "wwwroot"), Path.Combine(backup, "wwwroot"));
-        CopySnapshotItem(Path.Combine(installDir, "plugins"), Path.Combine(backup, "plugins"));
         WriteRequiredText(Path.Combine(backup, BackupReadyMarker), DateTimeOffset.UtcNow.ToString("O"));
     }
 
@@ -406,25 +399,6 @@ internal static class UpdateApply
         }
     }
 
-    private static void PreserveUserPlugins(string backupPlugins, string installPlugins)
-    {
-        if (!Directory.Exists(backupPlugins))
-        {
-            return;
-        }
-        Directory.CreateDirectory(installPlugins);
-        foreach (string oldDir in Directory.GetDirectories(backupPlugins))
-        {
-            string name = Path.GetFileName(oldDir);
-            string newDir = Path.Combine(installPlugins, name);
-            if (!Directory.Exists(newDir) && !File.Exists(newDir))
-            {
-                CopyDirectory(oldDir, newDir);
-                Logger.Info($"[更新] 已保留用户自加插件目录：{name}");
-            }
-        }
-    }
-
     private static void Rollback(UpdateTask journal)
     {
         string backup = AppPaths.UpdateBackupDir;
@@ -435,6 +409,8 @@ internal static class UpdateApply
         string installDir = AppPaths.AppRoot;
         RestoreFromBackup(Path.Combine(backup, "nexus-pipeline.exe"), Path.Combine(installDir, "nexus-pipeline.exe"));
         RestoreFromBackup(Path.Combine(backup, "wwwroot"), Path.Combine(installDir, "wwwroot"));
+        // 兼容 v0.10.7 更新 journal：旧 updater 会把 plugins 放入 backup，
+        // v0.10.8 自身的 backup 不包含该目录，因此仅在旧现场实际存在时恢复。
         RestoreFromBackup(Path.Combine(backup, "plugins"), Path.Combine(installDir, "plugins"));
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
@@ -517,8 +493,7 @@ internal static class UpdateApply
         return Directory.Exists(backup)
             && (File.Exists(Path.Combine(backup, BackupReadyMarker))
                 || File.Exists(Path.Combine(backup, "nexus-pipeline.exe"))
-                || Directory.Exists(Path.Combine(backup, "wwwroot"))
-                || Directory.Exists(Path.Combine(backup, "plugins")));
+                || Directory.Exists(Path.Combine(backup, "wwwroot")));
     }
 
     private static bool IsStagingValid(string stagedDir)

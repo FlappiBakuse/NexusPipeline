@@ -29,7 +29,7 @@ const EVERGREEN_DOCUMENTS = [
   "docs/RELEASING.md",
   "docs/ROADMAP.md",
   "docs/KNOWN_ISSUES.md",
-  "plugins/README.md",
+  "docs/PLUGIN_API.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
 ];
 
@@ -185,7 +185,7 @@ test("README documentation navigation points to existing files", () => {
     "CONTRIBUTING.md",
     "SECURITY.md",
     "CHANGELOG.md",
-    "plugins/README.md",
+    "docs/PLUGIN_API.md",
   ];
   const missing = required.filter((relativePath) => !fs.existsSync(path.join(ROOT, relativePath)));
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);

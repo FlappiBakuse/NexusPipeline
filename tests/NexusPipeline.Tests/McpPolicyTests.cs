@@ -64,6 +64,9 @@ public sealed class McpPolicyTests
         {
             LightweightMode = true,
             WebPort = 58801,
+            ProxyMode = "system",
+            ProxyUrl = "https://proxy.example",
+            ProxyUsername = "proxy-user",
         };
 
         JsonObject json = patch.ToPatch();
@@ -74,6 +77,10 @@ public sealed class McpPolicyTests
         Assert.Null(json["accessToken"]);
         Assert.Null(json["secretKey"]);
         Assert.Null(json["mcpAllowDestructiveTools"]);
+        Assert.Equal("system", json["proxyMode"]!.GetValue<string>());
+        Assert.Equal("https://proxy.example", json["proxyUrl"]!.GetValue<string>());
+        Assert.Equal("proxy-user", json["proxyUsername"]!.GetValue<string>());
+        Assert.Null(json["proxyPassword"]);
     }
 
     [Fact]
@@ -81,6 +88,7 @@ public sealed class McpPolicyTests
     {
         Assert.True(McpPolicy.IsSecretKey("accessToken"));
         Assert.True(McpPolicy.IsSecretKey("smtpPassword"));
+        Assert.True(McpPolicy.IsSecretKey("proxyPassword"));
         Assert.False(McpPolicy.IsSecretKey("allowRemoteAccess"));
         Assert.False(McpPolicy.IsSecretKey("arbitraryPath"));
     }

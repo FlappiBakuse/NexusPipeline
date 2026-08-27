@@ -8,6 +8,7 @@ using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Update;
 
 namespace NexusPipeline;
@@ -46,6 +47,7 @@ internal class RuntimeContext
             () => Users,
             users => DataStore.SaveUsers(users)));
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
+        collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(() => Settings));
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             () => Settings,
@@ -53,6 +55,13 @@ internal class RuntimeContext
             tryConfigurationMutation: mutation =>
                 provider.GetRequiredService<DispatchCenter>()
                     .TryExecuteHostConfigurationMutation(mutation, out _)));
+        collection.AddSingleton<PluginPackageService>(provider => new PluginPackageService(
+            provider.GetRequiredService<OutboundHttpClientProvider>()));
+        collection.AddSingleton<PluginRepositoryService>(provider => new PluginRepositoryService(
+            () => Settings,
+            () => provider.GetRequiredService<PluginManager>(),
+            provider.GetRequiredService<PluginPackageService>(),
+            provider.GetRequiredService<OutboundHttpClientProvider>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
@@ -73,7 +82,8 @@ internal class RuntimeContext
             AppPaths.AppRoot,
             () => Bootstrap.CanRequestDirectExit(out _),
             Bootstrap.TryRequestUpdateExit,
-            () => Bootstrap.TryAcquireUpdateMaintenanceLease()));
+            () => Bootstrap.TryAcquireUpdateMaintenanceLease(),
+            provider.GetRequiredService<OutboundHttpClientProvider>()));
         _services = collection.BuildServiceProvider();
     }
 

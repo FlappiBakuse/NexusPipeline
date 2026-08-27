@@ -32,8 +32,31 @@ test("访问令牌入口：生成、显示切换和状态回读", async ({ page 
 test("插件页面：健康状态以列表形式加载", async ({ page }) => {
   await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".plugins-table")).toBeVisible();
-  await expect(page.locator(".plugin-group").first()).toBeVisible();
-  await expect(page.locator('[data-testid="plugin-status"]').first()).toBeVisible();
+  await expect(page.getByTestId("plugin-store-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("plugin-store-list")).toBeVisible();
+  await expect(page.locator('[data-testid="plugin-store-status"]').first()).toBeVisible();
+});
+
+test("设置页面：三档代理模式可切换并保存", async ({ page }) => {
+  await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  const mode = page.locator("#st-proxy-mode");
+  await expect(mode).toBeVisible();
+  await mode.selectOption("none");
+  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.proxyMode, { timeout: 10000 }).toBe("none");
+
+  await mode.selectOption("http");
+  await expect(page.locator("#st-proxy-custom")).toBeVisible();
+  await page.locator("#st-proxy-url").fill("http://127.0.0.1:7890");
+  await page.locator("#st-proxy-url").blur();
+  await expect.poll(async () => {
+    const settings = (await (await api("GET", "/api/settings")).json()).settings;
+    return `${settings.proxyMode}|${settings.proxyUrl}`;
+  }, { timeout: 10000 }).toBe("http|http://127.0.0.1:7890");
+
+  await mode.selectOption("system");
+  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.proxyMode, { timeout: 10000 }).toBe("system");
+  await mode.selectOption("none");
+  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.proxyMode, { timeout: 10000 }).toBe("none");
 });
 
 test("设置页面：手机宽度无溢出且通知面板可展开", async ({ page }) => {

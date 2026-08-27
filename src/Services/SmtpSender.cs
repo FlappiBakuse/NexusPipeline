@@ -137,12 +137,16 @@ internal static class SmtpSender
 internal static class NotifySender
 {
     /// <summary>按启用开关并行发送启用渠道（Webhook / SMTP 各自独立开关，废弃原发送策略）。</summary>
-    public static async Task<bool> SendAsync(AppSettings settings, string text, string? smtpToOverride = null)
+    public static async Task<bool> SendAsync(
+        AppSettings settings,
+        string text,
+        string? smtpToOverride = null,
+        Networking.OutboundHttpClientProvider? outbound = null)
     {
         var tasks = new List<Task<bool>>();
         if (settings.WebhookEnabled)
         {
-            tasks.Add(WebhookSender.SendAsync(settings, text));
+            tasks.Add(WebhookSender.SendAsync(settings, text, outbound));
         }
         if (settings.SmtpEnabled)
         {

@@ -3,19 +3,13 @@ using System.Text;
 using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
 internal static class WebhookSender
 {
-    private static readonly HttpClient Http = new();
-
-    private static readonly HttpClient LoopbackHttp = new(new HttpClientHandler
-    {
-        UseProxy = false,
-    });
-
     /// <summary>Webhook 类型白名单（单源化）：引用 AppSettings.WebhookTypes，不再独立维护副本。</summary>
     private static readonly string[] Types = AppSettings.WebhookTypes;
 
@@ -56,7 +50,10 @@ internal static class WebhookSender
         return (true, $"已配置（{TypeDisplay(type)}）");
     }
 
-    public static async Task<bool> SendAsync(AppSettings settings, string text)
+    public static async Task<bool> SendAsync(
+        AppSettings settings,
+        string text,
+        OutboundHttpClientProvider? outbound = null)
     {
         string? webhookUrl = SecretStore.TryDecrypt(settings.WebhookUrl, out string? url) ? url : null;
         string? webhookSecret = SecretStore.TryDecrypt(settings.WebhookSecret, out string? secret) ? secret : null;
@@ -77,8 +74,9 @@ internal static class WebhookSender
         (string targetUrl, Dictionary<string, string> signatureHeaders) = ApplySignature(type, webhookUrl, webhookSecret);
         try
         {
-            bool loopback = IsLoopback(targetUrl);
-            HttpClient client = loopback ? LoopbackHttp : Http;
+            Uri target = new(targetUrl);
+            using HttpClient client = (outbound ?? new OutboundHttpClientProvider(() => settings))
+                .CreateClient(target, TimeSpan.FromSeconds(timeout));
             using var request = new HttpRequestMessage(HttpMethod.Post, targetUrl)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
@@ -108,11 +106,6 @@ internal static class WebhookSender
             Logger.Error($"[错误] Webhook 发送失败：{ex.Message}");
             return false;
         }
-    }
-
-    private static bool IsLoopback(string url)
-    {
-        return Uri.TryCreate(url, UriKind.Absolute, out Uri? target) && target.IsLoopback;
     }
 
     private static string BuildBody(string type, string text, string template)

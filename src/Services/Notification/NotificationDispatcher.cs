@@ -2,6 +2,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Services.Networking;
 
 namespace NexusPipeline.Services.Notification;
 
@@ -10,12 +11,18 @@ internal sealed class NotificationDispatcher : INotificationService
 {
     private readonly ISettingsProvider _settings;
 
+    private readonly OutboundHttpClientProvider? _outbound;
+
     private readonly TimeSpan _channelTimeout;
 
-    public NotificationDispatcher(ISettingsProvider settings, TimeSpan? channelTimeout = null)
+    public NotificationDispatcher(
+        ISettingsProvider settings,
+        TimeSpan? channelTimeout = null,
+        OutboundHttpClientProvider? outbound = null)
     {
         _settings = settings;
         _channelTimeout = channelTimeout ?? TimeSpan.FromSeconds(30);
+        _outbound = outbound;
     }
 
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
@@ -70,7 +77,7 @@ internal sealed class NotificationDispatcher : INotificationService
     {
         try
         {
-            await NotifySender.SendAsync(settings, text, smtpToOverride).WaitAsync(_channelTimeout).ConfigureAwait(false);
+            await NotifySender.SendAsync(settings, text, smtpToOverride, _outbound).WaitAsync(_channelTimeout).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

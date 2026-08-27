@@ -4,6 +4,7 @@ using NexusPipeline.Mcp;
 using NexusPipeline.Web;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Plugins;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
@@ -19,6 +20,10 @@ internal static class Bootstrap
     public static void StartServices()
     {
         RuntimeContext ctx = RuntimeContext.Instance;
+        if (!PluginInstallRecovery.ApplyPending())
+        {
+            Logger.Warn("[插件] 存在未完成的插件安装事务，保留 pending 并继续加载当前插件。");
+        }
         ctx.Plugins.LoadAll();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();

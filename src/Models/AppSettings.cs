@@ -33,6 +33,18 @@ public class AppSettings
     /// <summary>远程访问令牌（DPAPI 加密存储 enc: 前缀；本地请求豁免校验）。</summary>
     public string AccessToken { get; set; } = "";
 
+    /// <summary>宿主外部 HTTP 请求代理模式：none / system / http。</summary>
+    public string ProxyMode { get; set; } = "none";
+
+    /// <summary>自定义 HTTP/HTTPS 代理地址；仅 ProxyMode=http 时使用。</summary>
+    public string ProxyUrl { get; set; } = "";
+
+    /// <summary>自定义代理用户名，可选。</summary>
+    public string ProxyUsername { get; set; } = "";
+
+    /// <summary>自定义代理密码（DPAPI 加密存储）。</summary>
+    public string ProxyPassword { get; set; } = "";
+
     public bool WebhookEnabled { get; set; } = true;
 
     public bool SmtpEnabled { get; set; }

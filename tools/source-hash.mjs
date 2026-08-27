@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const inputRoots = ["src", "plugins"];
+const inputRoots = ["src"];
 
 function collectFiles(root) {
   const files = [];

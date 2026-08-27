@@ -1,11 +1,11 @@
-# NexusPipeline 插件开发指南
+# NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。两类插件共用 `plugins/<名称>/plugin.json` 发现入口；代码插件通过独立的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
 
 ## 目录结构
 
 ```
-plugins/
+NexusPipeline-Plugins/plugins/
 ├── bettergi/                     # 插件名 = 目录名
 │   ├── plugin.json               # 根文件：元数据 + 引用 data 文件（初始化专项插件）
 │   └── data/
@@ -18,8 +18,9 @@ plugins/
 └── maaend/         （同构）
 ```
 
-- `plugins/` 下的每个子目录视为一个插件；`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
-- 随附四个插件即数据化形态；数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
+- `NexusPipeline-Plugins/plugins/` 下的每个子目录视为一个插件；`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
+- 官方仓库通过根目录 `catalog.json` 发布当前版本和包校验信息；客户端只信任固定官方源，下载后再次检查 manifest。
+- 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
 ## managed-code C# 插件（Plugin API v1）
 
@@ -149,5 +150,5 @@ plugins/check-in/
 
 ## 构建与部署
 
-- `build.cmd` 将 `plugins/` 整体复制到 `release/plugins/`（无编译步骤）；部署即整体拷贝 `release/`。
+- 插件仓库单独构建 ZIP 并发布到 GitHub Release；主程序 `release/plugins/.nxp-root` 仅作为旧版本更新器的兼容根标记，主程序更新不会覆盖用户插件目录。
 - 修改插件文件后重启服务生效；`/api/status` 的 `plugins` 列表可见，新建脚本选择卡片层出现「新建{displayName}专项脚本实例」。

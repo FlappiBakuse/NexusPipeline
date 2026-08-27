@@ -3,6 +3,7 @@ obj/
 release/
 dist/
 build-tmp/
+/plugins/
 *.user
 .vs/
 config/

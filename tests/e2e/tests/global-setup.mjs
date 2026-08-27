@@ -12,6 +12,7 @@ export default async function globalSetup() {
   // 更新源 stub（本地 http，zip 内容取自刚就绪的 runtime），服务经 NEXUS_UPDATE_URL 指向；global teardown 关闭。
   await startUpdateStub();
   process.env.NEXUS_UPDATE_URL = "http://127.0.0.1:58931/";
+  process.env.NEXUS_PLUGIN_CATALOG_URL = "http://127.0.0.1:58931/plugins/catalog.json";
   startService();
   await waitForService();
 }

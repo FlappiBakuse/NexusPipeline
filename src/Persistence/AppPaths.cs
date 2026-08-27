@@ -43,6 +43,19 @@ internal static class AppPaths
     /// <summary>需要跨重启保留的内部状态目录。</summary>
     public static readonly string StateDir = Path.Combine(InternalDir, "state");
 
+    /// <summary>插件商店缓存、归属和待应用事务目录。</summary>
+    public static readonly string PluginStateDir = Path.Combine(StateDir, "plugins");
+
+    public static readonly string PluginCatalogCachePath = Path.Combine(PluginStateDir, "catalog-cache.json");
+
+    public static readonly string PluginOwnershipPath = Path.Combine(PluginStateDir, "ownership.json");
+
+    public static readonly string PluginPendingPath = Path.Combine(PluginStateDir, "pending.json");
+
+    public static readonly string PluginStagingDir = Path.Combine(PluginStateDir, "staging");
+
+    public static readonly string PluginBackupDir = Path.Combine(PluginStateDir, "backup");
+
     /// <summary>旧状态冲突与迁移现场的保留目录。</summary>
     public static readonly string StateRecoveryDir = Path.Combine(StateDir, "recovery");
 
@@ -73,7 +86,7 @@ internal static class AppPaths
     /// <summary>更新任务标记（mode: apply|defer|completed + 目标版本 + staging 路径）。</summary>
     public static readonly string UpdateTaskFile = Path.Combine(UpdateDir, "task.json");
 
-    /// <summary>应用前旧版本备份（nexus-pipeline.exe + wwwroot + plugins）。</summary>
+    /// <summary>应用前旧版本备份（仅 nexus-pipeline.exe + wwwroot；plugins 属于用户数据）。</summary>
     public static readonly string UpdateBackupDir = Path.Combine(AppRoot, ".nxp-backup", "previous");
 
     /// <summary>应用成功标记（内容 = 目标版本），供新实例启动收尾读取。</summary>

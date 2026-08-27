@@ -24,10 +24,11 @@ export async function pageSettings(token) {
     ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
   openSettingsPanel = "service";
-  render(pageHeader("系统设置", "设置", "集中管理服务行为、通知渠道、远程访问、MCP 与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
+  render(pageHeader("系统设置", "设置", "集中管理服务行为、通知渠道、远程访问、代理与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
     ${settingsCardMarkup("service", "服务行为", "服务启动、历史记录与日志选项", serviceSettingsMarkup(settings), "service-settings")}
     ${settingsCardMarkup("notifications", "通知渠道", "Webhook 与 SMTP 通知配置", notificationSettingsMarkup(settings), "notification-settings")}
     ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
+    ${settingsCardMarkup("network", "网络代理", "宿主外部 HTTP/HTTPS 请求", networkSettingsMarkup(settings), "network-settings")}
     ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
   </div>`);
   syncSettingsPanels();
@@ -60,7 +61,7 @@ function syncSettingsPanels() {
 }
 
 function toggleSettingsPanel(panelId) {
-  if (!["service", "notifications", "remote-mcp", "updates"].includes(panelId)) return;
+  if (!["service", "notifications", "remote-mcp", "network", "updates"].includes(panelId)) return;
   openSettingsPanel = openSettingsPanel === panelId ? null : panelId;
   syncSettingsPanels();
 }
@@ -87,6 +88,20 @@ function remoteMcpSettingsMarkup(settings, lanList) {
     ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
     ${switchControl("st-mcp-destructive", "允许破坏性工具", "开放删除、密钥、插件开关、重启和更新等高风险操作", settings.mcpAllowDestructiveTools, "toggle-st-flag", 'data-flag="st-mcp-destructive" data-restart-required="true"')}
   </div><div class="form-grid settings-single-field">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>
+  </div>`;
+}
+
+function networkSettingsMarkup(settings) {
+  const mode = settings.proxyMode || "none";
+  const customHidden = mode === "http" ? "" : " hidden";
+  return `<div class="network-settings">
+    ${selectField("st-proxy-mode", "代理模式", mode, [{ value: "none", label: "无代理" }, { value: "system", label: "使用系统设置" }, { value: "http", label: "HTTP/HTTPS 代理" }], 'data-action="toggle-proxy-fields"')}
+    <div id="st-proxy-custom" class="proxy-custom-fields"${customHidden}>
+      ${valueField("st-proxy-url", "HTTP/HTTPS 代理地址", settings.proxyUrl || "", "text", 'placeholder="http://127.0.0.1:7890"')}
+      ${valueField("st-proxy-user", "用户名（可选）", settings.proxyUsername || "")}
+      <div class="field"><label class="field-label" for="st-proxy-pwd">密码（可选） ${settings.proxyPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-proxy-pwd" type="password" autocomplete="new-password" placeholder="${settings.proxyPassword ? "（已设置，留空不变）" : ""}"></div>
+    </div>
+    <p class="muted helper-copy">代理覆盖插件仓库、插件包下载、软件更新和 Webhook。SMTP、本机 Control API、MCP 与插件子进程保持原有网络行为；localhost 和回环地址始终直连。</p>
   </div>`;
 }
 
@@ -182,6 +197,7 @@ async function saveUpdateSettings() {
 
 let notifySaveChain = Promise.resolve();
 let updateSaveChain = Promise.resolve();
+let networkSaveChain = Promise.resolve();
 
 function queueNotifySave() {
   const save = notifySaveChain.then(() => saveNotifySettings());
@@ -195,12 +211,22 @@ function queueUpdateSave() {
   return save;
 }
 
+function queueNetworkSave() {
+  const save = networkSaveChain.then(() => saveNetworkSettings());
+  networkSaveChain = save.catch(error => toast(error.message, "error"));
+  return save;
+}
+
 function awaitNotifySaveSettled() {
   return notifySaveChain;
 }
 
 function awaitUpdateSaveSettled() {
   return updateSaveChain;
+}
+
+function awaitNetworkSaveSettled() {
+  return networkSaveChain;
 }
 
 async function checkUpdate() {
@@ -326,6 +352,35 @@ async function saveNotifySettings() {
   }
 }
 
+function networkSettingsPayload() {
+  return {
+    proxyMode: $("#st-proxy-mode")?.value || "none",
+    proxyUrl: ($("#st-proxy-url")?.value || "").trim(),
+    proxyUsername: ($("#st-proxy-user")?.value || "").trim(),
+  };
+}
+
+async function saveNetworkSettings() {
+  const password = ($("#st-proxy-pwd")?.value || "").trim();
+  let data = await api("PUT", "/api/settings", networkSettingsPayload());
+  if (password) {
+    data = await api("PUT", "/api/settings", { secretKey: "proxyPassword", secretValue: password });
+    const input = $("#st-proxy-pwd");
+    if (input && input.value.trim() === password) input.value = "";
+  }
+  if (data?.settings) state.settings = data.settings;
+}
+
+function toggleProxyFields() {
+  const mode = $("#st-proxy-mode")?.value || "none";
+  const box = $("#st-proxy-custom");
+  if (box) box.hidden = mode !== "http";
+  // 空地址时让用户先填写地址；地址存在时模式选择可即时保存。
+  if (mode !== "http" || ($("#st-proxy-url")?.value || "").trim()) {
+    queueNetworkSave();
+  }
+}
+
 function syncNotificationBadges(settings) {
   const badges = [
     ["panel-wh", settings.webhookEnabled],
@@ -428,6 +483,7 @@ function bindAutoSave() {
   });
   bindSettingsFields(["st-whtype", "st-whtimeout", "st-whurl", "st-whsec", "st-whtpl", "st-host", "st-port2", "st-secure", "st-user", "st-pwd", "st-to", "st-from", "st-subject", "st-smtp-timeout"], queueNotifySave);
   bindSettingsFields(["st-update-channel", "st-update-source"], queueUpdateSave);
+  bindSettingsFields(["st-proxy-url", "st-proxy-user", "st-proxy-pwd"], queueNetworkSave);
 }
 
 function bindSettingsFields(ids, handler) {
@@ -440,7 +496,7 @@ function bindSettingsFields(ids, handler) {
 
 /** 重启服务：等待挂起的自动保存完成后弹确认卡片（端口改动已即时保存，无需再校验）。 */
 export async function restartService() {
-  await Promise.all([awaitSaveSettled(), awaitNotifySaveSettled(), awaitUpdateSaveSettled()]);
+  await Promise.all([awaitSaveSettled(), awaitNotifySaveSettled(), awaitUpdateSaveSettled(), awaitNetworkSaveSettled()]);
   confirmModal("重启服务", "重启将中断正在运行的任务，页面会短暂断开连接。确认重启服务？", "restart-confirm");
 }
 
@@ -550,6 +606,7 @@ export const actions = {
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
   "toggle-panel": target => togglePanel(target.dataset.panel, target),
   "toggle-generic-template": () => toggleGenericTemplate(),
+  "toggle-proxy-fields": () => toggleProxyFields(),
   "toggle-notify-flag": target => {
     const btn = $("#" + target.dataset.flag);
     if (btn) {

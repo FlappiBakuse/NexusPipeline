@@ -346,7 +346,7 @@ internal sealed class McpMutationTools
     }
 
     [McpServerTool(Name = "update_safe_settings", Title = "更新安全设置", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("更新设置白名单中的非密钥字段。AllowRemoteAccess、AccessToken、MCP 破坏性开关和 MCP 端口不接受来自 MCP 的修改。")]
+    [Description("更新设置白名单中的非密钥字段。AllowRemoteAccess、AccessToken、MCP 破坏性开关和 MCP 端口不接受来自 MCP 的修改。代理模式、地址和用户名可在此调整，代理密码使用 set_secret。")]
     public CallToolResult UpdateSafeSettings([Description("安全设置字段；省略字段保持原值。")]
         McpSafeSettingsPatch patch)
     {

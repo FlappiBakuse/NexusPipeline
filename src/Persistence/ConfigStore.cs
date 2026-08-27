@@ -94,6 +94,21 @@ internal static class ConfigStore
         {
             settings.SmtpTimeout = 30;
         }
+        settings.ProxyMode = (settings.ProxyMode ?? "none").Trim().ToLowerInvariant();
+        if (settings.ProxyMode is not ("none" or "system" or "http"))
+        {
+            settings.ProxyMode = "none";
+        }
+        settings.ProxyUrl = (settings.ProxyUrl ?? "").Trim();
+        settings.ProxyUsername = (settings.ProxyUsername ?? "").Trim();
+        settings.ProxyPassword ??= "";
+        if (!string.IsNullOrWhiteSpace(settings.ProxyUrl)
+            && (!Uri.TryCreate(settings.ProxyUrl, UriKind.Absolute, out Uri? proxyUri)
+                || (!string.Equals(proxyUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(proxyUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))))
+        {
+            settings.ProxyUrl = "";
+        }
         // 更新渠道白名单（stable/prerelease）；镜像源仅校验格式，空=默认 GitHub。
         if (settings.UpdateChannel is not ("stable" or "prerelease"))
         {

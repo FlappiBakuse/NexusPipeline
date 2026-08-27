@@ -21,7 +21,7 @@ import { deriveCandidateVersion, readProjectVersion } from "../support/project-v
 
 /**
  * 内建更新 System Smoke（下一候选版本）：在隔离安装副本上验证 apply-update 的
- * 「备份 → 交换 → 重拉」、config/history/用户自加插件保留、启动收尾清理、失败回滚与 defer 自动应用。
+ * 「备份 → 交换 → 重拉」、config/history/用户插件目录原样保留、启动收尾清理、失败回滚与 defer 自动应用。
  * 运行方式：管理员 cmd 终端执行 `set NEXUS_SYSTEM_SMOKE=1 && node --test tests/system/update-smoke.mjs`。
  */
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1" && isElevated();
@@ -42,7 +42,7 @@ function writeTask(mode, stagedDir = stagingRoot) {
   fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: updateVersion, StagedDir: stagedDir }), "utf8");
 }
 
-/** 从发布构建构造「新版本」staging：exe + wwwroot（release 干净源，无旧安装标记）+ plugins（含运行时保留观察物）。 */
+/** 从发布构建构造「新版本」staging：exe + wwwroot（release 干净源，无旧安装标记）+ plugins（验证更新器不接管该目录）。 */
 function prepareStaging() {
   fs.rmSync(stagingRoot, { recursive: true, force: true });
   fs.mkdirSync(stagingRoot, { recursive: true });
@@ -127,7 +127,7 @@ after(async () => {
   }
 });
 
-test("apply-update：备份→交换→保留用户插件与数据→重拉宿主→启动收尾清理", { skip }, async () => {
+test("apply-update：备份→交换→保留插件与数据→重拉宿主→启动收尾清理", { skip }, async () => {
   prepareStaging();
   writeTask("apply");
 

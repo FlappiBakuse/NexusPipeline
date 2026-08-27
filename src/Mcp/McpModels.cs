@@ -213,6 +213,12 @@ internal sealed class McpSafeSettingsPatch
 
     public int? WebPort { get; set; }
 
+    public string? ProxyMode { get; set; }
+
+    public string? ProxyUrl { get; set; }
+
+    public string? ProxyUsername { get; set; }
+
     public bool? WebhookEnabled { get; set; }
 
     public bool? SmtpEnabled { get; set; }
@@ -256,6 +262,9 @@ internal sealed class McpSafeSettingsPatch
         Add(patch, "autoOpenBrowser", AutoOpenBrowser);
         Add(patch, "historyRetentionDays", HistoryRetentionDays);
         Add(patch, "webPort", WebPort);
+        Add(patch, "proxyMode", ProxyMode);
+        Add(patch, "proxyUrl", ProxyUrl);
+        Add(patch, "proxyUsername", ProxyUsername);
         Add(patch, "webhookEnabled", WebhookEnabled);
         Add(patch, "smtpEnabled", SmtpEnabled);
         Add(patch, "webhookType", WebhookType);
@@ -489,6 +498,10 @@ internal static class McpViews
             settings.McpEnabled,
             settings.McpPort,
             settings.McpAllowDestructiveTools,
+            settings.ProxyMode,
+            settings.ProxyUrl,
+            settings.ProxyUsername,
+            proxyPassword = Mask(settings.ProxyPassword),
             settings.WebhookEnabled,
             settings.SmtpEnabled,
             settings.WebhookType,

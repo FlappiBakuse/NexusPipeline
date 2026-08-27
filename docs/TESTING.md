@@ -25,6 +25,7 @@
 - 调度计算、执行准入、资源冲突、重试和完成状态机；
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
+- 插件 catalog schema/版本/官方 URL 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
 - MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。
@@ -36,6 +37,7 @@
 - 主导航和关键二级页面可打开；
 - 一个典型创建、编辑、删除流程可完成；
 - 关键表单字段显隐、确认动作和粗粒度手机宽度检查。
+- 插件仓库/本地插件二态切换、仓库条目状态和网络代理字段显隐。
 
 以下行为进入 System Smoke：
 
@@ -46,6 +48,7 @@
 - 真实 JavaScript/Python interpreter 边界；
 - Generic ADB 与 MuMuManager stub command sequence；
 - managed plugin assembly 加载与更新事务恢复。
+- 插件 catalog 本地 fixture 的读取、插件目录归属和宿主更新不接管 `plugins/`。
 - MCP Streamable HTTP 的真实握手、工具发现、结构化结果、loopback Host/Origin 安全边界、运行轮询/取消和端口冲突降级。
 
 新增测试时先写低层 replacement，再决定是否需要保留一个高层 smoke。测试不得通过 retries、sleep、自动重启服务或跳过失败来掩盖不稳定性；`waitForTimeout` 不得承担业务同步职责。

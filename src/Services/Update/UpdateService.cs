@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Update;
@@ -24,19 +25,12 @@ internal enum UpdateState
 /// </summary>
 internal sealed class UpdateService
 {
-    private static readonly HttpClient Http = new(new HttpClientHandler
-    {
-        AllowAutoRedirect = false,
-    })
-    {
-        Timeout = TimeSpan.FromMinutes(10),
-    };
-
     private readonly Func<AppSettings> _settings;
     private readonly string _installDir;
     private readonly Func<bool> _canApplyFallback;
     private readonly Func<bool> _requestExit;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
+    private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
 
     private UpdateState _state = UpdateState.Idle;
@@ -54,12 +48,14 @@ internal sealed class UpdateService
         string installDir,
         Func<bool> canApply,
         Func<bool> requestExit,
-        Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null)
+        Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null,
+        OutboundHttpClientProvider? outbound = null)
     {
         _settings = settings;
         _installDir = installDir;
         _canApplyFallback = canApply;
         _requestExit = requestExit;
+        _outbound = outbound ?? new OutboundHttpClientProvider(_settings);
         if (acquireMaintenance is not null)
         {
             _acquireMaintenance = acquireMaintenance;
@@ -162,8 +158,12 @@ internal sealed class UpdateService
             UpdateSourcePolicy policy = new(source);
             string channel = EffectiveChannel(settings);
             (int, int, int) current = ParseCurrent();
+            using HttpClient http = _outbound.CreateClient(
+                policy.SourceUri,
+                TimeSpan.FromMinutes(10),
+                allowAutoRedirect: false);
             using HttpResponseMessage response = await policy.GetAsync(
-                Http,
+                http,
                 policy.SourceUri,
                 manifest: true,
                 "NexusPipeline-update/" + CurrentVersion,
@@ -261,8 +261,12 @@ internal sealed class UpdateService
                 }
                 UpdateSourcePolicy policy = new(source);
                 var progress = new Progress<UpdateDownloadProgress>(value => UpdateProgress(operation, value));
+                using HttpClient http = _outbound.CreateClient(
+                    new Uri(latest.ZipUrl),
+                    TimeSpan.FromMinutes(10),
+                    allowAutoRedirect: false);
                 (bool ok, string? downloadError) = await UpdatePackage.DownloadAsync(
-                    Http,
+                    http,
                     policy,
                     latest.ZipUrl,
                     latest.ShaUrl,

@@ -9,7 +9,7 @@ internal sealed record UpdateDownloadProgress(long BytesRead, long BytesTotal);
 
 /// <summary>
 /// 更新包：受策略约束的 zip/sha256 下载、SHA256 强校验、解压资源上限与布局归一。
-/// 布局：flat root = nexus-pipeline.exe + wwwroot/ + plugins/ + README + LICENSE；
+/// 布局：flat root = nexus-pipeline.exe + wwwroot/ + plugins/.nxp-root + README + LICENSE；
 /// 兼容「包内单个顶层目录」形态（自动归一）；拒绝数据目录、路径穿越、重复条目和 zip bomb。
 /// </summary>
 internal static class UpdatePackage
@@ -204,11 +204,11 @@ internal static class UpdatePackage
                     throw new InvalidDataException($"zip 条目数量超过上限（{MaxArchiveEntries}）");
                 }
                 string name = entry.FullName.Replace('\\', '/');
+                ValidateEntryPath(name.TrimEnd('/'), entry.FullName);
                 if (entry.FullName.EndsWith("/", StringComparison.Ordinal) || name.EndsWith("/", StringComparison.Ordinal))
                 {
                     continue;
                 }
-                ValidateEntryPath(name, entry.FullName);
                 if (entry.Length < 0 || entry.Length > MaxSingleEntryBytes)
                 {
                     throw new InvalidDataException($"zip 条目解压大小超过上限：{entry.FullName}");
@@ -322,6 +322,10 @@ internal static class UpdatePackage
                 throw new InvalidDataException("zip 解压内容超过资源上限");
             }
             output.Write(buffer, 0, read);
+        }
+        if (entryBytes != entry.Length)
+        {
+            throw new InvalidDataException($"zip 条目长度校验失败：{entry.FullName}");
         }
         return extracted;
     }

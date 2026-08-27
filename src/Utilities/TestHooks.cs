@@ -41,4 +41,7 @@ internal static class TestHooks
 
     /// <summary>测试用更新源覆盖（，env NEXUS_UPDATE_URL）：e2e/L2 指向本地 stub 源（https 或回环 http），生产不设置。</summary>
     public static string? UpdateSourceUrl => Environment.GetEnvironmentVariable("NEXUS_UPDATE_URL");
+
+    /// <summary>测试用插件 catalog 地址覆盖（env NEXUS_PLUGIN_CATALOG_URL）；生产不设置。</summary>
+    public static string? PluginCatalogUrl => Environment.GetEnvironmentVariable("NEXUS_PLUGIN_CATALOG_URL");
 }

@@ -1,9 +1,0 @@
-{
-  "name": "march7th",
-  "displayName": "March7thAssistant",
-  "gameName": "崩坏：星穹铁道",
-  "description": "March7th Assistant 专项脚本实例配置接管（Launcher 编辑配置 / Assistant 运行脚本，自动推导主程序、启动目标、配置与日志路径）",
-  "version": "0.1.0",
-  "resolve": "data/resolve.json",
-  "judgeScript": "data/judge.js"
-}

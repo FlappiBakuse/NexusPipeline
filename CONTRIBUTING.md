@@ -60,7 +60,7 @@
 ## 4. 如何提交代码
 
 1. 从最新 `main` 创建带前缀的工作分支，外部贡献者使用 fork；
-2. 先阅读与修改范围对应的权威文档：行为看 `DESIGN.md`，定位代码看 `ARCHITECTURE.md`，测试看 `TESTING.md`，插件看 `plugins/README.md`；
+2. 先阅读与修改范围对应的权威文档：行为看 `DESIGN.md`，定位代码看 `ARCHITECTURE.md`，测试看 `TESTING.md`，插件看 `docs/PLUGIN_API.md`；
 3. 变更前检查工作树，保护运行时数据和用户配置；
 4. 按第 7 节执行适用质量门禁；
 5. 按第 5 节创建提交，说明变更范围、兼容性和验证结果；
@@ -149,13 +149,13 @@ BREAKING CHANGE: 说明迁移方式和兼容性影响
 | 历史版本变化 | `CHANGELOG.md` | 不在 evergreen 文档重复 |
 | 尚未完成的开发计划 | `docs/ROADMAP.md` | 完成后移出并记录 CHANGELOG |
 | 当前未解决缺陷与风险 | `docs/KNOWN_ISSUES.md` | 修复后移出 |
-| Plugin SDK、manifest、扩展契约 | `plugins/README.md` | DESIGN/ARCHITECTURE 只说明边界并链接 |
+| Plugin SDK、manifest、扩展契约 | `docs/PLUGIN_API.md` | DESIGN/ARCHITECTURE 只说明边界并链接 |
 | AI/Codex 操作约束 | `AGENTS.md` | 不保存产品语义副本 |
 | 历史测试证据 | `tests/legacy/**` | 不作为当前规范引用 |
 
 #### Evergreen 规则
 
-`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md`、`docs/` 下的当前规范文档和 `plugins/README.md` 都属于 evergreen 文档。除兼容性确实依赖版本号的内容外：
+`README.md`、`AGENTS.md`、`CONTRIBUTING.md`、`SECURITY.md`、`docs/` 下的当前规范文档和 `docs/PLUGIN_API.md` 都属于 evergreen 文档。除兼容性确实依赖版本号的内容外：
 
 - 不记录已完成版本的流水账、修复过程和旧验证数字；
 - 不把 `KN-*`、内部阶段编号或历史问题编号写进当前语义说明；

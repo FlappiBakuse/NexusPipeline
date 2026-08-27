@@ -13,7 +13,7 @@ internal static class SettingsCommands
 {
     private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "webhookUrl", "webhookSecret", "smtpPassword", "accessToken",
+        "webhookUrl", "webhookSecret", "smtpPassword", "proxyPassword", "accessToken",
     };
 
     public static OperationResult<AppSettings> Update(JsonObject patch, string source = Audit.Web)
@@ -57,7 +57,7 @@ internal static class SettingsCommands
                     {
                         string key = secretKeyNode.Str();
                         string value = secretValueNode.Str();
-                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
+                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "proxyPassword" or "accessToken")
                         {
                             if (string.IsNullOrWhiteSpace(value))
                             {
@@ -70,6 +70,13 @@ internal static class SettingsCommands
                                 secretDetail = $"，更新密钥 {key}";
                             }
                         }
+                    }
+
+                    if (bindError is null
+                        && string.Equals(candidate.ProxyMode, "http", StringComparison.OrdinalIgnoreCase)
+                        && string.IsNullOrWhiteSpace(candidate.ProxyUrl))
+                    {
+                        bindError = "自定义代理模式需要填写 HTTP/HTTPS 代理地址";
                     }
 
                     if (bindError is null)
@@ -166,6 +173,28 @@ internal static class SettingsCommands
                     settings.LogLevel = level;
                 }
                 return null;
+            case "proxyMode":
+                string mode = value.Str().Trim().ToLowerInvariant();
+                if (mode is not ("none" or "system" or "http"))
+                {
+                    return "代理模式无效（应为 none、system 或 http）";
+                }
+                settings.ProxyMode = mode;
+                return null;
+            case "proxyUrl":
+                string proxyUrl = value.Str().Trim();
+                if (!string.IsNullOrWhiteSpace(proxyUrl)
+                    && (!Uri.TryCreate(proxyUrl, UriKind.Absolute, out Uri? proxyUri)
+                        || (!string.Equals(proxyUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(proxyUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))))
+                {
+                    return "代理地址必须是 http:// 或 https:// 地址";
+                }
+                settings.ProxyUrl = proxyUrl;
+                return null;
+            case "proxyUsername":
+                settings.ProxyUsername = value.Str().Trim();
+                return null;
         }
 
         string propertyName = char.ToUpperInvariant(field[0]) + field[1..];
@@ -200,6 +229,9 @@ internal static class SettingsCommands
             case "smtpPassword":
                 settings.SmtpPassword = encrypted;
                 break;
+            case "proxyPassword":
+                settings.ProxyPassword = encrypted;
+                break;
             case "accessToken":
                 settings.AccessToken = encrypted;
                 break;
@@ -218,6 +250,9 @@ internal static class SettingsCommands
                 break;
             case "smtpPassword":
                 settings.SmtpPassword = "";
+                break;
+            case "proxyPassword":
+                settings.ProxyPassword = "";
                 break;
             case "accessToken":
                 settings.AccessToken = "";

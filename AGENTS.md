@@ -1,6 +1,6 @@
 # AGENTS.md
 
-NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C#/.NET 8 WinForms 托盘程序、HttpListener Web 服务和零构建静态 ES module 前端。核心代码位于 `src/`，用户界面位于 `wwwroot/`，数据化插件位于 `plugins/`，测试位于 `tests/`。
+NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C#/.NET 8 WinForms 托盘程序、HttpListener Web 服务和零构建静态 ES module 前端。核心代码位于 `src/`，用户界面位于 `wwwroot/`，运行时插件位于 `plugins/`，独立插件仓库位于相邻的 `NexusPipeline-Plugins/`，测试位于 `tests/`。
 
 ## 权威文档路由
 
@@ -15,7 +15,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 | 发布、资产和 SHA | [docs/RELEASING.md](docs/RELEASING.md) |
 | 当前版本路线和未完成计划 | [docs/ROADMAP.md](docs/ROADMAP.md) |
 | 当前未解决问题与技术风险 | [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) |
-| Plugin SDK、manifest 和扩展契约 | [plugins/README.md](plugins/README.md) |
+| Plugin SDK、manifest 和扩展契约 | [docs/PLUGIN_API.md](docs/PLUGIN_API.md) |
 | 版本历史 | [CHANGELOG.md](CHANGELOG.md) |
 
 ## Agent 强制规则
@@ -25,7 +25,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 - 未经用户明确授权，不执行 commit、push、tag、Pull Request 或 Release；版本开发期间不自行拆分发布。
 - `config/`、`data/`、`history/`、`logs/` 和测试 runtime 属于用户或运行时现场。阅读时脱敏，修改和测试时使用隔离目录，禁止把凭据、账号、日志和运行产物加入版本库。
 - 文档任务保持文档范围。发现代码、测试和 DESIGN 的行为描述不一致时，先核对事实；需要改变产品行为时停止该冲突项并向用户报告。
-- 修改行为前阅读 DESIGN，寻找实现前阅读 ARCHITECTURE，修改测试前阅读 TESTING，修改插件前阅读 `plugins/README.md`，发布前阅读 RELEASING。
+- 修改行为前阅读 DESIGN，寻找实现前阅读 ARCHITECTURE，修改测试前阅读 TESTING，修改插件前阅读 `docs/PLUGIN_API.md`，发布前阅读 RELEASING。
 - 测试失败时保留失败证据并修复根因；禁止通过自动重试、跳过失败或静默重定向掩盖失败。完整测试命令只维护在 `docs/TESTING.md`。
 
 ## Windows 与工具链注意事项

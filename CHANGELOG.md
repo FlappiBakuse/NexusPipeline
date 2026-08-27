@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.8（Pre-release，开发中）
+
+### 插件仓库与运行目录
+
+- 将官方数据化专项插件实现迁移到独立的 `NexusPipeline-Plugins` 目录，主程序保留 `NexusPipeline.Plugin.Abstractions` Plugin API v1。
+- 新增固定官方 `catalog.json`、插件仓库浏览、安装、更新和卸载；插件包执行 SHA256、大小、ZIP 路径、资源上限和 manifest 一致性校验。
+- 新增跨重启插件 pending 事务、staging/backup 恢复和商店归属记录；现有 `plugins/` 在宿主更新时持续保留。
+- 插件页默认打开「插件仓库」，「本地插件」继续保留原有分组和启停布局。
+
+### 宿主网络与更新
+
+- 设置页新增无代理、使用系统设置和自定义 HTTP/HTTPS 代理三档模式；插件仓库、插件包、宿主更新和 Webhook 使用统一外部 HTTP 出口。
+- 代理密码使用 DPAPI 保存，设置 API 与界面只显示脱敏占位符；SMTP、Control API、MCP、本机地址和插件子进程保持独立网络边界。
+- 宿主更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，发布包中的 `plugins/.nxp-root` 用于旧版本更新器兼容。
+
+### 测试与文档
+
+- 新增 catalog、代理映射和插件安装恢复回归测试，扩展 UI/E2E 更新源 fixture 与文档一致性说明。
+
 ## v0.10.7（Pre-release）
 
 ### 用户管理与专项配置

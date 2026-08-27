@@ -8,11 +8,12 @@ import { projectRoot, runtimeDir } from "./helpers.mjs";
 
 /**
  * 更新源 stub（下一候选版本，e2e）：以本地 HTTP 服务模拟 GitHub Releases API 兼容源。
- * ZIP 内容 = 当前 runtime 构建（exe + wwwroot + plugins），布局与发布资产一致（flat root）。
+ * ZIP 内容 = 当前 runtime 构建（exe + wwwroot + plugins/.nxp-root），布局与发布资产一致（flat root）。
  */
 export const UPDATE_PORT = 58931;
 export const UPDATE_VERSION = deriveCandidateVersion(readProjectVersion(projectRoot));
 export const UPDATE_BASE = `http://127.0.0.1:${UPDATE_PORT}/`;
+const pluginRepoRoot = path.resolve(projectRoot, "..", "NexusPipeline-Plugins");
 
 let server = null;
 let zipBuffer = null;
@@ -139,6 +140,11 @@ function releasesJson() {
   ]);
 }
 
+function pluginCatalogJson() {
+  const file = path.join(pluginRepoRoot, "catalog.json");
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : JSON.stringify({ schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline-Plugins", generatedAt: new Date().toISOString(), plugins: [] });
+}
+
 export async function startUpdateStub() {
   if (server) return;
   buildZip();
@@ -146,6 +152,12 @@ export async function startUpdateStub() {
     const url = new URL(req.url, UPDATE_BASE);
     if (url.pathname === "/" || url.pathname === "/releases") {
       const body = releasesJson();
+      res.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
+      res.end(body);
+      return;
+    }
+    if (url.pathname === "/plugins/catalog.json") {
+      const body = pluginCatalogJson();
       res.writeHead(200, { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body) });
       res.end(body);
       return;

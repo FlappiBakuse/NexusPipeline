@@ -14,7 +14,7 @@ NexusPipeline/
 │   ├── Application/    应用宿主、启动流程与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/Abstractions/Repositories
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
-│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification 分域）
+│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update 分域）
 │   ├── Persistence/    持久化层（NexusPipeline.Persistence）
 │   ├── Utilities/      工具层（NexusPipeline.Utilities）
 │   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
@@ -125,7 +125,12 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
 | `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
-| `PluginManager` | src/Plugins/PluginManager.cs | 插件发现/加载/开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
+| `PluginManager` | src/Plugins/PluginManager.cs | 仅负责本地插件发现、加载、开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
+| `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、名称/版本/URL/SHA/宿主兼容性校验；不执行网络请求 |
+| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
+| `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
+| `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `OutboundHttpClientProvider` | src/Services/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
 | `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
 | `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
 
@@ -178,8 +183,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
 | `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
 | `views/history.js` | 历史列表 + 详情弹窗 |
-| `views/plugins.js` | 数据化专项插件与 managed-code 插件列表、启停状态 |
-| `views/settings.js` | 系统设置页 + Webhook/SMTP 内置通知渠道 |
+| `views/plugins.js` | 默认插件仓库视图、本地插件视图、安装/更新/卸载登记与启停状态 |
+| `views/settings.js` | 系统设置页 + Webhook/SMTP 内置通知渠道 + 三档宿主外网代理 |
 | `views/dashboard.js` | 仪表盘（3 秒轮询） |
 | `core/api.js` | 请求封装（JSON/错误/AbortController 生命周期联动） |
 | `core/dom.js` | `$` / `$$` 查询 |
@@ -200,7 +205,19 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ## 插件扩展指南
 
-数据化专项插件采用 `plugins/<名称>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。
+数据化专项插件采用运行目录 `plugins/<名称>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。实现与主仓库分离，官方源目录和包资产位于 `NexusPipeline-Plugins`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。
+
+### 插件仓库与本地运行目录
+
+- `PluginManager` 只扫描当前安装目录 `plugins/<name>/`；它不读取网络，也不决定包下载策略。
+- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟内存缓存，过期时请求网络；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。
+- 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录跨重启事务，启动时由 `PluginInstallRecovery` 在插件扫描前完成目录交换。
+- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本和 SHA；`catalog-cache.json` 仅作可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
+- Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；操作完成后提示重启生效。
+
+### 宿主外部网络出口
+
+`OutboundHttpClientProvider` 按每次请求读取当前 `AppSettings`，统一供插件 catalog/包下载、宿主更新和 Webhook 使用。代理模式为 `none`、`system`、`http`；自定义代理的密码通过 `SecretStore` DPAPI 存储，API/UI 只返回占位符。SMTP、Control API、MCP 以及插件子进程不经过该出口；loopback 目标始终禁用代理。
 
 ### 插件分类
 
@@ -220,7 +237,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ### 编写插件
 
-插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [plugins/README.md](../plugins/README.md)；本文件只说明宿主模块边界和代码定位。
+插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [PLUGIN_API.md](PLUGIN_API.md)；本文件只说明宿主模块边界和代码定位。
 
 - managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContext` 使用宿主提供的日志、配置、密钥、通知和后台任务端口。
 - 数据化专项插件由 `plugins/<名称>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册，宿主在保存脚本实例时固化解析结果。
@@ -236,6 +253,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/AttemptRunner.cs`、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/AttemptRunner.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/Configuration/ConfigurationTransaction.cs`（事务原语）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
+| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs`、`src/Plugins/PluginPackageService.cs`、`src/Plugins/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
+| 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
 | 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |

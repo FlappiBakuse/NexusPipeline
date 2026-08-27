@@ -8,7 +8,7 @@ internal static class McpPolicy
 {
     private static readonly HashSet<string> SecretKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "webhookUrl", "webhookSecret", "smtpPassword", "accessToken",
+        "webhookUrl", "webhookSecret", "smtpPassword", "proxyPassword", "accessToken",
     };
 
     public static OperationResult<T> DestructiveDenied<T>()

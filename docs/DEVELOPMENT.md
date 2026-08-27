@@ -30,10 +30,10 @@ build.cmd
 release/
 ├── nexus-pipeline.exe   ← 框架依赖的单文件、requireAdministrator
 ├── wwwroot/              ← 纯静态网页
-└── plugins/              ← 专项插件目录
+└── plugins/              ← 用户插件运行目录（由插件管理器维护）
 ```
 
-构建脚本由 `build.cmd` 调用 `tools/source-hash.mjs` 计算 `src/` 与 `plugins/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`；源码未变化时可以只同步 `wwwroot/` 与 `plugins/`。`release/` 属于运行产物，不提交到版本库。
+构建脚本由 `build.cmd` 调用 `tools/source-hash.mjs` 计算宿主 `src/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`；插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
 
 重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
 
@@ -82,6 +82,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `NEXUS_TIME_SCALE` | 缩放宿主等待时长；判断脚本单次 30 秒上限保持真实墙钟语义 |
 | `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 记录休眠、重启或关机请求，不执行真实系统操作 |
 | `NEXUS_SYSTEM_SMOKE=1` | 启用管理员 System Smoke 运行模式 |
+| `NEXUS_PLUGIN_CATALOG_URL` | 将插件 catalog 指向本地测试源；生产环境不设置 |
 
 ### 5.3 Windows 环境注意事项
 
@@ -113,6 +114,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 | `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |
 | `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的内部运行状态；旧根目录状态由取得单实例所有权的服务幂等迁移 |
+| `.nxp/state/plugins/` | 插件仓库 catalog 缓存、商店归属、待重启事务以及 staging/backup 操作现场 |
 
 `.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录，不纳入普通运行状态收纳迁移。旧版本的根目录 `service.pid`、`web.port` 会在服务取得单实例互斥体后作为过期标记清理；旧 `scheduler-state.json` 在新文件不存在时原子移动，新旧同时存在时旧文件进入 `.nxp/state/recovery/`。
 

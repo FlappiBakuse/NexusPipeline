@@ -147,9 +147,9 @@ internal sealed class McpDestructiveTools
     }
 
     [McpServerTool(Name = "set_secret", Title = "设置密钥", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("设置 Webhook、SMTP 密码或访问令牌；密钥值只进入加密存储，工具结果与审计日志不回显。")]
+    [Description("设置 Webhook、SMTP、代理密码或访问令牌；密钥值只进入加密存储，工具结果与审计日志不回显。")]
     public CallToolResult SetSecret(
-        [Description("密钥字段：webhookUrl、webhookSecret、smtpPassword 或 accessToken。")]
+        [Description("密钥字段：webhookUrl、webhookSecret、smtpPassword、proxyPassword 或 accessToken。")]
         string secretKey,
         [Description("密钥明文；不会出现在返回值或审计日志中。")]
         string secretValue)
@@ -177,8 +177,8 @@ internal sealed class McpDestructiveTools
     }
 
     [McpServerTool(Name = "clear_secret", Title = "清除密钥", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("清除 Webhook、SMTP 密码或访问令牌；返回值不包含密钥内容。")]
-    public CallToolResult ClearSecret([Description("密钥字段：webhookUrl、webhookSecret、smtpPassword 或 accessToken。")]
+    [Description("清除 Webhook、SMTP、代理密码或访问令牌；返回值不包含密钥内容。")]
+    public CallToolResult ClearSecret([Description("密钥字段：webhookUrl、webhookSecret、smtpPassword、proxyPassword 或 accessToken。")]
         string secretKey)
     {
         if (!Allowed())
