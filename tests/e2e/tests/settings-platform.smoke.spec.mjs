@@ -4,17 +4,21 @@ import { api, baseUrl } from "./helpers.mjs";
 test("设置入口：保存普通服务设置并从 API 读取", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#st-retention")).toBeVisible();
+  await expect(page.locator('[data-action="toggle-settings-panel"][data-panel="service"]')).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByTestId("mcp-settings")).toBeVisible();
-  await expect(page.locator("#st-mcp-port")).toHaveValue("58732");
+  await expect(page.locator("#st-mcp-port")).toBeHidden();
   const current = Number(await page.locator("#st-retention").inputValue());
   const next = current === 7 ? 8 : 7;
   await page.locator("#st-retention").fill(String(next));
   await page.locator("#st-retention").dispatchEvent("change");
   await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.historyRetentionDays, { timeout: 10000 }).toBe(next);
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="remote-mcp"]').click();
+  await expect(page.locator("#st-mcp-port")).toHaveValue("58732");
 });
 
 test("访问令牌入口：生成、显示切换和状态回读", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="remote-mcp"]').click();
   const token = page.locator("#st-token");
   await page.getByTestId("gen-token").click();
   await expect.poll(async () => (await token.inputValue()).length, { timeout: 10000 }).toBeGreaterThan(20);
@@ -38,6 +42,7 @@ test("设置页面：手机宽度无溢出且通知面板可展开", async ({ pa
     await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
     await expect(page.locator("#st-retention")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
+    await page.locator('[data-action="toggle-settings-panel"][data-panel="notifications"]').click();
     await page.getByRole("button", { name: /SMTP 邮件通知/ }).click();
     await expect(page.locator("#panel-smtp")).toBeVisible();
   } finally {
@@ -48,6 +53,7 @@ test("设置页面：手机宽度无溢出且通知面板可展开", async ({ pa
 test("更新区：检查→下载→就绪按钮流（本地 stub 更新源）", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("update-section")).toBeVisible();
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="updates"]').click();
   // 等待可能的启动自动检查结束（状态机空闲后再手动检查）。
   await expect.poll(async () => (await (await api("GET", "/api/update/status")).json()).state, { timeout: 20000 }).toBe("idle");
   await page.getByTestId("update-check").click();
@@ -59,6 +65,7 @@ test("更新区：检查→下载→就绪按钮流（本地 stub 更新源）",
 
 test("更新区：立即应用→服务重启→页面恢复（末位用例）", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="updates"]').click();
   await expect(page.getByTestId("update-apply")).toBeVisible({ timeout: 30000 });
   await page.getByTestId("update-apply").click();
   // 应用后服务退出并重拉；重启窗口内连接被拒属预期，手写循环捕获异常重试

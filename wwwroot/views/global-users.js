@@ -236,8 +236,11 @@ function umBindingCardMarkup(binding) {
   const preValue = (binding.preRunOnceOnly ? "%FIRST% " : "") + (binding.preRunScript || "");
   const postValue = (binding.postRunOnFinalOnly ? "%LAST% " : "") + (binding.postRunScript || "");
   const runDaysPlaceholder = "填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。";
+  const dragEnabled = umBindingDragEnabled();
+  const dragHidden = umState.bindingEditMode || !!umState.expandedId;
   const head =
     '<div class="um-binding-head">' +
+      '<span class="drag-handle um-binding-drag-handle" role="button" tabindex="' + (dragEnabled ? "0" : "-1") + '" aria-disabled="' + (dragEnabled ? "false" : "true") + '"' + (dragHidden ? " hidden" : "") + ' aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序" data-testid="um-binding-drag-handle">' + icon("grip") + "</span>" +
       '<button class="um-binding-toggle" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="打开脚本实例设置：' + esc(name) + '"' + (umState.bindingEditMode ? ' disabled aria-disabled="true"' : '') + '>' +
         '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="36" height="36" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
         '<span class="um-binding-copy"><strong class="um-binding-name">' + esc(name) + '</strong><span class="um-binding-badges">' + umBadges(binding) + "</span></span>" +
@@ -282,7 +285,7 @@ function umBindingCardMarkup(binding) {
       valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
       valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
     "</div>";
-  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + '" data-testid="um-binding-card" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main">' +
+  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main">' +
     head + subhead +
     '<div class="um-binding-body">' + mainView + generalView + notifyView + advancedView + "</div>" +
   "</article>";
@@ -297,6 +300,10 @@ const umState = {
   addSelected: new Set(),
 };
 
+function umBindingDragEnabled() {
+  return !umState.bindingEditMode && !umState.expandedId && !umState.addOpen;
+}
+
 function umAddItemMarkup(script) {
   const selected = umState.addSelected.has(script.id);
   return '<button class="um-add-item" type="button" data-action="toggle-um-add-item" data-script-id="' + esc(script.id) + '" aria-pressed="' + (selected ? "true" : "false") + '">' +
@@ -304,6 +311,16 @@ function umAddItemMarkup(script) {
     '<span class="um-add-item-copy"><strong>' + esc(script.name) + "</strong>" + (script.pluginType ? '<span class="muted">专项脚本</span>' : "") + "</span>" +
     '<span class="um-add-item-mark" aria-hidden="true">' + icon("check") + "</span>" +
   "</button>";
+}
+
+function mergeManagedBinding(user, binding) {
+  if (!user || !binding?.scriptInstanceId) return;
+  const bindings = Array.isArray(user.bindings) ? user.bindings : [];
+  const index = bindings.findIndex(item => item.scriptInstanceId === binding.scriptInstanceId);
+  if (index >= 0) bindings[index] = { ...bindings[index], ...binding };
+  else bindings.push(binding);
+  user.bindings = bindings;
+  user.bindingCount = bindings.length;
 }
 
 function renderUserManagementModal() {
@@ -323,8 +340,9 @@ function renderUserManagementModal() {
         '<div class="um-add-actions"><button class="ghost" type="button" data-action="close-um-add-panel">取消</button><button class="primary" type="button" data-action="confirm-um-add-bindings" data-testid="um-add-confirm">确认</button></div>' +
       "</div>" +
     "</div>";
-  const bindingList = user.bindings.length
-    ? '<div class="um-bindings" id="um-binding-list">' + user.bindings.map(umBindingCardMarkup).join("") + "</div>"
+  const bindings = Array.isArray(user.bindings) ? user.bindings : [];
+  const bindingList = bindings.length
+    ? '<div class="um-bindings" id="um-binding-list">' + bindings.map(umBindingCardMarkup).join("") + "</div>"
     : '<div class="empty compact-empty"><strong>尚未绑定脚本实例</strong><span>从上方「添加脚本」选择脚本实例后添加绑定。</span></div>';
   const bindingEditToggle = '<button class="ghost sm um-binding-edit-toggle" type="button" data-action="toggle-um-binding-edit" aria-pressed="' + (umState.bindingEditMode ? "true" : "false") + '"' + (umState.expandedId ? " hidden" : "") + '>' + (umState.bindingEditMode ? "完成编辑" : "编辑绑定") + "</button>";
   const body =
@@ -341,7 +359,18 @@ function renderUserManagementModal() {
   const footer = `<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${umState.expandedId ? "返回上级" : "取消"}</button>`;
   showModal(modalShell("编辑用户", body, footer), true);
   syncUmState();
+  wireManagedBindingDnd();
   hydrateIcons(document);
+}
+
+function wireManagedBindingDnd() {
+  const list = document.getElementById("um-binding-list");
+  if (!list) return;
+  initDndList(list, {
+    canDrag: () => umBindingDragEnabled(),
+    axis: "both",
+    onDrop: ids => reorderManagedBindings(ids),
+  });
 }
 
 /** 根据 umState 应用到 DOM（不重建弹窗，保留输入值与滚动位置）。 */
@@ -361,6 +390,7 @@ function syncUmState() {
   if (footerBack) footerBack.textContent = umState.expandedId ? "返回上级" : "取消";
   const list = document.getElementById("um-binding-list");
   if (list) {
+    const dragEnabled = umBindingDragEnabled();
     Array.from(list.querySelectorAll(".um-binding-card")).forEach(card => {
       const expanded = card.dataset.bindingId === umState.expandedId;
       card.classList.toggle("is-expanded", expanded);
@@ -371,6 +401,14 @@ function syncUmState() {
         toggle.disabled = umState.bindingEditMode;
         toggle.setAttribute("aria-disabled", umState.bindingEditMode ? "true" : "false");
         toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+      const dragHandle = card.querySelector(".um-binding-drag-handle");
+      if (dragHandle) {
+        dragHandle.tabIndex = dragEnabled ? 0 : -1;
+        dragHandle.setAttribute("aria-disabled", dragEnabled ? "false" : "true");
+        const dragHidden = umState.bindingEditMode || !!umState.expandedId;
+        dragHandle.hidden = dragHidden;
+        dragHandle.setAttribute("aria-hidden", dragHidden ? "true" : "false");
       }
     });
   }
@@ -452,7 +490,7 @@ export async function saveUserManagement() {
   }
 }
 
-async function refreshManagedUser() {
+async function refreshManagedUser(knownBindings = []) {
   if (!managementDraft) return;
   try {
     state.users = await api("GET", "/api/users");
@@ -463,6 +501,7 @@ async function refreshManagedUser() {
       await reloadUsers();
       return;
     }
+    for (const binding of knownBindings) mergeManagedBinding(user, binding);
     managementDraft.user = cloneUser(user);
     umState.expandedId = null;
     umState.subview = "main";
@@ -470,6 +509,53 @@ async function refreshManagedUser() {
     umState.addSelected.clear();
     renderUserManagementModal();
   } catch (error) {
+    // 新增绑定的 POST 已成功时，即使后续列表刷新失败也先把服务端返回的卡片呈现出来。
+    if (managementDraft && knownBindings.length) {
+      for (const binding of knownBindings) mergeManagedBinding(managementDraft.user, binding);
+      umState.expandedId = null;
+      umState.subview = "main";
+      umState.addOpen = false;
+      umState.addSelected.clear();
+      renderUserManagementModal();
+    }
+    toast(error.message, "error");
+  }
+}
+
+function restoreManagedBindingOrder() {
+  const list = document.getElementById("um-binding-list");
+  const bindings = managementDraft?.user?.bindings;
+  if (!list || !Array.isArray(bindings)) return;
+  const cards = new Map(Array.from(list.querySelectorAll("[data-dnd-id]")).map(card => [card.dataset.dndId, card]));
+  for (const binding of bindings) {
+    const card = cards.get(binding.scriptInstanceId);
+    if (card) list.appendChild(card);
+  }
+}
+
+async function reorderManagedBindings(ids) {
+  const draft = managementDraft;
+  if (!draft) return;
+  const userId = draft.userId;
+  const currentBindings = Array.isArray(draft.user.bindings) ? draft.user.bindings : [];
+  const byId = new Map(currentBindings.map(binding => [binding.scriptInstanceId, binding]));
+  const orderedBindings = ids.map(id => byId.get(id)).filter(Boolean);
+  if (orderedBindings.length !== currentBindings.length) {
+    restoreManagedBindingOrder();
+    toast("绑定脚本实例顺序无效", "error");
+    return;
+  }
+  try {
+    await api("PUT", "/api/users/" + encodeURIComponent(userId) + "/bindings/order", { ids });
+    draft.user.bindings = orderedBindings;
+    const cachedUser = userById(userId);
+    if (cachedUser) {
+      const cachedById = new Map((cachedUser.bindings || []).map(binding => [binding.scriptInstanceId, binding]));
+      cachedUser.bindings = ids.map(id => cachedById.get(id)).filter(Boolean);
+    }
+    if (managementDraft === draft) toast("已绑定脚本实例顺序已保存");
+  } catch (error) {
+    restoreManagedBindingOrder();
     toast(error.message, "error");
   }
 }
@@ -506,9 +592,10 @@ export async function confirmUmAddBindings() {
     toast("请选择要绑定的脚本实例", "error");
     return;
   }
+  const addedBindings = [];
   try {
     for (const scriptId of ids) {
-      await api("POST", "/api/users/" + encodeURIComponent(managementDraft.userId) + "/bindings", {
+      const payload = {
         scriptInstanceId: scriptId,
         enabled: true,
         notifyEnabled: true,
@@ -518,11 +605,13 @@ export async function confirmUmAddBindings() {
         postRunOnFinalOnly: false,
         smtpTo: "",
         runDays: -1,
-      });
+      };
+      addedBindings.push((await api("POST", "/api/users/" + encodeURIComponent(managementDraft.userId) + "/bindings", payload)) || payload);
     }
     toast(ids.length > 1 ? "已绑定 " + ids.length + " 个脚本实例" : "脚本绑定已添加");
-    await refreshManagedUser();
+    await refreshManagedUser(addedBindings);
   } catch (error) {
+    if (addedBindings.length) await refreshManagedUser(addedBindings);
     toast(error.message, "error");
   }
 }

@@ -8,6 +8,7 @@ import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 
 let restartRequired = false;
+let openSettingsPanel = "service";
 
 export async function pageSettings(token) {
   if (!isCurrent("settings", token)) return;
@@ -22,17 +23,46 @@ export async function pageSettings(token) {
   const lanList = (remote && remote.lanAddresses && remote.lanAddresses.length)
     ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
-  render(pageHeader("系统设置", "设置", "控制服务启动方式、历史保留、本地 Web 服务与 MCP Agent。") + restartNoticeMarkup(settings) + `<section class="card section-surface"><div class="section-heading"><h3>服务行为</h3><span class="muted">开关即时保存，需要重启的改动会在这里提示</span></div><div class="settings-list">
-    ${switchControl("st-autostart", "开机自启", "注册到当前用户启动项", settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
-    ${switchControl("st-lightweight", "轻量模式", "不启动网页服务，重启后生效", settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
-    ${switchControl("st-browser", "打开浏览器", "服务启动后自动打开控制台", settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
-  </div><div class="form-grid three">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div><p class="muted helper-copy">日志级别即时生效；Web 端口改动需重启服务。</p>${settings.lightweightMode ? '<p class="muted helper-copy">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}</section>${mcpSettingsMarkup(settings)}<section class="card section-surface"><div class="section-heading"><h3>远程访问</h3><span class="muted">绑定所有网卡，重启后生效</span></div>${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}<div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div>${settings.allowRemoteAccess ? '<p class="muted helper-copy lan-helper">其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p>' : ""}<p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>`);
-  const view = document.querySelector("#view");
-  view?.insertAdjacentHTML("beforeend", notificationSettingsMarkup(settings));
-  view?.insertAdjacentHTML("beforeend", updateSectionMarkup(settings, null));
+  openSettingsPanel = "service";
+  render(pageHeader("系统设置", "设置", "集中管理服务行为、通知渠道、远程访问、MCP 与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
+    ${settingsCardMarkup("service", "服务行为", "服务启动、历史记录与日志选项", serviceSettingsMarkup(settings), "service-settings")}
+    ${settingsCardMarkup("notifications", "通知渠道", "Webhook 与 SMTP 通知配置", notificationSettingsMarkup(settings), "notification-settings")}
+    ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
+    ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
+  </div>`);
+  syncSettingsPanels();
   bindAutoSave();
   renderUpdateStatus();
   loadUpdateStatus();
+}
+
+function settingsCardMarkup(id, title, description, body, testId) {
+  const expanded = openSettingsPanel === id;
+  return `<section class="settings-card section-surface${expanded ? " is-expanded" : ""}" data-settings-panel="${id}"${testId ? ` data-testid="${testId}"` : ""}>
+    <button class="settings-card-toggle" type="button" data-action="toggle-settings-panel" data-panel="${id}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="settings-panel-${id}"><span class="settings-card-copy"><strong class="settings-card-title">${title}</strong><span class="muted">${description}</span></span><span class="settings-card-arrow" aria-hidden="true">${icon(expanded ? "chevronDown" : "chevronRight", "settings-card-arrow-icon")}</span></button>
+    <div id="settings-panel-${id}" class="settings-card-body"${expanded ? "" : " hidden"}>${body}</div>
+  </section>`;
+}
+
+function syncSettingsPanels() {
+  document.querySelectorAll("[data-settings-panel]").forEach(card => {
+    const expanded = card.dataset.settingsPanel === openSettingsPanel;
+    card.classList.toggle("is-expanded", expanded);
+    const toggle = card.querySelector(".settings-card-toggle");
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      const arrow = toggle.querySelector(".settings-card-arrow");
+      if (arrow) arrow.innerHTML = icon(expanded ? "chevronDown" : "chevronRight", "settings-card-arrow-icon");
+    }
+    const body = card.querySelector(".settings-card-body");
+    if (body) body.hidden = !expanded;
+  });
+}
+
+function toggleSettingsPanel(panelId) {
+  if (!["service", "notifications", "remote-mcp", "updates"].includes(panelId)) return;
+  openSettingsPanel = openSettingsPanel === panelId ? null : panelId;
+  syncSettingsPanels();
 }
 
 function restartNoticeMarkup(settings) {
@@ -41,29 +71,43 @@ function restartNoticeMarkup(settings) {
   return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>有需要重启服务的设置已保存。</p>${disabled ? '<span class="muted">轻量模式请手动重启程序。</span>' : '<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">重启服务</button>'}</section>`;
 }
 
-function mcpSettingsMarkup(settings) {
+function serviceSettingsMarkup(settings) {
+  return `<div class="settings-list">
+    ${switchControl("st-autostart", "开机自启", "注册到当前用户启动项", settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
+    ${switchControl("st-lightweight", "轻量模式", "不启动网页服务，重启后生效", settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
+    ${switchControl("st-browser", "打开浏览器", "服务启动后自动打开控制台", settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
+  </div><div class="form-grid three">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div><p class="muted helper-copy">日志级别即时生效；Web 端口改动需重启服务。</p>${settings.lightweightMode ? '<p class="muted helper-copy">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}`;
+}
+
+function remoteMcpSettingsMarkup(settings, lanList) {
   const port = Number(settings.mcpPort) || 58732;
-  return `<section class="card section-surface" data-testid="mcp-settings"><div class="section-heading"><div><h3>MCP Agent</h3><span class="muted">为本机 Agent 提供结构化控制工具，始终只监听 loopback。</span></div></div><div class="settings-list">
+  return `<div class="settings-merged-content">
+    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true')}</div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div><p class="muted helper-copy lan-helper"${settings.allowRemoteAccess ? "" : " hidden"}>其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p><p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>
+    <section class="settings-subsection mcp-settings"><div class="settings-list">
     ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
     ${switchControl("st-mcp-destructive", "允许破坏性工具", "开放删除、密钥、插件开关、重启和更新等高风险操作", settings.mcpAllowDestructiveTools, "toggle-st-flag", 'data-flag="st-mcp-destructive" data-restart-required="true"')}
-  </div><div class="form-grid">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>`;
+  </div><div class="form-grid settings-single-field">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>
+  </div>`;
 }
 
 function notificationSettingsMarkup(settings) {
-  const body = `<section class="card section-surface notification-settings"><div class="section-heading"><div><h3>通知渠道</h3><span class="muted">Webhook 和 SMTP 是宿主内置能力，供脚本、队列和代码插件使用。</span></div></div>
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook 通知</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? "已启用" : "已禁用"}</span></button><div id="panel-wh" class="panel-body">${switchControl("st-wh-enabled", "启用 Webhook", "发送运行状态到 Webhook 服务", settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}<div class="form-grid">${selectField("st-whtype", "Webhook 类型", settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-generic-template"')} ${valueField("st-whtimeout", "超时秒数", settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field"><label class="field-label" for="st-whurl">Webhook 地址 ${settings.webhookUrl ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? "（已设置，留空不变）" : "https://…"}"></div><div class="field"><label class="field-label" for="st-whsec">Webhook 签名密钥 ${settings.webhookSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? "（已设置，留空不变）" : ""}"></div></div><div id="st-whtpl-box" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">generic 自定义模板（JSON，{text} 为消息占位符）</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP 邮件通知</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? "已启用" : "已禁用"}</span></button><div id="panel-smtp" class="panel-body" hidden>${switchControl("st-smtp-enabled", "启用 SMTP", "发送运行状态到邮箱", settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}<div class="form-grid three">${valueField("st-host", "SMTP 服务器", settings.smtpHost)}${valueField("st-port2", "端口", settings.smtpPort, "number")}${selectField("st-secure", "加密方式", settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", "账号", settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">授权码 ${settings.smtpPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? "（已设置，留空不变）" : ""}"></div></div><div class="form-grid">${valueField("st-to", "收件人（逗号分隔）", settings.smtpTo)}${valueField("st-from", "发件人显示地址（留空=账号）", settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", "主题前缀", settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", "超时秒数", settings.smtpTimeout || 30, "number", 'min="1"')}</div></div><div class="modal-footer-inline plain"><button type="button" data-action="save-notify-settings">保存设置</button><button class="ghost" type="button" data-action="test-notify">测试通知</button></div></section>`;
+  const body = `<div class="notification-settings">
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook 通知</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? "已启用" : "已禁用"}</span></button>
+    <div id="panel-wh" class="panel-body">${switchControl("st-wh-enabled", "启用 Webhook", "发送运行状态到 Webhook 服务", settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}<div class="form-grid">${selectField("st-whtype", "Webhook 类型", settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-generic-template"')} ${valueField("st-whtimeout", "超时秒数", settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field"><label class="field-label" for="st-whurl">Webhook 地址 ${settings.webhookUrl ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? "（已设置，留空不变）" : "https://…"}"></div><div class="field"><label class="field-label" for="st-whsec">Webhook 签名密钥 ${settings.webhookSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? "（已设置，留空不变）" : ""}"></div></div><div id="st-whtpl-box" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">generic 自定义模板（JSON，{text} 为消息占位符）</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP 邮件通知</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? "已启用" : "已禁用"}</span></button>
+    <div id="panel-smtp" class="panel-body" hidden>${switchControl("st-smtp-enabled", "启用 SMTP", "发送运行状态到邮箱", settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}<div class="form-grid three">${valueField("st-host", "SMTP 服务器", settings.smtpHost)}${valueField("st-port2", "端口", settings.smtpPort, "number")}${selectField("st-secure", "加密方式", settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", "账号", settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">授权码 ${settings.smtpPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? "（已设置，留空不变）" : ""}"></div></div><div class="form-grid">${valueField("st-to", "收件人（逗号分隔）", settings.smtpTo)}${valueField("st-from", "发件人显示地址（留空=账号）", settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", "主题前缀", settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", "超时秒数", settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
+    <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">测试通知</button></div>
+  </div>`;
   return body.replaceAll("▾", icon("chevronDown", "icon panel-arrow-icon")).replaceAll("▸", icon("chevronRight", "icon panel-arrow-icon"));
 }
 
 /** 更新区：设置（自动检查/渠道/镜像源）与检查 / 下载 / 应用状态区。 */
 function updateSectionMarkup(settings) {
-  return `<section class="card section-surface update-section" data-testid="update-section"><div class="section-heading"><div><h3>更新</h3><span class="muted">启动时自动检查一次新版本；下载与应用均为手动操作，应用前会等待任务与编辑会话结束。</span></div></div>
+  return `<div class="update-section">
     <div class="settings-list">${switchControl("st-update-check", "自动检查更新", "服务启动时检查一次（不会自动下载）", settings.updateCheckEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}</div>
     <div class="form-grid">${selectField("st-update-channel", "更新渠道", settings.updateChannel, [{ value: "prerelease", label: "预发布（Pre-release）" }, { value: "stable", label: "稳定版" }])}${valueField("st-update-source", "镜像源地址", settings.updateSourceUrl, "text", 'placeholder="留空 = 默认 GitHub"')}</div>
-    <div class="modal-footer-inline plain"><button type="button" data-action="update-save-settings" data-testid="update-save-settings">保存更新设置</button></div>
     <div id="update-status-box" class="update-status" data-testid="update-status"></div>
-  </section>`;
+  </div>`;
 }
 
 let updateStatus = null;
@@ -131,11 +175,32 @@ function updateSettingsPayload() {
 }
 
 async function saveUpdateSettings() {
-  try {
-    await api("PUT", "/api/settings", updateSettingsPayload());
-    toast("更新设置已保存");
-    await loadUpdateStatus();
-  } catch (error) { toast(error.message, "error"); }
+  const data = await api("PUT", "/api/settings", updateSettingsPayload());
+  if (data?.settings) state.settings = data.settings;
+  await loadUpdateStatus();
+}
+
+let notifySaveChain = Promise.resolve();
+let updateSaveChain = Promise.resolve();
+
+function queueNotifySave() {
+  const save = notifySaveChain.then(() => saveNotifySettings());
+  notifySaveChain = save.catch(error => toast(error.message, "error"));
+  return save;
+}
+
+function queueUpdateSave() {
+  const save = updateSaveChain.then(() => saveUpdateSettings());
+  updateSaveChain = save.catch(error => toast(error.message, "error"));
+  return save;
+}
+
+function awaitNotifySaveSettled() {
+  return notifySaveChain;
+}
+
+function awaitUpdateSaveSettled() {
+  return updateSaveChain;
 }
 
 async function checkUpdate() {
@@ -245,19 +310,38 @@ async function saveNotifySettings() {
     smtpTimeout: +($("#st-smtp-timeout")?.value || 30),
   };
   const secrets = [
-    ["webhookUrl", $("#st-whurl")?.value.trim() || ""],
-    ["webhookSecret", $("#st-whsec")?.value.trim() || ""],
-    ["smtpPassword", $("#st-pwd")?.value.trim() || ""],
+    ["webhookUrl", $("#st-whurl")?.value.trim() || "", "st-whurl"],
+    ["webhookSecret", $("#st-whsec")?.value.trim() || "", "st-whsec"],
+    ["smtpPassword", $("#st-pwd")?.value.trim() || "", "st-pwd"],
   ].filter(([, value]) => value.length > 0);
-  try {
-    await api("PUT", "/api/settings", payload);
-    for (const [key, value] of secrets) await api("PUT", "/api/settings", { secretKey: key, secretValue: value });
-    toast(secrets.length ? "通知设置与密钥已保存" : "通知设置已保存");
-    await pageSettings(state.routeToken);
-  } catch (error) { toast(error.message, "error"); }
+  let data = await api("PUT", "/api/settings", payload);
+  for (const [key, value] of secrets) data = await api("PUT", "/api/settings", { secretKey: key, secretValue: value });
+  if (data?.settings) {
+    state.settings = data.settings;
+    syncNotificationBadges(data.settings);
+  }
+  for (const [, value, id] of secrets) {
+    const input = $("#" + id);
+    if (input?.value.trim() === value) input.value = "";
+  }
+}
+
+function syncNotificationBadges(settings) {
+  const badges = [
+    ["panel-wh", settings.webhookEnabled],
+    ["panel-smtp", settings.smtpEnabled],
+  ];
+  for (const [panelId, enabled] of badges) {
+    const badge = document.querySelector(`[data-panel="${panelId}"] .badge`);
+    if (!badge) continue;
+    badge.classList.toggle("ok", enabled);
+    badge.classList.toggle("muted", !enabled);
+    badge.textContent = enabled ? "已启用" : "已禁用";
+  }
 }
 
 async function testNotify() {
+  await awaitNotifySaveSettled();
   try {
     const result = await api("POST", "/api/settings/test");
     toast(result.ok ? "测试通知发送成功" : "发送失败，详见日志", result.ok ? "info" : "error");
@@ -334,7 +418,7 @@ async function refreshLanList() {
   } catch { /* 静默 */ }
 }
 
-/** 设置页控件自动保存绑定：输入/下拉失焦（change）即保存；切换按钮经 toggle-st-flag 触发。 */
+/** 设置页控件自动保存绑定：服务行为沿用 change 保存，通知与更新设置按输入失焦或下拉 change 保存。 */
 function bindAutoSave() {
   ["st-loglevel", "st-retention", "st-port", "st-mcp-port", "st-token"].forEach(id => {
     $("#" + id)?.addEventListener("change", () => {
@@ -342,11 +426,21 @@ function bindAutoSave() {
       autoSave();
     });
   });
+  bindSettingsFields(["st-whtype", "st-whtimeout", "st-whurl", "st-whsec", "st-whtpl", "st-host", "st-port2", "st-secure", "st-user", "st-pwd", "st-to", "st-from", "st-subject", "st-smtp-timeout"], queueNotifySave);
+  bindSettingsFields(["st-update-channel", "st-update-source"], queueUpdateSave);
+}
+
+function bindSettingsFields(ids, handler) {
+  ids.forEach(id => {
+    const field = $("#" + id);
+    if (!field) return;
+    field.addEventListener(field.tagName === "SELECT" ? "change" : "blur", handler);
+  });
 }
 
 /** 重启服务：等待挂起的自动保存完成后弹确认卡片（端口改动已即时保存，无需再校验）。 */
 export async function restartService() {
-  await awaitSaveSettled();
+  await Promise.all([awaitSaveSettled(), awaitNotifySaveSettled(), awaitUpdateSaveSettled()]);
   confirmModal("重启服务", "重启将中断正在运行的任务，页面会短暂断开连接。确认重启服务？", "restart-confirm");
 }
 
@@ -453,22 +547,27 @@ export const actions = {
     toast("已生成随机令牌，正在保存…");
     void autoSave().then(() => toast("访问令牌已保存"), () => {});
   },
+  "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
   "toggle-panel": target => togglePanel(target.dataset.panel, target),
   "toggle-generic-template": () => toggleGenericTemplate(),
   "toggle-notify-flag": target => {
     const btn = $("#" + target.dataset.flag);
-    if (btn) btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    if (btn) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      queueNotifySave();
+    }
   },
-  "save-notify-settings": target => withBusy(target, () => saveNotifySettings()),
   "test-notify": target => withBusy(target, () => testNotify()),
   "update-check": target => withBusy(target, () => checkUpdate()),
   "update-download": target => withBusy(target, () => startUpdateDownload()),
   "update-cancel": () => cancelUpdateDownload(),
   "update-apply": target => withBusy(target, () => applyUpdate(false)),
   "update-defer": () => applyUpdate(true),
-  "update-save-settings": target => withBusy(target, () => saveUpdateSettings()),
   "toggle-update-flag": target => {
     const btn = $("#" + target.dataset.flag);
-    if (btn) btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    if (btn) {
+      btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      queueUpdateSave();
+    }
   },
 };

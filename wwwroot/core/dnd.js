@@ -3,7 +3,7 @@
  *
  * 用法：
  *   import { initDndList } from "./dnd.js";
- *   initDndList(container, { onDrop(orderedIds, draggedId) })
+ *   initDndList(container, { onDrop(orderedIds, draggedId), canDrag(), axis: "y" | "both" })
  *
  * 约定：
  *   - 容器内每个可拖项需带 data-dnd-id；拖拽把手用 .drag-handle（触屏需 touch-action: none，见 style.css）
@@ -56,19 +56,23 @@ function submitDrop(container, ids, itemId, scrollState, onDrop) {
   }
 }
 
-export function initDndList(container, { onDrop } = {}) {
+export function initDndList(container, { onDrop, canDrag = () => true, axis = "y" } = {}) {
   container.addEventListener("pointerdown", (event) => {
     const handle = event.target.closest(".drag-handle");
     if (!handle || !container.contains(handle)) return;
+    if (!canDrag()) return;
     const item = handle.closest("[data-dnd-id]");
     if (!item || active) return;
     event.preventDefault();
+    const rect = item.getBoundingClientRect();
     active = {
       container,
       item,
       pointerId: event.pointerId,
+      axis,
+      startClientX: event.clientX,
       startClientY: event.clientY,
-      offsetY: event.clientY - item.getBoundingClientRect().top,
+      startRect: { top: rect.top, left: rect.left, right: rect.right, bottom: rect.bottom },
       scrollState: captureScrollState(container),
       placeBefore: null,
       moved: false,
@@ -84,10 +88,13 @@ export function initDndList(container, { onDrop } = {}) {
     event.preventDefault();
     const s = active;
     s.moved = true;
-    const delta = event.clientY - s.startClientY;
-    s.item.style.transform = `translateY(${delta}px)`;
+    const deltaX = s.axis === "both" ? event.clientX - s.startClientX : 0;
+    const deltaY = event.clientY - s.startClientY;
+    s.item.style.transform = s.axis === "both"
+      ? `translate(${deltaX}px, ${deltaY}px)`
+      : `translateY(${deltaY}px)`;
     s.item.style.zIndex = "1";
-    updatePlacement(event.clientY);
+    updatePlacement(event.clientX, event.clientY);
   });
 
   container.addEventListener("pointerup", (event) => {
@@ -125,6 +132,7 @@ export function initDndList(container, { onDrop } = {}) {
     if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
     const handle = event.target?.closest?.(".drag-handle");
     if (!handle || !container.contains(handle)) return;
+    if (!canDrag()) return;
     const item = handle.closest("[data-dnd-id]");
     if (!item) return;
     event.preventDefault();
@@ -141,8 +149,8 @@ export function initDndList(container, { onDrop } = {}) {
   });
 }
 
-/** 计算插入位置：鼠标越过哪一项的垂直中点，就插到它前面；没有则插到末尾。 */
-function updatePlacement(clientY) {
+/** 计算纵向列表插入位置：鼠标越过哪一项的垂直中点，就插到它前面；没有则插到末尾。 */
+function updateVerticalPlacement(clientY) {
   const s = active;
   let placeBefore = null;
   for (const el of s.container.children) {
@@ -159,6 +167,54 @@ function updatePlacement(clientY) {
   if (s.placeBefore) s.placeBefore.classList.remove("dnd-drop-before");
   s.placeBefore = placeBefore;
   if (placeBefore) placeBefore.classList.add("dnd-drop-before");
+}
+
+/** 计算双列/网格插入位置：同一行按横向中心定位，行间按纵向顺序定位。 */
+function updateGridPlacement(clientX, clientY) {
+  const s = active;
+  const rows = [];
+  for (const el of s.container.children) {
+    if (!el.matches("[data-dnd-id]")) continue;
+    const rect = el === s.item ? s.startRect : el.getBoundingClientRect();
+    let row = rows.find(candidate => Math.abs(candidate.top - rect.top) <= 2);
+    if (!row) {
+      row = { top: rect.top, bottom: rect.bottom, items: [] };
+      rows.push(row);
+    }
+    row.top = Math.min(row.top, rect.top);
+    row.bottom = Math.max(row.bottom, rect.bottom);
+    row.items.push({ el, rect });
+  }
+  rows.sort((a, b) => a.top - b.top);
+
+  let placeBefore = null;
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index];
+    const candidates = row.items
+      .filter(entry => entry.el !== s.item)
+      .sort((a, b) => a.rect.left - b.rect.left);
+    if (clientY < row.top) {
+      placeBefore = candidates[0]?.el || rows[index + 1]?.items.find(entry => entry.el !== s.item)?.el || null;
+      break;
+    }
+    if (clientY > row.bottom) continue;
+
+    placeBefore = candidates.find(entry => clientX < entry.rect.left + entry.rect.width / 2)?.el || null;
+    if (!placeBefore) {
+      placeBefore = rows[index + 1]?.items.find(entry => entry.el !== s.item)?.el || null;
+    }
+    break;
+  }
+
+  if (placeBefore === s.placeBefore) return;
+  if (s.placeBefore) s.placeBefore.classList.remove("dnd-drop-before");
+  s.placeBefore = placeBefore;
+  if (placeBefore) placeBefore.classList.add("dnd-drop-before");
+}
+
+function updatePlacement(clientX, clientY) {
+  if (active?.axis === "both") updateGridPlacement(clientX, clientY);
+  else updateVerticalPlacement(clientY);
 }
 
 function clearClasses(container) {

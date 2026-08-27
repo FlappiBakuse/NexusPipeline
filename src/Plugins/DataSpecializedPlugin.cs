@@ -128,6 +128,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         {
             return null;
         }
+        rootPath = NormalizePathSeparators(rootPath.Trim());
         string resolveText;
         lock (_sync)
         {
@@ -231,7 +232,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// <summary>在根目录查找文件；searchUpward 时逐级向上（最多 4 层）。</summary>
     private static string? FindFile(string rootPath, string file, bool searchUpward)
     {
-        string candidate = Path.Combine(rootPath, file);
+        string candidate = NormalizePathSeparators(Path.Combine(rootPath, file));
         if (File.Exists(candidate))
         {
             return candidate;
@@ -243,7 +244,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         string? dir = Directory.GetParent(rootPath)?.FullName;
         for (int depth = 0; dir is not null && depth < 4; depth++)
         {
-            candidate = Path.Combine(dir, file);
+            candidate = NormalizePathSeparators(Path.Combine(dir, file));
             if (File.Exists(candidate))
             {
                 return candidate;
@@ -265,12 +266,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             string rel = "{rel:" + key + "}";
             if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
             {
-                return MakeRelativePath(rootPath, value);
+                return NormalizePathSeparators(MakeRelativePath(rootPath, value));
             }
             string abs = "{" + key + "}";
             if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
             {
-                return value;
+                return NormalizePathSeparators(value);
             }
         }
         return template;
@@ -289,14 +290,20 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             string rel = "{rel:" + key + "}";
             if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
             {
-                return MakeRelativePath(rootPath, value);
+                return NormalizePathSeparators(MakeRelativePath(rootPath, value));
             }
             if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
             {
-                return value;
+                return NormalizePathSeparators(value);
             }
         }
-        return Path.Combine(rootPath, template.Trim());
+        return NormalizePathSeparators(Path.Combine(rootPath, template.Trim()));
+    }
+
+    /// <summary>统一专项插件解析结果中的 Windows 路径分隔符，避免 resolve.json 使用斜杠时生成混合路径。</summary>
+    private static string NormalizePathSeparators(string path)
+    {
+        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
     }
 
     /// <summary>计算相对路径（toFile 相对 fromDir）；同目录结果以 .\ 开头（运行时启动目标语义）。</summary>

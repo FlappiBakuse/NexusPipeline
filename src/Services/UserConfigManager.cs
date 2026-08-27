@@ -76,8 +76,11 @@ internal static class UserConfigManager
 
     /* ---------------- 对外操作 ---------------- */
 
-    /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。</summary>
-    public static string? SnapshotOnAddUser(ScriptInstance script, string userKey)
+    /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。专项插件的默认配置模板允许配置位置暂不存在。</summary>
+    public static string? SnapshotOnAddUser(
+        ScriptInstance script,
+        string userKey,
+        IPluginCapabilityResolver capabilities)
     {
         string store = StoreDir(script.Id, userKey);
         string? error = null;
@@ -97,7 +100,13 @@ internal static class UserConfigManager
                 }
                 if (PathKindUtil.KindOf(script.ConfigPath) == PathKind.Missing)
                 {
-                    throw new IOException($"配置路径不存在：{script.ConfigPath}");
+                    if (ResolveConfigTemplateDir(script, capabilities) is null)
+                    {
+                        throw new IOException($"配置路径不存在：{script.ConfigPath}");
+                    }
+                    Directory.CreateDirectory(store);
+                    Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userKey}：配置模板将在编辑配置时生成");
+                    return;
                 }
                 ConfigSwapPrimitives.CopyAs(script.ConfigPath, store, PathKind.Dir);
                 Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userKey} → {store}");
@@ -235,8 +244,8 @@ internal static class UserConfigManager
         {
             return new List<string>();
         }
-        ScriptProfile? profile = capabilities.ResolveProfile(script.PluginType, script.RootPath);
-        if (profile is null || string.IsNullOrWhiteSpace(profile.ConfigTemplateDir) || !Directory.Exists(profile.ConfigTemplateDir))
+        string? configTemplateDir = ResolveConfigTemplateDir(script, capabilities);
+        if (configTemplateDir is null)
         {
             return new List<string>();
         }
@@ -253,7 +262,7 @@ internal static class UserConfigManager
             }
             return Directory.EnumerateFileSystemEntries(script.ConfigPath).Any()
                 ? new List<string>()
-                : TryCopyTemplateFiles(profile.ConfigTemplateDir, script.ConfigPath, parentDir);
+                : TryCopyTemplateFiles(configTemplateDir, script.ConfigPath, parentDir);
         }
         // 防御自愈（仅文件型 + 模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
         // 避免复制对目录写文件报拒绝访问。
@@ -280,13 +289,30 @@ internal static class UserConfigManager
             // 复制清单相对 ConfigPath 父目录记录（与 DoRestore 清理基准一致），目录型恢复时按 "config\mxu-MaaEnd.json" 精确清理。
             string targetDir = dirKind ? script.ConfigPath : parentDir;
             Directory.CreateDirectory(targetDir);
-            return CopyTemplateFiles(profile.ConfigTemplateDir, targetDir, parentDir);
+            return CopyTemplateFiles(configTemplateDir, targetDir, parentDir);
         }
         catch (Exception ex)
         {
             Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
             return new List<string>();
         }
+    }
+
+    /// <summary>返回专项插件可用的配置模板目录；通用脚本或模板目录缺失时返回 null。</summary>
+    private static string? ResolveConfigTemplateDir(
+        ScriptInstance script,
+        IPluginCapabilityResolver capabilities)
+    {
+        if (string.IsNullOrWhiteSpace(script.PluginType))
+        {
+            return null;
+        }
+        ScriptProfile? profile = capabilities.ResolveProfile(script.PluginType, script.RootPath);
+        return profile is not null
+            && !string.IsNullOrWhiteSpace(profile.ConfigTemplateDir)
+            && Directory.Exists(profile.ConfigTemplateDir)
+            ? profile.ConfigTemplateDir
+            : null;
     }
 
     /// <summary>复制模板目录内容到目标目录（异常兜底记 Error，返回空清单）。</summary>

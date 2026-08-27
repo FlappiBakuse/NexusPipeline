@@ -183,6 +183,11 @@ internal static class ApiUsersHandler
             await HttpHelper.WriteJsonAsync(context, user.Bindings.Select(binding => ProjectBinding(binding, scripts))).ConfigureAwait(false);
             return;
         }
+        if (method == "PUT" && seg.Length == 4 && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
+        {
+            await ReorderBindingsAsync(context, userId, body).ConfigureAwait(false);
+            return;
+        }
         if (seg.Length == 4 && method == "PUT")
         {
             await UpdateBindingAsync(context, userId, Uri.UnescapeDataString(seg[3]), body).ConfigureAwait(false);
@@ -203,6 +208,21 @@ internal static class ApiUsersHandler
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    private static async Task ReorderBindingsAsync(HttpListenerContext context, string userId, string body)
+    {
+        JsonNode? node = HttpHelper.ParseBody(body);
+        List<string>? ids = node?["ids"] is JsonArray array
+            ? array.Select(item => item?.ToString() ?? "").ToList()
+            : null;
+        OperationResult<bool> result = UserCommands.ReorderBindings(userId, ids);
+        if (!result.Succeeded)
+        {
+            await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
     private static async Task AddBindingAsync(HttpListenerContext context, string userId, string body)

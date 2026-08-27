@@ -163,6 +163,28 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .card { padding: clamp(18px, 2.2vw, 24px); margin-bottom: var(--space-5); }
 .card.list-surface, .card.table-surface, .list-surface, .table-surface { padding: 0; overflow: hidden; }
 .section-surface { padding: clamp(18px, 2.2vw, 24px); }
+.settings-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin-bottom: var(--space-5); }
+.settings-card { min-width: 0; order: 0; margin: 0; padding: 0; overflow: hidden; }
+.settings-card.is-expanded { order: -1; border-color: var(--border-strong); }
+.settings-card-toggle { display: flex; width: 100%; min-height: 72px; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
+.settings-card-toggle:hover { background: var(--hover-bg); }
+.settings-card-toggle:focus-visible { outline: none; box-shadow: var(--focus); }
+.settings-card-copy { display: grid; min-width: 0; gap: 4px; }
+.settings-card-title { font-size: 15px; line-height: 1.45; }
+.settings-card-copy .muted { line-height: 1.5; }
+.settings-card-arrow { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--accent); }
+.settings-card-arrow-icon { width: 22px; height: 22px; }
+.settings-card-body { min-width: 0; padding: 0 clamp(18px, 2.2vw, 24px) var(--space-5); border-top: 1px solid var(--border); }
+.settings-card-body[hidden] { display: none; }
+.notification-settings { padding-top: var(--space-3); }
+.settings-merged-content { display: grid; min-width: 0; gap: var(--space-5); }
+.settings-subsection { min-width: 0; }
+.settings-subsection + .settings-subsection { padding-top: var(--space-5); border-top: 1px solid var(--border); }
+.settings-single-field { grid-template-columns: minmax(0, 1fr); }
+.settings-subheading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-3); }
+.settings-subheading > div { min-width: 0; }
+.settings-subheading h4 { margin: 0; font-size: 15px; }
+.settings-subheading .muted { display: block; margin-top: 4px; line-height: 1.5; }
 .card h3 { margin-bottom: var(--space-3); }
 /* 完成操作倒计时卡片（v0.6.3+）：warning 级语义，复用现有 --warn 变量 */
 .system-action-card { border-color: var(--warn); }
@@ -1228,6 +1250,8 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-binding-card > .um-binding-head,
 .um-binding-card > .um-binding-subhead { min-width: 0; }
 .um-binding-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 10px 13px; }
+.um-binding-drag-handle[aria-disabled="true"] { cursor: default; color: var(--faint); opacity: .45; }
+.um-binding-drag-handle[aria-disabled="true"]:hover { background: transparent; color: var(--faint); }
 .um-binding-toggle {
   display: flex;
   min-width: 0;
@@ -1311,6 +1335,8 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .user-binding-section.um-binding-editing .um-binding-remove { display: inline-flex; }
 .user-binding-section.um-binding-editing .um-binding-bottom-arrow { display: none; }
 .user-binding-section.um-binding-editing .um-binding-toggle:disabled { cursor: default; opacity: 1; color: var(--text); }
+.user-binding-section.um-section-expanding .um-binding-drag-handle,
+.user-binding-section.um-binding-editing .um-binding-drag-handle { display: none; }
 
 /* 编辑配置：1/1 宽，高度加倍、文字居中 */
 .um-edit-config {

@@ -1,3 +1,4 @@
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
@@ -276,6 +277,80 @@ internal static class UserCommands
         }
     }
 
+    public static OperationResult<bool> ReorderBindings(
+        string userId,
+        IReadOnlyList<string>? ids,
+        string source = Audit.Web)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? user = ctx.FindUser(userId);
+        if (user is null)
+        {
+            return NotFound<bool>("未找到用户");
+        }
+
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckUserMutationBusy(ctx, user);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    List<UserScriptBinding> current = user.Bindings.ToList();
+                    if (ids is null || ids.Count != current.Count
+                        || ids.Any(string.IsNullOrWhiteSpace)
+                        || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
+                    {
+                        error = "绑定顺序名单缺失或与当前用户绑定列表不一致";
+                        return;
+                    }
+
+                    HashSet<string> existing = new(current.Select(binding => binding.ScriptInstanceId), StringComparer.Ordinal);
+                    if (existing.Count != current.Count || ids.Any(id => !existing.Contains(id)))
+                    {
+                        error = "绑定顺序名单与当前用户绑定列表不一致";
+                        return;
+                    }
+
+                    Dictionary<string, UserScriptBinding> byId = current.ToDictionary(
+                        binding => binding.ScriptInstanceId,
+                        StringComparer.Ordinal);
+                    List<UserScriptBinding> ordered = ids.Select(id => byId[id]).ToList();
+                    user.Bindings.Clear();
+                    user.Bindings.AddRange(ordered);
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        user.Bindings.Clear();
+                        user.Bindings.AddRange(current);
+                        throw;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return IsBusy(error)
+                    ? Conflict<bool>("resource_busy", error)
+                    : Validation<bool>(error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "调整用户绑定顺序", $"{user.Name} / {ids!.Count} 个脚本实例");
+            return OperationResult<bool>.Ok(true);
+        }
+        catch (Exception ex)
+        {
+            return Internal<bool>(ex);
+        }
+    }
+
     /// <summary>旧脚本用户 URL 的新增适配，数据仍由全局用户与脚本绑定模型统一持有。</summary>
     public static OperationResult<NexusUser> AddCompatibilityBinding(
         string scriptId,
@@ -358,7 +433,10 @@ internal static class UserCommands
                             snapshotScript = script.Clone();
                         }
 
-                        string? snapshotError = UserConfigManager.SnapshotOnAddUser(snapshotScript, target.Id);
+                        string? snapshotError = UserConfigManager.SnapshotOnAddUser(
+                            snapshotScript,
+                            target.Id,
+                            ctx.Resolve<IPluginCapabilityResolver>());
                         if (snapshotError is not null)
                         {
                             error = "初始配置快照失败：" + snapshotError;
@@ -808,7 +886,10 @@ internal static class UserCommands
                         snapshotScript = script.Clone();
                     }
 
-                    string? snapshotError = UserConfigManager.SnapshotOnAddUser(snapshotScript, user.Id);
+                    string? snapshotError = UserConfigManager.SnapshotOnAddUser(
+                        snapshotScript,
+                        user.Id,
+                        ctx.Resolve<IPluginCapabilityResolver>());
                     if (snapshotError is not null)
                     {
                         error = "初始配置快照失败：" + snapshotError;
