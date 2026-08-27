@@ -19,6 +19,17 @@ export const baseUrl = "http://127.0.0.1:58731/";
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 
+/** 测试插件仓库：兼容 CI 工作区子目录、本地相邻仓库和显式路径。 */
+export function pluginRepositoryRoot() {
+  const configured = process.env.NEXUS_PLUGIN_REPO_ROOT?.trim();
+  const candidates = [
+    configured ? (path.isAbsolute(configured) ? configured : path.resolve(projectRoot, configured)) : null,
+    path.join(projectRoot, "NexusPipeline-Plugins"),
+    path.resolve(projectRoot, "..", "NexusPipeline-Plugins"),
+  ].filter(Boolean);
+  return candidates.find(candidate => fs.existsSync(path.join(candidate, "catalog.json"))) || candidates[0];
+}
+
 let child = null;
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -45,6 +56,8 @@ export function setupRuntime() {
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
   const plugins = path.join(releaseDir, "plugins");
   if (fs.existsSync(plugins)) fs.cpSync(plugins, path.join(runtimeDir, "plugins"), { recursive: true });
+  const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
+  if (fs.existsSync(repositoryPlugins)) fs.cpSync(repositoryPlugins, path.join(runtimeDir, "plugins"), { recursive: true });
 
   const fixtures = path.join(__dirname, "fixtures");
   const adbDir = path.join(runtimeDir, "adb-stub");

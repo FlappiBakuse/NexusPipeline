@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { deriveCandidateVersion, readProjectVersion } from "../../support/project-version.mjs";
-import { projectRoot, runtimeDir } from "./helpers.mjs";
+import { pluginRepositoryRoot, projectRoot, runtimeDir } from "./helpers.mjs";
 
 /**
  * 更新源 stub（下一候选版本，e2e）：以本地 HTTP 服务模拟 GitHub Releases API 兼容源。
@@ -13,7 +13,6 @@ import { projectRoot, runtimeDir } from "./helpers.mjs";
 export const UPDATE_PORT = 58931;
 export const UPDATE_VERSION = deriveCandidateVersion(readProjectVersion(projectRoot));
 export const UPDATE_BASE = `http://127.0.0.1:${UPDATE_PORT}/`;
-const pluginRepoRoot = path.resolve(projectRoot, "..", "NexusPipeline-Plugins");
 
 let server = null;
 let zipBuffer = null;
@@ -141,7 +140,7 @@ function releasesJson() {
 }
 
 function pluginCatalogJson() {
-  const file = path.join(pluginRepoRoot, "catalog.json");
+  const file = path.join(pluginRepositoryRoot(), "catalog.json");
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : JSON.stringify({ schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline-Plugins", generatedAt: new Date().toISOString(), plugins: [] });
 }
 

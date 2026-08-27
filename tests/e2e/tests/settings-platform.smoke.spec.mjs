@@ -39,6 +39,7 @@ test("插件页面：健康状态以列表形式加载", async ({ page }) => {
 
 test("设置页面：三档代理模式可切换并保存", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="network"]').click();
   const mode = page.locator("#st-proxy-mode");
   await expect(mode).toBeVisible();
   await mode.selectOption("none");
