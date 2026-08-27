@@ -78,7 +78,7 @@ internal sealed class DispatchCenter
     public void EndEditSession(string scriptId, string userName)
         => _state.EndEditSession(scriptId, userName);
 
-    public bool CancelSystemAction() => _systemActions.Cancel(Audit.Web);
+    public bool CancelSystemAction(string source = Audit.Web) => _systemActions.Cancel(source);
 
     public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
     {

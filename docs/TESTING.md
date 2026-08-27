@@ -27,6 +27,7 @@
 - 配置交换、快照同步、插件 capability 和模拟器路由；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
+- MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册和队列完成操作策略。
 
 以下行为进入 UI Smoke：
 
@@ -43,6 +44,7 @@
 - 真实 JavaScript/Python interpreter 边界；
 - Generic ADB 与 MuMuManager stub command sequence；
 - managed plugin assembly 加载与更新事务恢复。
+- MCP Streamable HTTP 的真实握手、工具发现、结构化结果、loopback Host/Origin 安全边界、运行轮询/取消和端口冲突降级。
 
 新增测试时先写低层 replacement，再决定是否需要保留一个高层 smoke。测试不得通过 retries、sleep、自动重启服务或跳过失败来掩盖不稳定性；`waitForTimeout` 不得承担业务同步职责。
 
@@ -93,7 +95,7 @@ System Smoke 需要管理员终端和已完成的构建，统一入口为：
 node tests\run.mjs system
 ```
 
-统一入口当前按顺序覆盖 runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 五类跨层场景。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
+统一入口当前按顺序覆盖 MCP、runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 六类跨层场景。MCP suite 还覆盖默认关闭、启用后的官方协议握手、结构化工具调用、运行轮询/取消、轻量模式和固定端口占用降级。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
 
 ## 按需诊断与历史资产
 
@@ -113,7 +115,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和五阶段 System Smoke，不加载 legacy。发布前运行 UI Smoke 和适用的 System Smoke，并记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前运行 UI Smoke 和适用的 System Smoke，并记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 

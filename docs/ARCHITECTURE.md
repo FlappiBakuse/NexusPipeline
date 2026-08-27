@@ -10,7 +10,7 @@
 
 ```
 NexusPipeline/
-├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener）
+├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener/Kestrel）
 │   ├── Application/    应用宿主、启动流程与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/Abstractions/Repositories
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
@@ -20,6 +20,7 @@ NexusPipeline/
 │   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
 │   ├── Web/            HTTP 层（NexusPipeline.Web）
 │   ├── Cli/            命令行层（NexusPipeline.Cli）
+│   ├── Mcp/            MCP Streamable HTTP 适配层（NexusPipeline.Mcp）
 │   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
 ├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1（无宿主业务引用）
 ├── wwwroot/            前端（零构建 ES modules，浏览器直接加载）
@@ -30,7 +31,7 @@ NexusPipeline/
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
-│   ├── system/               Windows 真实进程 System Smoke（runtime/judge/execution-resilience/emulator/update）
+│   ├── system/               Windows 真实进程 System Smoke（mcp/runtime/judge/execution-resilience/emulator/update）
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
 │   ├── documentation/        Node 内建模块文档一致性检查
 │   ├── support/               Windows 进程、版本解析与测试公共设施
@@ -49,6 +50,7 @@ NexusPipeline（根：Application/Program/Bootstrap/RuntimeContext 组合根）
         ↑           ↑            ↑
 NexusPipeline.Web（HTTP 适配层）
 NexusPipeline.Cli（命令行适配层）
+NexusPipeline.Mcp（MCP 适配层）
 NexusPipeline.Extensibility（中立 capability/profile 契约）
 NexusPipeline.Plugins（插件发现、注册与内置实现）
 ```
@@ -112,6 +114,11 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
+| `McpHost` | src/Mcp/McpHost.cs | 同进程内嵌的 Kestrel Streamable HTTP MCP 宿主；固定 loopback 监听、启动/停止和工具注册；端口冲突不漂移且不影响 Web/Control API |
+| `McpSecurity` | src/Mcp/McpSecurity.cs | MCP Host、Origin 和请求体边界检查；MCP 端点与 Web 远程访问设置隔离 |
+| `McpToolContext` | src/Mcp/McpToolContext.cs | MCP 适配层组合根；提供快照、ID/唯一名称解析、状态/历史/设置投影，调用 Application Commands 或核心服务 |
+| `McpReadOnlyTools` / `McpMutationTools` / `McpDestructiveTools` | src/Mcp/ | 类型化 MCP 工具；只读与常规变更默认注册，高风险工具按 `McpAllowDestructiveTools` 条件注册 |
+| `McpPolicy` / `McpToolResult` | src/Mcp/ | 行为级高风险策略与统一结构化 `ok/errorCode/errorMessage/data` 结果映射 |
 | `CliArguments` / `CliCommandRouter` | src/Cli/ | noun/subcommand 参数解析、兼容别名和正式命令分派 |
 | `CliApiClient` / `CliTransport` | src/Cli/ | CLI 到 owning service 的本机 HTTP 控制通道、自动拉起与端口发现 |
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
@@ -131,6 +138,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
 - 控制命令：先在 owning service 的 `ApiXxxHandler` 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `RuntimeContext` 持久化集合。
 - 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
+- MCP 适配器：在 `src/Mcp/` 增加类型化工具和投影；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Application Commands 或既有核心服务。
 - 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
 
 ### 控制面边界
@@ -144,6 +152,8 @@ Scheduler    ─┘                         └→ ExecutionStateStore/Execution
 ```
 
 `manage` 的菜单类保留旧入口签名以兼容宿主调用，但不再直接读取或修改 `Scripts`、`Queues`、`Users`、`Settings` 集合，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
+
+MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时创建 Kestrel listener，使用 `McpPort` 绑定 loopback；工具类依赖 `McpToolContext`，再调用 Application Commands/核心服务。MCP 不依赖 Web handler、CLI 路由或前端投影；高风险工具的条件注册之外，写入对象还会经过 `McpPolicy` 行为校验。
 
 ## 前端分层（wwwroot/）
 
@@ -218,6 +228,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 想找什么 | 去哪里 |
 |---|---|
 | 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（`[ApiRoute]` 特性注册，见 `WebServer.Routes`） |
+| MCP 工具、端点或安全策略 | `src/Mcp/McpHost.cs`、`src/Mcp/McpSecurity.cs`、`src/Mcp/Mcp*Tools.cs`；业务规则进入 Application Commands/核心服务 |
 | 命令行某菜单 | `src/Cli/` 对应菜单类 |
 | 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/AttemptRunner.cs`、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/AttemptRunner.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
@@ -234,6 +245,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 ```
 Web 请求      → WebServer → ApiXxxHandler → ExecutionCommands/核心服务 → DataStore/Logger
 CLI / manage  → CliApiClient → Control API → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+MCP 请求      → McpHost → Mcp*Tools/McpToolContext → Application Command/核心服务 → DataStore/Logger
 Scheduler     → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
 运行结束 → ExecutionRunner → INotificationService → NotificationDispatcher → Webhook/SMTP；managed-code 插件 → IPluginNotificationService → NotificationDispatcher；同时向 ExecutionStateStore 提交完成意图
 ```

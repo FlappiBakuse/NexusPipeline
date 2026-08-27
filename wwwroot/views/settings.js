@@ -22,11 +22,11 @@ export async function pageSettings(token) {
   const lanList = (remote && remote.lanAddresses && remote.lanAddresses.length)
     ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
-  render(pageHeader("系统设置", "设置", "控制服务启动方式、历史保留和本地 Web 服务端口。") + restartNoticeMarkup(settings) + `<section class="card section-surface"><div class="section-heading"><h3>服务行为</h3><span class="muted">开关即时保存，需要重启的改动会在这里提示</span></div><div class="settings-list">
+  render(pageHeader("系统设置", "设置", "控制服务启动方式、历史保留、本地 Web 服务与 MCP Agent。") + restartNoticeMarkup(settings) + `<section class="card section-surface"><div class="section-heading"><h3>服务行为</h3><span class="muted">开关即时保存，需要重启的改动会在这里提示</span></div><div class="settings-list">
     ${switchControl("st-autostart", "开机自启", "注册到当前用户启动项", settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
     ${switchControl("st-lightweight", "轻量模式", "不启动网页服务，重启后生效", settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
     ${switchControl("st-browser", "打开浏览器", "服务启动后自动打开控制台", settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
-  </div><div class="form-grid three">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div><p class="muted helper-copy">日志级别即时生效；Web 端口改动需重启服务。</p>${settings.lightweightMode ? '<p class="muted helper-copy">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}</section><section class="card section-surface"><div class="section-heading"><h3>远程访问</h3><span class="muted">绑定所有网卡，重启后生效</span></div>${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}<div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div>${settings.allowRemoteAccess ? '<p class="muted helper-copy lan-helper">其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p>' : ""}<p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>`);
+  </div><div class="form-grid three">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div><p class="muted helper-copy">日志级别即时生效；Web 端口改动需重启服务。</p>${settings.lightweightMode ? '<p class="muted helper-copy">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}</section>${mcpSettingsMarkup(settings)}<section class="card section-surface"><div class="section-heading"><h3>远程访问</h3><span class="muted">绑定所有网卡，重启后生效</span></div>${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}<div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div>${settings.allowRemoteAccess ? '<p class="muted helper-copy lan-helper">其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p>' : ""}<p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>`);
   const view = document.querySelector("#view");
   view?.insertAdjacentHTML("beforeend", notificationSettingsMarkup(settings));
   view?.insertAdjacentHTML("beforeend", updateSectionMarkup(settings, null));
@@ -39,6 +39,14 @@ function restartNoticeMarkup(settings) {
   if (!restartRequired) return "";
   const disabled = settings.lightweightMode;
   return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>有需要重启服务的设置已保存。</p>${disabled ? '<span class="muted">轻量模式请手动重启程序。</span>' : '<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">重启服务</button>'}</section>`;
+}
+
+function mcpSettingsMarkup(settings) {
+  const port = Number(settings.mcpPort) || 58732;
+  return `<section class="card section-surface" data-testid="mcp-settings"><div class="section-heading"><div><h3>MCP Agent</h3><span class="muted">为本机 Agent 提供结构化控制工具，始终只监听 loopback。</span></div></div><div class="settings-list">
+    ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
+    ${switchControl("st-mcp-destructive", "允许破坏性工具", "开放删除、密钥、插件开关、重启和更新等高风险操作", settings.mcpAllowDestructiveTools, "toggle-st-flag", 'data-flag="st-mcp-destructive" data-restart-required="true"')}
+  </div><div class="form-grid">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>`;
 }
 
 function notificationSettingsMarkup(settings) {
@@ -295,6 +303,9 @@ async function doSave() {
     autoOpenBrowser: $("#st-browser")?.getAttribute("aria-pressed") === "true",
     historyRetentionDays: +($("#st-retention")?.value || 3),
     webPort: +($("#st-port")?.value || 58731),
+    mcpEnabled: $("#st-mcp-enabled")?.getAttribute("aria-pressed") === "true",
+    mcpPort: +($("#st-mcp-port")?.value || 58732),
+    mcpAllowDestructiveTools: $("#st-mcp-destructive")?.getAttribute("aria-pressed") === "true",
     logLevel: $("#st-loglevel")?.value || "info",
     allowRemoteAccess: $("#st-remote")?.getAttribute("aria-pressed") === "true",
   };
@@ -325,9 +336,9 @@ async function refreshLanList() {
 
 /** 设置页控件自动保存绑定：输入/下拉失焦（change）即保存；切换按钮经 toggle-st-flag 触发。 */
 function bindAutoSave() {
-  ["st-loglevel", "st-retention", "st-port", "st-token"].forEach(id => {
+  ["st-loglevel", "st-retention", "st-port", "st-mcp-port", "st-token"].forEach(id => {
     $("#" + id)?.addEventListener("change", () => {
-      if (id === "st-port") markRestartRequired();
+      if (["st-port", "st-mcp-port"].includes(id)) markRestartRequired();
       autoSave();
     });
   });
@@ -408,7 +419,7 @@ export const actions = {
     const btn = $("#" + target.dataset.flag);
     if (!btn) return;
     btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
-    if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote"].includes(target.dataset.flag)) markRestartRequired();
+    if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled", "st-mcp-destructive"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },
   "toggle-token-visibility": target => {

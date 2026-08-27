@@ -16,6 +16,15 @@ public class AppSettings
 
     public int WebPort { get; set; } = 58731;
 
+    /// <summary>是否启动内嵌 MCP Streamable HTTP 端点；默认关闭。</summary>
+    public bool McpEnabled { get; set; }
+
+    /// <summary>MCP 仅绑定 loopback 的固定监听端口；端口冲突时不自动漂移。</summary>
+    public int McpPort { get; set; } = 58732;
+
+    /// <summary>是否发布会改变或删除运行数据的 MCP 工具；默认关闭。</summary>
+    public bool McpAllowDestructiveTools { get; set; }
+
     public string LogLevel { get; set; } = "info";
 
     /// <summary>允许远程访问（绑定 http.sys 强通配符 +，非 0.0.0.0——http.sys 不接受 0.0.0.0 前缀；远程请求需访问令牌；默认仅本地 127.0.0.1）。</summary>

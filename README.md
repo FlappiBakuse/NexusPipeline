@@ -34,6 +34,7 @@
 - **通知推送**：Webhook / SMTP 双通道并行，属于宿主内置通知能力，配置入口位于「设置」页，密钥本地加密存储（DPAPI）。
 - **内建更新**：设置页可检查 GitHub 最新版本、下载校验（SHA256）后就绪、「立即更新」或「下次启动更新」；应用走独立切换进程（备份旧版本、失败自动回滚、启动自愈），只替换程序文件与前端，配置/历史/用户数据一律不触碰。
 - **命令行与控制面**：`manage`、正式 noun/subcommand CLI、网页和后续自动化入口共享常驻服务控制面；支持脚本/用户/队列/运行/历史/设置/插件/更新/维护等操作，并提供稳定的 `--json` 输出。
+- **MCP Agent 控制面**：可选在同一 `nexus-pipeline.exe` 内启动官方 Streamable HTTP MCP Server；端点固定为 `http://127.0.0.1:58732/mcp`（端口可配置），工具按只读、常规变更和破坏性操作分层，长任务返回 `runId` 供轮询。
 
 ## 安装
 
@@ -84,6 +85,20 @@ nexus-pipeline.exe cancel <运行 ID> --json
 ```
 
 带 `--json` 的正式命令在标准输出中返回单个 envelope：成功为 `{ "ok": true, "code": "ok", "data": ... }`，失败为 `{ "ok": false, "code": ..., "message": ... }`；诊断与运行进度写入标准错误。目标参数按“ID 精确匹配 → 名称唯一匹配”解析，同名目标返回 `ambiguous_target` 与候选 ID。未运行的常驻服务会由 CLI 自动拉起，控制 API 的实际监听端口由服务状态发现。
+
+## MCP Agent 接入
+
+在「设置 → MCP Agent」中启用 MCP 服务并重启 NexusPipeline。服务启动后，Agent 使用以下 Streamable HTTP 地址连接：
+
+```text
+http://127.0.0.1:58732/mcp
+```
+
+MCP 端口只绑定本机 loopback，与「远程访问」设置相互独立；端口被占用时 MCP 保持不可用，Control API 与脚本调度继续运行。MCP 工具使用稳定的脚本、用户、队列和运行 ID，`run_script` / `run_queue` 会立即返回 `runId`，再用 `get_run` 查询状态。
+
+默认工具包含状态、脚本、用户、绑定、队列、运行、历史、插件和脱敏设置查询，以及运行/取消、资源 CRUD 和安全设置更新。删除资源、密钥写入、插件启停、服务重启、应用更新和遗留数据清理等高风险工具只有在本机显式开启「允许破坏性工具」并重启后才会出现在工具列表中；密钥写入使用本地 DPAPI 加密，工具响应与审计日志均不回显明文。
+
+MCP 不承担 Web 页面、图标/头像上传、第三方 GUI 配置编辑、任意文件读写或 shell 执行。完整的工具边界、生命周期和安全模型见 [docs/DESIGN.md](docs/DESIGN.md) 与 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
 ## 常见问题
 

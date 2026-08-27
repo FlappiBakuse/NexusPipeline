@@ -11,6 +11,8 @@ internal static class Audit
 
     public const string System = "system";
 
+    public const string Mcp = "mcp";
+
     public static void Log(string source, string action, string detail = "")
     {
         string line = string.IsNullOrEmpty(detail)

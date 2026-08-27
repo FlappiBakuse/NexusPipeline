@@ -10,6 +10,7 @@
 1. [设计理念](#1-设计理念)
 2. [核心概念](#2-核心概念)
 3. [核心运行流程](#3-核心运行流程)
+   - [3.5 MCP Agent 控制面](#35-mcp-agent-控制面)
 4. [配置交换机制](#4-配置交换机制)
 5. [完成判定机制](#5-完成判定机制)
 6. [日志监控机制](#6-日志监控机制)
@@ -190,6 +191,37 @@ flowchart TD
 - 目标解析先按大小写不敏感的完整 ID 匹配，再按大小写不敏感的唯一名称匹配；名称匹配不唯一时保留候选 ID 并返回 `ambiguous_target`，禁止静默选择首项。
 
 轻量模式仍启动 Control API，监听地址固定为 `127.0.0.1`，仅关闭静态 Web UI 与浏览器自动打开。这样命令行自动拉起服务、脚本化调用和本机管理菜单在轻量模式下仍共享同一运行时状态。
+
+### 3.5 MCP Agent 控制面
+
+v0.10.5 在同一个 `nexus-pipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
+
+```text
+http://127.0.0.1:<McpPort>/mcp
+```
+
+MCP 的启动条件和运行语义如下：
+
+- `McpEnabled` 默认关闭；关闭时进程不创建 MCP Kestrel listener。
+- `McpPort` 默认 `58732`，有效范围为 `1024–65535`。端口是 Agent 配置的一部分，发生占用时记录错误并保持 MCP 不可用，Control API 继续工作，端口不会自动漂移。
+- `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
+- 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
+
+工具按风险分层。只读工具读取状态、脚本、用户、绑定、队列、运行、历史、插件和脱敏设置；常规变更工具提交运行/取消、资源 CRUD 和安全设置白名单更新；`McpAllowDestructiveTools` 默认关闭，只有显式开启并重启服务后才注册删除、密钥、插件开关、服务重启、应用更新和遗留数据清理工具。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+
+MCP 适配层只接收类型化参数，经过 `McpToolContext` 解析稳定 ID/唯一名称，再进入 Application Commands 和已有核心服务。它不复用 Web handler 或 CLI 路由，也不提供万能 CLI/API/shell 工具。运行类调用立即返回 `runId`，Agent 通过 `get_run` 轮询活动或最近完成的运行；业务错误保留在结构化工具结果内：
+
+```json
+{
+  "ok": false,
+  "errorCode": "resource_busy",
+  "errorMessage": "脚本正在运行，无法修改",
+  "candidates": [],
+  "data": null
+}
+```
+
+MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopback，Host 仅允许 `127.0.0.1`、`localhost` 和 `::1`，Origin 必须为相同 loopback 主机与 MCP 端口，请求体上限为 2 MiB。`get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符；secret mutation 只接受显式高风险工具，值经过既有 DPAPI 存储且不会进入返回值或 `Audit.Mcp` 日志。
 
 ## 4. 配置交换机制
 

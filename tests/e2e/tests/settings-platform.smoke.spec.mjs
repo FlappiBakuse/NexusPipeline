@@ -4,6 +4,8 @@ import { api, baseUrl } from "./helpers.mjs";
 test("设置入口：保存普通服务设置并从 API 读取", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#st-retention")).toBeVisible();
+  await expect(page.getByTestId("mcp-settings")).toBeVisible();
+  await expect(page.locator("#st-mcp-port")).toHaveValue("58732");
   const current = Number(await page.locator("#st-retention").inputValue());
   const next = current === 7 ? 8 : 7;
   await page.locator("#st-retention").fill(String(next));

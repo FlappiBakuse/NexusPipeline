@@ -148,6 +148,7 @@ async function runSystem(args) {
   };
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   const suites = [
+    ["runtime-mcp", "mcp-smoke.mjs"],
     ["runtime-runtime", "runtime-smoke.mjs"],
     ["runtime-judge", "judge-smoke.mjs"],
     ["runtime-execution-resilience", "execution-resilience.mjs"],

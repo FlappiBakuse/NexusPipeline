@@ -3,6 +3,7 @@ using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
+using NexusPipeline.Mcp;
 using NexusPipeline.Web;
 
 namespace NexusPipeline;
@@ -48,6 +49,7 @@ internal static class StartupPipeline
                 TrayApp.OpenWeb(web.Port);
             }
         }
+        McpHost? mcp = web is null ? null : Bootstrap.StartMcp();
         if (!webOptions.ServeWebUi)
         {
             Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
@@ -55,7 +57,7 @@ internal static class StartupPipeline
         if (web is null)
         {
             Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
-            Bootstrap.Shutdown(null);
+            Bootstrap.Shutdown(null, mcp);
             ClearServicePid();
             return;
         }
@@ -68,7 +70,7 @@ internal static class StartupPipeline
         Application.Run(new TrayApp());
 
         WaitForSafeShutdown();
-        Bootstrap.Shutdown(web);
+        Bootstrap.Shutdown(web, mcp);
         ClearServicePid();
         Logger.Info("NexusPipeline 已退出。");
     }
@@ -190,6 +192,7 @@ internal static class StartupPipeline
             return 1;
         }
         Bootstrap.AfterWebStarted(web);
+        McpHost? mcp = Bootstrap.StartMcp();
         ScheduleStartupUpdateCheck();
         Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
         if (ctx.Settings.AutoOpenBrowser)
@@ -228,7 +231,7 @@ internal static class StartupPipeline
             break;
         }
         WaitForSafeShutdown();
-        Bootstrap.Shutdown(web);
+        Bootstrap.Shutdown(web, mcp);
         ClearServicePid();
         return 0;
     }

@@ -1,4 +1,6 @@
 using System.Net;
+using System.Diagnostics;
+using NexusPipeline.Mcp;
 using NexusPipeline.Web;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
@@ -86,6 +88,21 @@ internal static class Bootstrap
         return true;
     }
 
+    /// <summary>按设置启动内嵌 MCP；MCP 端口冲突不自动漂移，失败不影响 Control API。</summary>
+    public static McpHost? StartMcp()
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        if (!ctx.Settings.McpEnabled)
+        {
+            return null;
+        }
+        var mcp = new McpHost(
+            ctx,
+            ctx.Settings.McpAllowDestructiveTools,
+            () => TryRequestRestart(Audit.Mcp));
+        return mcp.TryStart(ctx.Settings.McpPort) ? mcp : null;
+    }
+
     internal static (HostMaintenanceLease? Lease, string? Reason) TryAcquireUpdateMaintenanceLease()
     {
         HostMaintenanceLease? lease = RuntimeContext.Instance.Center.TryAcquireMaintenanceLease(out string reason);
@@ -121,6 +138,66 @@ internal static class Bootstrap
         return true;
     }
 
+    /// <summary>统一的服务重启入口，供 Web 与 MCP 共享安全退出门禁。</summary>
+    internal static bool TryRequestRestart(string auditSource)
+    {
+        if (ApplicationHost.IsWebOnly)
+        {
+            return false;
+        }
+        if (!CanRequestDirectExit(out string reason))
+        {
+            Logger.Warn($"[重启] 已拒绝重启请求：{reason}");
+            return false;
+        }
+        int newPort = RuntimeContext.Instance.Settings.WebPort;
+        Audit.Log(auditSource, "重启服务", $"端口 {newPort}");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Thread.Sleep(1000);
+                string exePath = Environment.ProcessPath ?? "";
+                if (string.IsNullOrWhiteSpace(exePath))
+                {
+                    Logger.Error("[重启] 无法获取当前程序路径，放弃重启。");
+                    return;
+                }
+                Process.Start(new ProcessStartInfo(exePath)
+                {
+                    Arguments = "restart",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                });
+                Logger.Info("[重启] 已拉起新进程，即将退出当前进程。");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[重启] 拉起新进程失败：{ex.Message}");
+                return;
+            }
+            try
+            {
+                if (!TryRequestCompletionExit())
+                {
+                    Logger.Warn("[重启] 当前进程仍有活动执行或编辑会话，已拒绝退出；新进程可能需要手动处理。");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[重启] 退出当前进程失败：{ex.Message}");
+                try
+                {
+                    Environment.Exit(0);
+                }
+                catch
+                {
+                }
+            }
+        });
+        return true;
+    }
+
     /// <summary>
     /// 更新应用后的宿主退出：常驻服务走完成操作退出门禁；
     /// web 模式没有 WinForms 消息循环（Application.Exit 无效），直接延时退出进程——单实例互斥体随进程终止释放，
@@ -143,11 +220,24 @@ internal static class Bootstrap
     /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护：单步异常不影响其余清理步骤执行。</summary>
     public static void Shutdown(WebServer? web)
     {
+        Shutdown(web, null);
+    }
+
+    public static void Shutdown(WebServer? web, McpHost? mcp)
+    {
         RuntimeContext ctx = RuntimeContext.Instance;
         if (!CanStopServices(out string reason))
         {
             Logger.Warn($"[退出] 服务仍有活动任务，拒绝执行宿主停止：{reason}");
             return;
+        }
+        try
+        {
+            mcp?.Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
         }
         try
         {

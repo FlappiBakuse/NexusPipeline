@@ -2,6 +2,22 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.5（Pre-release）
+
+### MCP Agent 控制面
+
+- 在同一 `nexus-pipeline.exe` 内嵌官方 `ModelContextProtocol.AspNetCore 2.2.0` Streamable HTTP MCP Server；默认关闭，启用后使用独立固定端口 `http://127.0.0.1:<McpPort>/mcp`，端口冲突不漂移且不影响 Web/Control API。
+- 新增 `McpEnabled`、`McpPort`、`McpAllowDestructiveTools` 设置，并在设置页提供 MCP Agent 配置入口；轻量模式保留本机 Control API，同时可独立启用 MCP。
+- 新增类型化状态、脚本、用户/绑定、队列、运行、历史、插件、设置、更新、维护和执行工具；所有写入复用 Application Commands/核心服务，长运行任务立即返回 `runId`。
+- 破坏性工具按设置条件注册，覆盖删除、遗留数据清理、secret、插件启停、服务重启和应用更新；队列完成系统操作与安全设置绕过均通过行为级策略拦截。
+- MCP 独立执行 loopback Host/Origin/请求体边界校验；设置读取脱敏，secret 仅进入 DPAPI 存储，MCP mutation 使用 `Audit.Mcp` 且不记录密钥明文。
+
+### 测试与文档
+
+- 新增官方 C# MCP 客户端握手/工具发现/结构化结果组件测试，以及 MCP 策略单元测试。
+- 新增发布进程 MCP System Smoke：默认关闭、启用握手、工具发现、状态/脱敏设置、Origin/Host 校验、运行轮询/取消、轻量模式和端口冲突降级。
+- 同步 README、DESIGN、ARCHITECTURE、TESTING 与 ROADMAP 的 MCP 接入、设置、安全和测试说明。
+
 ## v0.10.4（Pre-release）
 
 ### 统一控制面与可脚本化 CLI

@@ -62,6 +62,10 @@ internal static class ConfigStore
         {
             settings.WebPort = 58731;
         }
+        if (settings.McpPort < 1024 || settings.McpPort > 65535)
+        {
+            settings.McpPort = 58732;
+        }
         if (!LogLevelUtil.IsValid(settings.LogLevel))
         {
             settings.LogLevel = "info";

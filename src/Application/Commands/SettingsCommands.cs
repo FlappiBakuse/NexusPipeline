@@ -120,6 +120,13 @@ internal static class SettingsCommands
                     settings.WebPort = port;
                 }
                 return null;
+            case "mcpPort":
+                int mcpPort = value.Int(settings.McpPort);
+                if (mcpPort is >= 1024 and <= 65535)
+                {
+                    settings.McpPort = mcpPort;
+                }
+                return null;
             case "webhookTimeout":
                 int timeout = value.Int(settings.WebhookTimeout);
                 if (timeout >= 1)
