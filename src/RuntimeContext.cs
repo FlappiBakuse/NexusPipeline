@@ -63,6 +63,7 @@ internal class RuntimeContext
             provider.GetRequiredService<PluginPackageService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
         collection.AddSingleton<ExecutionAdmissionPolicy>();

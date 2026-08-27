@@ -1,7 +1,7 @@
 import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { pageHeader, systemActionCard } from "../core/forms.js";
-import { esc } from "../core/format.js";
+import { esc, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
 import { closeModal, confirmModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
@@ -96,6 +96,14 @@ function updateSystemAction(status) {
   startSystemActionCountdown();
 }
 
+function dispatchScriptOptionMarkup(script) {
+  const pluginStatus = scriptPluginStatus(script, state.plugins || []);
+  const unavailable = pluginStatus.specialized && !pluginStatus.available;
+  const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
+  const unavailableLabel = pluginStatus.missing ? "（未知专项）" : "（专项插件不可用）";
+  return `<option value="${esc(script.id)}"${unavailable ? " disabled" : ""}${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(script.name)}${unavailable ? unavailableLabel : ""}</option>`;
+}
+
 export async function pageDispatch(token) {
   if (!isCurrent("dispatch", token)) return;
   navActive("dispatch"); setTopbarTitle("调度中心");
@@ -103,14 +111,14 @@ export async function pageDispatch(token) {
   try { [status, scripts, queues] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/scripts"), api("GET", "/api/queues")]); }
   catch (error) { render(`<div class="empty"><strong>加载调度中心失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("dispatch", token)) return;
-  state.scripts = scripts; state.queues = queues;
+  state.scripts = scripts; state.queues = queues; state.plugins = status.plugins || [];
   render(pageHeader("调度中心", "调度中心", "手动启动任务，观察实时输出并及时取消运行。") + `
     <div id="system-action-area"></div>
     <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
     <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">开始一次运行</h3><span class="muted">选择目标后立即加入运行列表</span></div>
       <div class="dispatch-runbar">
         <div class="field"><label class="field-label" for="dc-kind">目标类型</label><select id="dc-kind" data-action="dispatch-kind"><option value="script">脚本实例</option><option value="queue">调度队列</option></select></div>
-        <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}">${esc(script.name)}</option>`).join("")}</select></div>
+        <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(dispatchScriptOptionMarkup).join("")}</select></div>
         <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div>
         <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
       </div>
@@ -130,6 +138,9 @@ async function refreshDispatch(token) {
 export async function dispatchScript() {
   const id = $("#dc-script")?.value;
   if (!id) { toast("请选择脚本实例", "error"); return; }
+  const script = (state.scripts || []).find(item => item.id === id);
+  const unavailableMessage = script ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
+  if (unavailableMessage) { toast(unavailableMessage, "error"); return; }
   try { await api("POST", "/api/dispatch/script", { scriptId: id, mode: "manual" }); toast("已开始执行"); }
   catch (error) { toast(error.message, "error"); }
 }

@@ -1,6 +1,6 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
-import { esc, scriptFallbackIcon } from "../core/format.js";
+import { esc, pluginDisplayName, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
 import { scrollField, selectField, switchControl, valueField, pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
@@ -20,7 +20,8 @@ function specializedPlugins() {
 /** 启动方式选择是否可用：模拟器是宿主基础设施；专项脚本按插件 capability 声明（缺省不支持）。 */
 function emulatorAllowed(pluginType) {
   if (!pluginType) return true;
-  const meta = (state.plugins || []).find(p => p.name === pluginType);
+  const normalized = String(pluginType).trim().toLowerCase();
+  const meta = (state.plugins || []).find(p => String(p.name || "").trim().toLowerCase() === normalized);
   return !!meta && meta.kind === "data-specialized" && meta.configuredEnabled && meta.runtimeEnabled && meta.state === "Active" && !!meta.supportsEmulator;
 }
 
@@ -50,15 +51,30 @@ export function changeGameMode() {
   if (args) args.placeholder = isEmu ? "am start 参数，如 -n 包名/.MainActivity" : "";
 }
 
-function pluginDisplay(name) {
-  const plugin = (state.plugins || []).find(p => p.name === name);
-  return plugin ? plugin.displayName : name;
-}
-
-/** 徽章游戏名：专用插件提供（gameName），无则回退显示名。 */
-function pluginGameName(name) {
-  const plugin = (state.plugins || []).find(p => p.name === name);
-  return plugin ? (plugin.gameName || plugin.displayName) : name;
+function scriptCardMarkup(script, notifyOn) {
+  const pluginStatus = scriptPluginStatus(script, state.plugins || []);
+  const unavailable = pluginStatus.specialized && !pluginStatus.available;
+  const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
+  const pluginBadge = !pluginStatus.specialized
+    ? '<span class="badge muted">通用脚本</span>'
+    : pluginStatus.missing
+      ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">未知专项</span>`
+      : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(pluginStatus.displayName)}专项</span>`;
+  const entityState = unavailable
+    ? ` class="entity-link is-unavailable" disabled aria-disabled="true" title="${esc(unavailableMessage)}"`
+    : ' class="entity-link"';
+  return `<article class="script-card${unavailable ? " is-unavailable" : ""}" data-testid="script-card" data-dnd-id="${esc(script.id)}">
+    <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
+    <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
+    <div class="script-main">
+      <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
+      <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
+    </div>
+    <div class="script-ops row-actions entity-actions">
+      <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
+      <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
+    </div>
+  </article>`;
 }
 
 export async function pageScripts(token) {
@@ -84,18 +100,7 @@ export async function pageScripts(token) {
   const content = scripts.length === 0
     ? '<div class="empty"><strong>暂无脚本实例</strong><span>创建一个脚本实例后，它会出现在这里并可加入调度队列。</span><a class="back-link" href="#/scripts" data-action="open-script-modal">新建脚本实例</a></div>'
     : `<section class="card list-surface"><div class="script-grid">
-      ${pageItems.map(script => `<article class="script-card" data-testid="script-card" data-dnd-id="${esc(script.id)}">
-        <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
-        <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
-        <div class="script-main">
-          <button class="entity-link" type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="编辑脚本实例：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-          <div class="meta-line script-meta"><span class="badge muted">${script.pluginType ? `${esc(pluginGameName(script.pluginType))}专项` : "通用脚本"}</span>${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
-        </div>
-        <div class="script-ops row-actions entity-actions">
-          <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}">编辑脚本</button>
-          <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
-        </div>
-      </article>`).join("")}
+      ${pageItems.map(script => scriptCardMarkup(script, notifyOn)).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
   render(pageHeader("自动化管理", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
@@ -148,7 +153,17 @@ export function openNewScriptChooser() {
     </button>`).join("")}
   </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("新建脚本实例", body, footer));
+  showModal(modalShell("新建脚本实例", body, footer), false, true);
+}
+
+export function editScript(id) {
+  const script = (state.scripts || []).find(item => item.id === id);
+  const unavailableMessage = script ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
+  if (unavailableMessage) {
+    toast(unavailableMessage, "error");
+    return;
+  }
+  return openScriptModal(id);
 }
 
 export async function openScriptModal(id = "", plugin = "") {
@@ -159,6 +174,13 @@ export async function openScriptModal(id = "", plugin = "") {
       script = state.scripts.find(item => item.id === id);
     } catch (error) {
       toast("加载脚本失败：" + error.message, "error");
+      return;
+    }
+  }
+  if (script) {
+    const unavailableMessage = scriptPluginUnavailableMessage(script, state.plugins || []);
+    if (unavailableMessage) {
+      toast(unavailableMessage, "error");
       return;
     }
   }
@@ -180,14 +202,14 @@ export async function openScriptModal(id = "", plugin = "") {
   const d = scriptDraft;
   const l = state.limits || {};
   const title = isSpecial
-    ? (id ? `编辑${esc(pluginDisplay(pluginType))}专项脚本实例` : `新建${esc(pluginDisplay(pluginType))}专项脚本实例`)
+    ? (id ? `编辑${esc(pluginDisplayName(pluginType, state.plugins || []))}专项脚本实例` : `新建${esc(pluginDisplayName(pluginType, state.plugins || []))}专项脚本实例`)
     : (id ? "编辑脚本实例" : "新建脚本实例");
   const body = isSpecial
     ? `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
     </div>
-    <p class="muted helper-copy">由专用插件「${esc(pluginDisplay(pluginType))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
+    <p class="muted helper-copy">由专用插件「${esc(pluginDisplayName(pluginType, state.plugins || []))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
@@ -259,7 +281,7 @@ export async function openScriptModal(id = "", plugin = "") {
       </div>
     </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-script">保存</button>';
-  showModal(modalShell(title, body, footer), true);
+  showModal(modalShell(title, body, footer), true, true);
   syncScriptGhostState();
   syncJudgeBox();
   const rootInput = $dom("#sm-root");
@@ -356,6 +378,16 @@ function stripQuotes(value) {
 }
 
 export async function saveScript() {
+  if (scriptDraft?.id) {
+    const existing = (state.scripts || []).find(item => item.id === scriptDraft.id);
+    const unavailableMessage = existing
+      ? scriptPluginUnavailableMessage(existing, state.plugins || [])
+      : "";
+    if (unavailableMessage) {
+      toast(unavailableMessage, "error");
+      return;
+    }
+  }
   const isSpecial = !!scriptDraft.pluginType;
   const required = isSpecial
     ? [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"]]
@@ -478,7 +510,7 @@ export async function confirmDeleteScript(id, name) {
 export const actions = {
   "open-script-modal": () => openNewScriptChooser(),
   "open-script-type": target => openScriptModal("", target.dataset.plugin || ""),
-  "edit-script": target => openScriptModal(target.dataset.id),
+  "edit-script": target => editScript(target.dataset.id),
   "delete-script": target => deleteScript(target.dataset.id, target.dataset.name),
   "confirm-delete-script": target => withBusy(target, () => confirmDeleteScript(target.dataset.id, target.dataset.name)),
   "save-script": target => withBusy(target, () => saveScript()),

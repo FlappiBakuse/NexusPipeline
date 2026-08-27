@@ -1,6 +1,6 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
-import { esc, scriptFallbackIcon } from "../core/format.js";
+import { esc, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
 import { pageHeader, switchControl, textareaField, valueField } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../core/state.js";
@@ -23,6 +23,11 @@ function cloneUser(user) {
 
 function scriptById(id) {
   return (state.scripts || []).find(script => script.id === id);
+}
+
+function unavailableScriptMessage(scriptId) {
+  const script = scriptById(scriptId);
+  return script ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
 }
 
 function initials(name) {
@@ -116,14 +121,16 @@ export async function pageUsers(token) {
     clearInterval(nextTimer);
     nextTimer = null;
   }
-  let users;
+  let users, scripts, status;
   try {
-    [users, state.scripts] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/scripts")]);
+    [users, scripts, status] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/scripts"), api("GET", "/api/status")]);
   } catch (error) {
     if (isCurrent("users", token)) render('<div class="empty"><strong>加载用户管理失败</strong><span>' + esc(error.message) + "</span></div>");
     return;
   }
   if (!isCurrent("users", token)) return;
+  state.scripts = scripts;
+  state.plugins = status.plugins || [];
   state.users = users || [];
   const limit = state.limits?.maxUsers ?? 50;
   const atLimit = state.users.length >= limit;
@@ -171,7 +178,7 @@ async function restoreEditSessionCard() {
 
 export function openGlobalUserModal() {
   const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
-  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
+  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true);
 }
 
 export async function saveGlobalUser() {
@@ -197,7 +204,11 @@ function availableScripts(user) {
   return (state.scripts || [])
     .slice()
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-    .filter(script => !boundIds.has(script.id));
+    .filter(script => !boundIds.has(script.id))
+    .filter(script => {
+      const status = scriptPluginStatus(script, state.plugins || []);
+      return !status.specialized || status.available;
+    });
 }
 
 function bindingIdPart(id) {
@@ -223,12 +234,21 @@ function umBadges(binding) {
     : runDays > 0
       ? `<span class="badge blue">剩余 ${runDays} 天</span>`
       : '<span class="badge muted">永久运行</span>';
-  return stateBadge + daysBadge;
+  const script = scriptById(binding.scriptInstanceId);
+  const pluginStatus = script ? scriptPluginStatus(script, state.plugins || []) : null;
+  const pluginBadge = pluginStatus?.missing
+    ? '<span class="badge bad">未知专项</span>'
+    : pluginStatus?.specialized && !pluginStatus.available
+      ? '<span class="badge warn">专项插件不可用</span>'
+      : "";
+  return pluginBadge + stateBadge + daysBadge;
 }
 
 function umBindingCardMarkup(binding) {
   const idPart = bindingIdPart(binding.scriptInstanceId);
   const name = umScriptName(binding);
+  const unavailableMessage = unavailableScriptMessage(binding.scriptInstanceId);
+  const unavailable = !!unavailableMessage;
   const notifyEnabled = binding.notifyEnabled !== false;
   const runDays = typeof binding.runDays === "number" ? binding.runDays : -1;
   // 绑定是否参与运行由运行天数唯一决定：-1/正数为启用，0 为停用。
@@ -241,7 +261,7 @@ function umBindingCardMarkup(binding) {
   const head =
     '<div class="um-binding-head">' +
       '<span class="drag-handle um-binding-drag-handle" role="button" tabindex="' + (dragEnabled ? "0" : "-1") + '" aria-disabled="' + (dragEnabled ? "false" : "true") + '"' + (dragHidden ? " hidden" : "") + ' aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序" data-testid="um-binding-drag-handle">' + icon("grip") + "</span>" +
-      '<button class="um-binding-toggle" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="打开脚本实例设置：' + esc(name) + '"' + (umState.bindingEditMode ? ' disabled aria-disabled="true"' : '') + '>' +
+      '<button class="um-binding-toggle' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="' + esc(unavailable ? '无法识别的专项脚本实例' : '打开脚本实例设置') + '：' + esc(name) + '"' + (unavailable ? ' aria-disabled="true" title="' + esc(unavailableMessage) + '"' : '') + (umState.bindingEditMode ? ' disabled aria-disabled="true"' : '') + '>' +
         '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="36" height="36" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
         '<span class="um-binding-copy"><strong class="um-binding-name">' + esc(name) + '</strong><span class="um-binding-badges">' + umBadges(binding) + "</span></span>" +
       "</button>" +
@@ -259,7 +279,7 @@ function umBindingCardMarkup(binding) {
     "</button>";
   const mainView =
     '<div class="um-view um-view-main">' +
-      '<button class="um-edit-config" type="button" data-action="edit-user-config-global" data-user-id="' + esc(managementDraft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '">' +
+      '<button class="um-edit-config' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="edit-user-config-global" data-user-id="' + esc(managementDraft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '"' + (unavailable ? ' title="' + esc(unavailableMessage) + '"' : '') + '>' +
         '<span class="um-edit-config-copy"><strong>编辑配置</strong><span class="muted">启动主程序打开该脚本实例的用户配置</span></span>' +
         '<span class="um-edit-config-arrow">' + icon("chevronRight") + "</span>" +
       "</button>" +
@@ -285,7 +305,7 @@ function umBindingCardMarkup(binding) {
       valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
       valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
     "</div>";
-  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main">' +
+  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
     head + subhead +
     '<div class="um-binding-body">' + mainView + generalView + notifyView + advancedView + "</div>" +
   "</article>";
@@ -357,7 +377,7 @@ function renderUserManagementModal() {
       bindingList +
     "</section>";
   const footer = `<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${umState.expandedId ? "返回上级" : "取消"}</button>`;
-  showModal(modalShell("编辑用户", body, footer), true);
+  showModal(modalShell("编辑用户", body, footer), true, true);
   syncUmState();
   wireManagedBindingDnd();
   hydrateIcons(document);
@@ -398,8 +418,9 @@ function syncUmState() {
       card.dataset.subview = expanded ? umState.subview : "main";
       const toggle = card.querySelector(".um-binding-toggle");
       if (toggle) {
+        const unavailable = card.dataset.pluginUnavailable === "true";
         toggle.disabled = umState.bindingEditMode;
-        toggle.setAttribute("aria-disabled", umState.bindingEditMode ? "true" : "false");
+        toggle.setAttribute("aria-disabled", unavailable || umState.bindingEditMode ? "true" : "false");
         toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
       }
       const dragHandle = card.querySelector(".um-binding-drag-handle");
@@ -592,6 +613,13 @@ export async function confirmUmAddBindings() {
     toast("请选择要绑定的脚本实例", "error");
     return;
   }
+  const unavailableScript = ids
+    .map(scriptById)
+    .find(script => script && scriptPluginStatus(script, state.plugins || []).specialized && !scriptPluginStatus(script, state.plugins || []).available);
+  if (unavailableScript) {
+    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []), "error");
+    return;
+  }
   const addedBindings = [];
   try {
     for (const scriptId of ids) {
@@ -618,6 +646,11 @@ export async function confirmUmAddBindings() {
 
 /** 展开/收回绑定卡片：只能同时展开一个，展开时其他卡片与添加脚本面板自动隐藏。 */
 export function toggleUmBinding(target) {
+  const unavailableMessage = unavailableScriptMessage(target.closest(".um-binding-card")?.dataset.bindingId);
+  if (unavailableMessage) {
+    toast(unavailableMessage, "error");
+    return;
+  }
   if (umState.bindingEditMode || umState.addOpen) return;
   const card = target.closest(".um-binding-card");
   if (!card) return;
@@ -783,6 +816,11 @@ export async function editGlobalUserConfig(userId, scriptId) {
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
   if (!user || !binding) return;
+  const unavailableMessage = unavailableScriptMessage(scriptId);
+  if (unavailableMessage) {
+    toast(unavailableMessage, "error");
+    return;
+  }
   try {
     await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start" });
     showGlobalEditConfigCard(userId, scriptId, user.name, binding.scriptName || "脚本实例");

@@ -1,4 +1,5 @@
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -30,6 +31,7 @@ internal static class QueueCommands
                         ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
                         ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
+                        ?? CheckQueuePluginAvailability(ctx, candidate)
                         ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), candidate);
                     if (error is null)
                     {
@@ -90,6 +92,7 @@ internal static class QueueCommands
                                 ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
                                 ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
+                                ?? CheckQueuePluginAvailability(ctx, candidate)
                                 ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), candidate);
                         if (existing is not null && error is null)
                         {
@@ -228,6 +231,25 @@ internal static class QueueCommands
                     out _))
             {
                 return $"定时时间格式不正确（{timeSet.Time}），须为 HH:mm（如 08:00）";
+            }
+        }
+        return null;
+    }
+
+    private static string? CheckQueuePluginAvailability(RuntimeContext ctx, DispatchQueue queue)
+    {
+        IPluginAvailability plugins = ctx.Resolve<IPluginAvailability>();
+        foreach (QueueTask task in queue.Tasks.OrderBy(item => item.Index))
+        {
+            ScriptInstance? script = ctx.Scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId);
+            if (script is null)
+            {
+                continue;
+            }
+            string? unavailableReason = PluginAvailability.GetUnavailableReason(script, plugins);
+            if (unavailableReason is not null)
+            {
+                return unavailableReason + "；请先移除该任务后再保存队列";
             }
         }
         return null;

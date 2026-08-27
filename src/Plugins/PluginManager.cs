@@ -33,7 +33,7 @@ internal enum PluginRuntimeState
     Shutdown,
 }
 
-internal sealed class PluginManager : IPluginCapabilityResolver
+internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability
 {
     private const int PluginApiMajor = 1;
 
@@ -244,6 +244,11 @@ internal sealed class PluginManager : IPluginCapabilityResolver
     {
         return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
             || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool IsDataSpecializedPlugin(string name)
+    {
+        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool SetEnabled(string name, bool enabled, string source = Audit.System)

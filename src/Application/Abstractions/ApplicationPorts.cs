@@ -200,6 +200,16 @@ internal interface IPluginCapabilityResolver
     ScriptProfile? ResolveProfile(string pluginName, string rootPath);
 }
 
+/// <summary>专项脚本实例的插件可用性端口；运行与配置流程只依赖动态状态，不直接依赖 PluginManager。</summary>
+internal interface IPluginAvailability
+{
+    bool IsKnownPlugin(string pluginName);
+
+    bool IsDataSpecializedPlugin(string pluginName);
+
+    bool IsEnabled(string pluginName);
+}
+
 /// <summary>
 /// 配置交换恢复的只读数据源端口：恢复路径按脚本/用户快照工作，
 /// 不再反向依赖组合根 RuntimeContext。具体适配由组合根在启动时注入（RuntimeInitializer 装配）。

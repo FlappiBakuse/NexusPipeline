@@ -15,17 +15,20 @@ internal sealed class ExecutionRunner
     private readonly IHistoryStore _history;
     private readonly INotificationService _notifications;
     private readonly SystemActionExecutor _systemActions;
+    private readonly IPluginAvailability? _pluginAvailability;
 
     public ExecutionRunner(
         IUserRepository users,
         IHistoryStore history,
         INotificationService notifications,
-        SystemActionExecutor systemActions)
+        SystemActionExecutor systemActions,
+        IPluginAvailability? pluginAvailability = null)
     {
         _users = users;
         _history = history;
         _notifications = notifications;
         _systemActions = systemActions;
+        _pluginAvailability = pluginAvailability;
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)
@@ -33,6 +36,26 @@ internal sealed class ExecutionRunner
         ScriptInstance script = plan.Script;
         try
         {
+            string? unavailableReason = PluginAvailability.GetUnavailableReason(
+                script.PluginType,
+                _pluginAvailability);
+            if (unavailableReason is not null)
+            {
+                List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(
+                    script,
+                    plan.Users,
+                    plan.ResolvedUsers);
+                List<RunRecord> skippedRecords = SkipUnavailableScript(
+                    exec,
+                    script,
+                    "",
+                    "",
+                    unavailableUsers,
+                    unavailableReason);
+                await NotifyUnavailableScriptAsync(script, unavailableUsers, skippedRecords).ConfigureAwait(false);
+                exec.Status = exec.Status == "cancelled" ? "cancelled" : "done";
+                return;
+            }
             List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, plan.Users, plan.ResolvedUsers);
             List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
             if (records.Count > 0 && records[^1].Status == "cancelled")
@@ -259,6 +282,29 @@ internal sealed class ExecutionRunner
                 exec.CurrentScriptName = script.Name;
                 exec.CurrentAttempt = 0;
                 exec.CurrentStatus = "等待开始";
+                string? unavailableReason = PluginAvailability.GetUnavailableReason(
+                    script.PluginType,
+                    _pluginAvailability);
+                if (unavailableReason is not null)
+                {
+                    List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(
+                        script,
+                        planned.EnabledUsers,
+                        planned.ResolvedUsers);
+                    List<RunRecord> skippedRecords = SkipUnavailableScript(
+                        exec,
+                        script,
+                        queue.Id,
+                        queue.Name,
+                        unavailableUsers,
+                        unavailableReason);
+                    records.AddRange(skippedRecords);
+                    if (!queue.NotifyEnabled)
+                    {
+                        await NotifyUnavailableScriptAsync(script, unavailableUsers, skippedRecords).ConfigureAwait(false);
+                    }
+                    continue;
+                }
                 List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, planned.EnabledUsers, planned.ResolvedUsers);
                 if (runUsers.Count == 0)
                 {
@@ -316,6 +362,110 @@ internal sealed class ExecutionRunner
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, completionIntent);
         }
+    }
+
+    private async Task NotifyUnavailableScriptAsync(
+        ScriptInstance script,
+        IReadOnlyList<ResolvedScriptUser> users,
+        IReadOnlyList<RunRecord> records)
+    {
+        if (!script.NotifyEnabled || users.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < users.Count && i < records.Count; i++)
+        {
+            ResolvedScriptUser user = users[i];
+            if (!user.Binding.NotifyEnabled)
+            {
+                continue;
+            }
+            try
+            {
+                await _notifications.NotifyScriptAsync(script, records[i], user.Binding).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[通知] 脚本「{script.Name}（{user.UserName}）」专项插件不可用的跳过结果通知发送异常：{ex.Message}");
+            }
+        }
+    }
+
+    private List<RunRecord> SkipUnavailableScript(
+        RunningExecution exec,
+        ScriptInstance script,
+        string queueId,
+        string queueName,
+        IReadOnlyList<ResolvedScriptUser> users,
+        string unavailableReason)
+    {
+        string detail = "绑定的" + unavailableReason;
+        string logLine = string.IsNullOrWhiteSpace(queueName)
+            ? $"[错误] 脚本实例「{script.Name}」{detail}，已跳过本次运行。"
+            : $"[错误] 调度队列「{queueName}」中的脚本实例「{script.Name}」{detail}，已跳过本次运行。";
+        exec.CurrentScriptName = script.Name;
+        exec.CurrentStatus = "已跳过（专项插件不可用）";
+        exec.AppendLog(logLine);
+        Logger.Error(logLine);
+
+        var records = new List<RunRecord>();
+        if (users.Count == 0)
+        {
+            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, null, detail));
+            return records;
+        }
+
+        foreach (ResolvedScriptUser user in users)
+        {
+            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, user, detail));
+        }
+        return records;
+    }
+
+    private RunRecord PublishUnavailableRecord(
+        RunningExecution exec,
+        ScriptInstance script,
+        string queueId,
+        string queueName,
+        ResolvedScriptUser? user,
+        string detail)
+    {
+        DateTime now = DateTime.Now;
+        var record = new RunRecord
+        {
+            ScriptInstanceId = script.Id,
+            ScriptName = script.Name,
+            QueueId = queueId,
+            QueueName = queueName,
+            Mode = exec.Mode,
+            UserName = user?.UserName ?? "",
+            UserId = user?.UserId ?? "",
+            StartTime = now,
+            EndTime = now,
+            Attempts = 1,
+            MaxAttempts = Math.Max(1, script.MaxAttempts),
+            Status = "failed",
+            FinalStatus = "failed",
+            ResultDetail = detail,
+            AttemptDetails = new List<RunAttempt>
+            {
+                new()
+                {
+                    Number = 1,
+                    StartTime = now,
+                    EndTime = now,
+                    Status = "failed",
+                    Reason = detail,
+                },
+            },
+        };
+        string displayName = string.IsNullOrWhiteSpace(user?.UserName)
+            ? script.Name
+            : $"{script.Name}（{user.UserName}）";
+        RunRecord published = PersistRecord(exec, record, new List<string>(), displayName);
+        exec.AddRecordAndIncrement(published);
+        return published;
     }
 
     private List<ResolvedScriptUser> ResolvePlanUsers(

@@ -6,11 +6,31 @@ import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.j
 import { markRestartRequired } from "./settings.js";
 
 let activeTab = "store";
+let pluginLoadId = 0;
 
-function groupFor(plugin) {
-  if (plugin.kind === "managed-code") return "代码插件";
-  if (plugin.kind === "data-specialized") return "数据化专项插件";
-  return "其他插件";
+function pluginKindLabel(plugin) {
+  return plugin.kind === "data-specialized" ? "专项插件" : "通用插件";
+}
+
+function pluginKindClass(plugin) {
+  return plugin.kind === "data-specialized" ? "blue" : "muted";
+}
+
+function pluginKindBadge(plugin) {
+  return `<span class="badge ${pluginKindClass(plugin)} plugin-kind-badge">${pluginKindLabel(plugin)}</span>`;
+}
+
+function pluginNameMarkup(plugin) {
+  const displayName = esc(plugin.displayName || plugin.name);
+  return `<div class="plugin-name-line"><strong class="plugin-name-scroll" tabindex="0" title="${displayName}"><span class="plugin-name-scroll-inner">${displayName}</span></strong></div>`;
+}
+
+function pluginDetailsMarkup(parts) {
+  return parts.filter(value => value !== undefined && value !== null && value !== "").map(esc).join(" · ");
+}
+
+function pluginBadgesMarkup(plugin, statusMarkup) {
+  return `<div class="plugin-row-badges">${pluginKindBadge(plugin)}${statusMarkup}</div>`;
 }
 
 function runtimeLabel(plugin) {
@@ -30,17 +50,27 @@ function runtimeClass(plugin) {
 }
 
 function pluginRow(plugin) {
-  const apiLabel = plugin.apiVersion ? ` · API v${esc(plugin.apiVersion)}` : "";
-  return `<article class="plugin-row"><div class="plugin-row-main"><strong class="plugin-name-scroll" tabindex="0" title="${esc(plugin.displayName)}"><span class="plugin-name-scroll-inner">${esc(plugin.displayName)}</span></strong><span class="muted">${esc(plugin.description || "本地扩展能力")} · ${esc(plugin.version || "未标注")}${apiLabel}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div><span class="badge ${runtimeClass(plugin)}" data-testid="plugin-status">${runtimeLabel(plugin)}</span><div class="plugin-row-action row-actions"><button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
+  const details = pluginDetailsMarkup([
+    plugin.description || "本地扩展能力",
+    plugin.gameName,
+    plugin.version || "未标注",
+    plugin.apiVersion ? `API v${plugin.apiVersion}` : "",
+  ]);
+  const status = `<span class="badge ${runtimeClass(plugin)}" data-testid="plugin-status">${runtimeLabel(plugin)}</span>`;
+  return `<article class="plugin-row"><div class="plugin-row-main">${pluginNameMarkup(plugin)}<span class="muted plugin-description">${details}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div>${pluginBadgesMarkup(plugin, status)}<div class="plugin-row-action row-actions"><button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
 }
 
-function pluginTabs() {
-  const storeClass = activeTab === "store" ? "primary" : "tertiary";
-  const localClass = activeTab === "local" ? "primary" : "tertiary";
+function pluginTabs(tab = activeTab) {
+  const storeClass = tab === "store" ? "primary" : "tertiary";
+  const localClass = tab === "local" ? "primary" : "tertiary";
   return '<div class="plugin-tabs" role="tablist" aria-label="插件视图">' +
-    '<button type="button" class="' + storeClass + '" role="tab" aria-selected="' + String(activeTab === "store") + '" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button>' +
-    '<button type="button" class="' + localClass + '" role="tab" aria-selected="' + String(activeTab === "local") + '" data-action="switch-plugin-tab" data-tab="local" data-testid="plugin-local-tab">本地插件</button>' +
+    '<button type="button" class="' + storeClass + '" role="tab" aria-selected="' + String(tab === "store") + '" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button>' +
+    '<button type="button" class="' + localClass + '" role="tab" aria-selected="' + String(tab === "local") + '" data-action="switch-plugin-tab" data-tab="local" data-testid="plugin-local-tab">本地插件</button>' +
     '</div>';
+}
+
+function pluginLoadingContent(title, message, testId) {
+  return `<section class="plugins-table plugin-loading-state" data-testid="${testId}" role="status" aria-live="polite" aria-busy="true"><div class="plugin-loading-progress" role="progressbar" aria-label="${esc(title)}" aria-valuetext="正在获取目录"><span></span></div><strong>${esc(title)}</strong><span class="muted">${esc(message)}</span></section>`;
 }
 
 function localPluginContent(status) {
@@ -93,26 +123,54 @@ function storePluginRow(plugin) {
   if (incompatible) {
     actions = '<span class="muted">' + esc(plugin.compatibilityReason || "当前宿主版本不兼容") + "</span>";
   }
-  const installedLabel = plugin.installed ? " · 当前 v" + esc(plugin.installedVersion) : "";
-  const apiLabel = plugin.apiVersion ? " · API v" + esc(plugin.apiVersion) : "";
-  return '<article class="plugin-store-row" data-testid="plugin-store-row"><div class="plugin-row-main"><strong class="plugin-name-scroll" tabindex="0" title="' + esc(plugin.displayName) + '"><span class="plugin-name-scroll-inner">' + esc(plugin.displayName) + '</span></strong><span class="muted">' + esc(plugin.description || "官方插件") + " · v" + esc(plugin.version) + installedLabel + apiLabel + "</span>" + (plugin.gameName ? '<span class="muted">' + esc(plugin.gameName) + "</span>" : "") + '</div><span class="badge ' + storeStatusClass(plugin) + '" data-testid="plugin-store-status">' + storeStatusLabel(plugin) + '</span><div class="plugin-store-actions row-actions">' + actions + "</div></article>";
+  const details = pluginDetailsMarkup([
+    plugin.description || "官方插件",
+    plugin.gameName,
+    plugin.version ? `v${plugin.version}` : "",
+    plugin.installed ? `当前 v${plugin.installedVersion}` : "",
+    plugin.apiVersion ? `API v${plugin.apiVersion}` : "",
+  ]);
+  const status = '<span class="badge ' + storeStatusClass(plugin) + '" data-testid="plugin-store-status">' + storeStatusLabel(plugin) + '</span>';
+  return '<article class="plugin-row plugin-store-row" data-testid="plugin-store-row"><div class="plugin-row-main">' + pluginNameMarkup(plugin) + '<span class="muted plugin-description">' + details + '</span></div>' + pluginBadgesMarkup(plugin, status) + '<div class="plugin-row-action plugin-store-actions row-actions">' + actions + "</div></article>";
 }
 
 function storePluginContent(data) {
-  if (!data) return '<div class="empty"><strong>插件仓库加载中</strong></div>';
+  if (!data) return pluginLoadingContent("正在加载插件仓库", "正在从官方仓库获取插件目录，请稍候…", "plugin-store-loading");
   if (!data.available) {
     return '<section class="plugins-table" data-testid="plugin-store-list"><div class="empty"><strong>插件仓库暂不可用</strong><span>' + esc(data.error || "请检查网络连接或代理设置。") + '</span><button class="tertiary" type="button" data-action="store-refresh" data-testid="plugin-store-refresh">重新加载</button></div></section>';
   }
   const warning = data.stale ? '<div class="callout callout-warning" data-testid="plugin-store-stale">仓库连接暂时不可用，当前显示缓存目录。' + (data.error ? " " + esc(data.error) : "") + "</div>" : "";
-  const plugins = (data.plugins || []).map(storePluginRow).join("");
-  return warning + '<section class="plugins-table plugin-store-list" data-testid="plugin-store-list">' + (plugins || '<div class="empty"><strong>暂无可用插件</strong></div>') + '</section><div class="plugin-store-footer"><span class="muted">仓库目录更新时间：' + esc(data.fetchedAt || "未知") + '</span><button class="tertiary" type="button" data-action="store-refresh" data-testid="plugin-store-refresh">刷新仓库</button></div><p class="muted helper-copy plugin-helper">安装、更新和卸载会在重启服务后生效。</p>';
+  const plugins = data.plugins || [];
+  const groups = [
+    { label: "专项插件", items: plugins.filter(plugin => plugin.kind === "data-specialized") },
+    { label: "通用插件", items: plugins.filter(plugin => plugin.kind !== "data-specialized") },
+  ].filter(group => group.items.length);
+  const groupMarkup = groups.map(group => '<section class="plugin-group"><div class="plugin-group-heading"><h3>' + group.label + "</h3><span>" + group.items.length + " 项</span></div>" + group.items.map(storePluginRow).join("") + "</section>").join("");
+  return warning + '<section class="plugins-table plugin-groups plugin-store-groups" data-testid="plugin-store-list">' + (groupMarkup || '<div class="empty"><strong>暂无可用插件</strong></div>') + '</section><div class="plugin-store-footer"><span class="muted">仓库目录更新时间：' + esc(data.fetchedAt || "未知") + '</span><button class="tertiary" type="button" data-action="store-refresh" data-testid="plugin-store-refresh">刷新仓库</button></div><p class="muted helper-copy plugin-helper">安装、更新和卸载会在重启服务后生效。</p>';
+}
+
+function pluginPageMarkup(tab, content) {
+  return pageHeader(
+    "插件",
+    "插件",
+    tab === "store" ? "浏览官方插件并管理安装版本。" : "查看已安装插件并管理运行状态。",
+    pluginTabs(tab),
+  ) + content;
 }
 
 export async function pagePlugins(token) {
   if (!isCurrent("plugins", token)) return;
   navActive("plugins"); setTopbarTitle("插件");
+  const requestedTab = activeTab;
+  const loadId = ++pluginLoadId;
+  render(pluginPageMarkup(
+    requestedTab,
+    requestedTab === "store"
+      ? storePluginContent(null)
+      : pluginLoadingContent("正在加载本地插件", "正在读取本机插件状态，请稍候…", "plugin-local-loading"),
+  ));
   let content;
-  if (activeTab === "store") {
+  if (requestedTab === "store") {
     try {
       content = storePluginContent(await api("GET", "/api/plugins/store"));
     } catch (error) {
@@ -125,13 +183,8 @@ export async function pagePlugins(token) {
       content = '<div class="empty"><strong>加载本地插件失败</strong><span>' + esc(error.message) + "</span></div>";
     }
   }
-  if (!isCurrent("plugins", token)) return;
-  render(pageHeader(
-    "插件",
-    "插件",
-    activeTab === "store" ? "浏览官方插件并管理安装版本。" : "查看已安装插件并管理运行状态。",
-    pluginTabs(),
-  ) + content);
+  if (!isCurrent("plugins", token) || loadId !== pluginLoadId || activeTab !== requestedTab) return;
+  render(pluginPageMarkup(requestedTab, content));
 }
 
 export async function togglePlugin(name, enabled) {

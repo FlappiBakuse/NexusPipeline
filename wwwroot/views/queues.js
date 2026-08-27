@@ -1,6 +1,6 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
-import { esc, scriptFallbackIcon } from "../core/format.js";
+import { esc, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
 import { pageHeader, switchControl, valueField } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
@@ -77,6 +77,21 @@ function restorePageScroll(top) {
 function queueCardMarkup(queue, scripts) {
   const firstTask = (queue.tasks || []).slice().sort((a, b) => a.index - b.index).find(item => scripts.some(script => script.id === item.scriptInstanceId));
   const firstScript = firstTask ? scripts.find(script => script.id === firstTask.scriptInstanceId) : null;
+  const unavailableScripts = (queue.tasks || [])
+    .map(task => scripts.find(script => script.id === task.scriptInstanceId))
+    .filter(Boolean)
+    .map(script => ({ script, status: scriptPluginStatus(script, state.plugins || []) }))
+    .filter(item => item.status.specialized && !item.status.available);
+  const missingScripts = unavailableScripts.filter(item => item.status.missing);
+  const disabledScripts = unavailableScripts.filter(item => !item.status.missing);
+  const unavailableBadge = [
+    missingScripts.length
+      ? `<span class="badge bad" title="${esc(missingScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">含 ${missingScripts.length} 个未知专项任务</span>`
+      : "",
+    disabledScripts.length
+      ? `<span class="badge warn" title="${esc(disabledScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">含 ${disabledScripts.length} 个不可用专项任务</span>`
+      : "",
+  ].join("");
   const nextAt = queue.nextTrigger ? new Date(queue.nextTrigger).getTime() : 0;
   const timeBadge = queue.autoRunMode === "scheduled"
     ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? "正在计算倒计时" : "等待定时触发"}</span>`
@@ -91,7 +106,7 @@ function queueCardMarkup(queue, scripts) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
       <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="编辑调度队列：${esc(queue.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
-      <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${timeBadge}${notifyBadge}</div>
+      <div class="meta-line queue-meta"><span class="badge muted">${(queue.tasks || []).length} 个任务</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? `完成后${queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机"}` : "完成后无操作"}</span>${unavailableBadge}${timeBadge}${notifyBadge}</div>
     </div>
     <div class="queue-ops row-actions entity-actions">
       <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">编辑队列</button>
@@ -182,8 +197,8 @@ export function renderQueueModal(skipOpenCapture = false) {
     <div class="form-grid"><div><label class="field-label" for="qm-mode">自动运行方式</label><select id="qm-mode"><option value="none" ${d.autoRunMode === "none" ? "selected" : ""}>不运行</option><option value="scheduled" ${d.autoRunMode === "scheduled" ? "selected" : ""}>定时运行</option><option value="startup" ${d.autoRunMode === "startup" ? "selected" : ""}>启动时运行</option></select></div><div><label class="field-label" for="qm-action">运行完成操作</label><select id="qm-action"><option value="none" ${d.completionAction === "none" ? "selected" : ""}>无操作</option><option value="exit" ${d.completionAction === "exit" ? "selected" : ""}>退出软件</option><option value="sleep" ${d.completionAction === "sleep" ? "selected" : ""}>休眠</option><option value="reboot" ${d.completionAction === "reboot" ? "selected" : ""}>重启</option><option value="shutdown" ${d.completionAction === "shutdown" ? "selected" : ""}>关机</option></select></div></div>
     <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置", d.notifyEnabled, "toggle-qm-flag")}</div>
     <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><strong>定时 ${index + 1}</strong><span class="muted">${esc(timeSet.time || "未设置时间")} · ${timeSet.days.length ? `${timeSet.days.length} 天` : "未选周期"}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label><input id="ts-time-${index}" type="time" data-ts-time="${index}" value="${esc(timeSet.time)}"></div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? "已启用" : "已停用"}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">删除定时</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
-    <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><select data-task-idx="${index}" aria-label="第 ${index + 1} 个任务：脚本实例"><option value="">（选择脚本实例）</option>${scripts.map(script => `<option value="${esc(script.id)}" ${script.id === task.scriptInstanceId ? "selected" : ""}>${esc(script.name)}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? "（长时）" : ""}</option>`).join("")}</select><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
-  showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body, '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-queue">保存</button>'), true);
+    <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><select data-task-idx="${index}" aria-label="第 ${index + 1} 个任务：脚本实例"><option value="">（选择脚本实例）</option>${scripts.map(script => { const pluginStatus = scriptPluginStatus(script, state.plugins || []); const unavailable = pluginStatus.specialized && !pluginStatus.available; const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : ""; const label = unavailable ? (pluginStatus.missing ? "（未知专项）" : "（专项插件不可用）") : (script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? "（长时）" : ""); return `<option value="${esc(script.id)}" ${script.id === task.scriptInstanceId ? "selected" : ""}${unavailable ? " disabled" : ""}${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(script.name)}${label}</option>`; }).join("")}</select><button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
+  showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body, '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-queue">保存</button>'), true, true);
   const restoreModalScroll = () => {
     if (!queueModalScroll) return;
     const nextBody = $(".modal-mask .modal-body");
@@ -251,6 +266,13 @@ export async function saveQueue() {
   if (!draft.name) { setFieldError("qm-name", "队列名称不能为空"); toast("队列名称不能为空", "error"); return; }
   clearFieldError("qm-name");
   if (!draft.tasks.length) { toast("任务列表为空，请至少添加一个脚本任务", "error"); return; }
+  const unavailableScript = draft.tasks
+    .map(task => state.scripts.find(script => script.id === task.scriptInstanceId))
+    .find(script => script && scriptPluginStatus(script, state.plugins || []).specialized && !scriptPluginStatus(script, state.plugins || []).available);
+  if (unavailableScript) {
+    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []) + "；请先移除该任务后再保存队列", "error");
+    return;
+  }
   const l = state.limits || {};
   const nameBytes = new TextEncoder().encode(draft.name).length;
   if (l.maxQueueNameBytes && nameBytes > l.maxQueueNameBytes) { setFieldError("qm-name", `队列名称最多 ${l.maxQueueNameBytes} 字节`); toast(`队列名称最多 ${l.maxQueueNameBytes} 字节`, "error"); return; }

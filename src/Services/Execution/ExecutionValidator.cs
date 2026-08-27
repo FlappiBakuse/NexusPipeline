@@ -15,12 +15,18 @@ internal sealed class ExecutionValidator
     private readonly IScriptRepository _scripts;
     private readonly IQueueRepository _queues;
     private readonly IUserRepository _users;
+    private readonly IPluginAvailability? _pluginAvailability;
 
-    public ExecutionValidator(IScriptRepository scripts, IQueueRepository queues, IUserRepository users)
+    public ExecutionValidator(
+        IScriptRepository scripts,
+        IQueueRepository queues,
+        IUserRepository users,
+        IPluginAvailability? pluginAvailability = null)
     {
         _scripts = scripts;
         _queues = queues;
         _users = users;
+        _pluginAvailability = pluginAvailability;
     }
 
     public ScriptInstance RequireScript(string scriptId)
@@ -64,6 +70,10 @@ internal sealed class ExecutionValidator
         if (IsScriptRunning(script))
         {
             throw new InvalidOperationException($"脚本「{script.Name}」正在运行，请先退出后再执行");
+        }
+        if (PluginAvailability.GetUnavailableReason(script.PluginType, _pluginAvailability) is not null)
+        {
+            return;
         }
         if (!string.IsNullOrWhiteSpace(userName)
             && !string.IsNullOrWhiteSpace(script.ConfigPath)

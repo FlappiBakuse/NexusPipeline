@@ -30,6 +30,13 @@ internal static class ConfigEditCommands
         }
 
         ConfigEditTarget target = targetResult.Value!;
+        string? pluginError = PluginAvailability.GetUnavailableReason(
+            target.Script,
+            ctx.Resolve<IPluginAvailability>());
+        if (pluginError is not null)
+        {
+            return Validation<ConfigEditStarted>(pluginError);
+        }
         if (string.IsNullOrWhiteSpace(target.Script.ConfigPath))
         {
             return Validation<ConfigEditStarted>("脚本未配置「配置文件路径/文件夹」");

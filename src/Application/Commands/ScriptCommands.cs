@@ -94,6 +94,14 @@ internal static class ScriptCommands
             return NotFound<ScriptInstance>($"未找到脚本实例：{scriptId}");
         }
 
+        string? existingPluginError = PluginAvailability.GetUnavailableReason(
+            existing,
+            ctx.Resolve<IPluginAvailability>());
+        if (existingPluginError is not null)
+        {
+            return Validation<ScriptInstance>(existingPluginError);
+        }
+
         SemaphoreSlim gate = ScriptConfigGate.Get(existing.Id);
         if (!gate.Wait(0))
         {
@@ -293,7 +301,15 @@ internal static class ScriptCommands
         {
             return Validation<ScriptProfile>("缺少专用插件标识");
         }
-        ScriptProfile? profile = RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>()
+        RuntimeContext ctx = RuntimeContext.Instance;
+        string? availabilityError = PluginAvailability.GetUnavailableReason(
+            pluginType,
+            ctx.Resolve<IPluginAvailability>());
+        if (availabilityError is not null)
+        {
+            return Validation<ScriptProfile>(availabilityError);
+        }
+        ScriptProfile? profile = ctx.Resolve<IPluginCapabilityResolver>()
             .ResolveProfile(pluginType, StripPathQuotes(rootPath));
         return profile is null
             ? Validation<ScriptProfile>("无法从脚本根目录推导专用插件配置（请检查根目录，并确认专用插件已启用）")
@@ -302,6 +318,13 @@ internal static class ScriptCommands
 
     private static string? ApplyProfile(ScriptInstance script)
     {
+        string? availabilityError = PluginAvailability.GetUnavailableReason(
+            script,
+            RuntimeContext.Instance.Resolve<IPluginAvailability>());
+        if (availabilityError is not null)
+        {
+            return availabilityError;
+        }
         ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
         if (profile is null)
         {
