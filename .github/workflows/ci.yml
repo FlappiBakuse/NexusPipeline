@@ -19,10 +19,10 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 检出官方插件仓库（UI Smoke 夹具）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: main
@@ -60,7 +60,7 @@ jobs:
 
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
