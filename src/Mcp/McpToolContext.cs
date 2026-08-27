@@ -66,6 +66,8 @@ internal sealed class McpToolContext
         IReadOnlyList<DispatchQueue> queues = Queues;
         return new
         {
+            service = ControlApiContract.ServiceName,
+            controlApiVersion = ControlApiContract.Version,
             time = DateTime.Now,
             version = UpdateService.CurrentVersion,
             lightweightMode = settings.LightweightMode,

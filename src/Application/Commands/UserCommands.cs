@@ -396,10 +396,11 @@ internal static class UserCommands
                         gateHeld = false;
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<NexusUser>(leases, $"script:{script.Id}:users");
+                return LeaseConflict<NexusUser>(leases, $"script:{script.Id}:users", failureCode);
             }
             if (error is not null)
             {
@@ -512,10 +513,11 @@ internal static class UserCommands
                         gateHeld = false;
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<NexusUser>(leases, $"user:{script.Id}:{target.Id}");
+                return LeaseConflict<NexusUser>(leases, $"user:{script.Id}:{target.Id}", failureCode);
             }
             if (error is not null)
             {
@@ -610,10 +612,11 @@ internal static class UserCommands
                         gateHeld = false;
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<bool>(leases, $"user:{script.Id}:{target.Id}");
+                return LeaseConflict<bool>(leases, $"user:{script.Id}:{target.Id}", failureCode);
             }
             if (error is not null)
             {
@@ -704,10 +707,11 @@ internal static class UserCommands
                         gateHeld = false;
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<bool>(leases, $"script:{script.Id}:users");
+                return LeaseConflict<bool>(leases, $"script:{script.Id}:users", failureCode);
             }
             if (error is not null)
             {
@@ -1184,12 +1188,20 @@ internal static class UserCommands
 
     private static OperationResult<T> LeaseConflict<T>(
         IReadOnlyList<ExecutionLeaseReference> leases,
-        string resource) =>
-        OperationResult<T>.Failure(
-            "execution_resource_in_use",
-            $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",
-            OperationErrorKind.Conflict,
-            leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray());
+        string resource,
+        string? failureCode = null)
+    {
+        return failureCode == "host_maintenance"
+            ? OperationResult<T>.Failure(
+                "host_maintenance",
+                "宿主正在进行维护操作，暂不能修改运行配置",
+                OperationErrorKind.Conflict)
+            : OperationResult<T>.Failure(
+                "execution_resource_in_use",
+                $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",
+                OperationErrorKind.Conflict,
+                leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray());
+    }
 
     private static OperationResult<T> Internal<T>(Exception exception) =>
         OperationResult<T>.Failure("internal_error", exception.Message, OperationErrorKind.Internal);

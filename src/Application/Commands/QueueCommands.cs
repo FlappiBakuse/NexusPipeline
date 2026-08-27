@@ -102,10 +102,11 @@ internal static class QueueCommands
                         }
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<DispatchQueue>(leases, $"queue:{queueId}");
+                return LeaseConflict<DispatchQueue>(leases, $"queue:{queueId}", failureCode);
             }
             if (existing is null)
             {
@@ -143,10 +144,11 @@ internal static class QueueCommands
                         DataStore.SaveQueues(ctx.Queues);
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<DispatchQueue?>(leases, $"queue:{queueId}");
+                return LeaseConflict<DispatchQueue?>(leases, $"queue:{queueId}", failureCode);
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "删除调度队列", removed is null ? $"id={queueId}（不存在）" : $"{removed.Name}（id={queueId}）");
@@ -194,10 +196,11 @@ internal static class QueueCommands
                         }
                     }
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<bool>(leases, "队列顺序");
+                return LeaseConflict<bool>(leases, "队列顺序", failureCode);
             }
             if (error is not null)
             {
@@ -284,12 +287,22 @@ internal static class QueueCommands
     private static OperationResult<T> NotFound<T>(string message) =>
         OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
 
-    private static OperationResult<T> LeaseConflict<T>(IReadOnlyList<ExecutionLeaseReference> leases, string resource) =>
-        OperationResult<T>.Failure(
-            "execution_resource_in_use",
-            $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",
-            OperationErrorKind.Conflict,
-            leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray());
+    private static OperationResult<T> LeaseConflict<T>(
+        IReadOnlyList<ExecutionLeaseReference> leases,
+        string resource,
+        string? failureCode = null)
+    {
+        return failureCode == "host_maintenance"
+            ? OperationResult<T>.Failure(
+                "host_maintenance",
+                "宿主正在进行维护操作，暂不能修改运行配置",
+                OperationErrorKind.Conflict)
+            : OperationResult<T>.Failure(
+                "execution_resource_in_use",
+                $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",
+                OperationErrorKind.Conflict,
+                leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray());
+    }
 
     private static OperationResult<T> Internal<T>(Exception exception) =>
         OperationResult<T>.Failure("internal_error", exception.Message, OperationErrorKind.Internal);

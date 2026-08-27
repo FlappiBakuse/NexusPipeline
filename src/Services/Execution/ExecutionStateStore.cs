@@ -465,15 +465,59 @@ internal sealed class ExecutionStateStore
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
     {
+        return TryExecuteLeaseMutation(scriptId, userName, mutation, out leases, out _);
+    }
+
+    /// <summary>
+    /// 在准入协调锁内检查宿主维护状态、执行租约并完成同步数据变更。
+    /// 维护租约优先于资源租约返回，确保重启/更新等待期间所有配置写入都被挡住。
+    /// </summary>
+    public bool TryExecuteLeaseMutation(
+        string scriptId,
+        string? userName,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+    {
         lock (_coordinationSync)
         {
-            leases = FindLeases(scriptId, userName);
+            lock (_sync)
+            {
+                if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
+                {
+                    leases = Array.Empty<ExecutionLeaseReference>();
+                    failureCode = "host_maintenance";
+                    return false;
+                }
+                leases = FindLeasesLocked(scriptId, userName);
+            }
             if (leases.Count > 0)
             {
+                failureCode = "execution_resource_in_use";
                 return false;
             }
+            failureCode = null;
             mutation();
             return true;
+        }
+    }
+
+    /// <summary>在准入协调锁内执行宿主级配置变更；维护租约期间拒绝写入设置和插件偏好。</summary>
+    public bool TryExecuteHostConfigurationMutation(Action mutation, out string? failureCode)
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
+                {
+                    failureCode = "host_maintenance";
+                    return false;
+                }
+                failureCode = null;
+                mutation();
+                return true;
+            }
         }
     }
 
@@ -483,10 +527,25 @@ internal sealed class ExecutionStateStore
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
     {
+        return TryExecuteQueueLeaseMutation(queueId, mutation, out leases, out _);
+    }
+
+    public bool TryExecuteQueueLeaseMutation(
+        string queueId,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+    {
         lock (_coordinationSync)
         {
             lock (_sync)
             {
+                if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
+                {
+                    leases = Array.Empty<ExecutionLeaseReference>();
+                    failureCode = "host_maintenance";
+                    return false;
+                }
                 leases = _active
                     .Where(exec => exec.Kind == "queue"
                         && string.Equals(exec.TargetId, queueId, StringComparison.Ordinal))
@@ -498,8 +557,10 @@ internal sealed class ExecutionStateStore
                     .ToList();
                 if (leases.Count > 0)
                 {
+                    failureCode = "execution_resource_in_use";
                     return false;
                 }
+                failureCode = null;
                 mutation();
                 return true;
             }
@@ -510,10 +571,24 @@ internal sealed class ExecutionStateStore
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
     {
+        return TryExecuteAnyQueueLeaseMutation(mutation, out leases, out _);
+    }
+
+    public bool TryExecuteAnyQueueLeaseMutation(
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+    {
         lock (_coordinationSync)
         {
             lock (_sync)
             {
+                if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
+                {
+                    leases = Array.Empty<ExecutionLeaseReference>();
+                    failureCode = "host_maintenance";
+                    return false;
+                }
                 leases = _active
                     .Where(exec => exec.Kind == "queue")
                     .Select(exec => new ExecutionLeaseReference(
@@ -524,8 +599,10 @@ internal sealed class ExecutionStateStore
                     .ToList();
                 if (leases.Count > 0)
                 {
+                    failureCode = "execution_resource_in_use";
                     return false;
                 }
+                failureCode = null;
                 mutation();
                 return true;
             }

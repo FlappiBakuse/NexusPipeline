@@ -1,14 +1,16 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  baseUrl,
+  api,
   fetchWithTimeout,
   isElevated,
   isRuntimeAlive,
+  makeFixture,
   prepareRuntime,
   projectRoot,
   runtimeExe,
@@ -16,7 +18,9 @@ import {
   runtimeDiagnostic,
   startRuntime,
   stopRuntime,
+  serviceUrl,
   waitForService,
+  writeBatch,
 } from "./runtime-helper.mjs";
 
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1" && isElevated();
@@ -24,6 +28,62 @@ const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
   : "System Smoke 需要管理员终端";
 const skip = enabled ? false : skipReason;
+
+function runCli(args, input = "", timeout = 10000) {
+  const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
+    .filter(Boolean)
+    .join(",");
+  return spawnSync(runtimeExe, args, {
+    cwd: runtimeDir,
+    input,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NEXUS_SYSTEM_SMOKE: "1",
+      NO_PROXY: localNoProxy,
+      no_proxy: localNoProxy,
+    },
+    timeout,
+    windowsHide: true,
+  });
+}
+
+function runCliAsync(args, input = "", timeout = 20000) {
+  const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
+    .filter(Boolean)
+    .join(",");
+  return new Promise((resolve, reject) => {
+    const child = spawn(runtimeExe, args, {
+      cwd: runtimeDir,
+      env: {
+        ...process.env,
+        NEXUS_SYSTEM_SMOKE: "1",
+        NO_PROXY: localNoProxy,
+        no_proxy: localNoProxy,
+      },
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`CLI 异步测试超时（${timeout}ms）：${args.join(" ")}`));
+    }, timeout);
+    child.stdout.on("data", chunk => { stdout += chunk.toString(); });
+    child.stderr.on("data", chunk => { stderr += chunk.toString(); });
+    child.once("error", error => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (status, signal) => {
+      clearTimeout(timer);
+      resolve({ status, signal, stdout, stderr });
+    });
+    if (input) child.stdin.write(input);
+    child.stdin.end();
+  });
+}
 
 before(async () => {
   if (!enabled) return;
@@ -37,23 +97,17 @@ after(async () => {
 });
 
 test("release binary 启动并提供 status API", { skip }, async () => {
-  const response = await fetchWithTimeout(baseUrl + "api/status");
+  const response = await fetchWithTimeout(serviceUrl() + "api/status");
   assert.equal(response.status, 200);
   const status = await response.json();
+  assert.equal(status.service, "NexusPipeline");
+  assert.equal(status.controlApiVersion, 1);
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
+  assert.ok(status.actualPort >= 1024 && status.actualPort <= 65535);
   assert.ok(Array.isArray(status.running));
 });
 
 test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip }, () => {
-  const runCli = (args, input = "") => spawnSync(runtimeExe, args, {
-    cwd: runtimeDir,
-    input,
-    encoding: "utf8",
-    env: { ...process.env, NEXUS_SYSTEM_SMOKE: "1" },
-    timeout: 10000,
-    windowsHide: true,
-  });
-
   for (const args of [["status", "--json"], ["script", "list", "--json"], ["run", "list", "--json"]]) {
     const result = runCli(args);
     assert.equal(result.status, 0, `${args.join(" ")} error: ${result.error?.message || ""}; stderr: ${result.stderr}`);
@@ -72,8 +126,77 @@ test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip
   assert.equal(failure.code, "validation_error");
 });
 
+test("通知测试失败通过非 2xx 与稳定错误码传递到 CLI", { skip, concurrency: false }, async () => {
+  const settings = await api("PUT", "/api/settings", {
+    webhookEnabled: false,
+    smtpEnabled: false,
+  });
+  assert.equal(settings.status, 200, `关闭通知渠道失败：HTTP ${settings.status} ${await settings.text()}`);
+
+  const webResponse = await api("POST", "/api/settings/test");
+  assert.equal(webResponse.status, 502);
+  const webPayload = await webResponse.json();
+  assert.equal(webPayload.ok, false);
+  assert.equal(webPayload.code, "notification_test_failed");
+
+  const cli = runCli(["settings", "test", "--json"]);
+  assert.equal(cli.status, 7, `${cli.stdout}\n${cli.stderr}`);
+  const lines = cli.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(lines.length, 1, `CLI stdout: ${cli.stdout}`);
+  const cliPayload = JSON.parse(lines[0]);
+  assert.equal(cliPayload.ok, false);
+  assert.equal(cliPayload.code, "notification_test_failed");
+});
+
+test("通知测试允许超过默认 5 秒的合法 Webhook 请求完成", { skip, concurrency: false }, async () => {
+  let requestCount = 0;
+  const server = http.createServer((_request, response) => {
+    requestCount++;
+    setTimeout(() => {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end("{}");
+    }, 6000);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, resolve);
+  });
+  const port = server.address().port;
+  try {
+    const settings = await api("PUT", "/api/settings", {
+      webhookEnabled: true,
+      smtpEnabled: false,
+      webhookType: "generic",
+      webhookTemplate: "{\"text\":{text}}",
+      webhookTimeout: 10,
+      secretKey: "webhookUrl",
+      secretValue: `http://127.0.0.1:${port}/delayed-webhook`,
+    });
+    assert.equal(settings.status, 200, `配置延迟 Webhook 失败：HTTP ${settings.status} ${await settings.text()}`);
+
+    const startedAt = Date.now();
+    const cli = await runCliAsync(["settings", "test", "--json"], "", 20000);
+    const elapsed = Date.now() - startedAt;
+    assert.equal(cli.status, 0, `${cli.stdout}\n${cli.stderr}\nwebhookRequests=${requestCount}`);
+    assert.ok(elapsed >= 5500, `延迟请求未实际经过服务端等待：${elapsed}ms`);
+    const lines = cli.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.equal(lines.length, 1, `CLI stdout: ${cli.stdout}`);
+    const payload = JSON.parse(lines[0]);
+    assert.equal(payload.ok, true);
+  } finally {
+    await api("PUT", "/api/settings", {
+      webhookEnabled: false,
+      smtpEnabled: false,
+      webhookTemplate: "",
+      secretKey: "webhookUrl",
+      secretValue: "",
+    });
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  }
+});
+
 test("status 与 limits API 在同一服务实例可用", { skip }, async () => {
-  const response = await fetchWithTimeout(baseUrl + "api/limits");
+  const response = await fetchWithTimeout(serviceUrl() + "api/limits");
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.equal(payload.limits.maxScripts, 25);
@@ -92,36 +215,56 @@ test("普通运行状态集中在 .nxp，安装根不再散落运行标记", { s
   assert.equal(fs.existsSync(stateDir), true);
 });
 
-test("58731 被占用时服务回退到下一个端口", { skip }, async () => {
-  await stopRuntime();
-  const blocker = net.createServer();
-  await new Promise((resolve, reject) => {
-    blocker.once("error", reject);
-    blocker.listen(58731, "127.0.0.1", resolve);
-  });
+test("配置端口被占用时服务回退到下一个可用端口", { skip }, async () => {
+  let blocker = null;
+  let blockedPort = null;
+  const settingsPath = path.join(runtimeDir, "config", "settings.json");
+  const originalSettings = fs.existsSync(settingsPath)
+    ? fs.readFileSync(settingsPath, "utf8")
+    : null;
   const failures = [];
   try {
+    await stopRuntime();
+    blocker = net.createServer();
+    await new Promise((resolve, reject) => {
+      blocker.once("error", reject);
+      blocker.listen(0, "127.0.0.1", resolve);
+    });
+    blockedPort = blocker.address().port;
+    const settings = originalSettings ? JSON.parse(originalSettings.replace(/^\uFEFF/, "")) : {};
+    settings.WebPort = blockedPort;
+    fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+
     startRuntime(["web"]);
-    await waitForService("http://127.0.0.1:58732/", 30000);
-    const response = await fetchWithTimeout("http://127.0.0.1:58732/api/status");
+    await waitForService(null, 30000);
+    const response = await fetchWithTimeout(serviceUrl() + "api/status");
     assert.equal(response.status, 200);
+    const status = await response.json();
+    assert.notEqual(status.actualPort, blockedPort);
   } catch (error) {
     failures.push(`端口回退启动阶段失败：${error.stack || error.message}\n${runtimeDiagnostic()}`);
   } finally {
     try {
-      await stopRuntime();
+    await stopRuntime();
     } catch (error) {
       failures.push(`端口回退清理阶段停止 runtime 失败：${error.stack || error.message}`);
     }
     try {
-      await new Promise((resolve, reject) => {
-        blocker.once("error", reject);
-        blocker.close(resolve);
-      });
+      if (blocker?.listening) {
+        await new Promise((resolve, reject) => {
+          blocker.once("error", reject);
+          blocker.close(resolve);
+        });
+      }
     } catch (error) {
-      failures.push(`端口回退清理阶段释放 58731 失败：${error.stack || error.message}`);
+      failures.push(`端口回退清理阶段释放测试占用端口失败：${error.stack || error.message}`);
     }
     try {
+      if (originalSettings === null) {
+        fs.rmSync(settingsPath, { force: true });
+      } else {
+        fs.writeFileSync(settingsPath, originalSettings, "utf8");
+      }
       startRuntime();
       await waitForService();
     } catch (error) {
@@ -146,6 +289,60 @@ test("非法 limits 配置触发 fatal startup 并可恢复", { skip }, async ()
   fs.rmSync(limitsPath, { force: true });
   startRuntime();
   await waitForService();
+});
+
+test("重启接受后立即冻结旧服务的运行与配置写入准入", { skip, concurrency: false }, async () => {
+  const fixture = makeFixture("restart-maintenance");
+  writeBatch(fixture, ["echo restart-maintenance>>\"" + fixture.log + "\""]);
+  let scriptId = "";
+  try {
+    const create = await api("POST", "/api/scripts", {
+      name: `Restart Maintenance ${Date.now()}`,
+      rootPath: fixture.dir,
+      mainExe: fixture.exe,
+      configPath: fixture.cfg,
+      logPath: fixture.log,
+      gameExe: "C:\\Windows\\System32\\PING.EXE",
+      gameArgs: "127.0.0.1 -n 1",
+      launchGame: false,
+      maxAttempts: 1,
+      logStallTimeoutMinutes: 5,
+      totalTimeoutMinutes: 5,
+      autoUpdateConfig: false,
+    });
+    const createBody = await create.text();
+    assert.equal(create.status, 200, `创建重启测试脚本失败：HTTP ${create.status} ${createBody}`);
+    scriptId = JSON.parse(createBody).id;
+    const userName = "Restart Maintenance User";
+    const addUser = await api("POST", `/api/scripts/${encodeURIComponent(scriptId)}/users`, {
+      name: userName,
+      enabled: true,
+    });
+    assert.equal(addUser.status, 200, `添加重启测试用户失败：HTTP ${addUser.status} ${await addUser.text()}`);
+
+    const restart = await api("POST", "/api/settings/restart");
+    const restartBody = await restart.text();
+    assert.equal(restart.status, 200, `提交重启失败：HTTP ${restart.status} ${restartBody}`);
+    const restartPayload = JSON.parse(restartBody);
+    assert.equal(restartPayload.ok, true);
+
+    const run = await api("POST", "/api/dispatch/script", { scriptId, mode: "manual", userName });
+    const runBody = await run.text();
+    assert.equal(run.status, 409, `维护期间运行未被拒绝：HTTP ${run.status} ${runBody}`);
+    const runPayload = JSON.parse(runBody);
+    assert.equal(runPayload.code, "host_maintenance");
+
+    const settings = await api("PUT", "/api/settings", { logLevel: "info" });
+    const settingsBody = await settings.text();
+    assert.equal(settings.status, 409, `维护期间设置写入未被拒绝：HTTP ${settings.status} ${settingsBody}`);
+    const settingsPayload = JSON.parse(settingsBody);
+    assert.equal(settingsPayload.code, "host_maintenance");
+
+    await new Promise(resolve => setTimeout(resolve, 2500));
+    await waitForService();
+  } finally {
+    if (scriptId) await api("DELETE", `/api/scripts/${encodeURIComponent(scriptId)}`);
+  }
 });
 
 test("System Smoke runtime 位于隔离目录", { skip }, () => {

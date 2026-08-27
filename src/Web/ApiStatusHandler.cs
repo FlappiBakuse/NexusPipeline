@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Services;
@@ -34,6 +35,8 @@ internal static class ApiStatusHandler
         }
         return new
         {
+            service = ControlApiContract.ServiceName,
+            controlApiVersion = ControlApiContract.Version,
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,

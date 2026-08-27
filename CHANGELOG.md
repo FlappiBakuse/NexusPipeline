@@ -2,6 +2,23 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.6（Pre-release）
+
+### CLI / MCP 控制面可靠性
+
+- 修复 MCP `run_queue` 对已有队列完成操作缺少执行时复核的问题；队列包含休眠、重启、关机或退出动作时，MCP 统一返回 `dangerous_completion_action`，Web/本地管理路径的队列完成操作语义保持不变。
+- 新增统一宿主重启协调器：Web、CLI 间接入口和 MCP 共用一次原子 `HostMaintenanceLease`。重启请求接受后立即冻结运行、配置编辑、设置与插件配置写入；新进程拉起失败释放租约，子进程已经拉起但旧进程退出延迟时继续保持维护状态。
+- 修复 `/api/settings/test` 通知失败仍返回 HTTP 200 的协议问题；失败现在返回非 2xx 与稳定错误码 `notification_test_failed`，CLI machine mode 返回单一失败 envelope 与执行失败退出码。
+- CLI Control API 请求采用分层超时：状态、CRUD 和运行轮询保留短超时，通知测试与更新检查使用长同步超时；HTTP 超时单独映射为 `timeout`。
+- `/api/status` 增加 `service` 与 `controlApiVersion` 身份字段；CLI 服务发现同时校验服务名、协议版本和合法 `actualPort`，降低端口扫描误识别风险。
+- 维护租约覆盖宿主级设置与插件开关写入，避免重启窗口内出现执行准入已冻结而配置仍继续落盘的状态分裂。
+
+### 测试与文档
+
+- 新增队列执行策略、重启租约生命周期、维护期间配置写入、CLI 超时/服务身份和通知测试退出码回归测试。
+- 扩展发布进程 System Smoke：MCP 执行已有危险完成操作的队列拦截、通知失败协议、超过默认短超时的合法 Webhook、重启接受后的即时运行/设置冻结。
+- 同步 README、DESIGN、ARCHITECTURE、TESTING 与 ROADMAP 的 v0.10.6 控制面契约和测试说明。
+
 ## v0.10.5（Pre-release）
 
 ### MCP Agent 控制面

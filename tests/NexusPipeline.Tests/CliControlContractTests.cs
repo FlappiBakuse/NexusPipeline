@@ -76,8 +76,33 @@ public sealed class CliControlContractTests
         Assert.Equal(5, CliExitCodes.For("service_unavailable"));
         Assert.Equal(6, CliExitCodes.For("operation_forbidden"));
         Assert.Equal(7, CliExitCodes.For("execution_failed"));
+        Assert.Equal(7, CliExitCodes.For("notification_test_failed"));
         Assert.Equal(8, CliExitCodes.For("cancelled"));
         Assert.Equal(9, CliExitCodes.For("internal_error"));
+    }
+
+    [Fact]
+    public void CliTransport_timeout_policy_keeps_long_control_operations_above_default()
+    {
+        TimeSpan defaultTimeout = CliTransport.TimeoutFor("GET", "/api/status");
+        TimeSpan notificationTimeout = CliTransport.TimeoutFor("POST", "/api/settings/test");
+        TimeSpan updateTimeout = CliTransport.TimeoutFor("POST", "/api/update/check");
+
+        Assert.Equal(CliTransport.DefaultControlTimeout, defaultTimeout);
+        Assert.True(notificationTimeout > defaultTimeout);
+        Assert.True(updateTimeout > defaultTimeout);
+        Assert.Equal(CliTransport.NotificationTestTimeout, notificationTimeout);
+        Assert.Equal(CliTransport.UpdateCheckTimeout, updateTimeout);
+    }
+
+    [Fact]
+    public void CliTransport_status_probe_requires_nexus_pipeline_identity_and_valid_port()
+    {
+        Assert.False(CliTransport.IsCompatibleStatus(JsonNode.Parse("{}")));
+        Assert.False(CliTransport.IsCompatibleStatus(JsonNode.Parse("{\"service\":\"Other\",\"controlApiVersion\":1,\"actualPort\":58731}")));
+        Assert.False(CliTransport.IsCompatibleStatus(JsonNode.Parse("{\"service\":\"NexusPipeline\",\"controlApiVersion\":2,\"actualPort\":58731}")));
+        Assert.False(CliTransport.IsCompatibleStatus(JsonNode.Parse("{\"service\":\"NexusPipeline\",\"controlApiVersion\":1,\"actualPort\":80}")));
+        Assert.True(CliTransport.IsCompatibleStatus(JsonNode.Parse("{\"service\":\"NexusPipeline\",\"controlApiVersion\":1,\"actualPort\":58731}")));
     }
 
     [Fact]

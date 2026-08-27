@@ -20,6 +20,7 @@ if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
 export const runtimeDir = path.join(here, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
+const webPortPath = path.join(runtimeDir, ".nxp", "runtime", "web.port");
 export const baseUrl = "http://127.0.0.1:58731/";
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
 export const mumuStub = path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd");
@@ -29,6 +30,18 @@ let stdout = "";
 let stderr = "";
 
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+export function serviceUrl() {
+  try {
+    const port = Number(fs.readFileSync(webPortPath, "utf8").trim());
+    if (Number.isInteger(port) && port >= 1024 && port <= 65535) {
+      return `http://127.0.0.1:${port}/`;
+    }
+  } catch {
+    // 服务启动前尚未生成 web.port，继续使用配置端口轮询。
+  }
+  return baseUrl;
+}
 
 export function isElevated() {
   return isAdministrator();
@@ -72,11 +85,20 @@ export function isRuntimeAlive(pid) {
 export function startRuntime(args = [], extraEnv = {}) {
   stdout = "";
   stderr = "";
+  const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
+    .filter(Boolean)
+    .join(",");
   const env = {
     ...process.env,
     NEXUS_SYSTEM_ACTION_DRYRUN: "1",
     NEXUS_ADB_EXE: adbStub,
     NEXUS_MUMU_MANAGER_EXE: mumuStub,
+    NO_PROXY: localNoProxy,
+    no_proxy: localNoProxy,
+    HTTP_PROXY: "",
+    HTTPS_PROXY: "",
+    http_proxy: "",
+    https_proxy: "",
     ...extraEnv,
   };
   child = spawn(runtimeExe, args, {
@@ -125,7 +147,7 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   }
 }
 
-export async function waitForService(url = baseUrl, timeoutMs = 30000) {
+export async function waitForService(url = null, timeoutMs = 30000) {
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   let attempts = 0;
@@ -133,7 +155,8 @@ export async function waitForService(url = baseUrl, timeoutMs = 30000) {
     attempts++;
     try {
       const requestTimeoutMs = Math.min(3000, Math.max(1, deadline - Date.now()));
-      const response = await fetchWithTimeout(url + "api/status", {}, requestTimeoutMs);
+      const targetUrl = url ?? serviceUrl();
+      const response = await fetchWithTimeout(targetUrl + "api/status", {}, requestTimeoutMs);
       if (response.ok) return;
       lastError = `HTTP ${response.status}`;
     } catch (error) {
@@ -154,13 +177,13 @@ export async function waitFor(predicate, timeoutMs = 30000, intervalMs = 250) {
   return !!(await predicate());
 }
 
-export async function api(method, pathName, body, url = baseUrl) {
+export async function api(method, pathName, body, url = null) {
   const options = { method };
   if (body !== undefined) {
     options.headers = { "Content-Type": "application/json" };
     options.body = JSON.stringify(body);
   }
-  return fetchWithTimeout(url + pathName.replace(/^\/+/, ""), options);
+  return fetchWithTimeout((url ?? serviceUrl()) + pathName.replace(/^\/+/, ""), options);
 }
 
 export function makeFixture(label) {

@@ -61,16 +61,40 @@ internal sealed class DispatchCenter
         out IReadOnlyList<ExecutionLeaseReference> leases)
         => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases);
 
+    public bool TryExecuteLeaseMutation(
+        string scriptId,
+        string? userName,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases, out failureCode);
+
+    public bool TryExecuteHostConfigurationMutation(Action mutation, out string? failureCode)
+        => _state.TryExecuteHostConfigurationMutation(mutation, out failureCode);
+
     public bool TryExecuteQueueLeaseMutation(
         string queueId,
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
         => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases);
 
+    public bool TryExecuteQueueLeaseMutation(
+        string queueId,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases, out failureCode);
+
     public bool TryExecuteAnyQueueLeaseMutation(
         Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases)
         => _state.TryExecuteAnyQueueLeaseMutation(mutation, out leases);
+
+    public bool TryExecuteAnyQueueLeaseMutation(
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteAnyQueueLeaseMutation(mutation, out leases, out failureCode);
 
     public bool TryBeginEditSession(string scriptId, string userName, string configPath, out string? conflict)
         => _state.TryBeginEditSession(scriptId, userName, configPath, out conflict);

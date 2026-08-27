@@ -46,9 +46,16 @@ internal static class ApiPluginsHandler
         }
         bool enabled = verb == "enable";
         PluginManager plugins = RuntimeContext.Instance.Plugins;
-        if (!plugins.SetEnabled(name, enabled, Audit.Web))
+        if (!plugins.SetEnabled(name, enabled, Audit.Web, out string? failureCode))
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = $"插件不存在：{name}" }, 404).ConfigureAwait(false);
+            int status = failureCode == "host_maintenance" ? 409 : 404;
+            string message = failureCode == "host_maintenance"
+                ? "宿主正在进行维护操作，暂不能修改插件设置"
+                : $"插件不存在：{name}";
+            await HttpHelper.WriteJsonAsync(
+                context,
+                new { ok = false, code = failureCode ?? "not_found", error = message, message },
+                status).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new

@@ -219,9 +219,13 @@ internal sealed class McpDestructiveTools
         {
             return McpToolResult.Failure("not_found", $"插件不存在：{pluginName}");
         }
-        if (!plugins.SetEnabled(pluginName, enabled, Audit.Mcp))
+        if (!plugins.SetEnabled(pluginName, enabled, Audit.Mcp, out string? failureCode))
         {
-            return McpToolResult.Failure("plugin_update_failed", $"插件状态保存失败：{pluginName}");
+            return McpToolResult.Failure(
+                failureCode ?? "plugin_update_failed",
+                failureCode == "host_maintenance"
+                    ? "宿主正在进行维护操作，暂不能修改插件设置"
+                    : $"插件状态保存失败：{pluginName}");
         }
         return McpToolResult.Success(new
         {

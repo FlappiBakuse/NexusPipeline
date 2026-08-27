@@ -129,6 +129,25 @@ public sealed class RegressionTests
     }
 
     [Fact]
+    public void HostMaintenanceLease_blocks_configuration_mutations_inside_coordination_domain()
+    {
+        var store = new ExecutionStateStore();
+        using HostMaintenanceLease lease = store.TryAcquireMaintenanceLease(out string reason)!;
+        bool mutated = false;
+
+        Assert.False(store.TryExecuteLeaseMutation(
+            "script-maintenance",
+            null,
+            () => mutated = true,
+            out IReadOnlyList<ExecutionLeaseReference> leases,
+            out string? failureCode));
+        Assert.False(mutated);
+        Assert.Empty(leases);
+        Assert.Equal("host_maintenance", failureCode);
+        Assert.Equal("", reason);
+    }
+
+    [Fact]
     public void SettingsClone_IsDetachedFromCurrentObject()
     {
         var settings = new AppSettings

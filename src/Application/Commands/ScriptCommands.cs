@@ -151,10 +151,11 @@ internal static class ScriptCommands
                         DataStore.SaveScripts(ctx.Scripts);
                     }
                 },
-                out leases);
+                out leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<ScriptInstance>(leases, $"script:{existing.Id}");
+                return LeaseConflict<ScriptInstance>(leases, $"script:{existing.Id}", failureCode);
             }
 
             ctx.Scheduler.RevalidatePendingPlans();
@@ -219,10 +220,11 @@ internal static class ScriptCommands
                     }
                     ConfigSwapPrimitives.RemoveMutex(scriptId);
                 },
-                out IReadOnlyList<ExecutionLeaseReference> leases);
+                out IReadOnlyList<ExecutionLeaseReference> leases,
+                out string? failureCode);
             if (!changed)
             {
-                return LeaseConflict<ScriptInstance?>(leases, $"script:{scriptId}");
+                return LeaseConflict<ScriptInstance?>(leases, $"script:{scriptId}", failureCode);
             }
 
             ctx.Scheduler.RevalidatePendingPlans();
@@ -357,8 +359,18 @@ internal static class ScriptCommands
     private static OperationResult<T> Conflict<T>(string code, string message) =>
         OperationResult<T>.Failure(code, message, OperationErrorKind.Conflict);
 
-    private static OperationResult<T> LeaseConflict<T>(IReadOnlyList<ExecutionLeaseReference> leases, string resource)
+    private static OperationResult<T> LeaseConflict<T>(
+        IReadOnlyList<ExecutionLeaseReference> leases,
+        string resource,
+        string? failureCode = null)
     {
+        if (failureCode == "host_maintenance")
+        {
+            return OperationResult<T>.Failure(
+                "host_maintenance",
+                "宿主正在进行维护操作，暂不能修改运行配置",
+                OperationErrorKind.Conflict);
+        }
         return OperationResult<T>.Failure(
             "execution_resource_in_use",
             $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束",

@@ -6,7 +6,6 @@ import net from "node:net";
 import path from "node:path";
 import {
   api,
-  baseUrl,
   deleteScript,
   fetchWithTimeout,
   isElevated,
@@ -14,6 +13,7 @@ import {
   prepareRuntime,
   runtimeDir,
   runtimeOutput,
+  serviceUrl,
   startRuntime,
   stopRuntime,
   waitFor,
@@ -27,8 +27,8 @@ const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
   : "System Smoke 需要管理员终端";
 const skip = enabled ? false : skipReason;
-const mcpPort = 58732;
-const mcpUrl = `http://127.0.0.1:${mcpPort}/mcp`;
+let mcpPort = 58732;
+let mcpUrl = `http://127.0.0.1:${mcpPort}/mcp`;
 let requestId = 0;
 
 before(async () => {
@@ -37,6 +37,7 @@ before(async () => {
   writeSettings({ mcpEnabled: false });
   startRuntime();
   await waitForService();
+  await selectMcpPort();
 });
 
 after(async () => {
@@ -83,6 +84,19 @@ function canConnect(port) {
     socket.once("error", () => finish(false));
     socket.setTimeout(1000, () => finish(false));
   });
+}
+
+async function selectMcpPort() {
+  const webPort = Number(new URL(serviceUrl()).port);
+  for (const candidate of [58732, 58733, 58734, 58735]) {
+    if (candidate === webPort) continue;
+    if (!await canConnect(candidate)) {
+      mcpPort = candidate;
+      mcpUrl = `http://127.0.0.1:${mcpPort}/mcp`;
+      return;
+    }
+  }
+  throw new Error("没有可用的 MCP System Smoke 端口");
 }
 
 async function waitForMcpPort() {
@@ -171,13 +185,17 @@ function rawMcpPost(headers = {}) {
 }
 
 async function mcpTool(name, args = {}) {
+  const envelope = await mcpToolEnvelope(name, args);
+  assert.equal(envelope.ok, true, `MCP 工具 ${name} 业务失败：${JSON.stringify(envelope)}`);
+  return envelope;
+}
+
+async function mcpToolEnvelope(name, args = {}) {
   const wireResult = await mcpRequest("tools/call", { name, arguments: args });
-  assert.equal(wireResult?.isError ?? false, false, `MCP 工具 ${name} 返回错误：${JSON.stringify(wireResult)}`);
   const structured = wireResult?.structuredContent
     || wireResult?.content?.find(item => item.type === "text")?.text;
   const envelope = typeof structured === "string" ? JSON.parse(structured) : structured;
   assert.ok(envelope, `MCP 工具 ${name} 没有结构化 envelope`);
-  assert.equal(envelope.ok, true, `MCP 工具 ${name} 业务失败：${JSON.stringify(envelope)}`);
   return envelope;
 }
 
@@ -248,6 +266,7 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
   let scriptId = "";
   let userId = "";
   let runId = "";
+  let dangerousQueueId = "";
   try {
     const scriptResponse = await api("POST", "/api/scripts", {
       name: `MCP System Smoke ${Date.now()}`,
@@ -294,6 +313,25 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     const listedUsers = await mcpTool("list_users");
     assert.ok(listedUsers.data.some(item => item.id === userId));
 
+    const dangerousQueueResponse = await api("POST", "/api/queues", {
+      name: `MCP Dangerous Queue ${Date.now()}`,
+      autoRunMode: "none",
+      completionAction: "shutdown",
+      tasks: [{ index: 0, scriptInstanceId: scriptId }],
+      timeSets: [],
+      notifyEnabled: false,
+    });
+    if (dangerousQueueResponse.status !== 200) {
+      assert.fail(`创建已有系统完成操作的队列失败：HTTP ${dangerousQueueResponse.status} ${await dangerousQueueResponse.text()}`);
+    }
+    const dangerousQueue = await dangerousQueueResponse.json();
+    dangerousQueueId = dangerousQueue.id;
+    const blockedQueueRun = await mcpToolEnvelope("run_queue", {
+      queueReference: dangerousQueue.id,
+    });
+    assert.equal(blockedQueueRun.ok, false);
+    assert.equal(blockedQueueRun.errorCode, "dangerous_completion_action");
+
     const started = await mcpTool("run_script", {
       scriptReference: scriptId,
       userReference: userId,
@@ -320,6 +358,9 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     assert.ok(["cancelled", "done", "error"].includes(finalRun.status), `未知终态：${finalRun.status}`);
   } finally {
     await waitNoRunning(30000);
+    if (dangerousQueueId) {
+      await api("DELETE", `/api/queues/${encodeURIComponent(dangerousQueueId)}`);
+    }
     if (userId) {
       await api("DELETE", `/api/users/${encodeURIComponent(userId)}`, { confirmName: userName });
     }
@@ -331,7 +372,7 @@ test("轻量模式保留 MCP 与 Control API，端口占用时主服务继续运
   await restartRuntime({ mcpEnabled: true, lightweightMode: true });
   const status = await mcpTool("get_status");
   assert.equal(status.data.lightweightMode, true);
-  const root = await fetchWithTimeout(baseUrl);
+  const root = await fetchWithTimeout(serviceUrl());
   assert.equal(root.status, 404);
 
   await stopRuntime();

@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
-  baseUrl,
   isElevated,
   prepareRuntime,
   projectRoot,
@@ -151,7 +150,7 @@ test("apply-update：备份→交换→保留用户插件与数据→重拉宿�
 
   // 新实例启动：收尾清理 + 服务可达。
   startRuntime(["web"]);
-  await waitForService(baseUrl, 60000);
+  await waitForService(null, 60000);
   await waitFor(() => !fs.existsSync(versionFile), 30000);
   assertMarkersCleaned();
   const status = await (await api("GET", "/api/status")).json();
@@ -171,7 +170,7 @@ test("启动收尾：apply 标记无成功标记时从备份回滚", { skip }, a
   writeTask("apply");
 
   startRuntime(["web"]);
-  await waitForService(baseUrl, 60000);
+  await waitForService(null, 60000);
 
   // 回滚后：旧 wwwroot 还原、staging/task 清理、服务正常运行。
   assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "legacy-install-marker.txt"), "utf8"), "legacy-install-marker");
@@ -188,7 +187,7 @@ test("defer 标记：下次启动自动应用并重拉服务", { skip }, async (
 
   // 启动（web 模式）：收尾检测到 defer → 转 apply → 拉起子进程 → 本进程退出 → 子进程交换 → 重拉服务。
   startRuntime(["web"]);
-  await waitForService(baseUrl, 90000);
+  await waitForService(null, 90000);
 
   assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "candidate-install-marker.txt"), "utf8"), "candidate-install-marker");
   await waitFor(() => !fs.existsSync(versionFile), 30000);

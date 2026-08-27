@@ -89,6 +89,11 @@ internal sealed class McpMutationTools
         {
             return McpToolResult.From(queue);
         }
+        OperationResult<DispatchQueue> executionPolicy = McpPolicy.ValidateQueueExecution(queue.Value!);
+        if (!executionPolicy.Succeeded)
+        {
+            return McpToolResult.From(executionPolicy);
+        }
         try
         {
             RunningExecution execution = _context.Runtime.Commands.StartQueue(

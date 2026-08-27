@@ -60,6 +60,14 @@ internal sealed class CliApiClient
                 ?? (string.IsNullOrWhiteSpace(raw) ? $"服务返回 HTTP {(int)response.StatusCode}" : raw.Trim());
             return CliApiResponse.Failure((int)response.StatusCode, node, NormalizeCode(serverCode), message);
         }
+        catch (TaskCanceledException ex)
+        {
+            return CliApiResponse.Failure(408, null, "timeout", $"控制 API 请求超时：{ex.Message}");
+        }
+        catch (HttpRequestException ex)
+        {
+            return CliApiResponse.Failure(503, null, "service_unavailable", $"控制 API 请求失败：{ex.Message}");
+        }
         catch (Exception ex)
         {
             return CliApiResponse.Failure(503, null, "service_unavailable", $"控制 API 请求失败：{ex.Message}");
@@ -100,7 +108,7 @@ internal sealed class CliApiClient
     {
         return code switch
         {
-            "execution_resource_in_use" or "busy" or "running" or "editing" or "locked" => "resource_busy",
+            "execution_resource_in_use" or "host_maintenance" or "busy" or "running" or "editing" or "locked" => "resource_busy",
             "not-ready" => "validation_error",
             "forbidden" => "operation_forbidden",
             _ => code,

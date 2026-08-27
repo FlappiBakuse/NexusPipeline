@@ -11,6 +11,10 @@ namespace NexusPipeline;
 /// <summary>服务启动/停止编排：插件、历史清理、调度器、Web 服务（端口重试）。</summary>
 internal static class Bootstrap
 {
+    private static readonly object RestartSync = new();
+
+    private static HostRestartCoordinator? _restartCoordinator;
+
     /// <summary>加载插件、清理过期历史、启动调度器与配置恢复重试。</summary>
     public static void StartServices()
     {
@@ -138,63 +142,64 @@ internal static class Bootstrap
         return true;
     }
 
-    /// <summary>统一的服务重启入口，供 Web 与 MCP 共享安全退出门禁。</summary>
+    /// <summary>统一的服务重启入口，供 Web、CLI 间接调用和 MCP 共享原子维护租约。</summary>
     internal static bool TryRequestRestart(string auditSource)
+    {
+        return RequestRestart(auditSource).Accepted;
+    }
+
+    internal static RestartRequestResult RequestRestart(string auditSource)
     {
         if (ApplicationHost.IsWebOnly)
         {
-            return false;
-        }
-        if (!CanRequestDirectExit(out string reason))
-        {
-            Logger.Warn($"[重启] 已拒绝重启请求：{reason}");
-            return false;
+            return RestartRequestResult.Failure(
+                "operation_forbidden",
+                "当前为仅网页模式（web），不支持自动重启，请手动重启");
         }
         int newPort = RuntimeContext.Instance.Settings.WebPort;
-        Audit.Log(auditSource, "重启服务", $"端口 {newPort}");
-        _ = Task.Run(() =>
+        HostRestartCoordinator coordinator;
+        lock (RestartSync)
         {
-            try
-            {
-                Thread.Sleep(1000);
-                string exePath = Environment.ProcessPath ?? "";
-                if (string.IsNullOrWhiteSpace(exePath))
+            _restartCoordinator ??= new HostRestartCoordinator(
+                acquireMaintenance: () =>
                 {
-                    Logger.Error("[重启] 无法获取当前程序路径，放弃重启。");
-                    return;
-                }
-                Process.Start(new ProcessStartInfo(exePath)
-                {
-                    Arguments = "restart",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                });
-                Logger.Info("[重启] 已拉起新进程，即将退出当前进程。");
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[重启] 拉起新进程失败：{ex.Message}");
-                return;
-            }
-            try
-            {
-                if (!TryRequestCompletionExit())
-                {
-                    Logger.Warn("[重启] 当前进程仍有活动执行或编辑会话，已拒绝退出；新进程可能需要手动处理。");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[重启] 退出当前进程失败：{ex.Message}");
-                try
-                {
-                    Environment.Exit(0);
-                }
-                catch
-                {
-                }
-            }
+                    HostMaintenanceLease? lease = RuntimeContext.Instance.Center.TryAcquireMaintenanceLease(out string reason);
+                    return (lease, lease is null ? reason : null);
+                },
+                launchChild: LaunchRestartChild,
+                requestExit: RequestRestartExit,
+                delay: duration => Thread.Sleep(TestHooks.ScaledMs((int)Math.Max(1, duration.TotalMilliseconds))),
+                launchDelay: TimeSpan.FromSeconds(1));
+            coordinator = _restartCoordinator;
+        }
+        RestartRequestResult result = coordinator.Request(auditSource, newPort);
+        if (!result.Accepted)
+        {
+            Logger.Warn($"[重启] 已拒绝重启请求：{result.Message}");
+        }
+        return result;
+    }
+
+    private static bool LaunchRestartChild()
+    {
+        string exePath = Environment.ProcessPath ?? "";
+        if (string.IsNullOrWhiteSpace(exePath))
+        {
+            Logger.Error("[重启] 无法获取当前程序路径，放弃重启。");
+            return false;
+        }
+        Process? child = Process.Start(new ProcessStartInfo(exePath)
+        {
+            Arguments = "restart",
+            UseShellExecute = false,
+            CreateNoWindow = true,
         });
+        return child is not null;
+    }
+
+    private static bool RequestRestartExit()
+    {
+        System.Windows.Forms.Application.Exit();
         return true;
     }
 

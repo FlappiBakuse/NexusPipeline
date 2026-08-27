@@ -11,6 +11,11 @@ internal static class WebhookSender
 {
     private static readonly HttpClient Http = new();
 
+    private static readonly HttpClient LoopbackHttp = new(new HttpClientHandler
+    {
+        UseProxy = false,
+    });
+
     /// <summary>Webhook 类型白名单（单源化）：引用 AppSettings.WebhookTypes，不再独立维护副本。</summary>
     private static readonly string[] Types = AppSettings.WebhookTypes;
 
@@ -72,6 +77,8 @@ internal static class WebhookSender
         (string targetUrl, Dictionary<string, string> signatureHeaders) = ApplySignature(type, webhookUrl, webhookSecret);
         try
         {
+            bool loopback = IsLoopback(targetUrl);
+            HttpClient client = loopback ? LoopbackHttp : Http;
             using var request = new HttpRequestMessage(HttpMethod.Post, targetUrl)
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json"),
@@ -81,7 +88,7 @@ internal static class WebhookSender
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
-            using var response = await Http.SendAsync(request, cts.Token).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, cts.Token).ConfigureAwait(false);
             string responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             // ：成功判定补 HTTP 状态码——此前飞书/钉钉只看 body code==0，HTTP 500 但 code==0 误判成功。
             bool ok = response.IsSuccessStatusCode
@@ -101,6 +108,11 @@ internal static class WebhookSender
             Logger.Error($"[错误] Webhook 发送失败：{ex.Message}");
             return false;
         }
+    }
+
+    private static bool IsLoopback(string url)
+    {
+        return Uri.TryCreate(url, UriKind.Absolute, out Uri? target) && target.IsLoopback;
     }
 
     private static string BuildBody(string type, string text, string template)

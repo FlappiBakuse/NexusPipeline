@@ -49,7 +49,10 @@ internal class RuntimeContext
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             () => Settings,
-            () => provider.GetRequiredService<NotificationDispatcher>()));
+            () => provider.GetRequiredService<NotificationDispatcher>(),
+            tryConfigurationMutation: mutation =>
+                provider.GetRequiredService<DispatchCenter>()
+                    .TryExecuteHostConfigurationMutation(mutation, out _)));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());

@@ -100,7 +100,7 @@ internal static class CliExitCodes
             "resource_busy" or "conflict" => 4,
             "service_unavailable" => 5,
             "operation_forbidden" => 6,
-            "execution_failed" => 7,
+            "execution_failed" or "notification_test_failed" => 7,
             "cancelled" or "timeout" => 8,
             _ => 9,
         };

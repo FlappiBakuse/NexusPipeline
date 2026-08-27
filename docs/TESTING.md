@@ -27,7 +27,8 @@
 - 配置交换、快照同步、插件 capability 和模拟器路由；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
-- MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册和队列完成操作策略。
+- MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。
+- Control API 身份握手、CLI 分层 HTTP 超时、通知测试失败错误码和维护期间宿主配置写入。
 
 以下行为进入 UI Smoke：
 
@@ -40,6 +41,7 @@
 
 - release binary 启动、状态 API、端口回退和重启；
 - release binary 的正式 CLI：`--json` 单 envelope、stderr 诊断、stdin JSON 校验和稳定退出码；
+- release binary 的 CLI/Control API 长请求、通知失败协议、服务身份校验和重启接受后运行/配置冻结；
 - fatal startup、进程树清理、detached child 和 Job Object；
 - 真实 JavaScript/Python interpreter 边界；
 - Generic ADB 与 MuMuManager stub command sequence；
@@ -95,7 +97,7 @@ System Smoke 需要管理员终端和已完成的构建，统一入口为：
 node tests\run.mjs system
 ```
 
-统一入口当前按顺序覆盖 MCP、runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 六类跨层场景。MCP suite 还覆盖默认关闭、启用后的官方协议握手、结构化工具调用、运行轮询/取消、轻量模式和固定端口占用降级。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
+统一入口当前按顺序覆盖 MCP、runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 六类跨层场景。MCP suite 还覆盖默认关闭、启用后的官方协议握手、结构化工具调用、已有危险完成操作拦截、运行轮询/取消、轻量模式和固定端口占用降级；runtime suite 覆盖通知测试失败、长 Webhook 请求、身份握手和重启维护窗口。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
 
 ## 按需诊断与历史资产
 

@@ -39,6 +39,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver
 
     private readonly Func<AppSettings> _settings;
     private readonly Func<NotificationDispatcher> _notifications;
+
+    private readonly Func<Action, bool> _tryConfigurationMutation;
     private readonly List<DataSpecializedPlugin> _dataPlugins = new();
     private readonly List<ManagedPluginDescriptor> _managedPlugins = new();
     private readonly Dictionary<string, ManagedPluginRuntime> _managedRuntimes = new(StringComparer.OrdinalIgnoreCase);
@@ -51,11 +53,17 @@ internal sealed class PluginManager : IPluginCapabilityResolver
     internal PluginManager(
         Func<AppSettings> settings,
         Func<NotificationDispatcher> notifications,
-        Func<List<DataSpecializedPlugin>>? discoverData = null)
+        Func<List<DataSpecializedPlugin>>? discoverData = null,
+        Func<Action, bool>? tryConfigurationMutation = null)
     {
         _settings = settings;
         _notifications = notifications;
         _discoverData = discoverData ?? DiscoverDataPlugins;
+        _tryConfigurationMutation = tryConfigurationMutation ?? (mutation =>
+        {
+            mutation();
+            return true;
+        });
     }
 
     /// <summary>插件统一元数据投影（专项数据插件 + managed-code 代码插件）。</summary>
@@ -240,19 +248,37 @@ internal sealed class PluginManager : IPluginCapabilityResolver
 
     public bool SetEnabled(string name, bool enabled, string source = Audit.System)
     {
+        return SetEnabled(name, enabled, source, out _);
+    }
+
+    public bool SetEnabled(string name, bool enabled, string source, out string? failureCode)
+    {
         if (!IsKnownPlugin(name))
         {
             Logger.Warn($"[插件] 插件「{name}」不存在，已忽略启用开关操作。");
+            failureCode = "not_found";
             return false;
         }
-        AppSettings settings = _settings();
-        settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
-        string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
-        settings.PluginPreferences[key] = new PluginPreference { Enabled = enabled };
-        ConfigStore.Save(settings);
+        bool changed = _tryConfigurationMutation(() =>
+        {
+            lock (RuntimeContext.Instance.SettingsMutationLock)
+            {
+                AppSettings settings = _settings();
+                settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
+                string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
+                settings.PluginPreferences[key] = new PluginPreference { Enabled = enabled };
+                ConfigStore.Save(settings);
+            }
+        });
+        if (!changed)
+        {
+            failureCode = "host_maintenance";
+            return false;
+        }
         _configuredEnabled[name] = enabled;
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
         Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
+        failureCode = null;
         return true;
     }
 

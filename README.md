@@ -94,7 +94,7 @@ nexus-pipeline.exe cancel <运行 ID> --json
 http://127.0.0.1:58732/mcp
 ```
 
-MCP 端口只绑定本机 loopback，与「远程访问」设置相互独立；端口被占用时 MCP 保持不可用，Control API 与脚本调度继续运行。MCP 工具使用稳定的脚本、用户、队列和运行 ID，`run_script` / `run_queue` 会立即返回 `runId`，再用 `get_run` 查询状态。
+MCP 端口只绑定本机 loopback，与「远程访问」设置相互独立；端口被占用时 MCP 保持不可用，Control API 与脚本调度继续运行。NexusPipeline 信任同一台计算机上的本机进程，MCP 的破坏性工具开关属于 Agent 操作护栏；loopback、Host、Origin 和请求体限制提供网络边界。MCP 工具使用稳定的脚本、用户、队列和运行 ID，`run_script` / `run_queue` 会立即返回 `runId`，再用 `get_run` 查询状态；已有队列若配置了完成后的休眠、重启、关机或退出动作，`run_queue` 会返回 `dangerous_completion_action`。
 
 默认工具包含状态、脚本、用户、绑定、队列、运行、历史、插件和脱敏设置查询，以及运行/取消、资源 CRUD 和安全设置更新。删除资源、密钥写入、插件启停、服务重启、应用更新和遗留数据清理等高风险工具只有在本机显式开启「允许破坏性工具」并重启后才会出现在工具列表中；密钥写入使用本地 DPAPI 加密，工具响应与审计日志均不回显明文。
 

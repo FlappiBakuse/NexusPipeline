@@ -19,62 +19,73 @@ internal static class SettingsCommands
     public static OperationResult<AppSettings> Update(JsonObject patch, string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        AppSettings candidate;
+        AppSettings candidate = ctx.Settings;
         string? bindError = null;
         string secretDetail = "";
         try
         {
-            lock (ctx.SettingsMutationLock)
+            bool admitted = ctx.Center.TryExecuteHostConfigurationMutation(() =>
             {
-                candidate = ctx.Settings.Clone();
-                foreach (KeyValuePair<string, JsonNode?> pair in patch)
+                lock (ctx.SettingsMutationLock)
                 {
-                    string field = pair.Key;
-                    if (string.IsNullOrEmpty(field))
+                    candidate = ctx.Settings.Clone();
+                    foreach (KeyValuePair<string, JsonNode?> pair in patch)
                     {
-                        bindError = "请求体包含空字段名";
-                        break;
-                    }
-                    if (field is "secretKey" or "secretValue" || SecretFields.Contains(field))
-                    {
-                        continue;
-                    }
-                    if (pair.Value is not null)
-                    {
-                        bindError = BindField(candidate, field, pair.Value);
-                        if (bindError is not null)
+                        string field = pair.Key;
+                        if (string.IsNullOrEmpty(field))
                         {
+                            bindError = "请求体包含空字段名";
                             break;
                         }
+                        if (field is "secretKey" or "secretValue" || SecretFields.Contains(field))
+                        {
+                            continue;
+                        }
+                        if (pair.Value is not null)
+                        {
+                            bindError = BindField(candidate, field, pair.Value);
+                            if (bindError is not null)
+                            {
+                                break;
+                            }
+                        }
                     }
-                }
 
-                JsonNode? secretKeyNode = patch["secretKey"];
-                JsonNode? secretValueNode = patch["secretValue"];
-                if (bindError is null && secretKeyNode is not null && secretValueNode is not null)
-                {
-                    string key = secretKeyNode.Str();
-                    string value = secretValueNode.Str();
-                    if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
+                    JsonNode? secretKeyNode = patch["secretKey"];
+                    JsonNode? secretValueNode = patch["secretValue"];
+                    if (bindError is null && secretKeyNode is not null && secretValueNode is not null)
                     {
-                        if (string.IsNullOrWhiteSpace(value))
+                        string key = secretKeyNode.Str();
+                        string value = secretValueNode.Str();
+                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "accessToken")
                         {
-                            ClearSecret(candidate, key);
-                            secretDetail = $"，清除密钥 {key}";
-                        }
-                        else
-                        {
-                            SetSecret(candidate, key, value);
-                            secretDetail = $"，更新密钥 {key}";
+                            if (string.IsNullOrWhiteSpace(value))
+                            {
+                                ClearSecret(candidate, key);
+                                secretDetail = $"，清除密钥 {key}";
+                            }
+                            else
+                            {
+                                SetSecret(candidate, key, value);
+                                secretDetail = $"，更新密钥 {key}";
+                            }
                         }
                     }
-                }
 
-                if (bindError is null)
-                {
-                    ConfigStore.Save(candidate);
-                    ctx.ReplaceSettings(candidate);
+                    if (bindError is null)
+                    {
+                        ConfigStore.Save(candidate);
+                        ctx.ReplaceSettings(candidate);
+                    }
                 }
+            }, out string? failureCode);
+
+            if (!admitted)
+            {
+                return OperationResult<AppSettings>.Failure(
+                    failureCode ?? "host_maintenance",
+                    "宿主正在进行维护操作，暂不能修改设置",
+                    OperationErrorKind.Conflict);
             }
 
             if (bindError is not null)
