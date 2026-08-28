@@ -1,6 +1,7 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
@@ -18,6 +19,7 @@ internal sealed class ExecutionRunner
     private readonly SystemActionExecutor _systemActions;
     private readonly IPluginAvailability _pluginAvailability;
     private readonly IUserRunStartingPublisher? _userRunEvents;
+    private readonly PluginManager? _plugins;
 
     public ExecutionRunner(
         IUserRepository users,
@@ -25,7 +27,8 @@ internal sealed class ExecutionRunner
         INotificationService notifications,
         SystemActionExecutor systemActions,
         IPluginAvailability pluginAvailability,
-        IUserRunStartingPublisher? userRunEvents = null)
+        IUserRunStartingPublisher? userRunEvents = null,
+        PluginManager? plugins = null)
     {
         _users = users;
         _history = history;
@@ -33,6 +36,7 @@ internal sealed class ExecutionRunner
         _systemActions = systemActions;
         _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
         _userRunEvents = userRunEvents;
+        _plugins = plugins;
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)
@@ -198,6 +202,7 @@ internal sealed class ExecutionRunner
         List<string> attemptLogs,
         string displayName)
     {
+        _plugins?.EnrichHistory(record);
         HistorySaveResult result;
         try
         {

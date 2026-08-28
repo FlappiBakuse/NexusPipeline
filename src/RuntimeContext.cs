@@ -73,7 +73,14 @@ internal class RuntimeContext
         collection.AddSingleton<ExecutionStateStore>();
         collection.AddSingleton<ExecutionValidator>();
         collection.AddSingleton<SystemActionExecutor>();
-        collection.AddSingleton<ExecutionRunner>();
+        collection.AddSingleton<ExecutionRunner>(provider => new ExecutionRunner(
+            provider.GetRequiredService<IUserRepository>(),
+            provider.GetRequiredService<IHistoryStore>(),
+            provider.GetRequiredService<INotificationService>(),
+            provider.GetRequiredService<SystemActionExecutor>(),
+            provider.GetRequiredService<IPluginAvailability>(),
+            provider.GetRequiredService<IUserRunStartingPublisher>(),
+            provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<ExecutionCommands>(provider => new ExecutionCommands(provider.GetRequiredService<DispatchCenter>()));
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionCommands>());

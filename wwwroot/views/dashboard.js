@@ -3,6 +3,8 @@ import { pageHeader, systemActionCard } from "../core/forms.js";
 import { esc, statusBadge } from "../core/format.js";
 import { isCurrent, schedule } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown } from "../core/ui.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { notifyPluginPageUpdated } from "../core/plugin-runtime.js";
 
 function runningMarkup(running) {
   if (!running.length) return '<div class="empty"><strong>当前空闲</strong><span>没有正在运行的脚本或调度队列。</span><a class="back-link" href="#/dispatch">前往调度中心</a></div>';
@@ -65,11 +67,14 @@ export async function pageDashboard(token) {
   }
   if (!isCurrent("dashboard", token)) return;
   setVersionLabel(status.version);
-  if (!document.querySelector('[data-testid="dashboard-state"]')) {
+  const isInitialRender = !document.querySelector('[data-testid="dashboard-state"]');
+  if (isInitialRender) {
     render(pageHeader("运行概览", "仪表盘", "查看当前运行状态、调度概览和通知能力。")
+      + pluginSlotMarkup("dashboard.cards", "dashboard.cards")
       + statePanelMarkup(status)
       + `<div id="system-action-area">${systemActionCard(status.systemAction)}</div>
       <section class="content-section list-surface" data-testid="running-panel">${runningPanelMarkup(status)}</section>
+      ${pluginSlotMarkup("dashboard.after-running", "dashboard.after-running")}
       <section class="content-section" id="dashboard-plugin-panel" hidden>${pluginPanelMarkup(status)}</section>`);
   } else {
     // 局部更新：不整页重渲染，避免滚动/焦点重置；区域缺失时静默跳过。
@@ -94,6 +99,16 @@ export async function pageDashboard(token) {
       pluginPanel.innerHTML = pluginPanelMarkup(status);
       pluginPanel.hidden = !pluginMarkup(status);
     }
+  }
+  await renderPluginSlots(document.querySelector("#view"));
+  if (!isInitialRender) {
+    await notifyPluginPageUpdated({
+      hash: "dashboard",
+      page: "dashboard",
+      segments: ["dashboard"],
+      token,
+      container: document.querySelector("#view"),
+    });
   }
   startSystemActionCountdown();
   schedule(() => pageDashboard(token), 3000, "dashboard", token);

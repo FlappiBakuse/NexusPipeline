@@ -90,6 +90,9 @@ internal static class ApiStatusHandler
                 runtimeEnabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
                 state = RuntimeContext.Instance.Plugins.GetRuntimeState(plugin.Name),
                 error = RuntimeContext.Instance.Plugins.GetRuntimeError(plugin.Name),
+                hasFrontend = plugin.HasFrontend,
+                frontendApiVersion = plugin.FrontendApiVersion,
+                frontendTrusted = RuntimeContext.Instance.Plugins.IsFrontendTrusted(plugin.Name),
                 restartRequired = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name)
                     != RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
             }),

@@ -100,7 +100,7 @@ html { min-width: 320px; background: var(--bg); }
 body {
   min-width: 320px; min-height: 100vh; margin: 0; overflow-x: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color: var(--text);
-  background: var(--bg);
+  background-color: var(--bg); background-image: var(--nexus-wallpaper-image, none); background-size: cover; background-position: center; background-attachment: fixed;
   line-height: 1.5;
 }
 button, input, select, textarea { font: inherit; }
@@ -130,6 +130,9 @@ a { color: inherit; }
 .main-nav a { display: flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; transition: background .15s, color .15s; }
 .main-nav a:hover { background: var(--panel-hover); color: var(--text); }
 .main-nav a.active { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.plugin-nav-host:empty { display: none; }
+.plugin-nav-host .plugin-nav-item { min-height: 38px; font-size: 12px; }
+.plugin-nav-host .plugin-nav-icon { width: 18px; justify-content: center; font-size: 16px; }
 .icon { display: block; width: 18px; height: 18px; flex: 0 0 auto; }
 .nav-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; color: currentColor; line-height: 1; }
 .sidebar-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 13px 4px 0 10px; border-top: 1px solid var(--border); color: var(--faint); font-size: 10px; }
@@ -161,6 +164,14 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .history-days-box .field-label { margin: 0; white-space: nowrap; }
 .card, .empty, .section-surface, .list-surface, .table-surface { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: none; }
 .card { padding: clamp(18px, 2.2vw, 24px); margin-bottom: var(--space-5); }
+.plugin-slot { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); }
+.plugin-contribution-card { margin-bottom: 0; }
+.plugin-contribution-badge { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+.plugin-contribution-form { display: grid; gap: var(--space-3); }
+.plugin-field { min-width: 0; }
+.plugin-field-description, .plugin-display-field { display: block; margin-top: 5px; font-size: 12px; }
+.plugin-display-field { display: flex; justify-content: space-between; gap: var(--space-3); padding: 5px 0; border-bottom: 1px solid var(--border); }
+.plugin-display-field:last-child { border-bottom: 0; }
 .card.list-surface, .card.table-surface, .list-surface, .table-surface { padding: 0; overflow: hidden; }
 .section-surface { padding: clamp(18px, 2.2vw, 24px); }
 .settings-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin-bottom: var(--space-5); }

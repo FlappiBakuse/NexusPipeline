@@ -5,6 +5,8 @@ import { esc, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core
 import { closeModal, confirmModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { notifyPluginPageUpdated } from "../core/plugin-runtime.js";
 
 /** 单个运行任务卡片 HTML（新任务插入用；已有任务走 updateRunningItem 局部更新，不重建 DOM）。 */
 function runningItemMarkup(record) {
@@ -112,9 +114,9 @@ export async function pageDispatch(token) {
   catch (error) { render(`<div class="empty"><strong>加载调度中心失败</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("dispatch", token)) return;
   state.scripts = scripts; state.queues = queues; state.plugins = status.plugins || [];
-  render(pageHeader("调度中心", "调度中心", "手动启动任务，观察实时输出并及时取消运行。") + `
+  render(pageHeader("调度中心", "调度中心", "手动启动任务，观察实时输出并及时取消运行。") + pluginSlotMarkup("dispatch.cards", "dispatch.cards") + `
     <div id="system-action-area"></div>
-    <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>
+    <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 2 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>${pluginSlotMarkup("dispatch.running.badges", "dispatch.running.badges")}
     <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">开始一次运行</h3><span class="muted">选择目标后立即加入运行列表</span></div>
       <div class="dispatch-runbar">
         <div class="field"><label class="field-label" for="dc-kind">目标类型</label><select id="dc-kind" data-action="dispatch-kind"><option value="script">脚本实例</option><option value="queue">调度队列</option></select></div>
@@ -122,15 +124,30 @@ export async function pageDispatch(token) {
         <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div>
         <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
       </div>
-    </section>`);
+    </section>${pluginSlotMarkup("dispatch.run.sections", "dispatch.run.sections")}`);
   applyProgress();
   updateSystemAction(status);
+  await renderPluginSlots(document.querySelector("#view"));
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }
 
 async function refreshDispatch(token) {
   if (!isCurrent("dispatch", token)) return;
-  try { const status = await api("GET", "/api/status"); if (isCurrent("dispatch", token)) { updateRunning(status); updateSystemAction(status); } }
+  try {
+    const status = await api("GET", "/api/status");
+    if (isCurrent("dispatch", token)) {
+      updateRunning(status);
+      updateSystemAction(status);
+      await renderPluginSlots(document.querySelector("#view"));
+      await notifyPluginPageUpdated({
+        hash: "dispatch",
+        page: "dispatch",
+        segments: ["dispatch"],
+        token,
+        container: document.querySelector("#view"),
+      });
+    }
+  }
   catch (error) { if (isCurrent("dispatch", token)) toast("状态更新失败：" + error.message, "error"); }
   schedule(() => refreshDispatch(token), 2000, "dispatch", token);
 }

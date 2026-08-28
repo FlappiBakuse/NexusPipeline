@@ -4,6 +4,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
+using NexusPipeline.Services;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.TestPlugin;
 using NexusPipeline.Utilities;
@@ -94,7 +95,52 @@ public sealed class ManagedPluginTests
         }
     }
 
-    private static string CreatePluginDirectory(string name, Type entryType, string apiVersion = "1.0")
+    [Fact]
+    public void FrontendTrust_IsBoundToVersionAndDeclaration()
+    {
+        const string name = "fixture-frontend";
+        string root = CreatePluginDirectory(name, typeof(NexusPipeline.TestPlugin.TestPlugin), frontend: true);
+        var settings = new AppSettings
+        {
+            PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
+            {
+                [name] = new PluginPreference { Enabled = true },
+            },
+        };
+        var manager = new PluginManager(
+            () => settings,
+            () => new NotificationDispatcher(new FixtureSettingsProvider()));
+
+        try
+        {
+            manager.LoadAll();
+            Assert.True(manager.IsEnabled(name));
+            Assert.True(manager.HasFrontend(name));
+            Assert.False(manager.IsFrontendTrusted(name));
+            Assert.Empty(manager.FrontendDescriptors);
+
+            Assert.True(manager.SetFrontendTrusted(name, true, Audit.System, out string? trustError), trustError);
+            Assert.True(manager.IsFrontendTrusted(name));
+            Assert.Single(manager.FrontendDescriptors);
+
+            string manifestPath = Path.Combine(root, "plugin.json");
+            string manifest = File.ReadAllText(manifestPath).Replace("web/main.js", "web/changed.js", StringComparison.Ordinal);
+            File.WriteAllText(manifestPath, manifest);
+            File.WriteAllText(Path.Combine(root, "web", "changed.js"), "export function activate() {}\n");
+
+            manager.LoadAll();
+            Assert.False(manager.IsFrontendTrusted(name));
+            Assert.Empty(manager.FrontendDescriptors);
+        }
+        finally
+        {
+            manager.ShutdownAll();
+            ReleasePluginContexts();
+            DeletePluginDirectory(root);
+        }
+    }
+
+    private static string CreatePluginDirectory(string name, Type entryType, string apiVersion = "1.0", bool frontend = false)
     {
         string root = Path.Combine(AppPaths.PluginsDir, name);
         DeletePluginDirectory(root);
@@ -102,6 +148,15 @@ public sealed class ManagedPluginTests
         Directory.CreateDirectory(root);
         string assemblyPath = typeof(NexusPipeline.TestPlugin.TestPlugin).Assembly.Location;
         File.Copy(assemblyPath, Path.Combine(root, Path.GetFileName(assemblyPath)), overwrite: true);
+        if (frontend)
+        {
+            Directory.CreateDirectory(Path.Combine(root, "web"));
+            File.WriteAllText(Path.Combine(root, "web", "main.js"), "export function activate() {}\n");
+        }
+        string capabilities = frontend ? "[\"background-jobs\", \"frontend-module\"]" : "[\"background-jobs\"]";
+        string frontendSection = frontend
+            ? ",\n  \"frontend\": {\n    \"apiVersion\": \"1.0\",\n    \"entry\": \"web/main.js\",\n    \"styles\": []\n  }"
+            : "";
         string manifest = $$"""
         {
           "schemaVersion": 1,
@@ -113,7 +168,7 @@ public sealed class ManagedPluginTests
           "apiVersion": "{{apiVersion}}",
           "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
           "entryType": "{{entryType.FullName}}",
-          "capabilities": ["background-jobs"]
+          "capabilities": {{capabilities}}{{frontendSection}}
         }
         """;
         File.WriteAllText(Path.Combine(root, "plugin.json"), manifest);

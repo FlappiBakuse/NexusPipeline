@@ -2,6 +2,26 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.11.2（Pre-release）
+
+### Plugin API v1.3
+
+- 增加通用 UI 贡献、作用域插件数据、插件自有 Web API 和历史展示贡献端口。
+- 保留 v1.0–v1.2 接口兼容路径，HoYoLAB v0.1.1 插件继续按 Plugin API v1.2 运行。
+- 补充插件数据清理、贡献校验、敏感字段脱敏和插件异常隔离。
+
+### Frontend API 1.0
+
+- 增加可信前端插件运行时，支持 ES module、CSS、导航、路由、动作、生命周期和稳定 UI slot。
+- Dashboard、用户、脚本、队列、调度、历史、插件和设置页面接入可扩展 slot。
+- 增加插件前端资源命名空间、信任确认、主题变量和壁纸资源能力。
+
+### 插件仓库与验证
+
+- 补充 NexusPipeline-Plugins 的前端插件指南、发行校验规则和可直接执行的 HoYoLAB 单元测试工程。
+- 更新测试源的候选版本从宿主项目 `<Version>` 自动派生下一 patch；v0.11.2 测试候选版本为 v0.11.3，fixture 使用语义标记。
+- 默认门禁 Unit/Component 364 项、Web Logic 12 项、文档一致性 5 项通过；UI Smoke 18 项、System Smoke 31 项和官方插件测试 9 项通过。
+
 ## v0.11.1（Pre-release，开发中）
 
 ### Plugin API 与用户列表徽章

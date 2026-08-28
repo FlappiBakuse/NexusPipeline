@@ -8,6 +8,7 @@ import { isCurrent, registerInterval, schedule, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
 let managementDraft = null;
 let deleteDraft = null;
@@ -119,6 +120,7 @@ function userCard(user) {
       '<div class="meta-line global-user-meta">' +
         '<span class="badge muted">已绑定 ' + bindingCount + " 个脚本</span>" +
         pluginUserBadgeMarkup(user) +
+        pluginSlotMarkup("users.list.badges", "user-" + user.id, "user-plugin-slot", { mode: "list", primaryId: user.id }) +
         '<span class="badge blue global-user-next-run" data-next-run="' + esc(nextRun) + '" title="' + esc(queueTitle) + '">' + esc(nextRunLabel(nextRun)) + "</span>" +
       "</div>" +
     "</div>" +
@@ -164,6 +166,7 @@ export async function pageUsers(token) {
     ? '<section class="card list-surface"><div class="script-grid global-user-list" id="global-user-list">' + sorted.map(userCard).join("") + "</div></section>"
     : '<div class="empty"><strong>暂无用户</strong><span>点击右上角「添加用户」创建用户后，再为它绑定一个或多个脚本实例。</span></div>';
   render(pageHeader("账号管理", "用户管理", "统一管理用户头像、脚本绑定、运行优先级和通知设置。", action) + content);
+  await renderPluginSlots(document.querySelector("#view"));
   const list = $("#global-user-list");
   if (list) initDndList(list, { onDrop: reorderGlobalUsers });
   hydrateIcons($("#view"));
@@ -339,7 +342,7 @@ function umBindingCardMarkup(binding) {
     "</div>";
   return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
     head + subhead +
-    '<div class="um-binding-body">' + mainView + generalView + notifyView + advancedView + "</div>" +
+    '<div class="um-binding-body">' + mainView + generalView + notifyView + advancedView + pluginSlotMarkup("users.binding.sections", "binding-" + managementDraft.userId + "-" + binding.scriptInstanceId, "user-binding-plugin-slot", { mode: "binding", primaryId: binding.scriptInstanceId, secondaryId: managementDraft.userId }) + "</div>" +
   "</article>";
 }
 
@@ -411,6 +414,7 @@ function renderUserManagementModal() {
   const footer = `<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${umState.expandedId ? "返回上级" : "取消"}</button>`;
   showModal(modalShell("用户管理", body, footer), true, true);
   syncUmState();
+  void renderPluginSlots(document);
   wireManagedBindingDnd();
   hydrateIcons(document);
 }
@@ -955,9 +959,10 @@ function globalManagementPluginMarkup(contributions) {
 function renderGlobalManagementModal() {
   if (!globalManagementDraft) return;
   const draft = globalManagementDraft;
-  const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions);
+  const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions) + pluginSlotMarkup("users.global.sections", "users.global.sections", "global-management-plugin-slot", { mode: "user", primaryId: draft.userId });
   const footer = '<button class="primary" type="button" data-action="save-global-management">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
   showModal(modalShell("全局管理", body, footer), true, true);
+  void renderPluginSlots(document);
   hydrateIcons(document);
 }
 

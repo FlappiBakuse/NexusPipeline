@@ -12,6 +12,8 @@ import { actions as dispatchActions, pageDispatch } from "./views/dispatch.js";
 import { actions as historyActions, pageHistory } from "./views/history.js";
 import { actions as pluginsActions, pagePlugins } from "./views/plugins.js";
 import { actions as settingsActions, pageSettings } from "./views/settings.js";
+import { initAppearance } from "./core/appearance.js";
+import { initPluginRuntime, notifyPluginDispose, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, resolvePluginAction, resolvePluginRoute, syncPluginNavActive } from "./core/plugin-runtime.js";
 
 const shellActions = {
   "open-nav": () => setNavOpen(true),
@@ -39,14 +41,33 @@ const allActions = {
 };
 
 const routes = { dashboard: pageDashboard, scripts: pageScripts, users: pageUsers, queues: pageQueues, dispatch: pageDispatch, history: pageHistory, plugins: pagePlugins, settings: pageSettings };
+let activeHash = null;
+let routeSerial = 0;
 
-function route() {
+async function route() {
   closeModal();
   setNavOpen(false);
   const hash = (location.hash || "#/dashboard").slice(2) || "dashboard";
+  const serial = ++routeSerial;
+  if (activeHash !== null) {
+    const previousSegments = activeHash.split("/");
+    await notifyPluginPageLeave({ hash: activeHash, page: previousSegments[0], segments: previousSegments });
+    await notifyPluginDispose({ hash: activeHash, page: previousSegments[0], segments: previousSegments });
+  }
   const token = enterPage(hash);
   const segments = hash.split("/");
-  (routes[segments[0]] || pageDashboard)(token);
+  activeHash = hash;
+  const pluginRoute = resolvePluginRoute(segments);
+  const handler = routes[segments[0]] || pluginRoute || pageDashboard;
+  await handler(token, segments);
+  if (serial !== routeSerial) return;
+  await notifyPluginPageEnter({ hash, page: segments[0], segments, token, container: document.querySelector("#view") });
+  await notifyPluginPageUpdated({ hash, page: segments[0], segments, token, container: document.querySelector("#view") });
+  syncPluginNavActive(location.hash || "#/dashboard");
+}
+
+function actionHandler(actionName) {
+  return allActions[actionName] || resolvePluginAction(actionName);
 }
 
 document.addEventListener("click", event => {
@@ -61,7 +82,7 @@ document.addEventListener("click", event => {
   // 原生 select 的 data-action 由 change 事件唯一分发——select 上点击（打开/选项变更）同样会
   // 触发本 click 委托，与 change 委托叠加即双触发（当前调用点幂等未暴露，属隐患模式）。
   if (target.matches("select") || target.matches("option")) return;
-  const handler = allActions[target.dataset.action];
+  const handler = actionHandler(target.dataset.action);
   if (handler) handler(target, event);
   if (target.matches('[role="menuitem"]')) closeMoreMenus();
   const toggleBtn = event.target.closest(".mode-toggle");
@@ -86,7 +107,7 @@ document.addEventListener("keydown", event => {
   if (event.key !== "Enter" && event.key !== " ") return;
   const target = event.target.closest('[data-action][role="button"]');
   if (!target || target.matches("button, a, input, select, textarea")) return;
-  const handler = allActions[target.dataset.action];
+  const handler = actionHandler(target.dataset.action);
   if (!handler) return;
   event.preventDefault();
   handler(target, event);
@@ -95,13 +116,13 @@ document.addEventListener("keydown", event => {
 document.addEventListener("input", event => {
   if (event.target?.id === "sm-root") syncScriptGhostState();
   const target = event.target.closest?.('[data-action="sync-user-management-run-days"]');
-  if (target) allActions[target.dataset.action]?.(target, event);
+  if (target) actionHandler(target.dataset.action)?.(target, event);
 });
 
 document.addEventListener("change", event => {
   const target = event.target.closest("[data-action]");
   if (!target) return;
-  const handler = allActions[target.dataset.action];
+  const handler = actionHandler(target.dataset.action);
   if (handler) handler(target, event);
 });
 
@@ -112,11 +133,13 @@ window.addEventListener("resize", () => {
 window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   if (!(await ensureAccessToken())) return;
+  await initAppearance();
   updateLocalAddr();
   initParticles();
   await loadLimits();
   showWarning();
-  route();
+  await initPluginRuntime();
+  await route();
 });
 
 /** 侧栏服务地址按实际监听端口/访问主机显示（此前硬编码 127.0.0.1，端口漂移或远程访问时不准确）。 */

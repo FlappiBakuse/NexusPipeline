@@ -8,6 +8,7 @@ import { isCurrent, notifyAvailable, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -68,7 +69,7 @@ function scriptCardMarkup(script, notifyOn) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
       <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-      <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}</div>
+    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
       <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
@@ -103,6 +104,7 @@ export async function pageScripts(token) {
       ${pageItems.map(script => scriptCardMarkup(script, notifyOn)).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
   render(pageHeader("自动化管理", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
+  await renderPluginSlots(document.querySelector("#view"));
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
   wireScriptIcons();
   hydrateIcons($dom("#view"));
@@ -281,7 +283,8 @@ export async function openScriptModal(id = "", plugin = "") {
       </div>
     </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-script">保存</button>';
-  showModal(modalShell(title, body, footer), true, true);
+  showModal(modalShell(title, body + pluginSlotMarkup("scripts.editor.sections", "scripts.editor.sections", "script-editor-plugin-slot", { mode: id ? "edit" : "create", primaryId: id || "" }), footer), true, true);
+  void renderPluginSlots(document);
   syncScriptGhostState();
   syncJudgeBox();
   const rootInput = $dom("#sm-root");

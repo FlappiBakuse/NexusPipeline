@@ -739,6 +739,7 @@ internal static class UserCommands
                             {
                                 DataStore.SaveUsers(ctx.Users);
                                 UserConfigManager.RemoveUserData(script.Id, target.Id);
+                                ctx.Plugins.DeleteUserScriptData(target.Id, script.Id);
                             }
                             catch
                             {
@@ -1127,6 +1128,7 @@ internal static class UserCommands
                     {
                         DataStore.SaveUsers(ctx.Users);
                         UserConfigManager.RemoveUserData(scriptId, user.Id);
+                        ctx.Plugins.DeleteUserScriptData(user.Id, scriptId);
                     }
                     catch
                     {

@@ -24,8 +24,13 @@ internal static class HttpHelper
             ".css" => "text/css; charset=utf-8",
             ".json" => "application/json; charset=utf-8",
             ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
             ".ico" => "image/x-icon",
             ".svg" => "image/svg+xml",
+            ".woff" => "font/woff",
+            ".woff2" => "font/woff2",
             _ => "application/octet-stream",
         };
         context.Response.ContentType = contentType;
@@ -47,8 +52,21 @@ internal static class HttpHelper
         context.Response.Headers["Content-Security-Policy"] = $"default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:* {currentHostPorts}; font-src 'self' data:";
         byte[] data = File.ReadAllBytes(filePath);
         context.Response.ContentLength64 = data.Length;
+        if (string.Equals(context.Request.HttpMethod, "HEAD", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.OutputStream.Close();
+            return;
+        }
         context.Response.OutputStream.Write(data, 0, data.Length);
         context.Response.OutputStream.Close();
+    }
+
+    public static Task NoContentAsync(HttpListenerContext context)
+    {
+        context.Response.StatusCode = 204;
+        context.Response.ContentLength64 = 0;
+        context.Response.Close();
+        return Task.CompletedTask;
     }
 
     public static async Task WriteJsonAsync(HttpListenerContext context, object value, int statusCode = 200)

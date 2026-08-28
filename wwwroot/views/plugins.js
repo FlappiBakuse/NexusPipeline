@@ -3,6 +3,7 @@ import { esc } from "../core/format.js";
 import { pageHeader } from "../core/forms.js";
 import { isCurrent, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { refreshPluginRuntime } from "../core/plugin-runtime.js";
 import { markRestartRequired } from "./settings.js";
 
 let activeTab = "local";
@@ -30,7 +31,10 @@ function pluginDetailsMarkup(parts) {
 }
 
 function pluginBadgesMarkup(plugin, statusMarkup) {
-  return `<div class="plugin-row-badges">${pluginKindBadge(plugin)}${statusMarkup}</div>`;
+  const frontend = plugin.hasFrontend
+    ? `<span class="badge ${plugin.frontendTrusted ? "ok" : "warn"}" title="可信前端模块可在同源管理页面运行 JavaScript/CSS">前端 ${plugin.frontendTrusted ? "已信任" : "待确认"}</span>`
+    : "";
+  return `<div class="plugin-row-badges">${pluginKindBadge(plugin)}${statusMarkup}${frontend}</div>`;
 }
 
 function runtimeLabel(plugin) {
@@ -57,7 +61,10 @@ function pluginRow(plugin) {
     plugin.apiVersion ? `API v${plugin.apiVersion}` : "",
   ]);
   const status = `<span class="badge ${runtimeClass(plugin)}" data-testid="plugin-status">${runtimeLabel(plugin)}</span>`;
-  return `<article class="plugin-row"><div class="plugin-row-main">${pluginNameMarkup(plugin)}<span class="muted plugin-description">${details}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div>${pluginBadgesMarkup(plugin, status)}<div class="plugin-row-action row-actions"><button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
+  const frontendAction = plugin.hasFrontend
+    ? `<button class="${plugin.frontendTrusted ? "ghost" : "tertiary"}" type="button" data-action="toggle-plugin-frontend" data-name="${esc(plugin.name)}" data-trusted="${plugin.frontendTrusted ? "false" : "true"}" title="${plugin.frontendTrusted ? "撤销后该插件前端将在下次加载时停止" : "确认后该插件前端可在同源管理页面运行 JavaScript/CSS"}">${plugin.frontendTrusted ? "撤销前端信任" : "信任前端"}</button>`
+    : "";
+  return `<article class="plugin-row"><div class="plugin-row-main">${pluginNameMarkup(plugin)}<span class="muted plugin-description">${details}</span>${plugin.error ? `<span class="field-error-message">${esc(plugin.error)}</span>` : ""}</div>${pluginBadgesMarkup(plugin, status)}<div class="plugin-row-action row-actions">${frontendAction}<button class="tertiary" type="button" data-action="toggle-plugin" data-name="${esc(plugin.name)}" data-enabled="${!plugin.configuredEnabled}">${plugin.configuredEnabled ? "禁用" : "启用"}</button></div></article>`;
 }
 
 function pluginTabs(tab = activeTab) {
@@ -209,8 +216,20 @@ async function runStoreAction(name, action) {
   }
 }
 
+async function togglePluginFrontend(name, trusted) {
+  try {
+    await api("POST", `/api/plugins/${encodeURIComponent(name)}/${trusted ? "trust-frontend" : "revoke-frontend"}`);
+    toast(trusted ? "已信任插件前端" : "已撤销插件前端信任");
+    if (trusted) await refreshPluginRuntime();
+    await pagePlugins(state.routeToken);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
 export const actions = {
   "toggle-plugin": target => togglePlugin(target.dataset.name, target.dataset.enabled === "true"),
+  "toggle-plugin-frontend": target => withBusy(target, () => togglePluginFrontend(target.dataset.name, target.dataset.trusted === "true")),
   "switch-plugin-tab": target => {
     activeTab = target.dataset.tab === "local" ? "local" : "store";
     pagePlugins(state.routeToken);

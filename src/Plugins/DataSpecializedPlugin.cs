@@ -23,6 +23,11 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     public string Version { get; private set; } = "";
 
+    /// <summary>数据化插件可选的同源可信前端模块声明。</summary>
+    public PluginFrontendManifest? Frontend { get; private set; }
+
+    internal string PluginDirectory { get; private set; } = "";
+
     /// <summary>数据化插件声明的能力 key；旧 supportsEmulator 字段会映射为 emulator。</summary>
     public IReadOnlySet<string> CapabilityKeys => _capabilityKeys;
 
@@ -56,6 +61,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
             var plugin = new DataSpecializedPlugin
             {
+                PluginDirectory = Path.GetFullPath(pluginDir),
                 Name = node?["name"]?.ToString() ?? "",
                 DisplayName = node?["displayName"]?.ToString() ?? "",
                 GameName = node?["gameName"]?.ToString() ?? "",
@@ -80,6 +86,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             {
                 plugin._capabilityKeys.Add(PluginCapabilityKeys.Emulator);
             }
+            if (node is not JsonObject root
+                || !PluginFrontendManifest.TryParse(root, plugin._capabilityKeys, out PluginFrontendManifest? frontend, out _))
+            {
+                return null;
+            }
+            plugin.Frontend = frontend;
             string? templateRef = node?["configTemplate"]?.ToString();
             if (string.IsNullOrWhiteSpace(plugin.Name) || string.IsNullOrWhiteSpace(plugin._resolvePath) || string.IsNullOrWhiteSpace(plugin._judgeScriptPath))
             {

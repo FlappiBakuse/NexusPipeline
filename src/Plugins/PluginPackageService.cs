@@ -286,10 +286,12 @@ internal sealed class PluginPackageService
                 {
                     throw new PluginRepositoryException("manifest_invalid", "数据化插件 manifest 包含越界路径");
                 }
-                if (DataSpecializedPlugin.Load(pluginDir) is null)
+                DataSpecializedPlugin? dataPlugin = DataSpecializedPlugin.Load(pluginDir);
+                if (dataPlugin is null)
                 {
                     throw new PluginRepositoryException("manifest_invalid", "数据化插件缺少有效的 data 文件");
                 }
+                ValidateFrontendFiles(pluginDir, dataPlugin.Frontend);
                 return;
             }
             if (!Managed.PluginManifest.TryLoad(pluginDir, out Managed.PluginManifest? managed, out string? error)
@@ -304,6 +306,7 @@ internal sealed class PluginPackageService
             {
                 throw new PluginRepositoryException("manifest_invalid", "managed-code 插件 entryAssembly 不存在或路径非法");
             }
+            ValidateFrontendFiles(pluginDir, managed.Frontend);
         }
         catch (PluginRepositoryException)
         {
@@ -321,6 +324,24 @@ internal sealed class PluginPackageService
         string normalized = value.Replace('\\', '/');
         return !normalized.Contains(':', StringComparison.Ordinal)
             && !normalized.Split('/').Any(part => part is "" or "." or "..");
+    }
+
+    private static void ValidateFrontendFiles(string pluginDir, PluginFrontendManifest? frontend)
+    {
+        if (frontend is null)
+        {
+            return;
+        }
+        foreach (string relative in new[] { frontend.Entry }.Concat(frontend.Styles))
+        {
+            string target = Path.GetFullPath(Path.Combine(pluginDir, relative.Replace('/', Path.DirectorySeparatorChar)));
+            if (!PluginFrontendManifest.IsPublicFrontendPath(relative)
+                || !IsContained(pluginDir, target)
+                || !File.Exists(target))
+            {
+                throw new PluginRepositoryException("manifest_invalid", $"frontend 资源不存在或路径非法：{relative}");
+            }
+        }
     }
 
     private static void ValidateEntryPath(string name, string original)

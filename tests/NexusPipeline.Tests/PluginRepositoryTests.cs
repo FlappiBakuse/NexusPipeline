@@ -4,12 +4,22 @@ using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services.Networking;
+using NexusPipeline.Services.Update;
 using Xunit;
 
 namespace NexusPipeline.Tests;
 
 public sealed class PluginRepositoryCatalogTests
 {
+    private static string CandidateHostVersion
+    {
+        get
+        {
+            Version current = Version.Parse(UpdateService.CurrentVersion);
+            return $"{current.Major}.{current.Minor}.{checked(current.Build + 1)}";
+        }
+    }
+
     [Fact]
     public void TryParse_ValidOfficialCatalog_ReturnsNormalizedEntry()
     {
@@ -77,7 +87,7 @@ public sealed class PluginRepositoryCatalogTests
     public void PluginApiCompatibility_UsesMajorAndMinorVersion()
     {
         Assert.Equal(1, PluginApiVersion.Major);
-        Assert.Equal(2, PluginApiVersion.Minor);
+        Assert.Equal(3, PluginApiVersion.Minor);
         Assert.True(PluginRepositoryCatalog.TryParseApiVersion("1.0", out int major, out int minor));
         Assert.Equal(1, major);
         Assert.Equal(0, minor);
@@ -89,12 +99,12 @@ public sealed class PluginRepositoryCatalogTests
             "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.0", Array.Empty<string>(),
             "0.11.0", "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/fixture-0.1.0.zip", new string('a', 64), 1);
         Assert.True(PluginRepositoryCatalog.IsCompatible(compatible, "0.11.0", out _));
-        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.3" };
+        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.4" };
         Assert.False(PluginRepositoryCatalog.IsCompatible(newerMinor, "0.11.0", out string reason));
         Assert.Contains("Plugin API", reason);
 
-        PluginCatalogEntry currentApi = compatible with { ApiVersion = "1.2", MinHostVersion = "0.11.1" };
-        Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, "0.11.1", out _));
+        PluginCatalogEntry currentApi = compatible with { ApiVersion = "1.2", MinHostVersion = CandidateHostVersion };
+        Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, CandidateHostVersion, out _));
     }
 
     private static JsonObject CreateCatalog()

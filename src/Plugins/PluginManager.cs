@@ -1,4 +1,7 @@
 using System.Reflection;
+using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
@@ -21,7 +24,17 @@ internal sealed record PluginSummary(
     string Version,
     string Kind,
     string ApiVersion,
-    IReadOnlyList<string> Capabilities);
+    IReadOnlyList<string> Capabilities,
+    bool HasFrontend,
+    string FrontendApiVersion);
+
+internal sealed record PluginFrontendRuntimeDescriptor(
+    string Name,
+    string DisplayName,
+    string Version,
+    string FrontendApiVersion,
+    string EntryUrl,
+    IReadOnlyList<string> StyleUrls);
 
 internal enum PluginRuntimeState
 {
@@ -55,6 +68,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly PluginUserGlobalManagementRegistry _userGlobalManagement = new();
     private readonly PluginUserListBadgeRegistry _userListBadges = new();
     private readonly PluginExecutionEventRegistry _executionEvents;
+    private readonly PluginUiContributionRegistry _uiContributions = new();
+    private readonly PluginWebApiRegistry _webApi = new();
+    private readonly PluginHistoryContributionRegistry _historyContributions = new();
 
     internal PluginManager(
         Func<AppSettings> settings,
@@ -95,7 +111,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Version,
                     "data-specialized",
                     "",
-                    plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray()));
+                    plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+                    plugin.Frontend is not null,
+                    plugin.Frontend?.ApiVersion ?? ""));
             }
             foreach (ManagedPluginDescriptor plugin in _managedPlugins)
             {
@@ -107,7 +125,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Manifest.Version,
                     "managed-code",
                     plugin.Manifest.ApiVersion,
-                    plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray()));
+                    plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+                    plugin.Manifest.Frontend is not null,
+                    plugin.Manifest.Frontend?.ApiVersion ?? ""));
             }
             return list;
         }
@@ -125,6 +145,182 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     internal IReadOnlyList<PluginUserListBadgeRegistration> UserListBadgeContributions =>
         _userListBadges.Snapshot();
 
+    internal IReadOnlyList<PluginUiContributionRegistration> UiContributions =>
+        _uiContributions.Snapshot();
+
+    internal bool TryGetUiContribution(
+        string pluginName,
+        string contributionId,
+        out PluginUiContributionRegistration? registration) =>
+        _uiContributions.TryGet(pluginName, contributionId, out registration);
+
+    internal IReadOnlyList<PluginWebApiRegistration> WebApiContributions =>
+        _webApi.Snapshot();
+
+    internal bool TryGetWebApi(
+        string pluginName,
+        string method,
+        string route,
+        out PluginWebApiRegistration? registration) =>
+        _webApi.TryGet(pluginName, method, route, out registration);
+
+    internal IReadOnlyList<PluginHistoryContributionRegistration> HistoryContributions =>
+        _historyContributions.Snapshot();
+
+    /// <summary>在历史提交前收集已注册插件的展示快照；插件异常或超限只会丢弃该插件的展示内容。</summary>
+    internal void EnrichHistory(RunRecord record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.StartTime == DateTime.MinValue)
+        {
+            return;
+        }
+
+        var context = new PluginHistoryContext(
+            record.Id,
+            record.UserId,
+            record.UserName,
+            record.ScriptInstanceId,
+            record.ScriptName,
+            record.QueueId,
+            record.QueueName,
+            record.Mode,
+            new DateTimeOffset(record.StartTime),
+            record.EndTime.HasValue ? new DateTimeOffset(record.EndTime.Value) : null,
+            string.IsNullOrWhiteSpace(record.FinalStatus) ? record.Status : record.FinalStatus);
+        var snapshots = new List<PluginHistoryRecord>();
+        int totalBytes = 0;
+        foreach (PluginHistoryContributionRegistration registration in HistoryContributions)
+        {
+            PluginHistoryDisplay? display;
+            try
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                display = registration.Contribution.Handler(context, timeout.Token)
+                    .AsTask()
+                    .WaitAsync(timeout.Token)
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[插件:{registration.PluginName}] 历史展示贡献执行失败（{registration.Contribution.Id}）：{ex.Message}");
+                continue;
+            }
+            if (!PluginUiValidation.TrySanitizeHistoryDisplay(display, out PluginHistoryDisplay? sanitized, out string error)
+                || sanitized is null)
+            {
+                if (!string.IsNullOrWhiteSpace(error))
+                {
+                    Logger.Warn($"[插件:{registration.PluginName}] 历史展示贡献无效（{registration.Contribution.Id}）：{error}");
+                }
+                continue;
+            }
+
+            var snapshot = new PluginHistoryRecord
+            {
+                PluginName = registration.PluginName,
+                PluginDisplayName = registration.PluginDisplayName,
+                Id = sanitized.Id,
+                Title = sanitized.Title,
+                Order = registration.Contribution.Order,
+                Badges = sanitized.Badges?.Select(badge => new PluginHistoryBadgeRecord
+                {
+                    Label = badge.Label,
+                    Tone = badge.Tone,
+                    Title = badge.Title,
+                }).ToList() ?? new List<PluginHistoryBadgeRecord>(),
+                Fields = sanitized.Fields?.Select(field => new PluginHistoryFieldRecord
+                {
+                    Label = field.Label,
+                    Value = field.Value,
+                    Tone = field.Tone,
+                }).ToList() ?? new List<PluginHistoryFieldRecord>(),
+            };
+            int bytes;
+            try
+            {
+                bytes = JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonOpts.Default).Length;
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[插件:{registration.PluginName}] 历史展示贡献序列化失败（{registration.Contribution.Id}）：{ex.Message}");
+                continue;
+            }
+            if (bytes > 16 * 1024 || totalBytes + bytes > 64 * 1024)
+            {
+                Logger.Warn($"[插件:{registration.PluginName}] 历史展示贡献超出大小上限（{registration.Contribution.Id}）");
+                continue;
+            }
+            snapshots.Add(snapshot);
+            totalBytes += bytes;
+        }
+        record.PluginHistory = snapshots;
+    }
+
+    internal IReadOnlyList<PluginFrontendRuntimeDescriptor> FrontendDescriptors
+    {
+        get
+        {
+            var result = new List<PluginFrontendRuntimeDescriptor>();
+            foreach (DataSpecializedPlugin plugin in _dataPlugins)
+            {
+                TryAddFrontendDescriptor(
+                    result,
+                    plugin.Name,
+                    plugin.DisplayName,
+                    plugin.Version,
+                    plugin.Frontend);
+            }
+            foreach (ManagedPluginDescriptor plugin in _managedPlugins)
+            {
+                TryAddFrontendDescriptor(
+                    result,
+                    plugin.Manifest.Name,
+                    plugin.Manifest.DisplayName,
+                    plugin.Manifest.Version,
+                    plugin.Manifest.Frontend);
+            }
+            return result.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
+        }
+    }
+
+    internal bool TryResolveFrontendAsset(
+        string pluginName,
+        string relativePath,
+        out string? filePath)
+    {
+        filePath = null;
+        if (!IsRuntimeEnabled(pluginName) || !IsFrontendTrusted(pluginName)
+            || !PluginFrontendManifest.IsPublicFrontendPath(relativePath))
+        {
+            return false;
+        }
+        string? pluginDirectory = _dataPlugins
+            .FirstOrDefault(plugin => string.Equals(plugin.Name, pluginName, StringComparison.OrdinalIgnoreCase))?.PluginDirectory;
+        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        if (data is null)
+        {
+            pluginDirectory = _managedPlugins.FirstOrDefault(plugin =>
+                string.Equals(plugin.Manifest.Name, pluginName, StringComparison.OrdinalIgnoreCase))?.Directory;
+        }
+        if (string.IsNullOrWhiteSpace(pluginDirectory))
+        {
+            return false;
+        }
+        string root = Path.GetFullPath(pluginDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string candidate = Path.GetFullPath(Path.Combine(pluginDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+            || !File.Exists(candidate)
+            || !IsPublicFrontendExtension(Path.GetExtension(candidate)))
+        {
+            return false;
+        }
+        filePath = candidate;
+        return true;
+    }
+
     public void Publish(PluginUserRunStartingEvent eventData)
     {
         _executionEvents.Publish(eventData);
@@ -133,6 +329,22 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     internal void DeleteUserData(string userId)
     {
         PluginUserDataStore.DeleteAllForUser(userId);
+        PluginScopedDataStore.DeleteUserData(userId);
+    }
+
+    internal void DeleteUserScriptData(string userId, string scriptId)
+    {
+        PluginScopedDataStore.DeleteUserScriptData(userId, scriptId);
+    }
+
+    internal void DeleteScriptData(string scriptId)
+    {
+        PluginScopedDataStore.DeleteScriptData(scriptId);
+    }
+
+    internal void DeleteQueueData(string queueId)
+    {
+        PluginScopedDataStore.DeleteQueueData(queueId);
     }
 
     /// <summary>专项插件是否支持安卓模拟器启动方式，由插件 manifest capability 声明。</summary>
@@ -186,6 +398,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _userGlobalManagement.Clear();
         _userListBadges.Clear();
         _executionEvents.Clear();
+        _uiContributions.Clear();
+        _webApi.Clear();
+        _historyContributions.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
         _managedRuntimes.Clear();
@@ -250,6 +465,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _userGlobalManagement.Clear();
         _userListBadges.Clear();
         _executionEvents.Clear();
+        _uiContributions.Clear();
+        _webApi.Clear();
+        _historyContributions.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -312,7 +530,16 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 AppSettings settings = _settings();
                 settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
                 string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
-                settings.PluginPreferences[key] = new PluginPreference { Enabled = enabled };
+                PluginPreference previous = settings.PluginPreferences.TryGetValue(key, out PluginPreference? existing)
+                    ? existing
+                    : new PluginPreference();
+                settings.PluginPreferences[key] = new PluginPreference
+                {
+                    Enabled = enabled,
+                    FrontendTrusted = previous.FrontendTrusted,
+                    FrontendTrustedVersion = previous.FrontendTrustedVersion,
+                    FrontendTrustedFingerprint = previous.FrontendTrustedFingerprint,
+                };
                 ConfigStore.Save(settings);
             }
         });
@@ -324,6 +551,64 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _configuredEnabled[name] = enabled;
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
         Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
+        failureCode = null;
+        return true;
+    }
+
+    internal bool HasFrontend(string name)
+    {
+        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase) && plugin.Frontend is not null)
+            || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase) && plugin.Manifest.Frontend is not null);
+    }
+
+    internal bool IsFrontendTrusted(string name)
+    {
+        if (!HasFrontend(name))
+        {
+            return false;
+        }
+        PluginPreference? preference = _settings().PluginPreferences?
+            .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
+        string version = GetPluginVersion(name);
+        string fingerprint = GetFrontendTrustFingerprint(name);
+        return preference?.FrontendTrusted == true
+            && string.Equals(preference.FrontendTrustedVersion, version, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(preference.FrontendTrustedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal bool SetFrontendTrusted(string name, bool trusted, string source, out string? failureCode)
+    {
+        if (!HasFrontend(name))
+        {
+            failureCode = "frontend_not_found";
+            return false;
+        }
+        bool changed = _tryConfigurationMutation(() =>
+        {
+            lock (RuntimeContext.Instance.SettingsMutationLock)
+            {
+                AppSettings settings = _settings();
+                settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
+                string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
+                bool enabled = settings.PluginPreferences.TryGetValue(key, out PluginPreference? existing)
+                    ? existing.Enabled
+                    : ReadConfiguredEnabled(name, IsManagedCode(name));
+                settings.PluginPreferences[key] = new PluginPreference
+                {
+                    Enabled = enabled,
+                    FrontendTrusted = trusted,
+                    FrontendTrustedVersion = trusted ? GetPluginVersion(name) : "",
+                    FrontendTrustedFingerprint = trusted ? GetFrontendTrustFingerprint(name) : "",
+                };
+                ConfigStore.Save(settings);
+            }
+        });
+        if (!changed)
+        {
+            failureCode = "host_maintenance";
+            return false;
+        }
+        Audit.Log(source, trusted ? "信任插件前端" : "撤销插件前端信任", name);
         failureCode = null;
         return true;
     }
@@ -383,6 +668,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 _userListBadges,
                 _executionEvents,
                 _http,
+                _uiContributions,
+                _webApi,
+                _historyContributions,
                 ex =>
                 {
                     _runtimeErrors[name] = ex.Message;
@@ -410,6 +698,97 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private bool IsManagedCode(string name)
     {
         return _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string GetPluginVersion(string name)
+    {
+        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (data is not null) return data.Version;
+        return _managedPlugins.FirstOrDefault(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase))?.Manifest.Version ?? "";
+    }
+
+    private string GetFrontendTrustFingerprint(string name)
+    {
+        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (data?.Frontend is not null)
+        {
+            return ComputeFrontendTrustFingerprint(data.Frontend, data.CapabilityKeys);
+        }
+        ManagedPluginDescriptor? managed = _managedPlugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
+        return managed?.Manifest.Frontend is null
+            ? ""
+            : ComputeFrontendTrustFingerprint(managed.Manifest.Frontend, managed.Manifest.Capabilities);
+    }
+
+    private static string ComputeFrontendTrustFingerprint(
+        PluginFrontendManifest frontend,
+        IEnumerable<string> capabilities)
+    {
+        string payload = string.Join(
+            "\n",
+            new[] { frontend.ApiVersion, frontend.Entry }
+                .Concat(frontend.Styles)
+                .Concat(capabilities
+                    .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
+                    .Select(item => "capability:" + item)));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+    }
+
+    private static PluginFrontendRuntimeDescriptor ToFrontendDescriptor(
+        string name,
+        string displayName,
+        string version,
+        PluginFrontendManifest frontend)
+    {
+        string prefix = "/plugin-assets/" + Uri.EscapeDataString(name) + "/";
+        return new PluginFrontendRuntimeDescriptor(
+            name,
+            displayName,
+            version,
+            frontend.ApiVersion,
+            prefix + frontend.Entry,
+            frontend.Styles.Select(style => prefix + style).ToArray());
+    }
+
+    private void TryAddFrontendDescriptor(
+        List<PluginFrontendRuntimeDescriptor> result,
+        string name,
+        string displayName,
+        string version,
+        PluginFrontendManifest? frontend)
+    {
+        try
+        {
+            if (!IsRuntimeEnabled(name) || !IsFrontendTrusted(name) || frontend is null)
+            {
+                return;
+            }
+            result.Add(ToFrontendDescriptor(name, displayName, version, frontend));
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件:{name}] 前端运行时清单生成失败：{ex.Message}");
+        }
+    }
+
+    private static string? FindPluginDirectory(string name)
+    {
+        if (!Directory.Exists(AppPaths.PluginsDir))
+        {
+            return null;
+        }
+        return Directory.GetDirectories(AppPaths.PluginsDir)
+            .FirstOrDefault(directory =>
+                string.Equals(Path.GetFileName(directory), name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsPublicFrontendExtension(string extension)
+    {
+        return extension.ToLowerInvariant() is ".js" or ".mjs" or ".css" or ".json"
+            or ".svg" or ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".ico"
+            or ".woff" or ".woff2";
     }
 
     private bool ReadConfiguredEnabled(string name, bool managedCode)
@@ -458,6 +837,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         private readonly PluginUserListBadgeRegistry _userListBadges;
         private readonly PluginExecutionEventRegistry _executionEvents;
         private readonly OutboundHttpClientProvider _http;
+        private readonly PluginUiContributionRegistry _ui;
+        private readonly PluginWebApiRegistry _webApi;
+        private readonly PluginHistoryContributionRegistry _history;
         private readonly Action<Exception> _reportJobError;
         private PluginLoadContext? _loadContext;
         private INexusPlugin? _plugin;
@@ -470,6 +852,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             PluginUserListBadgeRegistry userListBadges,
             PluginExecutionEventRegistry executionEvents,
             OutboundHttpClientProvider http,
+            PluginUiContributionRegistry ui,
+            PluginWebApiRegistry webApi,
+            PluginHistoryContributionRegistry history,
             Action<Exception> reportJobError)
         {
             _descriptor = descriptor;
@@ -478,6 +863,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             _userListBadges = userListBadges;
             _executionEvents = executionEvents;
             _http = http;
+            _ui = ui;
+            _webApi = webApi;
+            _history = history;
             _reportJobError = reportJobError;
         }
 
@@ -514,7 +902,10 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     _userGlobalManagement,
                     _userListBadges,
                     _executionEvents,
-                    _http);
+                    _http,
+                    _ui,
+                    _webApi,
+                    _history);
                 plugin.InitializeAsync(_hostContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
                 plugin.StartAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }

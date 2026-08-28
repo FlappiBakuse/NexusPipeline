@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Plugins.Managed;
 
@@ -24,6 +25,8 @@ internal sealed class PluginManifest
     public string EntryType { get; private init; } = "";
 
     public IReadOnlySet<string> Capabilities => _capabilities;
+
+    public PluginFrontendManifest? Frontend { get; private set; }
 
     private readonly HashSet<string> _capabilities = new(StringComparer.OrdinalIgnoreCase);
 
@@ -77,6 +80,12 @@ internal sealed class PluginManifest
             {
                 result._capabilities.Add("emulator");
             }
+            if (!PluginFrontendManifest.TryParse(root, result._capabilities, out PluginFrontendManifest? frontend, out string? frontendError))
+            {
+                error = frontendError;
+                return false;
+            }
+            result.Frontend = frontend;
             if (string.IsNullOrWhiteSpace(result.Name))
             {
                 error = "缺少插件 name";

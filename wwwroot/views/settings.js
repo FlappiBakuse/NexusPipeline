@@ -6,6 +6,7 @@ import { icon } from "../core/icons.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
 let restartRequired = false;
 let openSettingsPanel = "service";
@@ -30,7 +31,8 @@ export async function pageSettings(token) {
     ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
     ${settingsCardMarkup("network", "网络代理", "宿主外部 HTTP/HTTPS 请求", networkSettingsMarkup(settings), "network-settings")}
     ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
-  </div>`);
+  </div>${pluginSlotMarkup("settings.sections", "settings.sections", "settings-plugin-slot", { mode: "settings" })}`);
+  await renderPluginSlots(document.querySelector("#view"));
   syncSettingsPanels();
   bindAutoSave();
   renderUpdateStatus();

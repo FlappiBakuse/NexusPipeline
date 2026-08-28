@@ -45,6 +45,9 @@ internal static class ApiPluginsHandler
                 runtimeEnabled = manager.IsEnabled(plugin.Name),
                 state = manager.GetRuntimeState(plugin.Name),
                 error = manager.GetRuntimeError(plugin.Name),
+                hasFrontend = plugin.HasFrontend,
+                frontendApiVersion = plugin.FrontendApiVersion,
+                frontendTrusted = manager.IsFrontendTrusted(plugin.Name),
                 restartRequired = manager.IsConfiguredEnabled(plugin.Name)
                     != manager.IsEnabled(plugin.Name),
             })).ConfigureAwait(false);
@@ -56,6 +59,31 @@ internal static class ApiPluginsHandler
             return;
         }
         string name = seg[1];
+        if (seg[2].Equals("trust-frontend", StringComparison.OrdinalIgnoreCase)
+            || seg[2].Equals("revoke-frontend", StringComparison.OrdinalIgnoreCase))
+        {
+            bool trusted = seg[2].Equals("trust-frontend", StringComparison.OrdinalIgnoreCase);
+            PluginManager manager = RuntimeContext.Instance.Plugins;
+            if (!manager.SetFrontendTrusted(name, trusted, Audit.Web, out string? trustFailureCode))
+            {
+                int status = trustFailureCode == "host_maintenance" ? 409 : 404;
+                string message = trustFailureCode == "host_maintenance"
+                    ? "宿主正在进行维护操作，暂不能修改插件前端信任设置"
+                    : $"插件不存在或没有前端模块：{name}";
+                await HttpHelper.WriteJsonAsync(
+                    context,
+                    new { ok = false, code = trustFailureCode ?? "frontend_not_found", error = message },
+                    status).ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                ok = true,
+                frontendTrusted = manager.IsFrontendTrusted(name),
+                restartRequired = false,
+            }).ConfigureAwait(false);
+            return;
+        }
         // 显式校验 enable/disable，其余字符串 400（此前任意字符串都按 disable 处理）。
         string verb = seg[2].ToLowerInvariant();
         if (verb is not ("enable" or "disable"))

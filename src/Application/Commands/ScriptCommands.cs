@@ -225,6 +225,7 @@ internal static class ScriptCommands
                     if (removed is not null)
                     {
                         UserConfigManager.RemoveScriptData(scriptId);
+                        ctx.Plugins.DeleteScriptData(scriptId);
                     }
                     ConfigSwapPrimitives.RemoveMutex(scriptId);
                 },

@@ -13,6 +13,21 @@ internal static class ApiPluginContributionsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
+        if (TryParseUiQueryRoute(method, seg))
+        {
+            await QueryUiAsync(context, body).ConfigureAwait(false);
+            return;
+        }
+        if (TryParseUiActionRoute(method, seg, out string actionPluginName, out string actionContributionId, out string action))
+        {
+            await RunUiActionAsync(context, actionPluginName, actionContributionId, action, body).ConfigureAwait(false);
+            return;
+        }
+        if (TryParseUiSaveRoute(method, seg, out string savePluginName, out string saveContributionId))
+        {
+            await SaveUiAsync(context, savePluginName, saveContributionId, body).ConfigureAwait(false);
+            return;
+        }
         if (TryParseUserListBadgesRoute(method, seg))
         {
             await ReadUserListBadgesAsync(context).ConfigureAwait(false);
@@ -46,6 +61,59 @@ internal static class ApiPluginContributionsHandler
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    internal static bool TryParseUiQueryRoute(string method, string[] seg)
+    {
+        return method == "POST"
+            && seg.Length == 3
+            && seg[0].Equals("plugin-contributions", StringComparison.OrdinalIgnoreCase)
+            && seg[1].Equals("ui", StringComparison.OrdinalIgnoreCase)
+            && seg[2].Equals("query", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool TryParseUiSaveRoute(
+        string method,
+        string[] seg,
+        out string pluginName,
+        out string contributionId)
+    {
+        pluginName = "";
+        contributionId = "";
+        if (method != "PUT"
+            || seg.Length != 4
+            || !seg[0].Equals("plugin-contributions", StringComparison.OrdinalIgnoreCase)
+            || !seg[1].Equals("ui", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        pluginName = Uri.UnescapeDataString(seg[2]);
+        contributionId = Uri.UnescapeDataString(seg[3]);
+        return true;
+    }
+
+    internal static bool TryParseUiActionRoute(
+        string method,
+        string[] seg,
+        out string pluginName,
+        out string contributionId,
+        out string action)
+    {
+        pluginName = "";
+        contributionId = "";
+        action = "";
+        if (method != "POST"
+            || seg.Length != 6
+            || !seg[0].Equals("plugin-contributions", StringComparison.OrdinalIgnoreCase)
+            || !seg[1].Equals("ui", StringComparison.OrdinalIgnoreCase)
+            || !seg[4].Equals("action", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        pluginName = Uri.UnescapeDataString(seg[2]);
+        contributionId = Uri.UnescapeDataString(seg[3]);
+        action = Uri.UnescapeDataString(seg[5]);
+        return true;
     }
 
     internal static bool TryParseUserListBadgesRoute(string method, string[] seg)
@@ -89,6 +157,303 @@ internal static class ApiPluginContributionsHandler
             return true;
         }
         return false;
+    }
+
+    private static async Task QueryUiAsync(HttpListenerContext context, string body)
+    {
+        JsonObject? root = HttpHelper.ParseBody(body) as JsonObject;
+        string slot = ReadString(root?["slot"]);
+        if (root is null || !PluginUiSlots.All.Contains(slot) || root["contexts"] is not JsonArray contexts || contexts.Count is < 1 or > 256)
+        {
+            await UiValidationErrorAsync(context, "插件 UI 查询参数无效").ConfigureAwait(false);
+            return;
+        }
+
+        var parsedContexts = new List<PluginUiContext>(contexts.Count);
+        foreach (JsonNode? item in contexts)
+        {
+            if (item is not JsonObject contextObject)
+            {
+                await UiValidationErrorAsync(context, "插件 UI 上下文无效").ConfigureAwait(false);
+                return;
+            }
+            if (!TryCreateUiContext(contextObject, slot, out PluginUiContext uiContext, out string error))
+            {
+                await UiValidationErrorAsync(context, error.Length == 0 ? "插件 UI 上下文无效" : error).ConfigureAwait(false);
+                return;
+            }
+            parsedContexts.Add(uiContext);
+        }
+
+        PluginManager plugins = RuntimeContext.Instance.Plugins;
+        var result = new List<object>();
+        foreach (PluginUiContributionRegistration registration in plugins.UiContributions.Where(item =>
+                     string.Equals(item.Contribution.Slot, slot, StringComparison.OrdinalIgnoreCase)))
+        {
+            foreach (PluginUiContext uiContext in parsedContexts)
+            {
+                JsonObject values = new();
+                if (registration.Contribution.ReadHandler is not null)
+                {
+                    try
+                    {
+                        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        JsonObject? payload = await registration.Contribution.ReadHandler(uiContext, timeout.Token)
+                            .AsTask()
+                            .WaitAsync(timeout.Token)
+                            .ConfigureAwait(false);
+                        if (!PluginUiValidation.TrySanitizeRead(registration.Contribution, payload, out values, out string error))
+                        {
+                            Logger.Warn($"[插件:{registration.PluginName}] UI 贡献读取内容无效（{registration.Contribution.Id}）：{error}");
+                            continue;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[插件:{registration.PluginName}] UI 贡献读取失败（{registration.Contribution.Id}）：{ex.Message}");
+                        continue;
+                    }
+                }
+
+                result.Add(ProjectUiContribution(registration, uiContext, values));
+            }
+        }
+        await HttpHelper.WriteJsonAsync(context, new { slot, contributions = result }).ConfigureAwait(false);
+    }
+
+    private static async Task SaveUiAsync(
+        HttpListenerContext context,
+        string pluginName,
+        string contributionId,
+        string body)
+    {
+        JsonObject? root = HttpHelper.ParseBody(body) as JsonObject;
+        if (!TryParseUiContextFromBody(root, out PluginUiContext uiContext, out JsonObject? values, out string error))
+        {
+            await UiValidationErrorAsync(context, error).ConfigureAwait(false);
+            return;
+        }
+        PluginManager plugins = RuntimeContext.Instance.Plugins;
+        if (!plugins.TryGetUiContribution(pluginName, contributionId, out PluginUiContributionRegistration? registration)
+            || registration is null
+            || !string.Equals(registration.Contribution.Slot, uiContext.Slot, StringComparison.OrdinalIgnoreCase))
+        {
+            await UiContributionNotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        if (registration.Contribution.SaveHandler is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "action_not_supported", error = "该插件 UI 贡献不支持保存" }, 405).ConfigureAwait(false);
+            return;
+        }
+        if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
+        {
+            await UiValidationErrorAsync(context, error).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await registration.Contribution.SaveHandler(
+                    uiContext,
+                    (JsonObject)values!.DeepClone(),
+                    timeout.Token)
+                .AsTask()
+                .WaitAsync(timeout.Token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件:{registration.PluginName}] UI 贡献保存失败（{registration.Contribution.Id}）：{ex.Message}");
+            await UiPluginErrorAsync(context, "保存插件 UI 设置失败").ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+    }
+
+    private static async Task RunUiActionAsync(
+        HttpListenerContext context,
+        string pluginName,
+        string contributionId,
+        string action,
+        string body)
+    {
+        if (!IsSafeAction(action))
+        {
+            await UiValidationErrorAsync(context, "插件 UI 动作名无效").ConfigureAwait(false);
+            return;
+        }
+        JsonObject? root = HttpHelper.ParseBody(body) as JsonObject;
+        if (!TryParseUiContextFromBody(root, out PluginUiContext uiContext, out JsonObject? values, out string error))
+        {
+            await UiValidationErrorAsync(context, error).ConfigureAwait(false);
+            return;
+        }
+        PluginManager plugins = RuntimeContext.Instance.Plugins;
+        if (!plugins.TryGetUiContribution(pluginName, contributionId, out PluginUiContributionRegistration? registration)
+            || registration is null
+            || !string.Equals(registration.Contribution.Slot, uiContext.Slot, StringComparison.OrdinalIgnoreCase))
+        {
+            await UiContributionNotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        if (registration.Contribution.ActionHandler is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "action_not_supported", error = "该插件 UI 贡献不支持此动作" }, 405).ConfigureAwait(false);
+            return;
+        }
+        if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
+        {
+            await UiValidationErrorAsync(context, error).ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            JsonObject? payload = await registration.Contribution.ActionHandler(
+                    uiContext,
+                    action,
+                    (JsonObject)values!.DeepClone(),
+                    timeout.Token)
+                .AsTask()
+                .WaitAsync(timeout.Token)
+                .ConfigureAwait(false);
+            if (!PluginUiValidation.TrySanitizeRead(registration.Contribution, payload, out JsonObject sanitized, out error))
+            {
+                Logger.Warn($"[插件:{registration.PluginName}] UI 动作返回内容无效（{registration.Contribution.Id}/{action}）：{error}");
+                await UiPluginErrorAsync(context, "插件 UI 动作返回无效内容").ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, value = sanitized }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件:{registration.PluginName}] UI 动作执行失败（{registration.Contribution.Id}/{action}）：{ex.Message}");
+            await UiPluginErrorAsync(context, "执行插件 UI 动作失败").ConfigureAwait(false);
+        }
+    }
+
+    private static bool TryParseUiContextFromBody(
+        JsonObject? root,
+        out PluginUiContext uiContext,
+        out JsonObject? values,
+        out string error)
+    {
+        uiContext = new PluginUiContext("");
+        values = null;
+        error = "插件 UI 请求格式不正确";
+        if (root?["context"] is not JsonObject contextObject || root["values"] is not JsonObject valueObject)
+        {
+            return false;
+        }
+        string slot = ReadString(contextObject["slot"]);
+        if (!PluginUiSlots.All.Contains(slot))
+        {
+            error = "插件 UI slot 不受支持";
+            return false;
+        }
+        if (!TryCreateUiContext(contextObject, slot, out uiContext, out error))
+        {
+            return false;
+        }
+        values = valueObject;
+        return true;
+    }
+
+    private static bool TryCreateUiContext(
+        JsonObject source,
+        string slot,
+        out PluginUiContext uiContext,
+        out string error)
+    {
+        string mode = ReadString(source["mode"]);
+        string primaryId = ReadString(source["primaryId"]);
+        string secondaryId = ReadString(source["secondaryId"]);
+        if (!IsSafeContextValue(mode) || !IsSafeContextValue(primaryId) || !IsSafeContextValue(secondaryId))
+        {
+            uiContext = new PluginUiContext(slot);
+            error = "插件 UI 上下文值无效";
+            return false;
+        }
+        uiContext = new PluginUiContext(slot, mode, primaryId, secondaryId);
+        error = "";
+        return true;
+    }
+
+    private static object ProjectUiContribution(
+        PluginUiContributionRegistration registration,
+        PluginUiContext uiContext,
+        JsonObject values)
+    {
+        PluginUiContribution contribution = registration.Contribution;
+        return new
+        {
+            pluginName = registration.PluginName,
+            pluginDisplayName = registration.PluginDisplayName,
+            id = contribution.Id,
+            slot = contribution.Slot,
+            kind = contribution.Kind,
+            title = contribution.Title,
+            description = contribution.Description,
+            order = contribution.Order,
+            fields = ProjectUiFields(contribution),
+            context = new
+            {
+                slot = uiContext.Slot,
+                mode = uiContext.Mode,
+                primaryId = uiContext.PrimaryId,
+                secondaryId = uiContext.SecondaryId,
+            },
+            values,
+        };
+    }
+
+    private static object[] ProjectUiFields(PluginUiContribution contribution)
+    {
+        return (contribution.Fields ?? Array.Empty<PluginUiField>())
+            .Select(field => new
+            {
+                key = field.Key,
+                label = field.Label,
+                type = field.Type,
+                description = field.Description,
+                required = field.Required,
+                placeholder = field.Placeholder,
+                maxLength = field.MaxLength,
+                readOnly = field.ReadOnly || field.Type.Equals("status", StringComparison.OrdinalIgnoreCase),
+                min = field.Min,
+                max = field.Max,
+                step = field.Step,
+                options = field.Options?.Select(option => new { value = option.Value, label = option.Label }).ToList(),
+            })
+            .Cast<object>()
+            .ToArray();
+    }
+
+    private static string ReadString(JsonNode? node)
+    {
+        if (node is null) return "";
+        try
+        {
+            return node.GetValue<string>()?.Trim() ?? "";
+        }
+        catch (InvalidOperationException)
+        {
+            return "";
+        }
+    }
+
+    private static bool IsSafeContextValue(string value)
+    {
+        return value.Length <= 256 && value.All(character => !char.IsControl(character));
+    }
+
+    private static bool IsSafeAction(string action)
+    {
+        return action.Length is > 0 and <= 64
+            && action.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     }
 
     private static async Task ReadAsync(HttpListenerContext context, string userId)
@@ -236,6 +601,24 @@ internal static class ApiPluginContributionsHandler
             404);
 
     private static Task PluginErrorAsync(HttpListenerContext context, string message) =>
+        HttpHelper.WriteJsonAsync(
+            context,
+            new { ok = false, error = message, code = "plugin_error" },
+            500);
+
+    private static Task UiValidationErrorAsync(HttpListenerContext context, string message) =>
+        HttpHelper.WriteJsonAsync(
+            context,
+            new { ok = false, error = message, code = "validation_error" },
+            400);
+
+    private static Task UiContributionNotFoundAsync(HttpListenerContext context) =>
+        HttpHelper.WriteJsonAsync(
+            context,
+            new { ok = false, error = "插件 UI 贡献不存在或插件未启用", code = "contribution_not_found" },
+            404);
+
+    private static Task UiPluginErrorAsync(HttpListenerContext context, string message) =>
         HttpHelper.WriteJsonAsync(
             context,
             new { ok = false, error = message, code = "plugin_error" },

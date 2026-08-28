@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_2
+internal sealed class PluginHostContext : IPluginHostContextV1_3
 {
     public PluginHostContext(
         string pluginName,
@@ -19,7 +19,10 @@ internal sealed class PluginHostContext : IPluginHostContextV1_2
         PluginUserGlobalManagementRegistry globalManagement,
         PluginUserListBadgeRegistry userListBadges,
         PluginExecutionEventRegistry executionEvents,
-        OutboundHttpClientProvider http)
+        OutboundHttpClientProvider http,
+        PluginUiContributionRegistry ui,
+        PluginWebApiRegistry webApi,
+        PluginHistoryContributionRegistry history)
     {
         PluginName = pluginName;
         Logger = new PluginLogger(pluginName);
@@ -32,6 +35,10 @@ internal sealed class PluginHostContext : IPluginHostContextV1_2
         _userListBadges = new PluginUserListBadgeAdapter(userListBadges, pluginName, pluginDisplayName);
         _executionEvents = new PluginExecutionEventAdapter(executionEvents, pluginName);
         Http = new PluginHttpClientFactory(http);
+        _ui = new PluginUiContributionAdapter(ui, pluginName, pluginDisplayName);
+        ScopedData = new PluginScopedDataStore(pluginName);
+        _webApi = new PluginWebApiAdapter(webApi, pluginName);
+        _history = new PluginHistoryContributionAdapter(history, pluginName, pluginDisplayName);
     }
 
     public string PluginName { get; }
@@ -56,16 +63,33 @@ internal sealed class PluginHostContext : IPluginHostContextV1_2
 
     public IPluginHttpClientFactory Http { get; }
 
+    public IPluginUiContributionRegistry Ui => _ui;
+
+    public IPluginScopedDataStore ScopedData { get; }
+
+    public IPluginWebApiRegistry WebApi => _webApi;
+
+    public IPluginHistoryContributionRegistry History => _history;
+
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
 
     private readonly PluginUserListBadgeAdapter _userListBadges;
     private readonly PluginExecutionEventAdapter _executionEvents;
+
+    private readonly PluginUiContributionAdapter _ui;
+
+    private readonly PluginWebApiAdapter _webApi;
+
+    private readonly PluginHistoryContributionAdapter _history;
 
     public void Dispose()
     {
         _executionEvents.Dispose();
         _userListBadges.Dispose();
         _globalManagement.Dispose();
+        _ui.Dispose();
+        _webApi.Dispose();
+        _history.Dispose();
         ((PluginJobScheduler)Scheduler).Dispose();
     }
 
@@ -365,5 +389,150 @@ internal sealed class PluginNotificationAdapter : IPluginNotificationService
     public ValueTask SendAsync(PluginNotification notification, CancellationToken cancellationToken = default)
     {
         return _dispatcher.SendPluginAsync(notification, cancellationToken);
+    }
+}
+
+internal sealed class PluginUiContributionAdapter : IPluginUiContributionRegistry, IDisposable
+{
+    private readonly PluginUiContributionRegistry _registry;
+    private readonly string _pluginName;
+    private readonly string _pluginDisplayName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+
+    public PluginUiContributionAdapter(
+        PluginUiContributionRegistry registry,
+        string pluginName,
+        string pluginDisplayName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+        _pluginDisplayName = pluginDisplayName;
+    }
+
+    public IDisposable Register(PluginUiContribution contribution)
+    {
+        IDisposable registration = _registry.Register(_pluginName, _pluginDisplayName, contribution);
+        lock (_sync)
+        {
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
+    }
+}
+
+internal sealed class PluginWebApiAdapter : IPluginWebApiRegistry, IDisposable
+{
+    private readonly PluginWebApiRegistry _registry;
+    private readonly string _pluginName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+
+    public PluginWebApiAdapter(PluginWebApiRegistry registry, string pluginName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+    }
+
+    public IDisposable Register(PluginWebApiRoute route)
+    {
+        IDisposable registration = _registry.Register(_pluginName, route);
+        lock (_sync)
+        {
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
+    }
+}
+
+internal sealed class PluginHistoryContributionAdapter : IPluginHistoryContributionRegistry, IDisposable
+{
+    private readonly PluginHistoryContributionRegistry _registry;
+    private readonly string _pluginName;
+    private readonly string _pluginDisplayName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+
+    public PluginHistoryContributionAdapter(
+        PluginHistoryContributionRegistry registry,
+        string pluginName,
+        string pluginDisplayName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+        _pluginDisplayName = pluginDisplayName;
+    }
+
+    public IDisposable Register(PluginHistoryContribution contribution)
+    {
+        IDisposable registration = _registry.Register(_pluginName, _pluginDisplayName, contribution);
+        lock (_sync)
+        {
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
     }
 }

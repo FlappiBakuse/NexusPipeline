@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.2 与宿主交互。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 与宿主交互。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -15,6 +15,12 @@ NexusPipeline-Plugins/plugins/
 │       ├── judge.js              # 判断脚本（.js = 内置 Jint 引擎 / .py = 系统 python.exe）
 │       └── config-template/      # 可选：默认配置模板目录（编辑会话生成用）
 │           └── NexusPipeline.json
+├── check-in/                     # 可选 managed-code 插件
+│   ├── plugin.json
+│   ├── CheckInPlugin.dll
+│   └── web/                      # 可选：可信前端模块与静态资源
+│       ├── main.js
+│       └── style.css
 ├── march7th/       （plugin.json + data/{resolve.json, judge.js}）
 ├── zzzonedragon/   （同构）
 └── maaend/         （同构）
@@ -24,11 +30,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库通过根目录 `catalog.json` 发布当前版本和包校验信息；客户端只信任固定官方源，下载后再次检查 manifest。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.2）
+## managed-code C# 插件（Plugin API v1.3）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.2`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0`、`1.1` 与 `1.2` 插件可加载，`1.3` 与 `2.0` 插件会被拒绝。
+宿主当前 API 版本为 `1.3`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0`、`1.1`、`1.2` 与 `1.3` 插件可加载，`1.4` 与 `2.0` 插件会被拒绝。
 
 ```text
 plugins/check-in/
@@ -44,16 +50,21 @@ plugins/check-in/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.2",
+  "apiVersion": "1.3",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
-  "capabilities": ["background-jobs"]
+  "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
+  "frontend": {
+    "apiVersion": "1.0",
+    "entry": "web/main.js",
+    "styles": ["web/style.css"]
+  }
 }
 ```
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<插件名>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
@@ -65,7 +76,82 @@ plugins/check-in/
 
 用户列表徽章接口为 `GET /api/plugin-contributions/user-list-badges`，一次返回全部用户的徽章快照。每个徽章由宿主投影为 `pluginName`、`pluginDisplayName`、`id`、`label`、`tone`、`title` 和 `order`；`tone` 仅允许 `muted`、`blue`、`ok`、`warn`、`bad`，无效徽章会被记录并丢弃，不影响用户列表。
 
-`capabilities` 仅作为发现元数据。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state` 和 `error` 字段中查看。
+### v1.3 通用扩展端口
+
+`IPluginHostContextV1_3` 在 v1.2 基础上增加 `Ui`、`ScopedData`、`WebApi` 和 `History`。这些端口只使用稳定的字符串、JSON DTO 和取消令牌，不暴露宿主 DI 容器、领域模型或 `HttpListenerContext`。
+
+#### 声明式 UI
+
+`context.Ui.Register(new PluginUiContribution(...))` 可向以下稳定 slot 注册 Form、Badge 或 Card：
+
+```text
+dashboard.cards                 dashboard.after-running
+users.list.badges               users.binding.sections
+users.global.sections           scripts.list.badges
+scripts.editor.sections         queues.list.badges
+queues.editor.sections          dispatch.cards
+dispatch.running.badges         dispatch.run.sections
+history.list.badges             history.detail.sections
+settings.sections               shell.nav
+```
+
+每个贡献包含稳定 `id`、`slot`、`kind`、标题、说明、排序值和可选字段。字段类型包括 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`，以及 v1.3 的 `number`、`color`、`range`、`url`。上下文使用 `PluginUiContext(Slot, Mode, PrimaryId, SecondaryId)`；例如脚本编辑器可用 `PrimaryId` 表示脚本实例，用户绑定设置可同时传入用户和脚本 ID。
+
+宿主提供通用 HTTP 投影：
+
+- `POST /api/plugin-contributions/ui/query`：body 为 `{ "slot": "settings.sections", "contexts": [...] }`，批量读取指定 slot 的贡献；
+- `PUT /api/plugin-contributions/ui/{pluginName}/{contributionId}`：body 为 `{ "context": {...}, "values": {...} }`，提交表单；
+- `POST /api/plugin-contributions/ui/{pluginName}/{contributionId}/action/{action}`：提交带动作名和字段值的 Card/Form 操作。
+
+读取结果、保存值和动作返回值均经过字段名、数量、类型、长度和只读字段校验。`secret` 读取只返回 `{configured:true|false}`，保存使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`；`status` 字段为只读。处理器异常、超时或无效返回会隔离在对应贡献内。
+
+#### 作用域数据
+
+`IPluginScopedDataStore` 以插件为顶级隔离边界，scope 只允许安全的 ASCII 段，数据保存于 `config/plugins/<插件名>/scopes/`。建议使用以下约定：`global`、`user/<userId>`、`script/<scriptId>`、`queue/<queueId>`、`user-script/<userId>/<scriptId>`。读写接口支持 JSON 和泛型对象，宿主拒绝绝对路径、反斜杠、`.`、`..` 及越界段。
+
+删除全局用户、脚本实例、调度队列或用户脚本绑定时，宿主会清理对应作用域文件。历史数据中的插件展示快照与插件作用域数据相互独立；卸载插件不会回写或重写历史记录。
+
+#### 插件自有 Web API
+
+插件可通过 `context.WebApi.Register(new PluginWebApiRoute("GET", "health", handler))` 注册自己的路由。最终地址为 `/api/plugin-api/{pluginName}/health`，支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`。handler 收到 `PluginWebApiRequest`（方法、规范化相对路由、查询字典、可选 JSON body），返回 `PluginWebApiResponse.Json(...)` 或 `PluginWebApiResponse.Empty(204)`。
+
+宿主为每次调用设置 30 秒超时，并限制 JSON 响应为 2 MiB；未知路由、无效状态码、超时、异常和无效 JSON 响应均使用 `{ "ok": false, "code": "plugin_error", "error": "..." }` 形式处理。路由只能由注册它的插件访问，路径段拒绝空段、反斜杠及 `.`/`..`。
+
+#### 历史展示
+
+`context.History.Register(new PluginHistoryContribution(...))` 可在运行历史保存前生成纯文本展示快照。快照只允许标题、徽章和字段，单个插件贡献最多 16 KiB，全部插件单次运行最多 64 KiB；处理器最多执行 5 秒。快照写入 `RunRecord.PluginHistory`，不参与状态、尝试次数、结果和通知判定，插件卸载后仍可由历史页面展示。
+
+### 前端插件运行时（Frontend API 1.0）
+
+前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
+
+```json
+"capabilities": ["frontend-module"],
+"frontend": {
+  "apiVersion": "1.0",
+  "entry": "web/main.js",
+  "styles": ["web/style.css"]
+}
+```
+
+入口 ES module 必须导出 `activate(host)`。宿主通过 `GET /api/plugin-runtime/frontend` 发布已启用、API 兼容、当前版本已确认信任的安全描述，动态加载入口并按需注入样式。插件 host 提供：
+
+- `host.api.get/post/put/patch/delete(route, body, signal)`：访问插件自己的 `/api/plugin-api/` 命名空间；
+- `host.actions.register(id, handler)`：注册带 `plugin:<name>:` 前缀的全局 action；
+- `host.routes.register(route, handler)`：注册 `#/plugin/<name>/<route>` 页面路由；
+- `host.nav.register({ id, title, route, icon, order })`：向 `shell.nav` 增加导航项；
+- `host.slots.register(slot, renderer)`：接入稳定 UI slot，自定义 renderer 可返回清理函数；
+- `host.ui.query/save/action(...)`：使用声明式 UI 贡献接口；
+- `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
+- `host.appearance`：注册主题、设置 CSS token、应用主题和管理壁纸。
+
+前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。该能力只对用户明确确认信任的插件开放，插件更新版本或前端声明变化后会重新要求确认。前端信任记录按插件版本与前端声明指纹保存于 `AppSettings.PluginPreferences`，manifest 的入口、样式或 capability 变化会要求重新确认；撤销信任后模块不会出现在运行时清单。
+
+前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
+
+外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。壁纸 Blob 放在 IndexedDB，当前主题和壁纸元数据放在 `localStorage`，不写入宿主 `AppSettings`。
+
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`frontendTrusted` 和 `error` 字段中查看。
 
 ## plugin.json（根文件）
 

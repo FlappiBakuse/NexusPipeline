@@ -262,6 +262,40 @@ internal sealed class WebServer : IDisposable
                 }
                 return;
             }
+            if (path.StartsWith("/plugin-assets/", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!_options.ServeWebUi)
+                {
+                    await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+                if (method is not ("GET" or "HEAD"))
+                {
+                    await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+                    return;
+                }
+                string[] assetSegments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (assetSegments.Length < 3)
+                {
+                    await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+                string pluginName = Uri.UnescapeDataString(assetSegments[1]);
+                string relativePath = string.Join(
+                    "/",
+                    assetSegments.Skip(2).Select(Uri.UnescapeDataString));
+                if (!RuntimeContext.Instance.Plugins.TryResolveFrontendAsset(
+                        pluginName,
+                        relativePath,
+                        out string? assetPath)
+                    || assetPath is null)
+                {
+                    await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                    return;
+                }
+                HttpHelper.ServeFile(context, assetPath);
+                return;
+            }
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             {
                 if (!IsAllowedOrigin(context, out string? originDetail))

@@ -5,6 +5,7 @@ import { icon } from "../core/icons.js";
 import { isCurrent, state } from "../core/state.js";
 import { modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
 let historyDays = 30;
 let historyDates = [];
@@ -51,11 +52,32 @@ function entryMarkup(record) {
   return `<button class="history-entry history-status-${esc(finalStatusOf(record))}" type="button" data-action="history-detail" data-id="${esc(record.id)}" data-testid="history-entry">
     <span class="history-entry-bar" aria-hidden="true"></span>
     <span class="history-entry-main">
-      <span class="history-entry-title"><strong>${fmtDateTimeCN(record.startTime)} · ${esc(record.scriptName)}${queue}</strong>${entryBadge(record)}</span>
+      <span class="history-entry-title"><strong>${fmtDateTimeCN(record.startTime)} · ${esc(record.scriptName)}${queue}</strong>${entryBadge(record)}${pluginHistoryBadges(record)}${pluginSlotMarkup("history.list.badges", `history-${record.id}`, "history-plugin-slot", { mode: "list", primaryId: record.id })}</span>
       <span class="history-entry-path">${filePath}</span>
     </span>
     <span class="history-entry-arrow" aria-hidden="true">${icon("chevronRight")}</span>
   </button>`;
+}
+
+function pluginHistoryBadges(record) {
+  const tones = new Set(["muted", "blue", "ok", "warn", "bad"]);
+  return (record.pluginHistory || []).flatMap(item => (item.badges || []).map(badge => {
+    const tone = tones.has(String(badge.tone || "").toLowerCase()) ? String(badge.tone).toLowerCase() : "muted";
+    return `<span class="badge ${tone}" title="${esc(badge.title || item.pluginDisplayName || item.pluginName || "")}">${esc(badge.label || "")}</span>`;
+  })).join("");
+}
+
+function pluginHistoryDetailMarkup(record) {
+  const tones = new Set(["muted", "blue", "ok", "warn", "bad"]);
+  const items = (record.pluginHistory || []).map(item => {
+    const badges = (item.badges || []).map(badge => {
+      const tone = tones.has(String(badge.tone || "").toLowerCase()) ? String(badge.tone).toLowerCase() : "muted";
+      return `<span class="badge ${tone}" title="${esc(badge.title || "")}">${esc(badge.label || "")}</span>`;
+    }).join("");
+    const fields = (item.fields || []).map(field => `<div class="kv"><span class="k">${esc(field.label || "")}</span><span>${esc(field.value || "")}</span></div>`).join("");
+    return `<section class="subsection plugin-history-detail"><div class="section-heading"><h3>${esc(item.title || item.id || "插件信息")}</h3><span class="muted">${esc(item.pluginDisplayName || item.pluginName || "")}</span></div>${badges ? `<div class="plugin-contribution-badge">${badges}</div>` : ""}${fields ? `<div class="detail">${fields}</div>` : ""}</section>`;
+  }).join("");
+  return items ? `<section class="plugin-history-section"><div class="section-heading"><h3>插件运行信息</h3><span class="muted">运行完成时保存的展示快照</span></div>${items}</section>` : "";
 }
 
 function panelsMarkup(records) {
@@ -109,6 +131,7 @@ async function loadDayRecords(token) {
   historyDir = data.historyDir || "";
   const records = data.records || [];
   render(pageHeader("历史记录", "历史记录", `最近 ${historyDays} 天 · 按日期查看运行记录`, daysAction()) + panelsMarkup(records));
+  await renderPluginSlots(document.querySelector("#view"));
 }
 
 /** 天数范围切换：扩展为 7/15/30/60/90/120/180 天，切换后重拉日期列表并回落最新日期。 */
@@ -153,8 +176,9 @@ export async function historyDetail(id) {
       const logInfo = (data.attemptLogs || []).find(l => l.number === attempt.number);
       return `<div class="subsection"><h3>第 ${attempt.number} 次尝试：${attempt.status === "success" ? "成功" : attempt.status === "cancelled" ? "已取消" : "失败"}</h3><div class="detail"><div class="kv"><span class="k">原因</span><span>${esc(attempt.reason || "-")}</span></div><div class="kv"><span class="k">时间</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, `脚本日志（第 ${attempt.number} 次尝试）`)} </div>`;
     }).join("");
-    const body = `<div class="history-summary"><div><span class="k">结果</span><span class="v">${statusBadge(finalStatusOf(record))}</span></div><div><span class="k">运行模式</span><span class="v">${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div><div><span class="k">尝试次数</span><span class="v">${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div><div><span class="k">开始时间</span><span class="v">${esc(fmtTime(record.startTime))}</span></div></div><div class="detail"><div class="kv"><span class="k">开始</span><span>${esc(fmtTime(record.startTime))}</span></div><div class="kv"><span class="k">结束</span><span>${esc(fmtTime(record.endTime))}</span></div><div class="kv"><span class="k">模式</span><span>${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div>${record.userName ? `<div class="kv"><span class="k">用户</span><span>${esc(record.userName)}</span></div>` : ""}<div class="kv"><span class="k">重试</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"} 次</span></div><div class="kv"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))} ${esc(record.resultDetail)}</span></div></div>${attempts}`;
+    const body = `<div class="history-summary"><div><span class="k">结果</span><span class="v">${statusBadge(finalStatusOf(record))}</span></div><div><span class="k">运行模式</span><span class="v">${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div><div><span class="k">尝试次数</span><span class="v">${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div><div><span class="k">开始时间</span><span class="v">${esc(fmtTime(record.startTime))}</span></div></div><div class="detail"><div class="kv"><span class="k">开始</span><span>${esc(fmtTime(record.startTime))}</span></div><div class="kv"><span class="k">结束</span><span>${esc(fmtTime(record.endTime))}</span></div><div class="kv"><span class="k">模式</span><span>${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div>${record.userName ? `<div class="kv"><span class="k">用户</span><span>${esc(record.userName)}</span></div>` : ""}<div class="kv"><span class="k">重试</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"} 次</span></div><div class="kv"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))} ${esc(record.resultDetail)}</span></div></div>${pluginHistoryDetailMarkup(record)}${pluginSlotMarkup("history.detail.sections", "history.detail.sections", "history-detail-plugin-slot", { mode: "detail", primaryId: record.id })}${attempts}`;
     showModal(modalShell(`${esc(record.scriptName)} 运行详情`, body, '<button class="ghost" type="button" data-action="close-modal">关闭</button>'), true);
+    void renderPluginSlots(document);
   } catch (error) { toast(error.message, "error"); }
 }
 

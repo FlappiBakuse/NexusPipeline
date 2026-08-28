@@ -146,6 +146,10 @@ internal static class QueueCommands
                         ctx.Queues.RemoveAll(queue => queue.Id == queueId);
                         DataStore.SaveQueues(ctx.Queues);
                     }
+                    if (removed is not null)
+                    {
+                        ctx.Plugins.DeleteQueueData(queueId);
+                    }
                 },
                 out IReadOnlyList<ExecutionLeaseReference> leases,
                 out string? failureCode);

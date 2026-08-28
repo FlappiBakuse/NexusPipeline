@@ -57,6 +57,9 @@ public class RunRecord
 
     public List<RunAttempt> AttemptDetails { get; set; } = new();
 
+    /// <summary>运行落盘前由插件生成的展示快照；不影响 Status、FinalStatus 或执行流程。</summary>
+    public List<PluginHistoryRecord> PluginHistory { get; set; } = new();
+
     private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
     {
         PropertyNameCaseInsensitive = true,
