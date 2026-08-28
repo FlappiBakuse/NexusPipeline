@@ -8,10 +8,10 @@ internal static class PluginAvailability
 {
     public static string? GetUnavailableReason(
         ScriptInstance script,
-        IPluginAvailability? plugins)
+        IPluginAvailability plugins)
     {
         string pluginType = script.PluginType?.Trim() ?? "";
-        if (pluginType.Length == 0 || plugins is null)
+        if (pluginType.Length == 0)
         {
             return null;
         }
@@ -24,10 +24,10 @@ internal static class PluginAvailability
 
     public static string? GetUnavailableReason(
         string pluginType,
-        IPluginAvailability? plugins)
+        IPluginAvailability plugins)
     {
         string name = pluginType?.Trim() ?? "";
-        if (name.Length == 0 || plugins is null)
+        if (name.Length == 0)
         {
             return null;
         }

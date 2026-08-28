@@ -2,6 +2,21 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.10.10（Pre-release）
+
+### 专项插件可用性策略
+
+- 修复用户绑定现代与兼容新增/编辑入口缺少专项插件可用性门禁的问题；校验统一位于 `UserCommands`，并在配置快照和持久化之前执行。
+- 保留解除绑定、删除脚本和移除队列任务等清理操作；保留不可用专项脚本在 `ExecutionRunner` 中写入失败历史并继续队列的运行时语义。
+- 将 `ExecutionValidator`、`ExecutionRunner` 和可用性策略的插件依赖改为显式必填，降低 fail-open 风险。
+- 新增专项插件可用性、绑定门禁、快照前拒绝、兼容入口、清理操作和 profile 快照行为的回归测试。
+
+### 插件仓库文档
+
+- 为 `NexusPipeline-Plugins` 增加仓库概览、贡献指南、数据化专项插件开发、判断脚本开发和打包发布文档。
+- 补充 Judge 输入字段、Jint API、Python 受信任代码边界、输出解析、30 秒上限、`replaceConfigs` 与 `config-restore.json` 的实际契约。
+- 在宿主 Plugin API 文档中增加插件作者文档导航，并记录历史专项 profile 快照陈旧风险。
+
 ## v0.10.9（Pre-release）
 
 ### 真机审查与插件状态

@@ -15,20 +15,20 @@ internal sealed class ExecutionRunner
     private readonly IHistoryStore _history;
     private readonly INotificationService _notifications;
     private readonly SystemActionExecutor _systemActions;
-    private readonly IPluginAvailability? _pluginAvailability;
+    private readonly IPluginAvailability _pluginAvailability;
 
     public ExecutionRunner(
         IUserRepository users,
         IHistoryStore history,
         INotificationService notifications,
         SystemActionExecutor systemActions,
-        IPluginAvailability? pluginAvailability = null)
+        IPluginAvailability pluginAvailability)
     {
         _users = users;
         _history = history;
         _notifications = notifications;
         _systemActions = systemActions;
-        _pluginAvailability = pluginAvailability;
+        _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)

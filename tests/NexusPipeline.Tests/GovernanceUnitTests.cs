@@ -116,7 +116,8 @@ public class GovernanceUnitTests
         var validator = new ExecutionValidator(
             new TestScriptRepository(script),
             new TestQueueRepository(),
-            new TestUserRepository());
+            new TestUserRepository(),
+            new AllowAllPluginAvailability());
 
         ExecutionResult accepted = validator.Validate(new ExecutionRequest("script", script.Id, "manual"));
         ExecutionResult rejected = validator.Validate(new ExecutionRequest("unknown", "missing", "manual"));

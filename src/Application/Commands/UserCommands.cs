@@ -368,6 +368,10 @@ internal static class UserCommands
         {
             return NotFound<NexusUser>($"未找到脚本实例：{scriptId}");
         }
+        if (CheckScriptPluginAvailability(ctx, script) is string pluginError)
+        {
+            return Validation<NexusUser>(pluginError);
+        }
 
         NexusUser? target = null;
         UserScriptBinding? binding = null;
@@ -526,6 +530,10 @@ internal static class UserCommands
         if (target is null || binding is null)
         {
             return NotFound<NexusUser>("用户绑定不存在");
+        }
+        if (CheckScriptPluginAvailability(ctx, script) is string pluginError)
+        {
+            return Validation<NexusUser>(pluginError);
         }
 
         string? error = null;
@@ -836,6 +844,10 @@ internal static class UserCommands
         {
             return NotFound<UserScriptBinding>("用户或脚本实例不存在");
         }
+        if (CheckScriptPluginAvailability(ctx, script) is string pluginError)
+        {
+            return Validation<UserScriptBinding>(pluginError);
+        }
         candidate = NormalizeBinding(candidate, script.Id);
         string? error = null;
         SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
@@ -967,6 +979,11 @@ internal static class UserCommands
         if (user is null || existing is null)
         {
             return NotFound<UserScriptBinding>("用户绑定不存在");
+        }
+        ScriptInstance? script = ctx.FindScript(scriptId);
+        if (script is not null && CheckScriptPluginAvailability(ctx, script) is string pluginError)
+        {
+            return Validation<UserScriptBinding>(pluginError);
         }
         string? error = null;
         try
@@ -1182,6 +1199,11 @@ internal static class UserCommands
         }
         return null;
     }
+
+    private static string? CheckScriptPluginAvailability(RuntimeContext ctx, ScriptInstance script) =>
+        PluginAvailability.GetUnavailableReason(
+            script,
+            ctx.Resolve<IPluginAvailability>());
 
     private static string? CheckBindingBusy(RuntimeContext ctx, string userId, string scriptId)
     {

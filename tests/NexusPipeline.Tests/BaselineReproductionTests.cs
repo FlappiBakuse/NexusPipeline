@@ -23,7 +23,7 @@ public sealed class BaselineReproductionTests
         var queue = ScheduledQueue(now);
         var queues = new MutableQueueRepository(queue);
         var commands = new FirstTransientExecutionService();
-        var validator = new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository());
+        var validator = new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository(), new AllowAllPluginAvailability());
         using var scheduler = new Scheduler(
             queues,
             new EmptyHistoryStore(),
@@ -50,7 +50,7 @@ public sealed class BaselineReproductionTests
         var queue = ScheduledQueue(now);
         var queues = new MutableQueueRepository(queue);
         var firstCommands = new AlwaysTransientExecutionService();
-        var validator = new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository());
+        var validator = new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository(), new AllowAllPluginAvailability());
         var stateStore = new MemorySchedulerStateStore();
 
         using (var firstScheduler = new Scheduler(

@@ -15,18 +15,18 @@ internal sealed class ExecutionValidator
     private readonly IScriptRepository _scripts;
     private readonly IQueueRepository _queues;
     private readonly IUserRepository _users;
-    private readonly IPluginAvailability? _pluginAvailability;
+    private readonly IPluginAvailability _pluginAvailability;
 
     public ExecutionValidator(
         IScriptRepository scripts,
         IQueueRepository queues,
         IUserRepository users,
-        IPluginAvailability? pluginAvailability = null)
+        IPluginAvailability pluginAvailability)
     {
         _scripts = scripts;
         _queues = queues;
         _users = users;
-        _pluginAvailability = pluginAvailability;
+        _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
     }
 
     public ScriptInstance RequireScript(string scriptId)

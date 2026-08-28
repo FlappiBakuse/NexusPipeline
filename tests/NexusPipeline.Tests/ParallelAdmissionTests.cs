@@ -267,7 +267,7 @@ public class ParallelAdmissionTests
         var scripts = new SingleScriptRepository(script);
         var queues = new SingleQueueRepository(queue);
         var users = new TestUsers();
-        var validator = new ExecutionValidator(scripts, queues, users);
+        var validator = new ExecutionValidator(scripts, queues, users, new AllowAllPluginAvailability());
         var builder = new ExecutionPlanBuilder(scripts, queues, users, validator);
 
         QueueExecutionPlan plan = builder.BuildQueue(queue.Id);
@@ -373,7 +373,7 @@ public class ParallelAdmissionTests
             scripts,
             queues,
             users,
-            new ExecutionValidator(scripts, queues, users));
+            new ExecutionValidator(scripts, queues, users, new AllowAllPluginAvailability()));
 
         Assert.Equal(1, builder.BuildQueue(queue.Id).TotalTasks);
     }

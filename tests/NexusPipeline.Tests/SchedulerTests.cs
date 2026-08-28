@@ -26,7 +26,8 @@ public class SchedulerTests
         var validator = new ExecutionValidator(
             new EmptyScriptRepository(),
             queues,
-            new EmptyUserRepository());
+            new EmptyUserRepository(),
+            new AllowAllPluginAvailability());
         using var scheduler = new Scheduler(
             queues,
             new EmptyHistoryStore(),
@@ -83,7 +84,8 @@ public class SchedulerTests
         var validator = new ExecutionValidator(
             new EmptyScriptRepository(),
             queues,
-            new EmptyUserRepository());
+            new EmptyUserRepository(),
+            new AllowAllPluginAvailability());
         using var scheduler = new Scheduler(
             queues,
             new EmptyHistoryStore(),
