@@ -26,6 +26,8 @@ internal sealed class PluginManifest
 
     public IReadOnlySet<string> Capabilities => _capabilities;
 
+    public IReadOnlyList<string> Replaces { get; private set; } = Array.Empty<string>();
+
     public PluginFrontendManifest? Frontend { get; private set; }
 
     private readonly HashSet<string> _capabilities = new(StringComparer.OrdinalIgnoreCase);
@@ -80,6 +82,12 @@ internal sealed class PluginManifest
             {
                 result._capabilities.Add("emulator");
             }
+            if (!PluginRepositoryCatalog.TryParseReplaces(root, result.Name, out IReadOnlyList<string> replaces, out string? replacesError))
+            {
+                error = $"replaces 无效：{replacesError}";
+                return false;
+            }
+            result.Replaces = replaces;
             if (!PluginFrontendManifest.TryParse(root, result._capabilities, out PluginFrontendManifest? frontend, out string? frontendError))
             {
                 error = frontendError;

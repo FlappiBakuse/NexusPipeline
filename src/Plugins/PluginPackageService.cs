@@ -26,6 +26,7 @@ internal sealed class PluginPackageService
     public async Task<PluginPendingOperation> StageAsync(
         PluginCatalogEntry entry,
         string action,
+        string? sourceName = null,
         CancellationToken cancellationToken = default)
     {
         if (action is not ("install" or "update"))
@@ -59,6 +60,7 @@ internal sealed class PluginPackageService
             {
                 Action = action,
                 Name = entry.Name,
+                SourceName = sourceName ?? "",
                 Version = entry.Version,
                 Kind = entry.Kind,
                 ApiVersion = entry.ApiVersion,
@@ -273,6 +275,11 @@ internal sealed class PluginPackageService
             if (!manifestCapabilities.SetEquals(entry.Capabilities))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest capabilities 与 catalog 不一致");
+            }
+            if (!PluginRepositoryCatalog.TryParseReplaces(root, name, out IReadOnlyList<string> manifestReplaces, out _)
+                || !manifestReplaces.SequenceEqual(entry.ReplacementNames, StringComparer.OrdinalIgnoreCase))
+            {
+                throw new PluginRepositoryException("manifest_mismatch", "插件 manifest replaces 与 catalog 不一致");
             }
 
             if (entry.Kind == "data-specialized")

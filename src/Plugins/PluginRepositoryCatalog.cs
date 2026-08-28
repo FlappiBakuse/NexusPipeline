@@ -1,4 +1,6 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using NexusPipeline.Plugin.Abstractions;
 
 namespace NexusPipeline.Plugins;
@@ -61,6 +63,7 @@ internal static class PluginRepositoryCatalog
 
             var entries = new List<PluginCatalogEntry>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var replacedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (JsonNode? node in pluginNodes)
             {
                 if (node is not JsonObject item)
@@ -151,6 +154,19 @@ internal static class PluginRepositoryCatalog
                     error = $"插件 {name} 的 sizeBytes 超出范围";
                     return false;
                 }
+                if (!TryParseReplaces(item, name, out IReadOnlyList<string> replaces, out string? replacesError))
+                {
+                    error = $"插件 {name} 的 replaces 无效：{replacesError}";
+                    return false;
+                }
+                foreach (string replaced in replaces)
+                {
+                    if (!replacedNames.Add(replaced))
+                    {
+                        error = $"插件 replacement 来源重复：{replaced}";
+                        return false;
+                    }
+                }
 
                 entries.Add(new PluginCatalogEntry(
                     name,
@@ -164,7 +180,8 @@ internal static class PluginRepositoryCatalog
                     minHostVersion,
                     packageUrl,
                     sha256,
-                    sizeBytes));
+                    sizeBytes,
+                    replaces));
             }
             catalog = new PluginCatalog(schemaVersion, repository, generatedAt, entries);
             return true;
@@ -235,6 +252,40 @@ internal static class PluginRepositoryCatalog
                 return false;
             }
         }
+        return true;
+    }
+
+    internal static bool TryParseReplaces(
+        JsonObject root,
+        string currentName,
+        out IReadOnlyList<string> replaces,
+        out string? error)
+    {
+        replaces = Array.Empty<string>();
+        error = null;
+        JsonNode? node = root["replaces"];
+        if (node is null)
+        {
+            return true;
+        }
+        if (node is not JsonArray array || array.Count > 8)
+        {
+            error = "必须是最多包含 8 个名称的数组";
+            return false;
+        }
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonNode? item in array)
+        {
+            string name = item?.ToString()?.Trim() ?? "";
+            if (!IsSafePluginName(name)
+                || string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)
+                || !names.Add(name))
+            {
+                error = $"包含不安全、重复或等于当前名称的插件名：{name}";
+                return false;
+            }
+        }
+        replaces = names.OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
         return true;
     }
 
@@ -358,7 +409,12 @@ internal sealed record PluginCatalogEntry(
     string MinHostVersion,
     string PackageUrl,
     string Sha256,
-    long SizeBytes);
+    long SizeBytes,
+    IReadOnlyList<string>? Replaces = null)
+{
+    [JsonIgnore]
+    public IReadOnlyList<string> ReplacementNames => Replaces ?? Array.Empty<string>();
+}
 
 internal readonly record struct PluginVersion(int Major, int Minor, int Patch) : IComparable<PluginVersion>
 {

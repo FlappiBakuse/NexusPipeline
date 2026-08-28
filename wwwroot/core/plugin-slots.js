@@ -5,7 +5,7 @@ import { toast } from "./ui.js";
 export const pluginSlotNames = Object.freeze([
   "dashboard.cards", "dashboard.after-running", "users.list.badges", "users.binding.sections", "users.global.sections",
   "scripts.list.badges", "scripts.editor.sections", "queues.list.badges", "queues.editor.sections", "dispatch.cards",
-  "dispatch.running.badges", "dispatch.run.sections", "history.list.badges", "history.detail.sections", "settings.sections", "shell.nav",
+  "dispatch.running.badges", "dispatch.run.sections", "history.list.badges", "history.detail.sections", "settings.sections", "settings.cards", "shell.nav",
 ]);
 
 const validSlots = new Set(pluginSlotNames);

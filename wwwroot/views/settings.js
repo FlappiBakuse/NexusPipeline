@@ -31,6 +31,7 @@ export async function pageSettings(token) {
     ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
     ${settingsCardMarkup("network", "网络代理", "宿主外部 HTTP/HTTPS 请求", networkSettingsMarkup(settings), "network-settings")}
     ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
+    ${pluginSlotMarkup("settings.cards", "settings.cards", "settings-cards-plugin-slot", { mode: "settings" })}
   </div>${pluginSlotMarkup("settings.sections", "settings.sections", "settings-plugin-slot", { mode: "settings" })}`);
   await renderPluginSlots(document.querySelector("#view"));
   syncSettingsPanels();
@@ -63,7 +64,10 @@ function syncSettingsPanels() {
 }
 
 function toggleSettingsPanel(panelId) {
-  if (!["service", "notifications", "remote-mcp", "network", "updates"].includes(panelId)) return;
+  const builtInPanels = ["service", "notifications", "remote-mcp", "network", "updates"];
+  const isRenderedPluginPanel = Array.from(document.querySelectorAll("[data-settings-panel]"))
+    .some(card => card.dataset.settingsPanel === panelId && card.querySelector(".settings-card-body"));
+  if (!builtInPanels.includes(panelId) && !isRenderedPluginPanel) return;
   openSettingsPanel = openSettingsPanel === panelId ? null : panelId;
   syncSettingsPanels();
 }

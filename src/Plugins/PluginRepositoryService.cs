@@ -125,15 +125,24 @@ internal sealed class PluginRepositoryService
         }
         PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
             string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
+        PluginSummary? replacementSource = _plugins().PluginSummaries.FirstOrDefault(item =>
+            entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)));
+        if (installed is not null && replacementSource is not null)
+        {
+            throw new PluginRepositoryException("replacement_conflict", $"插件替换冲突：{entry.Name} 与 {replacementSource.Name} 同时存在");
+        }
         if (update && installed is null)
         {
-            throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
+            if (replacementSource is null)
+            {
+                throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
+            }
         }
-        if (!update && installed is not null)
+        if (!update && (installed is not null || replacementSource is not null))
         {
             throw new PluginRepositoryException("already_installed", $"插件已安装：{entry.Name}");
         }
-        if (HasPending(entry.Name))
+        if (HasPending(entry.Name, replacementSource?.Name))
         {
             throw new PluginRepositoryException("pending", $"插件已有待重启事务：{entry.Name}");
         }
@@ -142,7 +151,11 @@ internal sealed class PluginRepositoryService
         {
             throw new PluginRepositoryException("up_to_date", $"插件已是 v{installed.Version}");
         }
-        return await _packages.StageAsync(entry, update ? "update" : "install", cancellationToken).ConfigureAwait(false);
+        return await _packages.StageAsync(
+            entry,
+            update ? "update" : "install",
+            replacementSource?.Name,
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<PluginPendingOperation> UninstallAsync(
@@ -196,10 +209,13 @@ internal sealed class PluginRepositoryService
         return entry ?? throw new PluginRepositoryException("not_found", $"插件仓库中不存在：{name}");
     }
 
-    private bool HasPending(string name)
+    private bool HasPending(string name, string? sourceName = null)
     {
         return PluginInstallRecovery.ReadPending()
-            .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+            .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.SourceName, name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.SourceName, sourceName, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<(PluginCatalog Catalog, DateTimeOffset FetchedAt)> FetchCatalogAsync(
@@ -252,23 +268,33 @@ internal sealed class PluginRepositoryService
             .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
-        Dictionary<string, PluginPendingOperation> pending = PluginInstallRecovery.ReadPending()
-            .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
         var items = new List<PluginStoreItem>();
         foreach (PluginCatalogEntry entry in catalog.Plugins)
         {
             installed.TryGetValue(entry.Name, out PluginSummary? local);
-            pending.TryGetValue(entry.Name, out PluginPendingOperation? operation);
+            PluginSummary? replacementSource = installed.Values.FirstOrDefault(item =>
+                entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)));
+            PluginPendingOperation? operation = pending.LastOrDefault(item =>
+                string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.SourceName, entry.Name, StringComparison.OrdinalIgnoreCase)
+                || entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(name, item.SourceName, StringComparison.OrdinalIgnoreCase)));
             bool compatible = PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason);
-            bool updateAvailable = local is not null
-                && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
+            bool replacementConflict = local is not null && replacementSource is not null;
+            bool updateAvailable = replacementConflict
+                || replacementSource is not null
+                || local is not null && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
+            PluginSummary? effectiveInstalled = local ?? replacementSource;
             string status = operation is not null
                 ? "pending"
+                : replacementConflict
+                    ? "replacement-conflict"
                 : !compatible
                     ? "incompatible"
-                    : local is null
-                        ? "not-installed"
+                : effectiveInstalled is null
+                    ? "not-installed"
+                        : replacementSource is not null ? "replacement-available"
                         : updateAvailable ? "update-available" : "installed";
             items.Add(new PluginStoreItem(
                 entry.Name,
@@ -280,15 +306,17 @@ internal sealed class PluginRepositoryService
                 entry.ApiVersion,
                 entry.Capabilities,
                 entry.MinHostVersion,
-                local is not null,
-                local?.Version ?? "",
+                effectiveInstalled is not null,
+                effectiveInstalled?.Version ?? "",
                 updateAvailable,
                 compatible,
                 compatible ? "" : compatibilityReason,
-                ownership.ContainsKey(entry.Name),
+                ownership.ContainsKey(entry.Name)
+                    || replacementSource is not null && ownership.ContainsKey(replacementSource.Name),
                 operation?.Action ?? "",
                 operation?.Version ?? "",
-                status));
+                status,
+                effectiveInstalled?.Name ?? ""));
         }
         return new PluginStoreSnapshot(
             true,
@@ -402,4 +430,5 @@ internal sealed record PluginStoreItem(
     bool ManagedByStore,
     string PendingAction,
     string PendingVersion,
-    string Status);
+    string Status,
+    string InstalledName);

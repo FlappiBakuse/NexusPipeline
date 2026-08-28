@@ -23,6 +23,8 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     public string Version { get; private set; } = "";
 
+    public IReadOnlyList<string> Replaces { get; private set; } = Array.Empty<string>();
+
     /// <summary>数据化插件可选的同源可信前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
@@ -67,6 +69,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 GameName = node?["gameName"]?.ToString() ?? "",
                 Description = node?["description"]?.ToString() ?? "",
                 Version = node?["version"]?.ToString() ?? "",
+                Replaces = Array.Empty<string>(),
                 _resolvePath = node?["resolve"]?.ToString() ?? "",
                 _judgeScriptPath = node?["judgeScript"]?.ToString() ?? "",
             };
@@ -87,7 +90,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 plugin._capabilityKeys.Add(PluginCapabilityKeys.Emulator);
             }
             if (node is not JsonObject root
-                || !PluginFrontendManifest.TryParse(root, plugin._capabilityKeys, out PluginFrontendManifest? frontend, out _))
+                || !PluginRepositoryCatalog.TryParseReplaces(root, plugin.Name, out IReadOnlyList<string> replaces, out _))
+            {
+                return null;
+            }
+            plugin.Replaces = replaces;
+            if (!PluginFrontendManifest.TryParse(root, plugin._capabilityKeys, out PluginFrontendManifest? frontend, out _))
             {
                 return null;
             }

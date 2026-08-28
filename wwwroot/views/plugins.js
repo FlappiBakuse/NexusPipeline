@@ -98,14 +98,17 @@ function storeStatusLabel(plugin) {
     "not-installed": "未安装",
     installed: "已安装",
     "update-available": "有更新",
+    "replacement-available": "可替换旧插件",
     pending: "待重启",
+    "replacement-conflict": "替换冲突",
     incompatible: "宿主不兼容",
   }[plugin.status] || "可用";
 }
 
 function storeStatusClass(plugin) {
   if (plugin.status === "incompatible") return "danger";
-  if (plugin.status === "update-available" || plugin.status === "pending") return "warning";
+  if (plugin.status === "replacement-conflict") return "danger";
+  if (plugin.status === "update-available" || plugin.status === "replacement-available" || plugin.status === "pending") return "warning";
   if (plugin.status === "installed") return "ok";
   return "muted";
 }
@@ -113,14 +116,15 @@ function storeStatusClass(plugin) {
 function storePluginRow(plugin) {
   const pending = plugin.status === "pending";
   const incompatible = !plugin.compatible;
+  const conflicted = plugin.status === "replacement-conflict";
   let actions = "";
-  if (!pending && !incompatible) {
+  if (!pending && !incompatible && !conflicted) {
     if (!plugin.installed) {
       actions += '<button class="primary" type="button" data-action="store-install" data-name="' + esc(plugin.name) + '" data-testid="plugin-install-' + esc(plugin.name) + '">安装</button>';
     } else if (plugin.updateAvailable) {
-      actions += '<button class="primary" type="button" data-action="store-update" data-name="' + esc(plugin.name) + '" data-testid="plugin-update-' + esc(plugin.name) + '">更新</button>';
+      actions += '<button class="primary" type="button" data-action="store-update" data-name="' + esc(plugin.name) + '" data-testid="plugin-update-' + esc(plugin.name) + '">' + (plugin.status === "replacement-available" ? "替换旧插件" : "更新") + '</button>';
     }
-    if (plugin.installed) {
+    if (plugin.installed && (!plugin.installedName || plugin.installedName === plugin.name)) {
       actions += '<button class="tertiary" type="button" data-action="store-uninstall" data-name="' + esc(plugin.name) + '" data-testid="plugin-uninstall-' + esc(plugin.name) + '">卸载</button>';
     }
   }
@@ -130,11 +134,14 @@ function storePluginRow(plugin) {
   if (incompatible) {
     actions = '<span class="muted">' + esc(plugin.compatibilityReason || "当前宿主版本不兼容") + "</span>";
   }
+  if (conflicted) {
+    actions = '<span class="muted">目标插件与旧插件同时存在，请先处理本地插件冲突。</span>';
+  }
   const details = pluginDetailsMarkup([
     plugin.description || "官方插件",
     plugin.gameName,
     plugin.version ? `v${plugin.version}` : "",
-    plugin.installed ? `当前 v${plugin.installedVersion}` : "",
+    plugin.installed ? `当前 v${plugin.installedVersion}${plugin.installedName && plugin.installedName !== plugin.name ? `（${plugin.installedName}）` : ""}` : "",
     plugin.apiVersion ? `API v${plugin.apiVersion}` : "",
   ]);
   const status = '<span class="badge ' + storeStatusClass(plugin) + '" data-testid="plugin-store-status">' + storeStatusLabel(plugin) + '</span>';

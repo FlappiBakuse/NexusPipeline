@@ -24,6 +24,7 @@ internal static class Bootstrap
         {
             Logger.Warn("[插件] 存在未完成的插件安装事务，保留 pending 并继续加载当前插件。");
         }
+        ctx.ReloadSettings();
         ctx.Plugins.LoadAll();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();

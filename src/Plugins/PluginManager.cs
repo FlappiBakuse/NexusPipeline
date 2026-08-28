@@ -26,7 +26,8 @@ internal sealed record PluginSummary(
     string ApiVersion,
     IReadOnlyList<string> Capabilities,
     bool HasFrontend,
-    string FrontendApiVersion);
+    string FrontendApiVersion,
+    IReadOnlyList<string> Replaces);
 
 internal sealed record PluginFrontendRuntimeDescriptor(
     string Name,
@@ -113,7 +114,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     "",
                     plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Frontend is not null,
-                    plugin.Frontend?.ApiVersion ?? ""));
+                    plugin.Frontend?.ApiVersion ?? "",
+                    plugin.Replaces));
             }
             foreach (ManagedPluginDescriptor plugin in _managedPlugins)
             {
@@ -127,7 +129,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Manifest.ApiVersion,
                     plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Manifest.Frontend is not null,
-                    plugin.Manifest.Frontend?.ApiVersion ?? ""));
+                    plugin.Manifest.Frontend?.ApiVersion ?? "",
+                    plugin.Manifest.Replaces));
             }
             return list;
         }

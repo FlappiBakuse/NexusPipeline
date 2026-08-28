@@ -128,11 +128,13 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
 | `PluginManager` | src/Plugins/PluginManager.cs | 仅负责本地插件发现、加载、开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
 | `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.3 UI、作用域数据、插件 Web API、历史贡献注册表与 DTO 校验；按插件生命周期撤销注册 |
-| `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.0 清单与 `web/` 资源路径，不向前端泄露插件目录 |
+| `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.1 清单与 `web/` 资源路径，不向前端泄露插件目录 |
 | `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、名称/版本/URL/SHA/宿主兼容性校验；不执行网络请求 |
 | `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
 | `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
 | `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `AppearanceService` | src/Services/AppearanceService.cs | 服务端外观配置、壁纸资产、配色、配额和轮换游标的持久化与权限校验 |
+| `ApiAppearanceHandler` / `ApiAppearanceAssetsHandler` / `ApiAppearanceUploadHandler` | src/Web/ | 外观快照、配置、资产读取/删除/配色和原始上传 API；上传路由受独立体积上限保护 |
 | `OutboundHttpClientProvider` | src/Services/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
 | `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
 | `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
@@ -195,10 +197,10 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/forms.js` | 共享表单模板（pageHeader/valueField/selectField） |
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
-| `core/plugin-runtime.js` | Frontend API 1.0：同源模块加载、action/route/nav/slot/lifecycle 注册、插件 Web API 与 UI 贡献访问 |
+| `core/plugin-runtime.js` | Frontend API 1.1：同源模块加载、action/route/nav/slot/lifecycle 注册、插件 Web API、UI 贡献和外观宿主访问 |
 | `core/plugin-sdk.js` | 面向插件入口的稳定前端导出门面 |
 | `core/plugin-slots.js` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染和清理 |
-| `core/appearance.js` | 主题 token、插件主题注册、localStorage 外观元数据和 IndexedDB 壁纸 |
+| `core/appearance.js` | 主题 token、插件主题注册、服务端壁纸加载/轮换/配色和旧版本地壁纸回退 |
 | `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/users/settings） |
 | `core/limits.js` | 跨视图共享的约束警告层：加载 `/api/limits`、忽略状态持久化、alertdialog 警告层与「知道了/不再提醒」分发 |
 | `core/dnd.js` | 通用拖拽排序组件（无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项 |
@@ -250,7 +252,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [PLUGIN_API.md](PLUGIN_API.md)；本文件只说明宿主模块边界和代码定位。
 
 - managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContextV1_3` 使用宿主提供的通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户全局管理、用户列表徽章、用户运行事件、HTTP、日志、通知和任务端口。
-- 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.0`，入口位于 `web/` 并导出 `activate(host)`；用户必须在插件页单独确认前端信任，版本更新后重新确认。
+- 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.1`，入口位于 `web/` 并导出 `activate(host)`；用户必须在插件页单独确认前端信任，版本更新后重新确认。
 - 数据化专项插件由 `plugins/<名称>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册，宿主在保存脚本实例时固化解析结果。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 

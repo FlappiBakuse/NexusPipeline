@@ -47,6 +47,7 @@ internal static class ApiPluginsHandler
                 error = manager.GetRuntimeError(plugin.Name),
                 hasFrontend = plugin.HasFrontend,
                 frontendApiVersion = plugin.FrontendApiVersion,
+                replaces = plugin.Replaces,
                 frontendTrusted = manager.IsFrontendTrusted(plugin.Name),
                 restartRequired = manager.IsConfiguredEnabled(plugin.Name)
                     != manager.IsEnabled(plugin.Name),
@@ -156,6 +157,7 @@ internal static class ApiPluginsHandler
                 capabilities = plugin.Capabilities,
                 minHostVersion = plugin.MinHostVersion,
                 installed = plugin.Installed,
+                installedName = plugin.InstalledName,
                 installedVersion = plugin.InstalledVersion,
                 updateAvailable = plugin.UpdateAvailable,
                 compatible = plugin.Compatible,

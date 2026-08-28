@@ -51,6 +51,20 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Contains("官方插件仓库", urlError);
     }
 
+    [Fact]
+    public void TryParse_ValidatesReplacementIdentity()
+    {
+        JsonObject root = CreateCatalog();
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["replaces"] = new JsonArray("hoyolab-checkin");
+
+        Assert.True(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out PluginCatalog? catalog, out string? error), error);
+        Assert.Equal(new[] { "hoyolab-checkin" }, catalog!.Plugins[0].ReplacementNames);
+
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["replaces"] = new JsonArray("bettergi");
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? selfError));
+        Assert.Contains("当前名称", selfError);
+    }
+
     [Theory]
     [InlineData("https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/bettergi-0.1.0.txt")]
     [InlineData("https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/sub/bettergi-0.1.0.zip")]
@@ -199,6 +213,100 @@ public sealed class ProxyConfigurationTests
 
 public sealed class PluginInstallRecoveryTests
 {
+    [Fact]
+    public void ApplyPending_MigratesReplacementCodeNamespacesAndPreference()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string config = Path.Combine(root, "config");
+            string pending = Path.Combine(root, "state", "pending.json");
+            string ownership = Path.Combine(root, "state", "ownership.json");
+            string staging = Path.Combine(root, "state", "staging");
+            string backup = Path.Combine(root, "state", "backup");
+            string source = Path.Combine(plugins, "hoyolab-checkin");
+            string staged = Path.Combine(staging, "game-checkin.1");
+            Directory.CreateDirectory(source);
+            Directory.CreateDirectory(staged);
+            File.WriteAllText(Path.Combine(source, "old.dll"), "old");
+            File.WriteAllText(Path.Combine(staged, "plugin.json"), "new");
+            Directory.CreateDirectory(Path.Combine(config, "plugins", "hoyolab-checkin"));
+            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin.json"), "config");
+            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin.secrets.json"), "secret");
+            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin", "scope.json"), "scope");
+            Directory.CreateDirectory(config);
+            File.WriteAllText(Path.Combine(config, "settings.json"), "{\"PluginPreferences\":{\"hoyolab-checkin\":{\"Enabled\":true,\"FrontendTrusted\":true,\"FrontendTrustedVersion\":\"0.1.1\",\"FrontendTrustedFingerprint\":\"old\"}}}");
+
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "update",
+                Name = "game-checkin",
+                SourceName = "hoyolab-checkin",
+                Version = "0.1.2",
+                Kind = "managed-code",
+                ApiVersion = "1.2",
+                StagedPath = staged,
+                Phase = "pending",
+            }, pending);
+
+            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, config));
+            Assert.True(File.Exists(Path.Combine(plugins, "game-checkin", "plugin.json")));
+            Assert.False(Directory.Exists(source));
+            Assert.Equal("config", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin.json")));
+            Assert.Equal("secret", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin.secrets.json")));
+            Assert.Equal("scope", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin", "scope.json")));
+            JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(Path.Combine(config, "settings.json"))));
+            JsonObject preference = Assert.IsType<JsonObject>(settings["PluginPreferences"]!["game-checkin"]);
+            Assert.True(preference["Enabled"]!.GetValue<bool>());
+            Assert.False(preference["FrontendTrusted"]!.GetValue<bool>());
+            Assert.Equal("", preference["FrontendTrustedVersion"]!.ToString());
+            Assert.Empty(PluginInstallRecovery.ReadPending(pending));
+            PluginOwnership owner = Assert.Single(PluginInstallRecovery.ReadOwnership(ownership).Values);
+            Assert.Equal("game-checkin", owner.Name);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void ApplyPending_StopsReplacementWhenBothIdentitiesExist()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string pending = Path.Combine(root, "state", "pending.json");
+            string ownership = Path.Combine(root, "state", "ownership.json");
+            string staging = Path.Combine(root, "state", "staging");
+            string backup = Path.Combine(root, "state", "backup");
+            Directory.CreateDirectory(Path.Combine(plugins, "hoyolab-checkin"));
+            Directory.CreateDirectory(Path.Combine(plugins, "game-checkin"));
+            string staged = Path.Combine(staging, "game-checkin.1");
+            Directory.CreateDirectory(staged);
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "update",
+                Name = "game-checkin",
+                SourceName = "hoyolab-checkin",
+                Version = "0.1.2",
+                Kind = "managed-code",
+                StagedPath = staged,
+            }, pending);
+
+            Assert.False(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, Path.Combine(root, "config")));
+            Assert.Single(PluginInstallRecovery.ReadPending(pending));
+            Assert.True(Directory.Exists(Path.Combine(plugins, "hoyolab-checkin")));
+            Assert.True(Directory.Exists(Path.Combine(plugins, "game-checkin")));
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
     [Fact]
     public void ApplyPending_InstallsAndUninstallsPluginTransactionally()
     {

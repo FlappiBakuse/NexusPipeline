@@ -67,8 +67,8 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
       body: JSON.stringify([{
         userId: badgeUserId,
         badges: [{
-          pluginName: "hoyolab-checkin",
-          pluginDisplayName: "HoYoLAB 自动签到",
+          pluginName: "game-checkin",
+          pluginDisplayName: "游戏自动签到",
           id: "check-in-status",
           label: "签到 · 今日完成",
           tone: "ok",
@@ -85,29 +85,47 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
         status: 200,
         contentType: "application/json",
         body: JSON.stringify([{
-          pluginName: "hoyolab-checkin",
-          pluginDisplayName: "HoYoLAB 自动签到",
+          pluginName: "game-checkin",
+          pluginDisplayName: "游戏自动签到",
           id: "user-settings",
-          title: "HoYoLAB 自动签到",
-          description: "管理用户的签到开关、Cookie 和目标游戏。",
+          title: "游戏自动签到",
+          description: "按需管理米游社或 HoYoLAB 的 Cookie 和目标游戏。",
           fields: [
             { key: "enabled", label: "启用自动签到", type: "switch", description: "关闭后保留配置但不执行签到。", required: true },
-            { key: "cookie", label: "HoYoLAB Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
             {
-              key: "games",
-              label: "签到游戏",
+              key: "cnGames",
+              label: "米游社签到游戏",
               type: "multi-select",
-              description: "选择需要签到的游戏。",
-              required: true,
+              description: "选择官服签到游戏，可留空。",
               options: [
                 { value: "gi", label: "原神" },
                 { value: "hsr", label: "崩坏：星穹铁道" },
                 { value: "zzz", label: "绝区零" },
               ],
             },
+            {
+              key: "osGames",
+              label: "HoYoLAB 签到游戏",
+              type: "multi-select",
+              description: "选择国际服签到游戏，可留空。",
+              options: [
+                { value: "gi", label: "原神" },
+                { value: "hsr", label: "崩坏：星穹铁道" },
+                { value: "zzz", label: "绝区零" },
+              ],
+            },
+            { key: "cnCookie", label: "米游社 Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
+            { key: "osCookie", label: "HoYoLAB Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
             { key: "lastStatus", label: "最近状态", type: "status", readOnly: true },
           ],
-          values: { enabled: true, cookie: { configured: false }, games: ["gi"], lastStatus: "尚未尝试" },
+          values: {
+            enabled: true,
+            cnGames: ["gi"],
+            osGames: ["gi"],
+            cnCookie: { configured: false },
+            osCookie: { configured: false },
+            lastStatus: "尚未尝试",
+          },
         }]),
       });
       return;
@@ -146,7 +164,7 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     const card = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
     const badge = card.getByTestId("plugin-user-badge").first();
     await expect(badge).toHaveText("签到 · 今日完成");
-    await expect(badge).toHaveAttribute("data-plugin-name", "hoyolab-checkin");
+    await expect(badge).toHaveAttribute("data-plugin-name", "game-checkin");
     await expect(badge).toHaveAttribute("data-contribution-id", "check-in-status");
     await card.getByRole("button", { name: "全局管理", exact: true }).click();
     const globalDialog = page.getByRole("dialog", { name: "全局管理" });
@@ -156,21 +174,32 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     await expect(plugin).not.toContainText("aria-pressed=");
     await expect(plugin.getByRole("button", { name: "启用自动签到" })).toHaveAttribute("aria-pressed", "true");
     await expect(plugin.locator(":scope > .section-heading > div > strong")).toHaveCount(0);
-    const gameTrigger = plugin.locator(".plugin-multi-select-trigger");
-    await expect(gameTrigger).toContainText("原神");
-    await expect(plugin.locator('select[data-plugin-field="games"]')).toHaveCount(0);
-    await gameTrigger.click();
-    const gameMenu = plugin.locator(".plugin-multi-select-menu");
-    await expect(gameMenu).toBeVisible();
-    await gameMenu.locator('input[value="zzz"]').check();
-    await expect(gameTrigger).toContainText("绝区零");
+    const cnGameTrigger = plugin.locator(".plugin-multi-select-trigger").nth(0);
+    const osGameTrigger = plugin.locator(".plugin-multi-select-trigger").nth(1);
+    await expect(cnGameTrigger).toContainText("原神");
+    await expect(osGameTrigger).toContainText("原神");
+    await expect(plugin.locator('select[data-plugin-field="cnGames"]')).toHaveCount(0);
+    await expect(plugin.locator('select[data-plugin-field="osGames"]')).toHaveCount(0);
+    await cnGameTrigger.click();
+    const cnGameMenu = plugin.locator(".plugin-multi-select-menu").nth(0);
+    await expect(cnGameMenu).toBeVisible();
+    await cnGameMenu.locator('input[value="zzz"]').check();
+    await expect(cnGameTrigger).toContainText("绝区零");
+    await osGameTrigger.click();
+    const osGameMenu = plugin.locator(".plugin-multi-select-menu").nth(1);
+    await expect(osGameMenu).toBeVisible();
+    await osGameMenu.locator('input[value="zzz"]').check();
+    await expect(osGameTrigger).toContainText("绝区零");
+    await plugin.getByLabel("米游社 Cookie", { exact: true }).fill("stuid=1; stoken=secret");
     await plugin.getByLabel("HoYoLAB Cookie", { exact: true }).fill("ltuid=1; ltoken=secret");
     await globalDialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(globalDialog).toBeHidden();
     expect(savedPluginPayload?.values).toEqual({
       enabled: true,
-      cookie: { action: "set", value: "ltuid=1; ltoken=secret" },
-      games: ["gi", "zzz"],
+      cnCookie: { action: "set", value: "stuid=1; stoken=secret" },
+      cnGames: ["gi", "zzz"],
+      osCookie: { action: "set", value: "ltuid=1; ltoken=secret" },
+      osGames: ["gi", "zzz"],
     });
 
     await card.getByRole("button", { name: "用户管理", exact: true }).click();

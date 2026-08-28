@@ -121,14 +121,14 @@ settings.sections               shell.nav
 
 `context.History.Register(new PluginHistoryContribution(...))` 可在运行历史保存前生成纯文本展示快照。快照只允许标题、徽章和字段，单个插件贡献最多 16 KiB，全部插件单次运行最多 64 KiB；处理器最多执行 5 秒。快照写入 `RunRecord.PluginHistory`，不参与状态、尝试次数、结果和通知判定，插件卸载后仍可由历史页面展示。
 
-### 前端插件运行时（Frontend API 1.0）
+### 前端插件运行时（Frontend API 1.1）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.0",
+  "apiVersion": "1.1",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -143,15 +143,18 @@ settings.sections               shell.nav
 - `host.slots.register(slot, renderer)`：接入稳定 UI slot，自定义 renderer 可返回清理函数；
 - `host.ui.query/save/action(...)`：使用声明式 UI 贡献接口；
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
-- `host.appearance`：注册主题、设置 CSS token、应用主题和管理壁纸。
+- `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
+- `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
 
 前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。该能力只对用户明确确认信任的插件开放，插件更新版本或前端声明变化后会重新要求确认。前端信任记录按插件版本与前端声明指纹保存于 `AppSettings.PluginPreferences`，manifest 的入口、样式或 capability 变化会要求重新确认；撤销信任后模块不会出现在运行时清单。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
-外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。壁纸 Blob 放在 IndexedDB，当前主题和壁纸元数据放在 `localStorage`，不写入宿主 `AppSettings`。
+外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`wallpaperStore` 的壁纸文件由宿主保存到 `user-assets/appearance/wallpapers/`，配置保存到 `config/appearance.json`，轮换游标保存到 `.nxp/state/appearance-runtime.json`。单张壁纸上限 20 MiB，最多 20 张且总容量上限 128 MiB；允许 JPEG、PNG、WebP，上传时校验 MIME、文件头和 SHA256。浏览器只缓存当前显示 Blob，服务端配置由宿主统一同步。
 
-`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`frontendTrusted` 和 `error` 字段中查看。
+`wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
+
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`frontendTrusted`、`replaces` 和 `error` 字段中查看。
 
 ## plugin.json（根文件）
 
@@ -174,6 +177,7 @@ settings.sections               shell.nav
 | `name` | 插件标识（脚本实例 `PluginType` 引用；改名的旧实例需同步修改） |
 | `displayName` / `gameName` | 列表显示名 / 中文游戏名（脚本卡片徽章「{gameName}专项」） |
 | `description` / `version` | 插件说明 / 版本（插件页展示） |
+| `replaces` | 可选的旧插件机器标识数组；商店安装时按跨重启事务迁移旧插件代码目录、配置、密钥、作用域和插件偏好，并清除前端信任 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configTemplate` | 可选：默认配置模板目录（编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置） |
@@ -249,6 +253,18 @@ settings.sections               shell.nav
 
 - 编辑用户配置会话 start 时若 `ConfigPath` 不存在且插件提供 `config-template/` 目录 → 目录内容**整体复制**到配置位置（configPath 父目录），cancel 时按复制清单精确清理（清单随 `.session` 标记持久化，重启崩溃恢复同样生效）。
 - 建议放入「可直接使用的默认配置」而非空模板；BetterGI 示例为内置标准任务列表的 NexusPipeline.json。
+
+## 插件身份替换
+
+插件机器标识参与插件目录、配置、密钥、作用域和用户偏好隔离。需要改名时，新插件在 manifest 和 catalog 中声明 `replaces`，宿主会在重启阶段完成一次可恢复的身份迁移：
+
+1. 先校验新旧身份与 staging 目录，旧代码目录进入稳定 backup，新的插件目录完成交换；
+2. 将 `config/plugins/<旧名>.json`、`<旧名>.secrets.json` 和 `<旧名>/` 作用域目录移动为新身份；
+3. 将 `AppSettings.PluginPreferences` 中的旧键迁移为新键，保留 `Enabled`，清除前端信任记录；
+4. 更新商店 `ownership.json` 并清理旧身份归属；
+5. 任一阶段失败时保留 `pending.json`，下次启动从已记录阶段继续。
+
+新旧身份同时存在时，宿主报告 `replacement-conflict` 并停止替换，避免覆盖用户数据。`replaces` 每个条目最多 8 个安全机器标识，同一个旧身份在 catalog 中只能被一个新插件声明替换。
 
 ## 构建与部署
 

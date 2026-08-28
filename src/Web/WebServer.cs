@@ -15,6 +15,11 @@ internal sealed class WebServer : IDisposable
 {
     private delegate Task ApiRouteHandler(HttpListenerContext context, string method, string[] seg, string body);
 
+    private sealed record ApiRouteDefinition(
+        ApiRouteHandler Handler,
+        ApiBodyMode BodyMode,
+        int MaxBodyBytes);
+
     /// <summary>请求体大小上限（10MB，防超大 body 内存压力）。</summary>
     private const int MaxRequestBodyBytes = 10 * 1024 * 1024;
 
@@ -58,11 +63,11 @@ internal sealed class WebServer : IDisposable
     }
 
     /// <summary>API 路由表：启动时反射扫描带 [ApiRoute] 的 handler 类/方法注册；新增 API 无需改路由表。</summary>
-    private static readonly Dictionary<string, ApiRouteHandler> Routes = BuildRoutes();
+    private static readonly Dictionary<string, ApiRouteDefinition> Routes = BuildRoutes();
 
-    private static Dictionary<string, ApiRouteHandler> BuildRoutes()
+    private static Dictionary<string, ApiRouteDefinition> BuildRoutes()
     {
-        var routes = new Dictionary<string, ApiRouteHandler>(StringComparer.OrdinalIgnoreCase);
+        var routes = new Dictionary<string, ApiRouteDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (Type type in typeof(WebServer).Assembly.GetTypes())
         {
             ApiRouteAttribute? classAttr = type.GetCustomAttribute<ApiRouteAttribute>();
@@ -73,14 +78,20 @@ internal sealed class WebServer : IDisposable
             MethodInfo? handle = type.GetMethod("Handle", BindingFlags.Public | BindingFlags.Static);
             if (handle is not null)
             {
-                routes[classAttr.Name] = (ctx, m, seg, b) => InvokeRouteAsync(handle, ctx, m, seg, b);
+                routes[classAttr.Name] = new ApiRouteDefinition(
+                    (ctx, m, seg, b) => InvokeRouteAsync(handle, ctx, m, seg, b),
+                    classAttr.BodyMode,
+                    classAttr.MaxBodyBytes);
             }
             foreach (MethodInfo method in type.GetMethods(BindingFlags.Public | BindingFlags.Static))
             {
                 ApiRouteAttribute? methodAttr = method.GetCustomAttribute<ApiRouteAttribute>();
                 if (methodAttr is not null)
                 {
-                    routes[methodAttr.Name] = (ctx, m, seg, b) => InvokeRouteAsync(method, ctx, m, seg, b);
+                    routes[methodAttr.Name] = new ApiRouteDefinition(
+                        (ctx, m, seg, b) => InvokeRouteAsync(method, ctx, m, seg, b),
+                        methodAttr.BodyMode,
+                        methodAttr.MaxBodyBytes);
                 }
             }
         }
@@ -453,9 +464,23 @@ internal sealed class WebServer : IDisposable
 
     private static async Task HandleApiAsync(HttpListenerContext context, string method, string path, CancellationToken token)
     {
+        string[] segments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        ApiRouteDefinition? route = segments.Length >= 2
+            && segments[0].Equals("api", StringComparison.OrdinalIgnoreCase)
+            && Routes.TryGetValue(segments[1], out ApiRouteDefinition? resolved)
+            ? resolved
+            : null;
         string body = "";
-        if (context.Request.HasEntityBody)
+        if (context.Request.HasEntityBody && route?.BodyMode != ApiBodyMode.Raw)
         {
+            int maxBodyBytes = route is not null && route.MaxBodyBytes > 0
+                ? route.MaxBodyBytes
+                : MaxRequestBodyBytes;
+            if (context.Request.ContentLength64 > maxBodyBytes)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = $"请求体过大（上限 {maxBodyBytes / (1024 * 1024)}MB）" }, 413).ConfigureAwait(false);
+                return;
+            }
             using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8);
             var buffer = new char[81920];
             var text = new StringBuilder();
@@ -464,9 +489,9 @@ internal sealed class WebServer : IDisposable
             while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
             {
                 total += read;
-                if (total > MaxRequestBodyBytes)
+                if (total > maxBodyBytes)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = "请求体过大（上限 10MB）" }, 413).ConfigureAwait(false);
+                    await HttpHelper.WriteJsonAsync(context, new { error = $"请求体过大（上限 {maxBodyBytes / (1024 * 1024)}MB）" }, 413).ConfigureAwait(false);
                     return;
                 }
                 text.Append(buffer, 0, read);
@@ -474,7 +499,6 @@ internal sealed class WebServer : IDisposable
             body = text.ToString();
         }
 
-        string[] segments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length == 0)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -500,9 +524,9 @@ internal sealed class WebServer : IDisposable
             return;
         }
         string resource = seg[0].ToLowerInvariant();
-        if (Routes.TryGetValue(resource, out ApiRouteHandler? handler))
+        if (Routes.TryGetValue(resource, out ApiRouteDefinition? route))
         {
-            await handler(context, method, seg, body).ConfigureAwait(false);
+            await route.Handler(context, method, seg, body).ConfigureAwait(false);
             return;
         }
         await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);

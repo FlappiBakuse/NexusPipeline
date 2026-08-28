@@ -85,6 +85,7 @@ internal static class ApiStatusHandler
                 kind = plugin.Kind,
                 apiVersion = plugin.ApiVersion,
                 capabilities = plugin.Capabilities,
+                replaces = plugin.Replaces,
                 supportsEmulator = RuntimeContext.Instance.Plugins.HasCapability(plugin.Name, PluginCapabilityKeys.Emulator),
                 configuredEnabled = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name),
                 runtimeEnabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),

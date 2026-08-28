@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
@@ -36,11 +37,19 @@ internal static class PluginInstallRecovery
         {
             throw new InvalidDataException($"插件名称不安全：{operation.Name}");
         }
+        if (!string.IsNullOrWhiteSpace(operation.SourceName)
+            && (!PluginRepositoryCatalog.IsSafePluginName(operation.SourceName)
+                || string.Equals(operation.Name, operation.SourceName, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidDataException($"插件来源名称不安全：{operation.SourceName}");
+        }
         lock (Sync)
         {
             string file = path ?? AppPaths.PluginPendingPath;
             PluginPendingState state = LoadPending(file);
-            if (state.Operations.Any(item => string.Equals(item.Name, operation.Name, StringComparison.OrdinalIgnoreCase)))
+            if (state.Operations.Any(item => string.Equals(item.Name, operation.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.SourceName, operation.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(item.Name, operation.SourceName, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException($"插件已有待处理事务：{operation.Name}");
             }
@@ -55,13 +64,15 @@ internal static class PluginInstallRecovery
         string? pendingPath = null,
         string? ownershipPath = null,
         string? stagingRoot = null,
-        string? backupRoot = null)
+        string? backupRoot = null,
+        string? configRoot = null)
     {
         string localPlugins = Path.GetFullPath(pluginsDir ?? AppPaths.PluginsDir);
         string journalPath = Path.GetFullPath(pendingPath ?? AppPaths.PluginPendingPath);
         string ownersPath = Path.GetFullPath(ownershipPath ?? AppPaths.PluginOwnershipPath);
         string stagingBase = Path.GetFullPath(stagingRoot ?? AppPaths.PluginStagingDir);
         string backupBase = Path.GetFullPath(backupRoot ?? AppPaths.PluginBackupDir);
+        string configBase = Path.GetFullPath(configRoot ?? AppPaths.ConfigDir);
         lock (Sync)
         {
             PluginPendingState state;
@@ -96,7 +107,7 @@ internal static class PluginInstallRecovery
             {
                 foreach (PluginPendingOperation operation in state.Operations.ToArray())
                 {
-                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase);
+                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase, configBase);
                 }
                 TryDeleteEmptyDirectories(stagingBase);
                 TryDeleteEmptyDirectories(backupBase);
@@ -119,7 +130,8 @@ internal static class PluginInstallRecovery
         string pendingPath,
         string ownershipPath,
         string stagingRoot,
-        string backupRoot)
+        string backupRoot,
+        string configRoot)
     {
         if (!PluginRepositoryCatalog.IsSafePluginName(operation.Name))
         {
@@ -141,6 +153,12 @@ internal static class PluginInstallRecovery
         if (operation.Action == "uninstall")
         {
             ApplyUninstall(operation, state, ownership, localPath, backupPath, pendingPath, ownershipPath, backupRoot);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(operation.SourceName))
+        {
+            ApplyReplacement(operation, state, ownership, pluginsDir, pendingPath, ownershipPath, stagingRoot, backupRoot, configRoot);
             return;
         }
 
@@ -244,6 +262,223 @@ internal static class PluginInstallRecovery
         DeletePath(backupPath);
         state.Operations.Remove(operation);
         SavePending(pendingPath, state);
+    }
+
+    private static void ApplyReplacement(
+        PluginPendingOperation operation,
+        PluginPendingState state,
+        PluginOwnershipState ownership,
+        string pluginsDir,
+        string pendingPath,
+        string ownershipPath,
+        string stagingRoot,
+        string backupRoot,
+        string configRoot)
+    {
+        string sourceName = operation.SourceName!;
+        if (!PluginRepositoryCatalog.IsSafePluginName(sourceName)
+            || string.Equals(sourceName, operation.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"替换来源名称无效：{sourceName}");
+        }
+        string targetPath = Path.Combine(pluginsDir, operation.Name);
+        string sourcePath = Path.Combine(pluginsDir, sourceName);
+        EnsureChildPath(pluginsDir, sourcePath);
+        EnsureChildPath(pluginsDir, targetPath);
+        string stagedPath = Path.GetFullPath(operation.StagedPath ?? "");
+        EnsureChildPath(stagingRoot, stagedPath);
+        string backupPath = string.IsNullOrWhiteSpace(operation.BackupPath)
+            ? Path.Combine(backupRoot, operation.Name + ".from-" + sourceName + "." + Guid.NewGuid().ToString("N"))
+            : Path.GetFullPath(operation.BackupPath);
+        EnsureChildPath(backupRoot, backupPath);
+
+        if (operation.Phase is "pending" or "backed-up")
+        {
+            if (PathExists(targetPath))
+            {
+                throw new IOException($"插件替换冲突：目标插件已存在：{operation.Name}");
+            }
+            if (operation.Phase == "pending" && string.IsNullOrWhiteSpace(operation.BackupPath))
+            {
+                operation.BackupPath = backupPath;
+                SavePending(pendingPath, state);
+            }
+            if (PathExists(sourcePath) && !PathExists(backupPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+                Directory.Move(sourcePath, backupPath);
+            }
+            if (PathExists(sourcePath) && PathExists(backupPath))
+            {
+                throw new IOException($"插件替换事务同时存在来源目录和 backup：{sourceName}");
+            }
+            if (!PathExists(backupPath))
+            {
+                throw new IOException($"插件替换来源目录不存在：{sourceName}");
+            }
+            operation.Phase = "backed-up";
+            SavePending(pendingPath, state);
+        }
+
+        if (operation.Phase is "pending" or "backed-up")
+        {
+            if (PathExists(targetPath))
+            {
+                operation.Phase = "swapped";
+                SavePending(pendingPath, state);
+            }
+            else if (Directory.Exists(stagedPath))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
+                Directory.Move(stagedPath, targetPath);
+                operation.Phase = "swapped";
+                SavePending(pendingPath, state);
+            }
+            else
+            {
+                throw new IOException($"插件 staging 不存在：{stagedPath}");
+            }
+        }
+
+        if (operation.Phase == "swapped")
+        {
+            if (!Directory.Exists(targetPath))
+            {
+                throw new IOException($"插件替换目标目录不存在：{targetPath}");
+            }
+            MigratePluginNamespaces(configRoot, sourceName, operation.Name);
+            operation.Phase = "migrated";
+            SavePending(pendingPath, state);
+        }
+
+        if (operation.Phase == "migrated")
+        {
+            MigratePluginPreference(configRoot, sourceName, operation.Name);
+            operation.Phase = "preferences";
+            SavePending(pendingPath, state);
+        }
+
+        if (operation.Phase == "preferences")
+        {
+            ownership.Plugins.RemoveAll(item => string.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
+            UpsertOwnership(ownership, new PluginOwnership
+            {
+                Name = operation.Name,
+                Version = operation.Version,
+                Kind = operation.Kind,
+                ApiVersion = operation.ApiVersion,
+                Sha256 = operation.Sha256,
+                InstalledAt = DateTimeOffset.UtcNow,
+            });
+            SaveOwnership(ownershipPath, ownership);
+            operation.Phase = "owned";
+            SavePending(pendingPath, state);
+        }
+
+        if (operation.Phase == "owned")
+        {
+            DeletePath(backupPath);
+            state.Operations.Remove(operation);
+            SavePending(pendingPath, state);
+        }
+    }
+
+    private static void MigratePluginNamespaces(string configRoot, string sourceName, string targetName)
+    {
+        string pluginsConfig = Path.Combine(configRoot, "plugins");
+        Directory.CreateDirectory(pluginsConfig);
+        string[] names =
+        {
+            sourceName + ".json",
+            sourceName + ".secrets.json",
+        };
+        foreach (string sourceFileName in names)
+        {
+            string targetFileName = targetName + sourceFileName[sourceName.Length..];
+            MoveNamespacePath(
+                Path.Combine(pluginsConfig, sourceFileName),
+                Path.Combine(pluginsConfig, targetFileName));
+        }
+        MoveNamespacePath(
+            Path.Combine(pluginsConfig, sourceName),
+            Path.Combine(pluginsConfig, targetName));
+    }
+
+    private static void MoveNamespacePath(string source, string target)
+    {
+        bool sourceExists = PathExists(source);
+        bool targetExists = PathExists(target);
+        if (sourceExists && targetExists)
+        {
+            throw new IOException($"插件身份迁移冲突：{Path.GetFileName(source)} 与 {Path.GetFileName(target)} 同时存在");
+        }
+        if (!sourceExists || targetExists)
+        {
+            return;
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        if (Directory.Exists(source))
+        {
+            Directory.Move(source, target);
+        }
+        else
+        {
+            File.Move(source, target);
+        }
+    }
+
+    private static void MigratePluginPreference(string configRoot, string sourceName, string targetName)
+    {
+        string settingsPath = Path.Combine(configRoot, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            return;
+        }
+        JsonNode? parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
+        if (parsed is not JsonObject root)
+        {
+            throw new InvalidDataException("设置文件不是 JSON 对象");
+        }
+        string? preferencesName = root.Select(pair => pair.Key)
+            .FirstOrDefault(name => string.Equals(name, "PluginPreferences", StringComparison.OrdinalIgnoreCase));
+        if (preferencesName is null)
+        {
+            return;
+        }
+        if (root[preferencesName] is not JsonObject preferences)
+        {
+            throw new InvalidDataException("PluginPreferences 不是 JSON 对象");
+        }
+        string? sourceKey = preferences.Select(pair => pair.Key)
+            .FirstOrDefault(name => string.Equals(name, sourceName, StringComparison.OrdinalIgnoreCase));
+        string? targetKey = preferences.Select(pair => pair.Key)
+            .FirstOrDefault(name => string.Equals(name, targetName, StringComparison.OrdinalIgnoreCase));
+        if (sourceKey is null)
+        {
+            return;
+        }
+        if (targetKey is not null)
+        {
+            throw new IOException($"插件偏好迁移冲突：{sourceName} 与 {targetName} 同时存在");
+        }
+        JsonNode value = preferences[sourceKey]?.DeepClone()
+            ?? new JsonObject();
+        if (value is JsonObject preference)
+        {
+            SetPropertyIgnoreCase(preference, "FrontendTrusted", JsonValue.Create(false));
+            SetPropertyIgnoreCase(preference, "FrontendTrustedVersion", JsonValue.Create(""));
+            SetPropertyIgnoreCase(preference, "FrontendTrustedFingerprint", JsonValue.Create(""));
+        }
+        preferences.Remove(sourceKey);
+        preferences[targetName] = value;
+        JsonUtil.WriteAtomic(settingsPath, root.ToJsonString(JsonOpts.Indented));
+    }
+
+    private static void SetPropertyIgnoreCase(JsonObject objectNode, string propertyName, JsonNode? value)
+    {
+        string? existing = objectNode.Select(pair => pair.Key)
+            .FirstOrDefault(name => string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase));
+        objectNode[existing ?? propertyName] = value;
     }
 
     private static void ApplyUninstall(
@@ -368,6 +603,7 @@ internal static class PluginInstallRecovery
         {
             Action = source.Action,
             Name = source.Name,
+            SourceName = source.SourceName,
             Version = source.Version,
             Kind = source.Kind,
             ApiVersion = source.ApiVersion,
@@ -444,6 +680,9 @@ internal sealed class PluginPendingOperation
     public string Action { get; set; } = "";
 
     public string Name { get; set; } = "";
+
+    /// <summary>替换安装时的旧插件机器标识；普通安装/更新为空。</summary>
+    public string SourceName { get; set; } = "";
 
     public string Version { get; set; } = "";
 

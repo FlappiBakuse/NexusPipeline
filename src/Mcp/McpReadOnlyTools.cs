@@ -182,6 +182,7 @@ internal sealed class McpReadOnlyTools
             plugin.Kind,
             plugin.ApiVersion,
             plugin.Capabilities,
+            plugin.Replaces,
             configuredEnabled = plugins.IsConfiguredEnabled(plugin.Name),
             runtimeEnabled = plugins.IsEnabled(plugin.Name),
             state = plugins.GetRuntimeState(plugin.Name),

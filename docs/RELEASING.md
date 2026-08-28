@@ -69,7 +69,7 @@ README.md
 LICENSE
 ```
 
-包内 `plugins/.nxp-root` 仅用于兼容旧版本更新器；官方插件包由 `NexusPipeline-Plugins` 独立发布。主程序更新引擎只交换 `nexus-pipeline.exe` 和 `wwwroot/`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎兼容包内单个顶层目录形态，并拒绝绝对路径、`..` 路径和重复目录条目。
+包内 `plugins/.nxp-root` 仅用于兼容旧版本更新器。主程序更新引擎只交换 `nexus-pipeline.exe` 和 `wwwroot/`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎兼容包内单个顶层目录形态，并拒绝绝对路径、`..` 路径和重复目录条目。
 
 SHA 文件内容为纯 hash，不含文件名和空格，使用 UTF-8 无 BOM。PowerShell 示例：
 

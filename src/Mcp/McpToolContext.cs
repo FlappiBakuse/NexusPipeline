@@ -98,6 +98,7 @@ internal sealed class McpToolContext
                 plugin.Kind,
                 plugin.ApiVersion,
                 plugin.Capabilities,
+                plugin.Replaces,
                 configuredEnabled = Runtime.Plugins.IsConfiguredEnabled(plugin.Name),
                 runtimeEnabled = Runtime.Plugins.IsEnabled(plugin.Name),
                 state = Runtime.Plugins.GetRuntimeState(plugin.Name),

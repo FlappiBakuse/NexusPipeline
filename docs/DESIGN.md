@@ -30,7 +30,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 - **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由插件固化脚本驱动），其次成功/失败关键字；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
 - **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态，不只看进程退出码，因此日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
-- **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 使用宿主通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知和调度端口；可信插件可通过独立 Frontend API 1.0 加载同源 ES module/CSS，扩展页面路由、导航、slot、主题和壁纸；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记，旧 `supportsEmulator` 继续兼容。
+- **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 使用宿主通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知和调度端口；可信插件可通过独立 Frontend API 1.1 加载同源 ES module/CSS，扩展页面路由、导航、slot、主题和服务端同步壁纸；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记，旧 `supportsEmulator` 继续兼容。
 - **插件分发与运行解耦**：插件仓库以固定官方 `catalog.json` 提供版本和 SHA256，安装包在本地完成校验后以 pending 事务跨重启交换；宿主更新只替换宿主文件，用户插件目录持续保留。
 - **宿主网络出口可控**：外部 HTTP 请求统一经过可即时读取设置的网络出口，支持无代理、系统代理和自定义 HTTP/HTTPS 代理；本机控制面、MCP、SMTP 与插件子进程保持原有网络边界。
 
@@ -409,7 +409,7 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，每个条目包含名称、显示信息、SemVer、插件类型、最低宿主版本、官方 Release 包地址、包大小和 SHA256。客户端对 catalog 做 schema、重复名称、官方 URL、版本、大小和 SHA256 格式校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，每个条目包含名称、显示信息、SemVer、插件类型、最低宿主版本、官方 Release 包地址、包大小和 SHA256；需要更换机器标识的插件额外声明 `replaces`。客户端对 catalog 做 schema、重复名称、官方 URL、版本、大小、SHA256 和 replacement 唯一性校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
 
 插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。仓库请求在内存缓存有效期内复用结果；过期请求失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。
 
@@ -419,11 +419,11 @@ flowchart LR
 2. 将 ZIP 解压到 `.nxp/state/plugins/staging/`，拒绝绝对路径、`..`、重复条目、越界路径和超过资源上限的压缩内容；
 3. 检查根 `plugin.json` 与 catalog 的名称、版本、类型、API 和 capability 一致，并验证数据插件文件或 managed-code 入口程序集存在；
 4. 写入 `pending.json`，返回“重启后生效”；
-5. 下次启动先由 `PluginInstallRecovery` 完成备份、目录交换、归属记录和清理，再进入 `PluginManager.LoadAll`。交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
+5. 下次启动先由 `PluginInstallRecovery` 完成备份、目录交换、归属记录和清理，再进入 `PluginManager.LoadAll`；声明 `replaces` 时同时迁移旧插件配置、密钥、作用域和插件偏好。交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
 
 插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为目录缓存，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
 
-managed-code 插件可以通过 Plugin API v1.3 注册用户列表徽章、通用 UI 贡献、作用域数据、插件 Web API 和历史展示。宿主通过 `GET /api/plugin-contributions/user-list-badges` 一次读取全部用户的聚合展示数据，按插件贡献提供的顺序投影并校验；用户列表不理解具体插件业务，单个处理器异常也不会阻断其他用户或插件的徽章读取。插件徽章读取应使用本地状态，不能在列表请求中执行网络签到。可信前端插件通过 Frontend API 1.0 以 `web/` 下的 ES module/CSS 扩展页面；用户按插件版本与前端声明指纹单独确认信任，更新后重新确认。
+managed-code 插件可以通过 Plugin API v1.3 注册用户列表徽章、通用 UI 贡献、作用域数据、插件 Web API 和历史展示。宿主通过 `GET /api/plugin-contributions/user-list-badges` 一次读取全部用户的聚合展示数据，按插件贡献提供的顺序投影并校验；用户列表不理解具体插件业务，单个处理器异常也不会阻断其他用户或插件的徽章读取。插件徽章读取应使用本地状态，不能在列表请求中执行网络签到。可信前端插件通过 Frontend API 1.1 以 `web/` 下的 ES module/CSS 扩展页面；用户按插件版本与前端声明指纹单独确认信任，更新后重新确认。外观服务由 `AppearanceService` 提供服务端同步配置和壁纸文件，可信前端通过 `host.appearance.wallpaperStore` 访问。
 
 ### 7.4 宿主代理设置与网络边界
 

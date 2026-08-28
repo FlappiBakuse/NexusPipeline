@@ -3,6 +3,7 @@ import { registerInterval } from "./state.js";
 import { api } from "./api.js";
 import { icon } from "./icons.js";
 import { systemActionCard } from "./forms.js";
+import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -274,33 +275,24 @@ export async function cancelSystemAction() {
 }
 
 export function initTheme() {
-  // localStorage 读取加异常保护——隐私模式/禁用存储下 getItem 抛异常会导致白屏。
-  let stored = "system";
-  try {
-    stored = localStorage.getItem("nexus-theme") || "system";
-  } catch {
-    stored = "system";
-  }
-  applyTheme(stored);
+  syncThemeControls(initThemeValue());
 }
 
 export function applyTheme(theme) {
-  const value = ["light", "dark", "system"].includes(theme) ? theme : "system";
-  document.body.dataset.theme = value;
-  try {
-    localStorage.setItem("nexus-theme", value);
-  } catch {
-    // 存储不可用（隐私模式/禁用存储）：主题仅本次会话生效。
-  }
+  const value = applyThemeValue(theme);
+  syncThemeControls(value);
+}
+
+function syncThemeControls(value) {
   const iconName = value === "light" ? "sun" : value === "dark" ? "moon" : "system";
   $$('[data-theme-icon], #theme-icon').forEach(element => element.innerHTML = icon(iconName));
   $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", `当前${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}，点击切换主题`));
 }
 
 export function cycleTheme() {
-  const current = document.body.dataset.theme || "system";
-  applyTheme(current === "system" ? "light" : current === "light" ? "dark" : "system");
-  toast(`主题：${document.body.dataset.theme === "system" ? "跟随系统" : document.body.dataset.theme === "light" ? "浅色" : "深色"}`);
+  const value = cycleThemeValue();
+  syncThemeControls(value);
+  toast(`主题：${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}`);
 }
 
 /** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */

@@ -15,9 +15,9 @@ public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 0;
+    public const int Minor = 1;
 
-    public const string Text = "1.0";
+    public const string Text = "1.1";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -50,6 +50,7 @@ public static class PluginUiSlots
     public const string HistoryListBadges = "history.list.badges";
     public const string HistoryDetailSections = "history.detail.sections";
     public const string SettingsSections = "settings.sections";
+    public const string SettingsCards = "settings.cards";
     public const string ShellNav = "shell.nav";
 
     public static IReadOnlySet<string> All { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -69,6 +70,7 @@ public static class PluginUiSlots
         HistoryListBadges,
         HistoryDetailSections,
         SettingsSections,
+        SettingsCards,
         ShellNav,
     };
 }

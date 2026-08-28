@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { appearance } from "./appearance.js";
+import { appearance, createAppearanceHost, refreshAppearance } from "./appearance.js";
 
 const SLOT_NAMES = new Set([
   "dashboard.cards",
@@ -17,6 +17,7 @@ const SLOT_NAMES = new Set([
   "history.list.badges",
   "history.detail.sections",
   "settings.sections",
+  "settings.cards",
   "shell.nav",
 ]);
 
@@ -200,7 +201,7 @@ function createHost(descriptor) {
       onPageUpdated: handler => registerLifecycle("onPageUpdated", handler),
       onDispose: handler => registerLifecycle("onDispose", handler),
     },
-    appearance,
+    appearance: createAppearanceHost(descriptor.name),
   };
   return host;
 }
@@ -254,7 +255,7 @@ export async function refreshPluginRuntime() {
     const payload = await api("GET", "/api/plugin-runtime/frontend");
     const descriptors = Array.isArray(payload) ? payload : (payload?.plugins || []);
     for (const descriptor of descriptors) await activateDescriptor(descriptor);
-    await appearance.init();
+    await refreshAppearance();
     renderPluginNav();
     return true;
   } catch {

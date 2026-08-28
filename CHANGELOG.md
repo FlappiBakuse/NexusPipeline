@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.11.3（Pre-release）
+
+### 插件身份与运行时扩展
+
+- 增加插件身份替换与迁移机制，支持将 `hoyolab-checkin` 用户数据、密钥和启用状态迁移到 `game-checkin`。
+- 增加 Frontend API 1.1 的设置卡片 slot、外观状态订阅和服务端用户资产能力，支持前端插件使用同步壁纸资源。
+- 增加多壁纸服务端存储、轮换状态、模糊、变暗和自适应主题色；自定义壁纸启用后仍保留宿主夜间模式控制。
+
+### 官方插件
+
+- 新增 `custom-wallpaper` v0.1.0，支持多张壁纸同步、定时或启动 Web 轮换、拖拽排序和设置项自动保存。
+- 将 HoYoLAB 自动签到插件升级为 `game-checkin` v0.1.2，同时支持米游社与 HoYoLAB 的原神、崩坏：星穹铁道和绝区零签到。
+- 游戏自动签到按平台使用独立 Cookie，用户可按需配置任一平台；米游社验证码进入明确的人工处理状态。
+
+### 验证
+
+- 默认门禁：Unit/Component 367 项、Web Logic 12 项、文档一致性 5 项全部通过。
+- 管理员 UI Smoke 18/18 通过；管理员 System Smoke 31/31 通过；游戏自动签到插件测试 7/7 通过。
+
 ## v0.11.2（Pre-release）
 
 ### Plugin API v1.3
