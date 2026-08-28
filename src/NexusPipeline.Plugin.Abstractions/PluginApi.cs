@@ -1,11 +1,11 @@
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.1）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.2）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 1;
+    public const int Minor = 2;
 }
 
 public interface INexusPlugin
@@ -43,6 +43,12 @@ public interface IPluginHostContextV1_1 : IPluginHostContext
     IPluginExecutionEventService ExecutionEvents { get; }
 
     IPluginHttpClientFactory Http { get; }
+}
+
+/// <summary>Plugin API v1.2 的用户列表展示扩展；v1.1 插件仍可继续使用 IPluginHostContextV1_1。</summary>
+public interface IPluginHostContextV1_2 : IPluginHostContextV1_1
+{
+    IPluginUserListBadgeRegistry UserListBadges { get; }
 }
 
 /// <summary>按用户隔离的插件配置与 DPAPI 密钥存储。</summary>
@@ -86,6 +92,22 @@ public sealed record PluginUserGlobalManagementField(
     bool ReadOnly = false);
 
 public sealed record PluginUserGlobalManagementOption(string Value, string Label);
+
+/// <summary>插件声明式用户列表徽章贡献；处理器只接收用户 ID，不应执行网络请求。</summary>
+public interface IPluginUserListBadgeRegistry
+{
+    IDisposable Register(PluginUserListBadgeContribution contribution);
+}
+
+public sealed record PluginUserListBadgeContribution(
+    string Id,
+    int Order,
+    Func<string, CancellationToken, ValueTask<PluginUserListBadge?>> ReadHandler);
+
+public sealed record PluginUserListBadge(
+    string Label,
+    string Tone = "muted",
+    string Title = "");
 
 /// <summary>用户脚本执行开始事件；仅暴露稳定的宿主无关标识与时间信息。</summary>
 public interface IPluginExecutionEventService

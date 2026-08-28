@@ -53,4 +53,18 @@ public sealed class PluginContributionRouteTests
             out _,
             out _));
     }
+
+    [Fact]
+    public void UserListBadgeRoute_UsesSingleReadOnlyEndpoint()
+    {
+        Assert.True(ApiPluginContributionsHandler.TryParseUserListBadgesRoute(
+            "GET",
+            new[] { "plugin-contributions", "user-list-badges" }));
+        Assert.False(ApiPluginContributionsHandler.TryParseUserListBadgesRoute(
+            "PUT",
+            new[] { "plugin-contributions", "user-list-badges" }));
+        Assert.False(ApiPluginContributionsHandler.TryParseUserListBadgesRoute(
+            "GET",
+            new[] { "plugin-contributions", "user-list-badges", "extra" }));
+    }
 }

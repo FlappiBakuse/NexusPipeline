@@ -5,7 +5,7 @@ import { isCurrent, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { markRestartRequired } from "./settings.js";
 
-let activeTab = "store";
+let activeTab = "local";
 let pluginLoadId = 0;
 
 function pluginKindLabel(plugin) {
@@ -64,8 +64,8 @@ function pluginTabs(tab = activeTab) {
   const storeClass = tab === "store" ? "primary" : "tertiary";
   const localClass = tab === "local" ? "primary" : "tertiary";
   return '<div class="plugin-tabs" role="tablist" aria-label="插件视图">' +
-    '<button type="button" class="' + storeClass + '" role="tab" aria-selected="' + String(tab === "store") + '" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button>' +
     '<button type="button" class="' + localClass + '" role="tab" aria-selected="' + String(tab === "local") + '" data-action="switch-plugin-tab" data-tab="local" data-testid="plugin-local-tab">本地插件</button>' +
+    '<button type="button" class="' + storeClass + '" role="tab" aria-selected="' + String(tab === "store") + '" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button>' +
     '</div>';
 }
 
@@ -76,8 +76,8 @@ function pluginLoadingContent(title, message, testId) {
 function localPluginContent(status) {
   const plugins = status.plugins || [];
   const groups = [
-    { label: "数据化专项插件", items: plugins.filter(plugin => plugin.kind === "data-specialized") },
-    { label: "代码插件", items: plugins.filter(plugin => plugin.kind === "managed-code") },
+    { label: "通用插件", items: plugins.filter(plugin => plugin.kind === "managed-code") },
+    { label: "专项插件", items: plugins.filter(plugin => plugin.kind === "data-specialized") },
     { label: "其他插件", items: plugins.filter(plugin => !["data-specialized", "managed-code"].includes(plugin.kind)) },
   ].filter(group => group.items.length);
   const groupMarkup = groups.map(group => '<section class="plugin-group"><div class="plugin-group-heading"><h3>' + group.label + "</h3><span>" + group.items.length + " 项</span></div>" + group.items.map(pluginRow).join("") + "</section>").join("");
@@ -142,8 +142,8 @@ function storePluginContent(data) {
   const warning = data.stale ? '<div class="callout callout-warning" data-testid="plugin-store-stale">仓库连接暂时不可用，当前显示缓存目录。' + (data.error ? " " + esc(data.error) : "") + "</div>" : "";
   const plugins = data.plugins || [];
   const groups = [
-    { label: "专项插件", items: plugins.filter(plugin => plugin.kind === "data-specialized") },
     { label: "通用插件", items: plugins.filter(plugin => plugin.kind !== "data-specialized") },
+    { label: "专项插件", items: plugins.filter(plugin => plugin.kind === "data-specialized") },
   ].filter(group => group.items.length);
   const groupMarkup = groups.map(group => '<section class="plugin-group"><div class="plugin-group-heading"><h3>' + group.label + "</h3><span>" + group.items.length + " 项</span></div>" + group.items.map(storePluginRow).join("") + "</section>").join("");
   return warning + '<section class="plugins-table plugin-groups plugin-store-groups" data-testid="plugin-store-list">' + (groupMarkup || '<div class="empty"><strong>暂无可用插件</strong></div>') + '</section><div class="plugin-store-footer"><span class="muted">仓库目录更新时间：' + esc(data.fetchedAt || "未知") + '</span><button class="tertiary" type="button" data-action="store-refresh" data-testid="plugin-store-refresh">刷新仓库</button></div><p class="muted helper-copy plugin-helper">安装、更新和卸载会在重启服务后生效。</p>';

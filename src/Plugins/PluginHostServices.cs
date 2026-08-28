@@ -85,6 +85,70 @@ internal sealed class PluginUserGlobalManagementRegistry
     }
 }
 
+internal sealed record PluginUserListBadgeRegistration(
+    Guid Token,
+    string PluginName,
+    string PluginDisplayName,
+    PluginUserListBadgeContribution Contribution);
+
+internal sealed class PluginUserListBadgeRegistry
+{
+    private readonly object _sync = new();
+    private readonly Dictionary<Guid, PluginUserListBadgeRegistration> _registrations = new();
+
+    public IDisposable Register(
+        string pluginName,
+        string pluginDisplayName,
+        PluginUserListBadgeContribution contribution)
+    {
+        PluginContributionValidation.ValidateUserListBadgeContribution(contribution);
+        Guid token = Guid.NewGuid();
+        lock (_sync)
+        {
+            if (_registrations.Values.Any(item =>
+                string.Equals(item.PluginName, pluginName, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.Contribution.Id, contribution.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"插件用户列表徽章贡献 ID 重复：{pluginName}/{contribution.Id}");
+            }
+            _registrations[token] = new PluginUserListBadgeRegistration(
+                token,
+                pluginName,
+                pluginDisplayName,
+                contribution);
+        }
+        return new CallbackDisposable(() => Remove(token));
+    }
+
+    public IReadOnlyList<PluginUserListBadgeRegistration> Snapshot()
+    {
+        lock (_sync)
+        {
+            return _registrations.Values
+                .OrderBy(item => item.Contribution.Order)
+                .ThenBy(item => item.PluginDisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(item => item.Contribution.Id, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+    }
+
+    public void Clear()
+    {
+        lock (_sync)
+        {
+            _registrations.Clear();
+        }
+    }
+
+    private void Remove(Guid token)
+    {
+        lock (_sync)
+        {
+            _registrations.Remove(token);
+        }
+    }
+}
+
 internal sealed class PluginExecutionEventRegistry
 {
     private sealed record Subscription(Guid Token, string PluginName, Func<PluginUserRunStartingEvent, ValueTask> Handler);
@@ -351,6 +415,64 @@ internal static class PluginContributionValidation
         "multi-select",
         "status",
     };
+
+    private static readonly HashSet<string> AllowedBadgeTones = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "muted",
+        "blue",
+        "ok",
+        "warn",
+        "bad",
+    };
+
+    public static void ValidateUserListBadgeContribution(PluginUserListBadgeContribution contribution)
+    {
+        ArgumentNullException.ThrowIfNull(contribution);
+        if (!IsSafeKey(contribution.Id, 64))
+        {
+            throw new InvalidDataException("插件用户列表徽章贡献 ID 无效");
+        }
+        if (contribution.ReadHandler is null)
+        {
+            throw new InvalidDataException("插件用户列表徽章贡献缺少读取处理器");
+        }
+    }
+
+    public static bool TrySanitizeUserListBadge(
+        PluginUserListBadge? badge,
+        out PluginUserListBadge? sanitized,
+        out string error)
+    {
+        sanitized = null;
+        error = "";
+        if (badge is null)
+        {
+            return true;
+        }
+        if (string.IsNullOrWhiteSpace(badge.Label) || badge.Label.Length > 64)
+        {
+            error = "插件用户列表徽章 label 无效";
+            return false;
+        }
+        if (badge.Tone is null)
+        {
+            error = "插件用户列表徽章 tone 无效";
+            return false;
+        }
+        string tone = badge.Tone.Trim().ToLowerInvariant();
+        if (!AllowedBadgeTones.Contains(tone))
+        {
+            error = $"插件用户列表徽章 tone 不受支持：{badge.Tone}";
+            return false;
+        }
+        if (badge.Title is null || badge.Title.Length > 256)
+        {
+            error = "插件用户列表徽章 title 无效";
+            return false;
+        }
+        sanitized = new PluginUserListBadge(badge.Label.Trim(), tone, badge.Title);
+        return true;
+    }
 
     public static void ValidateContribution(PluginUserGlobalManagementContribution contribution)
     {

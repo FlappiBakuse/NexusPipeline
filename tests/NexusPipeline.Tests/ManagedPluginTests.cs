@@ -36,6 +36,8 @@ public sealed class ManagedPluginTests
             Assert.Equal("Active", manager.GetRuntimeState("fixture-managed"));
             Assert.True(manager.IsConfiguredEnabled("fixture-managed"));
             Assert.True(manager.IsEnabled("fixture-managed"));
+            PluginUserListBadgeRegistration badge = Assert.Single(manager.UserListBadgeContributions);
+            Assert.Equal("fixture-badge", badge.Contribution.Id);
             Assert.True(WaitUntil(() => ReadState(statePath)?.JobRan == true, TimeSpan.FromSeconds(3)));
             Assert.True(ReadState(statePath)?.Initialized);
             Assert.True(ReadState(statePath)?.Started);
@@ -47,6 +49,7 @@ public sealed class ManagedPluginTests
         finally
         {
             manager.ShutdownAll();
+            Assert.Empty(manager.UserListBadgeContributions);
             ReleasePluginContexts();
             DeletePluginDirectory(root);
         }

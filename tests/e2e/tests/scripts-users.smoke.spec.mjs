@@ -54,7 +54,30 @@ test("全局用户入口：创建并用完整用户名确认删除", async ({ pa
 test("用户绑定入口：打开管理、修改通知收件人并保存", async ({ page }) => {
   const suffix = Date.now();
   const fixture = makeScriptDir(`smoke-user-binding-${suffix}`);
+  let badgeUserId = "";
   let savedPluginPayload = null;
+  await page.route("**/api/plugin-contributions/user-list-badges", async route => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{
+        userId: badgeUserId,
+        badges: [{
+          pluginName: "hoyolab-checkin",
+          pluginDisplayName: "HoYoLAB 自动签到",
+          id: "check-in-status",
+          label: "签到 · 今日完成",
+          tone: "ok",
+          title: "今日签到已经完成",
+          order: 100,
+        }],
+      }]),
+    });
+  });
   await page.route("**/api/plugin-contributions/user-global/**", async route => {
     const request = route.request();
     if (request.method() === "GET") {
@@ -110,6 +133,7 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
   const script = await scriptResponse.json();
   const userResponse = await api("POST", "/api/users", { name: `Smoke 绑定用户-${suffix}` });
   const user = await userResponse.json();
+  badgeUserId = user.id;
   await api("POST", `/api/users/${encodeURIComponent(user.id)}/bindings`, {
     scriptInstanceId: script.id,
     enabled: true,
@@ -120,6 +144,10 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
   try {
     await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
     const card = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
+    const badge = card.getByTestId("plugin-user-badge").first();
+    await expect(badge).toHaveText("签到 · 今日完成");
+    await expect(badge).toHaveAttribute("data-plugin-name", "hoyolab-checkin");
+    await expect(badge).toHaveAttribute("data-contribution-id", "check-in-status");
     await card.getByRole("button", { name: "全局管理", exact: true }).click();
     const globalDialog = page.getByRole("dialog", { name: "全局管理" });
     await expect(globalDialog).toBeVisible();

@@ -53,6 +53,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly Func<List<DataSpecializedPlugin>> _discoverData;
     private readonly OutboundHttpClientProvider _http;
     private readonly PluginUserGlobalManagementRegistry _userGlobalManagement = new();
+    private readonly PluginUserListBadgeRegistry _userListBadges = new();
     private readonly PluginExecutionEventRegistry _executionEvents;
 
     internal PluginManager(
@@ -121,6 +122,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         out PluginUserGlobalManagementRegistration? registration) =>
         _userGlobalManagement.TryGet(pluginName, contributionId, out registration);
 
+    internal IReadOnlyList<PluginUserListBadgeRegistration> UserListBadgeContributions =>
+        _userListBadges.Snapshot();
+
     public void Publish(PluginUserRunStartingEvent eventData)
     {
         _executionEvents.Publish(eventData);
@@ -180,6 +184,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             ShutdownAll();
         }
         _userGlobalManagement.Clear();
+        _userListBadges.Clear();
         _executionEvents.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
@@ -243,6 +248,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         }
         _managedRuntimes.Clear();
         _userGlobalManagement.Clear();
+        _userListBadges.Clear();
         _executionEvents.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
@@ -374,6 +380,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 descriptor,
                 _notifications(),
                 _userGlobalManagement,
+                _userListBadges,
                 _executionEvents,
                 _http,
                 ex =>
@@ -448,6 +455,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         private readonly ManagedPluginDescriptor _descriptor;
         private readonly NotificationDispatcher _notifications;
         private readonly PluginUserGlobalManagementRegistry _userGlobalManagement;
+        private readonly PluginUserListBadgeRegistry _userListBadges;
         private readonly PluginExecutionEventRegistry _executionEvents;
         private readonly OutboundHttpClientProvider _http;
         private readonly Action<Exception> _reportJobError;
@@ -459,6 +467,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             ManagedPluginDescriptor descriptor,
             NotificationDispatcher notifications,
             PluginUserGlobalManagementRegistry userGlobalManagement,
+            PluginUserListBadgeRegistry userListBadges,
             PluginExecutionEventRegistry executionEvents,
             OutboundHttpClientProvider http,
             Action<Exception> reportJobError)
@@ -466,6 +475,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             _descriptor = descriptor;
             _notifications = notifications;
             _userGlobalManagement = userGlobalManagement;
+            _userListBadges = userListBadges;
             _executionEvents = executionEvents;
             _http = http;
             _reportJobError = reportJobError;
@@ -502,6 +512,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     _notifications,
                     _reportJobError,
                     _userGlobalManagement,
+                    _userListBadges,
                     _executionEvents,
                     _http);
                 plugin.InitializeAsync(_hostContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();

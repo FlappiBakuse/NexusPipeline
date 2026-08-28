@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
 using NexusPipeline.Utilities;
 
@@ -11,6 +13,11 @@ internal static class ApiPluginContributionsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
+        if (TryParseUserListBadgesRoute(method, seg))
+        {
+            await ReadUserListBadgesAsync(context).ConfigureAwait(false);
+            return;
+        }
         if (!TryParseRoute(method, seg, out string userId, out string pluginName, out string contributionId))
         {
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
@@ -39,6 +46,14 @@ internal static class ApiPluginContributionsHandler
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+    }
+
+    internal static bool TryParseUserListBadgesRoute(string method, string[] seg)
+    {
+        return method == "GET"
+            && seg.Length == 2
+            && seg[0].Equals("plugin-contributions", StringComparison.OrdinalIgnoreCase)
+            && seg[1].Equals("user-list-badges", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -96,6 +111,54 @@ internal static class ApiPluginContributionsHandler
                 return;
             }
             result.Add(Project(registration, values));
+        }
+        await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
+    }
+
+    private static async Task ReadUserListBadgesAsync(HttpListenerContext context)
+    {
+        PluginManager plugins = RuntimeContext.Instance.Plugins;
+        IReadOnlyList<PluginUserListBadgeRegistration> contributions = plugins.UserListBadgeContributions;
+        List<NexusUser> users = RuntimeContext.Instance.SnapshotUsers()
+            .OrderBy(user => user.Index)
+            .ToList();
+        var result = new List<object>(users.Count);
+        foreach (NexusUser user in users)
+        {
+            var badges = new List<object>();
+            foreach (PluginUserListBadgeRegistration registration in contributions)
+            {
+                PluginUserListBadge? badge;
+                try
+                {
+                    badge = await registration.Contribution.ReadHandler(user.Id, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[插件:{registration.PluginName}] 用户列表徽章读取失败（{user.Id}）：{ex.Message}");
+                    continue;
+                }
+                if (!PluginContributionValidation.TrySanitizeUserListBadge(badge, out PluginUserListBadge? sanitized, out string error))
+                {
+                    Logger.Warn($"[插件:{registration.PluginName}] 用户列表徽章无效（{registration.Contribution.Id}/{user.Id}）：{error}");
+                    continue;
+                }
+                if (sanitized is null)
+                {
+                    continue;
+                }
+                badges.Add(new
+                {
+                    pluginName = registration.PluginName,
+                    pluginDisplayName = registration.PluginDisplayName,
+                    id = registration.Contribution.Id,
+                    label = sanitized.Label,
+                    tone = sanitized.Tone,
+                    title = sanitized.Title,
+                    order = registration.Contribution.Order,
+                });
+            }
+            result.Add(new { userId = user.Id, badges });
         }
         await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
     }

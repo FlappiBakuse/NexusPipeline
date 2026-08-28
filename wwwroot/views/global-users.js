@@ -12,6 +12,7 @@ import { initDndList } from "../core/dnd.js";
 let managementDraft = null;
 let deleteDraft = null;
 let globalManagementDraft = null;
+let userListBadgesByUser = new Map();
 let nextTimer = null;
 let nextRefreshPending = false;
 
@@ -92,6 +93,20 @@ function avatarMarkup(user) {
     content + '<span class="global-user-avatar-mark" aria-hidden="true">+</span></button>';
 }
 
+function pluginUserBadgeMarkup(user) {
+  const badges = userListBadgesByUser.get(user.id);
+  if (!Array.isArray(badges)) return "";
+  const allowedTones = new Set(["muted", "blue", "ok", "warn", "bad"]);
+  return badges.map(badge => {
+    const label = String(badge?.label ?? "").trim();
+    if (!label) return "";
+    const tone = allowedTones.has(String(badge?.tone || "").toLowerCase())
+      ? String(badge.tone).toLowerCase()
+      : "muted";
+    return '<span class="badge ' + tone + '" data-testid="plugin-user-badge" data-plugin-name="' + esc(badge?.pluginName) + '" data-contribution-id="' + esc(badge?.id) + '" title="' + esc(badge?.title) + '">' + esc(label) + "</span>";
+  }).join("");
+}
+
 function userCard(user) {
   const bindingCount = user.bindingCount ?? (user.bindings || []).length;
   const nextRun = user.nextRunAt || "";
@@ -103,6 +118,7 @@ function userCard(user) {
       '<div class="script-name-row"><strong class="global-user-name">' + esc(user.name) + "</strong></div>" +
       '<div class="meta-line global-user-meta">' +
         '<span class="badge muted">已绑定 ' + bindingCount + " 个脚本</span>" +
+        pluginUserBadgeMarkup(user) +
         '<span class="badge blue global-user-next-run" data-next-run="' + esc(nextRun) + '" title="' + esc(queueTitle) + '">' + esc(nextRunLabel(nextRun)) + "</span>" +
       "</div>" +
     "</div>" +
@@ -123,9 +139,14 @@ export async function pageUsers(token) {
     clearInterval(nextTimer);
     nextTimer = null;
   }
-  let users, scripts, status;
+  let users, scripts, status, userListBadges;
   try {
-    [users, scripts, status] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/scripts"), api("GET", "/api/status")]);
+    [users, scripts, status, userListBadges] = await Promise.all([
+      api("GET", "/api/users"),
+      api("GET", "/api/scripts"),
+      api("GET", "/api/status"),
+      api("GET", "/api/plugin-contributions/user-list-badges"),
+    ]);
   } catch (error) {
     if (isCurrent("users", token)) render('<div class="empty"><strong>加载用户管理失败</strong><span>' + esc(error.message) + "</span></div>");
     return;
@@ -134,6 +155,7 @@ export async function pageUsers(token) {
   state.scripts = scripts;
   state.plugins = status.plugins || [];
   state.users = users || [];
+  userListBadgesByUser = new Map((Array.isArray(userListBadges) ? userListBadges : []).map(item => [item?.userId, Array.isArray(item?.badges) ? item.badges : []]));
   const limit = state.limits?.maxUsers ?? 50;
   const atLimit = state.users.length >= limit;
   const action = '<button class="primary" type="button" data-action="open-global-user-modal" data-testid="open-global-user-modal" ' + (atLimit ? "disabled" : "") + ">添加用户" + (atLimit ? "（" + state.users.length + "/" + limit + "）" : "") + "</button>";

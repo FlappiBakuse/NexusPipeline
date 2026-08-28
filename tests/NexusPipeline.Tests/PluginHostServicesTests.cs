@@ -77,4 +77,40 @@ public sealed class PluginHostServicesTests
         PluginUserRunStartingEvent actual = await completion.Task.WaitAsync(TimeSpan.FromSeconds(2));
         Assert.Equal(expected, actual);
     }
+
+    [Fact]
+    public async Task UserListBadges_AreSortedSanitizedAndRemovedWithRegistration()
+    {
+        var registry = new PluginUserListBadgeRegistry();
+        using IDisposable later = registry.Register(
+            "later-plugin",
+            "Later",
+            new PluginUserListBadgeContribution(
+                "later-badge",
+                200,
+                (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("稍后", "OK", "提示"))));
+        using IDisposable first = registry.Register(
+            "first-plugin",
+            "First",
+            new PluginUserListBadgeContribution(
+                "first-badge",
+                100,
+                (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("首先"))));
+
+        Assert.Equal(new[] { "first-badge", "later-badge" }, registry.Snapshot().Select(item => item.Contribution.Id));
+        PluginUserListBadge? badge = await registry.Snapshot()[1].Contribution.ReadHandler("user-1", CancellationToken.None);
+        Assert.True(PluginContributionValidation.TrySanitizeUserListBadge(badge, out PluginUserListBadge? sanitized, out string error), error);
+        Assert.Equal("ok", sanitized!.Tone);
+        Assert.Equal("提示", sanitized.Title);
+        Assert.False(PluginContributionValidation.TrySanitizeUserListBadge(
+            new PluginUserListBadge("非法", "custom-css"),
+            out _,
+            out string invalidError));
+        Assert.Contains("tone", invalidError);
+
+        first.Dispose();
+        Assert.Equal("later-badge", Assert.Single(registry.Snapshot()).Contribution.Id);
+        registry.Clear();
+        Assert.Empty(registry.Snapshot());
+    }
 }

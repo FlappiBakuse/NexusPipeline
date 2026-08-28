@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_1
+internal sealed class PluginHostContext : IPluginHostContextV1_2
 {
     public PluginHostContext(
         string pluginName,
@@ -17,6 +17,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_1
         NotificationDispatcher notifications,
         Action<Exception> reportJobError,
         PluginUserGlobalManagementRegistry globalManagement,
+        PluginUserListBadgeRegistry userListBadges,
         PluginExecutionEventRegistry executionEvents,
         OutboundHttpClientProvider http)
     {
@@ -28,6 +29,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_1
         Scheduler = new PluginJobScheduler(pluginName, reportJobError);
         UserData = new PluginUserDataStore(pluginName);
         _globalManagement = new PluginUserGlobalManagementAdapter(globalManagement, pluginName, pluginDisplayName);
+        _userListBadges = new PluginUserListBadgeAdapter(userListBadges, pluginName, pluginDisplayName);
         _executionEvents = new PluginExecutionEventAdapter(executionEvents, pluginName);
         Http = new PluginHttpClientFactory(http);
     }
@@ -48,16 +50,21 @@ internal sealed class PluginHostContext : IPluginHostContextV1_1
 
     public IPluginUserGlobalManagementRegistry UserGlobalManagement => _globalManagement;
 
+    public IPluginUserListBadgeRegistry UserListBadges => _userListBadges;
+
     public IPluginExecutionEventService ExecutionEvents => _executionEvents;
 
     public IPluginHttpClientFactory Http { get; }
 
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
+
+    private readonly PluginUserListBadgeAdapter _userListBadges;
     private readonly PluginExecutionEventAdapter _executionEvents;
 
     public void Dispose()
     {
         _executionEvents.Dispose();
+        _userListBadges.Dispose();
         _globalManagement.Dispose();
         ((PluginJobScheduler)Scheduler).Dispose();
     }
@@ -65,6 +72,56 @@ internal sealed class PluginHostContext : IPluginHostContextV1_1
     public void DisposeScheduler()
     {
         Dispose();
+    }
+}
+
+internal sealed class PluginUserListBadgeAdapter : IPluginUserListBadgeRegistry, IDisposable
+{
+    private readonly PluginUserListBadgeRegistry _registry;
+    private readonly string _pluginName;
+    private readonly string _pluginDisplayName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+
+    public PluginUserListBadgeAdapter(
+        PluginUserListBadgeRegistry registry,
+        string pluginName,
+        string pluginDisplayName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+        _pluginDisplayName = pluginDisplayName;
+    }
+
+    public IDisposable Register(PluginUserListBadgeContribution contribution)
+    {
+        IDisposable registration = _registry.Register(_pluginName, _pluginDisplayName, contribution);
+        lock (_sync)
+        {
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
     }
 }
 

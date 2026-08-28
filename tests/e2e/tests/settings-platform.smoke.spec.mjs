@@ -32,9 +32,16 @@ test("访问令牌入口：生成、显示切换和状态回读", async ({ page 
 test("插件页面：健康状态以列表形式加载", async ({ page }) => {
   await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
   await expect(page.locator(".plugins-table")).toBeVisible();
-  await expect(page.getByTestId("plugin-store-tab")).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByTestId("plugin-local-tab")).toHaveAttribute("aria-selected", "true");
+  const tabOrder = await page.locator('.plugin-tabs [role="tab"]').evaluateAll(tabs => tabs.map(tab => tab.dataset.tab));
+  expect(tabOrder).toEqual(["local", "store"]);
+  await expect(page.getByTestId("plugins-list")).toBeVisible();
+  await page.getByTestId("plugin-store-tab").click();
   await expect(page.getByTestId("plugin-store-list")).toBeVisible();
   await expect(page.locator('[data-testid="plugin-store-status"]').first()).toBeVisible();
+  const groupTitles = page.getByTestId("plugin-store-list").locator(".plugin-group-heading h3");
+  await expect(groupTitles.first()).toHaveText("通用插件");
+  await expect(groupTitles.nth(1)).toHaveText("专项插件");
 });
 
 test("设置页面：三档代理模式可切换并保存", async ({ page }) => {

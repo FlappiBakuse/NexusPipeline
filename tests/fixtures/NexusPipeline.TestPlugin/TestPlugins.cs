@@ -17,10 +17,18 @@ public sealed class FixtureState
 public sealed class TestPlugin : INexusPlugin
 {
     private IPluginHostContext? _context;
+    private IDisposable? _badgeRegistration;
 
     public async ValueTask InitializeAsync(IPluginHostContext context, CancellationToken cancellationToken)
     {
         _context = context;
+        if (context is IPluginHostContextV1_2 v12)
+        {
+            _badgeRegistration = v12.UserListBadges.Register(new PluginUserListBadgeContribution(
+                "fixture-badge",
+                10,
+                (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("Fixture 徽章", "blue", "Fixture"))));
+        }
         await SetStateAsync(state => state.Initialized = true, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -45,6 +53,8 @@ public sealed class TestPlugin : INexusPlugin
 
     public ValueTask StopAsync(CancellationToken cancellationToken)
     {
+        _badgeRegistration?.Dispose();
+        _badgeRegistration = null;
         return SetStateAsync(state => state.Stopped = true, cancellationToken);
     }
 
