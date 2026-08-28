@@ -22,7 +22,7 @@ NexusPipeline/
 │   ├── Cli/            命令行层（NexusPipeline.Cli）
 │   ├── Mcp/            MCP Streamable HTTP 适配层（NexusPipeline.Mcp）
 │   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
-├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1（无宿主业务引用）
+├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.1（无宿主业务引用）
 ├── wwwroot/            前端（零构建 ES modules，浏览器直接加载）
 │   ├── app.js          路由 + 事件委托（唯一入口）
 │   ├── core/           平台层（与业务无关的通用能力）
@@ -57,7 +57,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 - **核心域不得引用 Web/Cli**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
-- **Plugins 通过数据化 manifest 或独立 Plugin API v1 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
+- **Plugins 通过数据化 manifest 或独立 Plugin API v1.1 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
 - **已知偏差（如实记录）**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期数据读取通过 `Application/Abstractions/` 仓储完成；`ConfigSwapRecovery` 的损坏标记兼容恢复通过构造注入的 `IConfigRecoveryDataSource` 获取数据，不反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是保留的最小例外。新服务不得新增这类依赖。
 
@@ -111,7 +111,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
-| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1 DTO 均从此入口发送 |
+| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.1 DTO 均从此入口发送 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
@@ -137,7 +137,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 ### public / internal 约定
 
-- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API v1。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
+- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API v1.1。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
 - 其余全部 `internal`：新增类型默认 internal，除非它属于契约清单。
 
 ### 新增 API 的落点
@@ -224,23 +224,23 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 | 类别 | 形态 | 职责 | 启用语义 |
 |---|---|---|---|
-| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1 + manifest | 通过 Logger/Config/Secrets/Notifications/Scheduler 实现联网、签到等主动任务 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
+| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1.1 + manifest | 通过通用用户数据、声明式设置、用户运行事件、HTTP 和通知端口实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
 | 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好写入 `AppSettings.PluginPreferences`，重启后应用 |
 
 > **通知通道**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
 
 ### Capability 扩展约束
 
-- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
+- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1.1 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
 - 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。现有 `supportsEmulator` 仍兼容并映射为 `emulator`。
 - `PluginSummary` 只描述展示/发现所需的元数据；Web 状态接口继续单独生成 `supportsEmulator`，因此不会破坏现有前端响应结构。
-- Plugin API v1 只提供显式 `IPluginHostContext` 服务端口；配置与 DPAPI 密钥分文件存储于 `config/plugins/`，managed-code 插件停止时后台任务统一取消。
+- Plugin API v1.1 只提供显式 `IPluginHostContext` / `IPluginHostContextV1_1` 服务端口；插件全局配置、插件级密钥和按用户配置/密钥分层存储于 `config/plugins/`，managed-code 插件停止时后台任务、用户设置贡献和事件订阅统一取消。
 
 ### 编写插件
 
 插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [PLUGIN_API.md](PLUGIN_API.md)；本文件只说明宿主模块边界和代码定位。
 
-- managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContext` 使用宿主提供的日志、配置、密钥、通知和后台任务端口。
+- managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContextV1_1` 使用宿主提供的通用用户数据、声明式用户全局管理、用户运行事件、HTTP、日志、通知和任务端口。
 - 数据化专项插件由 `plugins/<名称>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册，宿主在保存脚本实例时固化解析结果。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 

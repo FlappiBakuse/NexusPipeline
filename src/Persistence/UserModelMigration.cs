@@ -115,7 +115,6 @@ internal static class UserModelMigration
                         Id = Guid.NewGuid().ToString("N"),
                         Index = byName.Count,
                         Name = oldUser.Name,
-                        AutoCheckInEnabled = false,
                     };
                     byName.Add(user.Name, user);
                     journal.Users.Add(user);

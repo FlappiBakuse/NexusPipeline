@@ -6,6 +6,7 @@ using NexusPipeline.Persistence;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
@@ -33,9 +34,10 @@ internal enum PluginRuntimeState
     Shutdown,
 }
 
-internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability
+internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher
 {
-    private const int PluginApiMajor = 1;
+    private const int PluginApiMajor = PluginApiVersion.Major;
+    private const int PluginApiMinor = PluginApiVersion.Minor;
 
     private readonly Func<AppSettings> _settings;
     private readonly Func<NotificationDispatcher> _notifications;
@@ -49,15 +51,25 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly Dictionary<string, PluginRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _runtimeErrors = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<List<DataSpecializedPlugin>> _discoverData;
+    private readonly OutboundHttpClientProvider _http;
+    private readonly PluginUserGlobalManagementRegistry _userGlobalManagement = new();
+    private readonly PluginExecutionEventRegistry _executionEvents;
 
     internal PluginManager(
         Func<AppSettings> settings,
         Func<NotificationDispatcher> notifications,
         Func<List<DataSpecializedPlugin>>? discoverData = null,
-        Func<Action, bool>? tryConfigurationMutation = null)
+        Func<Action, bool>? tryConfigurationMutation = null,
+        OutboundHttpClientProvider? http = null)
     {
         _settings = settings;
         _notifications = notifications;
+        _http = http ?? new OutboundHttpClientProvider(settings);
+        _executionEvents = new PluginExecutionEventRegistry((pluginName, exception) =>
+        {
+            _runtimeErrors[pluginName] = exception.Message;
+            Logger.Warn($"[插件:{pluginName}] 用户运行事件处理失败：{exception.Message}");
+        });
         _discoverData = discoverData ?? DiscoverDataPlugins;
         _tryConfigurationMutation = tryConfigurationMutation ?? (mutation =>
         {
@@ -98,6 +110,25 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             }
             return list;
         }
+    }
+
+    internal IReadOnlyList<PluginUserGlobalManagementRegistration> UserGlobalManagementContributions =>
+        _userGlobalManagement.Snapshot();
+
+    internal bool TryGetUserGlobalManagementContribution(
+        string pluginName,
+        string contributionId,
+        out PluginUserGlobalManagementRegistration? registration) =>
+        _userGlobalManagement.TryGet(pluginName, contributionId, out registration);
+
+    public void Publish(PluginUserRunStartingEvent eventData)
+    {
+        _executionEvents.Publish(eventData);
+    }
+
+    internal void DeleteUserData(string userId)
+    {
+        PluginUserDataStore.DeleteAllForUser(userId);
     }
 
     /// <summary>专项插件是否支持安卓模拟器启动方式，由插件 manifest capability 声明。</summary>
@@ -148,6 +179,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             ShutdownAll();
         }
+        _userGlobalManagement.Clear();
+        _executionEvents.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
         _managedRuntimes.Clear();
@@ -180,10 +213,10 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 Logger.Info($"[插件] 已禁用：{descriptor.Manifest.DisplayName}（managed-code，程序集未加载）");
                 continue;
             }
-            if (!descriptor.Manifest.IsCompatibleWith(PluginApiMajor))
+            if (!descriptor.Manifest.IsCompatibleWith(PluginApiMajor, PluginApiMinor))
             {
                 _runtimeStates[name] = PluginRuntimeState.Incompatible;
-                _runtimeErrors[name] = $"不支持 Plugin API v{descriptor.Manifest.ApiVersion}（宿主需要 v{PluginApiMajor}.x）";
+                _runtimeErrors[name] = $"不支持 Plugin API v{descriptor.Manifest.ApiVersion}（宿主支持 v{PluginApiMajor}.{PluginApiMinor} 及兼容的更低 minor）";
                 Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」与 Plugin API 不兼容，程序集未加载。");
                 continue;
             }
@@ -209,6 +242,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             }
         }
         _managedRuntimes.Clear();
+        _userGlobalManagement.Clear();
+        _executionEvents.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -338,6 +373,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             var runtime = new ManagedPluginRuntime(
                 descriptor,
                 _notifications(),
+                _userGlobalManagement,
+                _executionEvents,
+                _http,
                 ex =>
                 {
                     _runtimeErrors[name] = ex.Message;
@@ -409,6 +447,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     {
         private readonly ManagedPluginDescriptor _descriptor;
         private readonly NotificationDispatcher _notifications;
+        private readonly PluginUserGlobalManagementRegistry _userGlobalManagement;
+        private readonly PluginExecutionEventRegistry _executionEvents;
+        private readonly OutboundHttpClientProvider _http;
         private readonly Action<Exception> _reportJobError;
         private PluginLoadContext? _loadContext;
         private INexusPlugin? _plugin;
@@ -417,10 +458,16 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         public ManagedPluginRuntime(
             ManagedPluginDescriptor descriptor,
             NotificationDispatcher notifications,
+            PluginUserGlobalManagementRegistry userGlobalManagement,
+            PluginExecutionEventRegistry executionEvents,
+            OutboundHttpClientProvider http,
             Action<Exception> reportJobError)
         {
             _descriptor = descriptor;
             _notifications = notifications;
+            _userGlobalManagement = userGlobalManagement;
+            _executionEvents = executionEvents;
+            _http = http;
             _reportJobError = reportJobError;
         }
 
@@ -449,7 +496,14 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     throw new InvalidOperationException($"插件类型未实现 INexusPlugin：{_descriptor.Manifest.EntryType}");
                 }
                 _plugin = plugin;
-                _hostContext = new PluginHostContext(_descriptor.Manifest.Name, _notifications, _reportJobError);
+                _hostContext = new PluginHostContext(
+                    _descriptor.Manifest.Name,
+                    _descriptor.Manifest.DisplayName,
+                    _notifications,
+                    _reportJobError,
+                    _userGlobalManagement,
+                    _executionEvents,
+                    _http);
                 plugin.InitializeAsync(_hostContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
                 plugin.StartAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
             }
@@ -474,7 +528,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
         private void Cleanup()
         {
-            _hostContext?.DisposeScheduler();
+            _hostContext?.Dispose();
             _plugin = null;
             _hostContext = null;
             _loadContext?.Unload();

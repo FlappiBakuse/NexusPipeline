@@ -90,7 +90,7 @@ export function showModal(content, wide = false, locked = false) {
     if (!mask.isConnected) return;
     if (modal.contains(event.relatedTarget)) return;
     const first = $("input, select, textarea", modal) || $("button, a[href]", modal);
-    if (first) first.focus();
+    if (first) first.focus({ preventScroll: true });
   });
   initAutoScroll(modal);
   syncAllModeToggles(modal);

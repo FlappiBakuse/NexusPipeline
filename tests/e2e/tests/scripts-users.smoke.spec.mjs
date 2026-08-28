@@ -54,6 +54,48 @@ test("全局用户入口：创建并用完整用户名确认删除", async ({ pa
 test("用户绑定入口：打开管理、修改通知收件人并保存", async ({ page }) => {
   const suffix = Date.now();
   const fixture = makeScriptDir(`smoke-user-binding-${suffix}`);
+  let savedPluginPayload = null;
+  await page.route("**/api/plugin-contributions/user-global/**", async route => {
+    const request = route.request();
+    if (request.method() === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([{
+          pluginName: "hoyolab-checkin",
+          pluginDisplayName: "HoYoLAB 自动签到",
+          id: "user-settings",
+          title: "HoYoLAB 自动签到",
+          description: "管理用户的签到开关、Cookie 和目标游戏。",
+          fields: [
+            { key: "enabled", label: "启用自动签到", type: "switch", description: "关闭后保留配置但不执行签到。", required: true },
+            { key: "cookie", label: "HoYoLAB Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
+            {
+              key: "games",
+              label: "签到游戏",
+              type: "multi-select",
+              description: "选择需要签到的游戏。",
+              required: true,
+              options: [
+                { value: "gi", label: "原神" },
+                { value: "hsr", label: "崩坏：星穹铁道" },
+                { value: "zzz", label: "绝区零" },
+              ],
+            },
+            { key: "lastStatus", label: "最近状态", type: "status", readOnly: true },
+          ],
+          values: { enabled: true, cookie: { configured: false }, games: ["gi"], lastStatus: "尚未尝试" },
+        }]),
+      });
+      return;
+    }
+    if (request.method() === "PUT") {
+      savedPluginPayload = JSON.parse(request.postData() || "{}");
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+    await route.continue();
+  });
   const scriptResponse = await api("POST", "/api/scripts", {
     name: `Smoke 绑定脚本-${suffix}`,
     rootPath: fixture.root,
@@ -66,7 +108,7 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     totalTimeoutMinutes: 120,
   });
   const script = await scriptResponse.json();
-  const userResponse = await api("POST", "/api/users", { name: `Smoke 绑定用户-${suffix}`, autoCheckInEnabled: false });
+  const userResponse = await api("POST", "/api/users", { name: `Smoke 绑定用户-${suffix}` });
   const user = await userResponse.json();
   await api("POST", `/api/users/${encodeURIComponent(user.id)}/bindings`, {
     scriptInstanceId: script.id,
@@ -78,8 +120,33 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
   try {
     await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
     const card = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
-    await card.getByRole("button", { name: "编辑用户", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "编辑用户" });
+    await card.getByRole("button", { name: "全局管理", exact: true }).click();
+    const globalDialog = page.getByRole("dialog", { name: "全局管理" });
+    await expect(globalDialog).toBeVisible();
+    await expect(globalDialog.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
+    const plugin = globalDialog.locator(".global-management-plugin");
+    await expect(plugin).not.toContainText("aria-pressed=");
+    await expect(plugin.getByRole("button", { name: "启用自动签到" })).toHaveAttribute("aria-pressed", "true");
+    await expect(plugin.locator(":scope > .section-heading > div > strong")).toHaveCount(0);
+    const gameTrigger = plugin.locator(".plugin-multi-select-trigger");
+    await expect(gameTrigger).toContainText("原神");
+    await expect(plugin.locator('select[data-plugin-field="games"]')).toHaveCount(0);
+    await gameTrigger.click();
+    const gameMenu = plugin.locator(".plugin-multi-select-menu");
+    await expect(gameMenu).toBeVisible();
+    await gameMenu.locator('input[value="zzz"]').check();
+    await expect(gameTrigger).toContainText("绝区零");
+    await plugin.getByLabel("HoYoLAB Cookie", { exact: true }).fill("ltuid=1; ltoken=secret");
+    await globalDialog.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(globalDialog).toBeHidden();
+    expect(savedPluginPayload?.values).toEqual({
+      enabled: true,
+      cookie: { action: "set", value: "ltuid=1; ltoken=secret" },
+      games: ["gi", "zzz"],
+    });
+
+    await card.getByRole("button", { name: "用户管理", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "用户管理" });
     await expect(dialog.getByTestId("um-binding-card")).toHaveCount(1);
     const binding = dialog.getByTestId("um-binding-card").first();
     await binding.locator('[data-action="toggle-um-binding"]').click();

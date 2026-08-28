@@ -107,7 +107,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   const sid = script.id;
   const dataDir = path.join(runtimeDir, "data", sid);
   const createGlobalBinding = async (name, extra = {}) => {
-    const userResponse = await api("POST", "/api/users", { name, autoCheckInEnabled: false });
+    const userResponse = await api("POST", "/api/users", { name });
     expect(userResponse.ok, `创建全局用户 ${name}`).toBeTruthy();
     const user = await userResponse.json();
     const bindingResponse = await api("POST", `/api/users/${encodeURIComponent(user.id)}/bindings`, {
@@ -130,7 +130,7 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.waitForFunction(() => document.body.textContent.includes("甲") && document.body.textContent.includes("乙"), null, { timeout: 5000 });
   let body = await page.textContent("body");
   expect(body.includes("已绑定 1 个脚本"), "全局用户卡片显示脚本绑定数量").toBeTruthy();
-  expect(body.includes("自动签到未开启 · 即将开发"), "全局用户卡片显示自动签到占位").toBeTruthy();
+  expect(body.includes("全局管理"), "全局用户卡片显示全局管理入口").toBeTruthy();
   expect(await page.locator('[data-action="open-user-management"]').count(), "一级用户管理页提供用户设置入口").toBeGreaterThanOrEqual(2);
 
   await page.click('[data-action="open-global-user-modal"]');

@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1 与宿主交互。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.1 与宿主交互。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -24,9 +24,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库通过根目录 `catalog.json` 发布当前版本和包校验信息；客户端只信任固定官方源，下载后再次检查 manifest。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1）
+## managed-code C# 插件（Plugin API v1.1）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
+
+宿主当前 API 版本为 `1.1`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 与 `1.1` 插件可加载，`1.2` 与 `2.0` 插件会被拒绝。
 
 ```text
 plugins/check-in/
@@ -38,11 +40,11 @@ plugins/check-in/
 {
   "schemaVersion": 1,
   "name": "check-in",
-  "displayName": "自动签到",
-  "description": "按计划执行通用签到任务",
+  "displayName": "用户脚本扩展",
+  "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.0",
+  "apiVersion": "1.1",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs"]
@@ -50,6 +52,15 @@ plugins/check-in/
 ```
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
+
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+
+- `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<插件名>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。
+- `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
+- `IPluginExecutionEventService`：订阅 `UserRunStarting`。事件只包含用户、脚本实例、队列、运行模式和开始时间等稳定标识；宿主异步调用处理器，处理器异常只记录警告，不能阻塞或改变执行。
+- `IPluginHttpClientFactory`：创建遵循宿主代理设置的外网 `HttpClient`，插件无法读取 `AppSettings`。
+
+宿主通用设置接口为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`。插件未启用或贡献不存在返回 `404 contribution_not_found`，贡献处理器异常返回 `500 plugin_error`。
 
 `capabilities` 仅作为发现元数据。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state` 和 `error` 字段中查看。
 

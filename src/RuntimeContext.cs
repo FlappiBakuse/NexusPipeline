@@ -52,6 +52,7 @@ internal class RuntimeContext
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             () => Settings,
             () => provider.GetRequiredService<NotificationDispatcher>(),
+            http: provider.GetRequiredService<OutboundHttpClientProvider>(),
             tryConfigurationMutation: mutation =>
                 provider.GetRequiredService<DispatchCenter>()
                     .TryExecuteHostConfigurationMutation(mutation, out _)));
@@ -64,6 +65,7 @@ internal class RuntimeContext
             provider.GetRequiredService<OutboundHttpClientProvider>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<IUserRunStartingPublisher>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
         collection.AddSingleton<ExecutionAdmissionPolicy>();

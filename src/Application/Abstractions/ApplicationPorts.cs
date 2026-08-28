@@ -1,5 +1,6 @@
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 
@@ -87,9 +88,11 @@ internal interface IUserRepository
                 {
                     continue;
                 }
-                UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
-                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
-                return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
+                UserScriptBinding? binding = user.Bindings
+                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+                    .FirstOrDefault(item =>
+                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+                return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding);
             }
             return null;
         }
@@ -123,11 +126,13 @@ internal interface IUserRepository
                 .Select(user => new
                 {
                     User = user,
-                    Binding = user.Bindings.FirstOrDefault(item =>
-                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                    Binding = user.Bindings
+                        .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+                        .FirstOrDefault(item =>
+                            item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
                 })
                 .Where(item => item.Binding is not null)
-                .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
+                .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!))
                 .ToList();
         }
 
@@ -208,6 +213,12 @@ internal interface IPluginAvailability
     bool IsDataSpecializedPlugin(string pluginName);
 
     bool IsEnabled(string pluginName);
+}
+
+/// <summary>执行域向 managed-code 插件发布用户开始事件的内部端口。</summary>
+internal interface IUserRunStartingPublisher
+{
+    void Publish(PluginUserRunStartingEvent eventData);
 }
 
 /// <summary>

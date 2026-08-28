@@ -196,7 +196,7 @@ internal sealed class McpMutationTools
     }
 
     [McpServerTool(Name = "create_user", Title = "创建全局用户", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("创建全局用户；自动签到字段按现有应用规则校验。")]
+    [Description("创建全局用户。")]
     public CallToolResult CreateUser([Description("用户字段。")]
         McpUserInput input)
     {
@@ -207,7 +207,6 @@ internal sealed class McpMutationTools
         OperationResult<NexusUser> result = UserCommands.Create(
             input.Name,
             input.Remark,
-            input.AutoCheckInEnabled,
             Audit.Mcp);
         return McpToolResult.From(result, value => value is null ? null : McpViews.User(value, _context.Queues));
     }
@@ -233,7 +232,6 @@ internal sealed class McpMutationTools
             target.Value!.Id,
             input.Name,
             input.Remark,
-            input.AutoCheckInEnabled,
             Audit.Mcp);
         return McpToolResult.From(result, value => value is null ? null : McpViews.User(value, _context.Queues));
     }

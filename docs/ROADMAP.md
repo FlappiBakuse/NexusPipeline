@@ -1,16 +1,14 @@
 # NexusPipeline 后续开发路线（Roadmap）
 
-**编制日期**：2026-08-28｜**当前版本**：v0.10.10（Pre-release）｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**编制日期**：2026-08-28｜**当前版本**：v0.11.0（Pre-release）｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文档只记录尚未完成的版本计划、未来功能和仍需专项验证的风险。已完成版本的内容以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md` 与本文件对应章节，并创建本地 `backup/vX.Y.Z-dev` 标签、同步项目版本号。已知问题见 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)。
 
-## 后续功能：自动签到通用插件
+## 后续功能：插件生态扩展
 
-- [ ] 调研米游社/HoyoLab 与森空岛 API 的当前协议、凭证格式和变更风险。
-- [ ] 基于 Plugin API v1 开发独立 managed-code 自动签到插件，通过插件 Scheduler、SecretStore 与宿主 Notification API 工作。
-- [ ] 使用 SecretStore DPAPI 保存凭证，沿用 `enc:` 前缀、留空不变和不回显语义。
-- [ ] 在脚本用户编辑区增加自动签到入口与凭证填写体验。
-- [ ] 接入现有通知通道，并使用 mock API 服务器补充回归测试。
+- [ ] 为更多官方 managed-code 插件补充 mock HTTP 与事件回归测试。
+- [ ] 继续完善插件设置贡献的字段校验、错误呈现和迁移检查。
+- [ ] 持续验证用户级插件数据清理、密钥保护和跨版本兼容行为。
 
 ## 后续功能：桌面分身
 

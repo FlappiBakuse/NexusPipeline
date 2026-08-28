@@ -290,7 +290,6 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
 
     const userResponse = await api("POST", "/api/users", {
       name: userName,
-      autoCheckInEnabled: false,
     });
     if (userResponse.status !== 200) {
       assert.fail(`创建 MCP Smoke 用户失败：HTTP ${userResponse.status} ${await userResponse.text()}`);

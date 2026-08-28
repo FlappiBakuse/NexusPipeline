@@ -195,7 +195,6 @@ internal static class CliCommandRouter
                     return error;
                 }
                 JsonObject body = Object(("name", name), ("remark", args.Get("remark") ?? ""));
-                body["autoCheckInEnabled"] = false;
                 return ReturnApi(client.Post("/api/users", body), "用户已创建");
             }
             case "update":
@@ -222,7 +221,6 @@ internal static class CliCommandRouter
                 string nextName = args.Get("name") ?? currentObject["name"]?.ToString() ?? "";
                 string nextRemark = args.Get("remark") ?? currentObject["remark"]?.ToString() ?? "";
                 JsonObject body = Object(("name", nextName), ("remark", nextRemark));
-                body["autoCheckInEnabled"] = false;
                 return ReturnApi(client.Put($"/api/users/{Escape(id)}", body), "用户已更新");
             }
             case "delete":

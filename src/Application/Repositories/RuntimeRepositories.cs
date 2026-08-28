@@ -1,5 +1,6 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
+using NexusPipeline.Services;
 
 namespace NexusPipeline.App.Repositories;
 
@@ -80,8 +81,10 @@ internal sealed class RuntimeUserRepository : IUserRepository
             .Select(user => new
             {
                 user.Name,
-                Binding = user.Bindings.FirstOrDefault(item =>
-                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                Binding = user.Bindings
+                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+                    .FirstOrDefault(item =>
+                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
             })
             .Where(item => item.Binding is not null)
             .Select(item => item.Name)
@@ -111,11 +114,13 @@ internal sealed class RuntimeUserRepository : IUserRepository
             {
                 continue;
             }
-            UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
-                item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+            UserScriptBinding? binding = user.Bindings
+                .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+                .FirstOrDefault(item =>
+                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
             if (binding is not null)
             {
-                return new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
+                return new ResolvedScriptUser(user.Id, user.Name, binding);
             }
             return null;
         }
@@ -152,11 +157,13 @@ internal sealed class RuntimeUserRepository : IUserRepository
             .Select(user => new
             {
                 User = user,
-                Binding = user.Bindings.FirstOrDefault(item =>
-                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                Binding = user.Bindings
+                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+                    .FirstOrDefault(item =>
+                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
             })
             .Where(item => item.Binding is not null)
-            .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!.Clone()))
+            .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!))
             .ToList();
         if (result.Count > 0 || source.Count > 0 || script.Users.Count == 0)
         {
@@ -244,6 +251,16 @@ internal sealed class RuntimeUserRunDaysWriter : IUserRunDaysWriter
             List<NexusUser> users = _snapshotUsers();
             foreach (NexusUser user in users)
             {
+                UserBindingOverrides overrides = user.BindingOverrides ?? new UserBindingOverrides();
+                if (overrides.General?.SyncEnabled == true)
+                {
+                    if (overrides.General.RunDays > 0)
+                    {
+                        overrides.General.RunDays--;
+                        changed = true;
+                    }
+                    continue;
+                }
                 foreach (UserScriptBinding binding in user.Bindings)
                 {
                     if (binding.RunDays > 0)

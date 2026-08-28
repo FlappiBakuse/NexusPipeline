@@ -126,7 +126,7 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     const created = await createScript({ name: "验收布局脚本", rootPath: fixture.root, mainExe: fixture.main, configPath: fixture.cfg, logPath: fixture.log });
     expect(created.ok, "验收布局测试脚本创建成功").toBeTruthy();
     scriptId = created.id;
-    const userResponse = await api("POST", "/api/users", { name: userName, autoCheckInEnabled: false });
+    const userResponse = await api("POST", "/api/users", { name: userName });
     expect(userResponse.ok, "验收布局测试全局用户创建成功").toBeTruthy();
     userId = (await userResponse.json()).id;
     const bindingResponse = await api("POST", `/api/users/${encodeURIComponent(userId)}/bindings`, {
@@ -170,9 +170,9 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     });
     expect(userLayout.cardGrid, "手机用户卡片采用脚本实例式网格布局").toBeTruthy();
     expect(userLayout.handleWidth >= 44, "手机用户卡片拖拽把手保持触控尺寸").toBeTruthy();
-    expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 2, "手机用户高频操作区位于正文之后且完整排列").toBeTruthy();
+    expect(userLayout.actionsBelowInfo && userLayout.actionsInside && userLayout.actionCount === 3, "手机用户高频操作区位于正文之后且完整排列").toBeTruthy();
 
-    await userCard.getByRole("button", { name: "编辑用户", exact: true }).click();
+    await userCard.getByRole("button", { name: "用户管理", exact: true }).click();
     await page.waitForSelector('[data-testid="um-binding-card"]');
     await page.locator('[data-action="toggle-um-binding"]').first().click();
     await page.waitForSelector('.um-binding-card.is-expanded .um-binding-head .mode-toggle.switch-control');
@@ -422,7 +422,7 @@ test("手机端卡片操作入口：用户/脚本/队列按钮完整且不溢出
     const qr = await api("POST", "/api/queues", { name: "宽度统一队列", autoRunMode: "none", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: id }] });
     expect(qr.ok, "测试队列创建成功").toBeTruthy();
     qid = (await qr.json()).id;
-    const ur = await api("POST", "/api/users", { name: userName, autoCheckInEnabled: false });
+    const ur = await api("POST", "/api/users", { name: userName });
     expect(ur.ok, "测试全局用户创建成功").toBeTruthy();
     userId = (await ur.json()).id;
     const br = await api("POST", `/api/users/${encodeURIComponent(userId)}/bindings`, { scriptInstanceId: id, enabled: true, notifyEnabled: true });

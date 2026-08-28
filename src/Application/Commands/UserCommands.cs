@@ -18,7 +18,6 @@ internal static class UserCommands
     public static OperationResult<NexusUser> Create(
         string? name,
         string? remark,
-        bool autoCheckInEnabled,
         string source = Audit.Web)
     {
         if (ValidateName(name) is string nameError)
@@ -29,11 +28,6 @@ internal static class UserCommands
         {
             return Validation<NexusUser>(remarkError);
         }
-        if (autoCheckInEnabled)
-        {
-            return Validation<NexusUser>("自动签到将在后续版本通过插件实现");
-        }
-
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? created = null;
         string? error = null;
@@ -58,7 +52,6 @@ internal static class UserCommands
                         Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
                         Name = normalizedName,
                         Remark = remark?.Trim() ?? "",
-                        AutoCheckInEnabled = false,
                     };
                     ctx.Users.Add(created);
                     try
@@ -89,16 +82,11 @@ internal static class UserCommands
         string userId,
         string? name,
         string? remark,
-        bool autoCheckInEnabled,
         string source = Audit.Web)
     {
         if (ValidateName(name) is string nameError)
         {
             return Validation<NexusUser>(nameError);
-        }
-        if (autoCheckInEnabled)
-        {
-            return Validation<NexusUser>("自动签到将在后续版本通过插件实现");
         }
         if (ValidateRemark(remark) is string remarkError)
         {
@@ -131,10 +119,8 @@ internal static class UserCommands
                         return;
                     }
                     string oldName = target.Name;
-                    bool oldAuto = target.AutoCheckInEnabled;
                     string oldRemark = target.Remark;
                     target.Name = normalizedName;
-                    target.AutoCheckInEnabled = false;
                     target.Remark = remark?.Trim() ?? "";
                     try
                     {
@@ -143,7 +129,6 @@ internal static class UserCommands
                     catch
                     {
                         target.Name = oldName;
-                        target.AutoCheckInEnabled = oldAuto;
                         target.Remark = oldRemark;
                         throw;
                     }
@@ -161,6 +146,67 @@ internal static class UserCommands
         catch (Exception ex)
         {
             return Internal<NexusUser>(ex);
+        }
+    }
+
+    public static OperationResult<UserBindingOverrides> UpdateGlobalSettings(
+        string userId,
+        UserBindingOverrides? candidate,
+        string source = Audit.Web)
+    {
+        UserBindingOverrides normalized = UserBindingOverrideResolver.Normalize(candidate);
+        if (ValidateRunDays(normalized.General.RunDays) is string runDaysError)
+        {
+            return Validation<UserBindingOverrides>(runDaysError);
+        }
+        if (ValidateSmtp(normalized.Notification.SmtpTo) is string smtpError)
+        {
+            return Validation<UserBindingOverrides>(smtpError);
+        }
+
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? target = ctx.FindUser(userId);
+        if (target is null)
+        {
+            return NotFound<UserBindingOverrides>($"未找到用户：{userId}");
+        }
+
+        string? error = null;
+        try
+        {
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                error = CheckUserMutationBusy(ctx, target);
+                if (error is not null)
+                {
+                    return;
+                }
+                lock (ctx.DataLock)
+                {
+                    UserBindingOverrides previous = target.BindingOverrides?.Clone() ?? new UserBindingOverrides();
+                    target.BindingOverrides = normalized.Clone();
+                    try
+                    {
+                        DataStore.SaveUsers(ctx.Users);
+                    }
+                    catch
+                    {
+                        target.BindingOverrides = previous;
+                        throw;
+                    }
+                }
+            });
+            if (error is not null)
+            {
+                return Conflict<UserBindingOverrides>("resource_busy", error);
+            }
+            ctx.Scheduler.RevalidatePendingPlans();
+            Audit.Log(source, "调整用户全局绑定设置", $"{target.Name}（id={target.Id}）");
+            return OperationResult<UserBindingOverrides>.Ok(target.BindingOverrides.Clone());
+        }
+        catch (Exception ex)
+        {
+            return Internal<UserBindingOverrides>(ex);
         }
     }
 
@@ -216,6 +262,7 @@ internal static class UserCommands
                     UserConfigManager.RemoveUserData(binding.ScriptInstanceId, target.Id);
                 }
                 DeleteAvatarFiles(target.Id);
+                ctx.Plugins.DeleteUserData(target.Id);
             });
             if (error is not null)
             {
@@ -432,7 +479,9 @@ internal static class UserCommands
                                 ctx.Users.Add(target);
                                 created = true;
                             }
-                            binding = CompatibilityBinding(candidate, script.Id);
+                            binding = NormalizeBindingForUser(
+                                target,
+                                CompatibilityBinding(candidate, script.Id));
                             target.Bindings.Add(binding);
                             snapshotScript = script.Clone();
                         }
@@ -548,7 +597,7 @@ internal static class UserCommands
                 {
                     if (!gate.Wait(0))
                     {
-                        error = "脚本正在运行或编辑配置中，无法编辑用户";
+                        error = "脚本正在运行或编辑配置中，无法更新用户";
                         return;
                     }
                     gateHeld = true;
@@ -577,7 +626,12 @@ internal static class UserCommands
 
                             string previousName = target.Name;
                             UserScriptBinding previousBinding = binding.Clone();
-                            UserScriptBinding replacement = CompatibilityBinding(candidate, script.Id);
+                            UserScriptBinding replacement = CompatibilityBinding(candidate, script.Id, previousBinding);
+                            if (CheckLockedBindingUpdate(target, previousBinding, replacement) is string overrideError)
+                            {
+                                error = overrideError;
+                                return;
+                            }
                             try
                             {
                                 target.Name = normalizedName;
@@ -607,12 +661,14 @@ internal static class UserCommands
             }
             if (error is not null)
             {
-                return IsBusy(error)
+                return error.StartsWith("global_override_active|", StringComparison.Ordinal)
+                    ? Conflict<NexusUser>("global_override_active", GlobalOverrideMessage(error))
+                    : IsBusy(error)
                     ? Conflict<NexusUser>("resource_busy", error)
                     : Validation<NexusUser>(error);
             }
             ctx.Scheduler.RevalidatePendingPlans();
-            Audit.Log(source, "编辑用户（兼容 API）", $"{script.Name} / {target.Name}");
+            Audit.Log(source, "更新用户（兼容 API）", $"{script.Name} / {target.Name}");
             return OperationResult<NexusUser>.Ok(target);
         }
         catch (Exception ex)
@@ -915,6 +971,7 @@ internal static class UserCommands
                             error = "该用户已绑定此脚本实例";
                             return;
                         }
+                        candidate = NormalizeBindingForUser(user, candidate);
                         user.Bindings.Add(candidate);
                         try
                         {
@@ -986,6 +1043,7 @@ internal static class UserCommands
             return Validation<UserScriptBinding>(pluginError);
         }
         string? error = null;
+        bool globalOverrideConflict = false;
         try
         {
             ctx.Center.WithAdmissionCoordination(() =>
@@ -999,6 +1057,12 @@ internal static class UserCommands
                 {
                     UserScriptBinding old = existing.Clone();
                     UserScriptBinding replacement = NormalizeBinding(candidate, scriptId);
+                    if (CheckLockedBindingUpdate(user, old, replacement) is string overrideError)
+                    {
+                        error = overrideError;
+                        globalOverrideConflict = true;
+                        return;
+                    }
                     int index = user.Bindings.IndexOf(existing);
                     user.Bindings[index] = replacement;
                     try
@@ -1015,7 +1079,9 @@ internal static class UserCommands
             });
             if (error is not null)
             {
-                return Conflict<UserScriptBinding>("resource_busy", error);
+                return globalOverrideConflict
+                    ? Conflict<UserScriptBinding>("global_override_active", GlobalOverrideMessage(error))
+                    : Conflict<UserScriptBinding>("resource_busy", error);
             }
             ctx.Scheduler.RevalidatePendingPlans();
             return OperationResult<UserScriptBinding>.Ok(existing!);
@@ -1141,7 +1207,10 @@ internal static class UserCommands
         }
     }
 
-    private static UserScriptBinding CompatibilityBinding(ScriptUser candidate, string scriptId)
+    private static UserScriptBinding CompatibilityBinding(
+        ScriptUser candidate,
+        string scriptId,
+        UserScriptBinding? existing = null)
     {
         return new UserScriptBinding
         {
@@ -1151,7 +1220,64 @@ internal static class UserCommands
             PreRunOnceOnly = candidate.PreRunOnceOnly,
             PostRunScript = candidate.PostRunScript.Trim(),
             PostRunOnFinalOnly = candidate.PostRunOnFinalOnly,
+            NotifyEnabled = existing?.NotifyEnabled ?? true,
+            SmtpTo = existing?.SmtpTo ?? "",
+            RunDays = existing?.RunDays ?? -1,
         };
+    }
+
+    private static UserScriptBinding NormalizeBindingForUser(
+        NexusUser user,
+        UserScriptBinding candidate)
+    {
+        UserBindingOverrides overrides = user.BindingOverrides ?? new UserBindingOverrides();
+        UserScriptBinding normalized = candidate.Clone();
+        if (overrides.General?.SyncEnabled == true)
+        {
+            normalized.Enabled = true;
+            normalized.RunDays = -1;
+        }
+        if (overrides.Notification?.SyncEnabled == true)
+        {
+            normalized.NotifyEnabled = true;
+            normalized.SmtpTo = "";
+        }
+        if (overrides.Advanced?.SyncEnabled == true)
+        {
+            normalized.PreRunScript = "";
+            normalized.PreRunOnceOnly = false;
+            normalized.PostRunScript = "";
+            normalized.PostRunOnFinalOnly = false;
+        }
+        return normalized;
+    }
+
+    private static string? CheckLockedBindingUpdate(
+        NexusUser user,
+        UserScriptBinding previous,
+        UserScriptBinding candidate)
+    {
+        UserBindingOverrides overrides = user.BindingOverrides ?? new UserBindingOverrides();
+        if (overrides.General?.SyncEnabled == true
+            && (previous.Enabled != candidate.Enabled || previous.RunDays != candidate.RunDays))
+        {
+            return "global_override_active|全局管理正在同步通用设置，请先关闭全局同步或保持绑定原始值不变";
+        }
+        if (overrides.Notification?.SyncEnabled == true
+            && (previous.NotifyEnabled != candidate.NotifyEnabled
+                || !string.Equals(previous.SmtpTo, candidate.SmtpTo, StringComparison.Ordinal)))
+        {
+            return "global_override_active|全局管理正在同步通知设置，请先关闭全局同步或保持绑定原始值不变";
+        }
+        if (overrides.Advanced?.SyncEnabled == true
+            && (!string.Equals(previous.PreRunScript, candidate.PreRunScript, StringComparison.Ordinal)
+                || previous.PreRunOnceOnly != candidate.PreRunOnceOnly
+                || !string.Equals(previous.PostRunScript, candidate.PostRunScript, StringComparison.Ordinal)
+                || previous.PostRunOnFinalOnly != candidate.PostRunOnFinalOnly))
+        {
+            return "global_override_active|全局管理正在同步高级设置，请先关闭全局同步或保持绑定原始值不变";
+        }
+        return null;
     }
 
     private static NexusUser? FindUserByIdOrName(RuntimeContext ctx, string reference)
@@ -1247,6 +1373,12 @@ internal static class UserCommands
         error.Contains("运行", StringComparison.Ordinal)
         || error.Contains("编辑", StringComparison.Ordinal)
         || error.Contains("待执行", StringComparison.Ordinal);
+
+    private static string GlobalOverrideMessage(string error)
+    {
+        int separator = error.IndexOf('|');
+        return separator >= 0 ? error[(separator + 1)..] : error;
+    }
 
     private static void DeleteAvatarFiles(string userId)
     {

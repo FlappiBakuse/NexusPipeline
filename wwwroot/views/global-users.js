@@ -1,7 +1,8 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { esc, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
-import { pageHeader, switchControl, textareaField, valueField } from "../core/forms.js";
+import { pageHeader, selectField, switchControl, textareaField, valueField } from "../core/forms.js";
+import { pluginMultiSelectMarkup, selectedPluginMultiSelectValues, syncPluginMultiSelect } from "../core/plugin-fields.js";
 import { icon } from "../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
@@ -10,6 +11,7 @@ import { initDndList } from "../core/dnd.js";
 
 let managementDraft = null;
 let deleteDraft = null;
+let globalManagementDraft = null;
 let nextTimer = null;
 let nextRefreshPending = false;
 
@@ -101,12 +103,12 @@ function userCard(user) {
       '<div class="script-name-row"><strong class="global-user-name">' + esc(user.name) + "</strong></div>" +
       '<div class="meta-line global-user-meta">' +
         '<span class="badge muted">已绑定 ' + bindingCount + " 个脚本</span>" +
-        '<span class="badge muted">自动签到未开启 · 即将开发</span>' +
         '<span class="badge blue global-user-next-run" data-next-run="' + esc(nextRun) + '" title="' + esc(queueTitle) + '">' + esc(nextRunLabel(nextRun)) + "</span>" +
       "</div>" +
     "</div>" +
     '<div class="global-user-actions row-actions entity-actions">' +
-      '<button class="tertiary" type="button" data-action="open-user-management" data-user-id="' + esc(user.id) + '">编辑用户</button>' +
+      '<button class="tertiary" type="button" data-action="open-user-management" data-user-id="' + esc(user.id) + '">用户管理</button>' +
+      '<button class="tertiary" type="button" data-action="open-global-management" data-user-id="' + esc(user.id) + '">全局管理</button>' +
       '<button class="danger" type="button" data-action="delete-global-user" data-user-id="' + esc(user.id) + '">删除用户</button>' +
     "</div>" +
   "</article>";
@@ -190,7 +192,7 @@ export async function saveGlobalUser() {
   }
   clearFieldError("gu-name");
   try {
-    await api("POST", "/api/users", { name, autoCheckInEnabled: false });
+    await api("POST", "/api/users", { name });
     closeModal();
     toast("用户已创建");
     await reloadUsers();
@@ -226,8 +228,9 @@ function umScriptName(binding) {
 }
 
 function umBadges(binding) {
-  const runDays = typeof binding.runDays === "number" ? binding.runDays : -1;
-  const enabled = runDays !== 0;
+  const effective = binding.effective || binding;
+  const runDays = typeof effective.runDays === "number" ? effective.runDays : -1;
+  const enabled = effective.enabled !== false && runDays !== 0;
   const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? "已启用" : "已停用"}</span>`;
   const daysBadge = runDays === 0
     ? '<span class="badge warn">运行已停止</span>'
@@ -249,12 +252,16 @@ function umBindingCardMarkup(binding) {
   const name = umScriptName(binding);
   const unavailableMessage = unavailableScriptMessage(binding.scriptInstanceId);
   const unavailable = !!unavailableMessage;
-  const notifyEnabled = binding.notifyEnabled !== false;
-  const runDays = typeof binding.runDays === "number" ? binding.runDays : -1;
-  // 绑定是否参与运行由运行天数唯一决定：-1/正数为启用，0 为停用。
-  const enabled = runDays !== 0;
-  const preValue = (binding.preRunOnceOnly ? "%FIRST% " : "") + (binding.preRunScript || "");
-  const postValue = (binding.postRunOnFinalOnly ? "%LAST% " : "") + (binding.postRunScript || "");
+  const effective = binding.effective || binding;
+  const locks = binding.locks || {};
+  const notifyEnabled = effective.notifyEnabled !== false;
+  const runDays = typeof effective.runDays === "number" ? effective.runDays : -1;
+  const enabled = effective.enabled !== false;
+  const preValue = (effective.preRunOnceOnly ? "%FIRST% " : "") + (effective.preRunScript || "");
+  const postValue = (effective.postRunOnFinalOnly ? "%LAST% " : "") + (effective.postRunScript || "");
+  const overrideHelper = category => locks[category]
+    ? '<p class="muted helper-copy um-override-helper">由「全局管理」同步 / 关闭全局同步后将恢复此脚本实例原有设置</p>'
+    : "";
   const runDaysPlaceholder = "填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。";
   const dragEnabled = umBindingDragEnabled();
   const dragHidden = umState.bindingEditMode || !!umState.expandedId;
@@ -291,19 +298,22 @@ function umBindingCardMarkup(binding) {
     "</div>";
   const generalView =
     '<div class="um-view um-view-general">' +
-      switchControl("um-" + idPart + "-enabled", "是否启用", "运行天数为 0 时自动停用", enabled, "toggle-user-management-switch", 'data-binding-field="enabled"') +
-      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" data-action="sync-user-management-run-days" min="-1" step="1" placeholder="' + esc(runDaysPlaceholder) + '"') +
+      switchControl("um-" + idPart + "-enabled", "是否启用", "运行天数为 0 时不会参与运行", enabled, "toggle-user-management-switch", 'data-binding-field="enabled"' + (locks.general ? " disabled" : "")) +
+      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : "")) +
+      overrideHelper("general") +
     "</div>";
   const notifyView =
     '<div class="um-view um-view-notify">' +
-      switchControl("um-" + idPart + "-notify", "开启通知推送", "脚本实例通知开启时才会发送", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"') +
-      valueField("um-" + idPart + "-smtp", "SMTP 收件人", binding.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"') +
+      switchControl("um-" + idPart + "-notify", "开启通知推送", "脚本实例通知开启时才会发送", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
+      valueField("um-" + idPart + "-smtp", "SMTP 收件人", effective.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"' + (locks.notification ? " disabled" : "")) +
       '<p class="muted helper-copy">仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。</p>' +
+      overrideHelper("notification") +
     "</div>";
   const advancedView =
     '<div class="um-view um-view-advanced">' +
-      valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
-      valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
+      valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"' + (locks.advanced ? " disabled" : "")) +
+      valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"' + (locks.advanced ? " disabled" : "")) +
+      overrideHelper("advanced") +
     "</div>";
   return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
     head + subhead +
@@ -377,7 +387,7 @@ function renderUserManagementModal() {
       bindingList +
     "</section>";
   const footer = `<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${umState.expandedId ? "返回上级" : "取消"}</button>`;
-  showModal(modalShell("编辑用户", body, footer), true, true);
+  showModal(modalShell("用户管理", body, footer), true, true);
   syncUmState();
   wireManagedBindingDnd();
   hydrateIcons(document);
@@ -462,19 +472,22 @@ function readBindingPayloads() {
   return Array.from(document.querySelectorAll("#um-binding-list [data-binding-id]")).map(card => {
     const read = field => card.querySelector('[data-binding-field="' + field + '"]');
     const pressed = field => read(field)?.getAttribute("aria-pressed") === "true";
+    const raw = managementDraft?.user?.bindings?.find(item => item.scriptInstanceId === card.dataset.bindingId) || {};
+    const locks = raw.locks || {};
     const rawRunDays = parseInt((read("runDays")?.value || "-1"), 10);
     const runDays = Number.isNaN(rawRunDays) ? -1 : rawRunDays;
-    return {
+    const payload = {
       scriptInstanceId: card.dataset.bindingId,
-      enabled: runDays !== 0,
-      notifyEnabled: pressed("notifyEnabled"),
-      smtpTo: read("smtpTo")?.value.trim() || "",
-      preRunScript: (read("preRunScript")?.value || "").trim(),
-      preRunOnceOnly: (read("preRunScript")?.value || "").trim().startsWith("%FIRST%"),
-      postRunScript: (read("postRunScript")?.value || "").trim(),
-      postRunOnFinalOnly: (read("postRunScript")?.value || "").trim().startsWith("%LAST%"),
-      runDays,
+      enabled: locks.general ? raw.enabled !== false : pressed("enabled"),
+      notifyEnabled: locks.notification ? raw.notifyEnabled !== false : pressed("notifyEnabled"),
+      smtpTo: locks.notification ? (raw.smtpTo || "") : (read("smtpTo")?.value.trim() || ""),
+      preRunScript: locks.advanced ? (raw.preRunScript || "") : (read("preRunScript")?.value || "").trim(),
+      preRunOnceOnly: locks.advanced ? raw.preRunOnceOnly === true : (read("preRunScript")?.value || "").trim().startsWith("%FIRST%"),
+      postRunScript: locks.advanced ? (raw.postRunScript || "") : (read("postRunScript")?.value || "").trim(),
+      postRunOnFinalOnly: locks.advanced ? raw.postRunOnFinalOnly === true : (read("postRunScript")?.value || "").trim().startsWith("%LAST%"),
+      runDays: locks.general ? (typeof raw.runDays === "number" ? raw.runDays : -1) : runDays,
     };
+    return payload;
   });
 }
 
@@ -498,7 +511,7 @@ export async function saveUserManagement() {
   const userId = managementDraft.userId;
   const bindings = readBindingPayloads().map(normalizePrePost);
   try {
-    await api("PUT", "/api/users/" + encodeURIComponent(userId), { name, remark, autoCheckInEnabled: false });
+    await api("PUT", "/api/users/" + encodeURIComponent(userId), { name, remark });
     for (const binding of bindings) {
       await api("PUT", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(binding.scriptInstanceId), binding);
     }
@@ -841,6 +854,229 @@ export async function globalEditConfigAction(userId, scriptId, action) {
   }
 }
 
+function globalFieldId(prefix, key) {
+  return prefix + String(key || "field").replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function globalPrePostValue(script, once, marker) {
+  return (once ? marker + " " : "") + (script || "");
+}
+
+function globalManagementHostMarkup(settings) {
+  const general = settings.general || {};
+  const notification = settings.notification || {};
+  const advanced = settings.advanced || {};
+  const pre = globalPrePostValue(advanced.preRunScript, advanced.preRunOnceOnly, "%FIRST%");
+  const post = globalPrePostValue(advanced.postRunScript, advanced.postRunOnFinalOnly, "%LAST%");
+  return '<div class="global-management-grid">' +
+    '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div>' +
+      switchControl("gm-general-sync", "同步通用设置", "开启后覆盖每个脚本绑定的通用设置", general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
+      switchControl("gm-general-enabled", "是否启用", "关闭后所有绑定均不参与运行", general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
+      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" step="1" placeholder="-1 表示永久运行"') +
+    '</section>' +
+    '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div>' +
+      switchControl("gm-notification-sync", "同步通知设置", "开启后覆盖每个脚本绑定的通知设置", notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
+      switchControl("gm-notification-enabled", "开启通知推送", "脚本实例通知开启时才会发送", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
+      valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"') +
+    '</section>' +
+    '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div>' +
+      switchControl("gm-advanced-sync", "同步高级设置", "开启后覆盖每个脚本绑定的高级设置", advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
+      valueField("gm-advanced-pre", "任务前运行脚本路径", pre, "text", 'data-global-field="advanced.preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
+      valueField("gm-advanced-post", "任务后运行脚本路径", post, "text", 'data-global-field="advanced.postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
+    '</section>' +
+  '</div>';
+}
+
+function pluginFieldMarkup(contribution, field) {
+  const prefix = "gm-plugin-" + String(contribution.pluginName || "plugin").replace(/[^a-zA-Z0-9_-]/g, "-") + "-" + String(contribution.id || "settings").replace(/[^a-zA-Z0-9_-]/g, "-") + "-";
+  const id = globalFieldId(prefix, field.key);
+  const type = String(field.type || "text").toLowerCase();
+  const value = contribution.values?.[field.key];
+  const description = field.description ? '<span class="muted plugin-field-description">' + esc(field.description) + "</span>" : "";
+  const required = field.required ? ' <span class="req">*</span>' : "";
+  const readOnly = field.readOnly ? " disabled" : "";
+  if (type === "switch") {
+    return switchControl(id, esc(field.label) + required, "", value === true, "toggle-global-plugin-switch", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="switch"' + readOnly, field.label) + description;
+  }
+  if (type === "textarea") {
+    return '<div class="field plugin-field"><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><textarea id="' + esc(id) + '" class="form-textarea" data-plugin-field="' + esc(field.key) + '" data-plugin-type="textarea"' + (field.maxLength > 0 ? ' maxlength="' + esc(field.maxLength) + '"' : "") + ' placeholder="' + esc(field.placeholder || "") + '"' + readOnly + '>' + esc(typeof value === "string" ? value : "") + '</textarea>' + description + '</div>';
+  }
+  if (type === "select") {
+    const options = Array.isArray(field.options) ? field.options : [];
+    return selectField(id, esc(field.label) + required, typeof value === "string" ? value : "", options, 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="select"' + (field.readOnly ? " disabled" : "")) + description;
+  }
+  if (type === "multi-select") {
+    return pluginMultiSelectMarkup(id, field, value);
+  }
+  if (type === "secret") {
+    const configured = value?.configured === true;
+    return '<div class="field plugin-field plugin-secret-field"><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><div class="plugin-secret-row"><input id="' + esc(id) + '" type="password" data-plugin-field="' + esc(field.key) + '" data-plugin-type="secret" data-secret-action="keep" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 16384) + '" placeholder="' + esc(configured ? "已设置，留空保持不变" : (field.placeholder || "请输入密钥")) + '"' + readOnly + '>' + (configured && !field.readOnly ? '<button class="tertiary" type="button" data-action="clear-plugin-secret" data-plugin-field="' + esc(field.key) + '">清除</button>' : "") + '</div>' + description + '</div>';
+  }
+  if (type === "status") {
+    return '<div class="field plugin-field"><span class="field-label">' + esc(field.label) + '</span><span class="plugin-status-value" data-plugin-field="' + esc(field.key) + '" data-plugin-type="status">' + esc(typeof value === "string" ? value : "暂无状态") + '</span>' + description + '</div>';
+  }
+  return valueField(id, esc(field.label) + required, typeof value === "string" ? value : "", "text", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="text" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 65536) + '" placeholder="' + esc(field.placeholder || "") + '"' + readOnly) + description;
+}
+
+function globalManagementPluginMarkup(contributions) {
+  if (!Array.isArray(contributions) || !contributions.length) return "";
+  const cards = contributions.map(contribution => {
+    const displayName = contribution.pluginDisplayName || contribution.pluginName || "";
+    const title = contribution.title && String(contribution.title).trim() !== String(displayName).trim()
+      ? '<strong>' + esc(contribution.title) + '</strong>'
+      : "";
+    return '<article class="global-management-plugin card" data-plugin-name="' + esc(contribution.pluginName) + '" data-plugin-contribution-id="' + esc(contribution.id) + '"><div class="section-heading"><div><h4>' + esc(displayName) + '</h4>' + title + (contribution.description ? '<p class="muted">' + esc(contribution.description) + '</p>' : "") + '</div></div><div class="plugin-contribution-fields">' + (contribution.fields || []).map(field => pluginFieldMarkup(contribution, field)).join("") + '</div></article>';
+  }).join("");
+  return '<section class="global-management-plugins"><div class="section-heading"><div><h3>插件设置</h3><p class="muted">由当前已启用的插件提供的用户级设置。</p></div></div>' + cards + '</section>';
+}
+
+function renderGlobalManagementModal() {
+  if (!globalManagementDraft) return;
+  const draft = globalManagementDraft;
+  const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions);
+  const footer = '<button class="primary" type="button" data-action="save-global-management">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
+  showModal(modalShell("全局管理", body, footer), true, true);
+  hydrateIcons(document);
+}
+
+export async function openGlobalManagement(userId) {
+  if (!userById(userId)) return;
+  try {
+    const [settings, contributions] = await Promise.all([
+      api("GET", "/api/users/" + encodeURIComponent(userId) + "/global-settings"),
+      api("GET", "/api/plugin-contributions/user-global/" + encodeURIComponent(userId)),
+    ]);
+    globalManagementDraft = { userId, settings: settings || {}, contributions: contributions || [] };
+    renderGlobalManagementModal();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function readGlobalManagementSettings() {
+  const pressed = id => document.getElementById(id)?.getAttribute("aria-pressed") === "true";
+  const value = id => document.getElementById(id)?.value || "";
+  const runDays = parseInt(value("gm-general-run-days"), 10);
+  const preValue = value("gm-advanced-pre").trim();
+  const postValue = value("gm-advanced-post").trim();
+  return {
+    general: { syncEnabled: pressed("gm-general-sync"), enabled: pressed("gm-general-enabled"), runDays: Number.isNaN(runDays) ? -1 : runDays },
+    notification: { syncEnabled: pressed("gm-notification-sync"), notifyEnabled: pressed("gm-notification-enabled"), smtpTo: value("gm-notification-smtp").trim() },
+    advanced: {
+      syncEnabled: pressed("gm-advanced-sync"),
+      preRunScript: preValue.replace(/^%FIRST%\s*/, ""),
+      preRunOnceOnly: preValue.startsWith("%FIRST%"),
+      postRunScript: postValue.replace(/^%LAST%\s*/, ""),
+      postRunOnFinalOnly: postValue.startsWith("%LAST%"),
+    },
+  };
+}
+
+function readPluginContributionValues(contribution) {
+  const values = {};
+  const container = document.querySelector('[data-plugin-name="' + CSS.escape(contribution.pluginName || "") + '"][data-plugin-contribution-id="' + CSS.escape(contribution.id || "") + '"]');
+  for (const field of contribution.fields || []) {
+    const type = String(field.type || "text").toLowerCase();
+    const element = container?.querySelector('[data-plugin-field="' + CSS.escape(field.key) + '"]');
+    if (!element || field.readOnly || type === "status") continue;
+    if (type === "switch") {
+      values[field.key] = element.getAttribute("aria-pressed") === "true";
+    } else if (type === "multi-select") {
+      values[field.key] = selectedPluginMultiSelectValues(element);
+    } else if (type === "secret") {
+      const action = element.dataset.secretAction === "clear"
+        ? "clear"
+        : element.value ? "set" : "keep";
+      values[field.key] = action === "set" ? { action, value: element.value } : { action };
+    } else {
+      values[field.key] = element.value || "";
+    }
+  }
+  return values;
+}
+
+export async function saveGlobalManagement() {
+  if (!globalManagementDraft) return;
+  const draft = globalManagementDraft;
+  const settings = readGlobalManagementSettings();
+  try {
+    const saved = await api("PUT", "/api/users/" + encodeURIComponent(draft.userId) + "/global-settings", settings);
+    for (const contribution of draft.contributions || []) {
+      await api("PUT", "/api/plugin-contributions/user-global/" + encodeURIComponent(draft.userId) + "/" + encodeURIComponent(contribution.pluginName) + "/" + encodeURIComponent(contribution.id), {
+        values: readPluginContributionValues(contribution),
+      });
+    }
+    globalManagementDraft = null;
+    closeModal();
+    toast("全局设置已保存");
+    await reloadUsers();
+    return saved;
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+export function toggleGlobalManagementSwitch(target) {
+  if (target.disabled) return;
+  syncManagementSwitch(target, target.getAttribute("aria-pressed") !== "true");
+}
+
+export function toggleGlobalPluginSwitch(target) {
+  if (target.disabled) return;
+  syncManagementSwitch(target, target.getAttribute("aria-pressed") !== "true");
+}
+
+export function clearPluginSecret(target) {
+  const field = target.closest(".global-management-plugin")?.querySelector('[data-plugin-field="' + CSS.escape(target.dataset.pluginField || "") + '"]');
+  if (!field) return;
+  field.value = "";
+  field.dataset.secretAction = "clear";
+  target.disabled = true;
+}
+
+function closePluginMultiSelects(except = null) {
+  document.querySelectorAll('.plugin-multi-select-trigger[aria-expanded="true"]').forEach(trigger => {
+    const wrapper = trigger.closest(".plugin-multi-select");
+    if (wrapper === except) return;
+    trigger.setAttribute("aria-expanded", "false");
+    const menu = wrapper?.querySelector(".plugin-multi-select-menu");
+    if (menu) menu.hidden = true;
+  });
+}
+
+export function togglePluginMultiSelect(target) {
+  const wrapper = target.closest(".plugin-multi-select");
+  if (!wrapper || target.disabled) return;
+  const expanded = target.getAttribute("aria-expanded") === "true";
+  closePluginMultiSelects(wrapper);
+  target.setAttribute("aria-expanded", expanded ? "false" : "true");
+  const menu = wrapper.querySelector(".plugin-multi-select-menu");
+  if (menu) menu.hidden = expanded;
+}
+
+export function syncPluginMultiSelectOption(target) {
+  syncPluginMultiSelect(target.closest(".plugin-multi-select"));
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("click", event => {
+    if (!event.target?.closest?.(".plugin-multi-select")) closePluginMultiSelects();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const openTrigger = document.querySelector('.plugin-multi-select-trigger[aria-expanded="true"]');
+    if (!openTrigger) return;
+    closePluginMultiSelects();
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  document.addEventListener("input", event => {
+    const input = event.target?.closest?.('.plugin-secret-field input[data-plugin-type="secret"]');
+    if (!input) return;
+    input.dataset.secretAction = input.value ? "set" : "keep";
+  });
+}
+
 function syncManagementSwitch(target, pressed) {
   if (!target) return;
   target.setAttribute("aria-pressed", pressed ? "true" : "false");
@@ -852,29 +1088,20 @@ function syncManagementSwitch(target, pressed) {
 function toggleManagementSwitch(target) {
   if (target.disabled) return;
   const on = target.getAttribute("aria-pressed") === "true";
-  const next = !on;
-  const card = target.closest(".um-binding-card");
-  if (target.dataset.bindingField === "enabled") {
-    const runDays = card?.querySelector('[data-binding-field="runDays"]');
-    if (runDays) {
-      const current = parseInt(runDays.value || "-1", 10);
-      runDays.value = next ? (current === 0 ? "-1" : runDays.value) : "0";
-    }
-  }
-  syncManagementSwitch(target, next);
+  syncManagementSwitch(target, !on);
 }
 
 function syncManagementRunDays(target) {
-  const card = target.closest(".um-binding-card");
-  const enabled = parseInt(target.value || "-1", 10) !== 0;
-  syncManagementSwitch(card?.querySelector('[data-binding-field="enabled"]'), enabled);
+  return target;
 }
 
 export const actions = {
   "open-global-user-modal": () => openGlobalUserModal(),
   "open-user-management": target => openUserManagement(target.dataset.userId),
+  "open-global-management": target => withBusy(target, () => openGlobalManagement(target.dataset.userId)),
   "save-global-user": target => withBusy(target, () => saveGlobalUser()),
   "save-user-management": target => withBusy(target, () => saveUserManagement()),
+  "save-global-management": target => withBusy(target, () => saveGlobalManagement()),
   "delete-global-user": target => deleteGlobalUser(target.dataset.userId),
   "confirm-delete-global-user": target => withBusy(target, () => confirmDeleteGlobalUser()),
   "user-management-back": () => userManagementBack(),
@@ -895,4 +1122,9 @@ export const actions = {
   "global-edit-config-cancel": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "cancel")),
   "toggle-user-management-switch": target => toggleManagementSwitch(target),
   "sync-user-management-run-days": target => syncManagementRunDays(target),
+  "toggle-global-management-switch": target => toggleGlobalManagementSwitch(target),
+  "toggle-global-plugin-switch": target => toggleGlobalPluginSwitch(target),
+  "clear-plugin-secret": target => clearPluginSecret(target),
+  "toggle-plugin-multi-select": target => togglePluginMultiSelect(target),
+  "sync-plugin-multi-select-option": target => syncPluginMultiSelectOption(target),
 };

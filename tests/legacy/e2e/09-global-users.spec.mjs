@@ -38,13 +38,13 @@ test("全局用户 API：稳定 UserId、绑定、头像校验与精确删除确
     expect(scriptResponse.ok, `创建回归脚本（${scriptError}）`).toBeTruthy();
     scriptId = (await scriptResponse.json()).id;
 
-    const createResponse = await api("POST", "/api/users", { name, autoCheckInEnabled: false });
+    const createResponse = await api("POST", "/api/users", { name });
     expect(createResponse.ok, "创建全局用户").toBeTruthy();
     const created = await createResponse.json();
     userId = created.id;
     expect(typeof userId === "string" && userId.length > 20, "全局用户返回稳定 UserId").toBeTruthy();
 
-    const duplicate = await api("POST", "/api/users", { name: name.toUpperCase(), autoCheckInEnabled: false });
+    const duplicate = await api("POST", "/api/users", { name: name.toUpperCase() });
     expect(duplicate.status === 400, "全局用户名大小写不敏感去重").toBeTruthy();
 
     const binding = await api("POST", `/api/users/${encodeURIComponent(userId)}/bindings`, {
@@ -80,7 +80,6 @@ test("全局用户 API：稳定 UserId、绑定、头像校验与精确删除确
     const renameResponse = await api("PUT", `/api/users/${encodeURIComponent(userId)}`, {
       name: renamed,
       remark: "备注内容一",
-      autoCheckInEnabled: false,
     });
     const renamedUser = await responseJson(renameResponse);
     expect(renameResponse.ok && renamedUser?.id === userId && renamedUser.name === renamed && renamedUser.remark === "备注内容一", "改名与备注保存").toBeTruthy();
@@ -166,7 +165,7 @@ test("全局用户页面：脚本卡片结构、统一绑定管理与响应式�
     expect(queueResponse.ok, "创建布局回归队列").toBeTruthy();
     queueId = (await queueResponse.json()).id;
 
-    const userResponse = await api("POST", "/api/users", { name: userName, autoCheckInEnabled: false });
+    const userResponse = await api("POST", "/api/users", { name: userName });
     expect(userResponse.ok, "创建布局回归用户").toBeTruthy();
     userId = (await userResponse.json()).id;
     const bindingResponse = await api(`POST`, `/api/users/${encodeURIComponent(userId)}/bindings`, {
@@ -187,12 +186,11 @@ test("全局用户页面：脚本卡片结构、统一绑定管理与响应式�
     await expect(card.locator(".drag-handle")).toHaveAttribute("aria-label", "拖拽调整全局用户顺序");
     await expect(card.locator(".global-user-avatar-button")).toHaveAttribute("aria-label", new RegExp("点击上传或更换"));
     await expect(card.locator(".global-user-bindings")).toHaveCount(0);
-    await expect(card.getByRole("button", { name: "编辑用户", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "用户管理", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "全局管理", exact: true })).toBeVisible();
     await expect(card.getByRole("button", { name: "删除用户", exact: true })).toBeVisible();
-    await expect(card.getByText("自动签到未开启 · 即将开发", { exact: true })).toBeVisible();
-
-    await card.getByRole("button", { name: "编辑用户", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "编辑用户" });
+    await card.getByRole("button", { name: "用户管理", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "用户管理" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("heading", { name: "已绑定脚本实例", exact: true })).toBeVisible();
     await expect(dialog.getByRole("textbox", { name: "用户名", exact: false })).toHaveValue(userName);

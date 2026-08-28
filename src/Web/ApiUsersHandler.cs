@@ -56,6 +56,11 @@ internal static class ApiUsersHandler
             await HandleAvatarAsync(context, method, userId, body).ConfigureAwait(false);
             return;
         }
+        if (seg.Length == 3 && seg[2].Equals("global-settings", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleGlobalSettingsAsync(context, method, userId, body).ConfigureAwait(false);
+            return;
+        }
         if (seg.Length >= 3 && seg[2].Equals("bindings", StringComparison.OrdinalIgnoreCase))
         {
             await HandleBindingsAsync(context, method, userId, seg, body).ConfigureAwait(false);
@@ -99,8 +104,7 @@ internal static class ApiUsersHandler
         RuntimeContext ctx = RuntimeContext.Instance;
         OperationResult<NexusUser> result = UserCommands.Create(
             payload.Name,
-            payload.Remark,
-            payload.AutoCheckInEnabled);
+            payload.Remark);
         if (!result.Succeeded)
         {
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
@@ -123,8 +127,7 @@ internal static class ApiUsersHandler
         OperationResult<NexusUser> result = UserCommands.Update(
             userId,
             payload.Name,
-            payload.Remark,
-            payload.AutoCheckInEnabled);
+            payload.Remark);
         if (!result.Succeeded)
         {
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
@@ -180,7 +183,7 @@ internal static class ApiUsersHandler
                 return;
             }
             List<ScriptInstance> scripts = ctx.SnapshotScripts();
-            await HttpHelper.WriteJsonAsync(context, user.Bindings.Select(binding => ProjectBinding(binding, scripts))).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, user.Bindings.Select(binding => ProjectBinding(user, binding, scripts))).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 4 && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -242,7 +245,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectBinding(result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
+            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
     }
 
     private static async Task UpdateBindingAsync(HttpListenerContext context, string userId, string scriptId, string body)
@@ -265,7 +268,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectBinding(result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
+            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
     }
 
     private static async Task DeleteBindingAsync(HttpListenerContext context, string userId, string scriptId)
@@ -277,6 +280,46 @@ internal static class ApiUsersHandler
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+    }
+
+    private static async Task HandleGlobalSettingsAsync(
+        HttpListenerContext context,
+        string method,
+        string userId,
+        string body)
+    {
+        RuntimeContext ctx = RuntimeContext.Instance;
+        NexusUser? user = ctx.FindUser(userId);
+        if (user is null)
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            return;
+        }
+        if (method == "GET")
+        {
+            await HttpHelper.WriteJsonAsync(
+                context,
+                (user.BindingOverrides ?? new UserBindingOverrides()).Clone()).ConfigureAwait(false);
+            return;
+        }
+        if (method != "PUT")
+        {
+            await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+            return;
+        }
+        UserBindingOverrides? payload = HttpHelper.ParseBody<UserBindingOverrides>(body);
+        if (payload is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { error = "全局设置格式不正确" }, 400).ConfigureAwait(false);
+            return;
+        }
+        OperationResult<UserBindingOverrides> result = UserCommands.UpdateGlobalSettings(userId, payload);
+        if (!result.Succeeded)
+        {
+            await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, result.Value ?? new UserBindingOverrides()).ConfigureAwait(false);
     }
 
     private static async Task HandleAvatarAsync(HttpListenerContext context, string method, string userId, string body)
@@ -386,18 +429,22 @@ internal static class ApiUsersHandler
             user.Index,
             user.Name,
             user.Remark,
-            user.AutoCheckInEnabled,
             avatarUrl = HasAvatar(user.Id) ? $"/api/users/{Uri.EscapeDataString(user.Id)}/avatar" : null,
             bindingCount = user.Bindings.Count,
             nextRunAt = next?.TriggerTime,
             nextQueueName = next?.QueueName,
-            bindings = user.Bindings.Select(binding => ProjectBinding(binding, scripts)),
+            bindings = user.Bindings.Select(binding => ProjectBinding(user, binding, scripts)),
         };
     }
 
-    private static object ProjectBinding(UserScriptBinding binding, IReadOnlyList<ScriptInstance> scripts)
+    private static object ProjectBinding(
+        NexusUser user,
+        UserScriptBinding binding,
+        IReadOnlyList<ScriptInstance> scripts)
     {
         ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == binding.ScriptInstanceId);
+        UserScriptBinding effective = UserBindingOverrideResolver.Resolve(user, binding);
+        (bool General, bool Notification, bool Advanced) locks = UserBindingOverrideResolver.Locks(user);
         return new
         {
             binding.ScriptInstanceId,
@@ -410,6 +457,24 @@ internal static class ApiUsersHandler
             binding.NotifyEnabled,
             binding.SmtpTo,
             binding.RunDays,
+            effective = new
+            {
+                effective.Enabled,
+                effective.PreRunScript,
+                effective.PreRunOnceOnly,
+                effective.PostRunScript,
+                effective.PostRunOnFinalOnly,
+                effective.NotifyEnabled,
+                effective.SmtpTo,
+                effective.RunDays,
+                effective.Participates,
+            },
+            locks = new
+            {
+                general = locks.General,
+                notification = locks.Notification,
+                advanced = locks.Advanced,
+            },
         };
     }
 
@@ -428,8 +493,6 @@ internal static class ApiUsersHandler
         public string Name { get; set; } = "";
 
         public string? Remark { get; set; }
-
-        public bool AutoCheckInEnabled { get; set; }
     }
 
     private sealed class BindingPayload

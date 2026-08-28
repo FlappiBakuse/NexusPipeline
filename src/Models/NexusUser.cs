@@ -18,8 +18,8 @@ public class NexusUser
     /// <summary>用户备注，仅展示与编辑，不参与运行逻辑。</summary>
     public string Remark { get; set; } = "";
 
-    /// <summary> 仅作为 UI 占位，宿主不执行签到任务。</summary>
-    public bool AutoCheckInEnabled { get; set; }
+    /// <summary>按类别覆盖脚本绑定的用户级全局设置。</summary>
+    public UserBindingOverrides BindingOverrides { get; set; } = new();
 
     public List<UserScriptBinding> Bindings { get; set; } = new();
 

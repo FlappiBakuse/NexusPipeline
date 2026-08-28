@@ -1,5 +1,6 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
@@ -16,19 +17,22 @@ internal sealed class ExecutionRunner
     private readonly INotificationService _notifications;
     private readonly SystemActionExecutor _systemActions;
     private readonly IPluginAvailability _pluginAvailability;
+    private readonly IUserRunStartingPublisher? _userRunEvents;
 
     public ExecutionRunner(
         IUserRepository users,
         IHistoryStore history,
         INotificationService notifications,
         SystemActionExecutor systemActions,
-        IPluginAvailability pluginAvailability)
+        IPluginAvailability pluginAvailability,
+        IUserRunStartingPublisher? userRunEvents = null)
     {
         _users = users;
         _history = history;
         _notifications = notifications;
         _systemActions = systemActions;
         _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
+        _userRunEvents = userRunEvents;
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)
@@ -113,6 +117,22 @@ internal sealed class ExecutionRunner
             RunRecord record;
             try
             {
+                try
+                {
+                    _userRunEvents?.Publish(new PluginUserRunStartingEvent(
+                        runUser.UserId,
+                        runUser.UserName,
+                        script.Id,
+                        script.Name,
+                        queueId,
+                        queueName,
+                        exec.Mode,
+                        DateTimeOffset.Now));
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[插件] 用户运行事件发布异常：{ex.Message}");
+                }
                 session = new ExecutionCoordinator(
                     script, exec.Mode, queueId, queueName, runUser.UserName,
                     exec.Cts.Token,

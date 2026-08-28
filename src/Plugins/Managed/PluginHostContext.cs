@@ -2,17 +2,23 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Plugins;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContext
+internal sealed class PluginHostContext : IPluginHostContextV1_1
 {
     public PluginHostContext(
         string pluginName,
+        string pluginDisplayName,
         NotificationDispatcher notifications,
-        Action<Exception> reportJobError)
+        Action<Exception> reportJobError,
+        PluginUserGlobalManagementRegistry globalManagement,
+        PluginExecutionEventRegistry executionEvents,
+        OutboundHttpClientProvider http)
     {
         PluginName = pluginName;
         Logger = new PluginLogger(pluginName);
@@ -20,6 +26,10 @@ internal sealed class PluginHostContext : IPluginHostContext
         Secrets = new PluginSecretStore(pluginName);
         Notifications = new PluginNotificationAdapter(notifications);
         Scheduler = new PluginJobScheduler(pluginName, reportJobError);
+        UserData = new PluginUserDataStore(pluginName);
+        _globalManagement = new PluginUserGlobalManagementAdapter(globalManagement, pluginName, pluginDisplayName);
+        _executionEvents = new PluginExecutionEventAdapter(executionEvents, pluginName);
+        Http = new PluginHttpClientFactory(http);
     }
 
     public string PluginName { get; }
@@ -34,9 +44,122 @@ internal sealed class PluginHostContext : IPluginHostContext
 
     public IPluginJobScheduler Scheduler { get; }
 
+    public IPluginUserDataStore UserData { get; }
+
+    public IPluginUserGlobalManagementRegistry UserGlobalManagement => _globalManagement;
+
+    public IPluginExecutionEventService ExecutionEvents => _executionEvents;
+
+    public IPluginHttpClientFactory Http { get; }
+
+    private readonly PluginUserGlobalManagementAdapter _globalManagement;
+    private readonly PluginExecutionEventAdapter _executionEvents;
+
+    public void Dispose()
+    {
+        _executionEvents.Dispose();
+        _globalManagement.Dispose();
+        ((PluginJobScheduler)Scheduler).Dispose();
+    }
+
     public void DisposeScheduler()
     {
-        ((PluginJobScheduler)Scheduler).Dispose();
+        Dispose();
+    }
+}
+
+internal sealed class PluginUserGlobalManagementAdapter : IPluginUserGlobalManagementRegistry, IDisposable
+{
+    private readonly PluginUserGlobalManagementRegistry _registry;
+    private readonly string _pluginName;
+    private readonly string _pluginDisplayName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+
+    public PluginUserGlobalManagementAdapter(
+        PluginUserGlobalManagementRegistry registry,
+        string pluginName,
+        string pluginDisplayName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+        _pluginDisplayName = pluginDisplayName;
+    }
+
+    public IDisposable Register(PluginUserGlobalManagementContribution contribution)
+    {
+        IDisposable registration = _registry.Register(_pluginName, _pluginDisplayName, contribution);
+        lock (_sync)
+        {
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
+    }
+}
+
+internal sealed class PluginExecutionEventAdapter : IPluginExecutionEventService, IDisposable
+{
+    private readonly PluginExecutionEventRegistry _registry;
+    private readonly string _pluginName;
+    private readonly List<IDisposable> _subscriptions = new();
+    private readonly object _sync = new();
+
+    public PluginExecutionEventAdapter(PluginExecutionEventRegistry registry, string pluginName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+    }
+
+    public IDisposable SubscribeUserRunStarting(Func<PluginUserRunStartingEvent, ValueTask> handler)
+    {
+        IDisposable subscription = _registry.Subscribe(_pluginName, handler);
+        lock (_sync)
+        {
+            _subscriptions.Add(subscription);
+        }
+        return new CallbackDisposable(() =>
+        {
+            subscription.Dispose();
+            lock (_sync)
+            {
+                _subscriptions.Remove(subscription);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] subscriptions;
+        lock (_sync)
+        {
+            subscriptions = _subscriptions.ToArray();
+            _subscriptions.Clear();
+        }
+        foreach (IDisposable subscription in subscriptions)
+        {
+            subscription.Dispose();
+        }
     }
 }
 

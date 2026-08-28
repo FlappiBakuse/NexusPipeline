@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -372,7 +373,12 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         }
     }
 
-    private HttpListener? _listener;
+    private TcpListener? _listener;
+    private CancellationTokenSource? _listenerCts;
+    private Task? _listenerTask;
+    private bool _holdManifest;
+    private TaskCompletionSource<bool>? _manifestRequestStarted;
+    private TaskCompletionSource<bool>? _manifestRelease;
     private int _port;
     private string? _root;
     private string? _installDir;
@@ -403,28 +409,36 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         using var sha = SHA256.Create();
         _zipSha = Convert.ToHexString(sha.ComputeHash(_zipBytes)).ToLowerInvariant();
 
-        _listener = new HttpListener();
-        _listener.Prefixes.Add($"http://127.0.0.1:{0}/");
-        // 用自由端口：先探测再绑定
-        using (var probe = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0))
-        {
-            probe.Start();
-            _port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-        }
-        _listener.Prefixes.Clear();
-        _listener.Prefixes.Add($"http://127.0.0.1:{_port}/");
-        _listener.Start();
-        _listener.BeginGetContext(OnContext, null);
+        // 测试源只需要本地 HTTP 语义；TcpListener 不依赖 Windows HTTP.sys 或 URL ACL，
+        // 避免默认单测被管理员权限和沙箱策略影响。
+        TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        _listener = listener;
+        _port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        _listenerCts = new CancellationTokenSource();
+        _listenerTask = ServeAsync(listener, _listenerCts.Token);
 
         _settings = new AppSettings { UpdateChannel = "prerelease" };
         _settings.UpdateSourceUrl = SourceUrl;
         return Task.CompletedTask;
     }
 
-    public Task DisposeAsync()
+    public async Task DisposeAsync()
     {
-        _listener?.Stop();
+        StopListener();
+        if (_listenerTask is not null)
+        {
+            try
+            {
+                await _listenerTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        _listenerCts?.Dispose();
+        _listenerCts = null;
+        _listenerTask = null;
         try
         {
             if (Directory.Exists(_root))
@@ -435,7 +449,6 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         catch
         {
         }
-        return Task.CompletedTask;
     }
 
     private static void AddEntry(ZipArchive archive, string name, string content)
@@ -447,95 +460,133 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
     private string SourceUrl => $"http://127.0.0.1:{_port}/";
 
-    private void OnContext(IAsyncResult ar)
+    private void StopListener()
     {
-        HttpListener? listener = _listener;
-        if (listener is null || !listener.IsListening)
-        {
-            return;
-        }
-        HttpListenerContext context;
+        _listenerCts?.Cancel();
         try
         {
-            context = listener.EndGetContext(ar);
+            _listener?.Stop();
         }
-        catch (Exception)
+        catch (ObjectDisposedException)
         {
-            // 服务停止（Stop/Dispose）时挂起的异步上下文会以异常结束，忽略即可。
-            return;
         }
+        _listener = null;
+    }
+
+    private async Task ServeAsync(TcpListener listener, CancellationToken token)
+    {
         try
         {
-            listener.BeginGetContext(OnContext, null);
-        }
-        catch (Exception)
-        {
-            return;
-        }
-        try
-        {
-            string path = context.Request.Url?.AbsolutePath ?? "/";
-            byte[] body;
-            string contentType;
-            if (path == "/releases" || path == "/")
+            while (!token.IsCancellationRequested)
             {
-                var releases = new JsonArray();
-                var release = new JsonObject
+                TcpClient client;
+                try
                 {
-                    ["tag_name"] = $"v{CandidateVersion}",
-                    ["name"] = $"v{CandidateVersion}",
-                    ["draft"] = false,
-                    ["prerelease"] = true,
-                    ["body"] = "更新说明",
-                    ["assets"] = new JsonArray
-                    {
-                        new JsonObject
-                        {
-                            ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip",
-                        },
-                        new JsonObject
-                        {
-                            ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
-                            ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
-                        },
-                    },
-                };
-                releases.Add(release);
-                body = Encoding.UTF8.GetBytes(releases.ToJsonString());
-                contentType = "application/json";
+                    client = await listener.AcceptTcpClientAsync(token);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    break;
+                }
+                _ = HandleClientAsync(client, token);
             }
-            else if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                body = _zipBytes;
-                contentType = "application/octet-stream";
-            }
-            else if (path.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-            {
-                body = Encoding.ASCII.GetBytes(_zipSha + Environment.NewLine);
-                contentType = "text/plain";
-            }
-            else
-            {
-                context.Response.StatusCode = 404;
-                body = Array.Empty<byte>();
-                contentType = "text/plain";
-            }
-            context.Response.ContentType = contentType;
-            context.Response.ContentLength64 = body.Length;
-            context.Response.OutputStream.Write(body, 0, body.Length);
-            context.Response.OutputStream.Close();
         }
-        catch
+        catch (SocketException) when (token.IsCancellationRequested)
+        {
+        }
+    }
+
+    private async Task HandleClientAsync(TcpClient client, CancellationToken token)
+    {
+        using (client)
         {
             try
             {
-                context.Response.Abort();
+                await using NetworkStream stream = client.GetStream();
+                using var reader = new StreamReader(stream, Encoding.ASCII, detectEncodingFromByteOrderMarks: false, 8192, leaveOpen: true);
+                string? requestLine = await reader.ReadLineAsync(token);
+                if (string.IsNullOrWhiteSpace(requestLine))
+                {
+                    return;
+                }
+                while (!string.IsNullOrEmpty(await reader.ReadLineAsync(token)))
+                {
+                }
+
+                string[] requestParts = requestLine.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
+                string path = requestParts.Length >= 2
+                    ? requestParts[1].Split('?', 2)[0]
+                    : "/";
+                if (_holdManifest && (path == "/releases" || path == "/"))
+                {
+                    _manifestRequestStarted?.TrySetResult(true);
+                    await _manifestRelease!.Task.WaitAsync(token);
+                }
+                (int statusCode, string contentType, byte[] body) = BuildResponse(path);
+                string reason = statusCode == 200 ? "OK" : "Not Found";
+                byte[] header = Encoding.ASCII.GetBytes(
+                    $"HTTP/1.1 {statusCode} {reason}\r\n" +
+                    $"Content-Type: {contentType}\r\n" +
+                    $"Content-Length: {body.Length}\r\n" +
+                    "Connection: close\r\n\r\n");
+                await stream.WriteAsync(header, token);
+                await stream.WriteAsync(body, token);
             }
-            catch
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (IOException)
+            {
+                // 客户端取消请求时，测试源无需再写入已关闭的连接。
+            }
+            catch (SocketException)
             {
             }
         }
+    }
+
+    private (int StatusCode, string ContentType, byte[] Body) BuildResponse(string path)
+    {
+        if (path == "/releases" || path == "/")
+        {
+            var releases = new JsonArray();
+            var release = new JsonObject
+            {
+                ["tag_name"] = $"v{CandidateVersion}",
+                ["name"] = $"v{CandidateVersion}",
+                ["draft"] = false,
+                ["prerelease"] = true,
+                ["body"] = "更新说明",
+                ["assets"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip",
+                        ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip",
+                    },
+                    new JsonObject
+                    {
+                        ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
+                        ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
+                    },
+                },
+            };
+            releases.Add(release);
+            return (200, "application/json", Encoding.UTF8.GetBytes(releases.ToJsonString()));
+        }
+        if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            return (200, "application/octet-stream", _zipBytes);
+        }
+        if (path.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
+        {
+            return (200, "text/plain", Encoding.ASCII.GetBytes(_zipSha + Environment.NewLine));
+        }
+        return (404, "text/plain", Array.Empty<byte>());
     }
 
     private UpdateService NewService()
@@ -632,14 +683,16 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     [Fact]
     public async Task Cancel_MidCheckReturnsToIdleWithCancelNote()
     {
-        // 用不可达源让检查挂起（TCP 连接等待，超时前取消）。
-        _listener!.Stop();
-        _listener = null;
+        // 用本地测试源明确挂起清单响应，避免依赖外部网络的连接超时行为。
+        _holdManifest = true;
+        _manifestRequestStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _manifestRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         UpdateService service = NewService();
-        _settings.UpdateSourceUrl = "https://10.255.255.1/releases";
-        _ = service.CheckAsync("test");
-        await Task.Delay(200);
+        Task<UpdateStatusSnapshot> check = service.CheckAsync("test");
+        await _manifestRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(service.CancelDownload());
+        _manifestRelease.TrySetResult(true);
+        await check;
         UpdateStatusSnapshot status = service.GetStatus();
         Assert.Equal(UpdateState.Idle, status.State);
     }

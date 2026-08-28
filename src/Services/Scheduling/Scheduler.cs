@@ -189,6 +189,7 @@ internal sealed class Scheduler : IDisposable
         IReadOnlyList<DispatchQueue>? queueSnapshot = null)
     {
         HashSet<string> scriptIds = user.Bindings
+            .Select(binding => UserBindingOverrideResolver.Resolve(user, binding))
             .Where(binding => binding.Participates)
             .Select(binding => binding.ScriptInstanceId)
             .ToHashSet(StringComparer.Ordinal);

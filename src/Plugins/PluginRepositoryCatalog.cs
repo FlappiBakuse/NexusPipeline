@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using NexusPipeline.Plugin.Abstractions;
 
 namespace NexusPipeline.Plugins;
 
@@ -98,7 +99,7 @@ internal static class PluginRepositoryCatalog
                     return false;
                 }
                 string apiVersion = item["apiVersion"]?.ToString()?.Trim() ?? "";
-                if (kind == "managed-code" && !TryParseApiMajor(apiVersion, out _))
+                if (kind == "managed-code" && !TryParseApiVersion(apiVersion, out _, out _))
                 {
                     error = $"managed-code 插件 {name} 的 apiVersion 无效：{apiVersion}";
                     return false;
@@ -277,9 +278,11 @@ internal static class PluginRepositoryCatalog
             return false;
         }
         if (entry.Kind == "managed-code"
-            && (!TryParseApiMajor(entry.ApiVersion, out int apiMajor) || apiMajor != 1))
+            && (!TryParseApiVersion(entry.ApiVersion, out int apiMajor, out int apiMinor)
+                || apiMajor != PluginApiVersion.Major
+                || apiMinor > PluginApiVersion.Minor))
         {
-            reason = $"需要 Plugin API v1.x（插件声明 v{entry.ApiVersion}）";
+            reason = $"需要兼容 Plugin API v{PluginApiVersion.Major}.{PluginApiVersion.Minor} 的版本（插件声明 v{entry.ApiVersion}）";
             return false;
         }
         reason = "";
@@ -288,11 +291,24 @@ internal static class PluginRepositoryCatalog
 
     public static bool TryParseApiMajor(string? value, out int major)
     {
+        return TryParseApiVersion(value, out major, out _);
+    }
+
+    public static bool TryParseApiVersion(string? value, out int major, out int minor)
+    {
         major = 0;
-        string text = (value ?? "").Trim();
-        int dot = text.IndexOf('.');
-        string majorText = dot >= 0 ? text[..dot] : text;
-        return int.TryParse(majorText, out major) && major >= 0;
+        minor = 0;
+        string[] parts = (value ?? "").Trim().Split('.', StringSplitOptions.None);
+        if (parts.Length != 2
+            || parts.Any(part => string.IsNullOrEmpty(part)
+                || (part.Length > 1 && part[0] == '0')
+                || part.Any(ch => ch is < '0' or > '9'))
+            || !int.TryParse(parts[0], out major)
+            || !int.TryParse(parts[1], out minor))
+        {
+            return false;
+        }
+        return major >= 0 && minor >= 0;
     }
 
     private static string RequiredString(JsonObject root, string property)

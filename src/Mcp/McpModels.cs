@@ -93,8 +93,6 @@ internal sealed class McpUserInput
     public string Name { get; set; } = "";
 
     public string Remark { get; set; } = "";
-
-    public bool AutoCheckInEnabled { get; set; }
 }
 
 /// <summary>MCP 用户绑定写入 DTO；脚本引用既可填稳定 ID，也可填唯一名称。</summary>
@@ -424,7 +422,7 @@ internal static class McpViews
                     user.Name,
                     binding = user.Bindings
                         .Where(binding => string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal))
-                        .Select(Binding)
+                        .Select(binding => Binding(binding, user))
                         .FirstOrDefault(),
                 })
                 .Where(item => item.binding is not null)
@@ -432,8 +430,14 @@ internal static class McpViews
         };
     }
 
-    public static object Binding(UserScriptBinding binding)
+    public static object Binding(UserScriptBinding binding, NexusUser? user = null)
     {
+        UserScriptBinding effective = user is null
+            ? binding.Clone()
+            : UserBindingOverrideResolver.Resolve(user, binding);
+        (bool General, bool Notification, bool Advanced) locks = user is null
+            ? (false, false, false)
+            : UserBindingOverrideResolver.Locks(user);
         return new
         {
             binding.ScriptInstanceId,
@@ -446,6 +450,24 @@ internal static class McpViews
             binding.SmtpTo,
             binding.RunDays,
             binding.Participates,
+            effective = new
+            {
+                effective.Enabled,
+                effective.PreRunScript,
+                effective.PreRunOnceOnly,
+                effective.PostRunScript,
+                effective.PostRunOnFinalOnly,
+                effective.NotifyEnabled,
+                effective.SmtpTo,
+                effective.RunDays,
+                effective.Participates,
+            },
+            locks = new
+            {
+                general = locks.General,
+                notification = locks.Notification,
+                advanced = locks.Advanced,
+            },
         };
     }
 
@@ -461,11 +483,10 @@ internal static class McpViews
             user.Index,
             user.Name,
             user.Remark,
-            user.AutoCheckInEnabled,
             bindingCount = user.Bindings.Count,
             nextRunAt = next?.TriggerTime,
             nextQueueName = next?.QueueName,
-            bindings = user.Bindings.Select(Binding).ToList(),
+            bindings = user.Bindings.Select(binding => Binding(binding, user)).ToList(),
         };
     }
 

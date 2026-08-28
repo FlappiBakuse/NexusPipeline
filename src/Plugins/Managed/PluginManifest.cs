@@ -102,11 +102,32 @@ internal sealed class PluginManifest
 
     public bool IsCompatibleWith(int apiMajor)
     {
-        string majorText = ApiVersion.Split('.', 2)[0];
-        if (SchemaVersion != 1 || !int.TryParse(majorText, out int parsedMajor))
+        return IsCompatibleWith(apiMajor, int.MaxValue);
+    }
+
+    public bool IsCompatibleWith(int apiMajor, int apiMinor)
+    {
+        if (SchemaVersion != 1 || !TryParseApiVersion(ApiVersion, out int parsedMajor, out int parsedMinor))
         {
             return false;
         }
-        return parsedMajor == apiMajor;
+        return parsedMajor == apiMajor && parsedMinor <= apiMinor;
+    }
+
+    public static bool TryParseApiVersion(string? value, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+        string[] parts = (value ?? "").Trim().Split('.', StringSplitOptions.None);
+        if (parts.Length != 2
+            || parts.Any(part => string.IsNullOrEmpty(part)
+                || (part.Length > 1 && part[0] == '0')
+                || part.Any(ch => ch is < '0' or > '9'))
+            || !int.TryParse(parts[0], out major)
+            || !int.TryParse(parts[1], out minor))
+        {
+            return false;
+        }
+        return major >= 0 && minor >= 0;
     }
 }

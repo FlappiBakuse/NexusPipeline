@@ -1,9 +1,8 @@
 using System.Collections;
-using System.Net;
-using System.Net.Http.Json;
-using System.Net.Sockets;
 using System.Reflection;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.App.Commands;
+using NexusPipeline.App.Contracts;
 using NexusPipeline.App.Repositories;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
@@ -112,7 +111,7 @@ public sealed class UserIdRecoveryTests
 public sealed class BindingAndSchedulerTests
 {
     [Fact]
-    public async Task AddBinding_RejectsWhenAnyUserOfScriptIsRunning()
+    public void AddBinding_RejectsWhenAnyUserOfScriptIsRunning()
     {
         RuntimeContext context = RuntimeContext.Instance;
         string scriptId = "regression-running-" + Guid.NewGuid().ToString("N");
@@ -155,22 +154,19 @@ public sealed class BindingAndSchedulerTests
         Assert.True(state.TryRegister(execution, profile, out ExecutionAdmissionFailure? failure), failure?.Message);
 
         string usersPathBackup = AppPaths.UsersPath;
-        using var server = new WebServer();
-        using var client = new HttpClient();
         try
         {
-            int port = GetFreePort();
-            server.Start(port);
-            HttpResponseMessage response = await client.PostAsJsonAsync(
-                $"http://127.0.0.1:{port}/api/users/{targetUserId}/bindings",
-                new { ScriptInstanceId = scriptId });
+            OperationResult<UserScriptBinding> result = UserCommands.AddBinding(
+                targetUserId,
+                new UserScriptBinding { ScriptInstanceId = scriptId });
 
-            Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+            Assert.False(result.Succeeded);
+            Assert.Equal(OperationErrorKind.Conflict, result.ErrorKind);
+            Assert.Equal("resource_busy", result.ErrorCode);
             Assert.Empty(target.Bindings);
         }
         finally
         {
-            server.Stop();
             state.Unregister(execution);
             lock (context.DataLock)
             {
@@ -184,7 +180,7 @@ public sealed class BindingAndSchedulerTests
     }
 
     [Fact]
-    public async Task AddBinding_SnapshotFailure_DoesNotCreateBinding()
+    public void AddBinding_SnapshotFailure_DoesNotCreateBinding()
     {
         RuntimeContext context = RuntimeContext.Instance;
         string scriptId = "regression-snapshot-" + Guid.NewGuid().ToString("N");
@@ -211,23 +207,20 @@ public sealed class BindingAndSchedulerTests
             context.Users.Add(user);
         }
 
-        using var server = new WebServer();
-        using var client = new HttpClient();
         string usersPathBackup = AppPaths.UsersPath;
         try
         {
-            int port = GetFreePort();
-            server.Start(port);
-            HttpResponseMessage response = await client.PostAsJsonAsync(
-                $"http://127.0.0.1:{port}/api/users/{userId}/bindings",
-                new { ScriptInstanceId = scriptId });
+            OperationResult<UserScriptBinding> result = UserCommands.AddBinding(
+                userId,
+                new UserScriptBinding { ScriptInstanceId = scriptId });
 
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.False(result.Succeeded);
+            Assert.Equal(OperationErrorKind.Validation, result.ErrorKind);
+            Assert.Contains("初始配置快照失败", result.ErrorMessage);
             Assert.Empty(user.Bindings);
         }
         finally
         {
-            server.Stop();
             lock (context.DataLock)
             {
                 context.Scripts.Clear();
@@ -236,6 +229,7 @@ public sealed class BindingAndSchedulerTests
                 context.Users.AddRange(previousUsers);
             }
             RestoreFile(usersPathBackup, previousUsersFileExists, previousUsersFile);
+            DeleteExactDirectory(Path.Combine(AppPaths.DataDir, scriptId));
         }
     }
 
@@ -316,13 +310,6 @@ public sealed class BindingAndSchedulerTests
         type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public)!.SetValue(target, value);
     }
 
-    private static int GetFreePort()
-    {
-        using var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        return ((IPEndPoint)listener.LocalEndpoint).Port;
-    }
-
     private static void RestoreFile(string path, bool existed, byte[]? bytes)
     {
         if (existed)
@@ -333,6 +320,14 @@ public sealed class BindingAndSchedulerTests
         else if (File.Exists(path))
         {
             File.Delete(path);
+        }
+    }
+
+    private static void DeleteExactDirectory(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
         }
     }
 }

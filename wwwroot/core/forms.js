@@ -31,10 +31,11 @@ export function selectField(id, label, value, options, extra = "") {
 }
 
 /** 标准布尔开关：状态由 aria-pressed 表达，视觉层不再依赖「开/关」文案。 */
-export function switchControl(id, label, description, pressed, action, extra = "") {
+export function switchControl(id, label, description, pressed, action, extra = "", ariaLabel = "") {
+  const accessibleLabel = ariaLabel || String(label || "").replace(/<[^>]*>/g, "");
   return `<div class="switch-row settings-option" data-switch-row="${id}">
     <div class="switch-copy"><strong>${label}</strong>${description ? `<span class="muted">${description}</span>` : ""}</div>
-    <button id="${id}" class="mode-toggle switch-control" type="button" aria-label="${label}" aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="${action}" ${extra}><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${pressed ? "已启用" : "已停用"}</span></button>
+    <button id="${id}" class="mode-toggle switch-control" type="button" aria-label="${esc(accessibleLabel)}" aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="${action}" ${extra}><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${pressed ? "已启用" : "已停用"}</span></button>
   </div>`;
 }
 

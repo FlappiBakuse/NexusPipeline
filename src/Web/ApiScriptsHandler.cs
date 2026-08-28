@@ -396,14 +396,18 @@ internal static class ApiScriptsHandler
             .OrderBy(user => user.Index)
             .SelectMany(user => user.Bindings
                 .Where(binding => string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal))
-                .Select(binding => new ScriptUser
+                .Select(binding =>
                 {
-                    Name = user.Name,
-                    Enabled = binding.Participates,
-                    PreRunScript = binding.PreRunScript,
-                    PreRunOnceOnly = binding.PreRunOnceOnly,
-                    PostRunScript = binding.PostRunScript,
-                    PostRunOnFinalOnly = binding.PostRunOnFinalOnly,
+                    UserScriptBinding effective = UserBindingOverrideResolver.Resolve(user, binding);
+                    return new ScriptUser
+                    {
+                        Name = user.Name,
+                        Enabled = effective.Participates,
+                        PreRunScript = effective.PreRunScript,
+                        PreRunOnceOnly = effective.PreRunOnceOnly,
+                        PostRunScript = effective.PostRunScript,
+                        PostRunOnFinalOnly = effective.PostRunOnFinalOnly,
+                    };
                 }))
             .ToList();
         // 迁移完成后嵌套用户已不再是权威数据；这里仅为旧客户端保留只读投影。
