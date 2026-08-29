@@ -28,6 +28,23 @@ public sealed class AppearanceServiceTests
     }
 
     [Fact]
+    public void Normalize_DoesNotAssignAPluginProviderByDefault()
+    {
+        string root = NewTempDir();
+        try
+        {
+            AppearanceSnapshot snapshot = CreateService(root).GetSnapshot();
+
+            Assert.Equal("", snapshot.Provider.PluginName);
+            Assert.False(snapshot.Provider.Enabled);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
     public void TimerRotation_UsesOneServerRandomResultPerSlot()
     {
         string root = NewTempDir();

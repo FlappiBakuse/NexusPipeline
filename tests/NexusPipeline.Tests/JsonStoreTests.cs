@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using Xunit;
@@ -56,6 +57,37 @@ public class JsonStoreTests
             Assert.Equal("脚本", item.Name);
             Assert.True(File.Exists(path), "合法文件保持原路径不变");
             Assert.Empty(Directory.GetFiles(dir, "*.corrupt-*"));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void ReadObjectOrEmpty_CorruptFile_PreservesOriginal()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-jsontest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "secrets.json");
+            string corrupt = "[not-an-object]";
+            File.WriteAllText(path, corrupt);
+
+            JsonObject result = JsonStore.ReadObjectOrEmpty(path, "测试插件密钥");
+
+            Assert.Empty(result);
+            Assert.False(File.Exists(path));
+            string? preserved = Directory.GetFiles(dir, "secrets.json.corrupt-*").SingleOrDefault();
+            Assert.NotNull(preserved);
+            Assert.Equal(corrupt, File.ReadAllText(preserved!));
         }
         finally
         {

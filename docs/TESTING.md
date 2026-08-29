@@ -68,6 +68,28 @@ node tests\run.mjs build
 
 `default` 按 Unit + Component → Web Logic → 文档一致性 → UI Smoke 语法 → 构建顺序执行，并实时转发每个子进程的输出。
 
+## 管理员终端硬约束
+
+需要启动真实产品进程、创建受保护运行时资源或执行进程树/更新事务检查的测试，必须在管理员终端中运行。执行前核对终端完整性级别为 High 或 System；当前终端权限不足时，先打开管理员 PowerShell 或命令提示符，再切换到项目根目录执行规范命令。
+
+UI/System Smoke 的管理员前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。不得修改前置检查、降低测试权限、跳过套件、自动重试掩盖状态或将阻断状态记录为通过。
+
+### 从 Medium token 打开管理员终端
+
+如果当前账户属于本机 Administrators，但当前 PowerShell 仍显示 `Medium Mandatory Level`，在当前项目根目录执行：
+
+```powershell
+Start-Process -FilePath pwsh.exe -Verb RunAs -WorkingDirectory (Get-Location).Path -ArgumentList '-NoProfile','-NoExit'
+```
+
+在新窗口中重新核对完整性级别：
+
+```powershell
+whoami /groups | Select-String 'S-1-16-12288|S-1-16-16384'
+```
+
+输出 `S-1-16-12288`（High）或 `S-1-16-16384`（System）后，才执行 `node tests\run.mjs ui` 与 `node tests\run.mjs system`。若当前账户不属于 Administrators，必须切换到具备该权限的账户；凭据、token 或安全策略绕过不属于测试流程。
+
 ## UI Smoke
 
 在完成构建后，从管理员终端执行：
@@ -120,7 +142,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前运行 UI Smoke 和适用的 System Smoke，并记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前必须在管理员终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 

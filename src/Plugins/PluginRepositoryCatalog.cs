@@ -15,9 +15,9 @@ internal static class PluginRepositoryCatalog
     public const string CatalogUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/catalog.json";
     public const string PackageUrlPrefix = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/";
     public const string LegacyPackageUrlPrefix = "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/";
-    public const long MaxCatalogBytes = 2L * 1024 * 1024;
+    public const long MaxCatalogBytes = 8L * 1024 * 1024;
     public const long MaxPackageBytes = 200L * 1024 * 1024;
-    public const int MaxEntries = 256;
+    public const int MaxEntries = 4096;
 
     public static bool TryParse(string json, out PluginCatalog? catalog, out string? error)
     {
@@ -76,7 +76,10 @@ internal static class PluginRepositoryCatalog
                     return false;
                 }
                 string name = RequiredString(item, "name");
-                if (!IsSafePluginName(name) || !names.Add(name))
+                bool validName = schemaVersion == SchemaVersion
+                    ? IsCanonicalPluginId(name)
+                    : IsSafePluginName(name);
+                if (!validName || !names.Add(name))
                 {
                     error = $"插件 name 无效或重复：{name}";
                     return false;
@@ -176,7 +179,12 @@ internal static class PluginRepositoryCatalog
                     error = $"插件 {name} 的 sizeBytes 超出范围";
                     return false;
                 }
-                if (!TryParseReplaces(item, name, out IReadOnlyList<string> replaces, out string? replacesError))
+                if (!TryParseReplaces(
+                        item,
+                        name,
+                        out IReadOnlyList<string> replaces,
+                        out string? replacesError,
+                        requireCanonicalNames: schemaVersion == SchemaVersion))
                 {
                     error = $"插件 {name} 的 replaces 无效：{replacesError}";
                     return false;
@@ -424,11 +432,43 @@ internal static class PluginRepositoryCatalog
         return true;
     }
 
+    /// <summary>插件机器身份的规范格式；与仅用于兼容旧目录的路径安全名称分离。</summary>
+    public static bool IsCanonicalPluginId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 64
+            || !IsCanonicalPluginIdCharacter(value[0])
+            || !IsCanonicalPluginIdCharacter(value[^1]))
+        {
+            return false;
+        }
+        bool previousHyphen = false;
+        foreach (char ch in value)
+        {
+            if (IsCanonicalPluginIdCharacter(ch))
+            {
+                previousHyphen = false;
+                continue;
+            }
+            if (ch != '-' || previousHyphen)
+            {
+                return false;
+            }
+            previousHyphen = true;
+        }
+        return true;
+    }
+
+    private static bool IsCanonicalPluginIdCharacter(char ch)
+    {
+        return ch is >= 'a' and <= 'z' or >= '0' and <= '9';
+    }
+
     internal static bool TryParseReplaces(
         JsonObject root,
         string currentName,
         out IReadOnlyList<string> replaces,
-        out string? error)
+        out string? error,
+        bool requireCanonicalNames = false)
     {
         replaces = Array.Empty<string>();
         error = null;
@@ -446,7 +486,7 @@ internal static class PluginRepositoryCatalog
         foreach (JsonNode? item in array)
         {
             string name = item?.ToString()?.Trim() ?? "";
-            if (!IsSafePluginName(name)
+            if ((!requireCanonicalNames ? !IsSafePluginName(name) : !IsCanonicalPluginId(name))
                 || string.Equals(name, currentName, StringComparison.OrdinalIgnoreCase)
                 || !names.Add(name))
             {
@@ -507,11 +547,6 @@ internal static class PluginRepositoryCatalog
         }
         reason = "";
         return true;
-    }
-
-    public static bool TryParseApiMajor(string? value, out int major)
-    {
-        return TryParseApiVersion(value, out major, out _);
     }
 
     public static bool TryParseApiVersion(string? value, out int major, out int minor)

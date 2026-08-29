@@ -151,10 +151,74 @@ internal sealed class PluginUserListBadgeRegistry
 
 internal sealed class PluginExecutionEventRegistry
 {
-    private sealed record Subscription(Guid Token, string PluginName, Func<PluginUserRunStartingEvent, ValueTask> Handler);
+    private sealed record Subscription(
+        Guid Token,
+        string PluginName,
+        Func<PluginUserRunStartingEvent, ValueTask> Handler,
+        ExecutionScope Scope);
+
+    private sealed class ExecutionScope
+    {
+        private readonly object _sync = new();
+        private readonly HashSet<Task> _tasks = new();
+        private bool _accepting = true;
+
+        public void Run(Func<Task> operation)
+        {
+            Task task;
+            lock (_sync)
+            {
+                if (!_accepting)
+                {
+                    return;
+                }
+                task = Task.Run(operation);
+                _tasks.Add(task);
+            }
+            _ = task.ContinueWith(
+                _ => RemoveCompleted(),
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        public void Close(TimeSpan timeout)
+        {
+            Task[] tasks;
+            lock (_sync)
+            {
+                _accepting = false;
+                tasks = _tasks.ToArray();
+            }
+            if (tasks.Length > 0)
+            {
+                try
+                {
+                    Task.WhenAll(tasks).Wait(timeout);
+                }
+                catch
+                {
+                    // 处理器异常已经在任务边界报告；关停只需遵守有界等待。
+                }
+            }
+            lock (_sync)
+            {
+                _tasks.Clear();
+            }
+        }
+
+        private void RemoveCompleted()
+        {
+            lock (_sync)
+            {
+                _tasks.RemoveWhere(task => task.IsCompleted);
+            }
+        }
+    }
 
     private readonly object _sync = new();
     private readonly Dictionary<Guid, Subscription> _subscriptions = new();
+    private readonly Dictionary<string, ExecutionScope> _scopes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Action<string, Exception> _reportError;
 
     public PluginExecutionEventRegistry(Action<string, Exception> reportError)
@@ -170,7 +234,12 @@ internal sealed class PluginExecutionEventRegistry
         Guid token = Guid.NewGuid();
         lock (_sync)
         {
-            _subscriptions[token] = new Subscription(token, pluginName, handler);
+            if (!_scopes.TryGetValue(pluginName, out ExecutionScope? scope))
+            {
+                scope = new ExecutionScope();
+                _scopes[pluginName] = scope;
+            }
+            _subscriptions[token] = new Subscription(token, pluginName, handler, scope);
         }
         return new CallbackDisposable(() => Remove(token));
     }
@@ -184,7 +253,7 @@ internal sealed class PluginExecutionEventRegistry
         }
         foreach (Subscription subscription in subscriptions)
         {
-            _ = Task.Run(async () =>
+            subscription.Scope.Run(async () =>
             {
                 try
                 {
@@ -200,9 +269,16 @@ internal sealed class PluginExecutionEventRegistry
 
     public void Clear()
     {
+        ExecutionScope[] scopes;
         lock (_sync)
         {
             _subscriptions.Clear();
+            scopes = _scopes.Values.ToArray();
+            _scopes.Clear();
+        }
+        foreach (ExecutionScope scope in scopes)
+        {
+            scope.Close(TimeSpan.FromMilliseconds(TestHooks.ScaledMs(5_000)));
         }
     }
 
@@ -235,15 +311,11 @@ internal sealed class PluginUserDataStore : IPluginUserDataStore
         {
             return ValueTask.FromResult<T?>(default);
         }
-        try
-        {
-            return ValueTask.FromResult(JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOpts.Default));
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"插件用户配置解析失败（{_pluginName}/{userId}），按无配置处理：{ex.Message}");
-            return ValueTask.FromResult<T?>(default);
-        }
+        JsonStore.TryRead(
+            path,
+            out T? value,
+            $"插件用户配置（{_pluginName}/{userId}）");
+        return ValueTask.FromResult(value);
     }
 
     public ValueTask WriteConfigAsync<T>(string userId, T value, CancellationToken cancellationToken = default)
@@ -330,19 +402,7 @@ internal sealed class PluginUserDataStore : IPluginUserDataStore
 
     private static JsonObject ReadSecrets(string path)
     {
-        if (!File.Exists(path))
-        {
-            return new JsonObject();
-        }
-        try
-        {
-            return JsonNode.Parse(File.ReadAllText(path)) as JsonObject ?? new JsonObject();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"插件用户密钥文件损坏（{path}），继续写入：{ex.Message}");
-            return new JsonObject();
-        }
+        return JsonStore.ReadObjectOrEmpty(path, "插件用户密钥文件");
     }
 
     private static string ValidateSegment(string value, string label, int maxLength)

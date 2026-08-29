@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
-using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Update;
@@ -23,10 +22,20 @@ internal sealed class PluginPackageService
         _outbound = outbound;
     }
 
+    public Task<PluginPendingOperation> StageAsync(
+        PluginCatalogEntry entry,
+        string action,
+        string? sourceName = null,
+        CancellationToken cancellationToken = default)
+    {
+        return StageAsync(entry, action, sourceName, sourceArtifactName: null, cancellationToken: cancellationToken);
+    }
+
     public async Task<PluginPendingOperation> StageAsync(
         PluginCatalogEntry entry,
         string action,
         string? sourceName = null,
+        string? sourceArtifactName = null,
         CancellationToken cancellationToken = default)
     {
         if (action is not ("install" or "update"))
@@ -64,7 +73,9 @@ internal sealed class PluginPackageService
             {
                 Action = action,
                 Name = entry.Name,
+                ArtifactName = entry.ArtifactName,
                 SourceName = sourceName ?? "",
+                SourceArtifactName = sourceArtifactName ?? "",
                 Version = entry.Version,
                 Kind = entry.Kind,
                 ApiVersion = entry.ApiVersion,
@@ -245,59 +256,36 @@ internal sealed class PluginPackageService
     {
         try
         {
-            if (JsonNode.Parse(File.ReadAllText(Path.Combine(pluginDir, "plugin.json"))) is not JsonObject root)
+            if (!Managed.PluginManifest.TryLoad(pluginDir, out Managed.PluginManifest? manifest, out string? error)
+                || manifest is null)
             {
-                throw new PluginRepositoryException("manifest_invalid", "plugin.json 不是 JSON 对象");
+                throw new PluginRepositoryException("manifest_invalid", error ?? "plugin.json 无效");
             }
-            int schemaVersion = root["schemaVersion"]?.GetValue<int>() ?? 1;
-            string name = root["name"]?.ToString()?.Trim() ?? "";
-            string version = root["version"]?.ToString()?.Trim() ?? "";
-            string kind = root["kind"]?.ToString()?.Trim().ToLowerInvariant() ?? "data-specialized";
-            if (kind == "specialized") kind = "data-specialized";
-            string apiVersion = root["apiVersion"]?.ToString()?.Trim() ?? "";
-            if (schemaVersion != 1
-                || !string.Equals(name, entry.Name, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(version, entry.Version, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(kind, entry.Kind, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(apiVersion, entry.ApiVersion, StringComparison.OrdinalIgnoreCase))
+            if (manifest.SchemaVersion != entry.CatalogSchemaVersion
+                || !string.Equals(manifest.Name, entry.Name, StringComparison.Ordinal)
+                || !string.Equals(manifest.Version, entry.Version, StringComparison.Ordinal)
+                || !string.Equals(manifest.Kind, entry.Kind, StringComparison.Ordinal)
+                || !string.Equals(manifest.ApiVersion, entry.ApiVersion, StringComparison.Ordinal))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest 与 catalog 条目不一致");
             }
-            var manifestCapabilities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (root["capabilities"] is JsonArray capabilities)
+            if (entry.CatalogSchemaVersion == PluginRepositoryCatalog.SchemaVersion
+                && !string.Equals(manifest.ArtifactName, entry.ArtifactName, StringComparison.Ordinal))
             {
-                foreach (JsonNode? value in capabilities)
-                {
-                    string capability = value?.ToString()?.Trim() ?? "";
-                    if (!string.IsNullOrWhiteSpace(capability)) manifestCapabilities.Add(capability);
-                }
+                throw new PluginRepositoryException("manifest_mismatch", "插件 manifest artifactName 与 catalog 不一致");
             }
-            if (root["supportsEmulator"]?.GetValue<bool>() == true)
-            {
-                manifestCapabilities.Add("emulator");
-            }
-            if (!manifestCapabilities.SetEquals(entry.Capabilities))
+            if (!manifest.Capabilities.SetEquals(entry.Capabilities))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest capabilities 与 catalog 不一致");
             }
-            if (!PluginRepositoryCatalog.TryParseReplaces(root, name, out IReadOnlyList<string> manifestReplaces, out _)
-                || !manifestReplaces.SequenceEqual(entry.ReplacementNames, StringComparer.OrdinalIgnoreCase))
+            if (!manifest.Replaces.SequenceEqual(entry.ReplacementNames, StringComparer.Ordinal))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest replaces 与 catalog 不一致");
             }
 
             if (entry.Kind == "data-specialized")
             {
-                string resolve = root["resolve"]?.ToString()?.Trim() ?? "";
-                string judgeScript = root["judgeScript"]?.ToString()?.Trim() ?? "";
-                string configTemplate = root["configTemplate"]?.ToString()?.Trim() ?? "";
-                if (!IsSafeRelativePath(resolve)
-                    || !IsSafeRelativePath(judgeScript)
-                    || (!string.IsNullOrWhiteSpace(configTemplate) && !IsSafeRelativePath(configTemplate)))
-                {
-                    throw new PluginRepositoryException("manifest_invalid", "数据化插件 manifest 包含越界路径");
-                }
-                DataSpecializedPlugin? dataPlugin = DataSpecializedPlugin.Load(pluginDir);
+                DataSpecializedPlugin? dataPlugin = DataSpecializedPlugin.Load(pluginDir, manifest);
                 if (dataPlugin is null)
                 {
                     throw new PluginRepositoryException("manifest_invalid", "数据化插件缺少有效的 data 文件");
@@ -305,19 +293,14 @@ internal sealed class PluginPackageService
                 ValidateFrontendFiles(pluginDir, dataPlugin.Frontend);
                 return;
             }
-            if (!Managed.PluginManifest.TryLoad(pluginDir, out Managed.PluginManifest? managed, out string? error)
-                || managed is null)
-            {
-                throw new PluginRepositoryException("manifest_invalid", error ?? "managed-code manifest 无效");
-            }
-            string entryAssemblyPath = Path.GetFullPath(Path.Combine(pluginDir, managed.EntryAssembly));
-            if (!IsSafeRelativePath(managed.EntryAssembly)
+            string entryAssemblyPath = Path.GetFullPath(Path.Combine(pluginDir, manifest.EntryAssembly));
+            if (!IsSafeRelativePath(manifest.EntryAssembly)
                 || !IsContained(pluginDir, entryAssemblyPath)
                 || !File.Exists(entryAssemblyPath))
             {
                 throw new PluginRepositoryException("manifest_invalid", "managed-code 插件 entryAssembly 不存在或路径非法");
             }
-            ValidateFrontendFiles(pluginDir, managed.Frontend);
+            ValidateFrontendFiles(pluginDir, manifest.Frontend);
         }
         catch (PluginRepositoryException)
         {

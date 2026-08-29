@@ -10,11 +10,18 @@ internal sealed class PluginManifest
 
     public string Name { get; private init; } = "";
 
+    /// <summary>插件在文件系统中的正式目录和发行包身份；schema 1 插件为空并按旧目录兼容。</summary>
+    public string ArtifactName { get; private init; } = "";
+
     public string DisplayName { get; private init; } = "";
+
+    public string GameName { get; private init; } = "";
 
     public string Description { get; private init; } = "";
 
     public string Version { get; private init; } = "";
+
+    public string MinHostVersion { get; private init; } = "0.0.0";
 
     public string Kind { get; private init; } = "";
 
@@ -23,6 +30,12 @@ internal sealed class PluginManifest
     public string EntryAssembly { get; private init; } = "";
 
     public string EntryType { get; private init; } = "";
+
+    public string ResolvePath { get; private init; } = "";
+
+    public string JudgeScriptPath { get; private init; } = "";
+
+    public string ConfigTemplatePath { get; private init; } = "";
 
     public IReadOnlySet<string> Capabilities => _capabilities;
 
@@ -49,23 +62,70 @@ internal sealed class PluginManifest
                 error = "plugin.json 不是 JSON 对象";
                 return false;
             }
+            int schemaVersion = root["schemaVersion"]?.GetValue<int>() ?? 1;
+            if (schemaVersion is not (1 or 2))
+            {
+                error = $"不支持的 plugin.json schemaVersion：{schemaVersion}";
+                return false;
+            }
+            string name = root["name"]?.ToString()?.Trim() ?? "";
+            if (schemaVersion == 2
+                ? !PluginRepositoryCatalog.IsCanonicalPluginId(name)
+                : !PluginRepositoryCatalog.IsSafePluginName(name))
+            {
+                error = "插件 name 不符合命名规范";
+                return false;
+            }
+            string artifactName = root["artifactName"]?.ToString()?.Trim() ?? "";
+            if (schemaVersion == 2 && !PluginRepositoryCatalog.IsSafeArtifactName(artifactName))
+            {
+                error = "插件 artifactName 不符合大小写命名规范";
+                return false;
+            }
+            if (schemaVersion == 1 && !string.IsNullOrWhiteSpace(artifactName)
+                && !PluginRepositoryCatalog.IsSafeArtifactName(artifactName))
+            {
+                error = "插件 artifactName 不符合大小写命名规范";
+                return false;
+            }
+
             string kind = root["kind"]?.ToString()?.Trim().ToLowerInvariant() ?? "data-specialized";
             if (kind is not ("managed-code" or "data-specialized" or "specialized"))
             {
                 error = $"不支持的插件类型：{kind}";
                 return false;
             }
+            kind = kind == "specialized" ? "data-specialized" : kind;
+            string version = root["version"]?.ToString()?.Trim() ?? "";
+            if (schemaVersion == 2 && !PluginRepositoryCatalog.TryParseVersion(version, out _))
+            {
+                error = $"插件 version 无效：{version}";
+                return false;
+            }
+            string minHostVersion = root["minHostVersion"]?.ToString()?.Trim() ?? "0.0.0";
+            if (!PluginRepositoryCatalog.TryParseVersion(minHostVersion, out _))
+            {
+                error = $"插件 minHostVersion 无效：{minHostVersion}";
+                return false;
+            }
+
             var result = new PluginManifest
             {
-                SchemaVersion = root["schemaVersion"]?.GetValue<int>() ?? 1,
-                Name = root["name"]?.ToString()?.Trim() ?? "",
+                SchemaVersion = schemaVersion,
+                Name = name,
+                ArtifactName = artifactName,
                 DisplayName = root["displayName"]?.ToString()?.Trim() ?? "",
+                GameName = root["gameName"]?.ToString()?.Trim() ?? "",
                 Description = root["description"]?.ToString()?.Trim() ?? "",
-                Version = root["version"]?.ToString()?.Trim() ?? "",
-                Kind = kind == "specialized" ? "data-specialized" : kind,
+                Version = version,
+                MinHostVersion = minHostVersion,
+                Kind = kind,
                 ApiVersion = root["apiVersion"]?.ToString()?.Trim() ?? "",
                 EntryAssembly = root["entryAssembly"]?.ToString()?.Trim() ?? "",
                 EntryType = root["entryType"]?.ToString()?.Trim() ?? "",
+                ResolvePath = root["resolve"]?.ToString()?.Trim() ?? "",
+                JudgeScriptPath = root["judgeScript"]?.ToString()?.Trim() ?? "",
+                ConfigTemplatePath = root["configTemplate"]?.ToString()?.Trim() ?? "",
             };
             if (root["capabilities"] is JsonArray capabilities)
             {
@@ -82,7 +142,12 @@ internal sealed class PluginManifest
             {
                 result._capabilities.Add("emulator");
             }
-            if (!PluginRepositoryCatalog.TryParseReplaces(root, result.Name, out IReadOnlyList<string> replaces, out string? replacesError))
+            if (!PluginRepositoryCatalog.TryParseReplaces(
+                    root,
+                    result.Name,
+                    out IReadOnlyList<string> replaces,
+                    out string? replacesError,
+                    requireCanonicalNames: schemaVersion == 2))
             {
                 error = $"replaces 无效：{replacesError}";
                 return false;
@@ -94,11 +159,6 @@ internal sealed class PluginManifest
                 return false;
             }
             result.Frontend = frontend;
-            if (string.IsNullOrWhiteSpace(result.Name))
-            {
-                error = "缺少插件 name";
-                return false;
-            }
             if (result.Kind == "managed-code"
                 && (string.IsNullOrWhiteSpace(result.ApiVersion)
                     || string.IsNullOrWhiteSpace(result.EntryAssembly)
@@ -124,7 +184,8 @@ internal sealed class PluginManifest
 
     public bool IsCompatibleWith(int apiMajor, int apiMinor)
     {
-        if (SchemaVersion != 1 || !TryParseApiVersion(ApiVersion, out int parsedMajor, out int parsedMinor))
+        if (SchemaVersion is not (1 or 2)
+            || !TryParseApiVersion(ApiVersion, out int parsedMajor, out int parsedMinor))
         {
             return false;
         }
@@ -133,18 +194,6 @@ internal sealed class PluginManifest
 
     public static bool TryParseApiVersion(string? value, out int major, out int minor)
     {
-        major = 0;
-        minor = 0;
-        string[] parts = (value ?? "").Trim().Split('.', StringSplitOptions.None);
-        if (parts.Length != 2
-            || parts.Any(part => string.IsNullOrEmpty(part)
-                || (part.Length > 1 && part[0] == '0')
-                || part.Any(ch => ch is < '0' or > '9'))
-            || !int.TryParse(parts[0], out major)
-            || !int.TryParse(parts[1], out minor))
-        {
-            return false;
-        }
-        return major >= 0 && minor >= 0;
+        return PluginRepositoryCatalog.TryParseApiVersion(value, out major, out minor);
     }
 }

@@ -133,6 +133,8 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
 | `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
 | `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `PluginFilesystemLayoutMigration` | src/Plugins/PluginFilesystemLayoutMigration.cs | 在旧 pending 完成后，将 schema 1 或大小写不规范的插件物理目录迁移到 artifactName；冲突时保留现场并登记阻断状态 |
+| `JsonStore` | src/Persistence/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
 | `AppearanceService` | src/Services/AppearanceService.cs | 服务端外观配置、壁纸资产、配色、配额和轮换游标的持久化与权限校验 |
 | `ApiAppearanceHandler` / `ApiAppearanceAssetsHandler` / `ApiAppearanceUploadHandler` | src/Web/ | 外观快照、配置、资产读取/删除/配色和原始上传 API；上传路由受独立体积上限保护 |
 | `OutboundHttpClientProvider` | src/Services/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
@@ -214,14 +216,14 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 ## 插件扩展指南
 
-数据化专项插件采用运行目录 `plugins/<名称>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。实现与主仓库分离，官方源目录和包资产位于 `NexusPipeline-Plugins`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。
+数据化专项插件采用运行目录 `plugins/<ArtifactName>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。manifest 的 `name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装和发行物理身份。实现与主仓库分离，官方源目录和包资产位于 `NexusPipeline-Plugins`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。宿主兼容 schema 1，并在启动时对已存在的旧目录执行布局迁移。
 
 ### 插件仓库与本地运行目录
 
-- `PluginManager` 只扫描当前安装目录 `plugins/<name>/`；它不读取网络，也不决定包下载策略。
-- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟内存缓存，过期时请求网络；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。
-- 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录跨重启事务，启动时由 `PluginInstallRecovery` 在插件扫描前完成目录交换。
-- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本和 SHA；`catalog-cache.json` 仅作可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
+- `PluginManager` 只扫描当前安装目录 `plugins/<ArtifactName>/`，schema 2 要求物理目录名与 manifest.artifactName 完全一致；逻辑身份取 manifest.name。它不读取网络，也不决定包下载策略。
+- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟内存缓存，过期时请求网络；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。catalog 由插件自身的 manifest、store 和包生成。
+- 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录逻辑机器 ID、目标 artifactName、来源身份和跨重启事务，启动时按旧事务恢复、物理布局迁移、状态升级、插件扫描的顺序处理。
+- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 仅作可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
 - Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；操作完成后提示重启生效。
 - managed-code 用户级设置端点为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`；用户列表徽章使用单次聚合端点 `GET /api/plugin-contributions/user-list-badges`，宿主负责异常隔离、白名单校验和 HTML 展示数据投影。
 - v1.3 通用 UI 贡献使用 `POST /api/plugin-contributions/ui/query`、`PUT /api/plugin-contributions/ui/{plugin}/{contribution}` 和 `POST /api/plugin-contributions/ui/{plugin}/{contribution}/action/{action}`；插件 Web API 使用 `GET|POST|PUT|PATCH|DELETE /api/plugin-api/{plugin}/<route>`。
@@ -236,7 +238,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | 类别 | 形态 | 职责 | 启用语义 |
 |---|---|---|---|
 | managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1.3 + manifest | 通过通用用户数据、声明式设置、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP 和通知端口实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
-| 数据化专项插件 | `plugins/<名称>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好写入 `AppSettings.PluginPreferences`，重启后应用 |
+| 数据化专项插件 | `plugins/<ArtifactName>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好以机器 ID 为 key 写入 `AppSettings.PluginPreferences`，重启后应用 |
 
 > **通知通道**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
 
@@ -253,7 +255,7 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 - managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContextV1_3` 使用宿主提供的通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户全局管理、用户列表徽章、用户运行事件、HTTP、日志、通知和任务端口。
 - 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.1`，入口位于 `web/` 并导出 `activate(host)`；用户必须在插件页单独确认前端信任，版本更新后重新确认。
-- 数据化专项插件由 `plugins/<名称>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册，宿主在保存脚本实例时固化解析结果。
+- 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份，宿主在保存脚本实例时固化解析结果。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 
 ## 功能定位指南（找代码）

@@ -78,6 +78,7 @@ internal static class ApiStatusHandler
             plugins = RuntimeContext.Instance.Plugins.PluginSummaries.Select(plugin => new
             {
                 plugin.Name,
+                artifactName = plugin.ArtifactName,
                 plugin.DisplayName,
                 gameName = plugin.GameName,
                 plugin.Description,

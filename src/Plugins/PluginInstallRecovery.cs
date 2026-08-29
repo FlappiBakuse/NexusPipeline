@@ -33,7 +33,8 @@ internal static class PluginInstallRecovery
 
     public static void AddPending(PluginPendingOperation operation, string? path = null)
     {
-        if (!PluginRepositoryCatalog.IsSafePluginName(operation.Name))
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name)
+            && !string.Equals(operation.Action, "uninstall", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException($"插件名称不安全：{operation.Name}");
         }
@@ -42,6 +43,16 @@ internal static class PluginInstallRecovery
                 || string.Equals(operation.Name, operation.SourceName, StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidDataException($"插件来源名称不安全：{operation.SourceName}");
+        }
+        NormalizePhysicalNames(operation);
+        if (!PluginRepositoryCatalog.IsSafePluginName(operation.ArtifactName))
+        {
+            throw new InvalidDataException($"插件物理目录名不安全：{operation.ArtifactName}");
+        }
+        if (!string.IsNullOrWhiteSpace(operation.SourceArtifactName)
+            && !PluginRepositoryCatalog.IsSafePluginName(operation.SourceArtifactName))
+        {
+            throw new InvalidDataException($"插件来源物理目录名不安全：{operation.SourceArtifactName}");
         }
         lock (Sync)
         {
@@ -55,6 +66,56 @@ internal static class PluginInstallRecovery
             }
             state.Operations.Add(Clone(operation));
             SavePending(file, state);
+        }
+    }
+
+    /// <summary>在目录迁移完成后把旧状态中的物理目录名升级为 artifactName。</summary>
+    public static bool UpgradePersistedState(
+        string? pendingPath = null,
+        string? ownershipPath = null)
+    {
+        lock (Sync)
+        {
+            string pendingFile = pendingPath ?? AppPaths.PluginPendingPath;
+            string ownershipFile = ownershipPath ?? AppPaths.PluginOwnershipPath;
+            try
+            {
+                if (File.Exists(pendingFile))
+                {
+                    PluginPendingState pending = LoadPending(pendingFile);
+                    foreach (PluginPendingOperation operation in pending.Operations)
+                    {
+                        if (PluginFilesystemLayoutMigration.GetCanonicalArtifactName(operation.Name) is string artifact)
+                        {
+                            operation.ArtifactName = artifact;
+                        }
+                        if (!string.IsNullOrWhiteSpace(operation.SourceName)
+                            && PluginFilesystemLayoutMigration.GetCanonicalArtifactName(operation.SourceName) is string sourceArtifact)
+                        {
+                            operation.SourceArtifactName = sourceArtifact;
+                        }
+                    }
+                    SavePending(pendingFile, pending);
+                }
+                if (File.Exists(ownershipFile))
+                {
+                    PluginOwnershipState ownership = LoadOwnership(ownershipFile);
+                    foreach (PluginOwnership item in ownership.Plugins)
+                    {
+                        if (PluginFilesystemLayoutMigration.GetCanonicalArtifactName(item.Name) is string artifact)
+                        {
+                            item.ArtifactName = artifact;
+                        }
+                    }
+                    SaveOwnership(ownershipFile, ownership);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[插件] 升级安装状态失败：{ex.Message}");
+                return false;
+            }
         }
     }
 
@@ -137,12 +198,17 @@ internal static class PluginInstallRecovery
         {
             throw new InvalidDataException($"pending 包含不安全插件名称：{operation.Name}");
         }
-        string localPath = Path.Combine(pluginsDir, operation.Name);
+        NormalizePhysicalNames(operation);
+        if (!PluginRepositoryCatalog.IsSafePluginName(operation.ArtifactName))
+        {
+            throw new InvalidDataException($"pending 包含不安全物理目录名：{operation.ArtifactName}");
+        }
+        string localPath = Path.Combine(pluginsDir, operation.ArtifactName);
         EnsureChildPath(pluginsDir, localPath);
         string stagedPath = Path.GetFullPath(operation.StagedPath ?? "");
         EnsureChildPath(stagingRoot, stagedPath);
         string backupPath = string.IsNullOrWhiteSpace(operation.BackupPath)
-            ? Path.Combine(backupRoot, operation.Name + "." + Guid.NewGuid().ToString("N"))
+            ? Path.Combine(backupRoot, operation.ArtifactName + "." + Guid.NewGuid().ToString("N"))
             : Path.GetFullPath(operation.BackupPath);
         EnsureChildPath(backupRoot, backupPath);
 
@@ -252,6 +318,7 @@ internal static class PluginInstallRecovery
         UpsertOwnership(ownership, new PluginOwnership
         {
             Name = operation.Name,
+            ArtifactName = operation.ArtifactName,
             Version = operation.Version,
             Kind = operation.Kind,
             ApiVersion = operation.ApiVersion,
@@ -281,14 +348,19 @@ internal static class PluginInstallRecovery
         {
             throw new InvalidDataException($"替换来源名称无效：{sourceName}");
         }
-        string targetPath = Path.Combine(pluginsDir, operation.Name);
-        string sourcePath = Path.Combine(pluginsDir, sourceName);
+        NormalizePhysicalNames(operation);
+        if (!PluginRepositoryCatalog.IsSafePluginName(operation.SourceArtifactName))
+        {
+            throw new InvalidDataException($"替换来源物理目录名无效：{operation.SourceArtifactName}");
+        }
+        string targetPath = Path.Combine(pluginsDir, operation.ArtifactName);
+        string sourcePath = Path.Combine(pluginsDir, operation.SourceArtifactName);
         EnsureChildPath(pluginsDir, sourcePath);
         EnsureChildPath(pluginsDir, targetPath);
         string stagedPath = Path.GetFullPath(operation.StagedPath ?? "");
         EnsureChildPath(stagingRoot, stagedPath);
         string backupPath = string.IsNullOrWhiteSpace(operation.BackupPath)
-            ? Path.Combine(backupRoot, operation.Name + ".from-" + sourceName + "." + Guid.NewGuid().ToString("N"))
+            ? Path.Combine(backupRoot, operation.ArtifactName + ".from-" + operation.SourceArtifactName + "." + Guid.NewGuid().ToString("N"))
             : Path.GetFullPath(operation.BackupPath);
         EnsureChildPath(backupRoot, backupPath);
 
@@ -364,6 +436,7 @@ internal static class PluginInstallRecovery
             UpsertOwnership(ownership, new PluginOwnership
             {
                 Name = operation.Name,
+                ArtifactName = operation.ArtifactName,
                 Version = operation.Version,
                 Kind = operation.Kind,
                 ApiVersion = operation.ApiVersion,
@@ -560,11 +633,15 @@ internal static class PluginInstallRecovery
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
         PluginPendingState state = JsonSerializer.Deserialize<PluginPendingState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 pending.json 为空");
-        if (state.SchemaVersion != 1)
+        if (state.SchemaVersion is not (1 or 2))
         {
             throw new InvalidDataException($"不支持的插件 pending schemaVersion：{state.SchemaVersion}");
         }
         state.Operations ??= new List<PluginPendingOperation>();
+        foreach (PluginPendingOperation operation in state.Operations)
+        {
+            NormalizePhysicalNames(operation);
+        }
         return state;
     }
 
@@ -577,22 +654,31 @@ internal static class PluginInstallRecovery
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
         PluginOwnershipState state = JsonSerializer.Deserialize<PluginOwnershipState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 ownership.json 为空");
-        if (state.SchemaVersion != 1)
+        if (state.SchemaVersion is not (1 or 2))
         {
             throw new InvalidDataException($"不支持的插件 ownership schemaVersion：{state.SchemaVersion}");
         }
         state.Plugins ??= new List<PluginOwnership>();
+        foreach (PluginOwnership item in state.Plugins)
+        {
+            if (string.IsNullOrWhiteSpace(item.ArtifactName))
+            {
+                item.ArtifactName = item.Name;
+            }
+        }
         return state;
     }
 
     private static void SavePending(string path, PluginPendingState state)
     {
+        state.SchemaVersion = 2;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(state, JsonOpts.Indented));
     }
 
     private static void SaveOwnership(string path, PluginOwnershipState state)
     {
+        state.SchemaVersion = 2;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(state, JsonOpts.Indented));
     }
@@ -604,6 +690,8 @@ internal static class PluginInstallRecovery
             Action = source.Action,
             Name = source.Name,
             SourceName = source.SourceName,
+            ArtifactName = source.ArtifactName,
+            SourceArtifactName = source.SourceArtifactName,
             Version = source.Version,
             Kind = source.Kind,
             ApiVersion = source.ApiVersion,
@@ -613,6 +701,19 @@ internal static class PluginInstallRecovery
             Phase = source.Phase,
             CreatedAt = source.CreatedAt,
         };
+    }
+
+    private static void NormalizePhysicalNames(PluginPendingOperation operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation.ArtifactName))
+        {
+            operation.ArtifactName = operation.Name;
+        }
+        if (!string.IsNullOrWhiteSpace(operation.SourceName)
+            && string.IsNullOrWhiteSpace(operation.SourceArtifactName))
+        {
+            operation.SourceArtifactName = operation.SourceName;
+        }
     }
 
     private static bool PathExists(string path) => Directory.Exists(path) || File.Exists(path);
@@ -670,7 +771,7 @@ internal static class PluginInstallRecovery
 
 internal sealed class PluginPendingState
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
 
     public List<PluginPendingOperation> Operations { get; set; } = new();
 }
@@ -683,6 +784,12 @@ internal sealed class PluginPendingOperation
 
     /// <summary>替换安装时的旧插件机器标识；普通安装/更新为空。</summary>
     public string SourceName { get; set; } = "";
+
+    /// <summary>新插件的正式物理目录名；旧 pending 缺失时回退到 Name。</summary>
+    public string ArtifactName { get; set; } = "";
+
+    /// <summary>替换来源的旧物理目录名；旧 pending 缺失时回退到 SourceName。</summary>
+    public string SourceArtifactName { get; set; } = "";
 
     public string Version { get; set; } = "";
 
@@ -703,7 +810,7 @@ internal sealed class PluginPendingOperation
 
 internal sealed class PluginOwnershipState
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
 
     public List<PluginOwnership> Plugins { get; set; } = new();
 }
@@ -711,6 +818,8 @@ internal sealed class PluginOwnershipState
 internal sealed class PluginOwnership
 {
     public string Name { get; set; } = "";
+
+    public string ArtifactName { get; set; } = "";
 
     public string Version { get; set; } = "";
 

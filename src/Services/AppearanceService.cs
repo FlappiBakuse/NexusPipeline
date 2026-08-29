@@ -581,9 +581,7 @@ internal sealed class AppearanceService
         config.SchemaVersion = 1;
         config.Revision = Math.Max(1, config.Revision);
         config.Provider ??= new AppearanceProvider();
-        config.Provider.PluginName = string.IsNullOrWhiteSpace(config.Provider.PluginName)
-            ? "custom-wallpaper"
-            : config.Provider.PluginName.Trim();
+        config.Provider.PluginName = config.Provider.PluginName?.Trim() ?? "";
         config.Assets ??= new List<AppearanceAsset>();
         config.Assets = config.Assets
             .Where(asset => asset is not null && IsSafeAssetId(asset.Id) && AllowedMimeTypes.Contains(asset.MimeType))
@@ -770,7 +768,7 @@ internal sealed class AppearanceConfig
 
 internal sealed class AppearanceProvider
 {
-    public string PluginName { get; set; } = "custom-wallpaper";
+    public string PluginName { get; set; } = "";
     public bool Enabled { get; set; }
 }
 

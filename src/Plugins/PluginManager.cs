@@ -18,6 +18,7 @@ namespace NexusPipeline.Plugins;
 /// <summary>插件统一元数据投影。仅包含真实数据插件和 managed-code 插件。</summary>
 internal sealed record PluginSummary(
     string Name,
+    string ArtifactName,
     string DisplayName,
     string GameName,
     string Description,
@@ -45,6 +46,9 @@ internal enum PluginRuntimeState
     Loading,
     Active,
     InitFailed,
+    InitTimedOut,
+    StartTimedOut,
+    StopTimedOut,
     Shutdown,
 }
 
@@ -106,6 +110,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 list.Add(new PluginSummary(
                     plugin.Name,
+                    plugin.ArtifactName,
                     plugin.DisplayName,
                     plugin.GameName,
                     plugin.Description,
@@ -121,6 +126,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 list.Add(new PluginSummary(
                     plugin.Manifest.Name,
+                    string.IsNullOrWhiteSpace(plugin.Manifest.ArtifactName)
+                        ? Path.GetFileName(plugin.Directory)
+                        : plugin.Manifest.ArtifactName,
                     plugin.Manifest.DisplayName,
                     "",
                     plugin.Manifest.Description,
@@ -461,7 +469,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             }
             finally
             {
-                _runtimeStates[name] = PluginRuntimeState.Shutdown;
+                _runtimeStates[name] = runtime.StopTimedOut
+                    ? PluginRuntimeState.StopTimedOut
+                    : PluginRuntimeState.Shutdown;
             }
         }
         _managedRuntimes.Clear();
@@ -646,6 +656,12 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 continue;
             }
+            if (manifest.SchemaVersion >= 2
+                && !string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
+            {
+                Logger.Error($"[插件] 跳过物理目录名不匹配的插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
+                continue;
+            }
             if (IsKnownPlugin(manifest.Name))
             {
                 Logger.Warn($"[插件] 检测到重复插件名「{manifest.Name}」，跳过 managed-code 插件。");
@@ -683,6 +699,14 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             _managedRuntimes[name] = runtime;
             _runtimeStates[name] = PluginRuntimeState.Active;
             Logger.Info($"[插件] 已启用：{descriptor.Manifest.DisplayName} v{descriptor.Manifest.Version}（managed-code）");
+        }
+        catch (PluginLifecycleTimeoutException ex)
+        {
+            _runtimeStates[name] = ex.Phase == PluginLifecyclePhase.Initialize
+                ? PluginRuntimeState.InitTimedOut
+                : PluginRuntimeState.StartTimedOut;
+            _runtimeErrors[name] = ex.Message;
+            Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」生命周期超时：{ex.Message}");
         }
         catch (Exception ex)
         {
@@ -776,17 +800,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         }
     }
 
-    private static string? FindPluginDirectory(string name)
-    {
-        if (!Directory.Exists(AppPaths.PluginsDir))
-        {
-            return null;
-        }
-        return Directory.GetDirectories(AppPaths.PluginsDir)
-            .FirstOrDefault(directory =>
-                string.Equals(Path.GetFileName(directory), name, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static bool IsPublicFrontendExtension(string extension)
     {
         return extension.ToLowerInvariant() is ".js" or ".mjs" or ".css" or ".json"
@@ -817,7 +830,13 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 continue;
             }
-            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(directory);
+            if (manifest.SchemaVersion >= 2
+                && !string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
+            {
+                Logger.Error($"[插件] 跳过物理目录名不匹配的数据插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
+                continue;
+            }
+            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(directory, manifest);
             if (plugin is not null)
             {
                 list.Add(plugin);
@@ -847,6 +866,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         private PluginLoadContext? _loadContext;
         private INexusPlugin? _plugin;
         private PluginHostContext? _hostContext;
+
+        public bool StopTimedOut { get; private set; }
 
         public ManagedPluginRuntime(
             ManagedPluginDescriptor descriptor,
@@ -909,8 +930,12 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     _ui,
                     _webApi,
                     _history);
-                plugin.InitializeAsync(_hostContext, CancellationToken.None).AsTask().GetAwaiter().GetResult();
-                plugin.StartAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+                AwaitLifecycle(
+                    token => plugin.InitializeAsync(_hostContext, token),
+                    PluginLifecyclePhase.Initialize);
+                AwaitLifecycle(
+                    plugin.StartAsync,
+                    PluginLifecyclePhase.Start);
             }
             catch
             {
@@ -923,12 +948,46 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             try
             {
-                _plugin?.StopAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+                if (_plugin is not null)
+                {
+                    AwaitLifecycle(_plugin.StopAsync, PluginLifecyclePhase.Stop);
+                }
+            }
+            catch (PluginLifecycleTimeoutException)
+            {
+                StopTimedOut = true;
+                throw;
             }
             finally
             {
                 Cleanup();
             }
+        }
+
+        private static void AwaitLifecycle(
+            Func<CancellationToken, ValueTask> lifecycleFactory,
+            PluginLifecyclePhase phase)
+        {
+            using var timeout = new CancellationTokenSource(TestHooks.ScaledMs(20_000));
+            Task task = lifecycleFactory(timeout.Token).AsTask();
+            try
+            {
+                task.WaitAsync(timeout.Token).GetAwaiter().GetResult();
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                ObserveFault(task);
+                throw new PluginLifecycleTimeoutException(phase);
+            }
+        }
+
+        private static void ObserveFault(Task task)
+        {
+            _ = task.ContinueWith(
+                completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private void Cleanup()
@@ -940,4 +999,22 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             _loadContext = null;
         }
     }
+}
+
+internal enum PluginLifecyclePhase
+{
+    Initialize,
+    Start,
+    Stop,
+}
+
+internal sealed class PluginLifecycleTimeoutException : TimeoutException
+{
+    public PluginLifecycleTimeoutException(PluginLifecyclePhase phase)
+        : base($"插件生命周期阶段 {phase} 超过 20 秒截止时间")
+    {
+        Phase = phase;
+    }
+
+    public PluginLifecyclePhase Phase { get; }
 }

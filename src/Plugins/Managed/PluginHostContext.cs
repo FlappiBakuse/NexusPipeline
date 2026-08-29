@@ -93,10 +93,6 @@ internal sealed class PluginHostContext : IPluginHostContextV1_3
         ((PluginJobScheduler)Scheduler).Dispose();
     }
 
-    public void DisposeScheduler()
-    {
-        Dispose();
-    }
 }
 
 internal sealed class PluginUserListBadgeAdapter : IPluginUserListBadgeRegistry, IDisposable
@@ -301,15 +297,8 @@ internal sealed class PluginConfigStore : IPluginConfigStore
         {
             return ValueTask.FromResult<T?>(default);
         }
-        try
-        {
-            return ValueTask.FromResult(JsonSerializer.Deserialize<T>(File.ReadAllText(_path), JsonOpts.Default));
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"插件配置解析失败（{_path}），按无配置处理：{ex.Message}");
-            return ValueTask.FromResult<T?>(default);
-        }
+        JsonStore.TryRead(_path, out T? value, "插件配置");
+        return ValueTask.FromResult(value);
     }
 
     public ValueTask WriteAsync<T>(T value, CancellationToken cancellationToken = default)
@@ -361,19 +350,7 @@ internal sealed class PluginSecretStore : IPluginSecretStore
 
     private JsonObject ReadRoot()
     {
-        if (!File.Exists(_path))
-        {
-            return new JsonObject();
-        }
-        try
-        {
-            return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject ?? new JsonObject();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"插件配置文件损坏（{_path}），继续写入：{ex.Message}");
-            return new JsonObject();
-        }
+        return JsonStore.ReadObjectOrEmpty(_path, "插件密钥文件");
     }
 }
 

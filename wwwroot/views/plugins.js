@@ -51,6 +51,9 @@ function runtimeLabel(plugin) {
   const runtimeState = plugin.state || (plugin.runtimeEnabled ? "Active" : "Disabled");
   if (runtimeState === "Active") return plugin.configuredEnabled ? "运行中" : "运行中 · 待重启";
   if (runtimeState === "InitFailed") return "初始化失败";
+  if (runtimeState === "InitTimedOut") return "初始化超时";
+  if (runtimeState === "StartTimedOut") return "启动超时";
+  if (runtimeState === "StopTimedOut") return "停止超时";
   if (runtimeState === "Incompatible") return "API 不兼容";
   if (runtimeState === "Loading") return "加载中";
   return plugin.configuredEnabled ? "待重启" : "已禁用";
@@ -59,7 +62,7 @@ function runtimeLabel(plugin) {
 function runtimeClass(plugin) {
   const runtimeState = plugin.state || (plugin.runtimeEnabled ? "Active" : "Disabled");
   if (runtimeState === "Active") return "ok";
-  if (runtimeState === "InitFailed" || runtimeState === "Incompatible") return "danger";
+  if (["InitFailed", "InitTimedOut", "StartTimedOut", "StopTimedOut", "Incompatible"].includes(runtimeState)) return "danger";
   return "muted";
 }
 
@@ -111,13 +114,16 @@ function storeStatusLabel(plugin) {
     "replacement-available": "可替换旧插件",
     pending: "待重启",
     "replacement-conflict": "替换冲突",
+    "layout-conflict": "目录冲突",
     incompatible: "宿主不兼容",
+    unlisted: "未列入仓库",
   }[plugin.status] || "可用";
 }
 
 function storeStatusClass(plugin) {
   if (plugin.status === "incompatible") return "danger";
   if (plugin.status === "replacement-conflict") return "danger";
+  if (plugin.status === "layout-conflict") return "danger";
   if (plugin.status === "update-available" || plugin.status === "replacement-available" || plugin.status === "pending") return "warning";
   if (plugin.status === "installed") return "ok";
   return "muted";
@@ -127,14 +133,17 @@ function storePluginRow(plugin) {
   const pending = plugin.status === "pending";
   const incompatible = !plugin.compatible;
   const conflicted = plugin.status === "replacement-conflict";
+  const layoutConflict = plugin.status === "layout-conflict";
   let actions = "";
   if (!pending && !incompatible && !conflicted) {
-    if (!plugin.installed) {
+    if (plugin.status === "unlisted") {
+      actions += '<button class="tertiary" type="button" data-action="store-uninstall" data-name="' + esc(plugin.name) + '">卸载</button>';
+    } else if (!plugin.installed) {
       actions += '<button class="primary" type="button" data-action="store-install" data-name="' + esc(plugin.name) + '" data-testid="plugin-install-' + esc(plugin.name) + '">安装</button>';
     } else if (plugin.updateAvailable) {
       actions += '<button class="primary" type="button" data-action="store-update" data-name="' + esc(plugin.name) + '" data-testid="plugin-update-' + esc(plugin.name) + '">' + (plugin.status === "replacement-available" ? "替换旧插件" : "更新") + '</button>';
     }
-    if (plugin.installed && (!plugin.installedName || plugin.installedName === plugin.name)) {
+    if (plugin.status !== "unlisted" && plugin.installed && (!plugin.installedName || plugin.installedName === plugin.name)) {
       actions += '<button class="tertiary" type="button" data-action="store-uninstall" data-name="' + esc(plugin.name) + '" data-testid="plugin-uninstall-' + esc(plugin.name) + '">卸载</button>';
     }
   }
@@ -146,6 +155,9 @@ function storePluginRow(plugin) {
   }
   if (conflicted) {
     actions = '<span class="muted">目标插件与旧插件同时存在，请先处理本地插件冲突。</span>';
+  }
+  if (layoutConflict) {
+    actions = '<span class="muted">物理目录存在冲突，请先处理本地插件目录。</span>';
   }
   const details = pluginDetailsMarkup([
     plugin.description || "官方插件",

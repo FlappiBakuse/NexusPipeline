@@ -75,7 +75,7 @@ internal static class JsonStore
     {
         try
         {
-            string backup = $"{path}.corrupt-{DateTime.Now:yyyyMMddHHmmss}";
+            string backup = $"{path}.corrupt-{DateTime.Now:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}";
             File.Move(path, backup);
             return backup;
         }
@@ -83,6 +83,81 @@ internal static class JsonStore
         {
             Logger.Warn($"[警告] 保留损坏配置失败（{path}）：{ex.Message}");
             return "";
+        }
+    }
+
+    /// <summary>读取插件数据文件；JSON 解析失败时保留原文件，后续写入不会覆盖损坏现场。</summary>
+    public static bool TryRead<T>(string path, out T? value, string label)
+    {
+        value = default;
+        if (!File.Exists(path))
+        {
+            return true;
+        }
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"{label}读取失败（{path}）：{ex.Message}");
+            return false;
+        }
+        try
+        {
+            value = JsonSerializer.Deserialize<T>(text, JsonOpts.Default);
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            string backup = PreserveCorruptFile(path);
+            Logger.Warn($"{label}解析失败（{path}）：{ex.Message}，原文件已保留为 {backup}");
+            return false;
+        }
+        catch (NotSupportedException ex)
+        {
+            string backup = PreserveCorruptFile(path);
+            Logger.Warn($"{label}格式不受支持（{path}）：{ex.Message}，原文件已保留为 {backup}");
+            return false;
+        }
+        catch (InvalidOperationException ex)
+        {
+            string backup = PreserveCorruptFile(path);
+            Logger.Warn($"{label}结构无效（{path}）：{ex.Message}，原文件已保留为 {backup}");
+            return false;
+        }
+    }
+
+    public static JsonObject ReadObjectOrEmpty(string path, string label)
+    {
+        if (!File.Exists(path))
+        {
+            return new JsonObject();
+        }
+        string text;
+        try
+        {
+            text = File.ReadAllText(path);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"{label}读取失败（{path}）：{ex.Message}");
+            return new JsonObject();
+        }
+        try
+        {
+            if (JsonNode.Parse(text) is JsonObject root)
+            {
+                return root;
+            }
+            throw new InvalidDataException("JSON 根节点必须是对象");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        {
+            string backup = PreserveCorruptFile(path);
+            Logger.Warn($"{label}解析失败（{path}）：{ex.Message}，原文件已保留为 {backup}");
+            return new JsonObject();
         }
     }
 

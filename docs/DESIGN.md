@@ -409,7 +409,7 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，schemaVersion 2 的每个条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录；需要更换机器标识的插件额外声明 `replaces`。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、changelog 和 replacement 唯一性校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），仓库工具据此生成根目录 `catalog.json`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。catalog 条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录；需要更换机器标识的插件额外声明 `replaces`。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、changelog 和 replacement 唯一性校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
 
 插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。仓库请求在内存缓存有效期内复用结果；过期请求失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。
 
@@ -417,11 +417,13 @@ flowchart LR
 
 1. 从 catalog 下载包，限制响应大小并校验声明大小与 SHA256；
 2. 将 ZIP 解压到 `.nxp/state/plugins/staging/`，拒绝绝对路径、`..`、重复条目、越界路径和超过资源上限的压缩内容；
-3. 检查根 `plugin.json` 与 catalog 的名称、版本、类型、API 和 capability 一致，并验证数据插件文件或 managed-code 入口程序集存在；
-4. 写入 `pending.json`，返回“重启后生效”；
-5. 下次启动先由 `PluginInstallRecovery` 完成备份、目录交换、归属记录和清理，再进入 `PluginManager.LoadAll`；声明 `replaces` 时同时迁移旧插件配置、密钥、作用域和插件偏好。交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
+3. 检查根 `plugin.json` 与 catalog 的名称、artifactName、版本、类型、API 和 capability 一致，并验证数据插件文件或 managed-code 入口程序集存在；
+4. 写入带有机器 ID、artifactName 和来源物理目录名的 `pending.json`，返回“重启后生效”；
+5. 下次启动按“完成旧 pending 事务 → 迁移旧插件物理布局 → 升级 pending/ownership 状态 → `PluginManager.LoadAll`”的顺序执行。`PluginInstallRecovery` 使用 artifactName 进行目录交换，声明 `replaces` 时同时迁移旧插件配置、密钥、作用域和插件偏好。交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试；同一 artifact 存在多个大小写目录时保留全部现场并暂停相关自动安装/更新。
 
-插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为目录缓存，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为目录缓存，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+
+插件配置、密钥和作用域 JSON 解析失败时保留 `.corrupt-<timestamp>-<guid>` 现场，再以空值继续运行；后续写入不会覆盖原始损坏文件。managed-code 生命周期初始化、启动和停止均有 20 秒截止时间；用户运行事件在插件作用域中跟踪，并在清理时执行有界排空。
 
 managed-code 插件可以通过 Plugin API v1.3 注册用户列表徽章、通用 UI 贡献、作用域数据、插件 Web API 和历史展示。宿主通过 `GET /api/plugin-contributions/user-list-badges` 一次读取全部用户的聚合展示数据，按插件贡献提供的顺序投影并校验；用户列表不理解具体插件业务，单个处理器异常也不会阻断其他用户或插件的徽章读取。插件徽章读取应使用本地状态，不能在列表请求中执行网络签到。可信前端插件通过 Frontend API 1.1 以 `web/` 下的 ES module/CSS 扩展页面；用户按插件版本与前端声明指纹单独确认信任，更新后重新确认。外观服务由 `AppearanceService` 提供服务端同步配置和壁纸文件，可信前端通过 `host.appearance.wallpaperStore` 访问。
 

@@ -79,6 +79,28 @@ public sealed class PluginHostServicesTests
     }
 
     [Fact]
+    public async Task ExecutionEvents_ClearWaitsForInFlightHandlers()
+    {
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var events = new PluginExecutionEventRegistry((_, _) => { });
+        using IDisposable subscription = events.Subscribe("fixture", async _ =>
+        {
+            started.TrySetResult();
+            await release.Task.ConfigureAwait(false);
+        });
+
+        events.Publish(new PluginUserRunStartingEvent("u1", "用户", "s1", "脚本", "q1", "队列", "auto", DateTimeOffset.Now));
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Task clear = Task.Run(events.Clear);
+        await Task.Delay(50);
+        Assert.False(clear.IsCompleted);
+
+        release.TrySetResult();
+        await clear.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    [Fact]
     public async Task UserListBadges_AreSortedSanitizedAndRemovedWithRegistration()
     {
         var registry = new PluginUserListBadgeRegistry();

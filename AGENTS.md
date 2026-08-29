@@ -30,7 +30,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## Windows 与工具链注意事项
 
-- 程序和需要进程控制的测试在管理员上下文中运行；目标程序要求管理员时保留明确失败边界，不使用 runas 降级提权。
+- 程序和需要进程控制的测试在管理员上下文中运行。UI/System Smoke 必须从 High/System integrity 的管理员终端执行；当前账户属于本机 Administrators 但当前 token 仍为 Medium 时，使用 `Start-Process -FilePath pwsh.exe -Verb RunAs -WorkingDirectory (Get-Location).Path -ArgumentList '-NoProfile','-NoExit'` 打开新的管理员 PowerShell，并在新窗口用 `whoami /groups` 确认出现 `S-1-16-12288`（High）或 `S-1-16-16384`（System）后再执行测试。调度器返回管理员前置检查的 exit code `2` 时，验证状态为阻断，禁止修改前置检查、降低权限、跳过套件或据此提交/发布。
 - 控制台、管道和文件保持 UTF-8；启动 cmd/bat 时提供并消费有效的 stdout/stderr；`build.cmd` 和 `tests/e2e/run-e2e.cmd` 保持非交互，不加入无条件 `pause`。
 - 以显式路径开头的脚本 `Args` 表示运行时启动目标，`?` 后是目标参数；Args 不使用引号表达路径。
 - 能用 Python 完成的测试、批量文件操作、数据处理和临时脚本使用 Python；项目既有的 `.cmd`、`.ps1`、`dotnet`、`node` 和 `npm` 流程按原入口运行。
@@ -45,7 +45,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## 最短验证入口
 
-按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。活动测试统一经 Node 调度器运行；涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在默认门禁后从管理员终端运行：
+按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。活动测试统一经 Node 调度器运行；涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在默认门禁后从管理员终端运行。发布前必须确认 `default`、`ui` 和适用的 `system` 命令均以 exit code `0` 完成：
 
 ```text
 node tests\run.mjs default

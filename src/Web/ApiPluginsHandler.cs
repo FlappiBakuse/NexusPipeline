@@ -34,6 +34,7 @@ internal static class ApiPluginsHandler
             await HttpHelper.WriteJsonAsync(context, manager.PluginSummaries.Select(plugin => new
             {
                 plugin.Name,
+                artifactName = plugin.ArtifactName,
                 plugin.DisplayName,
                 gameName = plugin.GameName,
                 plugin.Description,

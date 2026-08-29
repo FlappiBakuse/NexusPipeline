@@ -65,6 +65,31 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Contains("changelog", changelogError);
     }
 
+    [Theory]
+    [InlineData("bettergi", true)]
+    [InlineData("game-checkin", true)]
+    [InlineData("a1-b2", true)]
+    [InlineData("BetterGI", false)]
+    [InlineData("game_checkin", false)]
+    [InlineData("game.checkin", false)]
+    [InlineData("-game", false)]
+    [InlineData("game-", false)]
+    [InlineData("game--checkin", false)]
+    public void IsCanonicalPluginId_EnforcesLowerKebabCase(string value, bool expected)
+    {
+        Assert.Equal(expected, PluginRepositoryCatalog.IsCanonicalPluginId(value));
+    }
+
+    [Fact]
+    public void TryParse_Schema2_RejectsNonCanonicalMachineId()
+    {
+        JsonObject root = CreateCatalog(2);
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["name"] = "BetterGI";
+
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? error));
+        Assert.Contains("name", error);
+    }
+
     [Fact]
     public void TryParse_RejectsDuplicateNamesAndUntrustedPackageUrl()
     {
@@ -437,6 +462,99 @@ public sealed class PluginInstallRecoveryTests
             Assert.False(Directory.Exists(Path.Combine(plugins, "bettergi")));
             Assert.Empty(PluginInstallRecovery.ReadOwnership(ownership));
             Assert.Empty(PluginInstallRecovery.ReadPending(pending));
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void AddPending_AllowsLegacyPluginIdentityForUninstall()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string pending = Path.Combine(root, "state", "pending.json");
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "uninstall",
+                Name = "Legacy_Plugin",
+                ArtifactName = "Legacy_Plugin",
+                Phase = "pending",
+                StagedPath = Path.Combine(root, "state", "staging", "uninstall.Legacy_Plugin"),
+            }, pending);
+
+            PluginPendingOperation operation = Assert.Single(PluginInstallRecovery.ReadPending(pending));
+            Assert.Equal("Legacy_Plugin", operation.Name);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void ApplyPending_UsesArtifactNameForPhysicalDirectory()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string pending = Path.Combine(root, "state", "pending.json");
+            string ownership = Path.Combine(root, "state", "ownership.json");
+            string staging = Path.Combine(root, "state", "staging");
+            string backup = Path.Combine(root, "state", "backup");
+            string staged = Path.Combine(staging, "bettergi.1");
+            Directory.CreateDirectory(staged);
+            File.WriteAllText(Path.Combine(staged, "plugin.json"), "{}");
+
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "install",
+                Name = "bettergi",
+                ArtifactName = "BetterGI",
+                Version = "0.1.1",
+                Kind = "data-specialized",
+                StagedPath = staged,
+                Phase = "pending",
+            }, pending);
+
+            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup));
+            string[] directories = Directory.GetDirectories(plugins)
+                .Select(Path.GetFileName)
+                .Where(name => name is not null)
+                .Cast<string>()
+                .ToArray();
+            Assert.Equal(new[] { "BetterGI" }, directories);
+            PluginOwnership installed = Assert.Single(PluginInstallRecovery.ReadOwnership(ownership).Values);
+            Assert.Equal("BetterGI", installed.ArtifactName);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void FilesystemLayoutMigration_MovesKnownLegacyDirectoryToArtifactName()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string legacy = Path.Combine(plugins, "bettergi");
+            Directory.CreateDirectory(legacy);
+            File.WriteAllText(Path.Combine(legacy, "plugin.json"), "{\"name\":\"bettergi\",\"kind\":\"data-specialized\"}");
+
+            Assert.True(PluginFilesystemLayoutMigration.Migrate(plugins));
+            string[] directories = Directory.GetDirectories(plugins)
+                .Select(Path.GetFileName)
+                .Where(name => name is not null)
+                .Cast<string>()
+                .ToArray();
+            Assert.Equal(new[] { "BetterGI" }, directories);
+            Assert.False(PluginFilesystemLayoutMigration.HasConflict("bettergi"));
         }
         finally
         {

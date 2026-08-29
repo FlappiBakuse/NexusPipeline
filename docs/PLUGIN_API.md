@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<名称>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 与宿主交互。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -8,26 +8,27 @@
 
 ```
 NexusPipeline-Plugins/plugins/
-├── bettergi/                     # 插件名 = 目录名
+├── BetterGI/                     # artifactName；plugin.json.name = bettergi
 │   ├── plugin.json               # 根文件：元数据 + 引用 data 文件（初始化专项插件）
+│   ├── store.json                # 商店展示元数据与更新记录
 │   └── data/
 │       ├── resolve.json          # 推导配置（require 校验 + paths 模板）
 │       ├── judge.js              # 判断脚本（.js = 内置 Jint 引擎 / .py = 系统 python.exe）
 │       └── config-template/      # 可选：默认配置模板目录（编辑会话生成用）
 │           └── NexusPipeline.json
-├── check-in/                     # 可选 managed-code 插件
+├── GameCheckIn/                  # 可选 managed-code 插件；name = game-checkin
 │   ├── plugin.json
 │   ├── CheckInPlugin.dll
 │   └── web/                      # 可选：可信前端模块与静态资源
 │       ├── main.js
 │       └── style.css
-├── march7th/       （plugin.json + data/{resolve.json, judge.js}）
-├── zzzonedragon/   （同构）
-└── maaend/         （同构）
+├── March7thAssistant/（plugin.json + store.json + data/{resolve.json, judge.js}）
+├── ZenlessZoneZeroOneDragon/（同构）
+└── MaaEnd/           （同构）
 ```
 
-- `NexusPipeline-Plugins/plugins/` 下的每个子目录视为一个插件；`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
-- 官方仓库通过根目录 `catalog.json` 发布当前版本和包校验信息；客户端只信任固定官方源，下载后再次检查 manifest。
+- `NexusPipeline-Plugins/plugins/` 下的每个子目录视为一个插件；schema 2 的物理目录名必须与 `artifactName` 完全一致，`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
+- 官方仓库由每个插件目录的 `plugin.json`、`store.json` 和当前 ZIP 生成根目录 `catalog.json`；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
 ## managed-code C# 插件（Plugin API v1.3）
@@ -37,15 +38,16 @@ NexusPipeline-Plugins/plugins/
 宿主当前 API 版本为 `1.3`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0`、`1.1`、`1.2` 与 `1.3` 插件可加载，`1.4` 与 `2.0` 插件会被拒绝。
 
 ```text
-plugins/check-in/
+plugins/GameCheckIn/
 ├── plugin.json
 └── CheckInPlugin.dll
 ```
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "name": "check-in",
+  "artifactName": "GameCheckIn",
   "displayName": "用户脚本扩展",
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
@@ -66,7 +68,7 @@ plugins/check-in/
 
 实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
-- `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<插件名>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。
+- `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
 - `IPluginExecutionEventService`：订阅 `UserRunStarting`。事件只包含用户、脚本实例、队列、运行模式和开始时间等稳定标识；宿主异步调用处理器，处理器异常只记录警告，不能阻塞或改变执行。
 - `IPluginHttpClientFactory`：创建遵循宿主代理设置的外网 `HttpClient`，插件无法读取 `AppSettings`。
@@ -158,14 +160,19 @@ settings.sections               shell.nav
 
 ## plugin.json（根文件）
 
+schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、SemVer `version` 和插件类型。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致；schema 1 仍可被宿主读取，并由启动迁移处理已知或 catalog 可推导的旧物理目录。
+
 ```json
 {
+  "schemaVersion": 2,
   "name": "bettergi",
+  "artifactName": "BetterGI",
   "displayName": "BetterGI",
   "gameName": "原神",
   "description": "BetterGenshinImpact 专项脚本实例配置接管（自动推导主程序、配置、日志路径与自启动参数）",
   "version": "0.1.0",
   "kind": "data-specialized",
+  "minHostVersion": "0.10.8",
   "resolve": "data/resolve.json",
   "judgeScript": "data/judge.js",
   "configTemplate": "data/config-template"
@@ -174,9 +181,12 @@ settings.sections               shell.nav
 
 | 字段 | 说明 |
 |---|---|
-| `name` | 插件标识（脚本实例 `PluginType` 引用；改名的旧实例需同步修改） |
+| `schemaVersion` | manifest 格式版本；当前为 `2`，宿主兼容旧版 `1` |
+| `name` | 稳定机器标识（脚本实例 `PluginType` 引用）；必须使用小写 kebab-case，改名需通过 `replaces` 迁移 |
+| `artifactName` | 源码、宿主安装、发行目录和 ZIP 的正式物理身份；ASCII 字母/数字，首字符为字母且至少包含一个大写字母，大小写必须与目录和文件名完全一致 |
 | `displayName` / `gameName` | 列表显示名 / 中文游戏名（脚本卡片徽章「{gameName}专项」） |
-| `description` / `version` | 插件说明 / 版本（插件页展示） |
+| `description` / `version` | 插件说明 / SemVer 版本（插件页展示） |
+| `minHostVersion` | 可选的最低宿主版本；缺省按 `0.0.0` 处理 |
 | `replaces` | 可选的旧插件机器标识数组；商店安装时按跨重启事务迁移旧插件代码目录、配置、密钥、作用域和插件偏好，并清除前端信任 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
@@ -256,15 +266,15 @@ settings.sections               shell.nav
 
 ## 插件身份替换
 
-插件机器标识参与插件目录、配置、密钥、作用域和用户偏好隔离。需要改名时，新插件在 manifest 和 catalog 中声明 `replaces`，宿主会在重启阶段完成一次可恢复的身份迁移：
+插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。需要改机器标识时，新插件在 manifest 和 catalog 中声明 `replaces`，宿主会在重启阶段完成一次可恢复的身份迁移：
 
-1. 先校验新旧身份与 staging 目录，旧代码目录进入稳定 backup，新的插件目录完成交换；
+1. 完成旧 pending journal 后，校验新旧身份与 staging 目录，旧代码目录进入稳定 backup，新的 artifactName 目录完成交换；
 2. 将 `config/plugins/<旧名>.json`、`<旧名>.secrets.json` 和 `<旧名>/` 作用域目录移动为新身份；
 3. 将 `AppSettings.PluginPreferences` 中的旧键迁移为新键，保留 `Enabled`，清除前端信任记录；
 4. 更新商店 `ownership.json` 并清理旧身份归属；
 5. 任一阶段失败时保留 `pending.json`，下次启动从已记录阶段继续。
 
-新旧身份同时存在时，宿主报告 `replacement-conflict` 并停止替换，避免覆盖用户数据。`replaces` 每个条目最多 8 个安全机器标识，同一个旧身份在 catalog 中只能被一个新插件声明替换。
+新旧身份同时存在时，宿主报告 `replacement-conflict` 并停止替换；同一 artifact 的多个大小写目录会报告 `layout-conflict`，保留全部现场并暂停相关自动安装/更新。`replaces` 每个条目最多 8 个安全机器标识，同一个旧身份在 catalog 中只能被一个新插件声明替换。
 
 ## 构建与部署
 

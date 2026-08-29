@@ -2,6 +2,32 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.11.5（Pre-release）
+
+### 插件身份与文件布局
+
+- 将插件机器 ID 统一为小写 kebab-case，并以大小写严格的 `artifactName` 区分源码目录、安装目录、发行目录和 ZIP 名称。
+- 增加 Manifest schemaVersion 2、旧 schema 1 兼容、启动时布局迁移、旧身份替换和目录冲突阻断；运行时配置、密钥和用户数据继续按机器 ID 隔离。
+- 将官方插件源码目录统一为 `BetterGI`、`MaaEnd`、`March7thAssistant`、`ZenlessZoneZeroOneDragon`、`GameCheckIn` 和 `CustomWallpaper`，历史 HoYoLAB 插件归档到 `HoYoLABCheckIn`。
+
+### 插件仓库与分发
+
+- 为每个官方插件增加 `store.json`，由 `Generate-Catalog.ps1` 从插件自身 manifest、商店元数据和发行包自动生成 catalog。
+- 重写插件打包与全量校验流程，支持确定性 ZIP、同版本内容不可变校验、SHA256/大小核对和每个 artifact 最近三个版本保留。
+- `game-checkin` v0.1.3 通过 `replaces` 迁移历史 `hoyolab-checkin` 身份；官方插件 catalog 使用 schemaVersion 2 和 raw 包地址。
+
+### 宿主稳定性
+
+- 插件卸载脱离 catalog 依赖，并在本地插件未列入 catalog 时显示可卸载状态。
+- 损坏的配置、密钥和插件数据 JSON 保留为带时间戳的 `.corrupt-*` 文件；managed plugin 生命周期增加启动、停止超时状态，插件事件任务在清理时执行有界收敛。
+- 清理无效的插件目录查找、重复 manifest 解析和未使用调度器释放逻辑，补充 machine ID、artifactName、迁移、损坏数据和事件收敛回归测试。
+
+### 验证与发布门禁
+
+- 默认门禁：Unit/Component 399 项、Web Logic 12 项、文档一致性 5 项全部通过；Release 构建成功。
+- 管理员 UI Smoke 与 System Smoke 全部通过，exit code 均为 `0`；GameCheckIn 插件测试 7/7 通过。
+- catalog 与官方插件发行包全量校验通过；管理员上下文测试要求已写入项目强制规则和测试规范。
+
 ## v0.11.4（Pre-release）
 
 ### 插件仓库
@@ -59,7 +85,7 @@
 - 更新测试源的候选版本从宿主项目 `<Version>` 自动派生下一 patch；v0.11.2 测试候选版本为 v0.11.3，fixture 使用语义标记。
 - 默认门禁 Unit/Component 364 项、Web Logic 12 项、文档一致性 5 项通过；UI Smoke 18 项、System Smoke 31 项和官方插件测试 9 项通过。
 
-## v0.11.1（Pre-release，开发中）
+## v0.11.1（Pre-release）
 
 ### Plugin API 与用户列表徽章
 
@@ -131,7 +157,7 @@
 
 - 调整设置卡片展开内容的垂直间距与对齐，MCP 端口输入框在 PC 端统一占满整行。
 
-## v0.10.8（Pre-release，开发中）
+## v0.10.8（Pre-release）
 
 ### 插件仓库与运行目录
 

@@ -112,15 +112,8 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
         {
             return ValueTask.FromResult<T?>(default);
         }
-        try
-        {
-            return ValueTask.FromResult(JsonSerializer.Deserialize<T>(File.ReadAllText(path), JsonOpts.Default));
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"插件作用域数据解析失败（{_pluginName}/{scope}），按无数据处理：{ex.Message}");
-            return ValueTask.FromResult<T?>(default);
-        }
+        JsonStore.TryRead(path, out T? value, $"插件作用域数据（{_pluginName}/{scope}）");
+        return ValueTask.FromResult(value);
     }
 
     public ValueTask WriteAsync<T>(string scope, T value, CancellationToken cancellationToken = default)

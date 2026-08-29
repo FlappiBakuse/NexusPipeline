@@ -1,11 +1,12 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Extensibility;
+using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
 /// <summary>
-/// 数据化专项插件：纯目录形态 plugins/&lt;名称&gt;/——
+/// 数据化专项插件：纯目录形态 plugins/&lt;artifactName&gt;/——
 /// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）、
 /// 可选 data/config-template/（默认配置模板目录，编辑会话生成用）。
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
@@ -14,6 +15,11 @@ namespace NexusPipeline.Plugins;
 internal sealed class DataSpecializedPlugin : IProfileResolver
 {
     public string Name { get; private set; } = "";
+
+    /// <summary>插件的正式物理目录名；运行时配置等逻辑命名空间仍使用 Name。</summary>
+    public string ArtifactName { get; private set; } = "";
+
+    public int SchemaVersion { get; private set; } = 1;
 
     public string DisplayName { get; private set; } = "";
 
@@ -53,55 +59,49 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
     public static DataSpecializedPlugin? Load(string pluginDir)
     {
-        string metaPath = Path.Combine(pluginDir, "plugin.json");
-        if (!File.Exists(metaPath))
+        if (!PluginManifest.TryLoad(pluginDir, out PluginManifest? manifest, out _)
+            || manifest is null
+            || manifest.Kind != "data-specialized")
         {
             return null;
         }
+        return Load(pluginDir, manifest);
+    }
+
+    /// <summary>使用发现阶段已解析的 manifest 加载数据插件，避免重复读取和解释 plugin.json。</summary>
+    internal static DataSpecializedPlugin? Load(string pluginDir, PluginManifest manifest)
+    {
         try
         {
-            JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
             var plugin = new DataSpecializedPlugin
             {
                 PluginDirectory = Path.GetFullPath(pluginDir),
-                Name = node?["name"]?.ToString() ?? "",
-                DisplayName = node?["displayName"]?.ToString() ?? "",
-                GameName = node?["gameName"]?.ToString() ?? "",
-                Description = node?["description"]?.ToString() ?? "",
-                Version = node?["version"]?.ToString() ?? "",
-                Replaces = Array.Empty<string>(),
-                _resolvePath = node?["resolve"]?.ToString() ?? "",
-                _judgeScriptPath = node?["judgeScript"]?.ToString() ?? "",
+                Name = manifest.Name,
+                ArtifactName = string.IsNullOrWhiteSpace(manifest.ArtifactName)
+                    ? Path.GetFileName(Path.GetFullPath(pluginDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+                    : manifest.ArtifactName,
+                SchemaVersion = manifest.SchemaVersion,
+                DisplayName = manifest.DisplayName,
+                GameName = manifest.GameName,
+                Description = manifest.Description,
+                Version = manifest.Version,
+                Replaces = manifest.Replaces,
+                Frontend = manifest.Frontend,
+                _resolvePath = manifest.ResolvePath,
+                _judgeScriptPath = manifest.JudgeScriptPath,
             };
-            if (node?["capabilities"] is JsonArray capabilities)
+            foreach (string capability in manifest.Capabilities)
             {
-                foreach (JsonNode? capability in capabilities)
-                {
-                    string key = capability?.ToString() ?? "";
-                    if (!string.IsNullOrWhiteSpace(key))
-                    {
-                        plugin._capabilityKeys.Add(key.Trim());
-                    }
-                }
+                plugin._capabilityKeys.Add(capability);
             }
-            // plugin.json compatibility: the former boolean declaration is a capability key.
-            if (node?["supportsEmulator"]?.GetValue<bool>() == true)
-            {
-                plugin._capabilityKeys.Add(PluginCapabilityKeys.Emulator);
-            }
-            if (node is not JsonObject root
-                || !PluginRepositoryCatalog.TryParseReplaces(root, plugin.Name, out IReadOnlyList<string> replaces, out _))
-            {
-                return null;
-            }
-            plugin.Replaces = replaces;
-            if (!PluginFrontendManifest.TryParse(root, plugin._capabilityKeys, out PluginFrontendManifest? frontend, out _))
-            {
-                return null;
-            }
-            plugin.Frontend = frontend;
-            string? templateRef = node?["configTemplate"]?.ToString();
+            string templateRef = manifest.ConfigTemplatePath;
             if (string.IsNullOrWhiteSpace(plugin.Name) || string.IsNullOrWhiteSpace(plugin._resolvePath) || string.IsNullOrWhiteSpace(plugin._judgeScriptPath))
+            {
+                return null;
+            }
+            if (!IsSafeRelativePath(plugin._resolvePath)
+                || !IsSafeRelativePath(plugin._judgeScriptPath)
+                || !string.IsNullOrWhiteSpace(templateRef) && !IsSafeRelativePath(templateRef))
             {
                 return null;
             }
@@ -126,6 +126,17 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             Logger.Warn($"[插件] 加载数据化插件 {Path.GetFileName(pluginDir)} 失败：{ex.Message}");
             return null;
         }
+    }
+
+    private static bool IsSafeRelativePath(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Contains('\0') || Path.IsPathRooted(value))
+        {
+            return false;
+        }
+        string normalized = value.Replace('\\', '/');
+        return !normalized.Contains(':', StringComparison.Ordinal)
+            && !normalized.Split('/').Any(part => part is "" or "." or "..");
     }
 
     /// <summary>判断脚本语言：data/judge.{js|py} 按扩展名（默认 javascript）。</summary>
