@@ -13,6 +13,7 @@ internal sealed class UpdateSourcePolicy
         "objects.githubusercontent.com",
         "release-assets.githubusercontent.com",
         "github-releases.githubusercontent.com",
+        "raw.githubusercontent.com",
     };
 
     private readonly bool _isDefaultSource;

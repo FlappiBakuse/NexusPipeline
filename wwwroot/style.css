@@ -44,6 +44,7 @@
   --nav-width: 248px;
   --content-max: 1440px;
   --focus: 0 0 0 3px rgba(98, 160, 255, 0.32);
+  --nexus-surface-opacity: 100%;
   --select-arrow: url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='%23edf5ff' stroke-opacity='.55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
@@ -145,6 +146,11 @@ a { color: inherit; }
   width: var(--nav-width); padding: 24px 16px 18px; background: var(--panel-solid); border-right: 1px solid var(--border);
   box-shadow: none;
 }
+body[data-wallpaper="on"] .sidebar,
+body[data-wallpaper="on"] .topbar {
+  background: var(--panel-solid);
+  background: color-mix(in srgb, var(--panel-solid) var(--nexus-surface-opacity, 100%), transparent);
+}
 .brand { display: flex; align-items: center; gap: 11px; min-height: 44px; padding: 0 8px; }
 .brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 11px; background: linear-gradient(135deg, var(--accent), #7e6cff); color: #fff; font-weight: 800; box-shadow: none; }
 .brand-copy { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; }
@@ -188,7 +194,11 @@ h3 { margin: 0; color: var(--text); font-size: 15px; line-height: 1.35; }
 .page-kicker { max-width: 72ch; margin: 7px 0 0; color: var(--muted); font-size: 12px; }
 .history-days-box { display: flex; align-items: center; gap: var(--space-2); }
 .history-days-box .field-label { margin: 0; white-space: nowrap; }
-.card, .empty, .section-surface, .list-surface, .table-surface { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: none; }
+.card, .empty, .section-surface, .list-surface, .table-surface, .dashboard-state { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: none; }
+body[data-wallpaper="on"] :is(.card, .empty, .section-surface, .list-surface, .table-surface, .dashboard-state) {
+  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) var(--nexus-surface-opacity, 100%), transparent);
+}
 .card { padding: clamp(18px, 2.2vw, 24px); margin-bottom: var(--space-5); }
 .plugin-slot { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); }
 .plugin-contribution-card { margin-bottom: 0; }
@@ -737,6 +747,14 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
 .plugin-row-main strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .plugin-row-main .muted { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-row-main .plugin-description { display: -webkit-box; overflow: hidden; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.5; }
+.plugin-changelog { margin-top: var(--space-2); border-top: 1px solid var(--border); }
+.plugin-changelog summary { min-height: 36px; padding: 8px 0 4px; color: var(--accent); cursor: pointer; font-size: 12px; font-weight: 700; }
+.plugin-changelog summary::marker { color: var(--accent); }
+.plugin-changelog-body { display: grid; gap: var(--space-3); padding: 2px 0 var(--space-2); }
+.plugin-changelog-entry { display: grid; gap: 4px; }
+.plugin-changelog-version { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.plugin-changelog-version strong { color: var(--text); font-size: 12px; }
+.plugin-changelog-entry ul { display: grid; gap: 3px; margin: 0; padding-left: 18px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .plugin-row-badges { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: var(--space-2); flex-wrap: wrap; }
 .plugin-row .plugin-row-action { min-width: 72px; max-width: 280px; }
 .plugin-tabs { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
@@ -749,6 +767,10 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
 .plugin-loading-progress { width: min(280px, 100%); height: 6px; overflow: hidden; border-radius: 999px; background: var(--panel-soft); }
 .plugin-loading-progress > span { display: block; width: 42%; height: 100%; border-radius: inherit; background: var(--accent); animation: plugin-loading-progress 1.4s ease-in-out infinite; }
 @keyframes plugin-loading-progress { 0% { transform: translateX(-120%); } 50% { transform: translateX(100%); } 100% { transform: translateX(240%); } }
+body[data-wallpaper="on"] :is(.plugin-group, .plugin-grid, .plugin-loading-state, .dispatch-runbar, .settings-list) {
+  background: var(--panel);
+  background: color-mix(in srgb, var(--panel) var(--nexus-surface-opacity, 100%), transparent);
+}
 .proxy-custom-fields { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
 .proxy-custom-fields[hidden] { display: none; }
 
@@ -1513,7 +1535,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   }
 }
 
-/* v0.9.10：用户、脚本实例和调度队列卡片的编辑/删除操作统一尺寸；移动端按 3:1 分配操作栏。 */
+/* v0.9.10：用户、脚本实例和调度队列卡片的编辑/删除操作统一尺寸；移动端脚本操作栏按 3:1、用户操作栏按 3:3:2 分配。 */
 .entity-actions > button {
   width: 96px;
   min-width: 96px;
@@ -1543,6 +1565,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   .global-user-card > .global-user-actions {
     grid-column: 2 / -1;
     grid-row: 2;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 3fr) minmax(0, 3fr) minmax(0, 2fr);
   }
 }

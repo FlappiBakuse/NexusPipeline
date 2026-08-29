@@ -409,7 +409,7 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，每个条目包含名称、显示信息、SemVer、插件类型、最低宿主版本、官方 Release 包地址、包大小和 SHA256；需要更换机器标识的插件额外声明 `replaces`。客户端对 catalog 做 schema、重复名称、官方 URL、版本、大小、SHA256 和 replacement 唯一性校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。仓库根目录维护 `catalog.json`，schemaVersion 2 的每个条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录；需要更换机器标识的插件额外声明 `replaces`。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、changelog 和 replacement 唯一性校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。
 
 插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。仓库请求在内存缓存有效期内复用结果；过期请求失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。
 

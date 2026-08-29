@@ -148,6 +148,7 @@ internal static class ApiPluginsHandler
             plugins = snapshot.Plugins.Select(plugin => new
             {
                 plugin.Name,
+                artifactName = plugin.ArtifactName,
                 plugin.DisplayName,
                 gameName = plugin.GameName,
                 plugin.Description,
@@ -166,6 +167,12 @@ internal static class ApiPluginsHandler
                 pendingAction = plugin.PendingAction,
                 pendingVersion = plugin.PendingVersion,
                 status = plugin.Status,
+                changelog = plugin.Changelog.Select(change => new
+                {
+                    version = change.Version,
+                    date = change.Date,
+                    items = change.Items,
+                }),
             }),
         }).ConfigureAwait(false);
     }

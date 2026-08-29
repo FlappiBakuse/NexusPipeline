@@ -25,7 +25,7 @@
 - 调度计算、执行准入、资源冲突、重试和完成状态机；
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
-- 插件 catalog schema/版本/官方 URL 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
+- 插件 catalog schema 1/2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
 - MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。

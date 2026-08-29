@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -8,10 +9,12 @@ namespace NexusPipeline.Plugins;
 /// <summary>官方插件仓库 catalog.json 的严格解析与供应链字段校验。</summary>
 internal static class PluginRepositoryCatalog
 {
-    public const int SchemaVersion = 1;
+    public const int SchemaVersion = 2;
+    public const int LegacySchemaVersion = 1;
     public const string Repository = "FlappiBakuse/NexusPipeline-Plugins";
     public const string CatalogUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/catalog.json";
-    public const string PackageUrlPrefix = "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/";
+    public const string PackageUrlPrefix = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/";
+    public const string LegacyPackageUrlPrefix = "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/";
     public const long MaxCatalogBytes = 2L * 1024 * 1024;
     public const long MaxPackageBytes = 200L * 1024 * 1024;
     public const int MaxEntries = 256;
@@ -33,7 +36,7 @@ internal static class PluginRepositoryCatalog
                 return false;
             }
             int schemaVersion = RequiredInt(root, "schemaVersion");
-            if (schemaVersion != SchemaVersion)
+            if (schemaVersion is not (LegacySchemaVersion or SchemaVersion))
             {
                 error = $"不支持的插件 catalog schemaVersion：{schemaVersion}";
                 return false;
@@ -63,6 +66,7 @@ internal static class PluginRepositoryCatalog
 
             var entries = new List<PluginCatalogEntry>();
             var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var artifactNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var replacedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (JsonNode? node in pluginNodes)
             {
@@ -89,6 +93,20 @@ internal static class PluginRepositoryCatalog
                 if (!TryParseVersion(version, out _))
                 {
                     error = $"插件 {name} 的 version 无效：{version}";
+                    return false;
+                }
+                string artifactName = item["artifactName"]?.ToString()?.Trim() ?? "";
+                if (schemaVersion == SchemaVersion)
+                {
+                    if (!IsSafeArtifactName(artifactName) || !artifactNames.Add(artifactName))
+                    {
+                        error = $"插件 {name} 的 artifactName 无效或重复：{artifactName}";
+                        return false;
+                    }
+                }
+                else if (!string.IsNullOrEmpty(artifactName) && !IsSafeArtifactName(artifactName))
+                {
+                    error = $"插件 {name} 的 artifactName 无效：{artifactName}";
                     return false;
                 }
                 string kind = (item["kind"]?.ToString()?.Trim().ToLowerInvariant()) ?? "";
@@ -136,7 +154,11 @@ internal static class PluginRepositoryCatalog
                     return false;
                 }
                 string packageUrl = RequiredString(item, "packageUrl");
-                string? packageUrlError = ValidatePackageUrl(packageUrl);
+                string? packageUrlError = ValidatePackageUrl(
+                    packageUrl,
+                    allowLegacyRelease: schemaVersion == LegacySchemaVersion,
+                    artifactName,
+                    version);
                 if (packageUrlError is not null)
                 {
                     error = $"插件 {name} 的 packageUrl 无效：{packageUrlError}";
@@ -168,6 +190,12 @@ internal static class PluginRepositoryCatalog
                     }
                 }
 
+                if (!TryParseChangelog(item, version, schemaVersion == SchemaVersion, out IReadOnlyList<PluginChangelogEntry> changelog, out string? changelogError))
+                {
+                    error = $"插件 {name} 的 changelog 无效：{changelogError}";
+                    return false;
+                }
+
                 entries.Add(new PluginCatalogEntry(
                     name,
                     displayName,
@@ -181,7 +209,12 @@ internal static class PluginRepositoryCatalog
                     packageUrl,
                     sha256,
                     sizeBytes,
-                    replaces));
+                    replaces)
+                {
+                    ArtifactName = artifactName,
+                    CatalogSchemaVersion = schemaVersion,
+                    Changelog = changelog,
+                });
             }
             catalog = new PluginCatalog(schemaVersion, repository, generatedAt, entries);
             return true;
@@ -195,32 +228,92 @@ internal static class PluginRepositoryCatalog
 
     public static string? ValidatePackageUrl(string value)
     {
-        if (!Uri.TryCreate(value?.Trim(), UriKind.Absolute, out Uri? uri))
+        return ValidatePackageUrl(value, allowLegacyRelease: false, artifactName: null, version: null);
+    }
+
+    public static string? ValidatePackageUrl(
+        string value,
+        bool allowLegacyRelease,
+        string? artifactName,
+        string? version)
+    {
+        string candidate = value?.Trim() ?? "";
+        if (candidate.Contains('%', StringComparison.Ordinal)
+            || !Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri))
         {
             return "地址格式无效";
         }
         if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)
             || uri.Port != 443
             || !string.IsNullOrEmpty(uri.UserInfo)
-            || !uri.AbsolutePath.StartsWith("/FlappiBakuse/NexusPipeline-Plugins/releases/download/", StringComparison.Ordinal))
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
         {
-            return "地址必须指向官方插件仓库的 GitHub Release 资产";
+            return "地址必须是无附加参数的官方 HTTPS 插件包地址";
         }
-        if (!string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
+
+        const string rawPrefix = "/FlappiBakuse/NexusPipeline-Plugins/main/packages/";
+        const string legacyPrefix = "/FlappiBakuse/NexusPipeline-Plugins/releases/download/";
+        bool raw = string.Equals(uri.Host, "raw.githubusercontent.com", StringComparison.OrdinalIgnoreCase)
+            && uri.AbsolutePath.StartsWith(rawPrefix, StringComparison.Ordinal);
+        bool legacy = allowLegacyRelease
+            && string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase)
+            && uri.AbsolutePath.StartsWith(legacyPrefix, StringComparison.Ordinal);
+        if (!raw && !legacy)
         {
-            return "地址不允许包含 query 或 fragment";
+            return allowLegacyRelease
+                ? "地址必须指向官方插件仓库的 raw 文件或旧版 GitHub Release 资产"
+                : "地址必须指向官方插件仓库 main/packages 下的 raw 文件";
         }
-        string releasePath = uri.AbsolutePath["/FlappiBakuse/NexusPipeline-Plugins/releases/download/".Length..];
-        string[] segments = releasePath.Split('/', StringSplitOptions.None);
+
+        string prefix = raw ? rawPrefix : legacyPrefix;
+        string packagePath = uri.AbsolutePath[prefix.Length..];
+        string[] segments = packagePath.Split('/', StringSplitOptions.None);
         if (segments.Length != 2
             || !IsSafeUrlSegment(segments[0])
             || !IsSafeUrlSegment(segments[1])
-            || !segments[1].EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            || !segments[1].EndsWith(".zip", StringComparison.Ordinal))
         {
-            return "地址缺少有效的 Release 资产名";
+            return "地址缺少有效的插件 ZIP 资产名";
+        }
+        if (raw && !IsSafeArtifactName(segments[0]))
+        {
+            return "raw 插件包目录名不符合大小写命名规范";
+        }
+        if (raw)
+        {
+            string artifactPrefix = $"{segments[0]}-";
+            if (!segments[1].StartsWith(artifactPrefix, StringComparison.Ordinal)
+                || !TryParseVersion(segments[1][artifactPrefix.Length..^4], out _))
+            {
+                return "raw 插件包文件名必须匹配 artifactName-版本.zip";
+            }
+        }
+        if (artifactName is not null && version is not null && raw
+            && (!string.Equals(segments[0], artifactName, StringComparison.Ordinal)
+                || !string.Equals(segments[1], $"{artifactName}-{version}.zip", StringComparison.Ordinal)))
+        {
+            return "插件包地址与 artifactName、version 不一致";
         }
         return null;
+    }
+
+    public static bool IsSafeArtifactName(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 64 || !char.IsAsciiLetter(value[0]))
+        {
+            return false;
+        }
+        bool hasUppercase = false;
+        foreach (char ch in value)
+        {
+            if (!char.IsAsciiLetterOrDigit(ch))
+            {
+                return false;
+            }
+            hasUppercase |= char.IsAsciiLetter(ch) && char.IsUpper(ch);
+        }
+        return hasUppercase;
     }
 
     private static bool IsSafeUrlSegment(string value)
@@ -236,6 +329,82 @@ internal static class PluginRepositoryCatalog
                 return false;
             }
         }
+        return true;
+    }
+
+    private static bool TryParseChangelog(
+        JsonObject item,
+        string currentVersion,
+        bool required,
+        out IReadOnlyList<PluginChangelogEntry> changelog,
+        out string? error)
+    {
+        changelog = Array.Empty<PluginChangelogEntry>();
+        error = null;
+        JsonNode? node = item["changelog"];
+        if (node is null)
+        {
+            if (required)
+            {
+                error = "必须是包含 1 至 3 个版本的数组";
+                return false;
+            }
+            return true;
+        }
+        if (node is not JsonArray array || array.Count is < 1 or > 3)
+        {
+            error = "必须是包含 1 至 3 个版本的数组";
+            return false;
+        }
+
+        var parsed = new List<PluginChangelogEntry>(array.Count);
+        var versions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < array.Count; index++)
+        {
+            if (array[index] is not JsonObject entry)
+            {
+                error = "每条记录必须是 JSON 对象";
+                return false;
+            }
+            string version = RequiredString(entry, "version");
+            if (!TryParseVersion(version, out _)
+                || !versions.Add(version)
+                || index == 0 && !string.Equals(version, currentVersion, StringComparison.Ordinal))
+            {
+                error = index == 0 ? "第一条记录必须对应当前插件版本" : "版本号无效、重复或未按从新到旧排列";
+                return false;
+            }
+            if (index > 0 && CompareVersions(parsed[index - 1].Version, version) <= 0)
+            {
+                error = "版本记录必须按从新到旧排列";
+                return false;
+            }
+            string date = RequiredString(entry, "date");
+            if (date.Length != 10
+                || !DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            {
+                error = "日期必须使用 YYYY-MM-DD 格式";
+                return false;
+            }
+            if (entry["items"] is not JsonArray itemNodes || itemNodes.Count is < 1 or > 32)
+            {
+                error = "items 必须是包含 1 至 32 条文本的数组";
+                return false;
+            }
+            var items = new List<string>(itemNodes.Count);
+            foreach (JsonNode? itemNode in itemNodes)
+            {
+                string text = itemNode?.ToString()?.Trim() ?? "";
+                if (text.Length is < 1 or > 512 || text.Contains('<') || text.Contains('>'))
+                {
+                    error = "更新记录文本长度或内容无效";
+                    return false;
+                }
+                items.Add(text);
+            }
+            parsed.Add(new PluginChangelogEntry(version, date, items));
+        }
+        changelog = parsed;
         return true;
     }
 
@@ -412,9 +581,20 @@ internal sealed record PluginCatalogEntry(
     long SizeBytes,
     IReadOnlyList<string>? Replaces = null)
 {
+    public string ArtifactName { get; init; } = "";
+
+    public int CatalogSchemaVersion { get; init; } = PluginRepositoryCatalog.SchemaVersion;
+
+    public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
+
     [JsonIgnore]
     public IReadOnlyList<string> ReplacementNames => Replaces ?? Array.Empty<string>();
 }
+
+internal sealed record PluginChangelogEntry(
+    string Version,
+    string Date,
+    IReadOnlyList<string> Items);
 
 internal readonly record struct PluginVersion(int Major, int Minor, int Patch) : IComparable<PluginVersion>
 {

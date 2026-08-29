@@ -33,7 +33,11 @@ internal sealed class PluginPackageService
         {
             throw new PluginRepositoryException("invalid_action", "插件包操作无效");
         }
-        string? urlError = PluginRepositoryCatalog.ValidatePackageUrl(entry.PackageUrl);
+        string? urlError = PluginRepositoryCatalog.ValidatePackageUrl(
+            entry.PackageUrl,
+            allowLegacyRelease: entry.CatalogSchemaVersion == PluginRepositoryCatalog.LegacySchemaVersion,
+            entry.ArtifactName,
+            entry.Version);
         if (urlError is not null)
         {
             throw new PluginRepositoryException("invalid_package_url", urlError);

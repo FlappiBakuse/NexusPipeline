@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.11.4（Pre-release）
+
+### 插件仓库
+
+- 将官方插件 catalog 升级为 schemaVersion 2，发行包迁移到正式大小写的 artifact 目录，每个插件最多保留最近三个版本。
+- 宿主接受官方 raw 包地址并继续保留旧 catalog 缓存兼容；插件商店展示 catalog 中最近三个版本的更新记录。
+
+### 自定义壁纸 v0.1.1
+
+- 定时和启动 Web 轮换改为服务端随机选择，多个浏览器共享当前结果，并避免存在多个壁纸时连续重复。
+- 增加卡片与侧边栏共用的 0–50% 透明度设置；主题按钮保持可见，壁纸配色仅提供强调色和辅助色，不覆盖浅色/深色结构主题。
+
+### 验证
+
+- 默认门禁：Unit/Component 383 项、Web Logic 12 项、文档一致性 5 项全部通过。
+- 管理员 UI Smoke 18/18 通过；管理员 System Smoke 31/31 通过。
+- 官方插件发行包校验、custom-wallpaper 前端语法和发布包内容校验全部通过。
+
 ## v0.11.3（Pre-release）
 
 ### 插件身份与运行时扩展

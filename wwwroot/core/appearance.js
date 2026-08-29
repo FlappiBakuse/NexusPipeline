@@ -9,6 +9,9 @@ const STORE_NAME = "wallpaper";
 const themes = new Map();
 const appliedThemeTokens = new Set();
 const appliedWallpaperTokens = new Set();
+const adaptiveWallpaperTokens = new Set([
+  "--accent", "--accent-strong", "--accent-alt", "--accent-soft", "--on-accent", "--focus", "--mask",
+]);
 const wallpaperSubscribers = new Set();
 let wallpaperUrl = null;
 let baseTheme = "system";
@@ -64,13 +67,17 @@ function setWallpaperTokens(tokens = {}) {
   validateTokens(tokens);
   clearWallpaperTokens();
   Object.entries(tokens).forEach(([name, value]) => {
-    document.documentElement.style.setProperty(name, value);
+    if (!adaptiveWallpaperTokens.has(name)) return;
+    (document.body || document.documentElement).style.setProperty(name, value);
     appliedWallpaperTokens.add(name);
   });
 }
 
 function clearWallpaperTokens() {
-  appliedWallpaperTokens.forEach(name => document.documentElement.style.removeProperty(name));
+  appliedWallpaperTokens.forEach(name => {
+    document.documentElement.style.removeProperty(name);
+    document.body?.style.removeProperty(name);
+  });
   appliedWallpaperTokens.clear();
 }
 
@@ -146,6 +153,7 @@ function applyWallpaperUrl(url) {
     document.documentElement.style.removeProperty("--nexus-wallpaper-image");
     document.documentElement.style.removeProperty("--nexus-wallpaper-blur");
     document.documentElement.style.removeProperty("--nexus-wallpaper-dim");
+    document.documentElement.style.removeProperty("--nexus-surface-opacity");
     document.body.removeAttribute("data-wallpaper");
     clearWallpaperTokens();
     return;
@@ -157,8 +165,10 @@ function applyWallpaperUrl(url) {
 function setWallpaperEffects(effects = {}) {
   const blur = Math.max(0, Math.min(40, Number(effects.blurPx) || 0));
   const dim = Math.max(0, Math.min(80, Number(effects.dimPercent) || 0));
+  const transparency = Math.max(0, Math.min(50, Number(effects.surfaceTransparencyPercent) || 0));
   document.documentElement.style.setProperty("--nexus-wallpaper-blur", `${blur}px`);
   document.documentElement.style.setProperty("--nexus-wallpaper-dim", `${dim / 100}`);
+  document.documentElement.style.setProperty("--nexus-surface-opacity", `${100 - transparency}%`);
 }
 
 function clearWallpaper() {
@@ -216,46 +226,14 @@ export async function derivePalette(blob) {
   const [hue, saturation] = rgbToHsl(red, green, blue);
   const accent = hslToCss(hue, Math.max(48, Math.min(78, saturation + 18)), light ? 66 : 42);
   const accentStrong = hslToCss(hue, Math.max(52, Math.min(84, saturation + 25)), light ? 74 : 34);
-  const text = light ? "#f8fafc" : "#172033";
-  const muted = light ? "#cbd5e1" : "#526078";
-  const panel = light ? "#182235" : "#ffffff";
-  const panelSoft = light ? "#24324a" : "#f4f7fb";
-  const ok = light ? "#4ed39a" : "#0f7b6c";
-  const bad = light ? "#ff727b" : "#d9544f";
-  const warn = light ? "#f6bf61" : "#a66a0b";
-  const arrowStroke = encodeURIComponent(text);
   return {
-    "--bg": light ? "#101827" : "#edf2f8",
-    "--bg-raised": light ? "#162237" : "#f8fafc",
-    "--panel": panel,
-    "--panel-solid": panel,
-    "--panel-soft": panelSoft,
-    "--panel-hover": light ? "#2b3b56" : "#e7edf5",
-    "--hover-bg": light ? "#30425e" : "#e2e9f2",
-    "--border": light ? "#52627b" : "#c6d0de",
-    "--border-strong": light ? "#8090a8" : "#8b9bb0",
-    "--text": text,
-    "--muted": muted,
-    "--faint": light ? "#9aa9bd" : "#718096",
     "--accent": accent,
     "--accent-strong": accentStrong,
     "--accent-alt": hslToCss((hue + 32) % 360, 64, light ? 68 : 38),
     "--accent-soft": hslAlphaToCss(hue, Math.max(48, Math.min(78, saturation + 18)), light ? 66 : 42, light ? 0.2 : 0.18),
     "--on-accent": "#ffffff",
-    "--shadow": light ? "rgba(0, 0, 0, .36)" : "rgba(34, 53, 78, .18)",
-    "--ok": ok,
-    "--bad": bad,
-    "--bad-soft": light ? "rgba(255, 114, 123, .16)" : "rgba(217, 84, 79, .14)",
-    "--bad-border": light ? "rgba(255, 114, 123, .48)" : "rgba(217, 84, 79, .42)",
-    "--warn": warn,
-    "--ok-soft": light ? "rgba(78, 211, 154, .14)" : "rgba(15, 123, 108, .12)",
-    "--warn-soft": light ? "rgba(246, 191, 97, .16)" : "rgba(166, 106, 11, .13)",
-    "--muted-soft": light ? "rgba(203, 213, 225, .14)" : "rgba(82, 96, 120, .12)",
     "--mask": light ? "rgba(4, 10, 20, .44)" : "rgba(255, 255, 255, .42)",
-    "--log-bg": light ? "#0c1422" : "#f8fafc",
-    "--log-text": light ? "#dbeafe" : "#24324a",
     "--focus": `0 0 0 3px ${hslAlphaToCss(hue, Math.max(48, Math.min(78, saturation + 18)), light ? 66 : 42, 0.32)}`,
-    "--select-arrow": `url("data:image/svg+xml;charset=utf-8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1.5 1.5l4.5 4.5 4.5-4.5' fill='none' stroke='${arrowStroke}' stroke-opacity='.55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>")`,
   };
 }
 
@@ -279,7 +257,7 @@ async function applyServerSnapshot(snapshot, caller = snapshot?.provider?.plugin
   const blob = await fetchAssetBlob(asset);
   applyWallpaperUrl(URL.createObjectURL(blob));
   setWallpaperEffects(snapshot.effects);
-  if (asset.paletteVersion === 1 && asset.palette) {
+  if (asset.paletteVersion === 2 && asset.palette) {
     setWallpaperTokens(asset.palette);
   } else {
     const palette = await derivePalette(blob);

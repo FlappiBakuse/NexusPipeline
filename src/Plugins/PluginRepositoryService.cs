@@ -298,6 +298,7 @@ internal sealed class PluginRepositoryService
                         : updateAvailable ? "update-available" : "installed";
             items.Add(new PluginStoreItem(
                 entry.Name,
+                entry.ArtifactName,
                 entry.DisplayName,
                 entry.GameName,
                 entry.Description,
@@ -316,7 +317,8 @@ internal sealed class PluginRepositoryService
                 operation?.Action ?? "",
                 operation?.Version ?? "",
                 status,
-                effectiveInstalled?.Name ?? ""));
+                effectiveInstalled?.Name ?? "",
+                entry.Changelog));
         }
         return new PluginStoreSnapshot(
             true,
@@ -414,6 +416,7 @@ internal sealed record PluginStoreSnapshot(
 
 internal sealed record PluginStoreItem(
     string Name,
+    string ArtifactName,
     string DisplayName,
     string GameName,
     string Description,
@@ -431,4 +434,5 @@ internal sealed record PluginStoreItem(
     string PendingAction,
     string PendingVersion,
     string Status,
-    string InstalledName);
+    string InstalledName,
+    IReadOnlyList<PluginChangelogEntry> Changelog);

@@ -36,6 +36,7 @@ internal sealed class AppearanceService
     private readonly string _runtimePath;
     private readonly string _assetsDir;
     private readonly string _stagingDir;
+    private readonly Func<DateTimeOffset> _utcNow;
     private readonly object _sync = new();
 
     public AppearanceService(
@@ -43,13 +44,15 @@ internal sealed class AppearanceService
         string? configPath = null,
         string? runtimePath = null,
         string? assetsDir = null,
-        string? stagingDir = null)
+        string? stagingDir = null,
+        Func<DateTimeOffset>? utcNow = null)
     {
         _plugins = plugins;
         _configPath = Path.GetFullPath(configPath ?? AppPaths.AppearanceConfigPath);
         _runtimePath = Path.GetFullPath(runtimePath ?? AppPaths.AppearanceRuntimePath);
         _assetsDir = Path.GetFullPath(assetsDir ?? AppPaths.AppearanceAssetsDir);
         _stagingDir = Path.GetFullPath(stagingDir ?? AppPaths.AppearanceStagingDir);
+        _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
     public AppearanceSnapshot GetSnapshot()
@@ -85,9 +88,8 @@ internal sealed class AppearanceService
                 && config.Order.Count > 0)
             {
                 AppearanceRuntimeState state = LoadRuntimeState();
-                int cursor = Math.Clamp(state.StartupCursor, -1, config.Order.Count - 1);
-                state.StartupCursor = (cursor + 1) % config.Order.Count;
-                JsonUtil.WriteAtomic(_runtimePath, JsonSerializer.Serialize(state, JsonOpts.Indented));
+                state.LastRandomId = PickRandomId(config.Order, state.LastRandomId);
+                SaveRuntimeState(state);
             }
             return BuildSnapshot(config);
         }
@@ -101,7 +103,7 @@ internal sealed class AppearanceService
             AppearanceConfig config = LoadConfig();
             AppearanceAsset asset = FindAsset(config, assetId);
             asset.Palette = ParsePalette(palette);
-            asset.PaletteVersion = 1;
+            asset.PaletteVersion = 2;
             config.Revision = Math.Max(1, config.Revision + 1);
             config.UpdatedAt = DateTimeOffset.UtcNow;
             SaveConfig(config);
@@ -294,31 +296,45 @@ internal sealed class AppearanceService
     private AppearanceSnapshot BuildSnapshot(AppearanceConfig config)
     {
         bool effective = IsProviderEffective(config.Provider);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        int index = 0;
+        DateTimeOffset now = _utcNow();
         DateTimeOffset? nextSwitchAt = null;
+        string currentId = "";
         if (config.Order.Count > 0)
         {
             if (config.Rotation.Mode.Equals("timer", StringComparison.OrdinalIgnoreCase))
             {
                 long intervalMs = Math.Max(1, config.Rotation.IntervalMinutes) * 60_000L;
                 long epoch = config.Rotation.EpochUnixMs <= 0 ? now.ToUnixTimeMilliseconds() : config.Rotation.EpochUnixMs;
-                long elapsed = Math.Max(0, now.ToUnixTimeMilliseconds() - epoch);
-                long step = elapsed / intervalMs;
-                index = (int)(step % config.Order.Count);
-                nextSwitchAt = DateTimeOffset.FromUnixTimeMilliseconds(epoch + (step + 1) * intervalMs);
+                long nowMs = now.ToUnixTimeMilliseconds();
+                long elapsed = nowMs >= epoch ? nowMs - epoch : 0;
+                long slot = elapsed / intervalMs;
+                AppearanceRuntimeState runtime = LoadRuntimeState();
+                bool sameSlot = runtime.TimerSlot == slot
+                    && runtime.TimerEpochUnixMs == epoch
+                    && runtime.TimerIntervalMinutes == config.Rotation.IntervalMinutes;
+                if (!sameSlot || !ContainsId(config.Order, runtime.LastRandomId))
+                {
+                    runtime.LastRandomId = PickRandomId(config.Order, runtime.LastRandomId);
+                    runtime.TimerSlot = slot;
+                    runtime.TimerEpochUnixMs = epoch;
+                    runtime.TimerIntervalMinutes = config.Rotation.IntervalMinutes;
+                    SaveRuntimeState(runtime);
+                }
+                currentId = runtime.LastRandomId;
+                nextSwitchAt = DateTimeOffset.FromUnixTimeMilliseconds(epoch + (slot + 1) * intervalMs);
             }
             else if (config.Rotation.Mode.Equals("startup", StringComparison.OrdinalIgnoreCase))
             {
-                index = Math.Clamp(LoadRuntimeState().StartupCursor, 0, config.Order.Count - 1);
+                AppearanceRuntimeState runtime = LoadRuntimeState();
+                currentId = ContainsId(config.Order, runtime.LastRandomId)
+                    ? runtime.LastRandomId
+                    : ResolveSelectedId(config);
             }
             else
             {
-                index = Math.Max(0, config.Order.FindIndex(id =>
-                    string.Equals(id, config.SelectedId, StringComparison.OrdinalIgnoreCase)));
+                currentId = ResolveSelectedId(config);
             }
         }
-        string currentId = config.Order.Count == 0 ? "" : config.Order[index];
         return new AppearanceSnapshot
         {
             SchemaVersion = config.SchemaVersion,
@@ -333,6 +349,35 @@ internal sealed class AppearanceService
             Effects = config.Effects,
             NextSwitchAt = nextSwitchAt,
         };
+    }
+
+    private static string ResolveSelectedId(AppearanceConfig config)
+    {
+        return config.Order.FirstOrDefault(id =>
+            string.Equals(id, config.SelectedId, StringComparison.OrdinalIgnoreCase))
+            ?? config.Order[0];
+    }
+
+    private static bool ContainsId(IReadOnlyList<string> order, string? id)
+    {
+        return !string.IsNullOrWhiteSpace(id)
+            && order.Any(value => string.Equals(value, id, StringComparison.OrdinalIgnoreCase));
+    }
+
+    internal static string PickRandomId(IReadOnlyList<string> order, string? previousId)
+    {
+        if (order.Count == 0)
+        {
+            return "";
+        }
+        var candidates = order
+            .Where(id => !string.Equals(id, previousId, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (candidates.Length == 0)
+        {
+            return order[0];
+        }
+        return candidates[RandomNumberGenerator.GetInt32(candidates.Length)];
     }
 
     private void ApplyPatch(AppearanceConfig config, JsonObject patch, string caller)
@@ -395,7 +440,7 @@ internal sealed class AppearanceService
             }
             if (config.Rotation.EpochUnixMs <= 0)
             {
-                config.Rotation.EpochUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                config.Rotation.EpochUnixMs = _utcNow().ToUnixTimeMilliseconds();
             }
         }
         if (patch["effects"] is JsonObject effects)
@@ -408,6 +453,13 @@ internal sealed class AppearanceService
             {
                 config.Effects.DimPercent = Math.Clamp(ReadInt(effects["dimPercent"], "effects.dimPercent"), 0, 80);
             }
+            if (effects["surfaceTransparencyPercent"] is not null)
+            {
+                config.Effects.SurfaceTransparencyPercent = Math.Clamp(
+                    ReadInt(effects["surfaceTransparencyPercent"], "effects.surfaceTransparencyPercent"),
+                    0,
+                    50);
+            }
         }
         if (patch["paletteByAsset"] is JsonObject palettes)
         {
@@ -418,7 +470,7 @@ internal sealed class AppearanceService
                     throw new AppearanceException("invalid_config", "壁纸配色格式无效");
                 }
                 FindAsset(config, assetId).Palette = ParsePalette(palette);
-                FindAsset(config, assetId).PaletteVersion = 1;
+                FindAsset(config, assetId).PaletteVersion = 2;
             }
         }
         config.Order = config.Order
@@ -518,6 +570,12 @@ internal sealed class AppearanceService
         return new AppearanceRuntimeState();
     }
 
+    private void SaveRuntimeState(AppearanceRuntimeState state)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_runtimePath)!);
+        JsonUtil.WriteAtomic(_runtimePath, JsonSerializer.Serialize(state, JsonOpts.Indented));
+    }
+
     private static void Normalize(AppearanceConfig config)
     {
         config.SchemaVersion = 1;
@@ -550,10 +608,11 @@ internal sealed class AppearanceService
         config.Rotation.IntervalMinutes = Math.Clamp(config.Rotation.IntervalMinutes, 1, 1440);
         config.Rotation.EpochUnixMs = config.Rotation.EpochUnixMs <= 0
             ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            : config.Rotation.EpochUnixMs;
+            : Math.Min(config.Rotation.EpochUnixMs, DateTimeOffset.MaxValue.ToUnixTimeMilliseconds());
         config.Effects ??= new AppearanceEffects();
         config.Effects.BlurPx = Math.Clamp(config.Effects.BlurPx, 0, 40);
         config.Effects.DimPercent = Math.Clamp(config.Effects.DimPercent, 0, 80);
+        config.Effects.SurfaceTransparencyPercent = Math.Clamp(config.Effects.SurfaceTransparencyPercent, 0, 50);
     }
 
     private static AppearanceAsset CloneAsset(AppearanceAsset source)
@@ -566,7 +625,7 @@ internal sealed class AppearanceService
             SizeBytes = Math.Max(0, source.SizeBytes),
             Sha256 = source.Sha256 ?? "",
             CreatedAt = source.CreatedAt,
-            PaletteVersion = source.PaletteVersion == 1 ? 1 : 0,
+            PaletteVersion = source.PaletteVersion >= 2 ? 2 : source.PaletteVersion == 1 ? 1 : 0,
             Palette = source.Palette is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : ParsePalette(source.Palette),
@@ -738,10 +797,17 @@ internal sealed class AppearanceEffects
 {
     public int BlurPx { get; set; }
     public int DimPercent { get; set; } = 20;
+    public int SurfaceTransparencyPercent { get; set; }
 }
 
 internal sealed class AppearanceRuntimeState
 {
+    public string LastRandomId { get; set; } = "";
+    public long TimerSlot { get; set; } = -1;
+    public long TimerEpochUnixMs { get; set; }
+    public int TimerIntervalMinutes { get; set; }
+
+    // 兼容旧版运行时文件；新算法不再读取该顺序游标。
     public int StartupCursor { get; set; } = -1;
 }
 

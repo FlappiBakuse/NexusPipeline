@@ -30,6 +30,16 @@ function pluginDetailsMarkup(parts) {
   return parts.filter(value => value !== undefined && value !== null && value !== "").map(esc).join(" · ");
 }
 
+function changelogMarkup(plugin) {
+  const entries = Array.isArray(plugin.changelog) ? plugin.changelog.slice(0, 3) : [];
+  if (!entries.length) return "";
+  const body = entries.map(entry => {
+    const items = Array.isArray(entry.items) ? entry.items : [];
+    return `<section class="plugin-changelog-entry"><div class="plugin-changelog-version"><strong>v${esc(entry.version)}</strong><span class="muted">${esc(entry.date)}</span></div><ul>${items.map(item => `<li>${esc(item)}</li>`).join("")}</ul></section>`;
+  }).join("");
+  return `<details class="plugin-changelog"><summary>更新记录</summary><div class="plugin-changelog-body">${body}</div></details>`;
+}
+
 function pluginBadgesMarkup(plugin, statusMarkup) {
   const frontend = plugin.hasFrontend
     ? `<span class="badge ${plugin.frontendTrusted ? "ok" : "warn"}" title="可信前端模块可在同源管理页面运行 JavaScript/CSS">前端 ${plugin.frontendTrusted ? "已信任" : "待确认"}</span>`
@@ -145,7 +155,7 @@ function storePluginRow(plugin) {
     plugin.apiVersion ? `API v${plugin.apiVersion}` : "",
   ]);
   const status = '<span class="badge ' + storeStatusClass(plugin) + '" data-testid="plugin-store-status">' + storeStatusLabel(plugin) + '</span>';
-  return '<article class="plugin-row plugin-store-row" data-testid="plugin-store-row"><div class="plugin-row-main">' + pluginNameMarkup(plugin) + '<span class="muted plugin-description">' + details + '</span></div>' + pluginBadgesMarkup(plugin, status) + '<div class="plugin-row-action plugin-store-actions row-actions">' + actions + "</div></article>";
+  return '<article class="plugin-row plugin-store-row" data-testid="plugin-store-row"><div class="plugin-row-main">' + pluginNameMarkup(plugin) + '<span class="muted plugin-description">' + details + '</span>' + changelogMarkup(plugin) + '</div>' + pluginBadgesMarkup(plugin, status) + '<div class="plugin-row-action plugin-store-actions row-actions">' + actions + "</div></article>";
 }
 
 function storePluginContent(data) {

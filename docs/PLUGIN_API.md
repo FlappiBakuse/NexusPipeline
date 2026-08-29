@@ -268,5 +268,5 @@ settings.sections               shell.nav
 
 ## 构建与部署
 
-- 插件仓库单独构建 ZIP 并发布到 GitHub Release；主程序 `release/plugins/.nxp-root` 仅作为旧版本更新器的兼容根标记，主程序更新不会覆盖用户插件目录。
+- 插件仓库单独构建 ZIP 并提交到 `packages/<ArtifactName>/`；宿主从 catalog 的官方 raw 地址下载，主程序 `release/plugins/.nxp-root` 仅作为旧版本更新器的兼容根标记，主程序更新不会覆盖用户插件目录。
 - 修改插件文件后重启服务生效；`/api/status` 的 `plugins` 列表可见，新建脚本选择卡片层出现「新建{displayName}专项脚本实例」。

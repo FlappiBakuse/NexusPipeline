@@ -36,6 +36,36 @@ public sealed class PluginRepositoryCatalogTests
     }
 
     [Fact]
+    public void TryParse_Schema2_ParsesArtifactAndChangelog()
+    {
+        string json = CreateCatalog(2).ToJsonString();
+
+        Assert.True(PluginRepositoryCatalog.TryParse(json, out PluginCatalog? catalog, out string? error), error);
+        PluginCatalogEntry entry = Assert.Single(catalog!.Plugins);
+        Assert.Equal(2, catalog.SchemaVersion);
+        Assert.Equal("BetterGI", entry.ArtifactName);
+        Assert.Equal("0.1.0", Assert.Single(entry.Changelog).Version);
+        Assert.Equal(2, entry.CatalogSchemaVersion);
+    }
+
+    [Fact]
+    public void TryParse_Schema2_RequiresValidArtifactNameAndCurrentChangelog()
+    {
+        JsonObject root = CreateCatalog(2);
+        JsonObject entry = (JsonObject)((JsonArray)root["plugins"]!)[0]!;
+        entry["artifactName"] = "bettergi";
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? artifactError));
+        Assert.Contains("artifactName", artifactError);
+
+        root = CreateCatalog(2);
+        entry = (JsonObject)((JsonArray)root["plugins"]!)[0]!;
+        entry["version"] = "0.1.1";
+        entry["packageUrl"] = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.1.zip";
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? changelogError));
+        Assert.Contains("changelog", changelogError);
+    }
+
+    [Fact]
     public void TryParse_RejectsDuplicateNamesAndUntrustedPackageUrl()
     {
         JsonObject root = CreateCatalog();
@@ -72,6 +102,44 @@ public sealed class PluginRepositoryCatalogTests
     public void ValidatePackageUrl_RejectsInvalidReleaseAssetPath(string url)
     {
         Assert.NotNull(PluginRepositoryCatalog.ValidatePackageUrl(url));
+    }
+
+    [Fact]
+    public void ValidatePackageUrl_AcceptsOfficialRawPackage()
+    {
+        Assert.Null(PluginRepositoryCatalog.ValidatePackageUrl(
+            "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/CustomWallpaper-0.1.1.zip"));
+    }
+
+    [Theory]
+    [InlineData("https://raw.githubusercontent.com/other-owner/NexusPipeline-Plugins/main/packages/CustomWallpaper/CustomWallpaper-0.1.1.zip")]
+    [InlineData("https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/dev/packages/CustomWallpaper/CustomWallpaper-0.1.1.zip")]
+    [InlineData("https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/customwallpaper/CustomWallpaper-0.1.1.zip")]
+    [InlineData("https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/customwallpaper-0.1.1.zip")]
+    [InlineData("https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/CustomWallpaper-0.1.1.zip?x=1")]
+    [InlineData("https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/../CustomWallpaper-0.1.1.zip")]
+    public void ValidatePackageUrl_RejectsUntrustedRawPackage(string url)
+    {
+        Assert.NotNull(PluginRepositoryCatalog.ValidatePackageUrl(url));
+    }
+
+    [Fact]
+    public void ValidatePackageUrl_RejectsVersionMismatchWhenIdentityIsProvided()
+    {
+        Assert.NotNull(PluginRepositoryCatalog.ValidatePackageUrl(
+            "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/CustomWallpaper-0.1.0.zip",
+            allowLegacyRelease: false,
+            artifactName: "CustomWallpaper",
+            version: "0.1.1"));
+    }
+
+    [Fact]
+    public void UpdateSourcePolicy_AllowsOfficialRawGithubAssets()
+    {
+        var policy = new UpdateSourcePolicy("");
+
+        Assert.Null(policy.ValidateAssetUri(new Uri(
+            "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.0.zip")));
     }
 
     [Theory]
@@ -121,8 +189,9 @@ public sealed class PluginRepositoryCatalogTests
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, CandidateHostVersion, out _));
     }
 
-    private static JsonObject CreateCatalog()
+    private static JsonObject CreateCatalog(int schemaVersion = 1)
     {
+        bool current = schemaVersion == PluginRepositoryCatalog.SchemaVersion;
         var entry = new JsonObject
         {
             ["name"] = "bettergi",
@@ -134,15 +203,28 @@ public sealed class PluginRepositoryCatalogTests
             ["apiVersion"] = "",
             ["capabilities"] = new JsonArray(),
             ["minHostVersion"] = "0.10.8",
-            ["packageUrl"] = "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/bettergi-0.1.0.zip",
+            ["packageUrl"] = current
+                ? "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.0.zip"
+                : "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/bettergi-0.1.0.zip",
             ["sha256"] = new string('a', 64),
             ["sizeBytes"] = 128,
         };
+        if (current)
+        {
+            entry["artifactName"] = "BetterGI";
+            entry["changelog"] = new JsonArray(
+                new JsonObject
+                {
+                    ["version"] = "0.1.0",
+                    ["date"] = "2026-08-28",
+                    ["items"] = new JsonArray("加入插件仓库支持。"),
+                });
+        }
         var plugins = new JsonArray();
         plugins.Add(entry);
         return new JsonObject
         {
-            ["schemaVersion"] = 1,
+            ["schemaVersion"] = schemaVersion,
             ["repository"] = PluginRepositoryCatalog.Repository,
             ["generatedAt"] = "2026-08-27T00:00:00Z",
             ["plugins"] = plugins,
