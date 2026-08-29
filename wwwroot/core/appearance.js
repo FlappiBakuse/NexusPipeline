@@ -45,6 +45,10 @@ function validTokenValue(value) {
   return typeof value === "string" && value.length <= 4096 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value);
 }
 
+function notifyAppearanceChanged() {
+  document.dispatchEvent(new CustomEvent("nexus:appearance-changed"));
+}
+
 function validateTokens(tokens = {}) {
   if (!tokens || typeof tokens !== "object") throw new TypeError("主题 tokens 无效");
   Object.entries(tokens).forEach(([name, value]) => {
@@ -73,6 +77,7 @@ function setWallpaperTokens(tokens = {}) {
     (document.body || document.documentElement).style.setProperty(name, value);
     appliedWallpaperTokens.add(name);
   });
+  notifyAppearanceChanged();
 }
 
 function clearWallpaperTokens() {
@@ -99,6 +104,7 @@ function applyBaseTheme() {
   const value = ["light", "dark", "system"].includes(baseTheme) ? baseTheme : "system";
   document.body.dataset.theme = value;
   document.body.dataset.appearanceTheme = baseTheme;
+  notifyAppearanceChanged();
 }
 
 export function applyThemeValue(name) {
@@ -158,10 +164,12 @@ function applyWallpaperUrl(url) {
     document.documentElement.style.removeProperty("--nexus-surface-opacity");
     document.body.removeAttribute("data-wallpaper");
     clearWallpaperTokens();
+    notifyAppearanceChanged();
     return;
   }
   document.documentElement.style.setProperty("--nexus-wallpaper-image", `url(${JSON.stringify(url)})`);
   document.body.dataset.wallpaper = "on";
+  notifyAppearanceChanged();
 }
 
 function setWallpaperEffects(effects = {}) {

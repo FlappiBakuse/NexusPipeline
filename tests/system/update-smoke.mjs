@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
-  isElevated,
+  isNormalIntegrity,
   prepareRuntime,
   projectRoot,
   releaseDir,
@@ -22,12 +22,12 @@ import { deriveCandidateVersion, readProjectVersion } from "../support/project-v
 /**
  * 内建更新 System Smoke（下一候选版本）：在隔离安装副本上验证 apply-update 的
  * 「备份 → 交换 → 重拉」、config/history/用户插件目录原样保留、启动收尾清理、失败回滚与 defer 自动应用。
- * 运行方式：管理员 cmd 终端执行 `set NEXUS_SYSTEM_SMOKE=1 && node --test tests/system/update-smoke.mjs`。
+ * 运行方式：普通权限终端执行 `set NEXUS_SYSTEM_SMOKE=1 && node --test tests/system/update-smoke.mjs`。
  */
-const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1" && isElevated();
+const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
-  : "System Smoke 需要管理员终端";
+  : "System Smoke 需要普通权限 Test Host";
 const skip = enabled ? false : skipReason;
 
 const updateDir = path.join(runtimeDir, ".nxp-update");
@@ -115,6 +115,7 @@ async function stopRuntimeHard() {
 
 before(async () => {
   if (!enabled) return;
+  assert.ok(isNormalIntegrity(), "System Smoke 必须在普通权限（Medium Integrity）终端运行");
   // 先兜底清理上一轮残留的 runtime 进程（apply 重拉的服务进程若未清完会锁死 runtime 目录，导致 rmSync EPERM）。
   await stopRuntimeHard();
   prepareRuntime();

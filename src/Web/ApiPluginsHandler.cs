@@ -10,17 +10,19 @@ internal static class ApiPluginsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)
     {
-        if (method == "GET" && seg.Length == 3
-            && seg[0].Equals("store", StringComparison.OrdinalIgnoreCase)
-            && seg[2].Equals("detail", StringComparison.OrdinalIgnoreCase))
+        // WebServer removes only the "api" segment before invoking a handler;
+        // seg[0] is therefore the resource name ("plugins").
+        if (method == "GET" && seg.Length == 4
+            && seg[1].Equals("store", StringComparison.OrdinalIgnoreCase)
+            && seg[3].Equals("detail", StringComparison.OrdinalIgnoreCase))
         {
-            await WriteStoreDetailAsync(context, seg[1]).ConfigureAwait(false);
+            await WriteStoreDetailAsync(context, seg[2]).ConfigureAwait(false);
             return;
         }
-        if (method == "GET" && seg.Length == 2
-            && seg[1].Equals("detail", StringComparison.OrdinalIgnoreCase))
+        if (method == "GET" && seg.Length == 3
+            && seg[2].Equals("detail", StringComparison.OrdinalIgnoreCase))
         {
-            await WriteLocalDetailAsync(context, seg[0]).ConfigureAwait(false);
+            await WriteLocalDetailAsync(context, seg[1]).ConfigureAwait(false);
             return;
         }
         if (method == "GET" && seg.Length == 2 && seg[1].Equals("store", StringComparison.OrdinalIgnoreCase))

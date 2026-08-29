@@ -1,4 +1,5 @@
 import { api } from "./api.js";
+import { createColorControl, createNumberControl, createSelectControl } from "./controls.js";
 import { disposePluginSlot, queryContributions, renderFrontendSlots } from "./plugin-runtime.js";
 import { toast } from "./ui.js";
 
@@ -62,12 +63,55 @@ function renderFields(parent, values) {
   });
 }
 
-function createInput(field, value) {
+function createInput(field, value, id) {
   const type = String(field.type || "text").toLowerCase();
+  let element;
   let input;
-  if (type === "textarea") input = document.createElement("textarea");
-  else if (type === "select" || type === "multi-select") input = document.createElement("select");
-  else input = document.createElement("input");
+  if (type === "textarea") {
+    element = input = document.createElement("textarea");
+  } else if (type === "select" || type === "multi-select") {
+    element = createSelectControl({
+      id,
+      value,
+      options: field.options,
+      multiple: type === "multi-select",
+      disabled: field.readOnly === true,
+      ariaLabel: field.label || field.key,
+    });
+    input = element.querySelector("[data-nxp-select-value]");
+  } else if (type === "number") {
+    element = createNumberControl({
+      id,
+      value: value == null ? "" : value,
+      min: field.min,
+      max: field.max,
+      step: field.step,
+      disabled: field.readOnly === true,
+      ariaLabel: field.label || field.key,
+    });
+    input = element.querySelector("[data-nxp-number-value]");
+  } else if (type === "color") {
+    element = createColorControl({
+      id,
+      value: value == null ? "" : value,
+      disabled: field.readOnly === true,
+      ariaLabel: field.label || field.key,
+    });
+    input = element.querySelector("[data-nxp-color-text]");
+  } else if (type === "switch") {
+    element = input = document.createElement("button");
+    input.type = "button";
+    input.className = "mode-toggle switch-control";
+    input.setAttribute("aria-label", field.label || field.key);
+    input.setAttribute("aria-pressed", value === true ? "true" : "false");
+    input.dataset.state = value === true ? "on" : "off";
+    input.dataset.nxpSwitch = "true";
+    input.innerHTML = '<span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>';
+  } else {
+    element = input = document.createElement("input");
+  }
+  if (!input || !element) throw new Error(`插件字段无法渲染：${field.key}`);
+  input.id = id;
   input.dataset.pluginFormField = field.key;
   input.dataset.pluginType = type;
   input.name = field.key;
@@ -75,41 +119,37 @@ function createInput(field, value) {
   if (field.required) input.required = true;
   if (field.placeholder) input.placeholder = field.placeholder;
   if (field.maxLength > 0) input.maxLength = field.maxLength;
-  if (type === "number" || type === "range") {
+  if (type === "range") {
     input.type = type;
+    input.classList.add("nxp-range");
+    input.dataset.nxpRange = "true";
     if (field.min != null) input.min = field.min;
     if (field.max != null) input.max = field.max;
     if (field.step != null) input.step = field.step;
-  } else if (type === "color") input.type = "color";
-  else if (type === "secret") input.type = "password";
+  } else if (type === "secret") input.type = "password";
   else if (type === "url") input.type = "url";
-  else if (type === "switch") {
-    input.type = "checkbox";
-    input.checked = value === true;
-  }
-  if (type === "select" || type === "multi-select") {
-    if (type === "multi-select") input.multiple = true;
-    (Array.isArray(field.options) ? field.options : []).forEach(option => {
-      const optionEl = document.createElement("option");
-      optionEl.value = typeof option === "string" ? option : option.value;
-      optionEl.textContent = typeof option === "string" ? option : option.label;
-      optionEl.selected = type === "multi-select" ? Array.isArray(value) && value.map(String).includes(optionEl.value) : String(value ?? "") === optionEl.value;
-      input.append(optionEl);
-    });
-  } else if (type !== "switch" && type !== "secret") {
+  if (type !== "select" && type !== "multi-select" && type !== "number" && type !== "range" && type !== "color" && type !== "switch" && type !== "secret") {
     input.value = value == null ? "" : String(value);
   }
   if (type === "secret" && value?.configured === true && !input.placeholder) {
     input.placeholder = "已设置，留空保持不变";
   }
-  return input;
+  return { element, input };
 }
 
 function readFormValues(form) {
   const values = {};
   form.querySelectorAll("[data-plugin-form-field]").forEach(input => {
     const type = input.dataset.pluginType;
-    if (type === "switch") values[input.dataset.pluginFormField] = input.checked;
+    if (type === "switch") values[input.dataset.pluginFormField] = input.getAttribute("aria-pressed") === "true";
+    else if (type === "multi-select" && input.dataset.nxpSelectMultiple) {
+      try {
+        const parsed = JSON.parse(input.value || "[]");
+        values[input.dataset.pluginFormField] = Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        values[input.dataset.pluginFormField] = [];
+      }
+    }
     else if (type === "multi-select") values[input.dataset.pluginFormField] = Array.from(input.selectedOptions).map(option => option.value);
     else if (type === "number" || type === "range") values[input.dataset.pluginFormField] = Number(input.value);
     else if (type === "secret") values[input.dataset.pluginFormField] = input.value ? { action: "set", value: input.value } : { action: "keep" };
@@ -127,9 +167,11 @@ function renderFormContribution(parent, contribution) {
     const wrapper = document.createElement("div");
     wrapper.className = "field plugin-field";
     const label = textElement("label", `${field.label || field.key}${field.required ? " *" : ""}`, "field-label");
-    const input = createInput(field, contribution.values?.[field.key]);
-    label.htmlFor = input.id = `plugin-${contribution.pluginName}-${contribution.id}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
-    wrapper.append(label, input);
+    const controlId = `plugin-${contribution.pluginName}-${contribution.id}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+    const control = createInput(field, contribution.values?.[field.key], controlId);
+    const labelTarget = control.element.querySelector?.("[data-nxp-select-trigger], [data-nxp-time-trigger]") || control.input;
+    label.htmlFor = labelTarget.id || controlId;
+    wrapper.append(label, control.element);
     if (field.description) wrapper.append(textElement("span", field.description, "muted plugin-field-description"));
     form.append(wrapper);
   });

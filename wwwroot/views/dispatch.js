@@ -1,12 +1,13 @@
 import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
-import { pageHeader, systemActionCard } from "../core/forms.js";
+import { pageHeader, selectField, systemActionCard } from "../core/forms.js";
 import { esc, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
 import { closeModal, confirmModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { disposePluginSlot, notifyPluginPageUpdated } from "../core/plugin-runtime.js";
+import { selectControlMarkup } from "../core/controls.js";
 
 const LOG_NEAR_BOTTOM_PX = 40;
 const LOG_QUIET_PERIOD_MS = 700;
@@ -187,12 +188,12 @@ function updateSystemAction(status) {
   startSystemActionCountdown();
 }
 
-function dispatchScriptOptionMarkup(script) {
+function dispatchScriptOption(script) {
   const pluginStatus = scriptPluginStatus(script, state.plugins || []);
   const unavailable = pluginStatus.specialized && !pluginStatus.available;
   const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
   const unavailableLabel = pluginStatus.missing ? "（未知专项）" : "（专项插件不可用）";
-  return `<option value="${esc(script.id)}"${unavailable ? " disabled" : ""}${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(script.name)}${unavailable ? unavailableLabel : ""}</option>`;
+  return { value: script.id, label: `${script.name}${unavailable ? unavailableLabel : ""}`, disabled: unavailable, title: unavailableMessage };
 }
 
 export async function pageDispatch(token) {
@@ -208,9 +209,9 @@ export async function pageDispatch(token) {
     <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>正在运行（${(status.running || []).length}）</h3><span class="muted">每 1 秒更新</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>${pluginSlotMarkup("dispatch.running.badges", "dispatch.running.badges")}
     <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">开始一次运行</h3><span class="muted">选择目标后立即加入运行列表</span></div>
       <div class="dispatch-runbar">
-        <div class="field"><label class="field-label" for="dc-kind">目标类型</label><select id="dc-kind" data-action="dispatch-kind"><option value="script">脚本实例</option><option value="queue">调度队列</option></select></div>
-        <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script">脚本实例</label><select id="dc-script" data-testid="dispatch-script"><option value="">（选择脚本实例）</option>${scripts.map(dispatchScriptOptionMarkup).join("")}</select></div>
-        <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue">调度队列</label><select id="dc-queue"><option value="">（选择调度队列）</option>${queues.map(queue => `<option value="${esc(queue.id)}">${esc(queue.name)}</option>`).join("")}</select></div>
+        ${selectField("dc-kind", "目标类型", "script", [{ value: "script", label: "脚本实例" }, { value: "queue", label: "调度队列" }], 'data-action="dispatch-kind"')}
+        <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script-trigger">脚本实例</label>${selectControlMarkup("dc-script", "", [{ value: "", label: "（选择脚本实例）" }, ...scripts.map(dispatchScriptOption)], 'data-testid="dispatch-script"', "脚本实例")}</div>
+        <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue-trigger">调度队列</label>${selectControlMarkup("dc-queue", "", [{ value: "", label: "（选择调度队列）" }, ...queues.map(queue => ({ value: queue.id, label: queue.name }))], "", "调度队列")}</div>
         <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
       </div>
     </section>${pluginSlotMarkup("dispatch.run.sections", "dispatch.run.sections")}`);

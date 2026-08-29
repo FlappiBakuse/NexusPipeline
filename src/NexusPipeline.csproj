@@ -8,11 +8,16 @@
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>nexus-pipeline</AssemblyName>
     <RootNamespace>NexusPipeline</RootNamespace>
-    <Version>0.11.8</Version>
+    <Version>0.11.9</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CA1416</NoWarn>
     <ApplicationIcon>NexusPipeline.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(NexusTestHost)' == 'true'">
+    <ApplicationManifest>app.test.manifest</ApplicationManifest>
+    <DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>

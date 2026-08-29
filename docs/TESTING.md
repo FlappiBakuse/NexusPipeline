@@ -85,37 +85,34 @@ node tests\run.mjs build
 
 `default` 按 Unit + Component → Web Logic → 文档一致性 → UI Smoke 语法 → 构建顺序执行，并实时转发每个子进程的输出。
 
-## 管理员终端硬约束
+## 权限边界与普通权限 Test Host
 
-需要启动真实产品进程、创建受保护运行时资源或执行进程树/更新事务检查的测试，必须在管理员终端中运行。执行前核对终端完整性级别为 High 或 System；当前终端权限不足时，先打开管理员 PowerShell 或命令提示符，再切换到项目根目录执行规范命令。
+正式产品构建继续使用 `requireAdministrator` 清单，满足脚本进程控制、系统操作和托盘运行边界。活动自动化测试统一要求当前终端为 Medium integrity 普通权限，由 Node 调度器在 `tests/.artifacts/test-host/` 构建 `asInvoker` Test Host。
 
-UI/System Smoke 的管理员前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。不得修改前置检查、降低测试权限、跳过套件、自动重试掩盖状态或将阻断状态记录为通过。
+Test Host 具备以下测试专用能力：
 
-### 从 Medium token 打开管理员终端
+- 只绑定 `127.0.0.1` 的托管 loopback HTTP transport，不依赖 HTTP.sys URLACL；业务路由、认证、静态资源和 API 处理逻辑与生产 WebServer 共用；
+- 运行数据写入每个 suite 自己的 `tests/system/runtime-*/` 或 `tests/e2e/runtime/`；
+- 使用隔离退出信号收尾常驻服务、重启子进程和更新 worker，runner 不需要 UAC 或管理员进程树权限；
+- 测试宿主包含 `NEXUS_TEST_HOST` 编译常量，生产宿主不加载测试回退逻辑。
 
-如果当前账户属于本机 Administrators，但当前 PowerShell 仍显示 `Medium Mandatory Level`，在当前项目根目录执行：
-
-```powershell
-Start-Process -FilePath pwsh.exe -Verb RunAs -WorkingDirectory (Get-Location).Path -ArgumentList '-NoProfile','-NoExit'
-```
-
-在新窗口中重新核对完整性级别：
+执行前用以下命令确认当前 token 为 Medium：
 
 ```powershell
-whoami /groups | Select-String 'S-1-16-12288|S-1-16-16384'
+whoami /groups | Select-String 'S-1-16-8192'
 ```
 
-输出 `S-1-16-12288`（High）或 `S-1-16-16384`（System）后，才执行 `node tests\run.mjs ui` 与 `node tests\run.mjs system`。若当前账户不属于 Administrators，必须切换到具备该权限的账户；凭据、token 或安全策略绕过不属于测试流程。
+UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。
 
 ## UI Smoke
 
-在完成构建后，从管理员终端执行：
+在项目根目录执行：
 
 ```text
 node tests\run.mjs ui
 ```
 
-入口会使用 `whoami /groups` 的完整性 SID 检查 High/System integrity。非管理员环境立即以 exit code `2` 退出，不在测试内部触发 UAC；`tests/e2e/run-e2e.cmd` 仅保留为兼容转发入口。
+入口会使用 `whoami /groups` 的完整性 SID 检查 Medium integrity，并自动构建隔离的 `asInvoker` Test Host；不在测试内部触发 UAC。`tests/e2e/run-e2e.cmd` 仅保留为兼容转发入口。
 
 当前 UI Smoke 使用四个 spec 文件：
 
@@ -141,11 +138,11 @@ tests/e2e/tests/
 
 新增或保留 UI Smoke 前，测试说明应能回答“业务不变量、失败模式、最低充分层级”三项问题；能够在 Unit、Component、Web Logic 或 System Smoke 证明的行为不占用 UI 配额。断言优先定位稳定的 `data-testid`、`data-action` 和业务 ID；禁止依赖按钮顺序、装饰性 class、随机 CSS 层级、精确像素坐标、SVG 数量和完整磁盘文件内容。
 
-普通 UI Smoke 使用一次 global setup 启动服务、一次 global teardown 关闭服务。服务意外退出应直接暴露为测试失败；服务重启、端口占用、UAC、进程树和 interpreter 场景由 System Smoke 独立负责。
+普通 UI Smoke 使用一次 global setup 启动 Test Host、一次 global teardown 关闭服务。服务意外退出应直接暴露为测试失败；服务重启、端口占用、进程树和 interpreter 场景由 System Smoke 独立负责。
 
 ## System Smoke
 
-System Smoke 需要管理员终端和已完成的构建，统一入口为：
+System Smoke 需要普通权限终端；统一入口会先完成生产构建，再创建隔离的 Test Host：
 
 ```text
 node tests\run.mjs system
@@ -171,7 +168,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前必须在管理员终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 
@@ -181,4 +178,4 @@ flake 视为测试或产品同步问题。处理顺序为：降低测试层级�
 
 ## 测试隔离与清理
 
-运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/stress/runtime/` 或历史工具专用的 `tests/legacy/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，并清理 PID、停止信号、临时 runtime、test-results 和专项日志。
+运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/.artifacts/test-host/`、`tests/stress/runtime/` 或历史工具专用的 `tests/legacy/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，并清理 PID、停止信号、临时 Test Host、runtime、test-results 和专项日志。

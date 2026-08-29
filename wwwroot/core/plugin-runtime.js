@@ -1,5 +1,6 @@
 import { api } from "./api.js";
 import { appearance, createAppearanceHost, refreshAppearance } from "./appearance.js";
+import { colorControlMarkup, fileControlMarkup, numberControlMarkup, rangeControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 import { toast } from "./ui.js";
 import { captureExecutionPreview } from "./execution-preview.js";
 
@@ -199,6 +200,20 @@ function createHost(descriptor) {
         api("POST", `/api/plugin-contributions/ui/${encodeURIComponent(pluginName)}/${encodeURIComponent(contributionId)}/action/${encodeURIComponent(action)}`, { context, values }, signal),
       toast: (message, tone = "info") => toast(message, tone),
     },
+    controls: Object.freeze({
+      select: ({ id, value = "", options = [], extra = "", ariaLabel = "", multiple = false } = {}) =>
+        selectControlMarkup(id, value, options, extra, ariaLabel, multiple),
+      number: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
+        numberControlMarkup(id, value, extra, ariaLabel),
+      range: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
+        rangeControlMarkup(id, value, extra, ariaLabel),
+      time: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
+        timeControlMarkup(id, value, extra, ariaLabel),
+      file: ({ id, extra = "", accept = "", multiple = false, label = "选择文件" } = {}) =>
+        fileControlMarkup(id, extra, accept, multiple, label),
+      color: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
+        colorControlMarkup(id, value, extra, ariaLabel),
+    }),
     executionPreview: {
       capture: (runId, signal) => captureExecutionPreview(runId, descriptor.name, signal),
     },

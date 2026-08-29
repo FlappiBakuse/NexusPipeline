@@ -145,12 +145,13 @@ settings.sections               shell.nav
 - `host.nav.register({ id, title, route, icon, order })`：向 `shell.nav` 增加导航项；
 - `host.slots.register(slot, renderer)`：接入稳定 UI slot，自定义 renderer 可返回清理函数；
 - `host.ui.query/save/action(...)`：使用声明式 UI 贡献接口；
+- `host.controls.select/number/range/time/file/color(...)`：生成宿主统一的自定义交互控件；参数中的 `id`、`value`、`options`、`extra` 和 `ariaLabel` 由插件传入，控件保留稳定的隐藏值载体与 `data-*` 标记；
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
 - `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
 - `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。
 
-前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 兼容性、公开资源路径、扩展名和文件存在性。同源前端可以访问管理页面可用的 DOM 与请求能力，插件发布前应完成代码审查。
+前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 兼容性、公开资源路径、扩展名和文件存在性。同源前端可以访问管理页面可用的 DOM 与请求能力，插件发布前应完成代码审查。可见选择、数字、时间、文件和颜色交互应优先使用 `host.controls`；文件选择器和取色器的浏览器载体保持隐藏，range 使用可访问的语义 input 并由宿主 CSS 绘制视觉层。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 

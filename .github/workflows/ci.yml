@@ -72,7 +72,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: 发布构建（提权版；runner 以管理员运行，无需 UAC）
+      - name: 构建发布源
         shell: cmd
         run: node tests\run.mjs build
 

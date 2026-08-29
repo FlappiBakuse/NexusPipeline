@@ -13,7 +13,7 @@
 | Node.js | 20.x | Web Logic、System Smoke 和 Playwright 测试 |
 
 - 网页管理界面为纯静态 ES modules，浏览器直接加载；源码构建不需要前端打包链。
-- 程序必须以管理员身份运行。正式构建带 `requireAdministrator` 清单，开发调试请使用管理员 shell。
+- 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；自动化 UI/System 调试由 runner 构建 `asInvoker` Test Host，在 Medium integrity 普通权限执行。
 - `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见 [TESTING.md](TESTING.md)。
 
 ## 2. 从源码编译
@@ -62,7 +62,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 4. 测试入口
 
-测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。统一入口为 `node tests/run.mjs default|ui|system|all`；每次改动按照修改范围执行对应门禁；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加管理员 System Smoke。
+测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。统一入口为 `node tests/run.mjs default|ui|system|all`；每次改动按照修改范围执行对应门禁；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加普通权限 System Smoke。
 
 ## 5. 调试技巧
 
@@ -81,14 +81,15 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 |---|---|
 | `NEXUS_TIME_SCALE` | 缩放宿主等待时长；判断脚本单次 30 秒上限保持真实墙钟语义 |
 | `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 记录休眠、重启或关机请求，不执行真实系统操作 |
-| `NEXUS_SYSTEM_SMOKE=1` | 启用管理员 System Smoke 运行模式 |
+| `NEXUS_SYSTEM_SMOKE=1` | 启用普通权限 Test Host System Smoke 运行模式 |
+| `NEXUS_TEST_HOST=1` | 由 runner 标记 asInvoker Test Host 进程 |
 | `NEXUS_PLUGIN_CATALOG_URL` | 将插件 catalog 指向本地测试源；生产环境不设置 |
 
 ### 5.3 Windows 环境注意事项
 
 - 控制台、管道和文件使用 UTF-8；批处理和中文文件操作应保持无 BOM 的 UTF-8。
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
-- 脚本运行必须在管理员上下文中完成。目标程序返回 Win32Exception 740 时应明确失败，保留管理员运行边界。
+- 正式脚本运行必须在管理员上下文中完成。Test Host 的脚本与解释器边界使用隔离 runtime 验证；目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
 - 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
 
@@ -124,7 +125,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 现象 | 排查方向 |
 |---|---|
-| 启动即退出 | 确认以管理员身份运行，检查程序启动日志和 exit code |
+| 启动即退出 | 正式程序确认管理员上下文；Test Host 检查隔离 runtime、启动日志和 exit code |
 | 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
 | Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
 | 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |

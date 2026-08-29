@@ -3,6 +3,11 @@ import { api, baseUrl, createScript, makeScriptDir, PING_GAME, waitNoRunning } f
 import fs from "node:fs";
 import path from "node:path";
 
+async function chooseCustomSelect(page, id, value) {
+  await page.locator(`#${id}-trigger`).click();
+  await page.locator(`#${id}-menu [data-nxp-select-option][data-value="${value}"]`).click();
+}
+
 test("调度队列入口：创建、编辑和删除一个手动队列", async ({ page }) => {
   const suffix = Date.now();
   const fixture = makeScriptDir(`smoke-queue-${suffix}`);
@@ -13,7 +18,7 @@ test("调度队列入口：创建、编辑和删除一个手动队列", async ({
     await page.getByRole("button", { name: "新建调度队列", exact: true }).click();
     await page.locator("#qm-name").fill(`Smoke 队列-${suffix}`);
     await page.getByRole("button", { name: "+ 添加任务", exact: true }).click();
-    await page.locator('[data-task-idx="0"]').selectOption(script.id);
+    await chooseCustomSelect(page, "qm-task-0", script.id);
     await page.locator(".modal").getByRole("button", { name: "保存", exact: true }).click();
     const card = page.getByTestId("queue-card").filter({ hasText: `Smoke 队列-${suffix}` }).first();
     await expect(card).toBeVisible();
@@ -55,8 +60,8 @@ test("调度中心入口：从队列选择器启动并看到运行状态", async
   const queue = await queueResponse.json();
   try {
     await page.goto(baseUrl + "#/dispatch", { waitUntil: "domcontentloaded" });
-    await page.selectOption("#dc-kind", "queue");
-    await page.selectOption("#dc-queue", queue.id);
+    await chooseCustomSelect(page, "dc-kind", "queue");
+    await chooseCustomSelect(page, "dc-queue", queue.id);
     const dispatchResponse = page.waitForResponse(response => response.url().endsWith("/api/dispatch/queue") && response.request().method() === "POST");
     await page.getByTestId("dispatch-run").click();
     expect((await dispatchResponse).ok()).toBeTruthy();

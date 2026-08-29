@@ -9,6 +9,7 @@ import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.j
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { selectControlMarkup } from "../core/controls.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -269,8 +270,8 @@ export async function openScriptModal(id = "", plugin = "") {
           <textarea id="sm-fail-kw" placeholder="命中即判定失败并终止本次尝试，按最大尝试次数重试；语法同成功关键字">${esc(d.failureKeywords)}</textarea>
         </div>
         <div id="sm-script-box" ${d.judgeScriptEnabled ? "" : "hidden"}>
-          <label class="field-label" for="sm-judge-lang">判断脚本语言</label>
-          <select id="sm-judge-lang"><option value="javascript" ${d.judgeScriptLanguage === "python" ? "" : "selected"}>JavaScript（内置引擎）</option><option value="python" ${d.judgeScriptLanguage === "python" ? "selected" : ""}>Python（系统解释器）</option></select>
+          <label class="field-label" for="sm-judge-lang-trigger">判断脚本语言</label>
+          ${selectControlMarkup("sm-judge-lang", d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: "JavaScript（内置引擎）" }, { value: "python", label: "Python（系统解释器）" }], "", "判断脚本语言")}
           <label class="field-label" for="sm-judge-code">判断脚本代码</label>
           <textarea id="sm-judge-code" class="mono code-area" placeholder="输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}">${esc(d.judgeScript)}</textarea>
           <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
@@ -359,7 +360,10 @@ export function uploadJudgeScript() {
       const code = $dom("#sm-judge-code");
       const language = $dom("#sm-judge-lang");
       if (code) code.value = String(reader.result || "");
-      if (language) language.value = lang;
+      if (language) {
+        language.value = lang;
+        language.dispatchEvent(new Event("change", { bubbles: true }));
+      }
       toast(`已载入脚本（${lang === "python" ? "Python" : "JavaScript"}）`);
     };
     reader.readAsText(file, "utf-8");

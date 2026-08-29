@@ -1,4 +1,5 @@
 import { esc } from "./format.js";
+import { numberControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 
 export function pageHeader(kicker, title, description, action = "") {
   return `<header class="page-head"><div class="page-head-copy">${kicker ? `<div class="eyebrow">${kicker}</div>` : ""}<h2>${title}</h2>${description ? `<p class="page-kicker">${description}</p>` : ""}</div>${action ? `<div class="page-head-actions">${action}</div>` : ""}</header>`;
@@ -9,7 +10,12 @@ function fieldErrorSlot(id) {
 }
 
 export function valueField(id, label, value, type = "text", extra = "") {
-  return `<div class="field"><label class="field-label" for="${id}">${label}</label><input id="${id}" type="${type}" value="${esc(value)}" ${extra}>${fieldErrorSlot(id)}</div>`;
+  const control = type === "number"
+    ? numberControlMarkup(id, value, extra, String(label).replace(/<[^>]*>/g, ""))
+    : type === "time"
+      ? timeControlMarkup(id, value, extra, String(label).replace(/<[^>]*>/g, ""))
+      : `<input id="${id}" type="${type}" value="${esc(value)}" ${extra}>`;
+  return `<div class="field"><label class="field-label" for="${id}">${label}</label>${control}${fieldErrorSlot(id)}</div>`;
 }
 
 /** 多行文本填写框：label 在上，正文 textarea，与单行字段同构。 */
@@ -27,7 +33,7 @@ export function scrollField(id, label, value, placeholder = "") {
 
 export function selectField(id, label, value, options, extra = "") {
   // option 的 value 与文本经 esc 转义（此前值含引号/尖括号会破坏 HTML 结构）。
-  return `<div class="field"><label class="field-label" for="${id}">${label}</label><select id="${id}" ${extra}>${options.map(option => { const v = typeof option === "string" ? option : option.value; const t = typeof option === "string" ? option : option.label; return `<option value="${esc(v)}" ${v === value ? "selected" : ""}>${esc(t)}</option>`; }).join("")}</select>${fieldErrorSlot(id)}</div>`;
+  return `<div class="field"><label class="field-label" for="${id}-trigger">${label}</label>${selectControlMarkup(id, value, options, extra, String(label).replace(/<[^>]*>/g, ""))}${fieldErrorSlot(id)}</div>`;
 }
 
 /** 标准布尔开关：状态由 aria-pressed 表达，视觉层不再依赖「开/关」文案。 */

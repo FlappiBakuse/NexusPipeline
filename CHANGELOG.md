@@ -2,6 +2,32 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.11.9（Pre-release）
+
+### 测试与运行宿主
+
+- 自动化测试迁移至普通权限 Test Host，覆盖托管 loopback、隔离运行时和测试退出收尾。
+- CLI、Control API、MCP、进程韧性、模拟器和更新事务补齐普通权限回归验证。
+
+### 前端控件与主题
+
+- 统一可见选择框、数字输入、时间选择器、日期段选择器、文件、颜色和滑块控件的 NexusPipeline 自定义界面。
+- 时间选择器支持数字选择、上下调整和外部失焦提交；历史记录日期段支持连续选择、跨月选择、应用和外部提交。
+- 修复浅色主题、无自定义壁纸场景、壁纸透明度场景下的卡片与内嵌卡片表面颜色和透明度同步。
+- 修复插件详情加载失败，恢复安装、更新和卸载操作；插件仓库按通用插件优先排序。
+
+### 官方插件
+
+- 更新 CustomWallpaper v0.1.5，统一设置页控件与主题表面表现。
+- 更新 GameCheckIn v0.1.4，统一两个平台的多选游戏选择器。
+
+### 验证
+
+- 默认门禁：Unit/Component 419 项、Web Logic 17 项、文档一致性 7 项全部通过。
+- 普通权限 UI Smoke 11/11 通过。
+- 普通权限 System Smoke：MCP 4/4、runtime 11/11、judge 1 项通过且 Python 场景按环境缺失跳过、执行韧性 10/10、模拟器 2/2、更新 3/3。
+- NexusPipeline-Plugins 全量验证、managed-code 构建和 GameCheckIn 测试 7/7 通过。
+
 ## v0.11.6（Pre-release）
 
 ### 自定义壁纸 v0.1.3

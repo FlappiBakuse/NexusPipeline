@@ -626,13 +626,17 @@ internal sealed class PluginRepositoryService
                 HasReadme = local.HasReadme,
             });
         }
+        IReadOnlyList<PluginStoreItem> orderedItems = items
+            .OrderBy(item => string.Equals(item.Kind, "data-specialized", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
         return new PluginStoreSnapshot(
             true,
             stale,
             fetchedAt,
             error,
             catalog,
-            items);
+            orderedItems);
     }
 
     private void TryLoadPersistentCache()

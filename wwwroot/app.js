@@ -79,9 +79,6 @@ document.addEventListener("click", event => {
   if (!event.target.closest(".overflow-menu-wrap")) closeMoreMenus();
   const target = event.target.closest("[data-action]");
   if (!target) return;
-  // 原生 select 的 data-action 由 change 事件唯一分发——select 上点击（打开/选项变更）同样会
-  // 触发本 click 委托，与 change 委托叠加即双触发（当前调用点幂等未暴露，属隐患模式）。
-  if (target.matches("select") || target.matches("option")) return;
   const handler = actionHandler(target.dataset.action);
   if (handler) handler(target, event);
   if (target.matches('[role="menuitem"]')) closeMoreMenus();

@@ -24,6 +24,26 @@ export function isAdministrator() {
   return result.status === 0 && /S-1-16-(?:12288|16384)\b/i.test(output);
 }
 
+/**
+ * Medium integrity is the normal desktop-user boundary used by the test host.
+ * Checking the mandatory-label SID keeps this contract independent of the
+ * localized text emitted by whoami.
+ */
+export function isMediumIntegrity() {
+  if (process.platform !== "win32") return false;
+  const result = run("whoami", ["/groups"]);
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+  return result.status === 0
+    && /S-1-16-8192\b/i.test(output)
+    && !/S-1-16-(?:12288|16384)\b/i.test(output);
+}
+
+export function requireMediumIntegrity(label = "该测试入口") {
+  if (isMediumIntegrity()) return true;
+  console.error(`[错误] ${label}必须在普通权限（Medium Integrity）终端运行。请使用：node tests/run.mjs ${label === "UI Smoke" ? "ui" : label === "System Smoke" ? "system" : "default"}`);
+  return false;
+}
+
 export function requireAdministrator(label = "该测试入口") {
   if (isAdministrator()) return true;
   console.error(`[错误] ${label}需要管理员终端。请在管理员终端执行：node tests/run.mjs ${label === "UI Smoke" ? "ui" : "system"}`);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  isAdministrator,
+  isMediumIntegrity,
   isProcessAlive,
   killProcessTree,
   readPidFile,
@@ -12,7 +12,12 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
-export const releaseDir = path.join(projectRoot, "release");
+const productionReleaseDir = path.join(projectRoot, "release");
+const configuredTestHostDir = process.env.NEXUS_TEST_HOST_DIR?.trim();
+export const testHostDir = configuredTestHostDir
+  ? (path.isAbsolute(configuredTestHostDir) ? configuredTestHostDir : path.resolve(projectRoot, configuredTestHostDir))
+  : path.join(projectRoot, "tests", ".artifacts", "test-host");
+export const releaseDir = process.env.NEXUS_TEST_HOST === "1" ? testHostDir : productionReleaseDir;
 const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
 if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
@@ -20,6 +25,11 @@ if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
 export const runtimeDir = path.join(here, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
+export const testHostExitFile = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim()
+  ? (path.isAbsolute(process.env.NEXUS_TEST_HOST_EXIT_FILE.trim())
+    ? process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()
+    : path.resolve(projectRoot, process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()))
+  : path.join(runtimeDir, ".nxp", "test-host.exit");
 const webPortPath = path.join(runtimeDir, ".nxp", "runtime", "web.port");
 export const baseUrl = "http://127.0.0.1:58731/";
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
@@ -43,8 +53,8 @@ export function serviceUrl() {
   return baseUrl;
 }
 
-export function isElevated() {
-  return isAdministrator();
+export function isNormalIntegrity() {
+  return isMediumIntegrity();
 }
 
 function ownedPids() {
@@ -62,7 +72,7 @@ export function prepareRuntime() {
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) {
-    throw new Error("release/nexus-pipeline.exe 不存在，请先运行 build.cmd");
+    throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs system`);
   }
   fs.copyFileSync(sourceExe, runtimeExe);
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
@@ -85,6 +95,9 @@ export function isRuntimeAlive(pid) {
 export function startRuntime(args = [], extraEnv = {}) {
   stdout = "";
   stderr = "";
+  if (process.env.NEXUS_TEST_HOST === "1") {
+    fs.rmSync(testHostExitFile, { force: true });
+  }
   const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
     .filter(Boolean)
     .join(",");
@@ -99,9 +112,12 @@ export function startRuntime(args = [], extraEnv = {}) {
     HTTPS_PROXY: "",
     http_proxy: "",
     https_proxy: "",
+    NEXUS_TEST_HOST_EXIT_FILE: testHostExitFile,
     ...extraEnv,
   };
-  child = spawn(runtimeExe, args, {
+  // System Smoke 统一使用 web 模式：stdin EOF 可触发受控退出，重启测试不依赖管理员 taskkill。
+  const launchArgs = args.length === 0 ? ["web"] : args;
+  child = spawn(runtimeExe, launchArgs, {
     cwd: runtimeDir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -114,6 +130,19 @@ export function startRuntime(args = [], extraEnv = {}) {
 }
 
 export async function stopRuntime() {
+  const currentChild = child;
+  if (process.env.NEXUS_TEST_HOST === "1") {
+    fs.mkdirSync(path.dirname(testHostExitFile), { recursive: true });
+    fs.writeFileSync(testHostExitFile, "stop\n", "utf8");
+  }
+  if (currentChild?.stdin && !currentChild.stdin.destroyed) {
+    try {
+      currentChild.stdin.end();
+      await waitForExit(currentChild.pid, 5000, 100);
+    } catch {
+      // 受控退出失败时继续使用隔离 PID 清理。
+    }
+  }
   const pids = ownedPids();
   for (const pid of pids) killProcessTree(pid);
   for (const pid of pids) await waitForExit(pid, 10000, 250);

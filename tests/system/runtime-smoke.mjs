@@ -8,7 +8,7 @@ import path from "node:path";
 import {
   api,
   fetchWithTimeout,
-  isElevated,
+  isNormalIntegrity,
   isRuntimeAlive,
   makeFixture,
   prepareRuntime,
@@ -23,10 +23,10 @@ import {
   writeBatch,
 } from "./runtime-helper.mjs";
 
-const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1" && isElevated();
+const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
-  : "System Smoke 需要管理员终端";
+  : "System Smoke 需要普通权限 Test Host";
 const skip = enabled ? false : skipReason;
 
 function runCli(args, input = "", timeout = 10000) {
@@ -87,6 +87,7 @@ function runCliAsync(args, input = "", timeout = 20000) {
 
 before(async () => {
   if (!enabled) return;
+  assert.ok(isNormalIntegrity(), "System Smoke 必须在普通权限（Medium Integrity）终端运行");
   prepareRuntime();
   startRuntime();
   await waitForService();
@@ -105,6 +106,57 @@ test("release binary 启动并提供 status API", { skip }, async () => {
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
   assert.ok(status.actualPort >= 1024 && status.actualPort <= 65535);
   assert.ok(Array.isArray(status.running));
+});
+
+test("普通权限 Test Host 可在无 URLACL 的 loopback 随机端口提供 status API", { skip, concurrency: false }, async () => {
+  assert.ok(isNormalIntegrity(), "HTTP Probe 必须在普通权限（Medium Integrity）终端运行");
+  const settingsPath = path.join(runtimeDir, "config", "settings.json");
+  const originalSettings = fs.existsSync(settingsPath)
+    ? fs.readFileSync(settingsPath, "utf8")
+    : null;
+  const blocker = net.createServer();
+  await new Promise((resolve, reject) => {
+    blocker.once("error", reject);
+    blocker.listen(0, "127.0.0.1", resolve);
+  });
+  const port = blocker.address().port;
+  await new Promise((resolve, reject) => blocker.close(error => error ? reject(error) : resolve()));
+  const settings = originalSettings ? JSON.parse(originalSettings.replace(/^\uFEFF/u, "")) : {};
+  settings.WebPort = port;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+  try {
+    const acl = spawnSync("netsh", ["http", "show", "urlacl"], { encoding: "utf8", windowsHide: true });
+    const aclOutput = `${acl.stdout || ""}\n${acl.stderr || ""}`;
+    if (acl.status === 0) {
+      assert.doesNotMatch(
+        aclOutput,
+        new RegExp(`https?://(?:127\\.0\\.0\\.1|\\+):${port}/`, "i"),
+        `随机探针端口已有 URLACL：${aclOutput}`,
+      );
+    } else {
+      // HTTP.sys URLACL 查询本身可能要求管理员句柄；随机 loopback 绑定
+      // 仍由 Test Host 的托管 transport 直接验证普通权限路径。
+      process.stderr.write("ℹ 普通权限无法读取 HTTP.sys URLACL，继续验证随机 loopback 绑定。\n");
+    }
+    await stopRuntime();
+    startRuntime(["web"]);
+    const probeUrl = `http://127.0.0.1:${port}/`;
+    await waitForService(probeUrl, 30000);
+    const response = await fetchWithTimeout(`${probeUrl}api/status`);
+    assert.equal(response.status, 200);
+    const status = await response.json();
+    assert.equal(status.service, "NexusPipeline");
+    assert.equal(status.actualPort, port);
+  } finally {
+    await stopRuntime();
+    if (originalSettings === null) {
+      fs.rmSync(settingsPath, { force: true });
+    } else {
+      fs.writeFileSync(settingsPath, originalSettings, "utf8");
+    }
+    startRuntime();
+    await waitForService();
+  }
 });
 
 test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip }, () => {
@@ -292,6 +344,9 @@ test("非法 limits 配置触发 fatal startup 并可恢复", { skip }, async ()
 });
 
 test("重启接受后立即冻结旧服务的运行与配置写入准入", { skip, concurrency: false }, async () => {
+  await stopRuntime();
+  startRuntime(["service"]);
+  await waitForService();
   const fixture = makeFixture("restart-maintenance");
   writeBatch(fixture, ["echo restart-maintenance>>\"" + fixture.log + "\""]);
   let scriptId = "";
@@ -342,6 +397,9 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     await waitForService();
   } finally {
     if (scriptId) await api("DELETE", `/api/scripts/${encodeURIComponent(scriptId)}`);
+    await stopRuntime();
+    startRuntime(["web"]);
+    await waitForService();
   }
 });
 

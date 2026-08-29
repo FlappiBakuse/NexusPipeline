@@ -1,7 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem v0.10.8 起插件由独立仓库管理；源码指纹只覆盖宿主 src，前端静态资源单独同步。
+rem v0.11.9 起自动化 UI/System Smoke 使用 tests/.artifacts/test-host 的 asInvoker 宿主。
+rem Plugin repository is maintained separately; the source hash covers host src and static wwwroot is synced independently.
 rem .build-src-hash records the host source fingerprint used to skip unchanged publishes.
 for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs"`) do set SRC_HASH=%%h
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
@@ -20,7 +21,8 @@ mkdir "%~dp0release\plugins" >nul 2>nul
 > "%~dp0release\plugins\.nxp-root" echo {"owner":"NexusPipeline","purpose":"plugin-runtime-root","version":1}
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
-echo Run from an Administrator command prompt for HttpListener and system smoke tests.
+echo Production executable uses the requireAdministrator manifest.
+echo UI/System Smoke builds an isolated asInvoker Test Host automatically.
 echo Runtime data directories are created on first launch.
 exit /b 0
 

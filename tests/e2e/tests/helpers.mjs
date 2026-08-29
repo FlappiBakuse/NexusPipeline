@@ -11,10 +11,20 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(__dirname, "..", "..", "..");
-export const releaseDir = path.join(projectRoot, "release");
+const productionReleaseDir = path.join(projectRoot, "release");
+const configuredTestHostDir = process.env.NEXUS_TEST_HOST_DIR?.trim();
+export const testHostDir = configuredTestHostDir
+  ? (path.isAbsolute(configuredTestHostDir) ? configuredTestHostDir : path.resolve(projectRoot, configuredTestHostDir))
+  : path.join(projectRoot, "tests", ".artifacts", "test-host");
+export const releaseDir = process.env.NEXUS_TEST_HOST === "1" ? testHostDir : productionReleaseDir;
 export const runtimeDir = path.join(__dirname, "..", "runtime");
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
+export const testHostExitFile = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim()
+  ? (path.isAbsolute(process.env.NEXUS_TEST_HOST_EXIT_FILE.trim())
+    ? process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()
+    : path.resolve(projectRoot, process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()))
+  : path.join(runtimeDir, ".nxp", "test-host.exit");
 export const baseUrl = "http://127.0.0.1:58731/";
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
@@ -51,7 +61,7 @@ export function setupRuntime() {
   fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
-  if (!fs.existsSync(sourceExe)) throw new Error("release/nexus-pipeline.exe 不存在，请先运行 build.cmd");
+  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ui`);
   fs.copyFileSync(sourceExe, runtimeExe);
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
   const plugins = path.join(releaseDir, "plugins");
@@ -72,11 +82,13 @@ export function setupRuntime() {
 
 export function startService() {
   fs.rmSync(servicePidPath, { force: true });
+  fs.rmSync(testHostExitFile, { force: true });
   const env = {
     ...process.env,
     NEXUS_SYSTEM_ACTION_DRYRUN: process.env.NEXUS_SYSTEM_ACTION_DRYRUN || "1",
     NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || path.join(runtimeDir, "adb-stub", "adb-stub.cmd"),
     NEXUS_MUMU_MANAGER_EXE: process.env.NEXUS_MUMU_MANAGER_EXE || path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd"),
+    NEXUS_TEST_HOST_EXIT_FILE: testHostExitFile,
   };
   child = spawn(runtimeExe, ["web"], {
     cwd: runtimeDir,
@@ -101,6 +113,10 @@ export async function waitForService(timeoutMs = 30000) {
 }
 
 export async function stopService() {
+  if (process.env.NEXUS_TEST_HOST === "1") {
+    fs.mkdirSync(path.dirname(testHostExitFile), { recursive: true });
+    fs.writeFileSync(testHostExitFile, "stop\n", "utf8");
+  }
   const pids = ownedPids();
   for (const pid of pids) killProcessTree(pid);
   for (const pid of pids) await waitForExit(pid, 10000, 250);

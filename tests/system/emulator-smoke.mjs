@@ -6,7 +6,7 @@ import {
   api,
   adbStub,
   deleteScript,
-  isElevated,
+  isNormalIntegrity,
   makeFixture,
   mumuStub,
   prepareRuntime,
@@ -19,14 +19,15 @@ import {
   runtimeDir,
 } from "./runtime-helper.mjs";
 
-const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1" && isElevated();
+const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
-  : "System Smoke 需要管理员终端";
+  : "System Smoke 需要普通权限 Test Host";
 const skip = enabled ? false : skipReason;
 
 before(async () => {
   if (!enabled) return;
+  assert.ok(isNormalIntegrity(), "System Smoke 必须在普通权限（Medium Integrity）终端运行");
   prepareRuntime();
   startRuntime([], { NEXUS_ADB_EXE: adbStub, NEXUS_MUMU_MANAGER_EXE: mumuStub });
   await waitForService();

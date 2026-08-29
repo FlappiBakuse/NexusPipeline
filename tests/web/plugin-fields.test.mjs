@@ -22,7 +22,7 @@ test("switchControl keeps required markup out of aria-label", () => {
   assert.doesNotMatch(markup, /aria-label="[^"]*class=/);
 });
 
-test("plugin multi-select renders a dropdown menu with checked options", () => {
+test("plugin multi-select reuses the shared dropdown control with selected options", () => {
   const markup = pluginMultiSelectMarkup(
     "gm-plugin-hoyolab-user-settings-games",
     {
@@ -39,23 +39,24 @@ test("plugin multi-select renders a dropdown menu with checked options", () => {
     ["gi"],
   );
 
-  assert.match(markup, /class="plugin-multi-select"/);
-  assert.match(markup, /data-action="toggle-plugin-multi-select"/);
-  assert.match(markup, /role="listbox" aria-label="签到游戏" aria-multiselectable="true"/);
-  assert.match(markup, /value="gi"[^>]*checked/);
+  assert.match(markup, /class="nxp-select" data-nxp-select data-nxp-select-multiple="true" data-plugin-field="games"/);
+  assert.match(markup, /data-nxp-select-multiple="true"/);
+  assert.match(markup, /role="listbox" aria-multiselectable="true"/);
+  assert.match(markup, /data-value="gi"[^>]*aria-selected="true"/);
+  assert.match(markup, /class="nxp-select-check"[^>]*>✓<\/span>/u);
+  assert.doesNotMatch(markup, /type="checkbox"/);
   assert.doesNotMatch(markup, /<select[^>]*multiple/);
 });
 
-test("selectedPluginMultiSelectValues reads checked custom options", () => {
+test("selectedPluginMultiSelectValues reads selected custom options", () => {
   const inputs = [
-    { value: "gi", checked: true },
-    { value: "hsr", checked: false },
-    { value: "zzz", checked: true },
+    { dataset: { value: "gi" } },
+    { dataset: { value: "zzz" } },
   ];
   const element = {
     querySelectorAll(selector) {
-      assert.equal(selector, "input[data-plugin-multi-option]:checked");
-      return inputs.filter(input => input.checked);
+      assert.equal(selector, '[data-plugin-multi-option][aria-selected="true"]');
+      return inputs;
     },
   };
 

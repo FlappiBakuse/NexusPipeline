@@ -1082,7 +1082,10 @@ export function togglePluginMultiSelect(target) {
 }
 
 export function syncPluginMultiSelectOption(target) {
-  syncPluginMultiSelect(target.closest(".plugin-multi-select"));
+  const option = target.closest("[data-plugin-multi-option]");
+  if (!option || option.disabled) return;
+  option.setAttribute("aria-selected", option.getAttribute("aria-selected") === "true" ? "false" : "true");
+  syncPluginMultiSelect(option.closest(".plugin-multi-select"));
 }
 
 if (typeof document !== "undefined") {

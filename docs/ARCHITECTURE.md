@@ -67,7 +67,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 |---|---|---|
 | `Program` | src/Application/ProgramEntry.cs | 进程入口，仅转交 `ApplicationHost.Run(args)` |
 | `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化、服务生命周期入口和兼容命令分发 |
-| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 管理员权限、旧配置迁移、约束/设置/数据加载；不启动服务 |
+| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 生产管理员权限校验、Test Host 编译分支、旧配置迁移、约束/设置/数据加载；不启动服务 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、恢复、Web/托盘生命周期 |
 | `RuntimeStateLayout` | src/Persistence/RuntimeStateLayout.cs | 取得 service ownership 后创建 `.nxp` 目录、迁移旧运行状态、保存冲突现场和提供旧端口兼容读取 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
@@ -112,7 +112,8 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.4 DTO 均从此入口发送 |
-| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
+| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
+| `WebTransport` | src/Web/WebTransport.cs | Test Host 的普通权限 HTTP 请求解析、响应流和 HttpListener/托管 transport 共用上下文适配 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
 | `McpHost` | src/Mcp/McpHost.cs | 同进程内嵌的 Kestrel Streamable HTTP MCP 宿主；固定 loopback 监听、启动/停止和工具注册；端口冲突不漂移且不影响 Web/Control API |
@@ -199,7 +200,8 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 | `core/api.js` | 请求封装（JSON/错误/AbortController 生命周期联动） |
 | `core/dom.js` | `$` / `$$` 查询 |
 | `core/format.js` | 格式化/转义/徽章模板 |
-| `core/forms.js` | 共享表单模板（pageHeader/valueField/selectField） |
+| `core/forms.js` | 共享表单模板（pageHeader/valueField/selectField），数字/时间/选择控件接入统一自定义控件层 |
+| `core/controls.js` | NexusPipeline 自定义 select、number、time、file、color 与 range 控件的模板、事件委托和键盘/ARIA 行为 |
 | `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
 | `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时 |
 | `core/plugin-runtime.js` | Frontend API 1.2：同源模块加载、action/route/nav/slot/lifecycle 注册、插件 Web API、UI 贡献、外观与运行预览宿主访问 |

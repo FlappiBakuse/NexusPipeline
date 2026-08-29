@@ -34,12 +34,19 @@ function color() {
   return value || "#62a0ff";
 }
 
+function alpha(name, fallback) {
+  const value = Number.parseFloat(getComputedStyle(document.body).getPropertyValue(name));
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function drawFrame(move) {
   if (!context || paused) return;
   const width = window.innerWidth;
   const height = window.innerHeight;
   context.clearRect(0, 0, width, height);
   const accent = color();
+  const dotAlpha = alpha("--particle-dot-alpha", 0.12);
+  const lineAlpha = alpha("--particle-line-alpha", 0.05);
   particles.forEach(point => {
     if (move) {
       point.vx += (Math.random() - 0.5) * point.drift * 2;
@@ -53,11 +60,11 @@ function drawFrame(move) {
     }
     context.beginPath();
     context.fillStyle = accent;
-    context.globalAlpha = 0.12;
+    context.globalAlpha = dotAlpha;
     context.arc(point.x, point.y, point.r, 0, Math.PI * 2);
     context.fill();
   });
-  context.globalAlpha = 0.05;
+  context.globalAlpha = lineAlpha;
   particles.forEach((point, index) => {
     particles.slice(index + 1).forEach(other => {
       const dx = point.x - other.x;
@@ -95,6 +102,7 @@ export function initParticles() {
   });
   resize();
   window.addEventListener("resize", resize, { passive: true });
+  document.addEventListener("nexus:appearance-changed", () => drawFrame(false));
   document.addEventListener("visibilitychange", () => {
     paused = document.hidden;
     if (paused && frame) cancelAnimationFrame(frame);

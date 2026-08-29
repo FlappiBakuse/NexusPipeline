@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
@@ -114,6 +115,10 @@ internal sealed class WebServer : IDisposable
 
     private readonly HttpListener _listener = new();
 
+#if NEXUS_TEST_HOST
+    private TcpListener? _managedListener;
+#endif
+
     private CancellationTokenSource? _cts;
 
     private Task? _loop;
@@ -145,14 +150,24 @@ internal sealed class WebServer : IDisposable
             RuntimeContext.Instance.Settings.AllowRemoteAccess);
         bool remote = _options.AllowRemoteAccess;
         RemoteAccessBound = remote;
+        // 生产宿主继续使用 HttpListener；普通权限 Test Host 使用托管 loopback，避免要求 URLACL。
+#if NEXUS_TEST_HOST
+        string prefix = $"http://127.0.0.1:{port}/";
+#else
         // 远程访问绑定 http.sys 强通配符 +（所有接口）；0.0.0.0 不是合法前缀主机（绑定必失败）。
         string prefix = remote ? $"http://+:{port}/" : $"http://127.0.0.1:{port}/";
         _listener.Prefixes.Clear();
         _listener.Prefixes.Add(prefix);
+#endif
         _cts = new CancellationTokenSource();
         try
         {
+#if NEXUS_TEST_HOST
+            _managedListener = new TcpListener(IPAddress.Loopback, port);
+            _managedListener.Start();
+#else
             _listener.Start();
+#endif
             try
             {
                 JsonUtil.WriteAtomic(AppPaths.WebPortPath, port.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -173,6 +188,16 @@ internal sealed class WebServer : IDisposable
             catch
             {
             }
+#if NEXUS_TEST_HOST
+            try
+            {
+                _managedListener?.Stop();
+                _managedListener = null;
+            }
+            catch
+            {
+            }
+#endif
             throw;
         }
         _loop = Task.Run(() => LoopAsync(_cts.Token));
@@ -204,6 +229,10 @@ internal sealed class WebServer : IDisposable
         try
         {
             _cts?.Cancel();
+#if NEXUS_TEST_HOST
+            _managedListener?.Stop();
+            _managedListener = null;
+#endif
             _listener.Stop();
         }
         catch
@@ -230,9 +259,12 @@ internal sealed class WebServer : IDisposable
 
     private async Task LoopAsync(CancellationToken token)
     {
+#if NEXUS_TEST_HOST
+        await ManagedLoopAsync(token).ConfigureAwait(false);
+#else
         while (true)
         {
-            HttpListenerContext context;
+            System.Net.HttpListenerContext context;
             try
             {
                 context = await _listener.GetContextAsync().ConfigureAwait(false);
@@ -247,9 +279,72 @@ internal sealed class WebServer : IDisposable
                 }
                 return;
             }
-            _ = Task.Run(() => HandleAsync(context, token));
+            _ = Task.Run(() => HandleAsync(WebContext.FromHttpListener(context), token));
+        }
+#endif
+    }
+
+#if NEXUS_TEST_HOST
+    private async Task ManagedLoopAsync(CancellationToken token)
+    {
+        TcpListener listener = _managedListener
+            ?? throw new InvalidOperationException("普通权限 Web transport 尚未启动");
+        while (!token.IsCancellationRequested)
+        {
+            TcpClient client;
+            try
+            {
+                client = await listener.AcceptTcpClientAsync(token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (ObjectDisposedException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (SocketException) when (token.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[错误] 托管 HTTP 监听循环异常退出：{ex.Message}");
+                return;
+            }
+            _ = Task.Run(() => HandleManagedClientAsync(client, token));
         }
     }
+
+    private async Task HandleManagedClientAsync(TcpClient client, CancellationToken token)
+    {
+        using (client)
+        {
+            try
+            {
+                client.NoDelay = true;
+                NetworkStream stream = client.GetStream();
+                WebRequest? request = await ManagedHttpTransport.ReadRequestAsync(
+                    stream,
+                    _port,
+                    client.Client.RemoteEndPoint as IPEndPoint,
+                    token).ConfigureAwait(false);
+                if (request is null) return;
+                var context = new WebContext(request, WebResponse.ForManagedStream(stream));
+                await HandleAsync(context, token).ConfigureAwait(false);
+                context.Response.Close();
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Web] 托管 HTTP 请求失败：{ex.Message}");
+            }
+        }
+    }
+#endif
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken token)
     {

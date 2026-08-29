@@ -65,6 +65,9 @@ internal static class StartupPipeline
         // 启动时按设置自动检查一次更新（仅检查不下载）。
         ScheduleStartupUpdateCheck();
 
+#if NEXUS_TEST_HOST
+        StartTestHostExitMonitor();
+#endif
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayApp());
@@ -184,7 +187,7 @@ internal static class StartupPipeline
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(
             ctx.Settings.WebPort,
-            new WebServerOptions(ServeWebUi: true, AllowRemoteAccess: ctx.Settings.AllowRemoteAccess));
+            new WebServerOptions(ServeWebUi: !ctx.Settings.LightweightMode, AllowRemoteAccess: ctx.Settings.AllowRemoteAccess));
         if (web is null)
         {
             ClearServicePid();
@@ -209,26 +212,39 @@ internal static class StartupPipeline
                 Logger.Warn($"自动打开浏览器失败：{ex.Message}");
             }
         }
-        // 正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
-        // 无效 stdin（spawn stdio:ignore，e2e 服务启动方式）Peek 抛异常 → 持续运行直到被外部终止。
-        while (true)
+#if NEXUS_TEST_HOST
+        string? testHostExitFile = TestHostExitFilePath();
+        if (testHostExitFile is not null)
         {
-            int peek;
-            try
+            while (!File.Exists(testHostExitFile))
             {
-                peek = Console.In.Peek();
+                Thread.Sleep(100);
             }
-            catch
+        }
+        else
+#endif
+        {
+            // 正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
+            // 无效 stdin（spawn stdio:ignore，e2e 服务启动方式）Peek 抛异常 → 持续运行直到被外部终止。
+            while (true)
             {
-                Thread.Sleep(500);
-                continue;
-            }
-            if (peek == -1)
-            {
+                int peek;
+                try
+                {
+                    peek = Console.In.Peek();
+                }
+                catch
+                {
+                    Thread.Sleep(500);
+                    continue;
+                }
+                if (peek == -1)
+                {
+                    break;
+                }
+                Console.ReadLine();
                 break;
             }
-            Console.ReadLine();
-            break;
         }
         WaitForSafeShutdown();
         Bootstrap.Shutdown(web, mcp);
@@ -299,6 +315,42 @@ internal static class StartupPipeline
             Thread.Sleep(500);
         }
     }
+
+#if NEXUS_TEST_HOST
+    private static string? TestHostExitFilePath()
+    {
+        string? value = Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXIT_FILE")?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static void StartTestHostExitMonitor()
+    {
+        string? exitFile = TestHostExitFilePath();
+        if (exitFile is null)
+        {
+            return;
+        }
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (File.Exists(exitFile))
+                {
+                    try
+                    {
+                        Application.Exit();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Test Host 退出信号处理失败：{ex.Message}");
+                    }
+                    return;
+                }
+                await Task.Delay(100).ConfigureAwait(false);
+            }
+        });
+    }
+#endif
 
 
 }

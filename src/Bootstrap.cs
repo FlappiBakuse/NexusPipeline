@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Diagnostics;
 using NexusPipeline.Mcp;
 using NexusPipeline.Web;
@@ -40,7 +41,7 @@ internal static class Bootstrap
         UserConfigManager.StartRecoveryRetry();
     }
 
-    /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener Start 失败后不可复用，否则抛 ObjectDisposedException 导致进程崩溃）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
+    /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener 或托管 loopback transport 启动失败后不可复用）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
     public static WebServer? StartWebWithRetry(int basePort, WebServerOptions? options = null)
     {
         int port = basePort;
@@ -52,7 +53,7 @@ internal static class Bootstrap
                 web.Start(port, options);
                 return web;
             }
-            catch (HttpListenerException)
+            catch (Exception ex) when (ex is HttpListenerException or SocketException)
             {
                 Logger.Warn($"[提示] 端口 {port} 被占用，尝试 {port + 1}。");
                 port++;

@@ -10,6 +10,7 @@ import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 let historyDates = [];
 let historySelectedDate = "";
 let historyDir = "";
+let historyRangeGlobalBound = false;
 
 const pad = n => String(n).padStart(2, "0");
 
@@ -52,22 +53,88 @@ function entryBadge(record) {
 }
 
 function historyRangeMarkup() {
-  const maxDate = localDateIso();
   const displayValue = `${historyStartDate.replaceAll("-", "/")} 至 ${historyEndDate.replaceAll("-", "/")}`;
   return `<div class="history-range-search" data-history-range data-testid="history-range-search">
-    <label class="field-label" for="history-range-display">时间段</label>
     <div class="history-range-picker">
-      <input id="history-range-display" class="history-range-display" type="text" value="${esc(displayValue)}" placeholder="选择时间段" readonly aria-haspopup="dialog" aria-expanded="false" aria-controls="history-range-popover" data-history-range-display data-testid="history-range-display">
-      <span class="history-range-icon" aria-hidden="true">${icon("calendar")}</span>
+      <button id="history-range-display" class="history-range-display" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="history-range-popover" data-history-range-display data-testid="history-range-display"><span data-history-range-label>${esc(displayValue)}</span>
+        <span class="history-range-icon" aria-hidden="true">${icon("calendar")}</span>
+      </button>
       <div id="history-range-popover" class="history-range-popover" role="dialog" aria-label="选择时间段" hidden data-history-range-popover>
-        <div class="history-range-popover-fields">
-          <label for="history-from">开始日期<input id="history-from" type="date" value="${esc(historyStartDate)}" max="${maxDate}" aria-label="开始日期" data-testid="history-from"></label>
-          <label for="history-to">结束日期<input id="history-to" type="date" value="${esc(historyEndDate)}" max="${maxDate}" aria-label="结束日期" data-testid="history-to"></label>
-        </div>
-        <span class="muted history-range-hint">选择完成后失焦自动查询</span>
+        <div class="history-calendar-toolbar"><button class="ghost sm" type="button" data-history-calendar-prev aria-label="上一个月份">‹</button><strong data-history-calendar-title>选择日期</strong><button class="ghost sm" type="button" data-history-calendar-next aria-label="下一个月份">›</button></div>
+        <div class="history-calendar-months" data-history-calendar-months></div>
+        <div class="history-range-selection"><span class="history-range-selection-item"><span class="muted">开始</span><strong data-history-range-from-label>${esc(historyStartDate.replaceAll("-", "/"))}</strong></span><span class="history-range-selection-arrow" aria-hidden="true">→</span><span class="history-range-selection-item"><span class="muted">结束</span><strong data-history-range-to-label>${esc(historyEndDate.replaceAll("-", "/"))}</strong></span></div>
+        <div class="history-range-popover-footer"><span class="muted history-range-hint">点击日期选择范围，今天及之后的日期不可选</span><button class="primary sm" type="button" data-history-range-apply>应用范围</button></div>
       </div>
+      <input id="history-from" type="hidden" value="${esc(historyStartDate)}" aria-label="开始日期" data-testid="history-from">
+      <input id="history-to" type="hidden" value="${esc(historyEndDate)}" aria-label="结束日期" data-testid="history-to">
     </div>
   </div>`;
+}
+
+function monthKey(value) {
+  const [year, month] = String(value || "").split("-").map(Number);
+  const date = Number.isFinite(year) && Number.isFinite(month) ? new Date(year, month - 1, 1) : new Date();
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+}
+
+function shiftMonth(value, offset) {
+  const [year, month] = monthKey(value).split("-").map(Number);
+  const date = new Date(year, month - 1 + offset, 1);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`;
+}
+
+function monthLabel(value) {
+  const [year, month] = monthKey(value).split("-");
+  return `${year}年${month}月`;
+}
+
+function calendarMonthMarkup(value, start, end, maxDate) {
+  const [year, month] = monthKey(value).split("-").map(Number);
+  const first = new Date(year, month - 1, 1);
+  const leading = first.getDay();
+  const dayCount = new Date(year, month, 0).getDate();
+  const weekdayLabels = ["日", "一", "二", "三", "四", "五", "六"];
+  const cells = weekdayLabels.map(day => `<span class="history-calendar-weekday">${day}</span>`);
+  for (let index = 0; index < leading; index++) cells.push('<span class="history-calendar-day is-empty" aria-hidden="true"></span>');
+  for (let day = 1; day <= dayCount; day++) {
+    const date = `${year}-${pad(month)}-${pad(day)}`;
+    const isStart = date === start;
+    const isEnd = date === end;
+    const inRange = !!start && !!end && date > start && date < end;
+    const disabled = date > maxDate;
+    const classes = ["history-calendar-day", isStart ? "is-start" : "", isEnd ? "is-end" : "", inRange ? "is-in-range" : ""].filter(Boolean).join(" ");
+    cells.push(`<button class="${classes}" type="button" data-history-calendar-day="${date}" aria-label="${fmtDateCN(date)}"${disabled ? " disabled" : ""}>${day}</button>`);
+  }
+  return `<section class="history-calendar-month" data-history-calendar-month="${monthKey(value)}"><h4>${monthLabel(value)}</h4><div class="history-calendar-grid">${cells.join("")}</div></section>`;
+}
+
+function syncHistoryRangeLabels(root) {
+  const from = root.querySelector("#history-from")?.value || "";
+  const to = root.querySelector("#history-to")?.value || "";
+  const display = root.querySelector("[data-history-range-label]");
+  const fromLabel = root.querySelector("[data-history-range-from-label]");
+  const toLabel = root.querySelector("[data-history-range-to-label]");
+  if (display) display.textContent = from && to ? `${from.replaceAll("-", "/")} 至 ${to.replaceAll("-", "/")}` : (from ? `${from.replaceAll("-", "/")} 至 选择结束日期` : "选择时间段");
+  if (fromLabel) fromLabel.textContent = from ? from.replaceAll("-", "/") : "未选择";
+  if (toLabel) toLabel.textContent = to ? to.replaceAll("-", "/") : "未选择";
+}
+
+function renderHistoryCalendar(root) {
+  const months = root.querySelector("[data-history-calendar-months]");
+  const title = root.querySelector("[data-history-calendar-title]");
+  const previous = root.querySelector("[data-history-calendar-prev]");
+  const next = root.querySelector("[data-history-calendar-next]");
+  if (!months || !title) return;
+  const maxDate = localDateIso();
+  const count = window.innerWidth <= 560 ? 1 : 2;
+  const anchor = monthKey(root.dataset.historyCalendarMonth || historyEndDate);
+  const start = root.querySelector("#history-from")?.value || "";
+  const end = root.querySelector("#history-to")?.value || "";
+  months.innerHTML = Array.from({ length: count }, (_, index) => calendarMonthMarkup(shiftMonth(anchor, index), start, end, maxDate)).join("");
+  title.textContent = count === 1 ? monthLabel(anchor) : `${monthLabel(anchor)} — ${monthLabel(shiftMonth(anchor, 1))}`;
+  if (previous) previous.disabled = false;
+  if (next) next.disabled = shiftMonth(anchor, count) > monthKey(maxDate);
+  syncHistoryRangeLabels(root);
 }
 
 function setHistoryRangePickerOpen(root, open) {
@@ -78,6 +145,13 @@ function setHistoryRangePickerOpen(root, open) {
   display.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+function applyHistoryRangeFromPicker(root) {
+  const from = root.querySelector("#history-from")?.value || "";
+  const to = root.querySelector("#history-to")?.value || "";
+  setHistoryRangePickerOpen(root, false);
+  if (from && to) historyRangeSearch(root);
+}
+
 function bindHistoryRangePicker() {
   const root = document.querySelector("[data-history-range]");
   if (!root || root.dataset.bound === "true") return;
@@ -85,13 +159,77 @@ function bindHistoryRangePicker() {
   if (!display) return;
   root.dataset.bound = "true";
   const open = () => setHistoryRangePickerOpen(root, true);
-  display.addEventListener("focus", open);
   display.addEventListener("click", open);
+  if (!historyRangeGlobalBound) {
+    document.addEventListener("pointerdown", event => {
+      const currentRoot = document.querySelector("[data-history-range]");
+      const currentPopover = currentRoot?.querySelector("[data-history-range-popover]");
+      const target = event.target instanceof Element ? event.target : null;
+      if (!currentRoot || !currentPopover || currentPopover.hidden || !target || currentRoot.contains(target)) return;
+      applyHistoryRangeFromPicker(currentRoot);
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      const currentRoot = document.querySelector("[data-history-range]");
+      const currentPopover = currentRoot?.querySelector("[data-history-range-popover]");
+      if (!currentRoot || !currentPopover || currentPopover.hidden) return;
+      setHistoryRangePickerOpen(currentRoot, false);
+      currentRoot.querySelector("[data-history-range-display]")?.focus();
+    });
+    historyRangeGlobalBound = true;
+  }
+  root.dataset.historyCalendarMonth = monthKey(historyStartDate);
+  renderHistoryCalendar(root);
+  root.addEventListener("click", event => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+    const day = target.closest("[data-history-calendar-day]");
+    if (day && !day.disabled) {
+      const from = root.querySelector("#history-from");
+      const to = root.querySelector("#history-to");
+      if (!from || !to) return;
+      const selected = day.dataset.historyCalendarDay || "";
+      if (!from.value || to.value) {
+        from.value = selected;
+        to.value = "";
+      } else if (selected < from.value) {
+        to.value = from.value;
+        from.value = selected;
+      } else {
+        to.value = selected;
+      }
+      renderHistoryCalendar(root);
+      const nextFocus = from.value && to.value
+        ? root.querySelector("[data-history-range-apply]")
+        : root.querySelector(`[data-history-calendar-day="${selected}"]`);
+      nextFocus?.focus();
+      return;
+    }
+    const previous = target.closest("[data-history-calendar-prev]");
+    if (previous && !previous.disabled) {
+      root.dataset.historyCalendarMonth = shiftMonth(root.dataset.historyCalendarMonth, -1);
+      renderHistoryCalendar(root);
+      (root.querySelector("[data-history-calendar-prev]:not(:disabled)") || root.querySelector("[data-history-calendar-next]:not(:disabled)"))?.focus();
+      return;
+    }
+    const next = target.closest("[data-history-calendar-next]");
+    if (next && !next.disabled) {
+      root.dataset.historyCalendarMonth = shiftMonth(root.dataset.historyCalendarMonth, 1);
+      renderHistoryCalendar(root);
+      (root.querySelector("[data-history-calendar-next]:not(:disabled)") || root.querySelector("[data-history-calendar-prev]:not(:disabled)"))?.focus();
+      return;
+    }
+    if (target.closest("[data-history-range-apply]")) {
+      applyHistoryRangeFromPicker(root);
+    }
+  });
   root.addEventListener("focusout", () => {
     window.setTimeout(() => {
       if (root.contains(document.activeElement)) return;
       setHistoryRangePickerOpen(root, false);
-      historyRangeSearch(root);
+      const from = root.querySelector("#history-from")?.value || "";
+      const to = root.querySelector("#history-to")?.value || "";
+      if (from && to) historyRangeSearch(root);
     }, 0);
   });
 }
@@ -222,6 +360,7 @@ export function historyRangeSearch(root = document.querySelector("[data-history-
     toast("开始日期不能晚于结束日期", "error");
     return;
   }
+  if (from === historyStartDate && to === historyEndDate) return;
   historyStartDate = from;
   historyEndDate = to;
   historySelectedDate = "";

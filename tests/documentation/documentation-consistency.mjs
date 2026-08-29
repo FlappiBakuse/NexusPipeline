@@ -193,6 +193,20 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
+test("production and test-host elevation contracts remain explicit", () => {
+  const productionManifest = read("src/app.manifest");
+  const testManifest = read("src/app.test.manifest");
+  const projectFile = read("src/NexusPipeline.csproj");
+  const runner = read("tests/run.mjs");
+  assert.match(productionManifest, /requestedExecutionLevel level="requireAdministrator"/u);
+  assert.match(testManifest, /requestedExecutionLevel level="asInvoker"/u);
+  assert.match(projectFile, /Condition="'\$\(NexusTestHost\)' == 'true'"/u);
+  assert.match(projectFile, /DefineConstants>\$\(DefineConstants\);NEXUS_TEST_HOST</u);
+  assert.match(runner, /buildTestHost/u);
+  assert.match(runner, /NEXUS_TEST_HOST: "1"/u);
+  assert.match(runner, /isMediumIntegrity\(\)/u);
+});
+
 test("control-plane capability matrix has complete statuses and risk classifications", () => {
   const text = read("docs/CONTROL_PLANE.md");
   const statuses = [

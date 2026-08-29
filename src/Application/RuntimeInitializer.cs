@@ -7,14 +7,14 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline;
 
 /// <summary>
-/// 应用运行时初始化：管理员权限、旧配置迁移、约束加载以及共享数据加载。
+/// 应用运行时初始化：权限契约、旧配置迁移、约束加载以及共享数据加载。
 /// 该阶段只负责建立可运行的组合根，不启动服务或处理具体命令。
 /// </summary>
 internal static class RuntimeInitializer
 {
     public static int Initialize()
     {
-        if (!IsAdministrator())
+        if (!IsTestHost() && !IsAdministrator())
         {
             const string msg = "NexusPipeline 必须以管理员身份运行（脚本程序需要管理员权限才能被接管运行），当前实例未获得管理员权限，即将退出。请右键「以管理员身份运行」，或确认部署的是提权版（requireAdministrator）。";
             Logger.Fatal(msg);
@@ -65,6 +65,15 @@ internal static class RuntimeInitializer
             Logger.Warn(warning);
         }
         return 0;
+    }
+
+    private static bool IsTestHost()
+    {
+#if NEXUS_TEST_HOST
+        return true;
+#else
+        return false;
+#endif
     }
 
     private static bool IsAdministrator()
