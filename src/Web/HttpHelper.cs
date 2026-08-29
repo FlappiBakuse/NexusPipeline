@@ -61,12 +61,41 @@ internal static class HttpHelper
         context.Response.OutputStream.Close();
     }
 
-    public static Task NoContentAsync(HttpListenerContext context)
+    public static Task NoContentAsync(HttpListenerContext context, IReadOnlyDictionary<string, string>? headers = null)
     {
         context.Response.StatusCode = 204;
+        if (headers is not null)
+        {
+            foreach ((string key, string value) in headers)
+            {
+                context.Response.Headers[key] = value;
+            }
+        }
         context.Response.ContentLength64 = 0;
         context.Response.Close();
         return Task.CompletedTask;
+    }
+
+    public static async Task WriteBinaryAsync(
+        HttpListenerContext context,
+        byte[] data,
+        string contentType,
+        IReadOnlyDictionary<string, string>? headers = null)
+    {
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = contentType;
+        context.Response.Headers["Cache-Control"] = "no-store";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        if (headers is not null)
+        {
+            foreach ((string key, string value) in headers)
+            {
+                context.Response.Headers[key] = value;
+            }
+        }
+        context.Response.ContentLength64 = data.Length;
+        await context.Response.OutputStream.WriteAsync(data).ConfigureAwait(false);
+        context.Response.OutputStream.Close();
     }
 
     public static async Task WriteJsonAsync(HttpListenerContext context, object value, int statusCode = 200)

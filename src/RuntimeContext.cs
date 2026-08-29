@@ -74,6 +74,9 @@ internal class RuntimeContext
         collection.AddSingleton<ExecutionPlanBuilder>();
         collection.AddSingleton<ExecutionStateStore>();
         collection.AddSingleton<ExecutionValidator>();
+        collection.AddSingleton<ExecutionPreviewService>(provider => new ExecutionPreviewService(
+            () => provider.GetRequiredService<DispatchCenter>(),
+            () => provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<SystemActionExecutor>();
         collection.AddSingleton<ExecutionRunner>(provider => new ExecutionRunner(
             provider.GetRequiredService<IUserRepository>(),

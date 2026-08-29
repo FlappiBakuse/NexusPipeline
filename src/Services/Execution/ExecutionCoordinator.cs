@@ -17,6 +17,10 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
     private readonly IUserRepository _users;
 
+    private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
+
+    private int? _gameProcessId;
+
     private EmulatorTarget? _emulatorTarget;
 
     private IEmulatorDriver? _emulatorDriver;
@@ -34,13 +38,16 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     public ExecutionCoordinator(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged,
         Action<string>? statusChanged,
-        Action<string>? logLine,
+        Action<string, LogLevel>? logLine,
+        Action<ExecutionPreviewTarget>? previewTargetChanged,
         IUserRepository users,
         ResolvedScriptUser? resolvedUser = null)
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
+        _previewTargetChanged = previewTargetChanged;
         _attemptRunner = new AttemptRunner(this);
+        SetInitialPreviewTarget();
     }
 
     Task<RunAttemptResult?> IAttemptExecutionHost.RunUserScriptCoreAsync(string scriptPath, string role, RunAttempt attempt, CancellationToken token)
@@ -315,17 +322,17 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         _statusChanged?.Invoke($"{role}脚本已启动（PID {process.Id}）");
         Logger.Info($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
 
-        void OnConsoleData(string? data)
+        void OnConsoleData(string? data, LogLevel level)
         {
             if (string.IsNullOrWhiteSpace(data))
             {
                 return;
             }
-            _logLine?.Invoke(data);
+            _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
         }
 
-        process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
-        process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data);
+        process.OutputDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Info);
+        process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Error);
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
@@ -448,6 +455,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     int gamePid = gameProcess?.Id ?? 0;
                     if (gamePid > 0)
                     {
+                        _gameProcessId = gamePid;
+                        SetPcPreviewTarget(gamePid);
                         SystemActions.BringToFrontFireAndForget(gamePid, "游戏");
                     }
                     Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
@@ -479,6 +488,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 {
                     return await FinishEarlyAsync(RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后仍未检测到游戏进程，游戏可能启动失败")).ConfigureAwait(false);
                 }
+                _gameProcessId = FindGameProcessId(_gameProcessId);
+                SetPcPreviewTarget(_gameProcessId);
                 _statusChanged?.Invoke("已确认游戏进程启动");
                 Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认游戏进程启动，继续运行脚本。");
             }
@@ -550,19 +561,19 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
             BringGameToFrontIfRunning();
         }
 
-        void OnConsoleData(string? data)
+        void OnConsoleData(string? data, LogLevel level)
         {
             if (string.IsNullOrWhiteSpace(data))
             {
                 return;
             }
-            _logLine?.Invoke(data);
+            _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
         }
 
         if (process is not null && stdoutAttached)
         {
-            process.OutputDataReceived += (_, e) => OnConsoleData(e.Data);
-            process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data);
+            process.OutputDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Info);
+            process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Error);
             process.BeginOutputReadLine();
             process.BeginErrorReadLine();
         }
@@ -711,7 +722,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                         {
                             continue;
                         }
-                        _logLine?.Invoke(line);
+                        _logLine?.Invoke(line, LogLevelUtil.ParseObserved(line));
                         AppendScriptLog(line);
                         switch (judge.HandleLine(line))
                         {
@@ -933,6 +944,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 return RunAttemptResult.Failed(_emulatorTarget.DetectionError ?? "模拟器目标识别失败");
             }
             _emulatorDriver = EmulatorDriverFactory.Create(_emulatorTarget);
+            SetEmulatorPreviewTarget(_emulatorDriver, ready: false);
             Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已冻结模拟器驱动：{_emulatorDriver.Kind}（目标 {_script.GameExe}）。");
         }
         _statusChanged?.Invoke("正在连接模拟器...");
@@ -979,6 +991,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         {
             return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后模拟器前台未出现应用（{targetPkg}），应用可能启动失败");
         }
+        SetEmulatorPreviewTarget(_emulatorDriver, ready: true);
         _statusChanged?.Invoke("已确认模拟器应用启动");
         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认模拟器应用启动，继续运行脚本。");
         return null;
@@ -1018,6 +1031,81 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         return _budget?.RemainingCommandSeconds(cap) ?? cap;
     }
 
+    private void SetInitialPreviewTarget()
+    {
+        bool configured = !string.IsNullOrWhiteSpace(_script.GameExe);
+        ExecutionPreviewSource source = !configured
+            ? ExecutionPreviewSource.None
+            : EmulatorSupport.IsEmulator(_script) ? ExecutionPreviewSource.Emulator : ExecutionPreviewSource.Pc;
+        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+            _script.Id,
+            _script.Name,
+            source,
+            configured ? ExecutionPreviewState.Waiting : ExecutionPreviewState.Unavailable,
+            Error: configured ? null : "未配置游戏目标"));
+    }
+
+    private void SetPcPreviewTarget(int? processId)
+    {
+        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+            _script.Id,
+            _script.Name,
+            ExecutionPreviewSource.Pc,
+            processId is > 0 ? ExecutionPreviewState.Ready : ExecutionPreviewState.Waiting,
+            processId));
+    }
+
+    private void SetEmulatorPreviewTarget(IEmulatorDriver? driver, bool ready)
+    {
+        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+            _script.Id,
+            _script.Name,
+            ExecutionPreviewSource.Emulator,
+            ready ? ExecutionPreviewState.Ready : ExecutionPreviewState.Waiting,
+            EmulatorDriver: driver));
+    }
+
+    private int? FindGameProcessId(int? preferredProcessId)
+    {
+        if (preferredProcessId is int preferred && preferred > 0
+            && SystemActions.FindVisibleWindow(preferred) != IntPtr.Zero)
+        {
+            return preferred;
+        }
+        string processName = Path.GetFileNameWithoutExtension(_script.GameExe ?? "");
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return null;
+        }
+        Process[] processes;
+        try
+        {
+            processes = Process.GetProcessesByName(processName);
+        }
+        catch
+        {
+            return null;
+        }
+        try
+        {
+            foreach (Process process in processes)
+            {
+                if (SystemActions.FindVisibleWindow(process.Id) != IntPtr.Zero)
+                {
+                    return process.Id;
+                }
+            }
+            return null;
+        }
+        finally
+        {
+            foreach (Process process in processes)
+            {
+                process.Dispose();
+            }
+        }
+    }
+
     /// <summary>统一游戏窗口前置（， 轮询检测）：无论 LaunchGame 配置，检测到游戏进程（GameExe 按名）
     /// 存在即后台前置其可见主窗口。游戏由启动器延迟拉起时启动瞬间检测不到——监控循环每轮调用本方法，
     /// 游戏出现即前置（复用 BringToFront 30 秒窗口覆盖「进程出现但窗口未建」），前置一次后由 _gameFronted 停止重复。
@@ -1031,21 +1119,13 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         }
         try
         {
-            Process[] procs = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(_script.GameExe));
-            try
+            int? processId = FindGameProcessId(_gameProcessId);
+            if (processId is int pid)
             {
-                if (procs.Length > 0)
-                {
-                    SystemActions.BringToFrontFireAndForget(procs[0].Id, "游戏");
-                    _gameFronted = true;
-                }
-            }
-            finally
-            {
-                foreach (Process proc in procs)
-                {
-                    proc.Dispose();
-                }
+                _gameProcessId = pid;
+                SetPcPreviewTarget(pid);
+                SystemActions.BringToFrontFireAndForget(pid, "游戏");
+                _gameFronted = true;
             }
         }
         catch (Exception ex)

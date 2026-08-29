@@ -24,7 +24,7 @@ internal class RunSession
     protected readonly CancellationToken _token;
     protected readonly Action<int, int>? _attemptChanged;
     protected readonly Action<string>? _statusChanged;
-    protected readonly Action<string>? _logLine;
+    protected readonly Action<string, LogLevel>? _logLine;
     protected RunBudget? _budget;
     protected ScriptUser? _activeUser;
     protected bool _gameFronted;
@@ -36,7 +36,7 @@ internal class RunSession
 
     protected RunSession(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         ResolvedScriptUser? resolvedUser = null,
-        Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string>? logLine = null)
+        Action<int, int>? attemptChanged = null, Action<string>? statusChanged = null, Action<string, LogLevel>? logLine = null)
     {
         _script = script;
         _mode = mode;
@@ -78,10 +78,10 @@ internal class RunSession
     internal bool FirstSyncDone { get => _firstSyncDone; set => _firstSyncDone = value; }
     internal bool PreRunCompletedSuccessfully { get => _preRunCompletedSuccessfully; set => _preRunCompletedSuccessfully = value; }
     internal Action<string>? StatusChanged => _statusChanged;
-    internal Action<string>? LogLine => _logLine;
+    internal Action<string, LogLevel>? LogLine => _logLine;
 
     internal void ReportStatus(string status) => _statusChanged?.Invoke(status);
-    internal void ReportLogLine(string line) => _logLine?.Invoke(line);
+    internal void ReportLogLine(string line, LogLevel level = LogLevel.Info) => _logLine?.Invoke(line, level);
 
     /// <summary>自动更新配置首次检测时机判定（纯函数便于单测）。</summary>
     internal static bool ShouldRunFirstSync(double elapsedSeconds, double thresholdSeconds)

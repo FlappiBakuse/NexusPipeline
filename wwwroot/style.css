@@ -435,8 +435,21 @@ td.ops { white-space: nowrap; }
 .progress-line { height: 7px; margin-top: 10px; overflow: hidden; border-radius: 6px; background: var(--panel-soft); }
 .progress-line > div { height: 100%; border-radius: inherit; background: var(--accent-strong); transition: width .4s ease; }
 .update-notes { margin-top: 12px; color: var(--text); font-size: 13px; line-height: 1.7; white-space: pre-wrap; max-height: 180px; overflow-y: auto; }
-.run-log { height: 170px; margin-top: 10px; }
+.run-log { min-height: 180px; height: min(30vh, 360px); max-height: min(75vh, 720px); margin-top: 10px; resize: vertical; overflow: auto; }
+pre.logbox.run-log { max-height: min(75vh, 720px); resize: vertical; }
 pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid var(--border); border-radius: 8px; background: var(--log-bg); color: var(--log-text); font-family: Consolas, monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; }
+.run-terminal { max-height: none; color: var(--log-text); font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+.run-terminal .run-log-line, .run-terminal .run-log-empty { display: block; min-height: 1.6em; }
+.run-terminal .run-log-debug { color: #8c96a8; }
+.run-terminal .run-log-info { color: var(--log-text); }
+.run-terminal .run-log-warn { color: var(--warn); }
+.run-terminal .run-log-error { color: var(--bad); }
+.run-terminal .run-log-fatal { background: var(--bad); color: #fff; }
+.running-item-content { display: block; }
+.running-item-content.has-live-screenshot { display: grid; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); align-items: stretch; gap: var(--space-3); }
+.running-item-content.has-live-screenshot > .run-log { min-width: 0; }
+.running-item-content.has-live-screenshot > .plugin-slot { min-width: 0; margin: 10px 0 0; }
+.running-sidecar:empty { display: none; }
 
 .plugin-grid { display: block; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--panel); }
 .plugin-grid .plugin-card, .plugin-card.capability-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: var(--space-1) var(--space-5); min-height: 0; margin-bottom: 0; padding: var(--space-4) var(--space-5); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
@@ -807,6 +820,11 @@ body[data-wallpaper="on"] :is(.plugin-group, .plugin-grid, .plugin-loading-state
   .plugin-row .plugin-row-action { grid-column: 2; grid-row: 1 / span 2; }
   .plugin-row .plugin-row-badges { grid-column: 1; grid-row: 2; justify-content: flex-start; }
   .plugin-store-footer { align-items: flex-start; flex-direction: column; }
+}
+
+@media (max-width: 980px) {
+  .running-item-content.has-live-screenshot { grid-template-columns: minmax(0, 1fr); }
+  .running-item-content.has-live-screenshot > .plugin-slot { margin-top: 0; }
 }
 
 @media (max-width: 480px) {

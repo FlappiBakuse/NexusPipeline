@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.3 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -31,11 +31,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个插件目录的 `plugin.json`、`store.json` 和当前 ZIP 生成根目录 `catalog.json`；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.3）
+## managed-code C# 插件（Plugin API v1.4）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.3`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0`、`1.1`、`1.2` 与 `1.3` 插件可加载，`1.4` 与 `2.0` 插件会被拒绝。
+宿主当前 API 版本为 `1.4`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.4` 插件可加载，`2.0` 插件会被拒绝。
 
 ```text
 plugins/GameCheckIn/
@@ -52,7 +52,7 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.3",
+  "apiVersion": "1.4",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
@@ -92,7 +92,8 @@ users.list.badges               users.binding.sections
 users.global.sections           scripts.list.badges
 scripts.editor.sections         queues.list.badges
 queues.editor.sections          dispatch.cards
-dispatch.running.badges         dispatch.run.sections
+dispatch.running.badges         dispatch.running.sidecar
+dispatch.run.sections
 history.list.badges             history.detail.sections
 settings.sections               shell.nav
 ```
@@ -123,14 +124,14 @@ settings.sections               shell.nav
 
 `context.History.Register(new PluginHistoryContribution(...))` 可在运行历史保存前生成纯文本展示快照。快照只允许标题、徽章和字段，单个插件贡献最多 16 KiB，全部插件单次运行最多 64 KiB；处理器最多执行 5 秒。快照写入 `RunRecord.PluginHistory`，不参与状态、尝试次数、结果和通知判定，插件卸载后仍可由历史页面展示。
 
-### 前端插件运行时（Frontend API 1.1）
+### 前端插件运行时（Frontend API 1.2）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.1",
+  "apiVersion": "1.2",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -147,12 +148,13 @@ settings.sections               shell.nav
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
 - `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
 - `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
+- `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。
 
 前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。该能力只对用户明确确认信任的插件开放，插件更新版本或前端声明变化后会重新要求确认。前端信任记录按插件版本与前端声明指纹保存于 `AppSettings.PluginPreferences`，manifest 的入口、样式或 capability 变化会要求重新确认；撤销信任后模块不会出现在运行时清单。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
-外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`wallpaperStore` 的壁纸文件由宿主保存到 `user-assets/appearance/wallpapers/`，配置保存到 `config/appearance.json`，轮换游标保存到 `.nxp/state/appearance-runtime.json`。单张壁纸上限 20 MiB，最多 20 张且总容量上限 128 MiB；允许 JPEG、PNG、WebP，上传时校验 MIME、文件头和 SHA256。浏览器只缓存当前显示 Blob，服务端配置由宿主统一同步。
+外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`wallpaperStore` 的壁纸文件由宿主保存到 `user-assets/appearance/wallpapers/`，配置保存到 `config/appearance.json`，轮换游标保存到 `.nxp/state/appearance-runtime.json`。单张壁纸上限 8192 KB，最多 32 张且总容量上限 256 MiB；允许 JPEG、PNG、WebP，上传时校验 MIME、文件头和 SHA256。浏览器只缓存当前显示 Blob，服务端配置由宿主统一同步。
 
 `wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
 

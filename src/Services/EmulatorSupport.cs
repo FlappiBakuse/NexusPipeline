@@ -376,7 +376,7 @@ internal static class EmulatorSupport
     }
 
     /// <summary>执行外部命令（重定向 stdio 并消费，规避 0x800700E8；bat/cmd 经 cmd.exe /d /s /c 包装）；超时强杀进程；返回 (退出码为 0, 输出)。</summary>
-    internal static async Task<(bool Ok, string Output)> RunCommandAsync(string exe, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken token)
+    private static ProcessStartInfo BuildCommandStartInfo(string exe, IReadOnlyList<string> args)
     {
         ProcessStartInfo psi;
         if (SystemActions.IsCommandFile(exe))
@@ -407,6 +407,12 @@ internal static class EmulatorSupport
         psi.StandardOutputEncoding = Encoding.UTF8;
         psi.StandardErrorEncoding = Encoding.UTF8;
         psi.CreateNoWindow = true;
+        return psi;
+    }
+
+    internal static async Task<(bool Ok, string Output)> RunCommandAsync(string exe, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken token)
+    {
+        ProcessStartInfo psi = BuildCommandStartInfo(exe, args);
         Process? process = null;
         Logger.Debug($"[模拟器] 执行命令：{psi.FileName} {psi.Arguments}");
         try
@@ -455,6 +461,101 @@ internal static class EmulatorSupport
                 throw;
             }
         }
+    }
+
+    internal static async Task<EmulatorBinaryResult> RunBinaryCommandAsync(string exe, IReadOnlyList<string> args, int timeoutSeconds, CancellationToken token)
+    {
+        ProcessStartInfo psi = BuildCommandStartInfo(exe, args);
+        Process? process = null;
+        Logger.Debug($"[模拟器] 执行二进制命令：{psi.FileName} {psi.Arguments}");
+        try
+        {
+            process = Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            return EmulatorBinaryResult.Failure(ex.Message);
+        }
+        using (Process proc = process!)
+        {
+            try
+            {
+                proc.StandardInput.Close();
+            }
+            catch
+            {
+            }
+            Task<byte[]> stdoutTask = ReadBinaryAsync(proc.StandardOutput.BaseStream, token);
+            Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+            Task exitTask = proc.WaitForExitAsync(token);
+            Task timeoutTask = Task.Delay(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)));
+            try
+            {
+                Task completed = await Task.WhenAny(exitTask, timeoutTask).ConfigureAwait(false);
+                if (completed == timeoutTask)
+                {
+                    TryKill(proc);
+                    await ObserveBinaryOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                    return EmulatorBinaryResult.Failure($"命令执行超时（{timeoutSeconds} 秒）");
+                }
+                await exitTask.ConfigureAwait(false);
+                byte[] data = await stdoutTask.ConfigureAwait(false);
+                string stderr = await stderrTask.ConfigureAwait(false);
+                return proc.ExitCode == 0
+                    ? EmulatorBinaryResult.Success(data)
+                    : EmulatorBinaryResult.Failure(string.IsNullOrWhiteSpace(stderr) ? $"命令返回码 {proc.ExitCode}" : stderr.Trim());
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(proc);
+                await ObserveBinaryOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                TryKill(proc);
+                await ObserveBinaryOutputAsync(stdoutTask, stderrTask).ConfigureAwait(false);
+                return EmulatorBinaryResult.Failure(ex.Message);
+            }
+        }
+    }
+
+    private static async Task<byte[]> ReadBinaryAsync(Stream stream, CancellationToken token)
+    {
+        const int maxBytes = 16 * 1024 * 1024;
+        using var output = new MemoryStream();
+        byte[] buffer = new byte[64 * 1024];
+        while (true)
+        {
+            int read = await stream.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false);
+            if (read == 0)
+            {
+                return output.ToArray();
+            }
+            if (output.Length + read > maxBytes)
+            {
+                throw new InvalidOperationException("截图响应超过大小上限");
+            }
+            output.Write(buffer, 0, read);
+        }
+    }
+
+    private static async Task ObserveBinaryOutputAsync(Task<byte[]> stdoutTask, Task<string> stderrTask)
+    {
+        try
+        {
+            await Task.WhenAll(stdoutTask, stderrTask).ConfigureAwait(false);
+        }
+        catch
+        {
+        }
+    }
+
+    internal static bool IsPng(byte[]? data)
+    {
+        return data is { Length: >= 8 }
+            && data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47
+            && data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
     }
 
     private static async Task ObserveOutputAsync(Task<string> stdoutTask, Task<string> stderrTask)

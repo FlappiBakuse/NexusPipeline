@@ -1127,7 +1127,7 @@ internal static class SystemActions
     [DllImport("user32.dll")]
     private static extern IntPtr SetActiveWindow(IntPtr hWnd);
 
-    private static IntPtr FindVisibleWindow(int pid)
+    internal static IntPtr FindVisibleWindow(int pid)
     {
         IntPtr found = IntPtr.Zero;
         EnumWindows((hWnd, _) =>

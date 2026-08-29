@@ -3,6 +3,7 @@ using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.Web;
 
@@ -68,11 +69,13 @@ internal static class ApiStatusHandler
                     snapshot.TotalTasks,
                     snapshot.DoneTasks,
                     snapshot.CurrentScriptName,
+                    snapshot.CurrentScriptId,
                     snapshot.CurrentStatus,
                     snapshot.CurrentAttempt,
                     snapshot.CurrentMaxAttempts,
                     persistenceWarning = snapshot.PersistenceWarning,
                     logTail = snapshot.LogTail,
+                    logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };
             }),
             plugins = RuntimeContext.Instance.Plugins.PluginSummaries.Select(plugin => new
@@ -100,4 +103,12 @@ internal static class ApiStatusHandler
             }),
         };
     }
+
+    private static object ToLogEntry(ExecutionLogEntry entry) => new
+    {
+        sequence = entry.Sequence,
+        timestamp = entry.Timestamp,
+        level = entry.Level.ToString().ToLowerInvariant(),
+        text = entry.FormattedText,
+    };
 }

@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.3）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.4）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 3;
+    public const int Minor = 4;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本。</summary>
@@ -15,9 +15,9 @@ public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 1;
+    public const int Minor = 2;
 
-    public const string Text = "1.1";
+    public const string Text = "1.2";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -32,7 +32,7 @@ public static class FrontendApiVersion
     }
 }
 
-/// <summary>v1.3 的稳定 UI 槽位。槽位是前端 ABI 的一部分，页面布局可以变化但槽位名称保持兼容。</summary>
+/// <summary>v1.4 的稳定 UI 槽位。槽位是前端 ABI 的一部分，页面布局可以变化但槽位名称保持兼容。</summary>
 public static class PluginUiSlots
 {
     public const string DashboardCards = "dashboard.cards";
@@ -46,6 +46,7 @@ public static class PluginUiSlots
     public const string QueuesEditorSections = "queues.editor.sections";
     public const string DispatchCards = "dispatch.cards";
     public const string DispatchRunningBadges = "dispatch.running.badges";
+    public const string DispatchRunningSidecar = "dispatch.running.sidecar";
     public const string DispatchRunSections = "dispatch.run.sections";
     public const string HistoryListBadges = "history.list.badges";
     public const string HistoryDetailSections = "history.detail.sections";
@@ -66,6 +67,7 @@ public static class PluginUiSlots
         QueuesEditorSections,
         DispatchCards,
         DispatchRunningBadges,
+        DispatchRunningSidecar,
         DispatchRunSections,
         HistoryListBadges,
         HistoryDetailSections,

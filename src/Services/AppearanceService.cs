@@ -11,9 +11,9 @@ namespace NexusPipeline.Services;
 /// <summary>服务端同步外观配置、壁纸资产和轮换状态。</summary>
 internal sealed class AppearanceService
 {
-    internal const long MaxAssetBytes = 20L * 1024 * 1024;
-    internal const long MaxTotalBytes = 128L * 1024 * 1024;
-    internal const int MaxAssets = 20;
+    internal const long MaxAssetBytes = 8L * 1024 * 1024;
+    internal const long MaxTotalBytes = 256L * 1024 * 1024;
+    internal const int MaxAssets = 32;
 
     private static readonly HashSet<string> AllowedMimeTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -66,10 +66,11 @@ internal sealed class AppearanceService
 
     public AppearanceSnapshot Save(JsonObject patch, string caller)
     {
-        EnsureWritable(caller);
+        caller = EnsureWritable(caller, allowClaim: true);
         lock (_sync)
         {
             AppearanceConfig config = LoadConfig();
+            EnsureProviderOwnership(config, caller, allowClaim: true);
             ApplyPatch(config, patch, caller);
             config.Revision = Math.Max(1, config.Revision + 1);
             config.UpdatedAt = DateTimeOffset.UtcNow;
@@ -80,10 +81,11 @@ internal sealed class AppearanceService
 
     public AppearanceSnapshot StartStartupRotation(string caller)
     {
-        EnsureWritable(caller);
+        caller = EnsureWritable(caller, allowClaim: true);
         lock (_sync)
         {
             AppearanceConfig config = LoadConfig();
+            bool claimedProvider = EnsureProviderOwnership(config, caller, allowClaim: true);
             if (config.Rotation.Mode.Equals("startup", StringComparison.OrdinalIgnoreCase)
                 && config.Order.Count > 0)
             {
@@ -91,16 +93,23 @@ internal sealed class AppearanceService
                 state.LastRandomId = PickRandomId(config.Order, state.LastRandomId);
                 SaveRuntimeState(state);
             }
+            if (claimedProvider)
+            {
+                config.Revision = Math.Max(1, config.Revision + 1);
+                config.UpdatedAt = DateTimeOffset.UtcNow;
+                SaveConfig(config);
+            }
             return BuildSnapshot(config);
         }
     }
 
     public AppearanceSnapshot SavePalette(string caller, string assetId, JsonObject palette)
     {
-        EnsureWritable(caller);
+        caller = EnsureWritable(caller, allowClaim: true);
         lock (_sync)
         {
             AppearanceConfig config = LoadConfig();
+            EnsureProviderOwnership(config, caller, allowClaim: true);
             AppearanceAsset asset = FindAsset(config, assetId);
             asset.Palette = ParsePalette(palette);
             asset.PaletteVersion = 2;
@@ -119,15 +128,15 @@ internal sealed class AppearanceService
         string caller,
         CancellationToken cancellationToken = default)
     {
-        EnsureWritable(caller);
+        caller = EnsureWritable(caller, allowClaim: true);
         string mime = (contentType ?? "").Split(';', 2)[0].Trim().ToLowerInvariant();
         if (!AllowedMimeTypes.Contains(mime))
         {
             throw new AppearanceException("invalid_type", "壁纸仅支持 JPEG、PNG 或 WebP");
         }
-        if (declaredLength > MaxAssetBytes)
+        if (declaredLength >= 0 && declaredLength > MaxAssetBytes)
         {
-            throw new AppearanceException("too_large", "壁纸文件不能超过 20 MiB");
+            throw new AppearanceException("too_large", "壁纸文件不能超过 8192 KB");
         }
 
         Directory.CreateDirectory(_stagingDir);
@@ -159,7 +168,7 @@ internal sealed class AppearanceService
                     total += read;
                     if (total > MaxAssetBytes)
                     {
-                        throw new AppearanceException("too_large", "壁纸文件不能超过 20 MiB");
+                        throw new AppearanceException("too_large", "壁纸文件不能超过 8192 KB");
                     }
                     int copy = Math.Min(read, header.Length - headerLength);
                     if (copy > 0)
@@ -178,20 +187,27 @@ internal sealed class AppearanceService
             lock (_sync)
             {
                 AppearanceConfig config = LoadConfig();
+                bool claimedProvider = EnsureProviderOwnership(config, caller, allowClaim: true);
                 AppearanceAsset? duplicate = config.Assets.FirstOrDefault(item =>
                     string.Equals(item.Sha256, sha256, StringComparison.OrdinalIgnoreCase));
                 if (duplicate is not null)
                 {
+                    if (claimedProvider)
+                    {
+                        config.Revision = Math.Max(1, config.Revision + 1);
+                        config.UpdatedAt = DateTimeOffset.UtcNow;
+                        SaveConfig(config);
+                    }
                     completedAsset = duplicate;
                 }
                 if (completedAsset is null && config.Assets.Count >= MaxAssets)
                 {
-                    throw new AppearanceException("quota", "壁纸数量不能超过 20 张");
+                    throw new AppearanceException("quota", "壁纸数量不能超过 32 张");
                 }
                 long existingBytes = config.Assets.Sum(item => item.SizeBytes);
                 if (completedAsset is null && existingBytes + total > MaxTotalBytes)
                 {
-                    throw new AppearanceException("quota", "壁纸总容量不能超过 128 MiB");
+                    throw new AppearanceException("quota", "壁纸总容量不能超过 256 MiB");
                 }
                 if (completedAsset is null)
                 {
@@ -246,10 +262,11 @@ internal sealed class AppearanceService
 
     public AppearanceSnapshot Delete(string caller, string assetId)
     {
-        EnsureWritable(caller);
+        caller = EnsureWritable(caller, allowClaim: true);
         lock (_sync)
         {
             AppearanceConfig config = LoadConfig();
+            EnsureProviderOwnership(config, caller, allowClaim: true);
             AppearanceAsset asset = FindAsset(config, assetId);
             string? file = FindAssetPath(asset);
             config.Assets.Remove(asset);
@@ -503,9 +520,9 @@ internal sealed class AppearanceService
         }
     }
 
-    private void EnsureWritable(string caller)
+    private string EnsureWritable(string caller, bool allowClaim)
     {
-        caller = caller.Trim();
+        caller = caller?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(caller) || !IsProviderEffective(new AppearanceProvider { PluginName = caller, Enabled = true }))
         {
             throw new AppearanceException("forbidden", "当前插件没有修改外观的权限");
@@ -513,11 +530,28 @@ internal sealed class AppearanceService
         lock (_sync)
         {
             AppearanceConfig config = LoadConfig();
-            if (!string.Equals(config.Provider.PluginName, caller, StringComparison.OrdinalIgnoreCase))
+            EnsureProviderOwnership(config, caller, allowClaim);
+        }
+        return caller;
+    }
+
+    private static bool EnsureProviderOwnership(AppearanceConfig config, string caller, bool allowClaim)
+    {
+        string owner = config.Provider.PluginName?.Trim() ?? "";
+        if (owner.Length == 0)
+        {
+            if (!allowClaim)
             {
                 throw new AppearanceException("forbidden", "当前插件不是外观配置的提供方");
             }
+            config.Provider.PluginName = caller;
+            return true;
         }
+        if (!string.Equals(owner, caller, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new AppearanceException("forbidden", "当前插件不是外观配置的提供方");
+        }
+        return false;
     }
 
     private AppearanceConfig LoadConfig()

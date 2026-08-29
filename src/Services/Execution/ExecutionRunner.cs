@@ -44,6 +44,7 @@ internal sealed class ExecutionRunner
         ScriptInstance script = plan.Script;
         try
         {
+            exec.SetPreviewWaiting(script);
             string? unavailableReason = PluginAvailability.GetUnavailableReason(
                 script.PluginType,
                 _pluginAvailability);
@@ -82,6 +83,7 @@ internal sealed class ExecutionRunner
         }
         finally
         {
+            exec.ClearPreviewTarget();
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, null);
         }
@@ -105,6 +107,7 @@ internal sealed class ExecutionRunner
             }
             string displayName = $"{script.Name}（{runUser.UserName}）";
             exec.CurrentScriptName = displayName;
+            exec.SetPreviewWaiting(script);
             exec.CurrentStatus = "等待开始";
 
             SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
@@ -146,7 +149,8 @@ internal sealed class ExecutionRunner
                         exec.CurrentMaxAttempts = max;
                     },
                     status => exec.CurrentStatus = status,
-                    line => exec.AppendLog(line),
+                    (line, level) => exec.AppendLog(level, line),
+                    target => exec.SetPreviewTarget(target),
                     _users,
                     runUser);
 
@@ -284,6 +288,7 @@ internal sealed class ExecutionRunner
                 ScriptInstance? script = planned.Script;
                 if (script is null)
                 {
+                    exec.ClearPreviewTarget();
                     var missing = new RunRecord
                     {
                         ScriptInstanceId = task.ScriptInstanceId,
@@ -305,6 +310,7 @@ internal sealed class ExecutionRunner
                 }
 
                 exec.CurrentScriptName = script.Name;
+                exec.SetPreviewWaiting(script);
                 exec.CurrentAttempt = 0;
                 exec.CurrentStatus = "等待开始";
                 string? unavailableReason = PluginAvailability.GetUnavailableReason(
@@ -384,6 +390,7 @@ internal sealed class ExecutionRunner
         }
         finally
         {
+            exec.ClearPreviewTarget();
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, completionIntent);
         }
@@ -431,7 +438,7 @@ internal sealed class ExecutionRunner
             : $"[错误] 调度队列「{queueName}」中的脚本实例「{script.Name}」{detail}，已跳过本次运行。";
         exec.CurrentScriptName = script.Name;
         exec.CurrentStatus = "已跳过（专项插件不可用）";
-        exec.AppendLog(logLine);
+        exec.AppendLog(LogLevel.Error, logLine);
         Logger.Error(logLine);
 
         var records = new List<RunRecord>();

@@ -58,7 +58,7 @@ internal static class Logger
         {
             return;
         }
-        string line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level.ToString().ToUpperInvariant()}] {message}";
+        string line = FormatLine(level, message);
         WriteConsole(line, level);
         lock (Sync)
         {
@@ -75,6 +75,16 @@ internal static class Logger
             {
             }
         }
+    }
+
+    internal static string FormatLine(LogLevel level, string message)
+    {
+        return FormatLine(level, message, DateTimeOffset.Now);
+    }
+
+    internal static string FormatLine(LogLevel level, string message, DateTimeOffset timestamp)
+    {
+        return $"[{timestamp.ToLocalTime():HH:mm:ss.fff}] [{level.ToString().ToUpperInvariant()}] {message}";
     }
 
     private static void WriteConsole(string line, LogLevel level)

@@ -26,6 +26,13 @@ internal sealed record EmulatorCommandResult(bool Ok, string Output)
     public static EmulatorCommandResult Failure(string output) => new(false, output);
 }
 
+internal sealed record EmulatorBinaryResult(bool Ok, byte[] Data, string Error)
+{
+    public static EmulatorBinaryResult Success(byte[] data) => new(true, data, "");
+
+    public static EmulatorBinaryResult Failure(string error) => new(false, Array.Empty<byte>(), error);
+}
+
 internal interface IEmulatorDriver
 {
     EmulatorKind Kind { get; }
@@ -35,6 +42,8 @@ internal interface IEmulatorDriver
     Task<EmulatorCommandResult> StartAppAsync(IReadOnlyList<string> startArgs, CancellationToken token, int timeoutSeconds);
 
     Task<string?> GetForegroundPackageAsync(CancellationToken token, int timeoutSeconds);
+
+    Task<EmulatorBinaryResult> CaptureScreenAsync(CancellationToken token, int timeoutSeconds);
 
     Task<EmulatorCommandResult> StopAppAsync(string? packageName, CancellationToken token, int timeoutSeconds);
 
@@ -159,6 +168,22 @@ internal sealed class GenericAdbEmulatorDriver : IEmulatorDriver
             : EmulatorSupport.GetForegroundPackageAsync(_target.AdbExecutable, _target.Endpoint, token, timeoutSeconds);
     }
 
+    public async Task<EmulatorBinaryResult> CaptureScreenAsync(CancellationToken token, int timeoutSeconds)
+    {
+        if (string.IsNullOrWhiteSpace(_target.AdbExecutable))
+        {
+            return EmulatorBinaryResult.Failure("未找到 adb 可执行文件");
+        }
+        EmulatorBinaryResult result = await EmulatorSupport.RunBinaryCommandAsync(
+            _target.AdbExecutable,
+            new[] { "-s", _target.Endpoint, "exec-out", "screencap", "-p" },
+            timeoutSeconds,
+            token).ConfigureAwait(false);
+        return result.Ok && EmulatorSupport.IsPng(result.Data)
+            ? result
+            : EmulatorBinaryResult.Failure(result.Error.Length > 0 ? result.Error : "ADB 未返回有效 PNG 截图");
+    }
+
     public async Task<EmulatorCommandResult> StopAppAsync(string? packageName, CancellationToken token, int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(packageName))
@@ -247,6 +272,25 @@ internal sealed class MuMuEmulatorDriver : IEmulatorDriver
         return result.Ok ? EmulatorSupport.ParseForegroundPackage(result.Output) : null;
     }
 
+    public async Task<EmulatorBinaryResult> CaptureScreenAsync(CancellationToken token, int timeoutSeconds)
+    {
+        EmulatorBinaryResult direct = await RunManagerBinaryAsync(
+            new[] { "adb", "-v", _target.MuMuInstanceIndex!, "exec-out", "screencap", "-p" },
+            token,
+            timeoutSeconds).ConfigureAwait(false);
+        if (direct.Ok && EmulatorSupport.IsPng(direct.Data))
+        {
+            return direct;
+        }
+        EmulatorBinaryResult fallback = await RunManagerBinaryAsync(
+            new[] { "adb", "-v", _target.MuMuInstanceIndex!, "shell", "screencap", "-p" },
+            token,
+            timeoutSeconds).ConfigureAwait(false);
+        return fallback.Ok && EmulatorSupport.IsPng(fallback.Data)
+            ? fallback
+            : EmulatorBinaryResult.Failure(fallback.Error.Length > 0 ? fallback.Error : (direct.Error.Length > 0 ? direct.Error : "MuMuManager 未返回有效 PNG 截图"));
+    }
+
     public async Task<EmulatorCommandResult> StopAppAsync(string? packageName, CancellationToken token, int timeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(packageName))
@@ -289,6 +333,15 @@ internal sealed class MuMuEmulatorDriver : IEmulatorDriver
     {
         (bool ok, string output) = await EmulatorSupport.RunCommandAsync(_target.MuMuManagerPath!, args, timeoutSeconds, token).ConfigureAwait(false);
         return ok ? EmulatorCommandResult.Success(output) : EmulatorCommandResult.Failure(output);
+    }
+
+    private async Task<EmulatorBinaryResult> RunManagerBinaryAsync(IReadOnlyList<string> args, CancellationToken token, int timeoutSeconds)
+    {
+        return await EmulatorSupport.RunBinaryCommandAsync(
+            _target.MuMuManagerPath!,
+            args,
+            timeoutSeconds,
+            token).ConfigureAwait(false);
     }
 
     private async Task<bool> WaitStoppedAsync(CancellationToken token, int timeoutSeconds)

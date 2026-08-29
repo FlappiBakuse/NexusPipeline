@@ -3,7 +3,7 @@ using NexusPipeline.Services;
 
 namespace NexusPipeline.Web;
 
-[ApiRoute("appearance-upload", BodyMode = ApiBodyMode.Raw, MaxBodyBytes = 20 * 1024 * 1024)]
+[ApiRoute("appearance-upload", BodyMode = ApiBodyMode.Raw, MaxBodyBytes = 8 * 1024 * 1024)]
 internal static class ApiAppearanceUploadHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
@@ -15,6 +15,11 @@ internal static class ApiAppearanceUploadHandler
         }
         try
         {
+            if (context.Request.ContentLength64 > AppearanceService.MaxAssetBytes)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "too_large", error = "壁纸文件不能超过 8192 KB" }, 413).ConfigureAwait(false);
+                return;
+            }
             string caller = ApiAppearanceHandler.ResolveCaller(context, null);
             AppearanceAsset asset = await RuntimeContext.Instance.Resolve<AppearanceService>().UploadAsync(
                 context.Request.InputStream,

@@ -1,5 +1,7 @@
 import { api } from "./api.js";
 import { appearance, createAppearanceHost, refreshAppearance } from "./appearance.js";
+import { toast } from "./ui.js";
+import { captureExecutionPreview } from "./execution-preview.js";
 
 const SLOT_NAMES = new Set([
   "dashboard.cards",
@@ -13,6 +15,7 @@ const SLOT_NAMES = new Set([
   "queues.editor.sections",
   "dispatch.cards",
   "dispatch.running.badges",
+  "dispatch.running.sidecar",
   "dispatch.run.sections",
   "history.list.badges",
   "history.detail.sections",
@@ -194,6 +197,10 @@ function createHost(descriptor) {
         api("PUT", `/api/plugin-contributions/ui/${encodeURIComponent(pluginName)}/${encodeURIComponent(contributionId)}`, { context, values }, signal),
       action: (pluginName, contributionId, action, context, values = {}, signal) =>
         api("POST", `/api/plugin-contributions/ui/${encodeURIComponent(pluginName)}/${encodeURIComponent(contributionId)}/action/${encodeURIComponent(action)}`, { context, values }, signal),
+      toast: (message, tone = "info") => toast(message, tone),
+    },
+    executionPreview: {
+      capture: (runId, signal) => captureExecutionPreview(runId, descriptor.name, signal),
     },
     lifecycle: {
       onPageEnter: handler => registerLifecycle("onPageEnter", handler),
