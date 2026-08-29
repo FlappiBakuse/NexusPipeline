@@ -1,0 +1,43 @@
+namespace NexusPipeline.Plugins;
+
+internal sealed record PluginDetail(
+    string Name,
+    string ArtifactName,
+    string DisplayName,
+    string GameName,
+    string Description,
+    string Version,
+    string Kind,
+    string ApiVersion,
+    IReadOnlyList<string> Capabilities,
+    string MinHostVersion,
+    bool Installed,
+    string InstalledName,
+    string InstalledVersion,
+    bool UpdateAvailable,
+    bool Compatible,
+    string CompatibilityReason,
+    bool ManagedByStore,
+    string PendingAction,
+    string PendingVersion,
+    string Status,
+    bool ConfiguredEnabled,
+    bool RuntimeEnabled,
+    string RuntimeState,
+    string? RuntimeError,
+    bool RestartRequired,
+    bool HasFrontend,
+    string FrontendApiVersion,
+    IReadOnlyList<PluginAuthor> Authors,
+    IReadOnlyList<string> Tags,
+    string Homepage,
+    string UpdatedAt,
+    bool HasReadme,
+    string ReadmeMarkdown,
+    string? ReadmeError,
+    IReadOnlyList<PluginChangelogEntry> Changelog);
+
+internal sealed record PluginReadmeResult(
+    bool HasReadme,
+    string Markdown,
+    string? Error);

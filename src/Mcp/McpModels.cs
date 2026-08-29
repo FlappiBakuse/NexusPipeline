@@ -652,6 +652,11 @@ internal static class McpViews
                 plugin.PendingAction,
                 plugin.PendingVersion,
                 plugin.Status,
+                authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
+                tags = plugin.Tags,
+                homepage = plugin.Homepage,
+                updatedAt = plugin.UpdatedAt,
+                hasReadme = plugin.HasReadme,
                 changelog = plugin.Changelog.Select(change => new
                 {
                     change.Version,

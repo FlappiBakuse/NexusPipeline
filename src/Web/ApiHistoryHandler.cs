@@ -20,21 +20,40 @@ internal static class ApiHistoryHandler
         // 日期索引——范围内有记录的日期（倒序、含当日条数），供历史页左侧日期列表。
         if (seg.Length == 2 && seg[1].ToLowerInvariant() == "dates")
         {
-            int rangeDays = int.TryParse(context.Request.QueryString["days"], out int rangeD) ? rangeD : 3;
-            if (rangeDays < 1)
+            bool hasExplicitRange = TryParseDateRange(context.Request, out DateTime rangeStart, out DateTime rangeEnd, out string? rangeError);
+            if (hasExplicitRange && rangeError is not null)
             {
-                rangeDays = 1;
+                await HttpHelper.WriteJsonAsync(context, new { error = rangeError }, 400).ConfigureAwait(false);
+                return;
             }
-            if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+            int rangeDays;
+            string rangeLabel;
+            if (!hasExplicitRange)
             {
-                rangeDays = Limits.Current.MaxHistoryRetentionDays;
+                rangeDays = int.TryParse(context.Request.QueryString["days"], out int rangeD) ? rangeD : 3;
+                if (rangeDays < 1)
+                {
+                    rangeDays = 1;
+                }
+                if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+                {
+                    rangeDays = Limits.Current.MaxHistoryRetentionDays;
+                }
+                rangeStart = DateTime.Today.AddDays(-(rangeDays - 1));
+                rangeEnd = DateTime.Now.AddMinutes(5);
+                rangeLabel = $"{rangeDays} 天";
+            }
+            else
+            {
+                rangeDays = (int)(rangeEnd.Date - rangeStart.Date).TotalDays + 1;
+                rangeLabel = $"{rangeStart:yyyy-MM-dd} 至 {rangeEnd:yyyy-MM-dd}";
             }
             List<IGrouping<string, RunRecord>> groups = RuntimeContext.Instance.History.Query(
-                DateTime.Today.AddDays(-(rangeDays - 1)), DateTime.Now.AddMinutes(5))
+                rangeStart, rangeEnd)
                 .GroupBy(record => record.StartTime.ToString("yyyy-MM-dd"))
                 .OrderByDescending(group => group.Key)
                 .ToList();
-            Audit.Log(Audit.Web, "查询历史记录", $"{groups.Count} 个日期（{rangeDays} 天）");
+            Audit.Log(Audit.Web, "查询历史记录", $"{groups.Count} 个日期（{rangeLabel}）");
             await HttpHelper.WriteJsonAsync(context, new
             {
                 dates = groups.Select(group => new { date = group.Key, count = group.Count() }).ToList(),
@@ -101,17 +120,36 @@ internal static class ApiHistoryHandler
         }
         string? scriptId = context.Request.QueryString["scriptId"];
         string? queueId = context.Request.QueryString["queueId"];
-        int days = int.TryParse(context.Request.QueryString["days"], out int d) ? d : 3;
-        if (days < 1)
+        bool hasHistoryRange = TryParseDateRange(context.Request, out DateTime historyStart, out DateTime historyEnd, out string? historyRangeError);
+        if (hasHistoryRange && historyRangeError is not null)
         {
-            days = 1;
+            await HttpHelper.WriteJsonAsync(context, new { error = historyRangeError }, 400).ConfigureAwait(false);
+            return;
         }
-        if (days > Limits.Current.MaxHistoryRetentionDays)
+        int days;
+        string historyRangeLabel;
+        if (!hasHistoryRange)
         {
-            days = Limits.Current.MaxHistoryRetentionDays;
+            days = int.TryParse(context.Request.QueryString["days"], out int d) ? d : 3;
+            if (days < 1)
+            {
+                days = 1;
+            }
+            if (days > Limits.Current.MaxHistoryRetentionDays)
+            {
+                days = Limits.Current.MaxHistoryRetentionDays;
+            }
+            historyStart = DateTime.Today.AddDays(-(days - 1));
+            historyEnd = DateTime.Now.AddMinutes(5);
+            historyRangeLabel = $"{days} 天";
+        }
+        else
+        {
+            days = (int)(historyEnd.Date - historyStart.Date).TotalDays + 1;
+            historyRangeLabel = $"{historyStart:yyyy-MM-dd} 至 {historyEnd:yyyy-MM-dd}";
         }
         List<RunRecord> records = RuntimeContext.Instance.History.Query(
-            DateTime.Today.AddDays(-(days - 1)), DateTime.Now.AddMinutes(5),
+            historyStart, historyEnd,
             string.IsNullOrWhiteSpace(scriptId) ? null : scriptId,
             string.IsNullOrWhiteSpace(queueId) ? null : queueId);
         bool paged = context.Request.QueryString["offset"] is not null || context.Request.QueryString["limit"] is not null;
@@ -119,11 +157,51 @@ internal static class ApiHistoryHandler
         {
             int offset = int.TryParse(context.Request.QueryString["offset"], out int o) ? Math.Max(0, o) : 0;
             int limit = int.TryParse(context.Request.QueryString["limit"], out int l) ? Math.Max(1, l) : 20;
-            Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{days} 天，分页 offset={offset} limit={limit}）");
+            Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{historyRangeLabel}，分页 offset={offset} limit={limit}）");
             await HttpHelper.WriteJsonAsync(context, new { total = records.Count, records = records.Skip(offset).Take(limit).ToList() }).ConfigureAwait(false);
             return;
         }
-        Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{days} 天）");
+        Audit.Log(Audit.Web, "查询历史记录", $"{records.Count} 条（{historyRangeLabel}）");
         await HttpHelper.WriteJsonAsync(context, records).ConfigureAwait(false);
+    }
+
+    private static bool TryParseDateRange(HttpListenerRequest request, out DateTime start, out DateTime end, out string? error)
+    {
+        start = default;
+        end = default;
+        error = null;
+        string fromParam = request.QueryString["from"] ?? "";
+        string toParam = request.QueryString["to"] ?? "";
+        bool hasFrom = !string.IsNullOrWhiteSpace(fromParam);
+        bool hasTo = !string.IsNullOrWhiteSpace(toParam);
+        if (!hasFrom && !hasTo)
+        {
+            return false;
+        }
+        if (!hasFrom || !hasTo)
+        {
+            error = "from 与 to 参数必须同时提供";
+            return true;
+        }
+        if (!DateTime.TryParseExact(fromParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime from)
+            || !DateTime.TryParseExact(toParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime to))
+        {
+            error = "日期范围格式须为 yyyy-MM-dd";
+            return true;
+        }
+        if (to.Date < from.Date)
+        {
+            error = "结束日期不能早于开始日期";
+            return true;
+        }
+        int rangeDays = (int)(to.Date - from.Date).TotalDays + 1;
+        if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+        {
+            error = $"日期范围不能超过 {Limits.Current.MaxHistoryRetentionDays} 天";
+            return true;
+        }
+        start = from.Date;
+        end = to.Date.AddDays(1).AddTicks(-1);
+        return true;
     }
 }

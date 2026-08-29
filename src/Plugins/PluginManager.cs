@@ -1,7 +1,5 @@
 using System.Reflection;
 using System.Text.Json;
-using System.Security.Cryptography;
-using System.Text;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
@@ -28,7 +26,20 @@ internal sealed record PluginSummary(
     IReadOnlyList<string> Capabilities,
     bool HasFrontend,
     string FrontendApiVersion,
-    IReadOnlyList<string> Replaces);
+    IReadOnlyList<string> Replaces)
+{
+    public IReadOnlyList<PluginAuthor> Authors { get; init; } = Array.Empty<PluginAuthor>();
+
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+
+    public string Homepage { get; init; } = "";
+
+    public string UpdatedAt { get; init; } = "";
+
+    public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
+
+    public bool HasReadme { get; init; }
+}
 
 internal sealed record PluginFrontendRuntimeDescriptor(
     string Name,
@@ -108,11 +119,15 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             var list = new List<PluginSummary>();
             foreach (DataSpecializedPlugin plugin in _dataPlugins)
             {
+                PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
+                    plugin.PluginDirectory,
+                    plugin.GameName,
+                    plugin.Version);
                 list.Add(new PluginSummary(
                     plugin.Name,
                     plugin.ArtifactName,
                     plugin.DisplayName,
-                    plugin.GameName,
+                    string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.GameName : metadata.GameName,
                     plugin.Description,
                     plugin.Version,
                     "data-specialized",
@@ -120,17 +135,30 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Frontend is not null,
                     plugin.Frontend?.ApiVersion ?? "",
-                    plugin.Replaces));
+                    plugin.Replaces)
+                {
+                    Authors = metadata.Authors,
+                    Tags = metadata.Tags,
+                    Homepage = metadata.Homepage,
+                    UpdatedAt = metadata.UpdatedAt,
+                    Changelog = metadata.Changelog,
+                    HasReadme = metadata.HasReadme,
+                });
             }
             foreach (ManagedPluginDescriptor plugin in _managedPlugins)
             {
+                string artifactName = string.IsNullOrWhiteSpace(plugin.Manifest.ArtifactName)
+                    ? Path.GetFileName(plugin.Directory)
+                    : plugin.Manifest.ArtifactName;
+                PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
+                    plugin.Directory,
+                    plugin.Manifest.GameName,
+                    plugin.Manifest.Version);
                 list.Add(new PluginSummary(
                     plugin.Manifest.Name,
-                    string.IsNullOrWhiteSpace(plugin.Manifest.ArtifactName)
-                        ? Path.GetFileName(plugin.Directory)
-                        : plugin.Manifest.ArtifactName,
+                    artifactName,
                     plugin.Manifest.DisplayName,
-                    "",
+                    string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.Manifest.GameName : metadata.GameName,
                     plugin.Manifest.Description,
                     plugin.Manifest.Version,
                     "managed-code",
@@ -138,7 +166,15 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Manifest.Frontend is not null,
                     plugin.Manifest.Frontend?.ApiVersion ?? "",
-                    plugin.Manifest.Replaces));
+                    plugin.Manifest.Replaces)
+                {
+                    Authors = metadata.Authors,
+                    Tags = metadata.Tags,
+                    Homepage = metadata.Homepage,
+                    UpdatedAt = metadata.UpdatedAt,
+                    Changelog = metadata.Changelog,
+                    HasReadme = metadata.HasReadme,
+                });
             }
             return list;
         }
@@ -315,7 +351,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         out string? filePath)
     {
         filePath = null;
-        if (!IsRuntimeEnabled(pluginName) || !IsFrontendTrusted(pluginName)
+        if (!IsRuntimeEnabled(pluginName)
             || !PluginFrontendManifest.IsPublicFrontendPath(relativePath))
         {
             return false;
@@ -556,15 +592,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 AppSettings settings = _settings();
                 settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
                 string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
-                PluginPreference previous = settings.PluginPreferences.TryGetValue(key, out PluginPreference? existing)
-                    ? existing
-                    : new PluginPreference();
                 settings.PluginPreferences[key] = new PluginPreference
                 {
                     Enabled = enabled,
-                    FrontendTrusted = previous.FrontendTrusted,
-                    FrontendTrustedVersion = previous.FrontendTrustedVersion,
-                    FrontendTrustedFingerprint = previous.FrontendTrustedFingerprint,
                 };
                 ConfigStore.Save(settings);
             }
@@ -587,56 +617,19 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase) && plugin.Manifest.Frontend is not null);
     }
 
-    internal bool IsFrontendTrusted(string name)
+    internal bool TryGetPluginDirectory(string name, out string? directory)
     {
-        if (!HasFrontend(name))
+        directory = _dataPlugins
+            .FirstOrDefault(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?.PluginDirectory;
+        if (directory is not null)
         {
-            return false;
+            return true;
         }
-        PluginPreference? preference = _settings().PluginPreferences?
-            .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
-        string version = GetPluginVersion(name);
-        string fingerprint = GetFrontendTrustFingerprint(name);
-        return preference?.FrontendTrusted == true
-            && string.Equals(preference.FrontendTrustedVersion, version, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(preference.FrontendTrustedFingerprint, fingerprint, StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal bool SetFrontendTrusted(string name, bool trusted, string source, out string? failureCode)
-    {
-        if (!HasFrontend(name))
-        {
-            failureCode = "frontend_not_found";
-            return false;
-        }
-        bool changed = _tryConfigurationMutation(() =>
-        {
-            lock (RuntimeContext.Instance.SettingsMutationLock)
-            {
-                AppSettings settings = _settings();
-                settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
-                string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
-                bool enabled = settings.PluginPreferences.TryGetValue(key, out PluginPreference? existing)
-                    ? existing.Enabled
-                    : ReadConfiguredEnabled(name, IsManagedCode(name));
-                settings.PluginPreferences[key] = new PluginPreference
-                {
-                    Enabled = enabled,
-                    FrontendTrusted = trusted,
-                    FrontendTrustedVersion = trusted ? GetPluginVersion(name) : "",
-                    FrontendTrustedFingerprint = trusted ? GetFrontendTrustFingerprint(name) : "",
-                };
-                ConfigStore.Save(settings);
-            }
-        });
-        if (!changed)
-        {
-            failureCode = "host_maintenance";
-            return false;
-        }
-        Audit.Log(source, trusted ? "信任插件前端" : "撤销插件前端信任", name);
-        failureCode = null;
-        return true;
+        directory = _managedPlugins
+            .FirstOrDefault(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase))
+            ?.Directory;
+        return directory is not null;
     }
 
     private void AddDataPlugin(DataSpecializedPlugin plugin)
@@ -740,42 +733,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         return _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    private string GetPluginVersion(string name)
-    {
-        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (data is not null) return data.Version;
-        return _managedPlugins.FirstOrDefault(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase))?.Manifest.Version ?? "";
-    }
-
-    private string GetFrontendTrustFingerprint(string name)
-    {
-        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin =>
-            string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
-        if (data?.Frontend is not null)
-        {
-            return ComputeFrontendTrustFingerprint(data.Frontend, data.CapabilityKeys);
-        }
-        ManagedPluginDescriptor? managed = _managedPlugins.FirstOrDefault(plugin =>
-            string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
-        return managed?.Manifest.Frontend is null
-            ? ""
-            : ComputeFrontendTrustFingerprint(managed.Manifest.Frontend, managed.Manifest.Capabilities);
-    }
-
-    private static string ComputeFrontendTrustFingerprint(
-        PluginFrontendManifest frontend,
-        IEnumerable<string> capabilities)
-    {
-        string payload = string.Join(
-            "\n",
-            new[] { frontend.ApiVersion, frontend.Entry }
-                .Concat(frontend.Styles)
-                .Concat(capabilities
-                    .OrderBy(item => item, StringComparer.OrdinalIgnoreCase)
-                    .Select(item => "capability:" + item)));
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
-    }
-
     private static PluginFrontendRuntimeDescriptor ToFrontendDescriptor(
         string name,
         string displayName,
@@ -801,7 +758,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     {
         try
         {
-            if (!IsRuntimeEnabled(name) || !IsFrontendTrusted(name) || frontend is null)
+            if (!IsRuntimeEnabled(name) || frontend is null)
             {
                 return;
             }

@@ -538,20 +538,23 @@ internal static class PluginInstallRecovery
             ?? new JsonObject();
         if (value is JsonObject preference)
         {
-            SetPropertyIgnoreCase(preference, "FrontendTrusted", JsonValue.Create(false));
-            SetPropertyIgnoreCase(preference, "FrontendTrustedVersion", JsonValue.Create(""));
-            SetPropertyIgnoreCase(preference, "FrontendTrustedFingerprint", JsonValue.Create(""));
+            RemovePropertyIgnoreCase(preference, "FrontendTrusted");
+            RemovePropertyIgnoreCase(preference, "FrontendTrustedVersion");
+            RemovePropertyIgnoreCase(preference, "FrontendTrustedFingerprint");
         }
         preferences.Remove(sourceKey);
         preferences[targetName] = value;
         JsonUtil.WriteAtomic(settingsPath, root.ToJsonString(JsonOpts.Indented));
     }
 
-    private static void SetPropertyIgnoreCase(JsonObject objectNode, string propertyName, JsonNode? value)
+    private static void RemovePropertyIgnoreCase(JsonObject objectNode, string propertyName)
     {
         string? existing = objectNode.Select(pair => pair.Key)
             .FirstOrDefault(name => string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase));
-        objectNode[existing ?? propertyName] = value;
+        if (existing is not null)
+        {
+            objectNode.Remove(existing);
+        }
     }
 
     private static void ApplyUninstall(

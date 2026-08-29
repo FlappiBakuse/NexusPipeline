@@ -227,7 +227,6 @@ test("control-plane capability matrix has complete statuses and risk classificat
     "plugins.store.install",
     "plugins.store.update",
     "plugins.store.uninstall",
-    "plugins.frontend-trust",
     "plugin-user-settings.secret-write",
     "update.apply",
     "maintenance.prune",

@@ -96,7 +96,7 @@ public sealed class ManagedPluginTests
     }
 
     [Fact]
-    public void FrontendTrust_IsBoundToVersionAndDeclaration()
+    public void FrontendDescriptor_IsPublishedForActivePluginWithoutConfirmation()
     {
         const string name = "fixture-frontend";
         string root = CreatePluginDirectory(name, typeof(NexusPipeline.TestPlugin.TestPlugin), frontend: true);
@@ -116,20 +116,13 @@ public sealed class ManagedPluginTests
             manager.LoadAll();
             Assert.True(manager.IsEnabled(name));
             Assert.True(manager.HasFrontend(name));
-            Assert.False(manager.IsFrontendTrusted(name));
-            Assert.Empty(manager.FrontendDescriptors);
-
-            Assert.True(manager.SetFrontendTrusted(name, true, Audit.System, out string? trustError), trustError);
-            Assert.True(manager.IsFrontendTrusted(name));
             Assert.Single(manager.FrontendDescriptors);
+            Assert.True(manager.TryResolveFrontendAsset(name, "web/main.js", out string? assetPath));
+            Assert.NotNull(assetPath);
+            Assert.False(manager.TryResolveFrontendAsset(name, "../plugin.json", out _));
 
-            string manifestPath = Path.Combine(root, "plugin.json");
-            string manifest = File.ReadAllText(manifestPath).Replace("web/main.js", "web/changed.js", StringComparison.Ordinal);
-            File.WriteAllText(manifestPath, manifest);
-            File.WriteAllText(Path.Combine(root, "web", "changed.js"), "export function activate() {}\n");
-
+            settings.PluginPreferences[name].Enabled = false;
             manager.LoadAll();
-            Assert.False(manager.IsFrontendTrusted(name));
             Assert.Empty(manager.FrontendDescriptors);
         }
         finally

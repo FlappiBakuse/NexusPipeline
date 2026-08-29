@@ -10,6 +10,19 @@ internal static class ApiPluginsHandler
 {
     public static async Task Handle(HttpListenerContext context, string method, string[] seg)
     {
+        if (method == "GET" && seg.Length == 3
+            && seg[0].Equals("store", StringComparison.OrdinalIgnoreCase)
+            && seg[2].Equals("detail", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteStoreDetailAsync(context, seg[1]).ConfigureAwait(false);
+            return;
+        }
+        if (method == "GET" && seg.Length == 2
+            && seg[1].Equals("detail", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteLocalDetailAsync(context, seg[0]).ConfigureAwait(false);
+            return;
+        }
         if (method == "GET" && seg.Length == 2 && seg[1].Equals("store", StringComparison.OrdinalIgnoreCase))
         {
             await WriteStoreAsync(context, forceRefresh: false).ConfigureAwait(false);
@@ -40,31 +53,6 @@ internal static class ApiPluginsHandler
             return;
         }
         string name = seg[1];
-        if (seg[2].Equals("trust-frontend", StringComparison.OrdinalIgnoreCase)
-            || seg[2].Equals("revoke-frontend", StringComparison.OrdinalIgnoreCase))
-        {
-            bool trusted = seg[2].Equals("trust-frontend", StringComparison.OrdinalIgnoreCase);
-            PluginManager manager = RuntimeContext.Instance.Plugins;
-            if (!manager.SetFrontendTrusted(name, trusted, Audit.Web, out string? trustFailureCode))
-            {
-                int status = trustFailureCode == "host_maintenance" ? 409 : 404;
-                string message = trustFailureCode == "host_maintenance"
-                    ? "宿主正在进行维护操作，暂不能修改插件前端信任设置"
-                    : $"插件不存在或没有前端模块：{name}";
-                await HttpHelper.WriteJsonAsync(
-                    context,
-                    new { ok = false, code = trustFailureCode ?? "frontend_not_found", error = message },
-                    status).ConfigureAwait(false);
-                return;
-            }
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = true,
-                frontendTrusted = manager.IsFrontendTrusted(name),
-                restartRequired = false,
-            }).ConfigureAwait(false);
-            return;
-        }
         // 显式校验 enable/disable，其余字符串 400（此前任意字符串都按 disable 处理）。
         string verb = seg[2].ToLowerInvariant();
         if (verb is not ("enable" or "disable"))
@@ -147,6 +135,11 @@ internal static class ApiPluginsHandler
                 pendingAction = plugin.PendingAction,
                 pendingVersion = plugin.PendingVersion,
                 status = plugin.Status,
+                authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }),
+                tags = plugin.Tags,
+                homepage = plugin.Homepage,
+                updatedAt = plugin.UpdatedAt,
+                hasReadme = plugin.HasReadme,
                 changelog = plugin.Changelog.Select(change => new
                 {
                     version = change.Version,
@@ -155,6 +148,94 @@ internal static class ApiPluginsHandler
                 }),
             }),
         }).ConfigureAwait(false);
+    }
+
+    private static async Task WriteLocalDetailAsync(HttpListenerContext context, string name)
+    {
+        PluginDetail? detail = await RuntimeContext.Instance
+            .Resolve<PluginRepositoryService>()
+            .GetLocalDetailAsync(name)
+            .ConfigureAwait(false);
+        if (detail is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "not_found", error = $"插件不存在：{name}" }, 404)
+                .ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context, DetailPayload(detail)).ConfigureAwait(false);
+    }
+
+    private static async Task WriteStoreDetailAsync(HttpListenerContext context, string name)
+    {
+        try
+        {
+            PluginDetail? detail = await RuntimeContext.Instance
+                .Resolve<PluginRepositoryService>()
+                .GetStoreDetailAsync(name)
+                .ConfigureAwait(false);
+            if (detail is null)
+            {
+                await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "not_found", error = $"插件仓库中不存在：{name}" }, 404)
+                    .ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteJsonAsync(context, DetailPayload(detail)).ConfigureAwait(false);
+        }
+        catch (PluginRepositoryException ex)
+        {
+            int status = ex.Code is "repository_unavailable" or "catalog_invalid" or "catalog_too_large" ? 502 : 400;
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, status)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private static object DetailPayload(PluginDetail detail)
+    {
+        return new
+        {
+            ok = true,
+            name = detail.Name,
+            artifactName = detail.ArtifactName,
+            displayName = detail.DisplayName,
+            gameName = detail.GameName,
+            description = detail.Description,
+            version = detail.Version,
+            kind = detail.Kind,
+            apiVersion = detail.ApiVersion,
+            capabilities = detail.Capabilities,
+            minHostVersion = detail.MinHostVersion,
+            installed = detail.Installed,
+            installedName = detail.InstalledName,
+            installedVersion = detail.InstalledVersion,
+            updateAvailable = detail.UpdateAvailable,
+            compatible = detail.Compatible,
+            compatibilityReason = detail.CompatibilityReason,
+            managedByStore = detail.ManagedByStore,
+            pendingAction = detail.PendingAction,
+            pendingVersion = detail.PendingVersion,
+            status = detail.Status,
+            configuredEnabled = detail.ConfiguredEnabled,
+            runtimeEnabled = detail.RuntimeEnabled,
+            runtimeState = detail.RuntimeState,
+            error = detail.RuntimeError,
+            restartRequired = detail.RestartRequired,
+            hasFrontend = detail.HasFrontend,
+            frontendApiVersion = detail.FrontendApiVersion,
+            authors = detail.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
+            tags = detail.Tags,
+            homepage = detail.Homepage,
+            updatedAt = detail.UpdatedAt,
+            hasReadme = detail.HasReadme,
+            readmeAvailable = detail.ReadmeMarkdown.Length > 0,
+            readmeMarkdown = detail.ReadmeMarkdown,
+            readmeError = detail.ReadmeError,
+            changelog = detail.Changelog.Select(change => new
+            {
+                version = change.Version,
+                date = change.Date,
+                items = change.Items,
+            }).ToList(),
+        };
     }
 
     private static async Task HandleStoreOperationAsync(HttpListenerContext context, string name, string action)

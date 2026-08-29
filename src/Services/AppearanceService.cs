@@ -29,6 +29,8 @@ internal sealed class AppearanceService
         "--accent", "--accent-strong", "--accent-alt", "--accent-soft", "--on-accent",
         "--ok", "--bad", "--bad-soft", "--bad-border", "--warn", "--ok-soft", "--warn-soft", "--muted-soft",
         "--shadow", "--mask", "--log-bg", "--log-text", "--focus", "--select-arrow",
+        "--wallpaper-card-dark", "--wallpaper-card-dark-soft", "--wallpaper-card-dark-hover", "--wallpaper-card-dark-border",
+        "--wallpaper-card-light", "--wallpaper-card-light-soft", "--wallpaper-card-light-hover", "--wallpaper-card-light-border",
     };
 
     private readonly Func<PluginManager>? _plugins;
@@ -112,7 +114,7 @@ internal sealed class AppearanceService
             EnsureProviderOwnership(config, caller, allowClaim: true);
             AppearanceAsset asset = FindAsset(config, assetId);
             asset.Palette = ParsePalette(palette);
-            asset.PaletteVersion = 2;
+            asset.PaletteVersion = 3;
             config.Revision = Math.Max(1, config.Revision + 1);
             config.UpdatedAt = DateTimeOffset.UtcNow;
             SaveConfig(config);
@@ -487,7 +489,7 @@ internal sealed class AppearanceService
                     throw new AppearanceException("invalid_config", "壁纸配色格式无效");
                 }
                 FindAsset(config, assetId).Palette = ParsePalette(palette);
-                FindAsset(config, assetId).PaletteVersion = 2;
+                FindAsset(config, assetId).PaletteVersion = 3;
             }
         }
         config.Order = config.Order
@@ -511,8 +513,7 @@ internal sealed class AppearanceService
             PluginManager manager = _plugins();
             return manager.IsKnownPlugin(provider.PluginName)
                 && manager.IsEnabled(provider.PluginName)
-                && manager.HasFrontend(provider.PluginName)
-                && manager.IsFrontendTrusted(provider.PluginName);
+                && manager.HasFrontend(provider.PluginName);
         }
         catch
         {
@@ -657,7 +658,7 @@ internal sealed class AppearanceService
             SizeBytes = Math.Max(0, source.SizeBytes),
             Sha256 = source.Sha256 ?? "",
             CreatedAt = source.CreatedAt,
-            PaletteVersion = source.PaletteVersion >= 2 ? 2 : source.PaletteVersion == 1 ? 1 : 0,
+            PaletteVersion = source.PaletteVersion >= 3 ? 3 : source.PaletteVersion == 2 ? 2 : source.PaletteVersion == 1 ? 1 : 0,
             Palette = source.Palette is null
                 ? new Dictionary<string, string>(StringComparer.Ordinal)
                 : ParsePalette(source.Palette),

@@ -214,16 +214,6 @@ internal sealed class McpDestructiveTools
     public Task<CallToolResult> UninstallPlugin([Description("当前已安装插件的稳定名称。")]
         string name) => UninstallPluginAsync(name);
 
-    [McpServerTool(Name = "trust_plugin_frontend", Title = "信任插件前端", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("保存插件前端信任决策，使该插件前端可以读取受控前端扩展资源。")]
-    public CallToolResult TrustPluginFrontend([Description("插件稳定名称。")]
-        string name) => SetPluginFrontendTrust(name, trusted: true);
-
-    [McpServerTool(Name = "revoke_plugin_frontend", Title = "撤销插件前端信任", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("撤销插件前端信任并立即阻止该插件前端扩展被加载。")]
-    public CallToolResult RevokePluginFrontend([Description("插件稳定名称。")]
-        string name) => SetPluginFrontendTrust(name, trusted: false);
-
     [McpServerTool(Name = "enable_plugin", Title = "启用插件", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("修改插件配置为启用；插件在下次服务启动时应用。")]
     public CallToolResult EnablePlugin([Description("插件名称。")] string name) => SetPluginState(name, enabled: true);
@@ -324,30 +314,6 @@ internal sealed class McpDestructiveTools
         {
             return McpToolResult.Exception(ex);
         }
-    }
-
-    private CallToolResult SetPluginFrontendTrust(string name, bool trusted)
-    {
-        if (!Allowed())
-        {
-            return Denied();
-        }
-        string pluginName = name?.Trim() ?? "";
-        PluginManager plugins = _context.Runtime.Plugins;
-        if (!plugins.SetFrontendTrusted(pluginName, trusted, Audit.Mcp, out string? failureCode))
-        {
-            return McpToolResult.Failure(
-                failureCode ?? "frontend_not_found",
-                failureCode == "host_maintenance"
-                    ? "宿主正在进行维护操作，暂不能修改插件前端信任设置"
-                    : $"插件不存在或没有前端模块：{pluginName}");
-        }
-        return McpToolResult.Success(new
-        {
-            name = pluginName,
-            frontendTrusted = plugins.IsFrontendTrusted(pluginName),
-            restartRequired = false,
-        });
     }
 
     [McpServerTool(Name = "restart_service", Title = "重启服务", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]

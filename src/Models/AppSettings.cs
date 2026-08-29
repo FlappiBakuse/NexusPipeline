@@ -105,13 +105,4 @@ public class AppSettings
 public sealed class PluginPreference
 {
     public bool Enabled { get; set; }
-
-    /// <summary>是否允许插件前端模块在管理页面同源执行；必须由用户单独确认。</summary>
-    public bool FrontendTrusted { get; set; }
-
-    /// <summary>确认时的插件版本。插件升级后版本变化会自动要求重新确认。</summary>
-    public string FrontendTrustedVersion { get; set; } = "";
-
-    /// <summary>确认时的前端声明指纹；manifest 入口、样式或 capability 变化会自动要求重新确认。</summary>
-    public string FrontendTrustedFingerprint { get; set; } = "";
 }

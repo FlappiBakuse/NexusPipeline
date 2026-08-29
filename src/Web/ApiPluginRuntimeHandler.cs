@@ -3,7 +3,7 @@ using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Web;
 
-/// <summary>向管理页面发布已启用、已确认信任且兼容的插件前端模块清单。</summary>
+/// <summary>向管理页面发布已启用、运行态有效且兼容的插件前端模块清单。</summary>
 [ApiRoute("plugin-runtime")]
 internal static class ApiPluginRuntimeHandler
 {

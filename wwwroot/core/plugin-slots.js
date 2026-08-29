@@ -213,7 +213,7 @@ export async function renderPluginSlot(container, slot, context = {}) {
     }]);
     contributions = Array.isArray(payload) ? payload : (payload?.contributions || []);
   } catch {
-    // 老服务端或单个插件故障不影响宿主页面；可信前端 renderer 仍会完成渲染。
+    // 老服务端或单个插件故障不影响宿主页面；插件 renderer 仍会完成渲染。
   }
   await paintPluginSlot(container, slot, context, contributions);
 }
@@ -238,7 +238,7 @@ export async function renderPluginSlots(root = document) {
       const payload = await queryContributions(slot, entries.map(entry => entry.context));
       contributions = Array.isArray(payload) ? payload : (payload?.contributions || []);
     } catch {
-      // 批量查询失败时保留可信前端 slot 的渲染结果。
+      // 批量查询失败时保留插件 slot 的渲染结果。
     }
     for (const entry of entries) {
       const matching = contributions.filter(contribution => {

@@ -24,7 +24,7 @@
 
 稳定 capability ID 与三端状态维护在 [CONTROL_PLANE.md](CONTROL_PLANE.md)；新能力完成前必须补齐该表并通过治理测试。
 
-每项能力都必须记录一种明确状态：`supported`、`intentionally-ui-only`、`security-restricted` 或 `not-applicable`。纯视觉表现、布局、壁纸展示和前端路由可以保持 `intentionally-ui-only`；插件安装、更新、卸载、前端信任、用户全局设置、插件用户设置和运行控制属于控制面能力，需具备正式 API、CLI/MCP 暴露或明确的 `security-restricted` 策略。CLI 通过 Control API 调用宿主服务，MCP 通过应用服务和同一套投影读取状态，适配器不得各自拼出独立领域规则。
+每项能力都必须记录一种明确状态：`supported`、`intentionally-ui-only`、`security-restricted` 或 `not-applicable`。纯视觉表现、布局、壁纸展示和前端路由可以保持 `intentionally-ui-only`；插件安装、更新、卸载、用户全局设置、插件用户设置和运行控制属于控制面能力，需具备正式 API、CLI/MCP 暴露或明确的 `security-restricted` 策略。CLI 通过 Control API 调用宿主服务，MCP 通过应用服务和同一套投影读取状态，适配器不得各自拼出独立领域规则。
 
 ## 测试归属规则
 
@@ -36,7 +36,7 @@
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
 - 插件 catalog schema 1/2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
-- 插件管理控制面投影、插件商店安装/更新/卸载事务、前端信任、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
+- 插件管理控制面投影、插件商店安装/更新/卸载事务、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
 - MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。

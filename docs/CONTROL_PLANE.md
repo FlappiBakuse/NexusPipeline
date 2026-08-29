@@ -31,7 +31,6 @@
 | `plugins.store.install` | `supported`（Control API） | `supported`（`plugin install/store install`） | `security-restricted`（`risk=destructive`） | `risk=destructive` 代码供应链修改；MCP 仅在 `McpAllowDestructiveTools` 开启后提供 |
 | `plugins.store.update` | `supported`（Control API） | `supported`（`plugin update/store update`） | `security-restricted`（`risk=destructive`） | `risk=destructive` 代码供应链修改；以 pending 事务跨重启生效 |
 | `plugins.store.uninstall` | `supported`（Control API） | `supported`（`plugin uninstall/store uninstall`） | `security-restricted`（`risk=destructive`） | `risk=destructive` 代码供应链修改；卸载事务在重启时完成 |
-| `plugins.frontend-trust` | `supported`（插件前端信任接口） | `supported`（`plugin trust-frontend/revoke-frontend`） | `security-restricted`（`risk=destructive`） | `risk=destructive` 影响同源前端代码加载；MCP 需显式高风险授权 |
 | `plugin-user-settings.read` | `supported`（用户全局贡献接口） | `supported`（`plugin user-settings list/get`） | `supported`（`list/get_plugin_user_settings`） | `secret` 字段只返回 `configured` 状态 |
 | `plugin-user-settings.write` | `supported`（贡献 PUT） | `supported`（`plugin user-settings update`） | `supported`（普通字段） | `secret` 的 `set/clear` 另受 `security-restricted` 规则约束 |
 | `plugin-user-settings.secret-write` | `supported`（贡献 PUT） | `supported`（通用 JSON payload） | `security-restricted`（`risk=sensitive`） | `risk=sensitive`；MCP `secret set/clear` 需要 `McpAllowDestructiveTools`；明文不进入输出或日志 |
@@ -49,7 +48,7 @@
 |---|---|---|---|---|
 | `appearance.wallpaper-presentation` | `intentionally-ui-only` | `not-applicable` | `not-applicable` | 壁纸选择、轮换和展示效果属于前端表现 |
 | `frontend.slot-rendering` | `intentionally-ui-only` | `not-applicable` | `not-applicable` | slot、nav、route 和 renderer 属于 Frontend API contract |
-| `execution-preview.image-rendering` | `intentionally-ui-only` | `not-applicable` | `not-applicable` | 图片显示属于可信前端；宿主采集授权由 `execution-preview-client` capability 控制 |
+| `execution-preview.image-rendering` | `intentionally-ui-only` | `not-applicable` | `not-applicable` | 图片显示属于插件前端；宿主采集授权由 `execution-preview-client` capability 控制 |
 
 ## 维护规则
 

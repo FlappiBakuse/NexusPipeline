@@ -20,7 +20,6 @@ internal sealed record PluginManagementView(
     bool RestartRequired,
     bool HasFrontend,
     string FrontendApiVersion,
-    bool FrontendTrusted,
     bool ManagedByStore,
     string InstalledName,
     string InstalledVersion,
@@ -28,6 +27,18 @@ internal sealed record PluginManagementView(
     string PendingAction,
     string PendingVersion)
 {
+    public IReadOnlyList<PluginAuthor> Authors { get; init; } = Array.Empty<PluginAuthor>();
+
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+
+    public string Homepage { get; init; } = "";
+
+    public string UpdatedAt { get; init; } = "";
+
+    public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
+
+    public bool HasReadme { get; init; }
+
     public static PluginManagementView Create(
         PluginSummary summary,
         PluginManager manager,
@@ -59,12 +70,19 @@ internal sealed record PluginManagementView(
             configuredEnabled != runtimeEnabled,
             summary.HasFrontend,
             summary.FrontendApiVersion,
-            manager.IsFrontendTrusted(summary.Name),
             owner is not null,
             owner?.Name ?? summary.Name,
             owner?.Version ?? summary.Version,
             owner is not null ? "official-store" : "local",
             operation?.Action ?? "",
-            operation?.Version ?? "");
+            operation?.Version ?? "")
+        {
+            Authors = summary.Authors,
+            Tags = summary.Tags,
+            Homepage = summary.Homepage,
+            UpdatedAt = summary.UpdatedAt,
+            Changelog = summary.Changelog,
+            HasReadme = summary.HasReadme,
+        };
     }
 }

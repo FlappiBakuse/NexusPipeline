@@ -135,8 +135,8 @@ public sealed class McpProtocolTests
             Assert.Contains(tools, tool => tool.Name == "install_plugin");
             Assert.Contains(tools, tool => tool.Name == "update_plugin");
             Assert.Contains(tools, tool => tool.Name == "uninstall_plugin");
-            Assert.Contains(tools, tool => tool.Name == "trust_plugin_frontend");
-            Assert.Contains(tools, tool => tool.Name == "revoke_plugin_frontend");
+            Assert.DoesNotContain(tools, tool => tool.Name == "trust_plugin_frontend");
+            Assert.DoesNotContain(tools, tool => tool.Name == "revoke_plugin_frontend");
         }
         finally
         {

@@ -49,6 +49,41 @@ public sealed class PluginRepositoryCatalogTests
     }
 
     [Fact]
+    public void TryParse_ParsesPresentationMetadataAndDerivesUpdatedAt()
+    {
+        JsonObject root = CreateCatalog(2);
+        JsonObject entry = (JsonObject)((JsonArray)root["plugins"]!)[0]!;
+        entry["authors"] = new JsonArray(new JsonObject
+        {
+            ["name"] = "Nexus Team",
+            ["url"] = "https://github.com/FlappiBakuse",
+        });
+        entry["tags"] = new JsonArray("原神", "专项插件");
+        entry["homepage"] = "https://github.com/FlappiBakuse/NexusPipeline-Plugins";
+        entry["hasReadme"] = true;
+
+        Assert.True(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out PluginCatalog? catalog, out string? error), error);
+        PluginCatalogEntry parsed = Assert.Single(catalog!.Plugins);
+        Assert.Equal("Nexus Team", Assert.Single(parsed.Authors).Name);
+        Assert.Equal(new[] { "原神", "专项插件" }, parsed.Tags);
+        Assert.Equal("https://github.com/FlappiBakuse/NexusPipeline-Plugins", parsed.Homepage);
+        Assert.Equal("2026-08-28", parsed.UpdatedAt);
+        Assert.True(parsed.HasReadme);
+    }
+
+    [Theory]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("http://example.com/readme")]
+    public void TryParse_RejectsUnsafePresentationHomepage(string homepage)
+    {
+        JsonObject root = CreateCatalog(2);
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["homepage"] = homepage;
+
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? error));
+        Assert.Contains("homepage", error);
+    }
+
+    [Fact]
     public void TryParse_Schema2_RequiresValidArtifactNameAndCurrentChangelog()
     {
         JsonObject root = CreateCatalog(2);
@@ -366,8 +401,9 @@ public sealed class PluginInstallRecoveryTests
             JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(Path.Combine(config, "settings.json"))));
             JsonObject preference = Assert.IsType<JsonObject>(settings["PluginPreferences"]!["game-checkin"]);
             Assert.True(preference["Enabled"]!.GetValue<bool>());
-            Assert.False(preference["FrontendTrusted"]!.GetValue<bool>());
-            Assert.Equal("", preference["FrontendTrustedVersion"]!.ToString());
+            Assert.Null(preference["FrontendTrusted"]);
+            Assert.Null(preference["FrontendTrustedVersion"]);
+            Assert.Null(preference["FrontendTrustedFingerprint"]);
             Assert.Empty(PluginInstallRecovery.ReadPending(pending));
             PluginOwnership owner = Assert.Single(PluginInstallRecovery.ReadOwnership(ownership).Values);
             Assert.Equal("game-checkin", owner.Name);

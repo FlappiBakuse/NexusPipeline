@@ -11,6 +11,8 @@ const appliedThemeTokens = new Set();
 const appliedWallpaperTokens = new Set();
 const adaptiveWallpaperTokens = new Set([
   "--accent", "--accent-strong", "--accent-alt", "--accent-soft", "--on-accent", "--focus", "--mask",
+  "--wallpaper-card-dark", "--wallpaper-card-dark-soft", "--wallpaper-card-dark-hover", "--wallpaper-card-dark-border",
+  "--wallpaper-card-light", "--wallpaper-card-light-soft", "--wallpaper-card-light-hover", "--wallpaper-card-light-border",
 ]);
 const wallpaperSubscribers = new Set();
 let wallpaperUrl = null;
@@ -224,6 +226,7 @@ export async function derivePalette(blob) {
   red = Math.round(red / Math.max(1, weight)); green = Math.round(green / Math.max(1, weight)); blue = Math.round(blue / Math.max(1, weight));
   const light = relativeLuminance(red, green, blue) < 0.42;
   const [hue, saturation] = rgbToHsl(red, green, blue);
+  const cardSaturation = Math.max(10, Math.min(32, saturation * 0.34 + 8));
   const accent = hslToCss(hue, Math.max(48, Math.min(78, saturation + 18)), light ? 66 : 42);
   const accentStrong = hslToCss(hue, Math.max(52, Math.min(84, saturation + 25)), light ? 74 : 34);
   return {
@@ -234,6 +237,14 @@ export async function derivePalette(blob) {
     "--on-accent": "#ffffff",
     "--mask": light ? "rgba(4, 10, 20, .44)" : "rgba(255, 255, 255, .42)",
     "--focus": `0 0 0 3px ${hslAlphaToCss(hue, Math.max(48, Math.min(78, saturation + 18)), light ? 66 : 42, 0.32)}`,
+    "--wallpaper-card-dark": hslToCss(hue, cardSaturation, 16),
+    "--wallpaper-card-dark-soft": hslToCss(hue, Math.min(36, cardSaturation + 2), 21),
+    "--wallpaper-card-dark-hover": hslToCss(hue, Math.min(40, cardSaturation + 5), 26),
+    "--wallpaper-card-dark-border": hslAlphaToCss(hue, Math.min(44, cardSaturation + 10), 64, 0.32),
+    "--wallpaper-card-light": hslToCss(hue, cardSaturation, 97),
+    "--wallpaper-card-light-soft": hslToCss(hue, Math.min(36, cardSaturation + 2), 93),
+    "--wallpaper-card-light-hover": hslToCss(hue, Math.min(40, cardSaturation + 5), 89),
+    "--wallpaper-card-light-border": hslAlphaToCss(hue, Math.min(44, cardSaturation + 10), 42, 0.24),
   };
 }
 
@@ -257,7 +268,7 @@ async function applyServerSnapshot(snapshot, caller = snapshot?.provider?.plugin
   const blob = await fetchAssetBlob(asset);
   applyWallpaperUrl(URL.createObjectURL(blob));
   setWallpaperEffects(snapshot.effects);
-  if (asset.paletteVersion === 2 && asset.palette) {
+  if (asset.paletteVersion === 3 && asset.palette) {
     setWallpaperTokens(asset.palette);
   } else {
     const palette = await derivePalette(blob);

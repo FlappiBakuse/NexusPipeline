@@ -19,7 +19,7 @@ NexusPipeline-Plugins/plugins/
 ├── GameCheckIn/                  # 可选 managed-code 插件；name = game-checkin
 │   ├── plugin.json
 │   ├── CheckInPlugin.dll
-│   └── web/                      # 可选：可信前端模块与静态资源
+│   └── web/                      # 可选：Frontend API 模块与静态资源
 │       ├── main.js
 │       └── style.css
 ├── March7thAssistant/（plugin.json + store.json + data/{resolve.json, judge.js}）
@@ -137,7 +137,7 @@ settings.sections               shell.nav
 }
 ```
 
-入口 ES module 必须导出 `activate(host)`。宿主通过 `GET /api/plugin-runtime/frontend` 发布已启用、API 兼容、当前版本已确认信任的安全描述，动态加载入口并按需注入样式。插件 host 提供：
+入口 ES module 必须导出 `activate(host)`。宿主通过 `GET /api/plugin-runtime/frontend` 发布已启用、API 兼容的安全描述，动态加载入口并按需注入样式。插件 host 提供：
 
 - `host.api.get/post/put/patch/delete(route, body, signal)`：访问插件自己的 `/api/plugin-api/` 命名空间；
 - `host.actions.register(id, handler)`：注册带 `plugin:<name>:` 前缀的全局 action；
@@ -150,7 +150,7 @@ settings.sections               shell.nav
 - `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。
 
-前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。该能力只对用户明确确认信任的插件开放，插件更新版本或前端声明变化后会重新要求确认。前端信任记录按插件版本与前端声明指纹保存于 `AppSettings.PluginPreferences`，manifest 的入口、样式或 capability 变化会要求重新确认；撤销信任后模块不会出现在运行时清单。
+前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 兼容性、公开资源路径、扩展名和文件存在性。同源前端可以访问管理页面可用的 DOM 与请求能力，插件发布前应完成代码审查。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
@@ -158,7 +158,9 @@ settings.sections               shell.nav
 
 `wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
 
-`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`frontendTrusted`、`replaces` 和 `error` 字段中查看。
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`replaces` 和 `error` 字段中查看。
+
+插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，更新时间取最新更新记录日期。
 
 ## plugin.json（根文件）
 
@@ -189,7 +191,7 @@ schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-ca
 | `displayName` / `gameName` | 列表显示名 / 中文游戏名（脚本卡片徽章「{gameName}专项」） |
 | `description` / `version` | 插件说明 / SemVer 版本（插件页展示） |
 | `minHostVersion` | 可选的最低宿主版本；缺省按 `0.0.0` 处理 |
-| `replaces` | 可选的旧插件机器标识数组；商店安装时按跨重启事务迁移旧插件代码目录、配置、密钥、作用域和插件偏好，并清除前端信任 |
+| `replaces` | 可选的旧插件机器标识数组；商店安装时按跨重启事务迁移旧插件代码目录、配置、密钥、作用域和插件偏好 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configTemplate` | 可选：默认配置模板目录（编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置） |
@@ -272,7 +274,7 @@ schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-ca
 
 1. 完成旧 pending journal 后，校验新旧身份与 staging 目录，旧代码目录进入稳定 backup，新的 artifactName 目录完成交换；
 2. 将 `config/plugins/<旧名>.json`、`<旧名>.secrets.json` 和 `<旧名>/` 作用域目录移动为新身份；
-3. 将 `AppSettings.PluginPreferences` 中的旧键迁移为新键，保留 `Enabled`，清除前端信任记录；
+3. 将 `AppSettings.PluginPreferences` 中的旧键迁移为新键，保留 `Enabled`；
 4. 更新商店 `ownership.json` 并清理旧身份归属；
 5. 任一阶段失败时保留 `pending.json`，下次启动从已记录阶段继续。
 

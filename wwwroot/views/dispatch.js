@@ -16,8 +16,7 @@ function executionPreviewLayoutEnabled(plugins = state.plugins) {
     && item.capabilities.some(capability => String(capability || "").toLowerCase() === "execution-preview-client"));
   return plugin?.configuredEnabled === true
     && plugin?.runtimeEnabled === true
-    && plugin?.hasFrontend === true
-    && plugin?.frontendTrusted === true;
+    && plugin?.hasFrontend === true;
 }
 
 function syncRunningLayout(plugins = state.plugins) {

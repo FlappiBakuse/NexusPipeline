@@ -368,8 +368,10 @@ test("历史记录日期索引：仅显示有记录的日期 + 按日取记录 +
     // UI：日期列表默认选中最新日期（今日），今日记录含本用例运行
     await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="history-panels"]', { timeout: 10000 });
-    const optCount = await page.$$eval("#history-days option", els => els.length);
-    expect(optCount === 7, "天数范围下拉含 7 个选项（7/15/30/60/90/120/180）").toBeTruthy();
+    const rangeControl = await page.$eval("#history-range-display", el => ({ type: el.type, readOnly: el.readOnly, value: el.value }));
+    const rangeParts = await page.$$eval("#history-from, #history-to", els => els.map(el => ({ type: el.type, value: el.value })));
+    const hasQueryButton = await page.$('[data-testid="history-range-search-button"]');
+    expect(rangeControl.type === "text" && rangeControl.readOnly && rangeParts.length === 2 && rangeParts.every(control => control.type === "date" && /^\\d{4}-\\d{2}-\\d{2}$/.test(control.value)) && !hasQueryButton, "历史记录使用单一时间段选择器并按年月日筛选").toBeTruthy();
     const dateRows = await page.$$eval('[data-testid="history-date"]', els => els.map(el => el.getAttribute("data-date")));
     expect(dateRows[0] === today, "日期列表默认选中并置顶今日").toBeTruthy();
     expect(dateRows.includes(oldDate) && !dateRows.includes(absentDate), "日期列表仅显示有记录的日期").toBeTruthy();

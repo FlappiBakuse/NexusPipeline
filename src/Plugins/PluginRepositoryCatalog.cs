@@ -203,6 +203,25 @@ internal static class PluginRepositoryCatalog
                     error = $"插件 {name} 的 changelog 无效：{changelogError}";
                     return false;
                 }
+                if (!PluginPresentationMetadataParser.TryParseFields(
+                        item,
+                        out IReadOnlyList<PluginAuthor> authors,
+                        out IReadOnlyList<string> tags,
+                        out string homepage,
+                        out bool hasReadme,
+                        out string? metadataError))
+                {
+                    error = $"插件 {name} 的展示元数据无效：{metadataError}";
+                    return false;
+                }
+                string updatedAt = item["updatedAt"]?.ToString()?.Trim() ?? changelog.FirstOrDefault()?.Date ?? "";
+                if ((updatedAt.Length > 0 && (updatedAt.Length != 10
+                    || !DateTime.TryParseExact(updatedAt, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
+                    || changelog.Count > 0 && !string.Equals(updatedAt, changelog[0].Date, StringComparison.Ordinal))
+                {
+                    error = $"插件 {name} 的 updatedAt 必须对应最新 changelog 日期";
+                    return false;
+                }
 
                 entries.Add(new PluginCatalogEntry(
                     name,
@@ -222,6 +241,11 @@ internal static class PluginRepositoryCatalog
                     ArtifactName = artifactName,
                     CatalogSchemaVersion = schemaVersion,
                     Changelog = changelog,
+                    Authors = authors,
+                    Tags = tags,
+                    Homepage = homepage,
+                    UpdatedAt = updatedAt,
+                    HasReadme = hasReadme,
                 });
             }
             catalog = new PluginCatalog(schemaVersion, repository, generatedAt, entries);
@@ -340,7 +364,7 @@ internal static class PluginRepositoryCatalog
         return true;
     }
 
-    private static bool TryParseChangelog(
+    internal static bool TryParseChangelog(
         JsonObject item,
         string currentVersion,
         bool required,
@@ -621,6 +645,16 @@ internal sealed record PluginCatalogEntry(
     public int CatalogSchemaVersion { get; init; } = PluginRepositoryCatalog.SchemaVersion;
 
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
+
+    public IReadOnlyList<PluginAuthor> Authors { get; init; } = Array.Empty<PluginAuthor>();
+
+    public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
+
+    public string Homepage { get; init; } = "";
+
+    public string UpdatedAt { get; init; } = "";
+
+    public bool HasReadme { get; init; }
 
     [JsonIgnore]
     public IReadOnlyList<string> ReplacementNames => Replaces ?? Array.Empty<string>();

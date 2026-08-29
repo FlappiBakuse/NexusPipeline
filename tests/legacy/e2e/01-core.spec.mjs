@@ -212,18 +212,18 @@ test("验收修正：手机用户/调度布局与队列、插件细节保持一�
     await page.click('[data-action="close-modal"]');
 
     await page.goto(baseUrl + "#/plugins", { waitUntil: "domcontentloaded" });
-    await page.waitForSelector(".plugins-table");
-    const pluginLayout = await page.$eval(".plugins-table", table => {
-      const group = table.querySelector(".plugin-group");
-      const helper = table.nextElementSibling;
-      const name = table.querySelector(".plugin-name-scroll");
+    await page.waitForSelector('[data-testid="plugin-browser"]');
+    const pluginLayout = await page.$eval('[data-testid="plugin-browser"]', browser => {
+      const helper = browser.querySelector(".plugin-list-pane");
+      const name = browser.querySelector(".plugin-name-scroll");
       return {
-        groupCount: table.querySelectorAll(".plugin-group").length,
+        listVisible: !!browser.querySelector(".plugin-list-pane"),
+        detailVisible: !!browser.querySelector(".plugin-detail-pane"),
         helperPadding: helper ? parseFloat(getComputedStyle(helper).paddingLeft) : 0,
-        nameFocusable: name?.getAttribute("tabindex") === "0",
+        nameFocusable: !name || name.getAttribute("tabindex") === "0",
       };
     });
-    expect(pluginLayout.groupCount > 0 && pluginLayout.helperPadding >= 0 && pluginLayout.nameFocusable, "插件按分组列表展示且名称可聚焦滚动").toBeTruthy();
+    expect(pluginLayout.listVisible && pluginLayout.detailVisible && pluginLayout.helperPadding >= 0 && pluginLayout.nameFocusable, "插件双栏浏览器保留列表与详情区域").toBeTruthy();
   } finally {
     if (queueId) await api("DELETE", "/api/queues/" + queueId);
     if (userId) await api("DELETE", `/api/users/${encodeURIComponent(userId)}`, { confirmName: userName });

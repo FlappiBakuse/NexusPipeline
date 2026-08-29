@@ -115,7 +115,7 @@ document.addEventListener("keydown", event => {
 
 document.addEventListener("input", event => {
   if (event.target?.id === "sm-root") syncScriptGhostState();
-  const target = event.target.closest?.('[data-action="sync-user-management-run-days"]');
+  const target = event.target.closest?.('[data-action="sync-user-management-run-days"], [data-action="filter-plugin-list"]');
   if (target) actionHandler(target.dataset.action)?.(target, event);
 });
 

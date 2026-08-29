@@ -32,8 +32,7 @@ internal sealed class ExecutionPreviewService
         if (!_plugins().IsKnownPlugin(pluginName)
             || !_plugins().HasCapability(pluginName, PluginCapabilityKeys.ExecutionPreviewClient)
             || !_plugins().IsEnabled(pluginName)
-            || !_plugins().HasFrontend(pluginName)
-            || !_plugins().IsFrontendTrusted(pluginName))
+            || !_plugins().HasFrontend(pluginName))
         {
             return new ExecutionPreviewResponse(404, Error: "执行预览插件不可用");
         }

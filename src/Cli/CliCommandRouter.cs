@@ -800,8 +800,7 @@ internal static class CliCommandRouter
 
         string? rawSecond = Positional(args, 2);
         string? second = rawSecond?.ToLowerInvariant();
-        bool actionFirst = first is "get" or "enable" or "disable" or "install" or "update" or "uninstall"
-            or "trust-frontend" or "revoke-frontend";
+        bool actionFirst = first is "get" or "enable" or "disable" or "install" or "update" or "uninstall";
         string sub = actionFirst ? first : second ?? first;
         if (sub == "list")
         {
@@ -812,7 +811,7 @@ internal static class CliCommandRouter
             }
             return ReturnApi(client.Get("/api/plugins"));
         }
-        if (sub is not ("get" or "enable" or "disable" or "install" or "update" or "uninstall" or "trust-frontend" or "revoke-frontend"))
+        if (sub is not ("get" or "enable" or "disable" or "install" or "update" or "uninstall"))
         {
             return CliOutput.WriteFailure("invalid_arguments", $"未知 plugin 子命令：{sub}");
         }
@@ -854,10 +853,7 @@ internal static class CliCommandRouter
         {
             return CliExitCodes.For("invalid_arguments");
         }
-        string message = sub is "trust-frontend" or "revoke-frontend"
-            ? "插件前端信任设置已更新"
-            : "插件设置已更新";
-        return ReturnApi(client.Post($"/api/plugins/{Escape(name)}/{sub}"), message);
+        return ReturnApi(client.Post($"/api/plugins/{Escape(name)}/{sub}"), "插件设置已更新");
     }
 
     private static int ExecutePluginStore(CliArguments args, CliApiClient client)

@@ -31,7 +31,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     public IReadOnlyList<string> Replaces { get; private set; } = Array.Empty<string>();
 
-    /// <summary>数据化插件可选的同源可信前端模块声明。</summary>
+    /// <summary>数据化插件可选的同源前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
     internal string PluginDirectory { get; private set; } = "";
