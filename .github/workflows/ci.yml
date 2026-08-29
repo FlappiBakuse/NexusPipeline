@@ -38,6 +38,26 @@ jobs:
         with:
           node-version: 20
 
+      - name: 创建 CI 普通权限账户
+        shell: pwsh
+        run: |
+          $userName = "NexusCi-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+          $password = "Nxp-" + [Guid]::NewGuid().ToString("N") + "!"
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
+          Add-LocalGroupMember -Group "Users" -Member $userName
+          $principal = [System.Security.Principal.NTAccount]::new($env:COMPUTERNAME, $userName).Value
+          $grant = "$($principal):(OI)(CI)M"
+          icacls "$env:GITHUB_WORKSPACE" /grant $grant /T /C /Q
+          Write-Output "::add-mask::$password"
+          "NEXUS_CI_TEST_USER=$userName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NEXUS_CI_TEST_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NEXUS_CI_TEST_DOMAIN=." | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 构建 Medium Integrity 测试启动器
+        shell: cmd
+        run: dotnet build tests\support\NexusPipeline.TestLauncher\NexusPipeline.TestLauncher.csproj -c Release --nologo
+
       - name: 安装 Playwright 依赖
         working-directory: tests/e2e
         shell: cmd
@@ -45,13 +65,21 @@ jobs:
 
       - name: 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
         shell: cmd
-        run: node tests\run.mjs default
+        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs default
 
       - name: 运行 Playwright UI Smoke
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: node tests\run.mjs ui
+        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs ui
+
+      - name: 清理 CI 普通权限账户
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if ($env:NEXUS_CI_TEST_USER) {
+            Remove-LocalUser -Name $env:NEXUS_CI_TEST_USER -ErrorAction SilentlyContinue
+          }
 
   system-tests:
     name: Windows System Smoke
@@ -72,6 +100,26 @@ jobs:
         with:
           node-version: 20
 
+      - name: 创建 CI 普通权限账户
+        shell: pwsh
+        run: |
+          $userName = "NexusCi-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+          $password = "Nxp-" + [Guid]::NewGuid().ToString("N") + "!"
+          $securePassword = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name $userName -Password $securePassword -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword | Out-Null
+          Add-LocalGroupMember -Group "Users" -Member $userName
+          $principal = [System.Security.Principal.NTAccount]::new($env:COMPUTERNAME, $userName).Value
+          $grant = "$($principal):(OI)(CI)M"
+          icacls "$env:GITHUB_WORKSPACE" /grant $grant /T /C /Q
+          Write-Output "::add-mask::$password"
+          "NEXUS_CI_TEST_USER=$userName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NEXUS_CI_TEST_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "NEXUS_CI_TEST_DOMAIN=." | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 构建 Medium Integrity 测试启动器
+        shell: cmd
+        run: dotnet build tests\support\NexusPipeline.TestLauncher\NexusPipeline.TestLauncher.csproj -c Release --nologo
+
       - name: 构建发布源
         shell: cmd
         run: node tests\run.mjs build
@@ -80,4 +128,12 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: node tests\run.mjs system
+        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs system
+
+      - name: 清理 CI 普通权限账户
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          if ($env:NEXUS_CI_TEST_USER) {
+            Remove-LocalUser -Name $env:NEXUS_CI_TEST_USER -ErrorAction SilentlyContinue
+          }

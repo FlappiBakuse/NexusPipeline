@@ -102,7 +102,7 @@ Test Host 具备以下测试专用能力：
 whoami /groups | Select-String 'S-1-16-8192'
 ```
 
-UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。
+UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。GitHub Actions 的 Windows runner 以管理员身份运行且关闭 UAC；CI 创建临时标准用户并使用 `tests/support/NexusPipeline.TestLauncher` 以该用户启动 Medium Integrity 子进程，本地 elevated token 若存在 linked filtered token 则优先复用，测试本身的权限校验保持有效。
 
 ## UI Smoke
 
@@ -168,7 +168,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 通过 `node tests\run.mjs default` 执行 Unit + Component、Web Logic、文档一致性、UI Smoke 语法和构建，再通过 `node tests\run.mjs ui` 执行 Playwright UI Smoke；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 `node tests\run.mjs system` 执行构建和六阶段 System Smoke，不加载 legacy。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 先构建 `tests/support/NexusPipeline.TestLauncher`，再通过它以 Medium Integrity 执行 `node tests\run.mjs default` 和 `node tests\run.mjs ui`；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 Medium Integrity 测试启动器执行 `node tests\run.mjs system`，不加载 legacy。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 
