@@ -144,6 +144,19 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         }
     }
 
+    /// <summary>插件管理控制面共享投影；ownership/pending 由同一份快照合并，避免各适配器自行拼装。</summary>
+    internal IReadOnlyList<PluginManagementView> PluginManagementViews
+    {
+        get
+        {
+            IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
+            IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
+            return PluginSummaries
+                .Select(summary => PluginManagementView.Create(summary, this, ownership, pending))
+                .ToArray();
+        }
+    }
+
     internal IReadOnlyList<PluginUserGlobalManagementRegistration> UserGlobalManagementContributions =>
         _userGlobalManagement.Snapshot();
 

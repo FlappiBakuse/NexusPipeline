@@ -51,8 +51,14 @@ public sealed class McpProtocolTests
             IList<McpClientTool> tools = await client.ListToolsAsync();
             Assert.Contains(tools, tool => tool.Name == "get_status");
             Assert.Contains(tools, tool => tool.Name == "get_settings");
+            Assert.Contains(tools, tool => tool.Name == "list_plugin_store");
+            Assert.Contains(tools, tool => tool.Name == "refresh_plugin_store");
+            Assert.Contains(tools, tool => tool.Name == "get_user_global_settings");
+            Assert.Contains(tools, tool => tool.Name == "list_plugin_user_settings");
+            Assert.Contains(tools, tool => tool.Name == "get_plugin_user_settings");
             Assert.DoesNotContain(tools, tool => tool.Name == "delete_script");
             Assert.DoesNotContain(tools, tool => tool.Name == "set_secret");
+            Assert.DoesNotContain(tools, tool => tool.Name == "install_plugin");
 
             CallToolResult result = await client.CallToolAsync("get_settings");
             Assert.False(result.IsError);
@@ -126,6 +132,11 @@ public sealed class McpProtocolTests
             Assert.Contains(tools, tool => tool.Name == "set_secret");
             Assert.Contains(tools, tool => tool.Name == "enable_plugin");
             Assert.Contains(tools, tool => tool.Name == "disable_plugin");
+            Assert.Contains(tools, tool => tool.Name == "install_plugin");
+            Assert.Contains(tools, tool => tool.Name == "update_plugin");
+            Assert.Contains(tools, tool => tool.Name == "uninstall_plugin");
+            Assert.Contains(tools, tool => tool.Name == "trust_plugin_frontend");
+            Assert.Contains(tools, tool => tool.Name == "revoke_plugin_frontend");
         }
         finally
         {

@@ -1,6 +1,6 @@
 # NexusPipeline 架构说明
 
-本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。
+本文件是开发者的定位指南：模块边界、依赖方向、如何定位功能、如何扩展插件。Web、CLI、MCP 的能力清单见 [CONTROL_PLANE.md](CONTROL_PLANE.md)。
 核心设计理念与运行流程见 [DESIGN.md](DESIGN.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)。
 
 > 产品行为以 [DESIGN.md](DESIGN.md) 为唯一详细来源；版本演化进入 [CHANGELOG.md](../CHANGELOG.md)，当前未解决风险进入 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，协作与文档治理规则见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
@@ -126,8 +126,10 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
 | `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
-| `PluginManager` | src/Plugins/PluginManager.cs | 仅负责本地插件发现、加载、开关和兼容 façade；通用 capability 查询委托 registry，元数据投影不携带业务能力字段 |
+| `PluginManager` | src/Plugins/PluginManager.cs | 负责本地插件发现、加载、开关和兼容 façade；通用 capability 查询委托 registry，并生成控制面共享插件投影 |
+| `PluginManagementView` | src/Plugins/PluginManagementView.cs | 合并 manifest、运行态、前端信任、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
 | `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.4 UI、作用域数据、插件 Web API、历史贡献注册表与 DTO 校验；按插件生命周期撤销注册 |
+| `PluginUserGlobalSettingsService` | src/Plugins/PluginUserGlobalSettingsService.cs | 统一插件用户全局设置的读取、字段投影、secret 脱敏、输入校验和超时边界，供 Web 与 MCP 复用 |
 | `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.2 清单与 `web/` 资源路径，不向前端泄露插件目录 |
 | `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
 | `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
@@ -150,6 +152,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 - HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
 - 控制命令：先在 owning service 的 `ApiXxxHandler` 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `RuntimeContext` 持久化集合。
+- 控制面治理：新增可管理能力时同步更新 [CONTROL_PLANE.md](CONTROL_PLANE.md)，为三端写明状态、风险分类和适用例外。
 - 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
 - MCP 适配器：在 `src/Mcp/` 增加类型化工具和投影；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Application Commands 或既有核心服务。
 - 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
@@ -246,8 +249,10 @@ views/* 互不引用（跨域数据只经 core/state.js 缓存共享）
 
 - 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1.4 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
 - 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。现有 `supportsEmulator` 仍兼容并映射为 `emulator`。
-- `PluginSummary` 只描述展示/发现所需的元数据；Web 状态接口继续单独生成 `supportsEmulator`，因此不会破坏现有前端响应结构。
+- `PluginSummary` 负责 manifest 元数据；`PluginManagementView` 负责跨控制面共享的运行态、前端信任、商店归属和 pending 事务字段，Web、MCP 与状态接口从同一投影读取。
 - Plugin API v1.4 继续提供显式 `IPluginHostContext` / `IPluginHostContextV1_1` / `IPluginHostContextV1_2` / `IPluginHostContextV1_3` 服务端口；插件全局配置、插件级密钥、按用户配置/密钥和实体作用域数据分层存储于 `config/plugins/`，managed-code 插件停止时后台任务、UI/Web API/历史贡献、用户设置贡献、用户列表徽章和事件订阅统一取消。
+
+执行预览属于受信任的宿主能力。插件需在 manifest 中声明 `execution-preview-client`，同时满足已启用、存在前端模块且前端信任已确认，才能通过 `ExecutionPreviewService` 获取预览；具体截图实现仍由宿主持有，插件身份负责能力声明与准入。
 
 ### 编写插件
 

@@ -2,6 +2,8 @@ using System.Text.Json.Nodes;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Mcp;
 using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Plugins;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -91,5 +93,39 @@ public sealed class McpPolicyTests
         Assert.True(McpPolicy.IsSecretKey("proxyPassword"));
         Assert.False(McpPolicy.IsSecretKey("allowRemoteAccess"));
         Assert.False(McpPolicy.IsSecretKey("arbitraryPath"));
+    }
+
+    [Fact]
+    public void PluginSettingPolicy_requires_destructive_permission_for_secret_set_or_clear()
+    {
+        var registration = new PluginUserGlobalManagementRegistration(
+            Guid.NewGuid(),
+            "fixture",
+            "Fixture",
+            new PluginUserGlobalManagementContribution(
+                "settings",
+                "设置",
+                "测试",
+                1,
+                new[]
+                {
+                    new PluginUserGlobalManagementField("token", "令牌", "secret"),
+                    new PluginUserGlobalManagementField("enabled", "启用", "switch"),
+                },
+                (_, _) => ValueTask.FromResult(new JsonObject()),
+                (_, _, _) => ValueTask.CompletedTask));
+
+        Assert.True(McpPolicy.HasSensitivePluginSettingChange(
+            registration,
+            new JsonObject { ["token"] = new JsonObject { ["action"] = "set", ["value"] = "secret" } }));
+        Assert.True(McpPolicy.HasSensitivePluginSettingChange(
+            registration,
+            new JsonObject { ["token"] = new JsonObject { ["action"] = "clear" } }));
+        Assert.False(McpPolicy.HasSensitivePluginSettingChange(
+            registration,
+            new JsonObject { ["token"] = new JsonObject { ["action"] = "keep" } }));
+        Assert.False(McpPolicy.HasSensitivePluginSettingChange(
+            registration,
+            new JsonObject { ["enabled"] = true }));
     }
 }

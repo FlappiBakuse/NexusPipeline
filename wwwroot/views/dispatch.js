@@ -11,8 +11,9 @@ import { disposePluginSlot, notifyPluginPageUpdated } from "../core/plugin-runti
 const LOG_NEAR_BOTTOM_PX = 40;
 const LOG_QUIET_PERIOD_MS = 700;
 
-function liveScreenshotLayoutEnabled(plugins = state.plugins) {
-  const plugin = (plugins || []).find(item => String(item.name || "").toLowerCase() === "live-screenshot");
+function executionPreviewLayoutEnabled(plugins = state.plugins) {
+  const plugin = (plugins || []).find(item => Array.isArray(item.capabilities)
+    && item.capabilities.some(capability => String(capability || "").toLowerCase() === "execution-preview-client"));
   return plugin?.configuredEnabled === true
     && plugin?.runtimeEnabled === true
     && plugin?.hasFrontend === true
@@ -20,9 +21,9 @@ function liveScreenshotLayoutEnabled(plugins = state.plugins) {
 }
 
 function syncRunningLayout(plugins = state.plugins) {
-  const enabled = liveScreenshotLayoutEnabled(plugins);
+  const enabled = executionPreviewLayoutEnabled(plugins);
   document.querySelectorAll("#running-list .running-item-content").forEach(content => {
-    content.classList.toggle("has-live-screenshot", enabled);
+    content.classList.toggle("has-execution-preview", enabled);
   });
 }
 

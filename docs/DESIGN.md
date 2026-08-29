@@ -188,13 +188,13 @@ flowchart TD
 
 ### 3.4 统一控制面与 CLI
 
-常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `ExecutionCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
 常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `ExecutionCommands`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
 
 正式 CLI 的协议边界如下：
 
 - 命令采用 `status`、`script`、`user`、`queue`、`run`、`history`、`settings`、`plugin`、`update`、`maintenance` 和 `system-action` 等 noun/subcommand；`run-script`、`run-queue`、`cancel` 等旧入口继续作为兼容别名。
 - 复杂 payload 统一使用 `--file <json 文件>` 或 `--file -`（标准输入），避免把领域对象拆成大量命令行开关。
+- `user global-settings` 管理用户的 General、Notification、Advanced BindingOverrides；`plugin store` 管理官方插件仓库事务；`plugin user-settings` 管理通用插件用户设置贡献，命令均通过 Control API 复用宿主服务。
 - `--json` 输出稳定 envelope；标准输出只承载协议数据，连接诊断和运行进度转到标准错误。退出码按参数/校验、找不到或歧义、资源冲突、服务不可用、禁止、执行失败、取消/超时和内部错误分层。
 - 目标解析先按大小写不敏感的完整 ID 匹配，再按大小写不敏感的唯一名称匹配；名称匹配不唯一时保留候选 ID 并返回 `ambiguous_target`，禁止静默选择首项。
 - Control API 服务发现只接受 `/api/status` 返回的 `service=NexusPipeline`、`controlApiVersion=1` 和 `1024–65535` 范围内的 `actualPort`；状态、CRUD 与运行轮询使用短请求超时，通知测试和更新检查使用长同步超时。
@@ -216,7 +216,7 @@ MCP 的启动条件和运行语义如下：
 - `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
-工具按风险分层。只读工具读取状态、脚本、用户、绑定、队列、运行、历史、插件和脱敏设置；常规变更工具提交运行/取消、资源 CRUD 和安全设置白名单更新；`McpAllowDestructiveTools` 默认关闭，只有显式开启并重启服务后才注册删除、密钥、插件开关、服务重启、应用更新和遗留数据清理工具。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+工具按风险分层。只读工具读取状态、脚本、用户、用户全局设置、绑定、队列、运行、历史、插件、插件商店和脱敏插件设置；常规变更工具提交运行/取消、资源 CRUD、安全设置白名单更新、商店 catalog 刷新和非敏感插件设置；`McpAllowDestructiveTools` 默认关闭，只有显式开启并重启服务后才注册删除、密钥、插件开关、插件安装/更新/卸载、前端信任、服务重启、应用更新和遗留数据清理工具。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
 v0.10.6 对 MCP 控制面采用以下行为契约：
 
@@ -226,6 +226,9 @@ v0.10.6 对 MCP 控制面采用以下行为契约：
 - 服务重启统一经过 `HostRestartCoordinator`：接受请求时由 `ExecutionStateStore` 原子取得 `HostMaintenanceLease`，租约立即冻结新的运行、配置编辑和宿主配置写入；子进程拉起失败释放租约，子进程已拉起后租约持续到旧进程退出。
 - `/api/settings/test` 的通知失败使用非 2xx 与 `notification_test_failed`；CLI 根据服务端错误码生成失败 envelope 和非零退出码。
 - `/api/status` 是 Control API 的身份握手，包含 `service=NexusPipeline` 与 `controlApiVersion=1`，CLI 不接受缺少身份或端口越界的其他 HTTP 2xx 响应。
+- `list_plugins`、`/api/plugins` 和 `/api/status` 使用共享 `PluginManagementView`，统一表达 schema 2 的 `artifactName`、前端信任、替换关系、商店归属和 pending 事务。
+- 插件用户全局设置通过现有声明式 contribution contract 提供通用读取、字段校验和写入；读取时 `secret` 只返回 `configured`，MCP 的 `set/clear` 需要敏感操作授权。
+- 执行预览端点按插件声明的 `execution-preview-client`、启用状态、前端存在和信任状态进行准入，宿主继续负责当前运行目标与截图采集。
 
 MCP 适配层只接收类型化参数，经过 `McpToolContext` 解析稳定 ID/唯一名称，再进入 Application Commands 和已有核心服务。它不复用 Web handler 或 CLI 路由，也不提供万能 CLI/API/shell 工具。运行类调用立即返回 `runId`，Agent 通过 `get_run` 轮询活动或最近完成的运行；业务错误保留在结构化工具结果内：
 

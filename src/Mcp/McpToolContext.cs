@@ -2,6 +2,7 @@ using NexusPipeline.App;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
@@ -26,6 +27,8 @@ internal sealed class McpToolContext
     public bool AllowDestructiveTools { get; }
 
     public Func<bool>? RequestRestart { get; }
+
+    internal PluginUserGlobalSettingsService UserGlobalSettings => Runtime.Resolve<PluginUserGlobalSettingsService>();
 
     public IReadOnlyList<ScriptInstance> Scripts => Runtime.SnapshotScripts()
         .OrderBy(item => item.Index)
@@ -88,24 +91,7 @@ internal sealed class McpToolContext
                 pending.Deadline,
             },
             running = Runtime.Center.Active.Select(item => McpRunView.From(item.Snapshot(), includeRecords: false)).ToList(),
-            plugins = Runtime.Plugins.PluginSummaries.Select(plugin => new
-            {
-                plugin.Name,
-                plugin.DisplayName,
-                plugin.GameName,
-                plugin.Description,
-                plugin.Version,
-                plugin.Kind,
-                plugin.ApiVersion,
-                plugin.Capabilities,
-                plugin.Replaces,
-                configuredEnabled = Runtime.Plugins.IsConfiguredEnabled(plugin.Name),
-                runtimeEnabled = Runtime.Plugins.IsEnabled(plugin.Name),
-                state = Runtime.Plugins.GetRuntimeState(plugin.Name),
-                error = Runtime.Plugins.GetRuntimeError(plugin.Name),
-                restartRequired = Runtime.Plugins.IsConfiguredEnabled(plugin.Name)
-                    != Runtime.Plugins.IsEnabled(plugin.Name),
-            }).ToList(),
+            plugins = Runtime.Plugins.PluginManagementViews,
         };
     }
 

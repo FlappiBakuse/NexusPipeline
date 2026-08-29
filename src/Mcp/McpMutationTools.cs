@@ -1,9 +1,12 @@
 using System.ComponentModel;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Update;
@@ -234,6 +237,79 @@ internal sealed class McpMutationTools
             input.Remark,
             Audit.Mcp);
         return McpToolResult.From(result, value => value is null ? null : McpViews.User(value, _context.Queues));
+    }
+
+    [McpServerTool(Name = "update_user_global_settings", Title = "更新用户全局设置", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("按全局用户稳定 ID 或唯一名称更新用户级绑定覆盖设置；用户基本信息和绑定数据保持不变。")]
+    public CallToolResult UpdateUserGlobalSettings(
+        [Description("用户稳定 ID 或唯一名称。")]
+        string reference,
+        [Description("用户级全局设置覆盖字段。")]
+        McpUserGlobalSettingsInput input)
+    {
+        if (input is null)
+        {
+            return McpToolResult.Failure("validation_error", "用户全局设置输入不能为空");
+        }
+        OperationResult<NexusUser> target = _context.ResolveUser(reference);
+        if (!target.Succeeded)
+        {
+            return McpToolResult.From(target);
+        }
+        OperationResult<UserBindingOverrides> result = UserCommands.UpdateGlobalSettings(
+            target.Value!.Id,
+            input.ToModel(),
+            Audit.Mcp);
+        return McpToolResult.From(result);
+    }
+
+    [McpServerTool(Name = "update_plugin_user_settings", Title = "更新插件用户设置", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("更新指定用户的插件声明式全局设置；密钥 set/clear 操作需要启用破坏性 MCP 工具，密钥明文不会出现在返回值。")]
+    public async Task<CallToolResult> UpdatePluginUserSettings(
+        [Description("用户稳定 ID 或唯一名称。")]
+        string userReference,
+        [Description("插件稳定名称。")]
+        string pluginName,
+        [Description("插件设置贡献 ID。")]
+        string contributionId,
+        [Description("插件字段值对象；secret 字段使用 {action: keep|set|clear, value?: string}。")]
+        JsonElement values)
+    {
+        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
+        if (!user.Succeeded)
+        {
+            return McpToolResult.From(user);
+        }
+        if (values.ValueKind != JsonValueKind.Object
+            || JsonNode.Parse(values.GetRawText()) is not JsonObject valueObject)
+        {
+            return McpToolResult.Failure("validation_error", "插件设置 values 必须是 JSON 对象");
+        }
+        string resolvedPluginName = pluginName?.Trim() ?? "";
+        string resolvedContributionId = contributionId?.Trim() ?? "";
+        if (!_context.UserGlobalSettings.TryGetRegistration(
+                resolvedPluginName,
+                resolvedContributionId,
+                out PluginUserGlobalManagementRegistration? registration)
+            || registration is null)
+        {
+            return McpToolResult.Failure("contribution_not_found", "插件设置贡献不存在或插件未启用");
+        }
+        if (McpPolicy.HasSensitivePluginSettingChange(registration, valueObject)
+            && !_context.AllowDestructiveTools)
+        {
+            return McpToolResult.From(McpPolicy.DestructiveDenied<bool>());
+        }
+        OperationResult<bool> result = await _context.UserGlobalSettings
+            .SaveAsync(user.Value!.Id, resolvedPluginName, resolvedContributionId, valueObject)
+            .ConfigureAwait(false);
+        return McpToolResult.From(result, value => new
+        {
+            saved = value == true,
+            userId = user.Value.Id,
+            pluginName = resolvedPluginName,
+            contributionId = resolvedContributionId,
+        });
     }
 
     [McpServerTool(Name = "add_binding", Title = "添加用户脚本绑定", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]

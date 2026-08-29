@@ -4,6 +4,7 @@
 
 - 开发环境与调试：[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；
 - 测试层级、完整命令与发布门禁：[docs/TESTING.md](docs/TESTING.md)；
+- Web/CLI/MCP 控制面能力对齐：[docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)；
 - 版本路线与未完成事项：[docs/ROADMAP.md](docs/ROADMAP.md)；
 - 当前未解决问题：[docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md)；
 - 发布流程：[docs/RELEASING.md](docs/RELEASING.md)；
@@ -129,8 +130,16 @@ BREAKING CHANGE: 说明迁移方式和兼容性影响
 - 后端模块边界、依赖方向和代码落点遵循 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)；
 - 新增类型默认 `internal`，公开类型限于项目既有契约清单和独立 Plugin API；
 - Web API 由 `src/Web/ApiXxxHandler.cs` 承担，命令行入口位于 `src/Cli/`，服务注册位于组合根；
+- 可管理能力的 Web、CLI、MCP 入口与风险分类遵循 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)；
 - 日志使用明确级别方法，保持配置交换、运行时数据和进程清理的不变量；
 - 前端保持零构建、零 CDN、原生 ES modules、事件委托和稳定测试属性；完整前端约束见根目录 `AGENTS.md`。
+
+### 6.3 Feature parity 与测试准入
+
+- 新增或修改可管理能力时，先更新 capability matrix 的稳定 ID、三端状态、Exception 和风险分类，再实现适配器与测试。
+- Web、CLI、MCP 复用 Application Command、核心服务和共享 projection；插件业务使用通用 contribution contract，保持宿主不携带具体插件业务分支。
+- 新增 UI 或 System Smoke 前，提交说明应写明业务不变量、失败模式和最低充分测试层级；低层已能稳定证明的行为不新增高层用例。
+- UI Smoke 的数量与禁止项以 [docs/TESTING.md](docs/TESTING.md) 为准。
 
 ### 6.2 文档治理
 
@@ -143,6 +152,7 @@ BREAKING CHANGE: 说明迁移方式和兼容性影响
 | 当前模块、依赖、代码定位 | `docs/ARCHITECTURE.md` | 提供摘要和链接 |
 | 开发环境、构建、调试 | `docs/DEVELOPMENT.md` | 提供摘要和链接 |
 | 测试层级、完整命令、门禁 | `docs/TESTING.md` | 说明责任并链接 |
+| Web/CLI/MCP 控制面能力对齐 | `docs/CONTROL_PLANE.md` | 说明三端状态、风险分类并链接 |
 | Contributor 流程、Commit、文档治理 | `CONTRIBUTING.md` | 不复制实现细节 |
 | 发布、SemVer、资产、SHA | `docs/RELEASING.md` | 只链接发布规则 |
 | 安全支持与漏洞报告 | `SECURITY.md` | 只链接安全规则 |

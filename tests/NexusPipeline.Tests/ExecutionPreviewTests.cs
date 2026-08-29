@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services;
@@ -116,5 +117,11 @@ public sealed class ExecutionPreviewTests
     public void PluginUiSlots_ContainsRunningSidecarSlot()
     {
         Assert.Contains(PluginUiSlots.DispatchRunningSidecar, PluginUiSlots.All);
+    }
+
+    [Fact]
+    public void ExecutionPreviewCapability_UsesStablePluginCapabilityKey()
+    {
+        Assert.Equal("execution-preview-client", PluginCapabilityKeys.ExecutionPreviewClient);
     }
 }

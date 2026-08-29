@@ -171,24 +171,73 @@ internal sealed class McpReadOnlyTools
     [Description("列出插件元数据、能力、配置启用状态和运行状态。")]
     public CallToolResult ListPlugins()
     {
-        PluginManager plugins = _context.Runtime.Plugins;
-        return McpToolResult.Success(plugins.PluginSummaries.Select(plugin => new
+        return McpToolResult.Success(_context.Runtime.Plugins.PluginManagementViews);
+    }
+
+    [McpServerTool(Name = "list_plugin_store", Title = "列出插件商店", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("读取官方插件 catalog、兼容性、安装状态、待重启事务和更新状态。")]
+    public async Task<CallToolResult> ListPluginStore()
+    {
+        return await ReadPluginStoreAsync(forceRefresh: false).ConfigureAwait(false);
+    }
+
+    [McpServerTool(Name = "refresh_plugin_store", Title = "刷新插件商店", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("从官方插件仓库刷新 catalog 缓存并返回最新商店状态。")]
+    public async Task<CallToolResult> RefreshPluginStore()
+    {
+        return await ReadPluginStoreAsync(forceRefresh: true).ConfigureAwait(false);
+    }
+
+    [McpServerTool(Name = "get_user_global_settings", Title = "获取用户全局设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("按全局用户稳定 ID 或唯一名称读取用户级绑定覆盖设置。")]
+    public CallToolResult GetUserGlobalSettings(
+        [Description("用户稳定 ID 或唯一名称。")]
+        string userReference)
+    {
+        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
+        if (!user.Succeeded)
         {
-            plugin.Name,
-            plugin.DisplayName,
-            plugin.GameName,
-            plugin.Description,
-            plugin.Version,
-            plugin.Kind,
-            plugin.ApiVersion,
-            plugin.Capabilities,
-            plugin.Replaces,
-            configuredEnabled = plugins.IsConfiguredEnabled(plugin.Name),
-            runtimeEnabled = plugins.IsEnabled(plugin.Name),
-            state = plugins.GetRuntimeState(plugin.Name),
-            error = plugins.GetRuntimeError(plugin.Name),
-            restartRequired = plugins.IsConfiguredEnabled(plugin.Name) != plugins.IsEnabled(plugin.Name),
-        }).ToList());
+            return McpToolResult.From(user);
+        }
+        return McpToolResult.Success((user.Value!.BindingOverrides ?? new UserBindingOverrides()).Clone());
+    }
+
+    [McpServerTool(Name = "list_plugin_user_settings", Title = "列出插件用户设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("读取指定用户的全部插件声明式全局设置；密钥字段只返回 configured 状态。")]
+    public async Task<CallToolResult> ListPluginUserSettings(
+        [Description("用户稳定 ID 或唯一名称。")]
+        string userReference)
+    {
+        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
+        if (!user.Succeeded)
+        {
+            return McpToolResult.From(user);
+        }
+        OperationResult<IReadOnlyList<PluginUserGlobalSettingsView>> result = await _context.UserGlobalSettings
+            .ReadAsync(user.Value!.Id)
+            .ConfigureAwait(false);
+        return McpToolResult.From(result);
+    }
+
+    [McpServerTool(Name = "get_plugin_user_settings", Title = "获取插件用户设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("读取指定用户的一个插件设置贡献；密钥字段只返回 configured 状态。")]
+    public async Task<CallToolResult> GetPluginUserSettings(
+        [Description("用户稳定 ID 或唯一名称。")]
+        string userReference,
+        [Description("插件稳定名称。")]
+        string pluginName,
+        [Description("插件设置贡献 ID。")]
+        string contributionId)
+    {
+        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
+        if (!user.Succeeded)
+        {
+            return McpToolResult.From(user);
+        }
+        OperationResult<PluginUserGlobalSettingsView> result = await _context.UserGlobalSettings
+            .ReadOneAsync(user.Value!.Id, pluginName?.Trim() ?? "", contributionId?.Trim() ?? "")
+            .ConfigureAwait(false);
+        return McpToolResult.From(result);
     }
 
     [McpServerTool(Name = "get_settings", Title = "获取脱敏设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
@@ -211,4 +260,21 @@ internal sealed class McpReadOnlyTools
     [McpServerTool(Name = "get_update_status", Title = "获取更新状态", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("读取更新检查、下载和应用状态。")]
     public CallToolResult GetUpdateStatus() => McpToolResult.Success(_context.GetUpdateStatus());
+
+    private async Task<CallToolResult> ReadPluginStoreAsync(bool forceRefresh)
+    {
+        try
+        {
+            PluginStoreSnapshot snapshot = await _context.Runtime.Resolve<PluginRepositoryService>()
+                .GetStoreAsync(forceRefresh)
+                .ConfigureAwait(false);
+            return snapshot.Available
+                ? McpToolResult.Success(McpViews.PluginStore(snapshot))
+                : McpToolResult.Failure("repository_unavailable", snapshot.Error ?? "插件仓库暂不可用");
+        }
+        catch (Exception ex)
+        {
+            return McpToolResult.Exception(ex);
+        }
+    }
 }

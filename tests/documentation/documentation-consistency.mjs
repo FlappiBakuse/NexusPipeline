@@ -24,6 +24,7 @@ const EVERGREEN_DOCUMENTS = [
   "SECURITY.md",
   "docs/DESIGN.md",
   "docs/ARCHITECTURE.md",
+  "docs/CONTROL_PLANE.md",
   "docs/DEVELOPMENT.md",
   "docs/TESTING.md",
   "docs/RELEASING.md",
@@ -177,6 +178,7 @@ test("README documentation navigation points to existing files", () => {
   const required = [
     "docs/DESIGN.md",
     "docs/ARCHITECTURE.md",
+    "docs/CONTROL_PLANE.md",
     "docs/DEVELOPMENT.md",
     "docs/TESTING.md",
     "docs/RELEASING.md",
@@ -189,4 +191,51 @@ test("README documentation navigation points to existing files", () => {
   ];
   const missing = required.filter((relativePath) => !fs.existsSync(path.join(ROOT, relativePath)));
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
+});
+
+test("control-plane capability matrix has complete statuses and risk classifications", () => {
+  const text = read("docs/CONTROL_PLANE.md");
+  const statuses = [
+    "supported",
+    "security-restricted",
+    "intentionally-ui-only",
+    "not-applicable",
+  ];
+  const rows = text
+    .split(/\r?\n/u)
+    .map(line => line.trim())
+    .filter(line => line.startsWith("|") && line.endsWith("|"))
+    .map(line => line.slice(1, -1).split("|").map(cell => cell.trim()))
+    .filter(cells => cells.length === 5 && /^`[^`]+`$/u.test(cells[0]));
+
+  assert.ok(rows.length >= 20, "Control Surface Capability Matrix needs the core capability rows");
+  for (const cells of rows) {
+    assert.ok(
+      cells.slice(1, 4).every(cell => statuses.some(status => cell.includes(`\`${status}\``))),
+      `missing surface status: ${cells[0]}`,
+    );
+    assert.ok(!cells.join(" ").includes("`missing`"), `implicit gap in ${cells[0]}`);
+    const restricted = cells.slice(1, 4).some(cell => cell.includes("`security-restricted`"));
+    if (restricted) {
+      assert.notEqual(cells[4], "—", `restricted capability needs an exception: ${cells[0]}`);
+    }
+  }
+
+  const rowsByCapability = new Map(rows.map(cells => [cells[0].slice(1, -1), cells]));
+  const destructive = [
+    "plugins.enable-disable",
+    "plugins.store.install",
+    "plugins.store.update",
+    "plugins.store.uninstall",
+    "plugins.frontend-trust",
+    "plugin-user-settings.secret-write",
+    "update.apply",
+    "maintenance.prune",
+  ];
+  for (const capability of destructive) {
+    const cells = rowsByCapability.get(capability);
+    assert.ok(cells, `missing capability row: ${capability}`);
+    assert.match(cells[3], /`security-restricted`/u, `${capability} must be MCP security-restricted`);
+    assert.match(cells[4], /risk=(?:destructive|sensitive)/u, `${capability} needs an MCP risk classification`);
+  }
 });

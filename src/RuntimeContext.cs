@@ -65,6 +65,8 @@ internal class RuntimeContext
             () => provider.GetRequiredService<PluginManager>(),
             provider.GetRequiredService<PluginPackageService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>()));
+        collection.AddSingleton<PluginUserGlobalSettingsService>(provider => new PluginUserGlobalSettingsService(
+            provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IUserRunStartingPublisher>(provider => provider.GetRequiredService<PluginManager>());

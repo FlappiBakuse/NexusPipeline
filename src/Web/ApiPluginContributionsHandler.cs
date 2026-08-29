@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
@@ -458,26 +459,16 @@ internal static class ApiPluginContributionsHandler
 
     private static async Task ReadAsync(HttpListenerContext context, string userId)
     {
-        PluginManager plugins = RuntimeContext.Instance.Plugins;
-        var result = new List<object>();
-        foreach (PluginUserGlobalManagementRegistration registration in plugins.UserGlobalManagementContributions)
+        OperationResult<IReadOnlyList<PluginUserGlobalSettingsView>> result = await RuntimeContext.Instance
+            .Resolve<PluginUserGlobalSettingsService>()
+            .ReadAsync(userId)
+            .ConfigureAwait(false);
+        if (!result.Succeeded)
         {
-            JsonObject values;
-            try
-            {
-                values = PluginContributionValidation.SanitizeRead(
-                    registration,
-                    await registration.Contribution.ReadHandler(userId, CancellationToken.None).ConfigureAwait(false));
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[插件:{registration.PluginName}] 用户全局设置读取失败：{ex.Message}");
-                await PluginErrorAsync(context, "读取插件设置失败").ConfigureAwait(false);
-                return;
-            }
-            result.Add(Project(registration, values));
+            await WriteOperationErrorAsync(context, result.Error!).ConfigureAwait(false);
+            return;
         }
-        await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, result.Value ?? Array.Empty<PluginUserGlobalSettingsView>()).ConfigureAwait(false);
     }
 
     private static async Task ReadUserListBadgesAsync(HttpListenerContext context)
@@ -542,56 +533,16 @@ internal static class ApiPluginContributionsHandler
             await HttpHelper.WriteJsonAsync(context, new { ok = false, error = "插件设置格式不正确", code = "validation_error" }, 400).ConfigureAwait(false);
             return;
         }
-        PluginManager plugins = RuntimeContext.Instance.Plugins;
-        if (string.IsNullOrWhiteSpace(pluginName) || !plugins.TryGetUserGlobalManagementContribution(pluginName, contributionId, out PluginUserGlobalManagementRegistration? registration) || registration is null)
+        OperationResult<bool> result = await RuntimeContext.Instance
+            .Resolve<PluginUserGlobalSettingsService>()
+            .SaveAsync(userId, pluginName, contributionId, values)
+            .ConfigureAwait(false);
+        if (!result.Succeeded)
         {
-            await ContributionNotFoundAsync(context).ConfigureAwait(false);
-            return;
-        }
-        if (!PluginContributionValidation.TryValidateSave(registration, values, out JsonObject sanitized, out string validationError))
-        {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = validationError, code = "validation_error" }, 400).ConfigureAwait(false);
-            return;
-        }
-        try
-        {
-            await registration.Contribution.SaveHandler(userId, sanitized, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[插件:{registration.PluginName}] 用户全局设置保存失败：{ex.Message}");
-            await PluginErrorAsync(context, "保存插件设置失败").ConfigureAwait(false);
+            await WriteOperationErrorAsync(context, result.Error!).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
-    }
-
-    private static object Project(
-        PluginUserGlobalManagementRegistration registration,
-        JsonObject values)
-    {
-        return new
-        {
-            pluginName = registration.PluginName,
-            pluginDisplayName = registration.PluginDisplayName,
-            id = registration.Contribution.Id,
-            title = registration.Contribution.Title,
-            description = registration.Contribution.Description,
-            order = registration.Contribution.Order,
-            fields = registration.Contribution.Fields.Select(field => new
-            {
-                key = field.Key,
-                label = field.Label,
-                type = field.Type,
-                description = field.Description,
-                required = field.Required,
-                placeholder = field.Placeholder,
-                maxLength = field.MaxLength,
-                readOnly = field.ReadOnly || field.Type.Equals("status", StringComparison.OrdinalIgnoreCase),
-                options = field.Options?.Select(option => new { value = option.Value, label = option.Label }).ToList(),
-            }).ToList(),
-            values,
-        };
     }
 
     private static Task ContributionNotFoundAsync(HttpListenerContext context) =>
@@ -605,6 +556,24 @@ internal static class ApiPluginContributionsHandler
             context,
             new { ok = false, error = message, code = "plugin_error" },
             500);
+
+    private static Task WriteOperationErrorAsync(HttpListenerContext context, OperationError error)
+    {
+        int status = error.Kind switch
+        {
+            OperationErrorKind.Validation => 400,
+            OperationErrorKind.NotFound => 404,
+            OperationErrorKind.Conflict => 409,
+            OperationErrorKind.Forbidden => 403,
+            OperationErrorKind.Timeout => 504,
+            OperationErrorKind.Unavailable => 502,
+            _ => 500,
+        };
+        return HttpHelper.WriteJsonAsync(
+            context,
+            new { ok = false, error = error.Message, message = error.Message, code = error.Code },
+            status);
+    }
 
     private static Task UiValidationErrorAsync(HttpListenerContext context, string message) =>
         HttpHelper.WriteJsonAsync(

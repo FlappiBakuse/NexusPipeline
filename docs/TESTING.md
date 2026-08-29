@@ -14,7 +14,17 @@
 
 `tests/stress/` 与 `tests/legacy/` 属于按需运行的诊断、压力和历史考据资产，不参与默认 CI，也不作为每个版本的固定发布门禁。
 
-文档一致性检查是独立的工程治理检查，不归入 L1–L5 或 Web Logic：`tests/documentation/documentation-consistency.mjs`。
+文档一致性检查是独立的工程治理检查，不归入 L1–L5 或 Web Logic：`tests/documentation/documentation-consistency.mjs`。其中包含 [CONTROL_PLANE.md](CONTROL_PLANE.md) 的矩阵完整性与风险分类检查。
+
+## 控制面覆盖规则
+
+涉及可管理业务能力的改动，验收链路按以下顺序核对：
+
+`Domain capability → Application command/service → HTTP/Web → CLI → MCP → docs/tests`
+
+稳定 capability ID 与三端状态维护在 [CONTROL_PLANE.md](CONTROL_PLANE.md)；新能力完成前必须补齐该表并通过治理测试。
+
+每项能力都必须记录一种明确状态：`supported`、`intentionally-ui-only`、`security-restricted` 或 `not-applicable`。纯视觉表现、布局、壁纸展示和前端路由可以保持 `intentionally-ui-only`；插件安装、更新、卸载、前端信任、用户全局设置、插件用户设置和运行控制属于控制面能力，需具备正式 API、CLI/MCP 暴露或明确的 `security-restricted` 策略。CLI 通过 Control API 调用宿主服务，MCP 通过应用服务和同一套投影读取状态，适配器不得各自拼出独立领域规则。
 
 ## 测试归属规则
 
@@ -26,6 +36,7 @@
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
 - 插件 catalog schema 1/2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
+- 插件管理控制面投影、插件商店安装/更新/卸载事务、前端信任、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
 - MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。
@@ -37,7 +48,13 @@
 - 主导航和关键二级页面可打开；
 - 一个典型创建、编辑、删除流程可完成；
 - 关键表单字段显隐、确认动作和粗粒度手机宽度检查。
-- 插件仓库/本地插件二态切换、仓库条目状态和网络代理字段显隐。
+- 插件本地/仓库入口可加载，并完成一个代表性插件贡献设置流程。
+
+以下行为固定在低层测试或 System Smoke：
+
+- DOM 层级、CSS/class/style、精确像素、SVG 数量、装饰性文案和每个选项的重复校对；
+- 更新下载、应用、进程重启、代理持久化、模拟器字段契约、插件序列化和文件系统内容；
+- 同一业务规则在多个页面的重复断言。
 
 以下行为进入 System Smoke：
 
@@ -110,7 +127,19 @@ tests/e2e/tests/
 └── settings-platform.smoke.spec.mjs
 ```
 
-全套 UI Smoke testcase 控制在 12～18 个，版本完成后不得超过 20 个。断言优先定位稳定的 `data-testid`、`data-action` 和业务 ID；禁止依赖按钮顺序、装饰性 class、随机 CSS 层级、精确像素坐标、SVG 数量和完整磁盘文件内容。
+全套 UI Smoke 目标为 9～12 个，硬上限为 12 个。建议预算如下：
+
+| 范围 | 建议数量 |
+|---|---:|
+| 应用入口与主导航 | 2 |
+| 典型脚本流程 | 1 |
+| 用户与绑定 | 2 |
+| 队列与调度 | 2 |
+| 设置与安全入口 | 1 |
+| 插件商店/贡献入口 | 1 |
+| 版本专项保留位 | 0～3 |
+
+新增或保留 UI Smoke 前，测试说明应能回答“业务不变量、失败模式、最低充分层级”三项问题；能够在 Unit、Component、Web Logic 或 System Smoke 证明的行为不占用 UI 配额。断言优先定位稳定的 `data-testid`、`data-action` 和业务 ID；禁止依赖按钮顺序、装饰性 class、随机 CSS 层级、精确像素坐标、SVG 数量和完整磁盘文件内容。
 
 普通 UI Smoke 使用一次 global setup 启动服务、一次 global teardown 关闭服务。服务意外退出应直接暴露为测试失败；服务重启、端口占用、UAC、进程树和 interpreter 场景由 System Smoke 独立负责。
 

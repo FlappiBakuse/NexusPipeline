@@ -199,6 +199,31 @@ internal sealed class McpDestructiveTools
         return McpToolResult.From(result, _ => new { key, configured = false });
     }
 
+    [McpServerTool(Name = "install_plugin", Title = "安装插件", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("从官方插件仓库登记插件安装事务；文件切换会在下次服务重启时生效。")]
+    public Task<CallToolResult> InstallPlugin([Description("官方 catalog 中的插件稳定名称。")]
+        string name) => StagePluginAsync(name, update: false);
+
+    [McpServerTool(Name = "update_plugin", Title = "更新插件", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("从官方插件仓库登记插件更新事务；文件切换会在下次服务重启时生效。")]
+    public Task<CallToolResult> UpdatePlugin([Description("官方 catalog 中的插件稳定名称。")]
+        string name) => StagePluginAsync(name, update: true);
+
+    [McpServerTool(Name = "uninstall_plugin", Title = "卸载插件", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("登记插件卸载事务；文件删除会在下次服务重启时生效。")]
+    public Task<CallToolResult> UninstallPlugin([Description("当前已安装插件的稳定名称。")]
+        string name) => UninstallPluginAsync(name);
+
+    [McpServerTool(Name = "trust_plugin_frontend", Title = "信任插件前端", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("保存插件前端信任决策，使该插件前端可以读取受控前端扩展资源。")]
+    public CallToolResult TrustPluginFrontend([Description("插件稳定名称。")]
+        string name) => SetPluginFrontendTrust(name, trusted: true);
+
+    [McpServerTool(Name = "revoke_plugin_frontend", Title = "撤销插件前端信任", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("撤销插件前端信任并立即阻止该插件前端扩展被加载。")]
+    public CallToolResult RevokePluginFrontend([Description("插件稳定名称。")]
+        string name) => SetPluginFrontendTrust(name, trusted: false);
+
     [McpServerTool(Name = "enable_plugin", Title = "启用插件", ReadOnly = false, Destructive = true, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("修改插件配置为启用；插件在下次服务启动时应用。")]
     public CallToolResult EnablePlugin([Description("插件名称。")] string name) => SetPluginState(name, enabled: true);
@@ -234,6 +259,94 @@ internal sealed class McpDestructiveTools
             runtimeEnabled = plugins.IsEnabled(pluginName),
             state = plugins.GetRuntimeState(pluginName),
             restartRequired = true,
+        });
+    }
+
+    private async Task<CallToolResult> StagePluginAsync(string name, bool update)
+    {
+        if (!Allowed())
+        {
+            return Denied();
+        }
+        string pluginName = name?.Trim() ?? "";
+        try
+        {
+            PluginPendingOperation operation = await _context.Runtime.Resolve<PluginRepositoryService>()
+                .InstallAsync(pluginName, update)
+                .ConfigureAwait(false);
+            Audit.Log(Audit.Mcp, "登记插件商店操作", $"{operation.Action}：{operation.Name} v{operation.Version}");
+            return McpToolResult.Success(new
+            {
+                pending = true,
+                action = operation.Action,
+                name = operation.Name,
+                version = operation.Version,
+                message = "操作已登记，将在下次重启服务时生效",
+            });
+        }
+        catch (PluginRepositoryException ex)
+        {
+            return McpToolResult.Failure(ex.Code, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return McpToolResult.Exception(ex);
+        }
+    }
+
+    private async Task<CallToolResult> UninstallPluginAsync(string name)
+    {
+        if (!Allowed())
+        {
+            return Denied();
+        }
+        string pluginName = name?.Trim() ?? "";
+        try
+        {
+            PluginPendingOperation operation = await _context.Runtime.Resolve<PluginRepositoryService>()
+                .UninstallAsync(pluginName)
+                .ConfigureAwait(false);
+            Audit.Log(Audit.Mcp, "登记插件商店操作", $"{operation.Action}：{operation.Name} v{operation.Version}");
+            return McpToolResult.Success(new
+            {
+                pending = true,
+                action = operation.Action,
+                name = operation.Name,
+                version = operation.Version,
+                message = "操作已登记，将在下次重启服务时生效",
+            });
+        }
+        catch (PluginRepositoryException ex)
+        {
+            return McpToolResult.Failure(ex.Code, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return McpToolResult.Exception(ex);
+        }
+    }
+
+    private CallToolResult SetPluginFrontendTrust(string name, bool trusted)
+    {
+        if (!Allowed())
+        {
+            return Denied();
+        }
+        string pluginName = name?.Trim() ?? "";
+        PluginManager plugins = _context.Runtime.Plugins;
+        if (!plugins.SetFrontendTrusted(pluginName, trusted, Audit.Mcp, out string? failureCode))
+        {
+            return McpToolResult.Failure(
+                failureCode ?? "frontend_not_found",
+                failureCode == "host_maintenance"
+                    ? "宿主正在进行维护操作，暂不能修改插件前端信任设置"
+                    : $"插件不存在或没有前端模块：{pluginName}");
+        }
+        return McpToolResult.Success(new
+        {
+            name = pluginName,
+            frontendTrusted = plugins.IsFrontendTrusted(pluginName),
+            restartRequired = false,
         });
     }
 

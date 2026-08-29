@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json.Nodes;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 
 namespace NexusPipeline.Mcp;
@@ -93,6 +94,77 @@ internal sealed class McpUserInput
     public string Name { get; set; } = "";
 
     public string Remark { get; set; } = "";
+}
+
+/// <summary>MCP 用户级全局绑定覆盖 DTO；独立于用户基本信息写入，避免误覆盖 Name/Remark。</summary>
+internal sealed class McpUserGlobalSettingsInput
+{
+    public McpUserGeneralOverrideInput General { get; set; } = new();
+
+    public McpUserNotificationOverrideInput Notification { get; set; } = new();
+
+    public McpUserAdvancedOverrideInput Advanced { get; set; } = new();
+
+    public UserBindingOverrides ToModel() => new()
+    {
+        General = (General ?? new McpUserGeneralOverrideInput()).ToModel(),
+        Notification = (Notification ?? new McpUserNotificationOverrideInput()).ToModel(),
+        Advanced = (Advanced ?? new McpUserAdvancedOverrideInput()).ToModel(),
+    };
+}
+
+internal sealed class McpUserGeneralOverrideInput
+{
+    public bool SyncEnabled { get; set; }
+
+    public bool Enabled { get; set; } = true;
+
+    public int RunDays { get; set; } = -1;
+
+    public UserGeneralOverride ToModel() => new()
+    {
+        SyncEnabled = SyncEnabled,
+        Enabled = Enabled,
+        RunDays = RunDays,
+    };
+}
+
+internal sealed class McpUserNotificationOverrideInput
+{
+    public bool SyncEnabled { get; set; }
+
+    public bool NotifyEnabled { get; set; } = true;
+
+    public string SmtpTo { get; set; } = "";
+
+    public UserNotificationOverride ToModel() => new()
+    {
+        SyncEnabled = SyncEnabled,
+        NotifyEnabled = NotifyEnabled,
+        SmtpTo = SmtpTo ?? "",
+    };
+}
+
+internal sealed class McpUserAdvancedOverrideInput
+{
+    public bool SyncEnabled { get; set; }
+
+    public string PreRunScript { get; set; } = "";
+
+    public bool PreRunOnceOnly { get; set; }
+
+    public string PostRunScript { get; set; } = "";
+
+    public bool PostRunOnFinalOnly { get; set; }
+
+    public UserAdvancedOverride ToModel() => new()
+    {
+        SyncEnabled = SyncEnabled,
+        PreRunScript = PreRunScript ?? "",
+        PreRunOnceOnly = PreRunOnceOnly,
+        PostRunScript = PostRunScript ?? "",
+        PostRunOnFinalOnly = PostRunOnFinalOnly,
+    };
 }
 
 /// <summary>MCP 用户绑定写入 DTO；脚本引用既可填稳定 ID，也可填唯一名称。</summary>
@@ -483,6 +555,7 @@ internal static class McpViews
             user.Index,
             user.Name,
             user.Remark,
+            bindingOverrides = (user.BindingOverrides ?? new UserBindingOverrides()).Clone(),
             bindingCount = user.Bindings.Count,
             nextRunAt = next?.TriggerTime,
             nextQueueName = next?.QueueName,
@@ -546,6 +619,46 @@ internal static class McpViews
             settings.UpdateCheckEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
+        };
+    }
+
+    public static object PluginStore(PluginStoreSnapshot snapshot)
+    {
+        return new
+        {
+            snapshot.Available,
+            snapshot.Stale,
+            fetchedAt = snapshot.FetchedAt.ToString("O"),
+            snapshot.Error,
+            plugins = snapshot.Plugins.Select(plugin => new
+            {
+                plugin.Name,
+                artifactName = plugin.ArtifactName,
+                plugin.DisplayName,
+                gameName = plugin.GameName,
+                plugin.Description,
+                plugin.Version,
+                kind = plugin.Kind,
+                apiVersion = plugin.ApiVersion,
+                plugin.Capabilities,
+                minHostVersion = plugin.MinHostVersion,
+                plugin.Installed,
+                plugin.InstalledName,
+                plugin.InstalledVersion,
+                plugin.UpdateAvailable,
+                plugin.Compatible,
+                plugin.CompatibilityReason,
+                plugin.ManagedByStore,
+                plugin.PendingAction,
+                plugin.PendingVersion,
+                plugin.Status,
+                changelog = plugin.Changelog.Select(change => new
+                {
+                    change.Version,
+                    change.Date,
+                    change.Items,
+                }).ToList(),
+            }).ToList(),
         };
     }
 

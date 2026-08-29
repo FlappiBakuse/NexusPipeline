@@ -1,5 +1,8 @@
+using System.Text.Json.Nodes;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
+using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Mcp;
 
@@ -46,4 +49,28 @@ internal static class McpPolicy
     }
 
     public static bool IsSecretKey(string key) => SecretKeys.Contains(key.Trim());
+
+    public static bool HasSensitivePluginSettingChange(
+        PluginUserGlobalManagementRegistration registration,
+        JsonObject values)
+    {
+        var fields = registration.Contribution.Fields.ToDictionary(
+            field => field.Key,
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string key, JsonNode? value) in values)
+        {
+            if (!fields.TryGetValue(key, out PluginUserGlobalManagementField? field)
+                || !field.Type.Equals("secret", StringComparison.OrdinalIgnoreCase)
+                || value is not JsonObject secret)
+            {
+                continue;
+            }
+            string action = secret["action"]?.ToString()?.Trim().ToLowerInvariant() ?? "";
+            if (action is "set" or "clear")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }

@@ -10,6 +10,12 @@
 - [ ] 继续完善插件设置贡献的字段校验、错误呈现和迁移检查。
 - [ ] 持续验证用户级插件数据清理、密钥保护和跨版本兼容行为。
 
+## 后续功能：插件控制贡献
+
+- [ ] 设计独立于 UI contribution 的 headless control contribution，声明稳定 ID、读写动作、输入输出 schema、风险级别和 secret 策略。
+- [ ] 让 Web、CLI、MCP 共用该控制贡献，并保持现有 UI contribution 的兼容路径。
+- [ ] 在 Plugin API minor 版本演进前完成现有插件迁移方案与控制面回归测试。
+
 ## 后续功能：桌面分身
 
 - [ ] 独立验证 Windows 会话创建（TS API / CreateProcessAsUser）。

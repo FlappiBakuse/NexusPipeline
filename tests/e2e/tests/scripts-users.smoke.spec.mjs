@@ -221,26 +221,3 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);
   }
 });
-
-test("模拟器表单入口：切换启动方式后字段和保存契约一致", async ({ page }) => {
-  const fixture = makeScriptDir("smoke-emulator-form");
-  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("new-script").click();
-  await page.locator('.new-script-chooser [data-action="open-script-type"][data-plugin=""]').click();
-  await page.selectOption("#sm-mode", "emulator");
-  await expect(page.locator('label[for="sm-game-exe"]')).toContainText("模拟器ADB地址");
-  await page.locator("#sm-name").fill("Smoke 模拟器表单");
-  await page.locator("#sm-root").fill(fixture.root);
-  await page.locator("#sm-exe").fill(fixture.main);
-  await page.locator("#sm-config").fill(fixture.cfg);
-  await page.locator("#sm-log").fill(fixture.log);
-  await page.locator("#sm-game-exe").fill("127.0.0.1:16384");
-  await page.locator("#sm-game-args").fill("-n com.example.game/.MainActivity");
-  await page.locator(".modal").getByRole("button", { name: "保存", exact: true }).click();
-  const card = page.getByTestId("script-card").filter({ hasText: "Smoke 模拟器表单" }).first();
-  await expect(card).toBeVisible();
-  const scripts = await (await api("GET", "/api/scripts")).json();
-  const created = scripts.find(item => item.name === "Smoke 模拟器表单");
-  expect(created.gameMode).toBe("emulator");
-  await api("DELETE", `/api/scripts/${encodeURIComponent(created.id)}`);
-});

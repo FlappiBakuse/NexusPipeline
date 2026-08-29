@@ -1,3 +1,4 @@
+using NexusPipeline.Extensibility;
 using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Services.Execution;
@@ -28,16 +29,13 @@ internal sealed class ExecutionPreviewService
         string pluginName,
         CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(pluginName, "live-screenshot", StringComparison.OrdinalIgnoreCase))
-        {
-            return new ExecutionPreviewResponse(404, Error: "实时截图插件不存在");
-        }
         if (!_plugins().IsKnownPlugin(pluginName)
+            || !_plugins().HasCapability(pluginName, PluginCapabilityKeys.ExecutionPreviewClient)
             || !_plugins().IsEnabled(pluginName)
             || !_plugins().HasFrontend(pluginName)
             || !_plugins().IsFrontendTrusted(pluginName))
         {
-            return new ExecutionPreviewResponse(404, Error: "实时截图插件不可用");
+            return new ExecutionPreviewResponse(404, Error: "执行预览插件不可用");
         }
 
         RunningExecution? execution = _center().Active.FirstOrDefault(item =>

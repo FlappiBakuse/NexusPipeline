@@ -16,6 +16,8 @@ internal interface IProfileResolver : IPluginCapability
 internal static class PluginCapabilityKeys
 {
     public const string Emulator = "emulator";
+
+    public const string ExecutionPreviewClient = "execution-preview-client";
 }
 
 /// <summary>专项插件推导出的脚本配置快照。</summary>

@@ -1,6 +1,7 @@
 using System.Net;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
@@ -78,29 +79,7 @@ internal static class ApiStatusHandler
                     logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };
             }),
-            plugins = RuntimeContext.Instance.Plugins.PluginSummaries.Select(plugin => new
-            {
-                plugin.Name,
-                artifactName = plugin.ArtifactName,
-                plugin.DisplayName,
-                gameName = plugin.GameName,
-                plugin.Description,
-                plugin.Version,
-                kind = plugin.Kind,
-                apiVersion = plugin.ApiVersion,
-                capabilities = plugin.Capabilities,
-                replaces = plugin.Replaces,
-                supportsEmulator = RuntimeContext.Instance.Plugins.HasCapability(plugin.Name, PluginCapabilityKeys.Emulator),
-                configuredEnabled = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name),
-                runtimeEnabled = RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
-                state = RuntimeContext.Instance.Plugins.GetRuntimeState(plugin.Name),
-                error = RuntimeContext.Instance.Plugins.GetRuntimeError(plugin.Name),
-                hasFrontend = plugin.HasFrontend,
-                frontendApiVersion = plugin.FrontendApiVersion,
-                frontendTrusted = RuntimeContext.Instance.Plugins.IsFrontendTrusted(plugin.Name),
-                restartRequired = RuntimeContext.Instance.Plugins.IsConfiguredEnabled(plugin.Name)
-                    != RuntimeContext.Instance.Plugins.IsEnabled(plugin.Name),
-            }),
+            plugins = RuntimeContext.Instance.Plugins.PluginManagementViews,
         };
     }
 

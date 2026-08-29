@@ -87,12 +87,15 @@ public sealed class CliControlContractTests
         TimeSpan defaultTimeout = CliTransport.TimeoutFor("GET", "/api/status");
         TimeSpan notificationTimeout = CliTransport.TimeoutFor("POST", "/api/settings/test");
         TimeSpan updateTimeout = CliTransport.TimeoutFor("POST", "/api/update/check");
+        TimeSpan pluginStoreTimeout = CliTransport.TimeoutFor("GET", "/api/plugins/store");
 
         Assert.Equal(CliTransport.DefaultControlTimeout, defaultTimeout);
         Assert.True(notificationTimeout > defaultTimeout);
         Assert.True(updateTimeout > defaultTimeout);
         Assert.Equal(CliTransport.NotificationTestTimeout, notificationTimeout);
         Assert.Equal(CliTransport.UpdateCheckTimeout, updateTimeout);
+        Assert.Equal(CliTransport.PluginRepositoryTimeout, pluginStoreTimeout);
+        Assert.True(pluginStoreTimeout > defaultTimeout);
     }
 
     [Fact]

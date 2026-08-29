@@ -19,6 +19,8 @@ internal static class CliTransport
 
     public static readonly TimeSpan UpdateCheckTimeout = TimeSpan.FromMinutes(10);
 
+    public static readonly TimeSpan PluginRepositoryTimeout = TimeSpan.FromMinutes(2);
+
     /// <summary>确保常驻服务可达：探测失败时自动拉起服务进程并等待（最多 30 秒）。轻量模式同样提供仅本机的 Control API。</summary>
     public static int? EnsureService()
     {
@@ -176,6 +178,10 @@ internal static class CliTransport
             && string.Equals(apiPath, "/api/update/check", StringComparison.OrdinalIgnoreCase))
         {
             return UpdateCheckTimeout;
+        }
+        if (apiPath.StartsWith("/api/plugins/store", StringComparison.OrdinalIgnoreCase))
+        {
+            return PluginRepositoryTimeout;
         }
         return DefaultControlTimeout;
     }
