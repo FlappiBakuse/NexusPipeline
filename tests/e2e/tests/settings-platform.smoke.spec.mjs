@@ -37,6 +37,7 @@ test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page 
   expect(tabOrder).toEqual(["local", "store"]);
   await expect(page.getByTestId("plugin-local-list")).toBeVisible();
   await expect(page.getByTestId("plugin-detail")).toBeVisible();
+  await expect(page.locator(".plugin-detail-meta")).not.toContainText("Frontend API");
   const search = page.getByTestId("plugin-search");
   await expect(search).toBeVisible();
   await expect(search).toHaveAttribute("placeholder", "搜索插件名称、标签或游戏");
@@ -70,6 +71,7 @@ test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page 
   await page.getByTestId("plugin-store-tab").click();
   await expect(page.getByTestId("plugin-store-list")).toBeVisible();
   await expect(page.getByTestId("plugin-detail")).toBeVisible();
+  await expect(page.locator(".plugin-detail-meta")).not.toContainText("Frontend API");
   const refresh = page.getByTestId("plugin-store-refresh");
   await expect(refresh).toBeVisible();
   const refreshLayout = await refresh.evaluate(button => ({

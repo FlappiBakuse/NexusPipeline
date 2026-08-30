@@ -109,7 +109,7 @@ function pluginListItem(plugin, tab) {
 }
 
 function pluginLoadingContent(title, message, testId) {
-  return `<section class="plugins-table plugin-loading-state" data-testid="${testId}" role="status" aria-live="polite" aria-busy="true"><div class="plugin-loading-progress" role="progressbar" aria-label="${esc(title)}" aria-valuetext="正在获取目录"><span></span></div><strong>${esc(title)}</strong><span class="muted">${esc(message)}</span></section>`;
+  return `<div class="plugin-loading-state" data-testid="${testId}" role="status" aria-live="polite" aria-busy="true"><div class="plugin-loading-progress" role="progressbar" aria-label="${esc(title)}" aria-valuetext="正在获取目录"><span></span></div><strong>${esc(title)}</strong><span class="muted">${esc(message)}</span></div>`;
 }
 
 function storeWarningMarkup() {
@@ -126,7 +126,7 @@ function pluginListPaneMarkup(tab) {
     return `<section class="plugin-list-pane" data-testid="${testId}">${pluginLoadingContent(tab === "store" ? "正在加载插件仓库" : "正在加载本地插件", tab === "store" ? "正在获取官方插件目录，请稍候…" : "正在读取本机插件状态，请稍候…", `${tab === "store" ? "plugin-store" : "plugin-local"}-loading`)}</section>`;
   }
   if (tab === "store" && data.available === false) {
-    return `<section class="plugin-list-pane" data-testid="${testId}"><div class="empty"><strong>插件仓库暂不可用</strong><span>${esc(data.error || "请检查网络连接或代理设置。")}</span></div></section>`;
+    return `<section class="plugin-list-pane" data-testid="${testId}"><div class="plugin-store-unavailable-message"><strong>插件仓库暂不可用</strong><span>${esc(data.error || "请检查网络连接或代理设置。")}</span></div></section>`;
   }
   if (data.error && !data.plugins.length) {
     return `<section class="plugin-list-pane" data-testid="${testId}"><div class="empty"><strong>加载本地插件失败</strong><span>${esc(data.error)}</span></div></section>`;
@@ -200,7 +200,6 @@ function detailMetaMarkup(detail, tab) {
     ["更新时间", detail.updatedAt || "未提供"],
     ["适用项目", detail.gameName || "通用"],
     ["插件类型", pluginKindLabel(detail)],
-    ["Frontend API", detail.frontendApiVersion ? `v${detail.frontendApiVersion}` : "无"],
   ];
   if (tab === "store" && detail.minHostVersion && detail.minHostVersion !== "0.0.0") {
     rows.push(["最低宿主版本", `v${detail.minHostVersion}`]);

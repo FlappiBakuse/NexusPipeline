@@ -1,4 +1,3 @@
-using NexusPipeline.App.Commands;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Repositories;
 using Microsoft.Extensions.DependencyInjection;
@@ -89,8 +88,8 @@ internal class RuntimeContext
             provider.GetRequiredService<IUserRunStartingPublisher>(),
             provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<DispatchCenter>();
-        collection.AddSingleton<ExecutionCommands>(provider => new ExecutionCommands(provider.GetRequiredService<DispatchCenter>()));
-        collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionCommands>());
+        collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
+        collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
         collection.AddSingleton<UserDataPruner>(provider => new UserDataPruner(SnapshotUsers, provider.GetRequiredService<ExecutionStateStore>()));
@@ -130,8 +129,6 @@ internal class RuntimeContext
     public PluginManager Plugins => Resolve<PluginManager>();
 
     public NotificationDispatcher Notifications => Resolve<NotificationDispatcher>();
-
-    public ExecutionCommands Commands => Resolve<ExecutionCommands>();
 
     public Scheduler Scheduler => Resolve<Scheduler>();
 

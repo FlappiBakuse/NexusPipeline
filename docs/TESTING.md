@@ -102,7 +102,19 @@ Test Host 具备以下测试专用能力：
 whoami /groups | Select-String 'S-1-16-8192'
 ```
 
-UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。GitHub Actions 的 Windows runner 以管理员身份运行且关闭 UAC；CI 创建临时标准用户并使用 `tests/support/NexusPipeline.TestLauncher` 以该用户启动 Medium Integrity 子进程，本地 elevated token 若存在 linked filtered token 则优先复用，测试本身的权限校验保持有效。
+UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。GitHub Actions 的 Windows runner 以管理员身份运行且关闭 UAC；`tests/support/NexusPipeline.TestLauncher` 保持 runner 用户与环境变量不变，通过 linked filtered token 或当前 token 派生的 restricted Medium token 启动测试，测试本身的权限校验保持有效。
+
+### Medium Token Normalizer 与 CI 可观测性
+
+TestLauncher 根据当前 token 选择三条路径：
+
+- 当前已经是 Medium Integrity：使用当前用户 token 的可创建进程副本，诊断为 `mode=current-token`。
+- 当前为 elevated token 且存在 UAC linked token：使用 filtered token，诊断为 `mode=linked-token`。
+- 当前为 elevated token 且没有 linked token：调用 `CreateRestrictedToken`，禁用 Administrators 与 Power Users SID、关闭最大特权，再将完整性级别设置为 Medium，诊断为 `mode=restricted-token`。
+
+LocalSystem/System Integrity 没有安全的普通用户降级路径时直接以 exit code `2` 结束。每次启动测试前，TestLauncher 输出 `mode`、`integrity`、`restricted` 和 `administrator-enabled`；token 不满足 Medium 或管理员组仍处于启用状态时拒绝启动。
+
+TestLauncher 使用可继承的标准输入、输出和错误句柄调用 `CreateProcessAsUser`，测试进程及其后代的 stdout/stderr 直接进入当前终端或 GitHub Actions step。`tests/support/launcher-probe.mjs` 在 CI 的测试前置步骤中检查 stdout marker、stderr marker、Medium integrity 和 `NEXUS_LAUNCHER_PROBE` 环境变量；launcher 无法建立安全 token 或子进程时返回 exit code `2`。
 
 ## UI Smoke
 
@@ -168,7 +180,9 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 先构建 `tests/support/NexusPipeline.TestLauncher`，再通过它以 Medium Integrity 执行 `node tests\run.mjs default` 和 `node tests\run.mjs ui`；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 Medium Integrity 测试启动器执行 `node tests\run.mjs system`，不加载 legacy。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 先构建 `tests/support/NexusPipeline.TestLauncher`，运行 launcher probe，再通过它以 Medium Integrity 执行 `node tests\run.mjs default` 和 `node tests\run.mjs ui`；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 Medium Integrity 测试启动器执行 probe 和 `node tests\run.mjs system`，不加载 legacy。GitHub Actions 不创建临时测试账户、不写入测试账户密码、不递归修改 workspace ACL。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+
+CI 中 Playwright 使用 `trace: retain-on-failure`，本地保持 `trace: off`。UI Smoke 失败时由 `actions/upload-artifact@v4` 上传 `tests/e2e/test-results`，用于补充同一 step 中已经实时显示的 suite、case、错误和 stack 信息。
 
 `NEXUS_CI` 不划分隐式 Playwright 测试集合。时间缩放仅适用于明确依赖宿主等待的专项脚本；判断脚本的 30 秒单次执行上限保持真实墙钟语义。测试中的日期断言遵循本地时区规则。
 

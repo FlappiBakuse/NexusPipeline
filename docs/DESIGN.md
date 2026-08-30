@@ -52,7 +52,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 执行状态存储（ExecutionStateStore） | 在同一临界区完成准入检查、活动运行登记、profile 资源租约释放和完成意图协调 |
 | 执行运行器（ExecutionRunner） | 负责后台脚本/队列生命周期、用户串行、历史落盘、通知和完成意图提交 |
 | 系统操作执行器（SystemActionExecutor） | 负责运行组空闲后的完成操作 arm、真实 60 秒倒计时与取消 |
-| 尝试执行（AttemptRunner） | 单次尝试执行边界，承接前/后置脚本、脚本监控、判定和资源清理调用 |
+| 尝试执行 | `ExecutionCoordinator` 直接承接前/后置脚本、脚本监控、判定和资源清理调用 |
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
 | 配置交换（ConfigSwap） | 运行前 configPath ↔ 用户快照的交换机制（见第 4 节） |
@@ -63,14 +63,14 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 插件仓库 catalog | 固定官方源发布的插件索引；客户端校验 schema、名称、SemVer、宿主兼容性、包 URL、大小和 SHA256 |
 | 插件 pending 事务 | 插件包下载并校验后写入 staging 与 `pending.json`，下次启动在插件扫描前完成安装、更新或卸载 |
 | 宿主外部 HTTP 出口 | 依据 `ProxyMode` 选择无代理、系统代理或自定义代理；外部请求读取最新设置，loopback 强制直连 |
-| 应用命令（ExecutionCommands） | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消入口 |
+| 执行应用端口（IExecutionService / IFrozenQueueExecutionService） | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消入口，由 `DispatchCenter` 直接实现 |
 | 控制面（Control API） | 常驻服务拥有运行时数据与执行状态；Web、CLI、manage 通过本机 HTTP 控制 API 提交查询与变更 |
 
 ## 3. 核心运行流程
 
 ### 3.1 脚本运行完整链路
 
-一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`DispatchCenter` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排（队列/手动/CLI 均经 `ExecutionCommands` → `DispatchCenter` 汇聚到此处）；`RunSession` 只保存状态，单次尝试经 `AttemptRunner` 进入：
+一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`DispatchCenter` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排，队列、手动和 CLI 入口均直接汇聚到 `DispatchCenter`；`RunSession` 只保存状态，单次尝试由协调器直接执行：
 
 ```mermaid
 sequenceDiagram
@@ -80,13 +80,11 @@ sequenceDiagram
     participant Q as ExecutionAdmissionPolicy
     participant E as ExecutionStateStore
     participant R as ExecutionRunner
-    participant C as ExecutionCommands
     participant S as ExecutionCoordinator.RunAsync
-    participant A as AttemptRunner（每次尝试）
     participant M as LogMonitor
     participant J as SessionJudge/判断脚本
 
-    C->>DC: StartScript / StartQueue / Cancel
+    DC->>DC: StartScript / StartQueue / Cancel
     DC->>P: 读取仓储快照并构建冻结计划
     P->>V: 执行计划前置校验
     P-->>DC: 返回计划与 AdmissionProfile
@@ -96,18 +94,18 @@ sequenceDiagram
     DC->>R: 启动后台任务
     R->>S: 编排该用户运行
     loop 尝试 1..MaxAttempts
-        S->>A: 执行本次尝试
-        A->>A: 前置脚本、游戏/脚本启动、日志监控、判定和清理
-        A->>A: 启动游戏（可选，轮询确认 GameWaitSeconds）
-        A->>A: 启动主程序（已在运行则仅监控）
-        A->>M: 解析日志路径 → 创建监控（严格 fresh：本次尝试写过才从头读，否则末尾读忽略残留）
+        S->>S: 执行本次尝试
+        S->>S: 前置脚本、游戏/脚本启动、日志监控、判定和清理
+        S->>S: 启动游戏（可选，轮询确认 GameWaitSeconds）
+        S->>S: 启动主程序（已在运行则仅监控）
+        S->>M: 解析日志路径 → 创建监控（严格 fresh：本次尝试写过才从头读，否则末尾读忽略残留）
         loop 1 秒间隔
             M->>M: 解析路径/FileId 替换/截断检测 → ReadNew 读新增
-            A->>J: 逐行 HandleLine（关键字）
-            A->>J: 判断脚本批次/周期/最终触发
-            J-->>A: success/failed/replaceConfigs
+            S->>J: 逐行 HandleLine（关键字）
+            S->>J: 判断脚本批次/周期/最终触发
+            J-->>S: success/failed/replaceConfigs
         end
-        A->>A: 判定成功/失败/超时/取消 → 杀进程树 → 按结果处理游戏
+        S->>S: 判定成功/失败/超时/取消 → 杀进程树 → 按结果处理游戏
         S->>S: 后置脚本（用户配置，可选）→ 记录尝试结果
         alt 成功或达到最大次数
             S-->>DC: 返回 RunRecord
@@ -121,7 +119,7 @@ sequenceDiagram
     E-->>E: 活动运行数为 0 时原子预留 pending 系统操作
 ```
 
-**分步细节（AttemptRunner 单次尝试边界内）：**
+**分步细节（ExecutionCoordinator 单次尝试流程内）：**
 
 1. **前置检查**：`IsScriptRunning` 检测运行时启动目标是否已在运行（按解析后的进程名，含自重启产物兜底）；已运行 → 先按启动目标强制结束并确认退出，再重新启动监管。
 2. **启动游戏（可选）**：`LaunchGame=true` 且已填游戏路径时，校验可执行 → 启动（bat 经 cmd 包装并接管输出）→ 每 1 秒轮询 `GameWaitSeconds` 秒确认进程出现 → 超时本次尝试失败。未填写路径则跳过并提示。
@@ -188,7 +186,7 @@ flowchart TD
 
 ### 3.4 统一控制面与 CLI
 
-常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `ExecutionCommands`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
+常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `DispatchCenter`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
 
 正式 CLI 的协议边界如下：
 

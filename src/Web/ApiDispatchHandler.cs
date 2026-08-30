@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text.Json.Nodes;
-using NexusPipeline.App.Commands;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -38,14 +37,14 @@ internal static class ApiDispatchHandler
             {
                 string scriptId = node.Get("scriptId").Str();
                 string userName = node.Get("userName").Str();
-                RunningExecution exec = RuntimeContext.Instance.Commands.StartScript(scriptId, mode, Audit.Web, userName);
+                RunningExecution exec = RuntimeContext.Instance.Center.StartScript(scriptId, mode, Audit.Web, userName);
                 await HttpHelper.WriteJsonAsync(context, new { runId = exec.Id, ok = true }).ConfigureAwait(false);
                 return;
             }
             if (seg.Length >= 2 && seg[1].ToLowerInvariant() == "queue")
             {
                 string queueId = node.Get("queueId").Str();
-                RunningExecution exec = RuntimeContext.Instance.Commands.StartQueue(queueId, mode, Audit.Web);
+                RunningExecution exec = RuntimeContext.Instance.Center.StartQueue(queueId, mode, Audit.Web);
                 await HttpHelper.WriteJsonAsync(context, new { runId = exec.Id, ok = true }).ConfigureAwait(false);
                 return;
             }
@@ -113,7 +112,7 @@ internal static class ApiDispatchHandler
         string runId = node.Get("runId").Str();
         try
         {
-            RuntimeContext.Instance.Commands.Cancel(runId, Audit.Web);
+            RuntimeContext.Instance.Center.Cancel(runId, Audit.Web);
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
         }
         catch (Exception ex)

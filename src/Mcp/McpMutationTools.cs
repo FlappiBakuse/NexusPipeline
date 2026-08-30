@@ -50,7 +50,7 @@ internal sealed class McpMutationTools
 
         try
         {
-            RunningExecution execution = _context.Runtime.Commands.StartScript(
+            RunningExecution execution = _context.Runtime.Center.StartScript(
                 script.Value!.Id,
                 "mcp",
                 Audit.Mcp,
@@ -99,7 +99,7 @@ internal sealed class McpMutationTools
         }
         try
         {
-            RunningExecution execution = _context.Runtime.Commands.StartQueue(
+            RunningExecution execution = _context.Runtime.Center.StartQueue(
                 queue.Value!.Id,
                 "mcp",
                 Audit.Mcp);
@@ -145,7 +145,7 @@ internal sealed class McpMutationTools
         }
         try
         {
-            _context.Runtime.Commands.Cancel(runId.Trim(), Audit.Mcp);
+            _context.Runtime.Center.Cancel(runId.Trim(), Audit.Mcp);
             return McpToolResult.Success(new { runId = runId.Trim(), canceled = true });
         }
         catch (Exception ex)

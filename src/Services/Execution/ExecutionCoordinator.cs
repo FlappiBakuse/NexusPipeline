@@ -8,12 +8,10 @@ using NexusPipeline.App.Abstractions;
 namespace NexusPipeline.Services.Execution;
 
 /// <summary>一次运行的应用层协调器；状态由基类 RunSession 持有。</summary>
-internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
+internal sealed class ExecutionCoordinator : RunSession
 {
     /// <summary>成功判定后等待脚本自行退出的宽限秒数（NEXUS_TIME_SCALE 加速时按比例缩放）。</summary>
     private const int ExitGraceSecondsAfterMarker = 60;
-
-    private readonly AttemptRunner _attemptRunner;
 
     private readonly IUserRepository _users;
 
@@ -46,15 +44,8 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     {
         _users = users;
         _previewTargetChanged = previewTargetChanged;
-        _attemptRunner = new AttemptRunner(this);
         SetInitialPreviewTarget();
     }
-
-    Task<RunAttemptResult?> IAttemptExecutionHost.RunUserScriptCoreAsync(string scriptPath, string role, RunAttempt attempt, CancellationToken token)
-        => RunUserScriptCoreAsync(scriptPath, role, attempt, token);
-
-    Task<RunAttemptResult> IAttemptExecutionHost.RunAttemptCoreAsync(RunAttempt attempt)
-        => RunAttemptCoreAsync(attempt);
 
     public async Task<RunRecord> RunAsync()
     {
@@ -183,7 +174,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                 bool mainExecuted = true;
                 if (runPreRun)
                 {
-                    RunAttemptResult? preResult = await _attemptRunner.RunUserScriptAsync(user!.PreRunScript!, "任务前", attempt, OperationToken).ConfigureAwait(false);
+                    RunAttemptResult? preResult = await RunUserScriptCoreAsync(user!.PreRunScript!, "任务前", attempt, OperationToken).ConfigureAwait(false);
                     if (preResult is not null)
                     {
                         // PreRun 只有成功（返回 null）才允许进入 Main；失败/取消直接结束本次 Attempt。
@@ -193,12 +184,12 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                     else
                     {
                         _preRunCompletedSuccessfully = true;
-                        result = await _attemptRunner.RunAsync(attempt).ConfigureAwait(false);
+                        result = await RunAttemptCoreAsync(attempt).ConfigureAwait(false);
                     }
                 }
                 else
                 {
-                    result = await _attemptRunner.RunAsync(attempt).ConfigureAwait(false);
+                    result = await RunAttemptCoreAsync(attempt).ConfigureAwait(false);
                 }
 
                 if (mainExecuted && result.Status != "cancelled"
@@ -209,7 +200,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
                         retryPolicy,
                         result))
                 {
-                    RunAttemptResult? postResult = await _attemptRunner.RunUserScriptAsync(user!.PostRunScript!, "任务后", attempt, OperationToken).ConfigureAwait(false);
+                    RunAttemptResult? postResult = await RunUserScriptCoreAsync(user!.PostRunScript!, "任务后", attempt, OperationToken).ConfigureAwait(false);
                     if (postResult is not null)
                     {
                         result = RunAttemptResult.MergePostRun(result, postResult);
@@ -406,7 +397,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
     internal async Task<RunAttemptResult> RunAttemptCoreAsync(RunAttempt attempt)
     {
         string modeText = _mode == "auto" ? "自动" : "手动";
-        var cleanup = new CleanupManager(_script, modeText, () => _emulatorDriver);
+        var finalizer = new RunAttemptFinalizer(_script, modeText, () => _emulatorDriver);
         RunAttemptResult? budgetError = CheckTotalTimeout();
         if (budgetError is not null)
         {
@@ -417,7 +408,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
-            await cleanup.CleanupGameOnEarlyExitAsync(early).ConfigureAwait(false);
+            await finalizer.CleanupGameOnEarlyExitAsync(early).ConfigureAwait(false);
             return early;
         }
 
@@ -580,7 +571,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
 
         bool KillScriptAndConfirm()
         {
-            bool confirmed = cleanup.KillScript(process, launchExe, excludeGame, _processOwnership);
+            bool confirmed = finalizer.KillScript(process, launchExe, excludeGame, _processOwnership);
             if (!confirmed)
             {
                 cleanupConfirmed = false;
@@ -853,7 +844,7 @@ internal sealed class ExecutionCoordinator : RunSession, IAttemptExecutionHost
         process = null;
         try
         {
-            await cleanup.CleanupGameAsync(finalResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
+            await finalizer.CleanupGameAsync(finalResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
         }
         finally
         {

@@ -237,7 +237,7 @@ function bindHistoryRangePicker() {
 function dateRowsMarkup() {
   return historyDates.length
     ? historyDates.map(date => `<button class="history-date-row${date.date === historySelectedDate ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-pressed="${date.date === historySelectedDate ? "true" : "false"}">${icon("chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} 条</span></button>`).join("")
-    : '<div class="empty compact-empty"><strong>该时间段暂无记录</strong><span>请选择其他日期范围。</span></div>';
+    : '<div class="history-dates-empty-message"><strong>该时间段暂无记录</strong><span>请选择其他日期范围。</span></div>';
 }
 
 function entryMarkup(record) {
@@ -287,7 +287,7 @@ function panelsMarkup(records) {
     <div class="history-records-column">
       <section class="history-records-panel">
         <div class="history-panel-head">${icon("queues")}<h3>运行记录</h3><span class="muted" data-testid="history-records-count">${records.length} 条记录</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="刷新记录" data-testid="history-refresh">${icon("refresh")}</button></div>
-        <div class="history-entry-list">${records.length ? records.map(entryMarkup).join("") : `<div class="empty"><strong>${emptyMessage}</strong></div>`}</div>
+        <div class="history-entry-list">${records.length ? records.map(entryMarkup).join("") : `<div class="history-empty-message">${emptyMessage}</div>`}</div>
       </section>
     </div>
   </div>`;

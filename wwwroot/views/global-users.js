@@ -951,7 +951,7 @@ function globalManagementPluginMarkup(contributions) {
     const title = contribution.title && String(contribution.title).trim() !== String(displayName).trim()
       ? '<strong>' + esc(contribution.title) + '</strong>'
       : "";
-    return '<article class="global-management-plugin card" data-plugin-name="' + esc(contribution.pluginName) + '" data-plugin-contribution-id="' + esc(contribution.id) + '"><div class="section-heading"><div><h4>' + esc(displayName) + '</h4>' + title + (contribution.description ? '<p class="muted">' + esc(contribution.description) + '</p>' : "") + '</div></div><div class="plugin-contribution-fields">' + (contribution.fields || []).map(field => pluginFieldMarkup(contribution, field)).join("") + '</div></article>';
+    return '<article class="global-management-plugin" data-plugin-name="' + esc(contribution.pluginName) + '" data-plugin-contribution-id="' + esc(contribution.id) + '"><div class="section-heading"><div><h4>' + esc(displayName) + '</h4>' + title + (contribution.description ? '<p class="muted">' + esc(contribution.description) + '</p>' : "") + '</div></div><div class="plugin-contribution-fields">' + (contribution.fields || []).map(field => pluginFieldMarkup(contribution, field)).join("") + '</div></article>';
   }).join("");
   return '<section class="global-management-plugins"><div class="section-heading"><div><h3>插件设置</h3><p class="muted">由当前已启用的插件提供的用户级设置。</p></div></div>' + cards + '</section>';
 }

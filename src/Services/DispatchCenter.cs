@@ -1,6 +1,7 @@
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
+using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
@@ -8,7 +9,7 @@ namespace NexusPipeline.Services;
 /// 执行门面：保持既有 Web/CLI/Scheduler 入口不变，只负责门禁、运行登记和取消。
 /// 具体校验由 <see cref="ExecutionValidator"/> 负责，后台生命周期由 <see cref="ExecutionRunner"/> 负责。
 /// </summary>
-internal sealed class DispatchCenter
+internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionService
 {
     private readonly ExecutionStateStore _state;
     private readonly ExecutionPlanBuilder _plans;

@@ -1,4 +1,3 @@
-using System.Reflection;
 using NexusPipeline.Extensibility;
 using NexusPipeline;
 using NexusPipeline.App.Abstractions;
@@ -15,17 +14,6 @@ namespace NexusPipeline.Tests;
 
 public class GovernanceUnitTests
 {
-    [Fact]
-    public void ExecutionCoordinator_OwnsFlow_WhileRunSessionRemainsStateObject()
-    {
-        Assert.Null(typeof(RunSession).GetMethod("RunAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-        Assert.NotNull(typeof(ExecutionCoordinator).GetMethod("RunAsync", BindingFlags.Instance | BindingFlags.Public));
-        Assert.NotNull(typeof(AttemptRunner));
-        Assert.Equal(typeof(IAttemptExecutionHost), typeof(AttemptRunner).GetConstructors()[0].GetParameters()[0].ParameterType);
-        Assert.True(typeof(IAttemptExecutionHost).IsAssignableFrom(typeof(ExecutionCoordinator)));
-        Assert.NotNull(typeof(ResultCollector));
-    }
-
     [Fact]
     public void RetryPolicy_OnlyRetriesRecoverableFailures()
     {
@@ -49,57 +37,12 @@ public class GovernanceUnitTests
     }
 
     [Fact]
-    public void NotificationAndCommandBoundaries_UseApplicationPorts()
-    {
-        Assert.DoesNotContain(typeof(PluginManager).GetInterfaces(), type => type.Name.Contains("NotificationChannel", StringComparison.Ordinal));
-        Assert.DoesNotContain(typeof(PluginManager).GetInterfaces(), type => type.Name.Contains("EmulatorCapability", StringComparison.Ordinal));
-        Assert.Equal(typeof(ISettingsProvider), typeof(NotificationDispatcher).GetConstructors()[0].GetParameters()[0].ParameterType);
-        Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.StartScript)));
-        Assert.NotNull(typeof(ExecutionCommands).GetMethod(nameof(ExecutionCommands.Cancel)));
-    }
-
-    [Fact]
-    public void ResourceMutations_ExposeSharedApplicationCommandBoundaries()
-    {
-        Assert.NotNull(typeof(ScriptCommands).GetMethod("Create"));
-        Assert.NotNull(typeof(ScriptCommands).GetMethod("Update"));
-        Assert.NotNull(typeof(ScriptCommands).GetMethod("Delete"));
-        Assert.NotNull(typeof(QueueCommands).GetMethod("Create"));
-        Assert.NotNull(typeof(QueueCommands).GetMethod("Update"));
-        Assert.NotNull(typeof(QueueCommands).GetMethod("Delete"));
-        Assert.NotNull(typeof(UserCommands).GetMethod("Create"));
-        Assert.NotNull(typeof(UserCommands).GetMethod("AddBinding"));
-        Assert.NotNull(typeof(SettingsCommands).GetMethod("Update"));
-        Assert.NotNull(typeof(ConfigEditCommands).GetMethod("Start"));
-        Assert.NotNull(typeof(ConfigEditCommands).GetMethod("Complete"));
-    }
-
-    [Fact]
-    public void ExecutionBoundary_SplitsFacadeValidationRunnerAndSystemActions()
-    {
-        Assert.Null(typeof(DispatchCenter).GetMethod("RunScriptAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-        Assert.Null(typeof(DispatchCenter).GetMethod("RunQueueAsync", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic));
-        Assert.NotNull(typeof(ExecutionValidator).GetMethod(nameof(ExecutionValidator.ValidateScriptStart)));
-        Assert.NotNull(typeof(ExecutionValidator).GetMethod(nameof(ExecutionValidator.ValidateQueueStart)));
-        Assert.NotNull(typeof(ExecutionRunner).GetMethod(nameof(ExecutionRunner.RunScriptAsync)));
-        Assert.NotNull(typeof(ExecutionRunner).GetMethod(nameof(ExecutionRunner.RunQueueAsync)));
-        Assert.NotNull(typeof(SystemActionExecutor).GetMethod(nameof(SystemActionExecutor.Schedule)));
-        Assert.NotNull(typeof(SystemActionExecutor).GetMethod(nameof(SystemActionExecutor.Cancel)));
-        Assert.True(typeof(IExecutionService).IsAssignableFrom(typeof(ExecutionCommands)));
-        Assert.True(typeof(IHistoryStore).IsAssignableFrom(typeof(HistoryService)));
-        Assert.True(typeof(INotificationService).IsAssignableFrom(typeof(NotificationDispatcher)));
-        Assert.True(typeof(IPluginCapabilityResolver).IsAssignableFrom(typeof(PluginManager)));
-    }
-
-    [Fact]
-    public void CompositionRoot_ResolvesV082ApplicationPorts()
+    public void CompositionRoot_MapsExecutionPortsToDispatchCenter()
     {
         RuntimeContext context = RuntimeContext.Instance;
 
-        Assert.NotNull(context.Resolve<IScriptRepository>());
-        Assert.NotNull(context.Resolve<IQueueRepository>());
-        Assert.NotNull(context.Resolve<IUserRepository>());
-        Assert.NotNull(context.Center);
+        Assert.Same(context.Center, context.Resolve<IExecutionService>());
+        Assert.Same(context.Center, context.Resolve<IFrozenQueueExecutionService>());
         Assert.NotNull(context.Validator);
         Assert.NotNull(context.Scheduler);
     }

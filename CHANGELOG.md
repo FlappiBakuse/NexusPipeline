@@ -2,6 +2,32 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.12.0（Pre-release）
+
+### 稳定期架构减负
+
+- 执行协调器直接承接前置/后置脚本与单次尝试流程，移除无独立行为的尝试运行器和清理门面。
+- `DispatchCenter` 直接实现执行应用端口，Web、CLI、Scheduler 和 MCP 继续共享同一准入、资源租约与后台运行路径。
+- 删除零生产引用的 CLI compatibility menu 壳，保留正式 noun/subcommand 路由和 Control API。
+- 将治理测试聚焦于执行端口的实际组合与运行安全行为，降低对历史类型拓扑的固定依赖。
+
+### 测试权限与 CI 可观测性
+
+- TestLauncher 统一处理 current、linked filtered 和 restricted Medium token 路径，保留 Medium Integrity 测试门禁与生产管理员清单。
+- TestLauncher 通过继承标准输入、输出和错误句柄实时透传测试日志，并在启动前输出权限路径诊断；安全 token 创建或子进程启动失败时返回 exit code `2`。
+- CI 移除临时测试账户、密码和 workspace ACL 修改，增加 launcher probe，并在 Playwright 失败时保留 trace 和测试结果 artifact。
+
+### 插件展示与发行元数据
+
+- 插件详情页移除 `Frontend API` 元数据展示；Frontend API 兼容性、资源路径和安全校验保持有效。
+- 7 个官方活跃插件补充 `FlappiBakuse` 作者信息并发布新的 patch 包，源码、catalog 与 ZIP 内 `store.json` 保持一致。
+- catalog 生成器要求正式插件提供作者信息，发行包校验补充 ZIP 与 catalog 作者一致性检查。
+
+### 前端空状态与管理卡片
+
+- 历史记录和插件加载、仓库不可用状态移除内嵌卡片表面，保留清晰的文字提示与加载反馈。
+- 用户全局管理中的游戏自动签到设置卡片统一管理面板的颜色与表面样式，插件版本保持不变。
+
 ## v0.11.9（Pre-release）
 
 ### 测试与运行宿主
