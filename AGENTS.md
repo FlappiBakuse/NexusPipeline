@@ -7,15 +7,12 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 | 需要知道什么 | 阅读 |
 |---|---|
 | 用户功能、安装、快速使用 | [README.md](README.md) |
-| 当前产品行为、不变量、已接受约束 | [docs/DESIGN.md](docs/DESIGN.md) |
-| 模块边界、依赖和代码定位 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
-| 开发环境、构建、调试和运行时数据 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
+| 当前产品行为、不变量、已接受约束、模块边界与代码定位 | [docs/DESIGN.md](docs/DESIGN.md)（第 10 节为开发者导航） |
+| 开发环境、构建、调试、协作规范和发布流程 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
 | 测试层级、完整命令和质量门禁 | [docs/TESTING.md](docs/TESTING.md) |
-| Web/CLI/MCP 控制面能力对齐 | [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) |
-| 协作、Commit 和文档治理 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 发布、资产和 SHA | [docs/RELEASING.md](docs/RELEASING.md) |
-| 当前版本路线和未完成计划 | [docs/ROADMAP.md](docs/ROADMAP.md) |
-| 当前未解决问题与技术风险 | [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) |
+| Web/CLI/MCP 控制面能力现状 | [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) |
+| 贡献要点速览 | [CONTRIBUTING.md](CONTRIBUTING.md) |
+| 当前开发计划与未解决问题 | [docs/STATUS.md](docs/STATUS.md) |
 | Plugin SDK、manifest 和扩展契约 | [docs/PLUGIN_API.md](docs/PLUGIN_API.md) |
 | 版本历史 | [CHANGELOG.md](CHANGELOG.md) |
 
@@ -26,7 +23,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 - 未经用户明确授权，不执行 commit、push、tag、Pull Request 或 Release；版本开发期间不自行拆分发布。
 - `config/`、`data/`、`history/`、`logs/` 和测试 runtime 属于用户或运行时现场。阅读时脱敏，修改和测试时使用隔离目录，禁止把凭据、账号、日志和运行产物加入版本库。
 - 文档任务保持文档范围。发现代码、测试和 DESIGN 的行为描述不一致时，先核对事实；需要改变产品行为时停止该冲突项并向用户报告。
-- 修改行为前阅读 DESIGN，寻找实现前阅读 ARCHITECTURE，修改测试前阅读 TESTING，修改插件前阅读 `docs/PLUGIN_API.md`，发布前阅读 RELEASING。
+- 修改行为前阅读 DESIGN（模块边界与代码定位见其第 10 节），修改测试前阅读 TESTING，修改插件前阅读 `docs/PLUGIN_API.md`，发布前阅读 DEVELOPMENT 的发布流程章节。
 - 新增或修改可管理能力时核对并更新 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)，为 Web、CLI、MCP 记录明确状态、风险边界和对应测试。
 - 新增 UI 行为时先评估 Unit、Component、Web Logic 或 System Smoke 的覆盖位置；UI Smoke 只保留无法由低层稳定证明的核心工作流。
 - 测试失败时保留失败证据并修复根因；禁止通过自动重试、跳过失败或静默重定向掩盖失败。完整测试命令只维护在 `docs/TESTING.md`。

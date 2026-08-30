@@ -19,15 +19,10 @@ internal static class StartupPipeline
             TrayApp.OpenWeb();
             return;
         }
-        AppPaths.RuntimeState.EnsureMigrated();
-        // 更新事务启动收尾（完成清理 / 失败回滚 / defer 自动应用）；
-        // defer 应用时已拉起 apply-update 子进程，本进程退出（互斥体随退出释放）。
-        if (UpdateApply.RunStartupFinalization())
+        if (!PrepareHostedStart())
         {
             return;
         }
-
-        WriteServicePid();
 
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.ReloadSettings();
@@ -72,10 +67,7 @@ internal static class StartupPipeline
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new TrayApp());
 
-        WaitForSafeShutdown();
-        Bootstrap.Shutdown(web, mcp);
-        ClearServicePid();
-        Logger.Info("NexusPipeline 已退出。");
+        ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
     }
 
     /// <summary>
@@ -173,13 +165,11 @@ internal static class StartupPipeline
             Console.WriteLine("[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。");
             return 1;
         }
-        AppPaths.RuntimeState.EnsureMigrated();
         // web 模式同样执行更新事务启动收尾（defer 时退出由本模式专用退出端口处理）。
-        if (UpdateApply.RunStartupFinalization())
+        if (!PrepareHostedStart())
         {
             return 0;
         }
-        WriteServicePid();
         ApplicationHost.IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
         // 崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
@@ -246,10 +236,35 @@ internal static class StartupPipeline
                 break;
             }
         }
+        ShutdownHosted(web, mcp);
+        return 0;
+    }
+
+    /// <summary>
+    /// 常驻模式（service/web）共享的启动不变量：运行时状态迁移 → 更新事务启动收尾 → 写 service.pid。
+    /// 返回 false 表示更新收尾已拉起 apply-update 子进程或完成回滚，本进程应立即退出。
+    /// </summary>
+    private static bool PrepareHostedStart()
+    {
+        AppPaths.RuntimeState.EnsureMigrated();
+        if (UpdateApply.RunStartupFinalization())
+        {
+            return false;
+        }
+        WriteServicePid();
+        return true;
+    }
+
+    /// <summary>常驻模式（service/web）共享的关闭不变量：等待任务/编辑会话安全结束 → 停服务 → 清 service.pid。</summary>
+    private static void ShutdownHosted(WebServer? web, McpHost? mcp, string? exitLog = null)
+    {
         WaitForSafeShutdown();
         Bootstrap.Shutdown(web, mcp);
         ClearServicePid();
-        return 0;
+        if (exitLog is not null)
+        {
+            Logger.Info(exitLog);
+        }
     }
 
     private static void WriteServicePid()

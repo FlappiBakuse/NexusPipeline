@@ -5,7 +5,6 @@ using NexusPipeline.App.Commands;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
-using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
 using Xunit;
@@ -25,15 +24,14 @@ public class GovernanceUnitTests
     }
 
     [Fact]
-    public void ConfigurationTransaction_ProvidesExplicitLifecycleBoundary()
+    public void ConfigRunSession_ProvidesExplicitLifecycleBoundary()
     {
-        var transaction = new ConfigurationTransaction("script", null, "");
+        var session = new ConfigRunSession("script", userKey: null, configPath: "", hasJudgeScript: false);
 
-        Assert.Equal("script", transaction.ScriptId);
-        Assert.False(transaction.IsPrepared);
-        Assert.True(transaction.Begin(out string? error));
+        Assert.False(session.IsPrepared);
+        Assert.True(session.Prepare(out string? error));
         Assert.Null(error);
-        Assert.False(transaction.IsPrepared);
+        Assert.False(session.IsPrepared);
     }
 
     [Fact]
@@ -346,15 +344,15 @@ public class GovernanceUnitTests
         public IReadOnlyList<DispatchQueue> Snapshot() => Array.Empty<DispatchQueue>();
     }
 
-    private sealed class TestUserRepository : IUserRepository
+    private sealed class TestUserRepository : LegacyModelUserRepository
     {
-        public ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName)
         {
             return script.Users.FirstOrDefault(user => user.Enabled
                 && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
         }
 
-        public IReadOnlyList<string> EnabledNames(ScriptInstance script)
+        public override IReadOnlyList<string> EnabledNames(ScriptInstance script)
         {
             return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
         }

@@ -40,7 +40,7 @@ internal static class ExecutionConflictResponse
         string resource,
         Action mutation)
     {
-        if (center.TryExecuteLeaseMutation(scriptId, userName, mutation, out IReadOnlyList<ExecutionLeaseReference> leases))
+        if (center.TryExecuteLeaseMutation(scriptId, userName, mutation, out IReadOnlyList<ExecutionLeaseReference> leases, out string? _))
         {
             return true;
         }
@@ -55,7 +55,7 @@ internal static class ExecutionConflictResponse
         string resource,
         Action mutation)
     {
-        if (center.TryExecuteQueueLeaseMutation(queueId, mutation, out IReadOnlyList<ExecutionLeaseReference> leases))
+        if (center.TryExecuteQueueLeaseMutation(queueId, mutation, out IReadOnlyList<ExecutionLeaseReference> leases, out string? _))
         {
             return true;
         }
@@ -69,7 +69,7 @@ internal static class ExecutionConflictResponse
         string resource,
         Action mutation)
     {
-        if (center.TryExecuteAnyQueueLeaseMutation(mutation, out IReadOnlyList<ExecutionLeaseReference> leases))
+        if (center.TryExecuteAnyQueueLeaseMutation(mutation, out IReadOnlyList<ExecutionLeaseReference> leases, out string? _))
         {
             return true;
         }

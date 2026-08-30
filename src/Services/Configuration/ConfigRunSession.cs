@@ -1,5 +1,4 @@
 using NexusPipeline.Utilities;
-using NexusPipeline.Services.Configuration;
 
 namespace NexusPipeline.Services;
 
@@ -17,61 +16,70 @@ internal sealed class ConfigRunSession
         RestoreConfig,
     }
 
-    private readonly ConfigurationTransaction _transaction;
+    private readonly string _scriptId;
+    private readonly string? _userKey;
+    private readonly string _configPath;
     private readonly bool _hasJudgeScript;
     private readonly object _finalizationGate = new();
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
     private string? _finalizationError;
 
-    public ConfigRunSession(string scriptId, string? userKey, string? userName, string configPath, bool hasJudgeScript)
+    public ConfigRunSession(string scriptId, string? userKey, string configPath, bool hasJudgeScript)
     {
-        _transaction = new ConfigurationTransaction(scriptId, userKey, userName, configPath);
+        _scriptId = scriptId;
+        _userKey = userKey;
+        _configPath = configPath;
         _hasJudgeScript = hasJudgeScript;
     }
 
-    public ConfigRunSession(string scriptId, string? userName, string configPath, bool hasJudgeScript)
-        : this(scriptId, userName, userName, configPath, hasJudgeScript)
-    {
-    }
+    public bool IsPrepared { get; private set; }
 
-    public bool IsPrepared => _transaction.IsPrepared;
-
-    public bool ProcessCleanupConfirmed => _processCleanupConfirmed;
-
-    public string ScriptDir => _transaction.ScriptDir;
+    public string ScriptDir => UserConfigManager.ScriptDir(_scriptId, _userKey);
 
     public void PrepareScriptArea()
     {
-        if (_hasJudgeScript) _transaction.PrepareScriptArea();
+        if (_hasJudgeScript) UserConfigManager.PrepareScriptDir(_scriptId, _userKey);
     }
 
     public bool Prepare(out string? error)
     {
         error = null;
-        return _transaction.Begin(out error);
+        if (string.IsNullOrWhiteSpace(_userKey) || string.IsNullOrWhiteSpace(_configPath))
+        {
+            return true;
+        }
+        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error);
+        return IsPrepared;
     }
 
     public string? PrepareForRetry()
     {
-        return _transaction.PrepareRetry();
+        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey))
+        {
+            return null;
+        }
+        return ConfigSwapSession.PrepareForRetry(_scriptId, _userKey, _configPath);
     }
 
     public void SyncToStore(bool firstCheck)
     {
-        _transaction.SyncToStore(firstCheck);
+        if (IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
+        {
+            ConfigSwapSession.SyncConfigToStore(_scriptId, _userKey, _configPath, firstCheck);
+        }
     }
 
     public void ApplyReplacements(List<string> replacements)
     {
-        _transaction.ApplyReplacements(replacements);
+        ConfigSwapSession.ApplyConfigReplacements(_scriptId, _userKey, _configPath, replacements);
     }
 
     /// <summary>进程树未能确认退出时锁住配置收尾，保留现场供恢复，而不是继续覆盖/还原文件。</summary>
     public void MarkProcessCleanupUnconfirmed(string reason)
     {
         _processCleanupConfirmed = false;
-        Logger.Error($"[错误] 脚本「{_transaction.ScriptId}」进程清理未确认，已阻断配置替换/还原：{reason}");
+        Logger.Error($"[错误] 脚本「{_scriptId}」进程清理未确认，已阻断配置替换/还原：{reason}");
     }
 
     /// <summary>唯一权威的运行收尾顺序；顺序由测试保护，业务调用者不再手工拼接。</summary>
@@ -131,17 +139,17 @@ internal sealed class ConfigRunSession
                         }
                         catch (Exception ex)
                         {
-                            Logger.Warn($"[配置] 脚本「{_transaction.ScriptId}」自动更新同步失败：{ex.Message}");
+                            Logger.Warn($"[配置] 脚本「{_scriptId}」自动更新同步失败：{ex.Message}");
                         }
                         break;
                     case FinalizationStep.RestoreReplacements:
-                        _transaction.RestoreReplacements();
+                        ConfigSwapSession.RestoreConfigReplacements(_scriptId, _userKey);
                         break;
                     case FinalizationStep.CleanupScriptArea:
-                        _transaction.CleanupScriptArea();
+                        UserConfigManager.CleanupScriptArea(_scriptId, _userKey);
                         break;
                     case FinalizationStep.RestoreConfig:
-                        restoreError = _transaction.Restore();
+                        restoreError = RestoreConfig();
                         break;
                 }
             }
@@ -150,5 +158,15 @@ internal sealed class ConfigRunSession
             _finalizationCompleted = true;
             return _finalizationError;
         }
+    }
+
+    /// <summary>运行结束后还原：清 config（运行产物），original → config 还原原配置；未准备过或无用户键时无操作。</summary>
+    private string? RestoreConfig()
+    {
+        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey))
+        {
+            return null;
+        }
+        return UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath);
     }
 }

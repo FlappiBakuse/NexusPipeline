@@ -5,11 +5,12 @@ import { pageHeader, selectField, switchControl, valueField } from "../core/form
 import { selectControlMarkup, timeControlMarkup } from "../core/controls.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
-import { isCurrent, notifyAvailable, registerInterval, state } from "../core/state.js";
+import { isCurrent, registerInterval, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { durationClock } from "../core/duration.js";
 
 let queueDraft = null;
 let queuePage = 1;
@@ -114,9 +115,7 @@ function queueCardMarkup(queue, scripts) {
     : queue.autoRunMode === "startup"
       ? '<span class="badge blue">将在下次启动开始运行</span>'
       : '<span class="badge blue" data-testid="queue-manual-badge">不自动运行</span>';
-  const notifyBadge = notifyAvailable()
-    ? `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? "队列通知已开启" : "队列通知未开启"}</span>`
-    : "";
+  const notifyBadge = `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? "队列通知已开启" : "队列通知未开启"}</span>`;
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
     <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
@@ -141,11 +140,7 @@ function tickQueueNext() {
       el.textContent = "即将开始运行";
       return;
     }
-    const seconds = Math.floor(remain / 1000);
-    const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
-    const minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0");
-    const secs = String(seconds % 60).padStart(2, "0");
-    el.textContent = `${hours}:${minutes}:${secs}后开始`;
+    el.textContent = `${durationClock(Math.floor(remain / 1000))}后开始`;
   });
 }
 
@@ -229,7 +224,7 @@ export function renderQueueModal(skipOpenCapture = false) {
   const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
     <p class="muted helper-copy">队列名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <div class="form-grid">${selectField("qm-mode", "自动运行方式", d.autoRunMode, [{ value: "none", label: "不运行" }, { value: "scheduled", label: "定时运行" }, { value: "startup", label: "启动时运行" }])}${selectField("qm-action", "运行完成操作", d.completionAction, [{ value: "none", label: "无操作" }, { value: "exit", label: "退出软件" }, { value: "sleep", label: "休眠" }, { value: "reboot", label: "重启" }, { value: "shutdown", label: "关机" }])}</div>
-    <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置", d.notifyEnabled, "toggle-qm-flag")}</div>
+    <div>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置", d.notifyEnabled, "toggle-qm-flag")}</div>
     <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><strong>定时 ${index + 1}</strong><span class="muted">${esc(timeSet.time || "未设置时间")} · ${timeSet.days.length ? `${timeSet.days.length} 天` : "未选周期"}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, "执行时间")}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? "已启用" : "已停用"}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">删除定时</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
     <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>${selectControlMarkup(`qm-task-${index}`, task.scriptInstanceId, queueTaskOptions(scripts), `data-task-idx="${index}"`, `第 ${index + 1} 个任务：脚本实例`)}<button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
   showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body + pluginSlotMarkup("queues.editor.sections", "queues.editor.sections", "queue-editor-plugin-slot", { mode: d.id ? "edit" : "create", primaryId: d.id || "" }), '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-queue">保存</button>'), true, true);

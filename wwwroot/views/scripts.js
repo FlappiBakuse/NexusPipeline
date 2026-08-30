@@ -4,7 +4,7 @@ import { esc, pluginDisplayName, scriptFallbackIcon, scriptPluginStatus, scriptP
 import { scrollField, selectField, switchControl, valueField, pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
-import { isCurrent, notifyAvailable, state } from "../core/state.js";
+import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
@@ -54,7 +54,7 @@ export function changeGameMode() {
   if (args) args.placeholder = isEmu ? "am start 参数，如 -n 包名/.MainActivity" : "";
 }
 
-function scriptCardMarkup(script, notifyOn) {
+function scriptCardMarkup(script) {
   const pluginStatus = scriptPluginStatus(script, state.plugins || []);
   const unavailable = pluginStatus.specialized && !pluginStatus.available;
   const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
@@ -71,7 +71,7 @@ function scriptCardMarkup(script, notifyOn) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
       <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
+    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
       <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
@@ -94,7 +94,6 @@ export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
   state.scripts = scripts;
   state.plugins = status.plugins || [];
-  const notifyOn = notifyAvailable();
   const atLimit = !!(state.limits && scripts.length >= state.limits.maxScripts);
   const action = `<button class="primary" type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(scripts.length / SCRIPT_PAGE_SIZE));
@@ -103,7 +102,7 @@ export async function pageScripts(token) {
   const content = scripts.length === 0
     ? '<div class="empty"><strong>暂无脚本实例</strong><span>创建一个脚本实例后，它会出现在这里并可加入调度队列。</span><a class="back-link" href="#/scripts" data-action="open-script-modal">新建脚本实例</a></div>'
     : `<section class="card list-surface"><div class="script-grid">
-      ${pageItems.map(script => scriptCardMarkup(script, notifyOn)).join("")}
+      ${pageItems.map(script => scriptCardMarkup(script)).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
   render(pageHeader("自动化管理", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
   await renderPluginSlots(document.querySelector("#view"));
@@ -219,7 +218,7 @@ export async function openScriptModal(id = "", plugin = "") {
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
+        <div>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
       </div>
       <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">
@@ -251,7 +250,7 @@ export async function openScriptModal(id = "", plugin = "") {
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
+        <div>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
       </div>
       <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
       <div id="sm-game-box" class="nested-panel">

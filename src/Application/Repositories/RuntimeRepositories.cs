@@ -57,14 +57,15 @@ internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvi
     public ExecutionQueueSnapshot? SnapshotQueue(string queueId) => _snapshotQueue(queueId);
 }
 
+/// <summary>
+/// 用户读取仓储：以全局用户快照为唯一数据源（启动时的 UserModelMigration 保证脚本不再携带嵌套用户）。
+/// </summary>
 internal sealed class RuntimeUserRepository : IUserRepository
 {
-    private readonly Action<Action> _withDataLock;
     private readonly Func<List<NexusUser>> _snapshotUsers;
 
-    public RuntimeUserRepository(Action<Action> withDataLock, Func<List<NexusUser>> snapshotUsers)
+    public RuntimeUserRepository(Func<List<NexusUser>> snapshotUsers)
     {
-        _withDataLock = withDataLock;
         _snapshotUsers = snapshotUsers;
     }
 
@@ -75,27 +76,16 @@ internal sealed class RuntimeUserRepository : IUserRepository
 
     public IReadOnlyList<string> EnabledNames(ScriptInstance script)
     {
-        List<NexusUser> source = _snapshotUsers();
-        List<string> result = source
+        return _snapshotUsers()
             .OrderBy(user => user.Index)
             .Select(user => new
             {
                 user.Name,
-                Binding = user.Bindings
-                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
-                    .FirstOrDefault(item =>
-                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                Binding = ResolveParticipatingBinding(script, user),
             })
             .Where(item => item.Binding is not null)
             .Select(item => item.Name)
             .ToList();
-        if (result.Count > 0 || source.Count > 0 || script.Users.Count == 0)
-        {
-            return result;
-        }
-        List<string> legacy = new();
-        _withDataLock(() => legacy = script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList());
-        return legacy;
     }
 
     public ResolvedScriptUser? ResolveEnabledBinding(
@@ -107,88 +97,45 @@ internal sealed class RuntimeUserRepository : IUserRepository
         {
             return null;
         }
-        List<NexusUser> source = users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
-        foreach (NexusUser user in source.OrderBy(item => item.Index))
+        foreach (NexusUser user in Source(users).OrderBy(item => item.Index))
         {
             if (!string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            UserScriptBinding? binding = user.Bindings
-                .Select(item => UserBindingOverrideResolver.Resolve(user, item))
-                .FirstOrDefault(item =>
-                    item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
-            if (binding is not null)
-            {
-                return new ResolvedScriptUser(user.Id, user.Name, binding);
-            }
-            return null;
+            UserScriptBinding? binding = ResolveParticipatingBinding(script, user);
+            return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding);
         }
-        // 仅用于旧 fixture/尚未迁移的内存脚本；生产启动会先完成 迁移。
-        ScriptUser? legacy = null;
-        _withDataLock(() =>
-        {
-            legacy = script.Users.FirstOrDefault(item => item.Enabled
-                && string.Equals(item.Name, userName, StringComparison.OrdinalIgnoreCase));
-        });
-        return legacy is null
-            ? null
-            : new ResolvedScriptUser(
-                "",
-                legacy.Name,
-                new UserScriptBinding
-                {
-                    ScriptInstanceId = script.Id,
-                    Enabled = legacy.Enabled,
-                    PreRunScript = legacy.PreRunScript,
-                    PreRunOnceOnly = legacy.PreRunOnceOnly,
-                    PostRunScript = legacy.PostRunScript,
-                    PostRunOnFinalOnly = legacy.PostRunOnFinalOnly,
-                });
+        return null;
     }
 
     public IReadOnlyList<ResolvedScriptUser> ResolveEnabledBindings(
         ScriptInstance script,
         IReadOnlyList<NexusUser>? users = null)
     {
-        List<NexusUser> source = users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
-        List<ResolvedScriptUser> result = source
+        return Source(users)
             .OrderBy(user => user.Index)
             .Select(user => new
             {
                 User = user,
-                Binding = user.Bindings
-                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
-                    .FirstOrDefault(item =>
-                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
+                Binding = ResolveParticipatingBinding(script, user),
             })
             .Where(item => item.Binding is not null)
             .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!))
             .ToList();
-        if (result.Count > 0 || source.Count > 0 || script.Users.Count == 0)
-        {
-            return result;
-        }
-        List<ResolvedScriptUser> legacy = new();
-        _withDataLock(() =>
-        {
-            legacy = script.Users
-                .Where(user => user.Enabled)
-                .Select(user => new ResolvedScriptUser(
-                    "",
-                    user.Name,
-                    new UserScriptBinding
-                    {
-                        ScriptInstanceId = script.Id,
-                        Enabled = user.Enabled,
-                        PreRunScript = user.PreRunScript,
-                        PreRunOnceOnly = user.PreRunOnceOnly,
-                        PostRunScript = user.PostRunScript,
-                        PostRunOnFinalOnly = user.PostRunOnFinalOnly,
-                    }))
-                .ToList();
-        });
-        return legacy;
+    }
+
+    private List<NexusUser> Source(IReadOnlyList<NexusUser>? users)
+    {
+        return users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
+    }
+
+    private static UserScriptBinding? ResolveParticipatingBinding(ScriptInstance script, NexusUser user)
+    {
+        return user.Bindings
+            .Select(item => UserBindingOverrideResolver.Resolve(user, item))
+            .FirstOrDefault(item =>
+                item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
     }
 }
 
@@ -204,30 +151,11 @@ internal sealed class RuntimeSettingsProvider : ISettingsProvider
     public AppSettings Current => _current();
 }
 
-/// <summary>配置交换恢复专用只读数据源适配器：脚本查找与用户快照由组合根装配注入。</summary>
-internal sealed class RuntimeConfigRecoveryDataSource : IConfigRecoveryDataSource
-{
-    private readonly Func<string, ScriptInstance?> _findScript;
-    private readonly Func<List<NexusUser>> _snapshotUsers;
-
-    public RuntimeConfigRecoveryDataSource(
-        Func<string, ScriptInstance?> findScript,
-        Func<List<NexusUser>> snapshotUsers)
-    {
-        _findScript = findScript;
-        _snapshotUsers = snapshotUsers;
-    }
-
-    public ScriptInstance? FindScript(string scriptId) => _findScript(scriptId);
-
-    public IReadOnlyList<NexusUser> SnapshotUsers() => _snapshotUsers();
-}
-
 /// <summary>
 /// 运行天数写入器：调度器每日首次 tick 时把 RunDays &gt; 0 的绑定减 1，
 /// 减至 0 的绑定不再参与运行（Participates = false）。写入在数据锁与持久化路径内完成。
 /// </summary>
-internal sealed class RuntimeUserRunDaysWriter : IUserRunDaysWriter
+internal sealed class RuntimeUserRunDaysWriter
 {
     private readonly Action<Action> _withDataLock;
     private readonly Func<List<NexusUser>> _snapshotUsers;

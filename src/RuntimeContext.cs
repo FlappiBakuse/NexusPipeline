@@ -28,14 +28,8 @@ internal class RuntimeContext
         collection.AddSingleton<IExecutionSnapshotProvider>(_ => new RuntimeExecutionSnapshotProvider(
             SnapshotScriptForExecution,
             SnapshotQueueForExecution));
-        collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(action =>
-        {
-            lock (DataLock)
-            {
-                action();
-            }
-        }, SnapshotUsers));
-        collection.AddSingleton<IUserRunDaysWriter>(_ => new RuntimeUserRunDaysWriter(
+        collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(SnapshotUsers));
+        collection.AddSingleton<Func<bool>>(new RuntimeUserRunDaysWriter(
             action =>
             {
                 lock (DataLock)
@@ -44,7 +38,7 @@ internal class RuntimeContext
                 }
             },
             () => Users,
-            users => DataStore.SaveUsers(users)));
+            users => DataStore.SaveUsers(users)).DecrementDaily);
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(() => Settings));
         collection.AddSingleton<AppearanceService>(provider => new AppearanceService(

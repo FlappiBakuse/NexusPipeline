@@ -12,10 +12,10 @@ namespace NexusPipeline.Tests;
 public sealed class McpProtocolTests
 {
     [Fact]
-    public async Task EmbeddedHttpHost_discovers_readonly_tools_and_returns_structured_result()
+    public async Task EmbeddedHttpHost_discovers_core_tools_and_returns_structured_result()
     {
         int port = GetFreePort();
-        using var host = new McpHost(RuntimeContext.Instance, allowDestructiveTools: false, requestRestart: null);
+        using var host = new McpHost(RuntimeContext.Instance, requestRestart: null);
         Assert.True(host.TryStart(port));
         try
         {
@@ -51,14 +51,11 @@ public sealed class McpProtocolTests
             IList<McpClientTool> tools = await client.ListToolsAsync();
             Assert.Contains(tools, tool => tool.Name == "get_status");
             Assert.Contains(tools, tool => tool.Name == "get_settings");
-            Assert.Contains(tools, tool => tool.Name == "list_plugin_store");
-            Assert.Contains(tools, tool => tool.Name == "refresh_plugin_store");
-            Assert.Contains(tools, tool => tool.Name == "get_user_global_settings");
-            Assert.Contains(tools, tool => tool.Name == "list_plugin_user_settings");
-            Assert.Contains(tools, tool => tool.Name == "get_plugin_user_settings");
+            Assert.Contains(tools, tool => tool.Name == "list_scripts");
+            Assert.Contains(tools, tool => tool.Name == "run_script");
             Assert.DoesNotContain(tools, tool => tool.Name == "delete_script");
             Assert.DoesNotContain(tools, tool => tool.Name == "set_secret");
-            Assert.DoesNotContain(tools, tool => tool.Name == "install_plugin");
+            Assert.DoesNotContain(tools, tool => tool.Name == "list_plugin_store");
 
             CallToolResult result = await client.CallToolAsync("get_settings");
             Assert.False(result.IsError);
@@ -100,57 +97,12 @@ public sealed class McpProtocolTests
     }
 
     [Fact]
-    public async Task EmbeddedHttpHost_registers_destructive_tools_only_when_enabled()
-    {
-        int port = GetFreePort();
-        using var host = new McpHost(RuntimeContext.Instance, allowDestructiveTools: true, requestRestart: null);
-        Assert.True(host.TryStart(port));
-        try
-        {
-            using var http = new HttpClient(new HttpClientHandler { UseProxy = false });
-            var transport = new HttpClientTransport(
-                new HttpClientTransportOptions
-                {
-                    Endpoint = new Uri(host.Endpoint),
-                    TransportMode = HttpTransportMode.StreamableHttp,
-                    EnableStandaloneGetStream = false,
-                },
-                http,
-                NullLoggerFactory.Instance,
-                ownsHttpClient: false);
-            await using McpClient client = await McpClient.CreateAsync(
-                transport,
-                new McpClientOptions
-                {
-                    ProtocolVersion = "2025-11-25",
-                    ClientInfo = new Implementation { Name = "NexusPipeline.Tests", Version = "1.0" },
-                },
-                NullLoggerFactory.Instance);
-
-            IList<McpClientTool> tools = await client.ListToolsAsync();
-            Assert.Contains(tools, tool => tool.Name == "delete_script");
-            Assert.Contains(tools, tool => tool.Name == "set_secret");
-            Assert.Contains(tools, tool => tool.Name == "enable_plugin");
-            Assert.Contains(tools, tool => tool.Name == "disable_plugin");
-            Assert.Contains(tools, tool => tool.Name == "install_plugin");
-            Assert.Contains(tools, tool => tool.Name == "update_plugin");
-            Assert.Contains(tools, tool => tool.Name == "uninstall_plugin");
-            Assert.DoesNotContain(tools, tool => tool.Name == "trust_plugin_frontend");
-            Assert.DoesNotContain(tools, tool => tool.Name == "revoke_plugin_frontend");
-        }
-        finally
-        {
-            host.Stop();
-        }
-    }
-
-    [Fact]
     public void EmbeddedHttpHost_does_not_drift_when_port_is_occupied()
     {
         int port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        using var host = new McpHost(RuntimeContext.Instance, allowDestructiveTools: false, requestRestart: null);
+        using var host = new McpHost(RuntimeContext.Instance, requestRestart: null);
 
         Assert.False(host.TryStart(port));
         Assert.False(host.IsRunning);

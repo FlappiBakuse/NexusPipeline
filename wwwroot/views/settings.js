@@ -92,7 +92,6 @@ function remoteMcpSettingsMarkup(settings, lanList) {
     <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true')}</div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div><p class="muted helper-copy lan-helper"${settings.allowRemoteAccess ? "" : " hidden"}>其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p><p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>
     <section class="settings-subsection mcp-settings"><div class="settings-list">
     ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
-    ${switchControl("st-mcp-destructive", "允许破坏性工具", "开放删除、密钥、插件开关、重启和更新等高风险操作", settings.mcpAllowDestructiveTools, "toggle-st-flag", 'data-flag="st-mcp-destructive" data-restart-required="true"')}
   </div><div class="form-grid settings-single-field">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>
   </div>`;
 }
@@ -201,39 +200,30 @@ async function saveUpdateSettings() {
   await loadUpdateStatus();
 }
 
-let notifySaveChain = Promise.resolve();
-let updateSaveChain = Promise.resolve();
-let networkSaveChain = Promise.resolve();
-
-function queueNotifySave() {
-  const save = notifySaveChain.then(() => saveNotifySettings());
-  notifySaveChain = save.catch(error => toast(error.message, "error"));
-  return save;
+/** 分组串行化保存：同一组设置字段的连续修改按顺序落盘，失败只弹一次错误。 */
+function createSaveQueue(save) {
+  let chain = Promise.resolve();
+  return {
+    queue() {
+      const pending = chain.then(save);
+      chain = pending.catch(error => toast(error.message, "error"));
+      return pending;
+    },
+    settled() {
+      return chain;
+    },
+  };
 }
 
-function queueUpdateSave() {
-  const save = updateSaveChain.then(() => saveUpdateSettings());
-  updateSaveChain = save.catch(error => toast(error.message, "error"));
-  return save;
-}
-
-function queueNetworkSave() {
-  const save = networkSaveChain.then(() => saveNetworkSettings());
-  networkSaveChain = save.catch(error => toast(error.message, "error"));
-  return save;
-}
-
-function awaitNotifySaveSettled() {
-  return notifySaveChain;
-}
-
-function awaitUpdateSaveSettled() {
-  return updateSaveChain;
-}
-
-function awaitNetworkSaveSettled() {
-  return networkSaveChain;
-}
+const notifySaveQueue = createSaveQueue(saveNotifySettings);
+const updateSaveQueue = createSaveQueue(saveUpdateSettings);
+const networkSaveQueue = createSaveQueue(saveNetworkSettings);
+const queueNotifySave = () => notifySaveQueue.queue();
+const queueUpdateSave = () => updateSaveQueue.queue();
+const queueNetworkSave = () => networkSaveQueue.queue();
+const awaitNotifySaveSettled = () => notifySaveQueue.settled();
+const awaitUpdateSaveSettled = () => updateSaveQueue.settled();
+const awaitNetworkSaveSettled = () => networkSaveQueue.settled();
 
 async function checkUpdate() {
   try {
@@ -450,7 +440,6 @@ async function doSave() {
     webPort: +($("#st-port")?.value || 58731),
     mcpEnabled: $("#st-mcp-enabled")?.getAttribute("aria-pressed") === "true",
     mcpPort: +($("#st-mcp-port")?.value || 58732),
-    mcpAllowDestructiveTools: $("#st-mcp-destructive")?.getAttribute("aria-pressed") === "true",
     logLevel: $("#st-loglevel")?.value || "info",
     allowRemoteAccess: $("#st-remote")?.getAttribute("aria-pressed") === "true",
   };
@@ -575,7 +564,7 @@ export const actions = {
     const btn = $("#" + target.dataset.flag);
     if (!btn) return;
     btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
-    if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled", "st-mcp-destructive"].includes(target.dataset.flag)) markRestartRequired();
+    if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },
   "toggle-token-visibility": target => {

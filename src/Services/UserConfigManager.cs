@@ -470,38 +470,7 @@ internal static class UserConfigManager
         return error;
     }
 
-    /* ---------------- 配置替换 / 恢复（转发 ConfigSwapSession） ---------------- */
-
-    /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 swap-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
-    public static string? ApplyConfigReplacements(string scriptId, string? userName, string configPath, List<string> replacements)
-    {
-        return ConfigSwapSession.ApplyConfigReplacements(scriptId, userName, configPath, replacements);
-    }
-
-    /// <summary>还原配置替换：从 swap-backup 恢复全部被替换文件（按 .meta 记录的 configPath），删除替换期间新增的文件，随后清理备份目录。</summary>
-    public static bool RestoreConfigReplacements(string scriptId, string? userName)
-    {
-        return ConfigSwapSession.RestoreConfigReplacements(scriptId, userName);
-    }
-
-    /// <summary>自动更新配置同步：把运行生效的 config 当前内容全量镜像到用户快照 store。
-    /// 插队文件按还原描述还原启停后写入；失败仅告警不阻断运行收尾。</summary>
-    public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
-    {
-        ConfigSwapSession.SyncConfigToStore(scriptId, userName, configPath, firstCheck);
-    }
-
-    /// <summary>失败重试前重新交换配置：当前尝试配置保存到 retry-store，真实现场先恢复再重新加载下一轮配置。</summary>
-    public static string? PrepareForRetry(string scriptId, string userName, string configPath)
-    {
-        return ConfigSwapSession.PrepareForRetry(scriptId, userName, configPath);
-    }
-
-    /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
-    public static void RecoverIfNeeded(string scriptId, string userName, string configPath)
-    {
-        ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
-    }
+    /* ---------------- 恢复（转发 ConfigSwapSession；运行期替换/同步/重试由 ConfigRunSession 直达 ConfigSwapSession） ---------------- */
 
     /// <summary>启动恢复：按当前全局用户绑定的 UserId 白名单处理会话标记与配置替换，并保留脚本级现场。</summary>
     public static void RecoverInterrupted(IReadOnlyList<NexusUser>? users = null)

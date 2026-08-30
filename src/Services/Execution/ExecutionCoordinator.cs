@@ -107,7 +107,6 @@ internal sealed class ExecutionCoordinator : RunSession
             _configRun = new ConfigRunSession(
                 _script.Id,
                 resolvedUser?.UserKey ?? user?.Name,
-                resolvedUser?.UserName ?? user?.Name,
                 _script.ConfigPath,
                 _script.HasJudgeScript());
             _configRun.PrepareScriptArea();

@@ -42,7 +42,7 @@ internal sealed class Scheduler : IDisposable
 
     private readonly ISchedulerStateStore _stateStore;
 
-    private readonly IUserRunDaysWriter? _runDaysWriter;
+    private readonly Func<bool>? _decrementRunDays;
 
     /// <summary>上次执行运行天数递减的本地日期（字符串比较，避免同一天重复递减）。</summary>
     private string? _lastRunDaysDecayDate;
@@ -55,7 +55,7 @@ internal sealed class Scheduler : IDisposable
         ExecutionValidator validator,
         ExecutionPlanBuilder? plans = null,
         ISchedulerStateStore? stateStore = null,
-        IUserRunDaysWriter? runDaysWriter = null)
+        Func<bool>? decrementRunDays = null)
     {
         _queues = queues;
         _history = history;
@@ -64,7 +64,7 @@ internal sealed class Scheduler : IDisposable
         _validator = validator;
         _plans = plans;
         _stateStore = stateStore ?? new MemorySchedulerStateStore();
-        _runDaysWriter = runDaysWriter;
+        _decrementRunDays = decrementRunDays;
         // 启动当天不立即递减（避免每次重启就少一天）；只有运行期间跨天、或首次 tick 在启动后的次日触发才递减。
         _lastRunDaysDecayDate = DateTime.Now.ToString("yyyy-MM-dd");
         RestorePersistedState();
@@ -350,14 +350,14 @@ internal sealed class Scheduler : IDisposable
     /// <summary>每日首次 tick：运行天数 &gt; 0 的绑定递减 1（同日重复跳过一次）。</summary>
     private void DecayRunDays(string today)
     {
-        if (_runDaysWriter is null || string.Equals(_lastRunDaysDecayDate, today, StringComparison.Ordinal))
+        if (_decrementRunDays is null || string.Equals(_lastRunDaysDecayDate, today, StringComparison.Ordinal))
         {
             return;
         }
         _lastRunDaysDecayDate = today;
         try
         {
-            if (_runDaysWriter.DecrementDaily())
+            if (_decrementRunDays())
             {
                 Audit.Log(Audit.Scheduler, "运行天数每日递减", "绑定运行天数已递减 1");
                 RevalidatePendingPlans();

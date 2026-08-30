@@ -104,7 +104,7 @@ MCP 端口只绑定本机 loopback，与「远程访问」设置相互独立；�
 
 默认工具包含状态、脚本、用户、用户全局设置、绑定、队列、运行、历史、插件、插件商店和插件用户设置的脱敏查询，以及运行/取消、资源 CRUD 和安全设置更新。删除资源、密钥写入、插件启停、插件安装/更新/卸载、服务重启、应用更新和遗留数据清理等高风险工具只有在本机显式开启「允许破坏性工具」并重启后才会出现在工具列表中；密钥写入使用本地 DPAPI 加密，工具响应与审计日志均不回显明文。
 
-MCP 不承担 Web 页面、图标/头像上传、第三方 GUI 配置编辑、任意文件读写或 shell 执行。完整的工具边界、生命周期和安全模型见 [docs/DESIGN.md](docs/DESIGN.md) 与 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+MCP 不承担 Web 页面、图标/头像上传、第三方 GUI 配置编辑、任意文件读写或 shell 执行。完整的工具边界、生命周期和安全模型见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 常见问题
 
@@ -133,14 +133,12 @@ MCP 不承担 Web 页面、图标/头像上传、第三方 GUI 配置编辑、�
 
 | 文档 | 读者 | 内容 |
 |---|---|---|
-| [docs/DESIGN.md](docs/DESIGN.md) | 开发者 | 核心设计理念与运行流程（判定/配置交换/日志监控等机制详解） |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 开发者 | 模块边界、目录结构、依赖方向、扩展落点 |
-| [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) | 开发者 | Web、CLI、MCP 能力矩阵与风险分类 |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 开发者 | 开发环境搭建、编译、运行与调试 |
-| [docs/RELEASING.md](docs/RELEASING.md) | 维护者 | 版本发布流程（tag / release / 资产） |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | 开发者 | 版本路线与后续开发清单 |
-| [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md) | 开发者 | 当前未解决问题与技术风险 |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献者 | 协作规范（Issue / PR / 提交信息 / 测试流程） |
+| [docs/DESIGN.md](docs/DESIGN.md) | 开发者 | 核心设计理念、运行流程与模块边界（第 10 节为开发者导航） |
+| [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) | 开发者 | Web、CLI、MCP 控制面能力现状 |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 开发者 | 开发环境、调试、协作规范与发布流程 |
+| [docs/TESTING.md](docs/TESTING.md) | 开发者 | 测试层级与质量门禁 |
+| [docs/STATUS.md](docs/STATUS.md) | 开发者 | 后续开发计划与已知问题台账 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献者 | 贡献要点速览 |
 | [SECURITY.md](SECURITY.md) | 所有人 | 安全漏洞报告与敏感信息处理 |
 | [CHANGELOG.md](CHANGELOG.md) | 所有人 | 版本历史（升级前必看） |
 | [docs/PLUGIN_API.md](docs/PLUGIN_API.md) | 高级用户 | 专项插件数据化形态与自定义插件指南 |

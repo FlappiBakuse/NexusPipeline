@@ -65,7 +65,7 @@ public sealed class UserBindingOverrideTests
                 new UserScriptBinding { ScriptInstanceId = script.Id, Enabled = false, RunDays = 5 },
             },
         };
-        var repository = new RuntimeUserRepository(action => action(), () => new List<NexusUser> { user });
+        var repository = new RuntimeUserRepository(() => new List<NexusUser> { user });
 
         ResolvedScriptUser? resolved = repository.ResolveEnabledBinding(script, user.Name);
 

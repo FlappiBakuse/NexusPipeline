@@ -118,7 +118,6 @@ internal static class Bootstrap
         }
         var mcp = new McpHost(
             ctx,
-            ctx.Settings.McpAllowDestructiveTools,
             () => TryRequestRestart(Audit.Mcp));
         return mcp.TryStart(ctx.Settings.McpPort) ? mcp : null;
     }

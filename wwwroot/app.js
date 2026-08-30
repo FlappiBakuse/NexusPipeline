@@ -6,7 +6,7 @@ import { loadLimits, showWarning, dismissWarningOnce, dismissWarningForever } fr
 import { pagerNavigate } from "./core/pager.js";
 import { pageDashboard } from "./views/dashboard.js";
 import { actions as scriptsActions, pageScripts, syncScriptGhostState } from "./views/scripts.js";
-import { actions as usersActions, pageUsers } from "./views/users.js";
+import { actions as usersActions, pageUsers } from "./views/users/index.js";
 import { actions as queuesActions, pageQueues } from "./views/queues.js";
 import { actions as dispatchActions, pageDispatch } from "./views/dispatch.js";
 import { actions as historyActions, pageHistory } from "./views/history.js";

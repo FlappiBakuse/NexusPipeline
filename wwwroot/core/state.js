@@ -43,11 +43,6 @@ export function releaseController(controller) {
   state.controllers.delete(controller);
 }
 
-export function notifyAvailable() {
-  // 通知是宿主内置能力，插件状态不再参与通知控件显示。
-  return true;
-}
-
 export function disposePage() {
   state.timers.forEach(timer => {
     clearTimeout(timer);

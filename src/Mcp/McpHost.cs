@@ -21,16 +21,14 @@ internal sealed class McpHost : IDisposable
 {
     private readonly RuntimeContext _runtime;
 
-    private readonly bool _allowDestructiveTools;
 
     private readonly Func<bool>? _requestRestart;
 
     private WebApplication? _app;
 
-    public McpHost(RuntimeContext runtime, bool allowDestructiveTools, Func<bool>? requestRestart)
+    public McpHost(RuntimeContext runtime, Func<bool>? requestRestart)
     {
         _runtime = runtime;
-        _allowDestructiveTools = allowDestructiveTools;
         _requestRestart = requestRestart;
     }
 
@@ -57,7 +55,7 @@ internal sealed class McpHost : IDisposable
             _app.StartAsync().GetAwaiter().GetResult();
             IsRunning = true;
             Current = this;
-            Logger.Info($"MCP 服务已启动：{Endpoint}（破坏性工具：{(_allowDestructiveTools ? "开" : "关")}）");
+            Logger.Info($"MCP 服务已启动：{Endpoint}");
             return true;
         }
         catch (Exception ex)
@@ -116,7 +114,7 @@ internal sealed class McpHost : IDisposable
         // Kestrel 的 HostFiltering 允许列表作为第一层配置；请求中间件再做端口与 Origin 精确校验。
         builder.WebHost.UseSetting("allowedHosts", "127.0.0.1;localhost;[::1]");
         builder.Logging.ClearProviders();
-        builder.Services.AddSingleton(new McpToolContext(_runtime, _allowDestructiveTools, _requestRestart));
+        builder.Services.AddSingleton(new McpToolContext(_runtime, _requestRestart));
 
         IMcpServerBuilder mcp = builder.Services.AddMcpServer(options =>
         {
@@ -125,15 +123,11 @@ internal sealed class McpHost : IDisposable
                 Name = "NexusPipeline",
                 Version = typeof(McpHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
             };
-            options.ServerInstructions = "NexusPipeline 本地自动化控制面。长时间运行操作会立即返回 runId，请使用 get_run 轮询；破坏性工具默认关闭。";
+            options.ServerInstructions = "NexusPipeline 本地自动化控制面。长时间运行操作会立即返回 runId，请使用 get_run 轮询；破坏性操作请通过本地 CLI 执行。";
         });
         mcp.WithHttpTransport(options => options.Stateless = true);
         mcp.WithTools<McpReadOnlyTools>();
         mcp.WithTools<McpMutationTools>();
-        if (_allowDestructiveTools)
-        {
-            mcp.WithTools<McpDestructiveTools>();
-        }
 
         WebApplication app = builder.Build();
         app.Use(async (context, next) =>

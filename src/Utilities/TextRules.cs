@@ -6,15 +6,6 @@ internal static class TextRules
 {
     public static readonly string[] ExecutableExtensions = { ".exe", ".bat", ".cmd", ".com", ".ps1" };
 
-    public static bool Contains(string text, string needle)
-    {
-        if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(needle))
-        {
-            return false;
-        }
-        return text.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
-    }
-
     public static bool IsExecutable(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
@@ -37,24 +28,6 @@ internal static class TextRules
             result.Add(match.Value.Trim('"'));
         }
         return result;
-    }
-
-    public static List<string> GetErrorLines(string logText)
-    {
-        if (string.IsNullOrWhiteSpace(logText))
-        {
-            return new List<string>();
-        }
-        List<string> lines = logText.Split('\n').Select(line => line.TrimEnd('\r')).ToList();
-        List<string> withTime = lines
-            .Where(line => Regex.IsMatch(line, @"(\d{2}:\d{2}:\d{2}|\[\d{4}-\d{2}-\d{2})"))
-            .Where(line => Regex.IsMatch(line, "ERROR|错误|异常|失败|Error|Exception"))
-            .ToList();
-        if (withTime.Count == 0)
-        {
-            withTime = lines.Where(line => Regex.IsMatch(line, "ERROR|错误|异常|失败|Error|Exception")).ToList();
-        }
-        return withTime.Where(line => !string.IsNullOrWhiteSpace(line)).Take(12).ToList();
     }
 
     public static string TakeTail(string text, int maxLines)

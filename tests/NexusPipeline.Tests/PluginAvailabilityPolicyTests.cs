@@ -305,11 +305,11 @@ public sealed class PluginAvailabilityPolicyTests
         public IReadOnlyList<DispatchQueue> Snapshot() => Array.Empty<DispatchQueue>();
     }
 
-    private sealed class EmptyUserRepository : NexusPipeline.App.Abstractions.IUserRepository
+    private sealed class EmptyUserRepository : LegacyModelUserRepository
     {
-        public ScriptUser? FindEnabled(ScriptInstance script, string? userName) => null;
+        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName) => null;
 
-        public IReadOnlyList<string> EnabledNames(ScriptInstance script) => Array.Empty<string>();
+        public override IReadOnlyList<string> EnabledNames(ScriptInstance script) => Array.Empty<string>();
     }
 
     private static ExecutionRunner CreateRunner(

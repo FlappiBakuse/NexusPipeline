@@ -21,6 +21,7 @@ scheduler-state.json
 .nxp-version
 .nxp-update-worker-*.exe
 tests/e2e/node_modules/
+tests/.artifacts/
 tests/e2e/runtime/
 tests/system/runtime/
 tests/system/runtime-*/

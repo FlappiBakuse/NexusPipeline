@@ -13,17 +13,14 @@ internal sealed class McpToolContext
 {
     public McpToolContext(
         RuntimeContext runtime,
-        bool allowDestructiveTools,
         Func<bool>? requestRestart)
     {
         Runtime = runtime;
-        AllowDestructiveTools = allowDestructiveTools;
         RequestRestart = requestRestart;
     }
 
     public RuntimeContext Runtime { get; }
 
-    public bool AllowDestructiveTools { get; }
 
     public Func<bool>? RequestRestart { get; }
 
@@ -76,7 +73,6 @@ internal sealed class McpToolContext
             webPort = settings.WebPort,
             mcpEnabled = settings.McpEnabled,
             mcpPort = settings.McpPort,
-            mcpAllowDestructiveTools = AllowDestructiveTools,
             mcpEndpoint = IsRunningEndpoint(settings.McpPort),
             scriptCount = scripts.Count,
             queueCount = queues.Count,

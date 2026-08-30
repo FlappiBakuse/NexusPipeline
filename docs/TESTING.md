@@ -14,7 +14,7 @@
 
 `tests/stress/` 与 `tests/legacy/` 属于按需运行的诊断、压力和历史考据资产，不参与默认 CI，也不作为每个版本的固定发布门禁。
 
-文档一致性检查是独立的工程治理检查，不归入 L1–L5 或 Web Logic：`tests/documentation/documentation-consistency.mjs`。其中包含 [CONTROL_PLANE.md](CONTROL_PLANE.md) 的矩阵完整性与风险分类检查。
+文档一致性检查是独立的工程治理检查，不归入 L1–L5 或 Web Logic：`tests/documentation/documentation-consistency.mjs`，覆盖 Markdown 本地链接、CHANGELOG 标题唯一性、README 导航存在性与双模式行为防线。
 
 ## 控制面覆盖规则
 
@@ -22,7 +22,7 @@
 
 `Domain capability → Application command/service → HTTP/Web → CLI → MCP → docs/tests`
 
-稳定 capability ID 与三端状态维护在 [CONTROL_PLANE.md](CONTROL_PLANE.md)；新能力完成前必须补齐该表并通过治理测试。
+三端能力入口现状维护在 [CONTROL_PLANE.md](CONTROL_PLANE.md)；新能力落地后同步更新该表。
 
 每项能力都必须记录一种明确状态：`supported`、`intentionally-ui-only`、`security-restricted` 或 `not-applicable`。纯视觉表现、布局、壁纸展示和前端路由可以保持 `intentionally-ui-only`；插件安装、更新、卸载、用户全局设置、插件用户设置和运行控制属于控制面能力，需具备正式 API、CLI/MCP 暴露或明确的 `security-restricted` 策略。CLI 通过 Control API 调用宿主服务，MCP 通过应用服务和同一套投影读取状态，适配器不得各自拼出独立领域规则。
 
@@ -39,7 +39,7 @@
 - 插件管理控制面投影、插件商店安装/更新/卸载事务、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。
-- MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、破坏性工具条件注册、队列执行完成操作策略和重启维护租约。
+- MCP 工具 DTO、`OperationResult` 映射、脱敏设置、目标解析、队列执行完成操作策略和重启维护租约。
 - Control API 身份握手、CLI 分层 HTTP 超时、通知测试失败错误码和维护期间宿主配置写入。
 
 以下行为进入 UI Smoke：

@@ -48,7 +48,7 @@ after(async () => {
   if (enabled) await stopRuntime();
 });
 
-function writeSettings({ mcpEnabled, mcpAllowDestructiveTools = false, lightweightMode = false }) {
+function writeSettings({ mcpEnabled, lightweightMode = false }) {
   const configDir = path.join(runtimeDir, "config");
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(
@@ -57,7 +57,6 @@ function writeSettings({ mcpEnabled, mcpAllowDestructiveTools = false, lightweig
       WebPort: 58731,
       McpEnabled: mcpEnabled,
       McpPort: mcpPort,
-      McpAllowDestructiveTools: mcpAllowDestructiveTools,
       LightweightMode: lightweightMode,
       AutoOpenBrowser: false,
       UpdateCheckEnabled: false,
@@ -246,7 +245,6 @@ test("启用 MCP 后可完成握手、工具发现、状态读取与 loopback �
 
   const settings = await mcpTool("get_settings");
   assert.equal(settings.data.mcpEnabled, true);
-  assert.equal(settings.data.mcpAllowDestructiveTools, false);
   assert.equal(settings.data.accessToken, "");
 
   const wrongOrigin = await rawMcpPost({

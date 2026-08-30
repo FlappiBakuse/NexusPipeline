@@ -6,30 +6,32 @@ import {
   isProcessAlive,
   killProcessTree,
   readPidFile,
-  waitForExit,
 } from "../../support/windows-process.mjs";
+import {
+  copyReleaseArtifacts,
+  installEmulatorStubs,
+  requireExecutionMode,
+  resolveTestHostDir,
+  resolveTestHostExitFile,
+  sleep,
+  stopSpawnedService,
+} from "../../support/test-runtime.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(__dirname, "..", "..", "..");
 const productionReleaseDir = path.join(projectRoot, "release");
-const testMode = process.env.NEXUS_TEST_MODE?.trim().toLowerCase();
-if (testMode !== "codex" && testMode !== "admin") {
-  throw new Error("E2E 必须通过 tests\\run.mjs 显式选择模式：codex 或 admin。");
-}
+const testMode = requireExecutionMode("E2E");
 export const executionMode = testMode;
 export const isCodexMode = testMode === "codex";
 export const isAdminMode = testMode === "admin";
-const configuredTestHostDir = process.env.NEXUS_TEST_HOST_DIR?.trim();
-export const testHostDir = configuredTestHostDir
-  ? (path.isAbsolute(configuredTestHostDir) ? configuredTestHostDir : path.resolve(projectRoot, configuredTestHostDir))
-  : path.join(projectRoot, "tests", ".artifacts", "test-host");
+export const testHostDir = resolveTestHostDir(projectRoot);
 export const runtimeDir = path.join(__dirname, "..", "runtime");
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
-const configuredTestHostExitFile = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim();
-export const testHostExitFile = configuredTestHostExitFile
-  ? (path.isAbsolute(configuredTestHostExitFile) ? configuredTestHostExitFile : path.resolve(projectRoot, configuredTestHostExitFile))
-  : path.join(runtimeDir, ".nxp", "test-host.exit");
+export const testHostExitFile = resolveTestHostExitFile(
+  projectRoot,
+  path.join(runtimeDir, ".nxp", "test-host.exit"),
+);
 export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
 export const baseUrl = "http://127.0.0.1:58731/";
 export const JSON_HDR = { "Content-Type": "application/json" };
@@ -48,8 +50,6 @@ export function pluginRepositoryRoot() {
 
 let child = null;
 
-export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
 function ownedPids() {
   const pids = new Set();
   const marked = readPidFile(servicePidPath);
@@ -58,32 +58,17 @@ function ownedPids() {
   return [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
 }
 
-function stopOwnedProcessesSync() {
-  for (const pid of ownedPids()) killProcessTree(pid);
-}
-
 export function setupRuntime() {
-  stopOwnedProcessesSync();
+  for (const pid of ownedPids()) killProcessTree(pid);
   fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} ui`);
-  fs.copyFileSync(sourceExe, runtimeExe);
-  fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
-  const plugins = path.join(releaseDir, "plugins");
-  if (fs.existsSync(plugins)) fs.cpSync(plugins, path.join(runtimeDir, "plugins"), { recursive: true });
+  copyReleaseArtifacts(releaseDir, runtimeDir);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
   if (fs.existsSync(repositoryPlugins)) fs.cpSync(repositoryPlugins, path.join(runtimeDir, "plugins"), { recursive: true });
 
-  const fixtures = path.join(__dirname, "fixtures");
-  const adbDir = path.join(runtimeDir, "adb-stub");
-  fs.mkdirSync(adbDir, { recursive: true });
-  fs.copyFileSync(path.join(fixtures, "adb-stub.cmd"), path.join(adbDir, "adb-stub.cmd"));
-  fs.writeFileSync(path.join(adbDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
-  const mumuDir = path.join(runtimeDir, "mumu-stub");
-  fs.mkdirSync(mumuDir, { recursive: true });
-  fs.copyFileSync(path.join(fixtures, "mumu-manager-stub.cmd"), path.join(mumuDir, "mumu-manager-stub.cmd"));
-  fs.writeFileSync(path.join(mumuDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}", "utf8");
+  installEmulatorStubs(runtimeDir, path.join(__dirname, "fixtures"));
 }
 
 export function startService() {
@@ -125,21 +110,8 @@ export async function waitForService(timeoutMs = 30000) {
 }
 
 export async function stopService() {
-  if (isCodexMode) {
-    fs.mkdirSync(path.dirname(testHostExitFile), { recursive: true });
-    fs.writeFileSync(testHostExitFile, "stop\n", "utf8");
-  }
-  if (child?.stdin && !child.stdin.destroyed) {
-    try {
-      child.stdin.end();
-      await waitForExit(child.pid, 5000, 250);
-    } catch {
-      // 受控 stdin 退出失败时继续使用隔离 PID 清理。
-    }
-  }
-  const pids = ownedPids();
-  for (const pid of pids) killProcessTree(pid);
-  for (const pid of pids) await waitForExit(pid, 10000, 250);
+  const current = child;
+  await stopSpawnedService({ child: current, exitFile: testHostExitFile, pidFilePath: servicePidPath });
   child = null;
 }
 

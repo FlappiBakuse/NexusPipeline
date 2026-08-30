@@ -2,6 +2,44 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.12.2（Pre-release）
+
+稳定期架构减负：以「用户数据安全与程序稳定为底线、实现以最简可读为准」完成一轮全局简化。更新事务、配置交换磁盘协议、密钥存储、进程管理与迁移逻辑保持一行未动；对外行为变化仅 MCP 工具面收敛一项。
+
+### MCP 工具面收敛（行为收缩）
+
+- MCP 工具从 52 个收敛为 19 个核心子集：只读保留状态、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；变更保留运行/取消、取消系统操作、脚本与用户创建、绑定管理。删除、密钥、插件安装/开关、商店、服务重启、更新应用和遗留数据清理等高风险或低频运维操作改由本地 CLI 与管理页面承担。
+- 移除 `McpAllowDestructiveTools` 设置与条件注册的破坏性工具类；设置页删除对应开关，`McpPolicy` 仅保留队列完成操作复核。
+- 新增能力进入 MCP 工具面时保持核心子集克制，避免向全量 API 膨胀。
+
+### 后端简化
+
+- 删除 `ConfigurationTransaction` 转发层（内联进 `ConfigRunSession`，并移除被丢弃的 `userName` 死参数）与 `UserConfigManager` 中仅剩单一消费者的转发方法。
+- 用户绑定解析收口为 `RuntimeUserRepository` 单一实现；删除接口默认方法双份逻辑与迁移完成后不可达的三段 legacy 回退分支。
+- 删除 `IUserRunDaysWriter`、`IConfigRecoveryDataSource` 接口及 `RuntimeConfigRecoveryDataSource` 适配器，改为组合根直接注入委托；租约类转发方法收敛为带 `failureCode` 的单一重载。
+- `SingleFlightWorker` 删除两个纯转发壳类，`RuntimeWorkers` 直接持有泛型单飞实例；AttemptId/Generation 乱序丢弃语义保持不变。
+- 旧 `/api/scripts/{id}/users` 写入端点收敛为翻译层，复用统一的 `Create/Update/AddBinding/UpdateBinding/DeleteBinding/Reorder` 命令；读取兼容投影保持不变。
+- `StartupPipeline` 提取常驻模式共享的启动不变量（迁移 → 更新收尾 → PID）与关闭不变量（安全停机 → 停服务 → 清 PID）。
+- 删除零引用的 `TextRules.Contains`、`TextRules.GetErrorLines` 与 `ConfigRunSession.ProcessCleanupConfirmed` 死成员。
+
+### 前端与测试简化
+
+- `views/global-users.js`（1,180 行双界面单文件）拆分为 `views/users/` 四模块（index/shared/user-management/global-management）；新增 `core/prepost.js` 统一三处 `%FIRST%`/`%LAST%` 编解码，`core/duration.js` 统一三处 `HH:MM:SS` 格式化。
+- 删除零引用的 `core/plugin-sdk.js`、恒真的 `state.js:notifyAvailable` 及其 5 处调用分支；设置页保存队列六个同构函数参数化；溢出滚动三段重复逻辑合一。
+- 删除钉死源码字面量的文档治理断言与 CONTROL_PLANE 矩阵强制校验；治理测试保留链接检查、CHANGELOG 标题、README 导航与双模式行为防线。
+- 删除纯源码文本断言的 `tests/web/modal-focus.test.mjs`；e2e 更新 stub 从 189 行手写 ZIP 生成器砍至 55 行（更新事务验证由 System Smoke 承担）；插件页 smoke 移除像素级布局断言，保留功能断言。
+- 新增 `tests/support/test-runtime.mjs` 收敛 e2e 与 System Smoke 重复的模式解析、Test Host 路径、产物复制、stub 安装和受控停止逻辑。
+
+### 文档与流程治理
+
+- 文档从 14 份收敛为 9 份：ARCHITECTURE 并入 DESIGN（第 10 节开发者导航）、RELEASING 并入 DEVELOPMENT（CONTRIBUTING 保留薄壳）、ROADMAP 与 KNOWN_ISSUES 合并为 STATUS；删除 ROADMAP 中 headless control contribution 立项。
+- CONTROL_PLANE 改为信息性能力现状表，反映 MCP 收敛后的实态。
+- PLUGIN_API 将 artifactName/replaces/布局迁移声明为完成态「历史兼容」；插件仓库 README 结构图修正 `resolve.json`/`judge.js`/`config-template/` 的归属目录。
+
+### 验证
+
+- Codex 本地完整门禁通过：Unit/Component 406 项、Web Logic 16 项、文档一致性 5 项、UI Smoke 11 项；System Smoke 六个 suite（MCP/runtime/judge/execution-resilience/emulator/update）全部通过，其中 MCP suite 经真实协议握手验证收敛后的 19 工具面。删除 34 个 MCP 工具、3 个接口、4 个转发壳类、2 个死工具函数与约 3,000 行文档冗余。
+
 ## v0.12.1（Pre-release）
 
 ### 约束与运行策略

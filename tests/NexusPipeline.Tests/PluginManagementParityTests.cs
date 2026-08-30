@@ -70,34 +70,6 @@ public sealed class PluginManagementParityTests
     }
 
     [Fact]
-    public void UserGlobalSettingsInput_maps_all_override_categories()
-    {
-        var input = new McpUserGlobalSettingsInput
-        {
-            General = new McpUserGeneralOverrideInput { SyncEnabled = true, Enabled = false, RunDays = 3 },
-            Notification = new McpUserNotificationOverrideInput { SyncEnabled = true, NotifyEnabled = false, SmtpTo = "u@example.com" },
-            Advanced = new McpUserAdvancedOverrideInput
-            {
-                SyncEnabled = true,
-                PreRunScript = "pre.ps1",
-                PreRunOnceOnly = true,
-                PostRunScript = "post.ps1",
-                PostRunOnFinalOnly = true,
-            },
-        };
-
-        UserBindingOverrides model = input.ToModel();
-
-        Assert.True(model.General.SyncEnabled);
-        Assert.False(model.General.Enabled);
-        Assert.Equal(3, model.General.RunDays);
-        Assert.False(model.Notification.NotifyEnabled);
-        Assert.Equal("u@example.com", model.Notification.SmtpTo);
-        Assert.True(model.Advanced.PreRunOnceOnly);
-        Assert.True(model.Advanced.PostRunOnFinalOnly);
-    }
-
-    [Fact]
     public void PluginManagementView_includes_common_runtime_and_install_provenance()
     {
         var settings = new AppSettings();

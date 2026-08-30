@@ -501,15 +501,15 @@ public class ParallelAdmissionTests
         public IReadOnlyList<DispatchQueue> Snapshot() => new[] { _queue.Clone() };
     }
 
-    private sealed class TestUsers : IUserRepository
+    private sealed class TestUsers : LegacyModelUserRepository
     {
-        public ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName)
         {
             return script.Users.FirstOrDefault(user => user.Enabled
                 && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
         }
 
-        public IReadOnlyList<string> EnabledNames(ScriptInstance script)
+        public override IReadOnlyList<string> EnabledNames(ScriptInstance script)
         {
             return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
         }

@@ -24,13 +24,10 @@ const EVERGREEN_DOCUMENTS = [
   "CONTRIBUTING.md",
   "SECURITY.md",
   "docs/DESIGN.md",
-  "docs/ARCHITECTURE.md",
   "docs/CONTROL_PLANE.md",
   "docs/DEVELOPMENT.md",
   "docs/TESTING.md",
-  "docs/RELEASING.md",
-  "docs/ROADMAP.md",
-  "docs/KNOWN_ISSUES.md",
+  "docs/STATUS.md",
   "docs/PLUGIN_API.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
 ];
@@ -152,15 +149,6 @@ test("CHANGELOG has one heading per release version", () => {
   assert.deepEqual(duplicates, [], `Duplicate CHANGELOG headings:\n${duplicates.join("\n")}`);
 });
 
-test("ROADMAP does not repeat published version headings", () => {
-  const changelogVersions = new Set(extractVersionHeadings(read("CHANGELOG.md")).map(({ version }) => version));
-  const roadmapVersions = extractVersionHeadings(read("docs/ROADMAP.md"));
-  const overlaps = roadmapVersions
-    .filter(({ version }) => changelogVersions.has(version))
-    .map(({ version, index }) => `${version} at line ${lineNumber(read("docs/ROADMAP.md"), index)}`);
-  assert.deepEqual(overlaps, [], `ROADMAP contains published version headings:\n${overlaps.join("\n")}`);
-});
-
 test("evergreen documents contain no deprecated authority or path references", () => {
   const failures = [];
   for (const relativeFile of EVERGREEN_DOCUMENTS) {
@@ -178,13 +166,10 @@ test("evergreen documents contain no deprecated authority or path references", (
 test("README documentation navigation points to existing files", () => {
   const required = [
     "docs/DESIGN.md",
-    "docs/ARCHITECTURE.md",
     "docs/CONTROL_PLANE.md",
     "docs/DEVELOPMENT.md",
     "docs/TESTING.md",
-    "docs/RELEASING.md",
-    "docs/ROADMAP.md",
-    "docs/KNOWN_ISSUES.md",
+    "docs/STATUS.md",
     "CONTRIBUTING.md",
     "SECURITY.md",
     "CHANGELOG.md",
@@ -194,127 +179,40 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
-test("production and dual-mode test contracts remain explicit", () => {
+test("dual-mode production contracts stay on data files and behavior", () => {
+  // 权限门禁以 manifest 数据文件为准（产品 requireAdministrator，Test Host asInvoker）。
   const productionManifest = read("src/app.manifest");
   const testManifest = read("src/app.test.manifest");
   const project = read("src/NexusPipeline.csproj");
-  const runner = read("tests/run.mjs");
-  const processHelper = read("tests/support/windows-process.mjs");
-  const e2eHelper = read("tests/e2e/tests/helpers.mjs");
-  const e2eSetup = read("tests/e2e/tests/global-setup.mjs");
-  const systemHelper = read("tests/system/runtime-helper.mjs");
-  const systemSuites = [
-    "tests/system/mcp-smoke.mjs",
-    "tests/system/runtime-smoke.mjs",
-    "tests/system/judge-smoke.mjs",
-    "tests/system/execution-resilience.mjs",
-    "tests/system/emulator-smoke.mjs",
-    "tests/system/update-smoke.mjs",
-  ].map(read);
-  const ci = read(".github/workflows/ci.yml");
-  const testingDocs = read("docs/TESTING.md");
-  const developmentDocs = read("docs/DEVELOPMENT.md");
-  const agents = read("AGENTS.md");
-  const design = read("docs/DESIGN.md");
   assert.match(productionManifest, /requestedExecutionLevel level="requireAdministrator"/u);
   assert.match(testManifest, /requestedExecutionLevel level="asInvoker"/u);
   assert.match(project, /Condition="'\$\(NexusTestHost\)' == 'true'"/u);
   assert.match(project, /ApplicationManifest>app\.test\.manifest/u);
-  assert.match(runner, /isAdministrator\(\)/u);
-  assert.match(runner, /MODE_SUITES = new Set\(\["default", "ui", "system", "all"\]\)/u);
-  assert.match(runner, /case "codex"[\s\S]*runMode\("codex"/u);
-  assert.match(runner, /case "admin"[\s\S]*runMode\("admin"/u);
-  assert.match(runner, /mode === "codex" \? await buildTestHost\(\) : 0/u);
-  assert.match(runner, /modeEnvironment\(mode/u);
-  assert.match(runner, /NexusPipeline CODEX FEEDBACK TEST/u);
-  assert.match(runner, /NexusPipeline ADMINISTRATOR GATE/u);
-  assert.match(processHelper, /S-1-16-(?:12288|16384)\b/u);
-  assert.match(processHelper, /getIntegrityLevel/u);
-  assert.match(e2eHelper, /executionMode/u);
-  assert.match(e2eHelper, /isCodexMode \? testHostDir : productionReleaseDir/u);
-  assert.match(e2eHelper, /NEXUS_TEST_HOST_EXIT_FILE/u);
-  assert.match(e2eSetup, /executionMode === "admin"/u);
-  assert.match(systemHelper, /executionMode/u);
-  assert.match(systemHelper, /isCodexMode \? testHostDir : productionReleaseDir/u);
-  for (const suite of systemSuites) {
-    assert.match(suite, /isAdminMode/u);
-    assert.match(suite, /if \(isAdminMode\)/u);
-  }
-  assert.match(ci, /node tests\\run\.mjs admin default/u);
-  assert.match(ci, /node tests\\run\.mjs admin ui/u);
-  assert.match(ci, /node tests\\run\.mjs admin system/u);
 
-  const activeFiles = [runner, e2eHelper, e2eSetup, systemHelper, ...systemSuites];
-  for (const activeFile of activeFiles) {
-    assert.doesNotMatch(activeFile, /AdminTestBroker|admin-broker|TestLauncher|CreateRestrictedToken|linked-token|restricted-token|PowerShell Direct|Hyper-V/u);
+  // 文档不再描述已移除的 Broker/TestLauncher 架构。
+  const ci = read(".github/workflows/ci.yml");
+  const docs = [
+    ["AGENTS.md", read("AGENTS.md")],
+    ["docs/TESTING.md", read("docs/TESTING.md")],
+    ["docs/DEVELOPMENT.md", read("docs/DEVELOPMENT.md")],
+    ["docs/DESIGN.md", read("docs/DESIGN.md")],
+  ];
+  for (const [relativeFile, text] of docs) {
+    assert.doesNotMatch(
+      text,
+      /AdminTestBroker|admin-broker|Elevated Test Broker|PowerShell Direct|Hyper-V|Windows Sandbox Broker/u,
+      `${relativeFile} still describes removed Broker architecture`,
+    );
   }
   assert.doesNotMatch(ci, /TestLauncher|launcher-probe|New-LocalUser|NEXUS_CI_TEST_USER|NEXUS_CI_TEST_PASSWORD|CreateRestrictedToken|linked-token|restricted-token|AdminTestBroker|admin-broker|NEXUS_TEST_HOST/u);
   assert.equal(fs.existsSync(path.join(ROOT, "tests/support/NexusPipeline.TestLauncher")), false);
   assert.equal(fs.existsSync(path.join(ROOT, "tests/support/launcher-probe.mjs")), false);
   assert.equal(fs.existsSync(path.join(ROOT, "tests/support/admin-broker")), false);
 
-  for (const [relativeFile, text] of [
-    ["AGENTS.md", agents],
-    ["docs/TESTING.md", testingDocs],
-    ["docs/DEVELOPMENT.md", developmentDocs],
-    ["docs/DESIGN.md", design],
-  ]) {
-    assert.doesNotMatch(text, /AdminTestBroker|admin-broker|Elevated Test Broker|PowerShell Direct|Hyper-V|Windows Sandbox Broker/u, `${relativeFile} still describes removed Broker architecture`);
-  }
-  assert.match(testingDocs, /node tests\\run\.mjs codex all/u);
-  assert.match(testingDocs, /node tests\\run\.mjs admin all/u);
-  assert.match(testingDocs, /NEXUS_TEST_HOST/u);
-  assert.match(agents, /Codex.*Test Host/u);
-  assert.match(developmentDocs, /codex <suite>/u);
+  // 行为级防线：省略模式必须以 exit code 2 拒绝执行（真正的权限契约走 admin 门禁）。
   assert.equal(
     spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "default"], { encoding: "utf8" }).status,
     2,
     "bare default must require an explicit codex/admin mode",
   );
-});
-
-test("control-plane capability matrix has complete statuses and risk classifications", () => {
-  const text = read("docs/CONTROL_PLANE.md");
-  const statuses = [
-    "supported",
-    "security-restricted",
-    "intentionally-ui-only",
-    "not-applicable",
-  ];
-  const rows = text
-    .split(/\r?\n/u)
-    .map(line => line.trim())
-    .filter(line => line.startsWith("|") && line.endsWith("|"))
-    .map(line => line.slice(1, -1).split("|").map(cell => cell.trim()))
-    .filter(cells => cells.length === 5 && /^`[^`]+`$/u.test(cells[0]));
-
-  assert.ok(rows.length >= 20, "Control Surface Capability Matrix needs the core capability rows");
-  for (const cells of rows) {
-    assert.ok(
-      cells.slice(1, 4).every(cell => statuses.some(status => cell.includes(`\`${status}\``))),
-      `missing surface status: ${cells[0]}`,
-    );
-    assert.ok(!cells.join(" ").includes("`missing`"), `implicit gap in ${cells[0]}`);
-    const restricted = cells.slice(1, 4).some(cell => cell.includes("`security-restricted`"));
-    if (restricted) {
-      assert.notEqual(cells[4], "—", `restricted capability needs an exception: ${cells[0]}`);
-    }
-  }
-
-  const rowsByCapability = new Map(rows.map(cells => [cells[0].slice(1, -1), cells]));
-  const destructive = [
-    "plugins.enable-disable",
-    "plugins.store.install",
-    "plugins.store.update",
-    "plugins.store.uninstall",
-    "plugin-user-settings.secret-write",
-    "update.apply",
-    "maintenance.prune",
-  ];
-  for (const capability of destructive) {
-    const cells = rowsByCapability.get(capability);
-    assert.ok(cells, `missing capability row: ${capability}`);
-    assert.match(cells[3], /`security-restricted`/u, `${capability} must be MCP security-restricted`);
-    assert.match(cells[4], /risk=(?:destructive|sensitive)/u, `${capability} needs an MCP risk classification`);
-  }
 });

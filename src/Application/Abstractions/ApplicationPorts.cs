@@ -68,93 +68,22 @@ internal interface IUserRepository
 
     IReadOnlyList<string> EnabledNames(ScriptInstance script);
 
-    /// <summary>
-    /// 按全局用户快照解析一个启用绑定。旧测试/兼容仓储未实现时回退到 ScriptUser，保证旧执行契约可逐步迁移。
-    /// </summary>
+    /// <summary>按全局用户快照解析一个启用绑定；users 为空时由实现方取当前并发快照。</summary>
     ResolvedScriptUser? ResolveEnabledBinding(
         ScriptInstance script,
         string? userName,
-        IReadOnlyList<NexusUser>? users = null)
-    {
-        if (users is not null)
-        {
-            if (string.IsNullOrWhiteSpace(userName))
-            {
-                return null;
-            }
-            foreach (NexusUser user in users.OrderBy(item => item.Index))
-            {
-                if (!string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                UserScriptBinding? binding = user.Bindings
-                    .Select(item => UserBindingOverrideResolver.Resolve(user, item))
-                    .FirstOrDefault(item =>
-                        item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
-                return binding is null ? null : new ResolvedScriptUser(user.Id, user.Name, binding);
-            }
-            return null;
-        }
+        IReadOnlyList<NexusUser>? users = null);
 
-        ScriptUser? legacy = FindEnabled(script, userName);
-        return legacy is null
-            ? null
-            : new ResolvedScriptUser(
-                "",
-                legacy.Name,
-                new UserScriptBinding
-                {
-                    ScriptInstanceId = script.Id,
-                    Enabled = legacy.Enabled,
-                    PreRunScript = legacy.PreRunScript,
-                    PreRunOnceOnly = legacy.PreRunOnceOnly,
-                    PostRunScript = legacy.PostRunScript,
-                    PostRunOnFinalOnly = legacy.PostRunOnFinalOnly,
-                });
-    }
-
-    /// <summary>按全局 Index 返回脚本已绑定且启用的用户；users 为空时兼容旧嵌套模型。</summary>
+    /// <summary>按全局 Index 返回脚本已绑定且启用的用户；users 为空时由实现方取当前并发快照。</summary>
     IReadOnlyList<ResolvedScriptUser> ResolveEnabledBindings(
         ScriptInstance script,
-        IReadOnlyList<NexusUser>? users = null)
-    {
-        if (users is not null)
-        {
-            return users
-                .OrderBy(item => item.Index)
-                .Select(user => new
-                {
-                    User = user,
-                    Binding = user.Bindings
-                        .Select(item => UserBindingOverrideResolver.Resolve(user, item))
-                        .FirstOrDefault(item =>
-                            item.Participates && string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)),
-                })
-                .Where(item => item.Binding is not null)
-                .Select(item => new ResolvedScriptUser(item.User.Id, item.User.Name, item.Binding!))
-                .ToList();
-        }
-
-        return EnabledNames(script)
-            .Select(name => ResolveEnabledBinding(script, name))
-            .Where(item => item is not null)
-            .Cast<ResolvedScriptUser>()
-            .ToList();
-    }
+        IReadOnlyList<NexusUser>? users = null);
 }
 
 /// <summary>设置读取端口，避免业务服务为读取设置而反向依赖 RuntimeContext。</summary>
 internal interface ISettingsProvider
 {
     AppSettings Current { get; }
-}
-
-/// <summary>运行天数每日递减端口：调度器每日首次 tick 调用一次；返回是否有绑定发生递减。</summary>
-internal interface IUserRunDaysWriter
-{
-    /// <summary>对所有 RunDays &gt; 0 的绑定递减 1（降至 0 后不再参与运行）；返回是否发生变化。</summary>
-    bool DecrementDaily();
 }
 
 /// <summary>历史持久化端口，执行域不依赖历史文件实现。</summary>
@@ -219,15 +148,4 @@ internal interface IPluginAvailability
 internal interface IUserRunStartingPublisher
 {
     void Publish(PluginUserRunStartingEvent eventData);
-}
-
-/// <summary>
-/// 配置交换恢复的只读数据源端口：恢复路径按脚本/用户快照工作，
-/// 不再反向依赖组合根 RuntimeContext。具体适配由组合根在启动时注入（RuntimeInitializer 装配）。
-/// </summary>
-internal interface IConfigRecoveryDataSource
-{
-    ScriptInstance? FindScript(string scriptId);
-
-    IReadOnlyList<NexusUser> SnapshotUsers();
 }

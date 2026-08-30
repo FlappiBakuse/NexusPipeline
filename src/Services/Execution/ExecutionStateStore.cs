@@ -459,15 +459,6 @@ internal sealed class ExecutionStateStore
     }
 
     /// <summary>在准入协调锁内检查租约并执行同步数据变更，消除“检查后到删除前”的竞态窗口。</summary>
-    public bool TryExecuteLeaseMutation(
-        string scriptId,
-        string? userName,
-        Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-    {
-        return TryExecuteLeaseMutation(scriptId, userName, mutation, out leases, out _);
-    }
-
     /// <summary>
     /// 在准入协调锁内检查宿主维护状态、执行租约并完成同步数据变更。
     /// 维护租约优先于资源租约返回，确保重启/更新等待期间所有配置写入都被挡住。
@@ -525,14 +516,6 @@ internal sealed class ExecutionStateStore
     public bool TryExecuteQueueLeaseMutation(
         string queueId,
         Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-    {
-        return TryExecuteQueueLeaseMutation(queueId, mutation, out leases, out _);
-    }
-
-    public bool TryExecuteQueueLeaseMutation(
-        string queueId,
-        Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases,
         out string? failureCode)
     {
@@ -565,13 +548,6 @@ internal sealed class ExecutionStateStore
                 return true;
             }
         }
-    }
-
-    public bool TryExecuteAnyQueueLeaseMutation(
-        Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-    {
-        return TryExecuteAnyQueueLeaseMutation(mutation, out leases, out _);
     }
 
     public bool TryExecuteAnyQueueLeaseMutation(

@@ -7,7 +7,6 @@ using NexusPipeline.App.Repositories;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
-using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Web;
 using Xunit;
@@ -17,7 +16,7 @@ namespace NexusPipeline.Tests;
 public sealed class UserIdRecoveryTests
 {
     [Fact]
-    public void ConfigurationTransaction_UsesUserIdDirectory_AndLeavesLegacyNameResidue()
+    public void ConfigRunSession_UsesUserIdDirectory_AndLeavesLegacyNameResidue()
     {
         string scriptId = "regression-userid-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");
@@ -36,8 +35,8 @@ public sealed class UserIdRecoveryTests
             File.WriteAllText(canonicalState, "canonical-user-id");
             File.WriteAllText(legacyState, "legacy-display-name");
 
-            var transaction = new ConfigurationTransaction(scriptId, userId, userName, configPath);
-            transaction.PrepareScriptArea();
+            var session = new ConfigRunSession(scriptId, userId, configPath, hasJudgeScript: true);
+            session.PrepareScriptArea();
 
             Assert.Equal("canonical-user-id", File.ReadAllText(canonicalState));
             Assert.Equal("legacy-display-name", File.ReadAllText(legacyState));
@@ -54,7 +53,7 @@ public sealed class UserIdRecoveryTests
     {
         RuntimeContext context = RuntimeContext.Instance;
         // v0.10.0（B2）：恢复数据源由组合根装配；测试直接构造等价适配器。
-        ConfigSwapSession.ConfigureRecovery(new RuntimeConfigRecoveryDataSource(context.FindScript, context.SnapshotUsers));
+        ConfigSwapSession.ConfigureRecovery(context.FindScript, context.SnapshotUsers);
         string scriptId = "regression-recovery-" + Guid.NewGuid().ToString("N");
         string legacyName = "LegacyName-" + Guid.NewGuid().ToString("N");
         string configPath = Path.Combine(Path.GetTempPath(), "np-regression-recovery-" + Guid.NewGuid().ToString("N"), "config.json");

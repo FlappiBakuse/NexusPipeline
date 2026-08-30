@@ -32,15 +32,6 @@ internal sealed class McpReadOnlyTools
         return McpToolResult.Success(_context.Scripts.Select(script => McpViews.Script(script, users)).ToList());
     }
 
-    [McpServerTool(Name = "get_script", Title = "获取脚本实例", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按脚本稳定 ID 或唯一名称获取一个脚本实例。名称匹配多个对象时会返回 ambiguous_target。")]
-    public CallToolResult GetScript([Description("脚本稳定 ID 或唯一名称。")]
-        string reference)
-    {
-        OperationResult<ScriptInstance> result = _context.ResolveScript(reference);
-        return McpToolResult.From(result, value => value is null ? null : McpViews.Script(value, _context.Users));
-    }
-
     [McpServerTool(Name = "list_users", Title = "列出全局用户", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("列出全局用户、绑定数量、绑定设置和下一次队列计划。")]
     public CallToolResult ListUsers()
@@ -49,29 +40,11 @@ internal sealed class McpReadOnlyTools
         return McpToolResult.Success(_context.Users.Select(user => McpViews.User(user, queues)).ToList());
     }
 
-    [McpServerTool(Name = "get_user", Title = "获取全局用户", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按全局用户稳定 ID 或唯一名称获取一个用户。")]
-    public CallToolResult GetUser([Description("用户稳定 ID 或唯一名称。")]
-        string reference)
-    {
-        OperationResult<NexusUser> result = _context.ResolveUser(reference);
-        return McpToolResult.From(result, value => value is null ? null : McpViews.User(value, _context.Queues));
-    }
-
     [McpServerTool(Name = "list_queues", Title = "列出调度队列", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("列出调度队列、任务顺序、时间表、通知开关和下一次触发时间。")]
     public CallToolResult ListQueues()
     {
         return McpToolResult.Success(_context.Queues.Select(McpViews.Queue).ToList());
-    }
-
-    [McpServerTool(Name = "get_queue", Title = "获取调度队列", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按队列稳定 ID 或唯一名称获取一个调度队列。")]
-    public CallToolResult GetQueue([Description("队列稳定 ID 或唯一名称。")]
-        string reference)
-    {
-        OperationResult<DispatchQueue> result = _context.ResolveQueue(reference);
-        return McpToolResult.From(result, value => value is null ? null : McpViews.Queue(value));
     }
 
     [McpServerTool(Name = "list_runs", Title = "列出运行任务", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
@@ -152,21 +125,6 @@ internal sealed class McpReadOnlyTools
         });
     }
 
-    [McpServerTool(Name = "get_history_detail", Title = "获取历史详情", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按历史记录 ID 获取运行详情与每次尝试的日志尾部。为控制响应大小，不返回完整日志文件。")]
-    public CallToolResult GetHistoryDetail([Description("历史 RunRecord 的 ID。")]
-        string recordId)
-    {
-        if (string.IsNullOrWhiteSpace(recordId))
-        {
-            return McpToolResult.Failure("validation_error", "recordId 不能为空");
-        }
-        RunRecord? record = _context.Runtime.History.FindById(recordId.Trim());
-        return record is null
-            ? McpToolResult.Failure("not_found", $"未找到历史记录：{recordId}")
-            : McpToolResult.Success(_context.GetHistoryDetail(record));
-    }
-
     [McpServerTool(Name = "list_plugins", Title = "列出插件", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("列出插件元数据、能力、配置启用状态和运行状态。")]
     public CallToolResult ListPlugins()
@@ -174,88 +132,9 @@ internal sealed class McpReadOnlyTools
         return McpToolResult.Success(_context.Runtime.Plugins.PluginManagementViews);
     }
 
-    [McpServerTool(Name = "list_plugin_store", Title = "列出插件商店", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("读取官方插件 catalog、兼容性、安装状态、待重启事务和更新状态。")]
-    public async Task<CallToolResult> ListPluginStore()
-    {
-        return await ReadPluginStoreAsync(forceRefresh: false).ConfigureAwait(false);
-    }
-
-    [McpServerTool(Name = "refresh_plugin_store", Title = "刷新插件商店", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = true, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("从官方插件仓库刷新 catalog 缓存并返回最新商店状态。")]
-    public async Task<CallToolResult> RefreshPluginStore()
-    {
-        return await ReadPluginStoreAsync(forceRefresh: true).ConfigureAwait(false);
-    }
-
-    [McpServerTool(Name = "get_user_global_settings", Title = "获取用户全局设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按全局用户稳定 ID 或唯一名称读取用户级绑定覆盖设置。")]
-    public CallToolResult GetUserGlobalSettings(
-        [Description("用户稳定 ID 或唯一名称。")]
-        string userReference)
-    {
-        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
-        if (!user.Succeeded)
-        {
-            return McpToolResult.From(user);
-        }
-        return McpToolResult.Success((user.Value!.BindingOverrides ?? new UserBindingOverrides()).Clone());
-    }
-
-    [McpServerTool(Name = "list_plugin_user_settings", Title = "列出插件用户设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("读取指定用户的全部插件声明式全局设置；密钥字段只返回 configured 状态。")]
-    public async Task<CallToolResult> ListPluginUserSettings(
-        [Description("用户稳定 ID 或唯一名称。")]
-        string userReference)
-    {
-        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
-        if (!user.Succeeded)
-        {
-            return McpToolResult.From(user);
-        }
-        OperationResult<IReadOnlyList<PluginUserGlobalSettingsView>> result = await _context.UserGlobalSettings
-            .ReadAsync(user.Value!.Id)
-            .ConfigureAwait(false);
-        return McpToolResult.From(result);
-    }
-
-    [McpServerTool(Name = "get_plugin_user_settings", Title = "获取插件用户设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("读取指定用户的一个插件设置贡献；密钥字段只返回 configured 状态。")]
-    public async Task<CallToolResult> GetPluginUserSettings(
-        [Description("用户稳定 ID 或唯一名称。")]
-        string userReference,
-        [Description("插件稳定名称。")]
-        string pluginName,
-        [Description("插件设置贡献 ID。")]
-        string contributionId)
-    {
-        OperationResult<NexusUser> user = _context.ResolveUser(userReference);
-        if (!user.Succeeded)
-        {
-            return McpToolResult.From(user);
-        }
-        OperationResult<PluginUserGlobalSettingsView> result = await _context.UserGlobalSettings
-            .ReadOneAsync(user.Value!.Id, pluginName?.Trim() ?? "", contributionId?.Trim() ?? "")
-            .ConfigureAwait(false);
-        return McpToolResult.From(result);
-    }
-
     [McpServerTool(Name = "get_settings", Title = "获取脱敏设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("读取应用设置；Webhook、SMTP 密码和访问令牌只返回已设置占位符，不返回明文。")]
     public CallToolResult GetSettings() => McpToolResult.Success(_context.GetSettings());
-
-    [McpServerTool(Name = "list_legacy_user_data", Title = "列出遗留用户数据", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("列出可确认清理的历史用户名目录候选；该工具不会删除任何数据。")]
-    public CallToolResult ListLegacyUserData()
-    {
-        IReadOnlyList<LegacyDataCandidate> candidates = _context.Runtime.Resolve<UserDataPruner>().FindCandidates();
-        return McpToolResult.Success(candidates.Select(item => new
-        {
-            item.ScriptId,
-            item.UserKey,
-            item.ItemCount,
-        }).ToList());
-    }
 
     [McpServerTool(Name = "get_update_status", Title = "获取更新状态", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("读取更新检查、下载和应用状态。")]

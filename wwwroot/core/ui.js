@@ -4,6 +4,7 @@ import { api } from "./api.js";
 import { icon } from "./icons.js";
 import { systemActionCard } from "./forms.js";
 import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
+import { durationClock } from "./duration.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -115,6 +116,18 @@ export function toggleMoreMenu(trigger) {
 
 /** 长文本滚动：内容溢出容器时启用往返滚动（否则保持省略号兜底）。</summary> */
 export function initAutoScroll(root = view) {
+  const applyHoverScroll = (el, inner, enabled = true) => {
+    const width = inner.scrollWidth;
+    if (!enabled || width <= el.clientWidth + 1) {
+      inner.style.removeProperty("width");
+      el.style.removeProperty("--hover-scroll-x");
+      el.classList.remove("is-overflowing");
+      return;
+    }
+    inner.style.width = `${width}px`;
+    el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
+    el.classList.add("is-overflowing");
+  };
   root.querySelectorAll(".scroll-text").forEach(el => {
     const inner = el.querySelector(":scope > .scroll-inner");
     if (!inner) return;
@@ -128,38 +141,13 @@ export function initAutoScroll(root = view) {
   });
   root.querySelectorAll(".plugin-name-scroll").forEach(el => {
     const inner = el.querySelector(":scope > .plugin-name-scroll-inner");
-    if (!inner) return;
-    const width = inner.scrollWidth;
-    if (width > el.clientWidth + 1) {
-      inner.style.width = `${width}px`;
-      el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
-      el.classList.add("is-overflowing");
-    } else {
-      inner.style.removeProperty("width");
-      el.style.removeProperty("--hover-scroll-x");
-      el.classList.remove("is-overflowing");
-    }
+    if (inner) applyHoverScroll(el, inner);
   });
   root.querySelectorAll(".plugin-detail-name-scroll").forEach(el => {
     const inner = el.querySelector(":scope > .plugin-detail-name-scroll-inner");
     if (!inner) return;
     const narrowViewport = window.matchMedia?.("(max-width: 767px)")?.matches ?? true;
-    if (!narrowViewport || el.clientWidth <= 0) {
-      inner.style.removeProperty("width");
-      el.style.removeProperty("--hover-scroll-x");
-      el.classList.remove("is-overflowing");
-      return;
-    }
-    const width = inner.scrollWidth;
-    if (width > el.clientWidth + 1) {
-      inner.style.width = `${width}px`;
-      el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
-      el.classList.add("is-overflowing");
-    } else {
-      inner.style.removeProperty("width");
-      el.style.removeProperty("--hover-scroll-x");
-      el.classList.remove("is-overflowing");
-    }
+    applyHoverScroll(el, inner, narrowViewport && el.clientWidth > 0);
   });
   initInputHints(root);
 }
@@ -228,11 +216,7 @@ export function startCountdown(targetId, timeValue) {
       element.textContent = "即将触发";
       return;
     }
-    const seconds = Math.floor(remain / 1000);
-    const hours = String(Math.floor(seconds / 3600)).padStart(2, "0");
-    const minutes = String(Math.floor(seconds % 3600 / 60)).padStart(2, "0");
-    const secs = String(seconds % 60).padStart(2, "0");
-    element.textContent = `${hours}:${minutes}:${secs}`;
+    element.textContent = durationClock(Math.floor(remain / 1000));
   };
   update();
   countdownTimer = registerInterval(setInterval(update, 1000));

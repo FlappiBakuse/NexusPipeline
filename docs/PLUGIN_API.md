@@ -269,7 +269,9 @@ schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-ca
 - 编辑用户配置会话 start 时若 `ConfigPath` 不存在且插件提供 `config-template/` 目录 → 目录内容**整体复制**到配置位置（configPath 父目录），cancel 时按复制清单精确清理（清单随 `.session` 标记持久化，重启崩溃恢复同样生效）。
 - 建议放入「可直接使用的默认配置」而非空模板；BetterGI 示例为内置标准任务列表的 NexusPipeline.json。
 
-## 插件身份替换
+## 历史兼容：插件身份替换与布局迁移（完成态）
+
+> 本节机制随 v0.11.5 的 schema 2 身份改造交付并进入维护完成态：宿主保留兼容能力以支持已发布版本，不再扩展新的迁移特性。新插件应直接选定稳定的机器 ID 与 artifactName 并避免改名；确需替换旧身份时按既有 `replaces` 协议执行，勿期待新增迁移能力。
 
 插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。需要改机器标识时，新插件在 manifest 和 catalog 中声明 `replaces`，宿主会在重启阶段完成一次可恢复的身份迁移：
 

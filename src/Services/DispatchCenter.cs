@@ -59,13 +59,6 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
         string scriptId,
         string? userName,
         Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-        => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases);
-
-    public bool TryExecuteLeaseMutation(
-        string scriptId,
-        string? userName,
-        Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases,
         out string? failureCode)
         => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases, out failureCode);
@@ -76,20 +69,9 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
     public bool TryExecuteQueueLeaseMutation(
         string queueId,
         Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-        => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases);
-
-    public bool TryExecuteQueueLeaseMutation(
-        string queueId,
-        Action mutation,
         out IReadOnlyList<ExecutionLeaseReference> leases,
         out string? failureCode)
         => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases, out failureCode);
-
-    public bool TryExecuteAnyQueueLeaseMutation(
-        Action mutation,
-        out IReadOnlyList<ExecutionLeaseReference> leases)
-        => _state.TryExecuteAnyQueueLeaseMutation(mutation, out leases);
 
     public bool TryExecuteAnyQueueLeaseMutation(
         Action mutation,

@@ -1078,9 +1078,9 @@ internal static class ConfigSwapSession
     /// 装配配置交换恢复：组合根在进程初始化时注入脚本/用户快照数据源；
     /// 恢复路径不再反向依赖 RuntimeContext。未装配时调用恢复入口视为编程错误。
     /// </summary>
-    public static void ConfigureRecovery(IConfigRecoveryDataSource dataSource)
+    public static void ConfigureRecovery(Func<string, ScriptInstance?> findScript, Func<IReadOnlyList<NexusUser>> snapshotUsers)
     {
-        _recovery = new ConfigSwapRecovery(dataSource);
+        _recovery = new ConfigSwapRecovery(findScript, snapshotUsers);
     }
 
     private static ConfigSwapRecovery Recovery

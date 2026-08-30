@@ -205,12 +205,12 @@ public sealed class RegressionTests
     [Fact]
     public void ConfigRunSession_FinalizeRun_IsIdempotent()
     {
-        var session = new ConfigRunSession("script", userName: null, configPath: "", hasJudgeScript: false);
+        var session = new ConfigRunSession("script", userKey: null, configPath: "", hasJudgeScript: false);
 
         Assert.Null(session.FinalizeRun(autoUpdateConfig: true));
         Assert.Null(session.FinalizeRun(autoUpdateConfig: true));
 
-        session = new ConfigRunSession("script", userName: null, configPath: "", hasJudgeScript: false);
+        session = new ConfigRunSession("script", userKey: null, configPath: "", hasJudgeScript: false);
         session.MarkProcessCleanupUnconfirmed("测试保留现场");
 
         string? first = session.FinalizeRun(autoUpdateConfig: true);

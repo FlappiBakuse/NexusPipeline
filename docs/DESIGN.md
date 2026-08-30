@@ -1,7 +1,7 @@
 # NexusPipeline（枢链）核心设计说明
 
 > 本文档解释 NexusPipeline 的**设计理念**与**核心功能运行的具体步骤**：机制为什么这样设计、运行时会发生什么。
-> 开发者导航（模块边界/依赖方向/扩展落点）见 [ARCHITECTURE.md](ARCHITECTURE.md)；版本历史见 [CHANGELOG.md](../CHANGELOG.md)；用户操作说明见 [README.md](../README.md)。
+> 开发者导航（模块边界/依赖方向/扩展落点）见本文件第 10 节；版本历史见 [CHANGELOG.md](../CHANGELOG.md)；用户操作说明见 [README.md](../README.md)。
 
 ---
 
@@ -17,6 +17,7 @@
 7. [通知与数据落盘](#7-通知与数据落盘)
 8. [已知行为与边界](#8-已知行为与边界)
 9. [相关文档](#9-相关文档)
+10. [架构与模块定位（开发者导航）](#10-架构与模块定位开发者导航)
 
 ---
 
@@ -56,7 +57,6 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
 | 配置交换（ConfigSwap） | 运行前 configPath ↔ 用户快照的交换机制（见第 4 节） |
-| 配置事务（ConfigurationTransaction） | 封装 prepare/retry/sync/replace/rollback 原语；保持现有 ConfigSwap 磁盘协议 |
 | 配置运行作用域（ConfigRunSession） | 编排一次运行的事务动作并固定最终收尾顺序 |
 | 日志监控（LogMonitor） | 对脚本日志文件的增量读取器，支持追加/截断/替换三种文件形态（见第 6 节） |
 | 插件 capability | 与插件身份/元数据分离的可查询能力；C# 按接口注册，数据化插件按 key 登记 |
@@ -216,18 +216,17 @@ MCP 的启动条件和运行语义如下：
 - `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
-工具按风险分层。只读工具读取状态、脚本、用户、用户全局设置、绑定、队列、运行、历史、插件、插件商店和脱敏插件设置；常规变更工具提交运行/取消、资源 CRUD、安全设置白名单更新、商店 catalog 刷新和非敏感插件设置；`McpAllowDestructiveTools` 默认关闭，只有显式开启并重启服务后才注册删除、密钥、插件开关、插件安装/更新/卸载、服务重启、应用更新和遗留数据清理工具。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+MCP 只保留面向 Agent 的核心子集（19 个工具）：只读工具覆盖状态、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启、更新应用和遗留数据清理等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
 v0.10.6 对 MCP 控制面采用以下行为契约：
 
 - NexusPipeline 信任同一台计算机上的本机进程；loopback、Host、Origin 与请求体限制用于网络和网页边界，MCP 不增加本机进程认证令牌或 SID 鉴权。
-- `McpAllowDestructiveTools` 是 Agent 工具分类与产品护栏，不承担执行沙箱职责，也不改变通用脚本可执行目标的既有产品能力。
 - `run_queue` 在提交执行前复核队列快照的 `CompletionAction`；任何非 `none` 动作都返回稳定的 `dangerous_completion_action`，既有 Web/本地队列仍可按本地设置执行完成操作。
-- 服务重启统一经过 `HostRestartCoordinator`：接受请求时由 `ExecutionStateStore` 原子取得 `HostMaintenanceLease`，租约立即冻结新的运行、配置编辑和宿主配置写入；子进程拉起失败释放租约，子进程已拉起后租约持续到旧进程退出。
+- 服务重启统一经过 `HostRestartCoordinator`（入口为 Web 管理页与 CLI）：接受请求时由 `ExecutionStateStore` 原子取得 `HostMaintenanceLease`，租约立即冻结新的运行、配置编辑和宿主配置写入；子进程拉起失败释放租约，子进程已拉起后租约持续到旧进程退出。
 - `/api/settings/test` 的通知失败使用非 2xx 与 `notification_test_failed`；CLI 根据服务端错误码生成失败 envelope 和非零退出码。
 - `/api/status` 是 Control API 的身份握手，包含 `service=NexusPipeline` 与 `controlApiVersion=1`，CLI 不接受缺少身份或端口越界的其他 HTTP 2xx 响应。
 - `list_plugins`、`/api/plugins` 和 `/api/status` 使用共享 `PluginManagementView`，统一表达 schema 2 的 `artifactName`、展示元数据、替换关系、商店归属和 pending 事务；插件详情通过专用 detail API 提供 README 与完整更新记录。
-- 插件用户全局设置通过现有声明式 contribution contract 提供通用读取、字段校验和写入；读取时 `secret` 只返回 `configured`，MCP 的 `set/clear` 需要敏感操作授权。
+- 插件用户全局设置与用户级插件设置的读取和写入由 Web/CLI 提供；MCP 不暴露这些低频细粒度入口。
 - 执行预览端点按插件声明的 `execution-preview-client`、启用状态和前端存在进行准入，宿主继续负责当前运行目标与截图采集。
 
 MCP 适配层只接收类型化参数，经过 `McpToolContext` 解析稳定 ID/唯一名称，再进入 Application Commands 和已有核心服务。它不复用 Web handler 或 CLI 路由，也不提供万能 CLI/API/shell 工具。运行类调用立即返回 `runId`，Agent 通过 `get_run` 轮询活动或最近完成的运行；业务错误保留在结构化工具结果内：
@@ -491,12 +490,287 @@ managed-code 插件可以通过 Plugin API v1.4 注册用户列表徽章、通�
 ## 9. 相关文档
 
 - [README.md](../README.md)：用户文档（功能、安装、快速上手、常见问题）
-- [ARCHITECTURE.md](ARCHITECTURE.md)：开发者导航（模块边界、依赖方向、扩展落点）
-- [DEVELOPMENT.md](DEVELOPMENT.md)：开发环境搭建与调试指南（编译、运行、Debug）
-- [RELEASING.md](RELEASING.md)：发布流程手册（tag / release / 资产）
-- [CONTRIBUTING.md](../CONTRIBUTING.md)：协作规范（Issue / PR / 提交信息 / 测试流程）
-- [ROADMAP.md](ROADMAP.md)：版本路线与后续开发清单
-- [KNOWN_ISSUES.md](KNOWN_ISSUES.md)：已知问题台账
+- [DEVELOPMENT.md](DEVELOPMENT.md)：开发手册（环境搭建、调试、协作规范与发布流程）
+- [TESTING.md](TESTING.md)：测试层级与完整门禁
+- [CONTROL_PLANE.md](CONTROL_PLANE.md)：Web/CLI/MCP 控制面能力现状
+- [STATUS.md](STATUS.md)：后续开发计划与已知问题台账
 - [CHANGELOG.md](../CHANGELOG.md)：版本历史
-- [PLUGIN_API.md](PLUGIN_API.md)：专项插件（数据化形态）开发指南
+- [PLUGIN_API.md](PLUGIN_API.md)：插件契约（manifest、SDK、扩展指南）
 - [NexusPipeline-Plugins 前端插件指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)：Frontend API 模块、UI slot、主题和发布包约定
+
+---
+
+## 10. 架构与模块定位（开发者导航）
+
+### 10.1 总体结构
+
+```
+NexusPipeline/
+├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener/Kestrel）
+│   ├── Application/    应用宿主、启动流程与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/Abstractions/Repositories
+│   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
+│   ├── Models/         领域模型（NexusPipeline.Models）
+│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update 分域）
+│   ├── Persistence/    持久化层（NexusPipeline.Persistence）
+│   ├── Utilities/      工具层（NexusPipeline.Utilities）
+│   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
+│   ├── Web/            HTTP 层（NexusPipeline.Web）
+│   ├── Cli/            命令行层（NexusPipeline.Cli）
+│   ├── Mcp/            MCP Streamable HTTP 适配层（NexusPipeline.Mcp）
+│   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
+├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.4（无宿主业务引用）
+├── wwwroot/            前端（零构建 ES modules，浏览器直接加载）
+│   ├── app.js          路由 + 事件委托（唯一入口）
+│   ├── core/           平台层（与业务无关的通用能力，含插件运行时与外观引擎）
+│   ├── views/          业务视图（一域一目录/文件）
+│   └── effects/        独立视觉效果
+├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
+├── tests/
+│   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
+│   ├── system/               Windows 真实进程 System Smoke（mcp/runtime/judge/execution-resilience/emulator/update）
+│   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
+│   ├── documentation/        Node 内建模块文档一致性检查
+│   ├── support/              Windows 进程、版本解析、测试运行时公共设施
+│   └── legacy/               历史考据与专项诊断资产（不进入 CI/发布门禁）
+├── tools/source-hash.mjs      Node 源码指纹计算（排除 bin/obj）
+└── tests/run.mjs              统一测试调度入口
+```
+
+### 10.2 后端分层与依赖方向（只允许向下依赖）
+
+```
+NexusPipeline（根：Application/Program/Bootstrap/RuntimeContext 组合根）
+   └── Models（领域模型）← Services（服务）← Persistence（持久化）← Utilities（工具，被一切依赖）
+        ↑           ↑            ↑
+NexusPipeline.Web（HTTP 适配层）
+NexusPipeline.Cli（命令行适配层）
+NexusPipeline.Mcp（MCP 适配层）
+NexusPipeline.Extensibility（中立 capability/profile 契约）
+NexusPipeline.Plugins（插件发现、注册与内置实现）
+```
+
+- **核心域不得引用 Web/Cli**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
+- **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
+- **Plugins 通过数据化 manifest 或独立 Plugin API v1.4 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
+- **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
+- **已知偏差（如实记录）**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期数据读取通过 `Application/Abstractions/` 仓储完成；`ConfigSwapRecovery` 的损坏标记兼容恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是保留的最小例外。新服务不得新增这类依赖。
+
+### 10.3 关键类职责
+
+| 类 | 位置 | 职责 |
+|---|---|---|
+| `Program` | src/Application/ProgramEntry.cs | 进程入口，仅转交 `ApplicationHost.Run(args)` |
+| `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化、服务生命周期入口和兼容命令分发 |
+| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 生产管理员权限校验、Test Host 编译分支、旧配置迁移、约束/设置/数据加载；不启动服务 |
+| `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、共享启动/关闭不变量、Web/托盘生命周期 |
+| `RuntimeStateLayout` | src/Persistence/RuntimeStateLayout.cs | 取得 service ownership 后创建 `.nxp` 目录、迁移旧运行状态、保存冲突现场和提供旧端口兼容读取 |
+| `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
+| `HostRestartCoordinator` | src/Services/HostRestartCoordinator.cs | 统一 Web/MCP/CLI 间接重启生命周期；原子取得维护租约、延迟拉起子进程、处理失败释放与旧进程退出延迟 |
+| `RuntimeContext` | src/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
+| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一数据锁内的执行输入快照；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
+| `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
+| `IExecutionService` / `IFrozenQueueExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；执行端口由 `DispatchCenter` 直接实现，其他端口由 `NotificationDispatcher`、`PluginManager` 提供 |
+| `ScriptCommands` / `QueueCommands` / `UserCommands` / `SettingsCommands` / `ConfigEditCommands` | src/Application/Commands/ | 脚本、队列、全局用户、绑定、头像、设置、配置编辑生命周期及旧脚本用户兼容 URL 的校验、租约协调、持久化和副作用收尾；Web 只负责请求解析与兼容投影 |
+| `OperationResult<T>` | src/Application/Contracts/OperationResult.cs | 与 HTTP/CLI 无关的成功、错误分类和候选目标结果契约 |
+| `TargetResolver` | src/Application/TargetResolver.cs | 统一执行 ID 优先、唯一名称匹配和歧义候选返回 |
+| `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
+| `DispatchCenter` | src/Services/DispatchCenter.cs | 执行应用端口与兼容门面：获取冻结计划、提交准入登记、取消和入口参数编排；不承载后台运行流程 |
+| `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作；运行时通过 `IExecutionSnapshotProvider` 获取队列与脚本的原子输入 |
+| `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程预检和任务计数校验 |
+| `PluginAvailability` | src/Services/PluginAvailability.cs | 根据插件身份、数据化专项类型和运行态统一判断脚本实例是否仍可使用专项插件 |
+| `ExecutionAdmissionPolicy` | src/Services/Execution/ExecutionAdmissionPolicy.cs | 纯逻辑比较 EmulatorOnly/Standard 矩阵、重复目标、资源冲突、完成操作兼容性和 pending 阻断，并标注瞬时/永久失败 |
+| `ExecutionRunner` | src/Services/Execution/ExecutionRunner.cs | 脚本/队列后台生命周期、队列内用户串行、历史落盘、通知和完成意图提交 |
+| `SystemActionExecutor` | src/Services/Execution/SystemActionExecutor.cs | 运行组空闲后的完成操作 arm、pending 倒计时和取消语义 |
+| `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、配置事务和运行收尾；后台任务与历史/通知外层边界由 `ExecutionRunner` 承载 |
+| `RunSession` | src/Services/RunSession.cs | 一次运行的状态对象：元数据、预算、日志收集、配置事务状态和回调；不再拥有 `RunAsync` 流程 |
+| `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
+| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、运行组 `Open/Closing/ActionPending/Maintenance` 状态、完成意图与待执行系统操作，并为执行、编辑、宿主配置 CRUD 提供租约协调 |
+| `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、并发安全记录/日志写入与一致快照 |
+| `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
+| `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
+| `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
+| `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
+| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时和 stdout 尾行 JSON 解析（含 `replaceConfigs`） |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断/替换三形态；替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
+| `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话、模板复制与隐藏配置管理 |
+| `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
+| `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换兼容 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
+| `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、模板/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的委托 |
+| `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
+| `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位、受限迁移与清理 |
+| `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
+| `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
+| `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.4 DTO 均从此入口发送 |
+| `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
+| `WebTransport` | src/Web/WebTransport.cs | Test Host 的普通权限 HTTP 请求解析、响应流和 HttpListener/托管 transport 共用上下文适配 |
+| `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
+| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
+| `McpHost` | src/Mcp/McpHost.cs | 同进程内嵌的 Kestrel Streamable HTTP MCP 宿主；固定 loopback 监听、启动/停止和工具注册；端口冲突不漂移且不影响 Web/Control API |
+| `McpSecurity` | src/Mcp/McpSecurity.cs | MCP Host、Origin 和请求体边界检查；MCP 端点与 Web 远程访问设置隔离 |
+| `McpToolContext` | src/Mcp/McpToolContext.cs | MCP 适配层组合根；提供快照、ID/唯一名称解析、状态/历史/设置投影，调用 Application Commands 或核心服务 |
+| `McpReadOnlyTools` / `McpMutationTools` | src/Mcp/ | 面向 Agent 的核心工具子集（只读 + 常规变更）；删除、密钥、插件安装等高风险操作走本地 CLI |
+| `McpPolicy` / `McpToolResult` | src/Mcp/ | 行为级安全策略（队列完成操作复核）与统一结构化 `ok/errorCode/errorMessage/data` 结果映射 |
+| `ControlApiContract` | src/Application/Contracts/ControlApiContract.cs | Control API 服务名与协议版本身份契约，供服务状态输出与 CLI 握手校验共用 |
+| `CliArguments` / `CliCommandRouter` | src/Cli/ | noun/subcommand 参数解析、兼容别名和正式命令分派 |
+| `CliApiClient` / `CliTransport` | src/Cli/ | CLI 到 owning service 的本机 HTTP 控制通道、身份握手、自动拉起、端口发现和按端点分层超时 |
+| `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
+| `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
+| `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
+| `PluginManager` | src/Plugins/PluginManager.cs | 负责本地插件发现、加载、开关和兼容 façade；通用 capability 查询委托 registry，并生成控制面共享插件投影 |
+| `PluginManagementView` | src/Plugins/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
+| `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.4 UI、作用域数据、插件 Web API、历史贡献注册表与 DTO 校验；按插件生命周期撤销注册 |
+| `PluginUserGlobalSettingsService` | src/Plugins/PluginUserGlobalSettingsService.cs | 统一插件用户全局设置的读取、字段投影、secret 脱敏、输入校验和超时边界，供 Web 复用 |
+| `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.2 清单与 `web/` 资源路径，不向前端泄露插件目录 |
+| `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
+| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
+| `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
+| `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `PluginFilesystemLayoutMigration` | src/Plugins/PluginFilesystemLayoutMigration.cs | 在旧 pending 完成后，将 schema 1 或大小写不规范的插件物理目录迁移到 artifactName；冲突时保留现场并登记阻断状态 |
+| `JsonStore` | src/Persistence/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
+| `AppearanceService` | src/Services/AppearanceService.cs | 服务端外观配置、壁纸资产、配色、配额和轮换游标的持久化与权限校验 |
+| `ApiAppearanceHandler` / `ApiAppearanceAssetsHandler` / `ApiAppearanceUploadHandler` | src/Web/ | 外观快照、配置、资产读取/删除/配色和原始上传 API；上传路由受独立体积上限保护 |
+| `OutboundHttpClientProvider` | src/Services/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
+| `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
+| `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
+
+### 10.4 public / internal 约定
+
+- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API v1.4。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
+- 其余全部 `internal`：新增类型默认 internal，除非它属于契约清单。
+
+### 10.5 新增 API 的落点
+
+- HTTP 路由：在 `src/Web/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
+- 控制命令：先在 owning service 的 `ApiXxxHandler` 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `RuntimeContext` 持久化集合。
+- MCP 适配器：在 `src/Mcp/` 增加类型化工具和投影；只有面向 Agent 的核心子集才进入工具面，其余能力走 CLI；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Application Commands 或既有核心服务。
+- 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
+- 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
+
+### 10.6 控制面边界
+
+常驻服务持有 `RuntimeContext`、执行状态和持久化写入。Web 与 CLI 都是协议适配层：
+
+```text
+Web 请求      ─┐
+CLI / manage ─┼→ Control API → ApiXxxHandler → Application Command/核心服务 → DataStore/Logger
+Scheduler    ─┘                         └→ ExecutionStateStore/ExecutionRunner
+```
+
+`manage` 的菜单类保留旧入口签名以兼容宿主调用，但不再直接读取或修改 `Scripts`、`Queues`、`Users`、`Settings` 集合，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
+
+MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时创建 Kestrel listener，使用 `McpPort` 绑定 loopback；工具类依赖 `McpToolContext`，再调用 Application Commands/核心服务。MCP 不依赖 Web handler、CLI 路由或前端投影；写入对象还会经过 `McpPolicy` 行为校验。
+
+重启请求从 Web handler 或 CLI 进入 `Bootstrap.RequestRestart`，再由 `HostRestartCoordinator` 取得 `DispatchCenter` 提供的 `HostMaintenanceLease`。租约与 `ExecutionStateStore` 的执行、编辑、宿主配置变更协调锁共享同一准入域；CLI 通过 `/api/settings/restart` 复用该入口。`run_queue` 额外使用 `McpPolicy.ValidateQueueExecution` 复核已有队列的完成操作，因此队列创建来源不会改变 MCP 执行护栏。
+
+### 10.7 前端分层
+
+```
+app.js → views/* → core/*（api/state/ui/modal/forms/dom/format）
+views/* 域之间互不引用（跨域数据只经 core/state.js 缓存共享；views/users/ 目录内部的 index/shared/user-management/global-management 拆分属于同一域）
+```
+
+| 模块 | 职责 |
+|---|---|
+| `app.js` | 路由表 + 各视图 `actions` 注册表合并分发 + 全局 input 委托。**不加业务逻辑** |
+| `views/scripts.js` | 脚本实例页（紧凑列表行 + 新建卡片组 + 通用/专用弹窗，草稿为模块变量） |
+| `views/users/` | 全局用户域：`index.js`（actions 合并 + pageUsers 出口）、`shared.js`（列表页/添加用户/编辑配置/共享开关）、`user-management.js`（用户管理弹窗与绑定卡片）、`global-management.js`（全局管理弹窗与插件贡献字段） |
+| `views/queues.js` | 调度队列页 + 定时/任务弹窗 |
+| `views/dispatch.js` | 调度中心（2 秒轮询，只更新运行面板 DOM） |
+| `views/history.js` | 历史列表 + 详情弹窗 |
+| `views/plugins.js` | 默认插件仓库视图、本地插件视图、安装/更新/卸载登记与启停状态 |
+| `views/settings.js` | 系统设置页 + Webhook/SMTP 内置通知渠道 + 三档宿主外网代理 |
+| `views/dashboard.js` | 仪表盘（3 秒轮询） |
+| `core/api.js` | 请求封装（JSON/错误/AbortController 生命周期联动） |
+| `core/dom.js` | `$` / `$$` 查询 |
+| `core/format.js` | 格式化/转义/徽章模板 |
+| `core/forms.js` | 共享表单模板（pageHeader/valueField/selectField），数字/时间/选择控件接入统一自定义控件层 |
+| `core/controls.js` | NexusPipeline 自定义 select、number、time、file、color 与 range 控件的模板、事件委托和键盘/ARIA 行为 |
+| `core/modal.js` | 单模态弹窗（焦点陷阱/Esc/焦点恢复） |
+| `core/ui.js` | 页面渲染/导航/Toast/主题/倒计时/溢出滚动 |
+| `core/duration.js` | `HH:MM:SS` 倒计时格式化 |
+| `core/prepost.js` | `%FIRST%` / `%LAST%` 路径前缀的编码与拆分 |
+| `core/plugin-runtime.js` | Frontend API 1.2：同源模块加载、action/route/nav/slot/lifecycle 注册、插件 Web API、UI 贡献、外观与运行预览宿主访问 |
+| `core/plugin-slots.js` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染和清理 |
+| `core/appearance.js` | 主题 token、插件主题注册、服务端壁纸加载/轮换/配色和旧版本地壁纸回退 |
+| `core/state.js` | 路由生命周期（enterPage/isCurrent/schedule/trackController）+ 跨域缓存（scripts/queues/users/settings） |
+| `core/limits.js` | 跨视图共享的约束警告层：加载 `/api/limits`、忽略状态持久化、alertdialog 警告层与「知道了/不再提醒」分发 |
+| `core/dnd.js` | 通用拖拽排序组件（无业务依赖）：`initDndList(container, { onDrop(ids) })`——容器内 `[data-dnd-id]` 项 + `.drag-handle` 把手，Pointer Events 统一鼠标/触屏；拖拽结束 DOM 重排后回调视图提交全量顺序；插入位置判定不得跳过带 `.dnd-drop-before` 标记的项 |
+
+新增交互的落点：
+
+1. 在对应域视图新增导出函数 + 加入该视图的 `actions` 对象（`data-action` 名与处理器映射）。
+2. 视图模板使用 `data-action` + 稳定的 `data-testid`（e2e 契约）。
+3. 需要路由的新页面：视图导出 `pageXxx(token)`，在 `app.js` 的 `routes` 表注册一行；二级路由在 `route()` 特判分支转发。
+4. 列表拖拽排序：渲染容器 + `[data-dnd-id]` 项 + `.drag-handle` 把手 → `initDndList(container, { onDrop })` → 视图把可见项重排进全量列表后提交 `PUT /api/{scripts|queues}/order`（body `{ ids: [...] }`，全量名单一致校验）或用户沿用 `PUT /api/scripts/{id}/users/order`（`{ names }`）；**弹窗内（队列编辑弹窗的定时列表/任务列表）**：onDrop 按 `data-dnd-id`（渲染下标）重排 `queueDraft` 数组，任务卡重排时同步重设 `index`，sync 按元素携带下标（`data-ts-idx`/`data-task-idx`）写回原数组项。
+
+### 10.8 插件扩展指南
+
+数据化专项插件采用运行目录 `plugins/<ArtifactName>/plugin.json + data/`，managed-code 插件采用同一目录下的 `plugin.json + entryAssembly`。manifest 的 `name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装和发行物理身份。实现与主仓库分离，官方源目录和包资产位于 `NexusPipeline-Plugins`。通知和模拟器属于宿主内置基础设施，不再拥有插件身份。数据化 capability 通过 `plugin.json` 的 `capabilities` 数组登记；旧 `supportsEmulator: true` 自动映射为 `emulator` key。宿主兼容 schema 1，并在启动时对已存在的旧目录执行布局迁移。
+
+插件仓库与本地运行目录：
+
+- `PluginManager` 只扫描当前安装目录 `plugins/<ArtifactName>/`，schema 2 要求物理目录名与 manifest.artifactName 完全一致；逻辑身份取 manifest.name。它不读取网络，也不决定包下载策略。
+- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟内存缓存，过期时请求网络；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。catalog 由插件自身的 manifest、store 和包生成。
+- 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录逻辑机器 ID、目标 artifactName、来源身份和跨重启事务，启动时按旧事务恢复、物理布局迁移、状态升级、插件扫描的顺序处理。
+- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 仅作可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
+- Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；操作完成后提示重启生效。
+- managed-code 用户级设置端点为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`；用户列表徽章使用单次聚合端点 `GET /api/plugin-contributions/user-list-badges`，宿主负责异常隔离、白名单校验和 HTML 展示数据投影。
+- v1.3 通用 UI 贡献使用 `POST /api/plugin-contributions/ui/query`、`PUT /api/plugin-contributions/ui/{plugin}/{contribution}` 和 `POST /api/plugin-contributions/ui/{plugin}/{contribution}/action/{action}`；插件 Web API 使用 `GET|POST|PUT|PATCH|DELETE /api/plugin-api/{plugin}/<route>`。
+- `GET /api/plugin-runtime/frontend` 只发布已启用、运行态有效、版本兼容且资源清单有效的前端模块；公开静态资源限定在插件 `web/` 目录，并仅支持 GET/HEAD 与白名单 MIME。
+
+宿主外部网络出口：`OutboundHttpClientProvider` 按每次请求读取当前 `AppSettings`，统一供插件 catalog/包下载、宿主更新和 Webhook 使用。代理模式为 `none`、`system`、`http`；自定义代理的密码通过 `SecretStore` DPAPI 存储，API/UI 只返回占位符。SMTP、Control API、MCP 以及插件子进程不经过该出口；loopback 目标始终禁用代理。
+
+插件分类：
+
+| 类别 | 形态 | 职责 | 启用语义 |
+|---|---|---|---|
+| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1.4 + manifest | 通过通用用户数据、声明式设置、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP 和通知端口实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
+| 数据化专项插件 | `plugins/<ArtifactName>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好以机器 ID 为 key 写入 `AppSettings.PluginPreferences`，重启后应用 |
+
+> **通知通道**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
+
+Capability 扩展约束：
+
+- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1.4 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
+- 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。现有 `supportsEmulator` 仍兼容并映射为 `emulator`。
+- `PluginSummary` 负责 manifest 与本地展示元数据；`PluginManagementView` 负责跨控制面共享的运行态、展示元数据、商店归属和 pending 事务字段，Web、MCP 与状态接口从同一投影读取。
+- Plugin API v1.4 继续提供显式 `IPluginHostContext` / `IPluginHostContextV1_1` / `IPluginHostContextV1_2` / `IPluginHostContextV1_3` 服务端口；插件全局配置、插件级密钥、按用户配置/密钥和实体作用域数据分层存储于 `config/plugins/`，managed-code 插件停止时后台任务、UI/Web API/历史贡献、用户设置贡献、用户列表徽章和事件订阅统一取消。
+
+执行预览属于宿主控制的能力。插件需在 manifest 中声明 `execution-preview-client`，同时满足已启用且存在前端模块，才能通过 `ExecutionPreviewService` 获取预览；具体截图实现仍由宿主持有，插件身份负责能力声明与准入。
+
+编写插件：插件的 manifest、`resolve.json`、判断脚本、配置还原描述和默认配置模板组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在 [PLUGIN_API.md](PLUGIN_API.md)；本节只说明宿主模块边界和代码定位。
+
+- managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContextV1_3` 使用宿主提供的通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户全局管理、用户列表徽章、用户运行事件、HTTP、日志、通知和任务端口。
+- 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.2`，入口位于 `web/` 并导出 `activate(host)`；启用且兼容后由宿主直接加载，版本和声明变化继续经过 manifest、路径和资源校验。
+- 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份，宿主在保存脚本实例时固化解析结果。
+- 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
+
+### 10.9 功能定位指南（找代码）
+
+| 想找什么 | 去哪里 |
+|---|---|
+| 某 API 路由的实现 | `src/Web/ApiXxxHandler.cs`（`[ApiRoute]` 特性注册，见 `WebServer.Routes`） |
+| MCP 工具、端点或安全策略 | `src/Mcp/McpHost.cs`、`src/Mcp/McpSecurity.cs`、`src/Mcp/Mcp*Tools.cs`；业务规则进入 Application Commands/核心服务 |
+| 命令行某菜单 | `src/Cli/` 对应菜单类 |
+| 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
+| 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/ExecutionCoordinator.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
+| 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
+| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs`、`src/Plugins/PluginPackageService.cs`、`src/Plugins/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
+| 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
+| 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
+| 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
+| 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
+| 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
+| 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
+| 历史记录格式 | `src/Services/History/HistoryService.cs`、`src/Models/RunRecord.cs` |
+
+### 10.10 数据流速览
+
+```
+Web 请求      → WebServer → ApiXxxHandler → DispatchCenter/核心服务 → DataStore/Logger
+CLI / manage  → CliApiClient → Control API → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+MCP 请求      → McpHost → Mcp*Tools/McpToolContext → Application Command/核心服务 → DataStore/Logger
+Scheduler     → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
+运行结束 → ExecutionRunner → INotificationService → NotificationDispatcher → Webhook/SMTP；managed-code 插件 → IPluginNotificationService → NotificationDispatcher；同时向 ExecutionStateStore 提交完成意图
+```

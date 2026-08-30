@@ -49,7 +49,7 @@ internal static class RuntimeInitializer
         ctx.ReloadData();
         // 配置交换恢复的数据源由组合根装配（恢复路径不再反向依赖 RuntimeContext；
         // 所有进程模式共用，service/web 的 StartupPipeline 启动恢复与 CLI 运行时自愈均由此覆盖）。
-        ConfigSwapSession.ConfigureRecovery(new RuntimeConfigRecoveryDataSource(ctx.FindScript, ctx.SnapshotUsers));
+        ConfigSwapSession.ConfigureRecovery(ctx.FindScript, ctx.SnapshotUsers);
         if (Limits.Fatals.Count > 0)
         {
             foreach (string fatal in Limits.Fatals)

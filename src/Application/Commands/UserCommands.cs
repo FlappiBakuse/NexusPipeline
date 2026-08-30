@@ -398,7 +398,9 @@ internal static class UserCommands
         }
     }
 
-    /// <summary>旧脚本用户 URL 的新增适配，数据仍由全局用户与脚本绑定模型统一持有。</summary>
+    /// <summary>
+    /// 旧脚本用户 URL 的新增适配：按名字解析全局用户（缺失时创建），再走统一的 AddBinding。
+    /// </summary>
     public static OperationResult<NexusUser> AddCompatibilityBinding(
         string scriptId,
         ScriptUser candidate,
@@ -408,7 +410,6 @@ internal static class UserCommands
         {
             return Validation<NexusUser>(nameError);
         }
-
         RuntimeContext ctx = RuntimeContext.Instance;
         ScriptInstance? script = ctx.FindScript(scriptId);
         if (script is null)
@@ -420,143 +421,38 @@ internal static class UserCommands
             return Validation<NexusUser>(pluginError);
         }
 
-        NexusUser? target = null;
-        UserScriptBinding? binding = null;
-        string? error = null;
-        bool created = false;
-        bool gateHeld = false;
-        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-        try
+        string normalizedName = candidate.Name.Trim();
+        NexusUser? user;
+        lock (ctx.DataLock)
         {
-            bool changed = ctx.Center.TryExecuteLeaseMutation(
-                script.Id,
-                null,
-                () =>
-                {
-                    if (!gate.Wait(0))
-                    {
-                        error = "脚本正在运行或编辑配置中，无法新增用户";
-                        return;
-                    }
-                    gateHeld = true;
-                    try
-                    {
-                        if (UserConfigManager.EditSessions.Values.Any(session => session.Script.Id == script.Id))
-                        {
-                            error = "脚本正在编辑配置中，无法新增用户";
-                            return;
-                        }
-
-                        ScriptInstance snapshotScript;
-                        lock (ctx.DataLock)
-                        {
-                            string normalizedName = candidate.Name.Trim();
-                            target = ctx.Users.FirstOrDefault(user =>
-                                string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
-                            if (target is not null && target.Bindings.Any(item => item.ScriptInstanceId == script.Id))
-                            {
-                                error = "用户名重复：该脚本已存在同名用户";
-                                return;
-                            }
-                            error = Limits.CheckUserCount(ctx.Users.Sum(user => user.Bindings.Count(item => item.ScriptInstanceId == script.Id)));
-                            if (error is not null)
-                            {
-                                return;
-                            }
-                            if (target is null)
-                            {
-                                error = Limits.CheckGlobalUserCount(ctx.Users.Count);
-                                if (error is not null)
-                                {
-                                    return;
-                                }
-                                target = new NexusUser
-                                {
-                                    Id = Guid.NewGuid().ToString("N"),
-                                    Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
-                                    Name = normalizedName,
-                                };
-                                ctx.Users.Add(target);
-                                created = true;
-                            }
-                            binding = NormalizeBindingForUser(
-                                target,
-                                CompatibilityBinding(candidate, script.Id));
-                            target.Bindings.Add(binding);
-                            snapshotScript = script.Clone();
-                        }
-
-                        string? snapshotError = UserConfigManager.SnapshotOnAddUser(
-                            snapshotScript,
-                            target.Id,
-                            ctx.Resolve<IPluginCapabilityResolver>());
-                        if (snapshotError is not null)
-                        {
-                            error = "初始配置快照失败：" + snapshotError;
-                            lock (ctx.DataLock)
-                            {
-                                target.Bindings.Remove(binding);
-                                if (created)
-                                {
-                                    ctx.Users.Remove(target);
-                                }
-                            }
-                            return;
-                        }
-
-                        lock (ctx.DataLock)
-                        {
-                            try
-                            {
-                                DataStore.SaveUsers(ctx.Users);
-                            }
-                            catch
-                            {
-                                target.Bindings.Remove(binding);
-                                if (created)
-                                {
-                                    ctx.Users.Remove(target);
-                                }
-                                throw;
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        gate.Release();
-                        gateHeld = false;
-                    }
-                },
-                out IReadOnlyList<ExecutionLeaseReference> leases,
-                out string? failureCode);
-            if (!changed)
-            {
-                return LeaseConflict<NexusUser>(leases, $"script:{script.Id}:users", failureCode);
-            }
-            if (error is not null)
-            {
-                return IsBusy(error)
-                    ? Conflict<NexusUser>("resource_busy", error)
-                    : Validation<NexusUser>(error);
-            }
-            ctx.Scheduler.RevalidatePendingPlans();
-            Audit.Log(source, "添加用户（兼容 API）", $"{script.Name} / {target!.Name}");
-            return OperationResult<NexusUser>.Ok(target!);
+            user = ctx.Users.FirstOrDefault(item =>
+                string.Equals(item.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
         }
-        catch (Exception ex)
+        if (user is null)
         {
-            return Internal<NexusUser>(ex);
-        }
-        finally
-        {
-            if (gateHeld)
+            OperationResult<NexusUser> created = Create(normalizedName, null, source);
+            if (!created.Succeeded)
             {
-                gate.Release();
+                return OperationResult<NexusUser>.Failure(created.Error!);
             }
+            user = created.Value;
         }
+        if (user is null)
+        {
+            return NotFound<NexusUser>($"未找到用户：{normalizedName}");
+        }
+        OperationResult<UserScriptBinding> bound = AddBinding(user.Id, CompatibilityBinding(candidate, scriptId), source);
+        if (!bound.Succeeded)
+        {
+            return OperationResult<NexusUser>.Failure(bound.Error!);
+        }
+        return OperationResult<NexusUser>.Ok(user);
     }
 
-    /// <summary>旧脚本用户 URL 的编辑适配，用户名变化与绑定变化作为一次服务内事务落盘。</summary>
+    /// <summary>
+    /// 旧脚本用户 URL 的编辑适配：翻译为「全局用户改名（名字有变化时）→ UpdateBinding」。
+    /// 旧契约把两步并入一次事务；两步翻译在中途失败时保留已完成的改名。
+    /// </summary>
     public static OperationResult<NexusUser> UpdateCompatibilityBinding(
         string scriptId,
         string userReference,
@@ -567,7 +463,6 @@ internal static class UserCommands
         {
             return Validation<NexusUser>(nameError);
         }
-
         RuntimeContext ctx = RuntimeContext.Instance;
         ScriptInstance? script = ctx.FindScript(scriptId);
         if (script is null)
@@ -585,106 +480,28 @@ internal static class UserCommands
             return Validation<NexusUser>(pluginError);
         }
 
-        string? error = null;
-        bool gateHeld = false;
-        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-        try
+        string normalizedName = candidate.Name.Trim();
+        if (!string.Equals(target.Name, normalizedName, StringComparison.Ordinal))
         {
-            bool changed = ctx.Center.TryExecuteLeaseMutation(
-                script.Id,
-                target.Id,
-                () =>
-                {
-                    if (!gate.Wait(0))
-                    {
-                        error = "脚本正在运行或编辑配置中，无法更新用户";
-                        return;
-                    }
-                    gateHeld = true;
-                    try
-                    {
-                        error = CheckUserMutationBusy(ctx, target);
-                        if (error is not null)
-                        {
-                            return;
-                        }
-                        lock (ctx.DataLock)
-                        {
-                            int index = target.Bindings.IndexOf(binding);
-                            if (index < 0)
-                            {
-                                error = "用户绑定不存在";
-                                return;
-                            }
-                            string normalizedName = candidate.Name.Trim();
-                            if (ctx.Users.Any(user => !ReferenceEquals(user, target)
-                                && string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase)))
-                            {
-                                error = "用户名重复：全局用户已存在同名用户";
-                                return;
-                            }
-
-                            string previousName = target.Name;
-                            UserScriptBinding previousBinding = binding.Clone();
-                            UserScriptBinding replacement = CompatibilityBinding(candidate, script.Id, previousBinding);
-                            if (CheckLockedBindingUpdate(target, previousBinding, replacement) is string overrideError)
-                            {
-                                error = overrideError;
-                                return;
-                            }
-                            try
-                            {
-                                target.Name = normalizedName;
-                                target.Bindings[index] = replacement;
-                                DataStore.SaveUsers(ctx.Users);
-                                binding = replacement;
-                            }
-                            catch
-                            {
-                                target.Name = previousName;
-                                target.Bindings[index] = previousBinding;
-                                throw;
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        gate.Release();
-                        gateHeld = false;
-                    }
-                },
-                out IReadOnlyList<ExecutionLeaseReference> leases,
-                out string? failureCode);
-            if (!changed)
+            OperationResult<NexusUser> renamed = Update(target.Id, normalizedName, target.Remark, source);
+            if (!renamed.Succeeded)
             {
-                return LeaseConflict<NexusUser>(leases, $"user:{script.Id}:{target.Id}", failureCode);
-            }
-            if (error is not null)
-            {
-                return error.StartsWith("global_override_active|", StringComparison.Ordinal)
-                    ? Conflict<NexusUser>("global_override_active", GlobalOverrideMessage(error))
-                    : IsBusy(error)
-                    ? Conflict<NexusUser>("resource_busy", error)
-                    : Validation<NexusUser>(error);
-            }
-            ctx.Scheduler.RevalidatePendingPlans();
-            Audit.Log(source, "更新用户（兼容 API）", $"{script.Name} / {target.Name}");
-            return OperationResult<NexusUser>.Ok(target);
-        }
-        catch (Exception ex)
-        {
-            return Internal<NexusUser>(ex);
-        }
-        finally
-        {
-            if (gateHeld)
-            {
-                gate.Release();
+                return OperationResult<NexusUser>.Failure(renamed.Error!);
             }
         }
+        OperationResult<UserScriptBinding> updated = UpdateBinding(
+            target.Id,
+            scriptId,
+            CompatibilityBinding(candidate, scriptId, binding),
+            source);
+        if (!updated.Succeeded)
+        {
+            return OperationResult<NexusUser>.Failure(updated.Error!);
+        }
+        return OperationResult<NexusUser>.Ok(target);
     }
 
-    /// <summary>旧脚本用户 URL 的删除适配；保留全局用户，移除该脚本下的绑定与配置数据。</summary>
+    /// <summary>旧脚本用户 URL 的删除适配；保留全局用户，仅解除该脚本绑定（与 DeleteBinding 同语义）。</summary>
     public static OperationResult<bool> DeleteCompatibilityBinding(
         string scriptId,
         string userReference,
@@ -702,89 +519,10 @@ internal static class UserCommands
         {
             return NotFound<bool>("用户绑定不存在");
         }
-
-        string? error = null;
-        bool gateHeld = false;
-        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-        try
-        {
-            bool changed = ctx.Center.TryExecuteLeaseMutation(
-                script.Id,
-                target.Id,
-                () =>
-                {
-                    if (!gate.Wait(0))
-                    {
-                        error = "脚本正在运行或编辑配置中，无法删除用户";
-                        return;
-                    }
-                    gateHeld = true;
-                    try
-                    {
-                        error = CheckUserMutationBusy(ctx, target);
-                        if (error is not null)
-                        {
-                            return;
-                        }
-                        lock (ctx.DataLock)
-                        {
-                            int index = target.Bindings.IndexOf(binding);
-                            if (index < 0)
-                            {
-                                error = "用户绑定不存在";
-                                return;
-                            }
-                            target.Bindings.RemoveAt(index);
-                            try
-                            {
-                                DataStore.SaveUsers(ctx.Users);
-                                UserConfigManager.RemoveUserData(script.Id, target.Id);
-                                ctx.Plugins.DeleteUserScriptData(target.Id, script.Id);
-                            }
-                            catch
-                            {
-                                target.Bindings.Insert(index, binding);
-                                DataStore.SaveUsers(ctx.Users);
-                                throw;
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        gate.Release();
-                        gateHeld = false;
-                    }
-                },
-                out IReadOnlyList<ExecutionLeaseReference> leases,
-                out string? failureCode);
-            if (!changed)
-            {
-                return LeaseConflict<bool>(leases, $"user:{script.Id}:{target.Id}", failureCode);
-            }
-            if (error is not null)
-            {
-                return IsBusy(error)
-                    ? Conflict<bool>("resource_busy", error)
-                    : Validation<bool>(error);
-            }
-            ctx.Scheduler.RevalidatePendingPlans();
-            Audit.Log(source, "解除用户绑定（兼容 API）", $"{script.Name} / {target.Name}");
-            return OperationResult<bool>.Ok(true);
-        }
-        catch (Exception ex)
-        {
-            return Internal<bool>(ex);
-        }
-        finally
-        {
-            if (gateHeld)
-            {
-                gate.Release();
-            }
-        }
+        return DeleteBinding(target.Id, scriptId, source);
     }
 
-    /// <summary>旧脚本用户 URL 的排序适配，按绑定用户顺序重排全局用户索引。</summary>
+    /// <summary>旧脚本用户 URL 的排序适配：把脚本绑定用户的新顺序翻译为全局用户 Index 重排。</summary>
     public static OperationResult<bool> ReorderCompatibility(
         string scriptId,
         IReadOnlyList<string>? names,
@@ -796,84 +534,48 @@ internal static class UserCommands
         {
             return NotFound<bool>($"未找到脚本实例：{scriptId}");
         }
-
-        string? error = null;
-        bool gateHeld = false;
+        IReadOnlyList<ExecutionLeaseReference> leases = ctx.Center.FindLeases(script.Id);
+        if (leases.Count > 0)
+        {
+            return LeaseConflict<bool>(leases, $"script:{script.Id}:users");
+        }
         SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        if (!gate.Wait(0))
+        {
+            return Validation<bool>("脚本正在运行或编辑配置中，无法调整用户顺序");
+        }
         try
         {
-            bool changed = ctx.Center.TryExecuteLeaseMutation(
-                script.Id,
-                null,
-                () =>
+            List<string> ids;
+            lock (ctx.DataLock)
+            {
+                List<NexusUser> bound = ctx.Users
+                    .Where(user => user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id))
+                    .OrderBy(user => user.Index)
+                    .ToList();
+                if (names is null || names.Count != bound.Count || names.Any(string.IsNullOrWhiteSpace)
+                    || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
                 {
-                    if (!gate.Wait(0))
-                    {
-                        error = "脚本正在运行或编辑配置中，无法调整用户顺序";
-                        return;
-                    }
-                    gateHeld = true;
-                    try
-                    {
-                        lock (ctx.DataLock)
-                        {
-                            List<NexusUser> bound = ctx.Users
-                                .Where(user => user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id))
-                                .OrderBy(user => user.Index)
-                                .ToList();
-                            if (names is null || names.Count != bound.Count || names.Any(string.IsNullOrWhiteSpace)
-                                || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
-                            {
-                                error = "用户顺序名单缺失或与当前用户列表不一致";
-                                return;
-                            }
-                            Dictionary<string, NexusUser> byName = bound.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
-                            if (names.Any(name => !byName.ContainsKey(name)))
-                            {
-                                error = "用户顺序名单与当前用户列表不一致";
-                                return;
-                            }
-                            HashSet<string> boundIds = bound.Select(user => user.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                            List<NexusUser> ordered = names.Select(name => byName[name])
-                                .Concat(ctx.Users.Where(user => !boundIds.Contains(user.Id)).OrderBy(user => user.Index))
-                                .ToList();
-                            for (int i = 0; i < ordered.Count; i++)
-                            {
-                                ordered[i].Index = i;
-                            }
-                            DataStore.SaveUsers(ctx.Users);
-                        }
-                    }
-                    finally
-                    {
-                        gate.Release();
-                        gateHeld = false;
-                    }
-                },
-                out IReadOnlyList<ExecutionLeaseReference> leases,
-                out string? failureCode);
-            if (!changed)
-            {
-                return LeaseConflict<bool>(leases, $"script:{script.Id}:users", failureCode);
+                    return Validation<bool>("用户顺序名单缺失或与当前用户列表不一致");
+                }
+                Dictionary<string, NexusUser> byName = bound.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
+                if (names.Any(name => !byName.ContainsKey(name)))
+                {
+                    return Validation<bool>("用户顺序名单与当前用户列表不一致");
+                }
+                HashSet<string> boundIds = bound.Select(user => user.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                ids = names.Select(name => byName[name].Id)
+                    .Concat(ctx.Users
+                        .Where(user => !boundIds.Contains(user.Id))
+                        .OrderBy(user => user.Index)
+                        .Select(user => user.Id))
+                    .ToList();
             }
-            if (error is not null)
-            {
-                return Validation<bool>(error);
-            }
-            ctx.Scheduler.RevalidatePendingPlans();
-            Audit.Log(source, "调整用户顺序（兼容 API）", script.Name);
-            return OperationResult<bool>.Ok(true);
-        }
-        catch (Exception ex)
-        {
-            return Internal<bool>(ex);
+            return Reorder(ids, source);
         }
         finally
         {
-            if (gateHeld)
-            {
-                gate.Release();
-            }
+            gate.Release();
         }
     }
 

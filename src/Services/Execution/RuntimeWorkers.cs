@@ -19,8 +19,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     private readonly Action<string> _statusChanged;
     private readonly Func<int, JudgeSnapshot> _captureSnapshot;
     private readonly Action<List<string>> _replaceRequested;
-    private readonly SingleFlightJudgeWorker _judgeWorker;
-    private readonly ConfigSyncWorker _configSyncWorker;
+    private readonly SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult> _judgeWorker;
+    private readonly SingleFlightWorker<ConfigSyncRequest, bool> _configSyncWorker;
 
     private int _judgeGeneration;
     private int _finalJudgeGeneration = -1;
@@ -52,7 +52,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         _statusChanged = statusChanged;
         _captureSnapshot = captureSnapshot;
         _replaceRequested = replaceRequested;
-        _judgeWorker = new SingleFlightJudgeWorker(async (snapshot, workerToken) =>
+        _judgeWorker = new SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult>(async (snapshot, workerToken) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, _operationToken);
             JudgeScriptResult judgeResult = await JudgeScriptRunner.ExecuteAsync(
@@ -74,7 +74,11 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                 judgeResult,
                 DateTime.Now);
         });
-        _configSyncWorker = new ConfigSyncWorker(configSync);
+        _configSyncWorker = new SingleFlightWorker<ConfigSyncRequest, bool>((request, _) =>
+        {
+            configSync(request);
+            return Task.FromResult(true);
+        });
     }
 
     public bool TryStartConfigSync(ConfigSyncRequest request) => _configSyncWorker.TryStart(request);

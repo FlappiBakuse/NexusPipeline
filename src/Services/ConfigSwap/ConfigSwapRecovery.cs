@@ -6,17 +6,19 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// 配置交换恢复：脚本/用户读取经 <see cref="IConfigRecoveryDataSource"/> 注入，
-/// 不再反向依赖组合根。仅改调用方式，磁盘协议与判定语义不变；实例由组合根装配（RuntimeInitializer），
-/// 恢复重试循环为进程内单实例。
+/// 配置交换恢复：脚本/用户读取经组合根注入的委托完成，
+/// 不再反向依赖组合根。仅改调用方式，磁盘协议与判定语义不变；
+/// 实例由组合根装配（RuntimeInitializer），恢复重试循环为进程内单实例。
 /// </summary>
 internal sealed class ConfigSwapRecovery
 {
-    private readonly IConfigRecoveryDataSource _dataSource;
+    private readonly Func<string, ScriptInstance?> _findScript;
+    private readonly Func<IReadOnlyList<NexusUser>> _snapshotUsers;
 
-    public ConfigSwapRecovery(IConfigRecoveryDataSource dataSource)
+    public ConfigSwapRecovery(Func<string, ScriptInstance?> findScript, Func<IReadOnlyList<NexusUser>> snapshotUsers)
     {
-        _dataSource = dataSource;
+        _findScript = findScript;
+        _snapshotUsers = snapshotUsers;
     }
 
     /* ---------------- 会话与恢复 ---------------- */
@@ -93,7 +95,7 @@ internal sealed class ConfigSwapRecovery
     /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store.previous，临时目录只作为未完成事务清理。</summary>
     private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
-        IEnumerable<NexusUser> source = users ?? _dataSource.SnapshotUsers();
+        IEnumerable<NexusUser> source = users ?? _snapshotUsers();
         var result = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         foreach (NexusUser user in source)
         {
@@ -226,7 +228,7 @@ internal sealed class ConfigSwapRecovery
     /// <summary>会话标记损坏时，使用当前脚本固化的 ConfigPath 和 original 目录形态做保守恢复。</summary>
     private bool RecoverCorruptMark(string scriptId, string userName)
     {
-        ScriptInstance? script = _dataSource.FindScript(scriptId);
+        ScriptInstance? script = _findScript(scriptId);
         if (script is null || string.IsNullOrWhiteSpace(script.ConfigPath))
         {
             Logger.Error($"[错误] 配置会话标记损坏且无法找到脚本配置路径：脚本 {scriptId} / 用户 {userName}");
@@ -266,7 +268,7 @@ internal sealed class ConfigSwapRecovery
     /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false（保持旧恢复行为）。</summary>
     private bool ScriptProcessRunning(string scriptId)
     {
-        ScriptInstance? script = _dataSource.FindScript(scriptId);
+        ScriptInstance? script = _findScript(scriptId);
         if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
         {
             return false;

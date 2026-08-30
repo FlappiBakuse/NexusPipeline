@@ -115,7 +115,6 @@ internal static class ApiSettingsHandler
             settings.WebPort,
             settings.McpEnabled,
             settings.McpPort,
-            settings.McpAllowDestructiveTools,
             settings.ProxyMode,
             settings.ProxyUrl,
             settings.ProxyUsername,
