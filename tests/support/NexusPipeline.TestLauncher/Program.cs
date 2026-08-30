@@ -255,7 +255,7 @@ static SafeNativeHandle CreateRestrictedMediumToken(IntPtr currentToken)
 
         if (!NativeMethods.CreateRestrictedToken(
             currentToken,
-            NativeMethods.DisableMaxPrivilege,
+            NativeMethods.DisableMaxPrivilege | NativeMethods.LuaToken,
             (uint)sidPointers.Length,
             sidAttributes,
             0,
@@ -316,13 +316,16 @@ static void SetMediumIntegrity(IntPtr token)
                 Attributes = NativeMethods.SeGroupIntegrity,
             },
         };
-        labelBuffer = Marshal.AllocHGlobal(Marshal.SizeOf<NativeMethods.TokenMandatoryLabel>());
+        var labelLength = checked(
+            Marshal.SizeOf<NativeMethods.TokenMandatoryLabel>()
+            + (int)NativeMethods.GetLengthSid(mediumSid));
+        labelBuffer = Marshal.AllocHGlobal(labelLength);
         Marshal.StructureToPtr(label, labelBuffer, false);
         if (!NativeMethods.SetTokenInformation(
             token,
             NativeMethods.TokenIntegrityLevel,
             labelBuffer,
-            Marshal.SizeOf<NativeMethods.TokenMandatoryLabel>()))
+            labelLength))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "SetTokenInformation(TokenIntegrityLevel) 失败");
         }
@@ -641,6 +644,7 @@ static class NativeMethods
     public const int TokenPrimary = 1;
     public const uint MediumIntegrityRid = 0x2000;
     public const uint DisableMaxPrivilege = 0x00000001;
+    public const uint LuaToken = 0x00000004;
     public const uint SeGroupEnabled = 0x00000004;
     public const uint SeGroupIntegrity = 0x00000020;
     public const int ErrorInvalidParameter = 87;
@@ -731,6 +735,9 @@ static class NativeMethods
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ConvertStringSidToSid(string stringSid, out IntPtr sid);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    public static extern uint GetLengthSid(IntPtr sid);
 
     [DllImport("advapi32.dll", EntryPoint = "ConvertSidToStringSidW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
