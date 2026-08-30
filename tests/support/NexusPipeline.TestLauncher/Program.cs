@@ -164,35 +164,65 @@ static int RunWithLogon(string[] command, string userName, string password, stri
 {
     var commandLine = new StringBuilder(string.Join(" ", command.Select(QuoteArgument)));
     NativeMethods.ProcessInformation processInfo;
-    using (var standardHandles = DuplicateStandardHandles())
+    var environment = CreateInheritedUserEnvironment(userName, password, domain);
+    try
     {
-        var startupInfo = new NativeMethods.StartupInfo
+        using (var standardHandles = DuplicateStandardHandles())
         {
-            cb = Marshal.SizeOf<NativeMethods.StartupInfo>(),
-            dwFlags = NativeMethods.StartfUseStdHandles,
-            hStdInput = standardHandles.Input.Handle,
-            hStdOutput = standardHandles.Output.Handle,
-            hStdError = standardHandles.Error.Handle,
-        };
+            var startupInfo = new NativeMethods.StartupInfo
+            {
+                cb = Marshal.SizeOf<NativeMethods.StartupInfo>(),
+                dwFlags = NativeMethods.StartfUseStdHandles,
+                hStdInput = standardHandles.Input.Handle,
+                hStdOutput = standardHandles.Output.Handle,
+                hStdError = standardHandles.Error.Handle,
+            };
 
-        if (!NativeMethods.CreateProcessWithLogon(
-            userName,
-            domain,
-            password,
-            NativeMethods.LogonWithProfile,
-            null,
-            commandLine,
-            NativeMethods.CreateUnicodeEnvironment,
-            IntPtr.Zero,
-            Environment.CurrentDirectory,
-            ref startupInfo,
-            out processInfo))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessWithLogonW 失败");
+            if (!NativeMethods.CreateProcessWithLogon(
+                userName,
+                domain,
+                password,
+                NativeMethods.LogonWithProfile,
+                null,
+                commandLine,
+                NativeMethods.CreateUnicodeEnvironment,
+                environment,
+                Environment.CurrentDirectory,
+                ref startupInfo,
+                out processInfo))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessWithLogonW 失败");
+            }
         }
+    }
+    finally
+    {
+        NativeMethods.DestroyEnvironmentBlock(environment);
     }
 
     return WaitForProcess(processInfo);
+}
+
+static IntPtr CreateInheritedUserEnvironment(string userName, string password, string domain)
+{
+    if (!NativeMethods.LogonUser(
+        userName,
+        domain,
+        password,
+        NativeMethods.Logon32LogonInteractive,
+        NativeMethods.Logon32ProviderDefault,
+        out var tokenHandle))
+    {
+        throw new Win32Exception(Marshal.GetLastWin32Error(), "LogonUserW 失败");
+    }
+
+    using var token = new SafeNativeHandle(tokenHandle);
+    if (!NativeMethods.CreateEnvironmentBlock(out var environment, token.Handle, true))
+    {
+        throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateEnvironmentBlock 失败");
+    }
+
+    return environment;
 }
 
 static InheritedStandardHandles DuplicateStandardHandles()
@@ -705,6 +735,8 @@ static class NativeMethods
     public const uint Infinite = 0xFFFFFFFF;
     public const uint WaitObject0 = 0;
     public const uint LogonWithProfile = 0x00000001;
+    public const int Logon32LogonInteractive = 2;
+    public const int Logon32ProviderDefault = 0;
     public const uint CreateUnicodeEnvironment = 0x00000400;
     public const uint DuplicateSameAccess = 0x00000002;
     public const int StdInputHandle = -10;
@@ -795,6 +827,27 @@ static class NativeMethods
     [DllImport("advapi32.dll", EntryPoint = "ConvertSidToStringSidW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr stringSid);
+
+    [DllImport("advapi32.dll", EntryPoint = "LogonUserW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool LogonUser(
+        string userName,
+        string domain,
+        string password,
+        int logonType,
+        int logonProvider,
+        out IntPtr token);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateEnvironmentBlock(
+        out IntPtr environment,
+        IntPtr token,
+        [MarshalAs(UnmanagedType.Bool)] bool inherit);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyEnvironmentBlock(IntPtr environment);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
