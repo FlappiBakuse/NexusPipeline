@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem v0.11.9 起自动化 UI/System Smoke 使用 tests/.artifacts/test-host 的 asInvoker 宿主。
+rem This produces the production release used by Administrator Gate; Codex Feedback builds a separate Test Host.
 rem Plugin repository is maintained separately; the source hash covers host src and static wwwroot is synced independently.
 rem .build-src-hash records the host source fingerprint used to skip unchanged publishes.
 for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs"`) do set SRC_HASH=%%h
@@ -22,7 +22,7 @@ mkdir "%~dp0release\plugins" >nul 2>nul
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
 echo Production executable uses the requireAdministrator manifest.
-echo UI/System Smoke builds an isolated asInvoker Test Host automatically.
+echo Codex Feedback Smoke uses an isolated asInvoker Test Host; Administrator Gate uses this production release.
 echo Runtime data directories are created on first launch.
 exit /b 0
 

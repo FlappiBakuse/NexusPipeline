@@ -3,21 +3,30 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  isMediumIntegrity,
+  isAdministrator,
   isProcessAlive,
   killProcessTree,
   readPidFile,
   waitForExit,
 } from "../support/windows-process.mjs";
 
+export { isAdministrator };
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
 const productionReleaseDir = path.join(projectRoot, "release");
+const executionMode = process.env.NEXUS_TEST_MODE?.trim().toLowerCase();
+if (executionMode !== "codex" && executionMode !== "admin") {
+  throw new Error("System Smoke 必须通过 tests\\run.mjs 显式选择模式：codex 或 admin。");
+}
+export { executionMode };
+export const isCodexMode = executionMode === "codex";
+export const isAdminMode = executionMode === "admin";
 const configuredTestHostDir = process.env.NEXUS_TEST_HOST_DIR?.trim();
 export const testHostDir = configuredTestHostDir
   ? (path.isAbsolute(configuredTestHostDir) ? configuredTestHostDir : path.resolve(projectRoot, configuredTestHostDir))
   : path.join(projectRoot, "tests", ".artifacts", "test-host");
-export const releaseDir = process.env.NEXUS_TEST_HOST === "1" ? testHostDir : productionReleaseDir;
+export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
 const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
 if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
@@ -25,10 +34,9 @@ if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
 export const runtimeDir = path.join(here, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
-export const testHostExitFile = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim()
-  ? (path.isAbsolute(process.env.NEXUS_TEST_HOST_EXIT_FILE.trim())
-    ? process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()
-    : path.resolve(projectRoot, process.env.NEXUS_TEST_HOST_EXIT_FILE.trim()))
+const configuredTestHostExitFile = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim();
+export const testHostExitFile = configuredTestHostExitFile
+  ? (path.isAbsolute(configuredTestHostExitFile) ? configuredTestHostExitFile : path.resolve(projectRoot, configuredTestHostExitFile))
   : path.join(runtimeDir, ".nxp", "test-host.exit");
 const webPortPath = path.join(runtimeDir, ".nxp", "runtime", "web.port");
 export const baseUrl = "http://127.0.0.1:58731/";
@@ -53,10 +61,6 @@ export function serviceUrl() {
   return baseUrl;
 }
 
-export function isNormalIntegrity() {
-  return isMediumIntegrity();
-}
-
 function ownedPids() {
   const pids = new Set();
   const marked = readPidFile(servicePidPath);
@@ -72,7 +76,7 @@ export function prepareRuntime() {
   fs.mkdirSync(runtimeDir, { recursive: true });
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) {
-    throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs system`);
+    throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
   }
   fs.copyFileSync(sourceExe, runtimeExe);
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
@@ -95,9 +99,7 @@ export function isRuntimeAlive(pid) {
 export function startRuntime(args = [], extraEnv = {}) {
   stdout = "";
   stderr = "";
-  if (process.env.NEXUS_TEST_HOST === "1") {
-    fs.rmSync(testHostExitFile, { force: true });
-  }
+  if (isCodexMode) fs.rmSync(testHostExitFile, { force: true });
   const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
     .filter(Boolean)
     .join(",");
@@ -112,9 +114,15 @@ export function startRuntime(args = [], extraEnv = {}) {
     HTTPS_PROXY: "",
     http_proxy: "",
     https_proxy: "",
-    NEXUS_TEST_HOST_EXIT_FILE: testHostExitFile,
+    NEXUS_TEST_MODE: executionMode,
     ...extraEnv,
   };
+  for (const key of ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"]) delete env[key];
+  if (isCodexMode) {
+    env.NEXUS_TEST_HOST = "1";
+    env.NEXUS_TEST_HOST_DIR = testHostDir;
+    env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
+  }
   // System Smoke 统一使用 web 模式：stdin EOF 可触发受控退出，重启测试不依赖管理员 taskkill。
   const launchArgs = args.length === 0 ? ["web"] : args;
   child = spawn(runtimeExe, launchArgs, {
@@ -131,7 +139,7 @@ export function startRuntime(args = [], extraEnv = {}) {
 
 export async function stopRuntime() {
   const currentChild = child;
-  if (process.env.NEXUS_TEST_HOST === "1") {
+  if (isCodexMode) {
     fs.mkdirSync(path.dirname(testHostExitFile), { recursive: true });
     fs.writeFileSync(testHostExitFile, "stop\n", "utf8");
   }

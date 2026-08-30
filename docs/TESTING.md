@@ -75,7 +75,6 @@
 统一 Node 调度器是活动测试的规范入口。以下命令均在项目根目录执行：
 
 ```text
-node tests\run.mjs default
 node tests\run.mjs unit
 node tests\run.mjs web
 node tests\run.mjs docs
@@ -83,48 +82,90 @@ node tests\run.mjs syntax
 node tests\run.mjs build
 ```
 
-`default` 按 Unit + Component → Web Logic → 文档一致性 → UI Smoke 语法 → 构建顺序执行，并实时转发每个子进程的输出。
+`unit`、`web`、`docs`、`syntax` 和 `build` 可在受限 Codex 终端中运行。`default`、`ui`、`system`、`all` 属于组合入口，必须显式选择执行模式：
 
-## 权限边界与普通权限 Test Host
+```text
+node tests\run.mjs codex default
+node tests\run.mjs codex ui
+node tests\run.mjs codex system
+node tests\run.mjs codex all
 
-正式产品构建继续使用 `requireAdministrator` 清单，满足脚本进程控制、系统操作和托盘运行边界。活动自动化测试统一要求当前终端为 Medium integrity 普通权限，由 Node 调度器在 `tests/.artifacts/test-host/` 构建 `asInvoker` Test Host。
-
-Test Host 具备以下测试专用能力：
-
-- 只绑定 `127.0.0.1` 的托管 loopback HTTP transport，不依赖 HTTP.sys URLACL；业务路由、认证、静态资源和 API 处理逻辑与生产 WebServer 共用；
-- 运行数据写入每个 suite 自己的 `tests/system/runtime-*/` 或 `tests/e2e/runtime/`；
-- 使用隔离退出信号收尾常驻服务、重启子进程和更新 worker，runner 不需要 UAC 或管理员进程树权限；
-- 测试宿主包含 `NEXUS_TEST_HOST` 编译常量，生产宿主不加载测试回退逻辑。
-
-执行前用以下命令确认当前 token 为 Medium：
-
-```powershell
-whoami /groups | Select-String 'S-1-16-8192'
+node tests\run.mjs admin default
+node tests\run.mjs admin ui
+node tests\run.mjs admin system
+node tests\run.mjs admin all
 ```
 
-UI/System Smoke 的普通权限前置检查返回 exit code `2` 时，测试视为阻断且发布门禁未完成。保留权限检查、修复环境或测试编排，并记录阻断原因。GitHub Actions 的 Windows runner 以管理员身份运行且关闭 UAC；`tests/support/NexusPipeline.TestLauncher` 保持 runner 用户与环境变量不变，通过 linked filtered token 或当前 token 派生的 restricted Medium token 启动测试，测试本身的权限校验保持有效。
+省略 `codex` 或 `admin` 的组合入口会打印用法并返回 exit code `2`，避免测试结果失去运行语义。
 
-### Medium Token Normalizer 与 CI 可观测性
+## 权限边界与双模式门禁
 
-TestLauncher 根据当前 token 选择三条路径：
+正式产品构建使用 `requireAdministrator` 清单，满足脚本进程控制、系统操作和托盘运行边界。测试分成两个明确模式：Codex 本地反馈与 Administrator 正式门禁。
 
-- 当前已经是 Medium Integrity：使用当前用户 token 的可创建进程副本，诊断为 `mode=current-token`。
-- 当前为 elevated token 且存在 UAC linked token：使用 filtered token，诊断为 `mode=linked-token`。
-- 当前为 elevated token 且没有 linked token：调用 `CreateRestrictedToken`，禁用 Administrators 与 Power Users SID、关闭最大特权，再将完整性级别设置为 Medium，诊断为 `mode=restricted-token`。
+| Mode | 权限 | Runtime | LLM 可本地执行 | 正式管理员门禁 |
+|---|---|---|---:|---:|
+| Unit/Web/Docs/Syntax | 普通即可 | 不启动正式 App | 是 | 部分 |
+| `codex` | 普通/受限即可 | `NexusTestHost=true` 的 Test Host | 是 | 否 |
+| `admin` | High/System | `release/nexus-pipeline.exe` | 由 CI 执行 | 是 |
+| GitHub CI | Administrator，UAC disabled | Production Release | 自动远程执行 | 是 |
 
-LocalSystem/System Integrity 没有安全的普通用户降级路径时直接以 exit code `2` 结束。每次启动测试前，TestLauncher 输出 `mode`、`integrity`、`restricted` 和 `administrator-enabled`；token 不满足 Medium 或管理员组仍处于启用状态时拒绝启动。
+执行管理员模式前可用以下命令核对完整性 SID：
 
-TestLauncher 使用可继承的标准输入、输出和错误句柄调用 `CreateProcessAsUser`，测试进程及其后代的 stdout/stderr 直接进入当前终端或 GitHub Actions step。`tests/support/launcher-probe.mjs` 在 CI 的测试前置步骤中检查 stdout marker、stderr marker、Medium integrity 和 `NEXUS_LAUNCHER_PROBE` 环境变量；launcher 无法建立安全 token 或子进程时返回 exit code `2`。
+```powershell
+whoami /groups | Select-String 'S-1-16-(12288|16384)'
+```
+
+`S-1-16-12288` 表示 High，`S-1-16-16384` 表示 System。`admin default|ui|system|all` 与管理员 UI/System 直接入口在权限不足时打印诊断并返回 exit code `2`；不会触发 UAC、降级令牌或把阻断转成 skip。
+
+### Codex Feedback Mode
+
+`codex` 模式用于受限 Codex 的自主开发闭环：
+
+```text
+node tests\run.mjs codex all
+```
+
+UI/System 执行前会构建 `-p:NexusTestHost=true` 的临时宿主，使用 `src/app.test.manifest` 的 `asInvoker` 清单，运行目录为 `tests/.artifacts/test-host`。E2E/System 通过 `NEXUS_TEST_MODE=codex` 选择 Test Host，并使用隔离 runtime、stub、dry-run 和退出信号文件完成收尾。
+
+启动输出会标明：
+
+```text
+NexusPipeline CODEX FEEDBACK TEST
+Runtime: Test Host
+Administrator validation: deferred to GitHub CI
+```
+
+Codex Feedback PASS 表示本地功能反馈通过，仍需等待 GitHub Administrator Gate。
+
+### Administrator Gate Mode
+
+`admin` 模式是正式质量门禁：
+
+```text
+node tests\run.mjs admin default
+node tests\run.mjs admin ui
+node tests\run.mjs admin system
+```
+
+入口要求 High/System 完整性，固定使用 `release/nexus-pipeline.exe` 的生产构建，并清除 `NEXUS_TEST_HOST`、`NEXUS_TEST_HOST_DIR` 与 `NEXUS_TEST_HOST_EXIT_FILE`。权限不足返回 `2`，不会切换到 Test Host。
+
+直接执行 `npx playwright test` 或直接运行 System suite 时必须先设置明确的 `NEXUS_TEST_MODE`，推荐始终通过 `tests/run.mjs` 进入；缺少模式会直接报错。
 
 ## UI Smoke
 
-在项目根目录执行：
+Codex 本地反馈：
 
 ```text
-node tests\run.mjs ui
+node tests\run.mjs codex ui
 ```
 
-入口会使用 `whoami /groups` 的完整性 SID 检查 Medium integrity，并自动构建隔离的 `asInvoker` Test Host；不在测试内部触发 UAC。`tests/e2e/run-e2e.cmd` 仅保留为兼容转发入口。
+GitHub Administrator Gate：
+
+```text
+node tests\run.mjs admin ui
+```
+
+两种入口运行相同的 Playwright assertions。Codex 入口构建并启动 Test Host，管理员入口构建并启动 `release/nexus-pipeline.exe`；global setup 会再次核对当前模式，管理员模式还会检查 Administrator / High Integrity 或 System Integrity。`tests/e2e/run-e2e.cmd` 保留为 Codex 反馈模式兼容转发入口。
 
 当前 UI Smoke 使用四个 spec 文件：
 
@@ -150,17 +191,18 @@ tests/e2e/tests/
 
 新增或保留 UI Smoke 前，测试说明应能回答“业务不变量、失败模式、最低充分层级”三项问题；能够在 Unit、Component、Web Logic 或 System Smoke 证明的行为不占用 UI 配额。断言优先定位稳定的 `data-testid`、`data-action` 和业务 ID；禁止依赖按钮顺序、装饰性 class、随机 CSS 层级、精确像素坐标、SVG 数量和完整磁盘文件内容。
 
-普通 UI Smoke 使用一次 global setup 启动 Test Host、一次 global teardown 关闭服务。服务意外退出应直接暴露为测试失败；服务重启、端口占用、进程树和 interpreter 场景由 System Smoke 独立负责。
+UI Smoke 使用一次 global setup 启动当前模式的隔离副本、一次 global teardown 关闭服务。服务意外退出应直接暴露为测试失败；服务重启、端口占用、进程树和 interpreter 场景由 System Smoke 独立负责。
 
 ## System Smoke
 
-System Smoke 需要普通权限终端；统一入口会先完成生产构建，再创建隔离的 Test Host：
+Codex 本地反馈与管理员门禁均使用同一组 System Smoke assertions，模式由命令显式选择：
 
 ```text
-node tests\run.mjs system
+node tests\run.mjs codex system
+node tests\run.mjs admin system
 ```
 
-统一入口当前按顺序覆盖 MCP、runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 六类跨层场景。MCP suite 还覆盖默认关闭、启用后的官方协议握手、结构化工具调用、已有危险完成操作拦截、运行轮询/取消、轻量模式和固定端口占用降级；runtime suite 覆盖通知测试失败、长 Webhook 请求、身份握手和重启维护窗口。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 仅保留为兼容转发入口。
+统一入口当前按顺序覆盖 MCP、runtime（含 CLI/Control API）、judge、execution-resilience、emulator 和 update 六类跨层场景。Codex 模式使用 Test Host、test-host exit signaling、isolated runtime、stub 和 dry-run；admin 模式使用 production release 并要求 High/System。MCP suite 还覆盖默认关闭、启用后的官方协议握手、结构化工具调用、已有危险完成操作拦截、运行轮询/取消、轻量模式和固定端口占用降级；runtime suite 覆盖通知测试失败、长 Webhook 请求、身份握手和重启维护窗口。测试辅助进程必须使用 `tests/system/runtime*/` 等隔离目录，并在结束时关闭服务和清理现场。`tests/system/run-system.cmd` 保留为 Codex 反馈模式兼容转发入口。
 
 ## 按需诊断与历史资产
 
@@ -180,7 +222,7 @@ node tests\stress\diagnostics\flake-monitor.mjs
 
 ## CI 与发布门禁
 
-CI 的主 job 先构建 `tests/support/NexusPipeline.TestLauncher`，运行 launcher probe，再通过它以 Medium Integrity 执行 `node tests\run.mjs default` 和 `node tests\run.mjs ui`；独立的 `system-tests` job 通过 `node tests\run.mjs build` 与 Medium Integrity 测试启动器执行 probe 和 `node tests\run.mjs system`，不加载 legacy。GitHub Actions 不创建临时测试账户、不写入测试账户密码、不递归修改 workspace ACL。发布前在 Medium integrity 普通权限终端完成 `default`、`ui` 和适用的 `system` 测试，并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
+CI 的主 job 和独立的 `system-tests` job 都先用完整性 SID 确认 Windows runner 为 High/System，再分别执行 `node tests\run.mjs admin default`、`node tests\run.mjs admin ui` 和 `node tests\run.mjs admin system`。GitHub Actions 不创建临时测试账户、不写入测试账户密码、不递归修改 workspace ACL，也不使用令牌降级启动器。发布前必须在 GitHub Administrator Gate 中完成这些测试并确认每项 exit code 为 `0`；任一项因权限检查返回 `2` 或因测试失败退出时，发布门禁未完成。发布验证记录实际通过数与耗时；Stress/Chaos 根据修改范围和专项风险决定。
 
 CI 中 Playwright 使用 `trace: retain-on-failure`，本地保持 `trace: off`。UI Smoke 失败时由 `actions/upload-artifact@v4` 上传 `tests/e2e/test-results`，用于补充同一 step 中已经实时显示的 suite、case、错误和 stack 信息。
 
@@ -192,4 +234,4 @@ flake 视为测试或产品同步问题。处理顺序为：降低测试层级�
 
 ## 测试隔离与清理
 
-运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/.artifacts/test-host/`、`tests/stress/runtime/` 或历史工具专用的 `tests/legacy/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，并清理 PID、停止信号、临时 Test Host、runtime、test-results 和专项日志。
+运行时数据必须位于 `tests/e2e/runtime/`、`tests/system/runtime*/`、`tests/stress/runtime/` 或历史工具专用的 `tests/legacy/runtime/`，禁止写入项目根目录的 `config/`、`data/`、`history/` 和 `logs/`。测试结束后停止产品进程，并清理 PID、runtime、test-results 和专项日志。

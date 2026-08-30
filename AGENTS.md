@@ -33,7 +33,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## Windows 与工具链注意事项
 
-- 生产程序和需要真实系统资源的运行边界保持管理员上下文；自动化测试统一在 Medium integrity 普通权限执行。UI/System Smoke 由 Node 调度器构建 `tests/.artifacts/test-host/` 下的 `asInvoker` Test Host，Test Host 使用隔离的托管 loopback transport 与测试退出信号。执行前用 `whoami /groups` 确认出现 `S-1-16-8192`（Medium）；测试 runner 返回权限错误时，验证状态为阻断，保留权限检查并修复环境或测试编排。
+- 生产程序和需要真实系统资源的运行边界保持管理员上下文；`admin default` / `admin ui` / `admin system` / `admin all` 是正式门禁，必须在 Administrator / High Integrity 或 System Integrity 执行。`codex` 模式是受限 Codex 的本地反馈路径：UI/System 使用 `NexusTestHost=true` 的 Test Host，不要求管理员权限，并在输出中标明反馈语义。管理员入口检查 `S-1-16-12288`（High）或 `S-1-16-16384`（System）；权限不足返回 exit code `2`，不得降级、UAC 提权或 skip。仓库不包含 Broker、VM、TestLauncher 或令牌降级器。
 - 控制台、管道和文件保持 UTF-8；启动 cmd/bat 时提供并消费有效的 stdout/stderr；`build.cmd` 和 `tests/e2e/run-e2e.cmd` 保持非交互，不加入无条件 `pause`。
 - 以显式路径开头的脚本 `Args` 表示运行时启动目标，`?` 后是目标参数；Args 不使用引号表达路径。
 - 能用 Python 完成的测试、批量文件操作、数据处理和临时脚本使用 Python；项目既有的 `.cmd`、`.ps1`、`dotnet`、`node` 和 `npm` 流程按原入口运行。
@@ -48,11 +48,11 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## 最短验证入口
 
-按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。活动测试统一经 Node 调度器在普通权限 Test Host 体系下运行；涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在默认门禁后运行 System Smoke。发布前必须确认 `default`、`ui` 和适用的 `system` 命令均以 exit code `0` 完成：
+按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。受限 Codex 可运行 `unit`、`web`、`docs`、`syntax`，并通过显式 `codex` 模式运行本地 UI/System 反馈；正式管理员验证使用显式 `admin` 模式并要求 Administrator / High Integrity 或 System Integrity。涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在本地反馈后由 GitHub Administrator CI 执行 System Smoke。发布前必须确认 GitHub 上的 `admin default`、`admin ui` 和适用的 `admin system` 均以 exit code `0` 完成：
 
 ```text
-node tests\run.mjs default
-node tests\run.mjs system
+node tests\run.mjs codex all
+node tests\run.mjs admin all
 ```
 
-UI Smoke 使用 `node tests\run.mjs ui`；`tests\system\run-system.cmd` 与 `tests\e2e\run-e2e.cmd` 仅保留为兼容转发入口。服务普通运行状态位于 `.nxp\runtime\` 与 `.nxp\state\`，更新事务目录仍按原协议留在安装根目录。
+Codex 本地 UI Smoke 使用 `node tests\run.mjs codex ui`；管理员 UI Smoke 使用 `node tests\run.mjs admin ui`；`tests\system\run-system.cmd` 与 `tests\e2e\run-e2e.cmd` 保留为 Codex 反馈模式兼容转发入口。服务普通运行状态位于 `.nxp\runtime\` 与 `.nxp\state\`，更新事务目录仍按原协议留在安装根目录。

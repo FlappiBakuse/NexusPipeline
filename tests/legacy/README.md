@@ -10,7 +10,7 @@
 当前替代关系：
 
 - `tests/system/execution-resilience.mjs` 承担确定性的执行状态机保护。
-- `tests/system/run-system.cmd` 承担每次 PR 与 main push 的系统门禁入口。
+- `tests/system/run-system.cmd` 保留为 Codex 本地反馈模式的兼容入口；GitHub Administrator 门禁由 CI 直接调用 `node tests\run.mjs admin system`。
 - `tests/stress/diagnostics/flake-monitor.mjs` 是按需运行的进程/端口诊断工具。
 
 历史脚本如需专项运行，应先完成 `build.cmd`，并确认其运行时目录位于 `tests/legacy/runtime/`，避免将测试数据写入项目根目录。

@@ -13,7 +13,7 @@ jobs:
   build-and-test:
     name: 构建 + 分层测试
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
 
@@ -38,30 +38,33 @@ jobs:
         with:
           node-version: 20
 
-      - name: 构建 Medium Integrity 测试启动器
-        shell: cmd
-        run: dotnet build tests\support\NexusPipeline.TestLauncher\NexusPipeline.TestLauncher.csproj -c Release --nologo
-
-      - name: TestLauncher 权限与输出自检
-        shell: cmd
-        env:
-          NEXUS_LAUNCHER_PROBE: expected-value
-        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\support\launcher-probe.mjs
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
 
       - name: 安装 Playwright 依赖
         working-directory: tests/e2e
         shell: cmd
         run: npm ci
 
-      - name: 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
+      - name: Administrator 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
         shell: cmd
-        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs default
+        run: node tests\run.mjs admin default
 
-      - name: 运行 Playwright UI Smoke
+      - name: Administrator Playwright UI Smoke
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs ui
+        run: node tests\run.mjs admin ui
 
       - name: 上传 Playwright 失败诊断
         if: ${{ failure() }}
@@ -91,22 +94,32 @@ jobs:
         with:
           node-version: 20
 
-      - name: 构建 Medium Integrity 测试启动器
-        shell: cmd
-        run: dotnet build tests\support\NexusPipeline.TestLauncher\NexusPipeline.TestLauncher.csproj -c Release --nologo
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
 
-      - name: TestLauncher 权限与输出自检
-        shell: cmd
-        env:
-          NEXUS_LAUNCHER_PROBE: expected-value
-        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\support\launcher-probe.mjs
-
-      - name: 构建发布源
-        shell: cmd
-        run: node tests\run.mjs build
-
-      - name: 运行完整 System Smoke
+      - name: Administrator System Smoke
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: dotnet tests\support\NexusPipeline.TestLauncher\bin\Release\net8.0\NexusPipeline.TestLauncher.dll node tests\run.mjs system
+        run: node tests\run.mjs admin system
+
+      - name: 上传 System Smoke 失败诊断
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-smoke-results
+          path: |
+            tests/system/runtime-*
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7

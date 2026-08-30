@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -193,18 +194,83 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
-test("production and test-host elevation contracts remain explicit", () => {
+test("production and dual-mode test contracts remain explicit", () => {
   const productionManifest = read("src/app.manifest");
   const testManifest = read("src/app.test.manifest");
-  const projectFile = read("src/NexusPipeline.csproj");
+  const project = read("src/NexusPipeline.csproj");
   const runner = read("tests/run.mjs");
+  const processHelper = read("tests/support/windows-process.mjs");
+  const e2eHelper = read("tests/e2e/tests/helpers.mjs");
+  const e2eSetup = read("tests/e2e/tests/global-setup.mjs");
+  const systemHelper = read("tests/system/runtime-helper.mjs");
+  const systemSuites = [
+    "tests/system/mcp-smoke.mjs",
+    "tests/system/runtime-smoke.mjs",
+    "tests/system/judge-smoke.mjs",
+    "tests/system/execution-resilience.mjs",
+    "tests/system/emulator-smoke.mjs",
+    "tests/system/update-smoke.mjs",
+  ].map(read);
+  const ci = read(".github/workflows/ci.yml");
+  const testingDocs = read("docs/TESTING.md");
+  const developmentDocs = read("docs/DEVELOPMENT.md");
+  const agents = read("AGENTS.md");
+  const design = read("docs/DESIGN.md");
   assert.match(productionManifest, /requestedExecutionLevel level="requireAdministrator"/u);
   assert.match(testManifest, /requestedExecutionLevel level="asInvoker"/u);
-  assert.match(projectFile, /Condition="'\$\(NexusTestHost\)' == 'true'"/u);
-  assert.match(projectFile, /DefineConstants>\$\(DefineConstants\);NEXUS_TEST_HOST</u);
-  assert.match(runner, /buildTestHost/u);
-  assert.match(runner, /NEXUS_TEST_HOST: "1"/u);
-  assert.match(runner, /isMediumIntegrity\(\)/u);
+  assert.match(project, /Condition="'\$\(NexusTestHost\)' == 'true'"/u);
+  assert.match(project, /ApplicationManifest>app\.test\.manifest/u);
+  assert.match(runner, /isAdministrator\(\)/u);
+  assert.match(runner, /MODE_SUITES = new Set\(\["default", "ui", "system", "all"\]\)/u);
+  assert.match(runner, /case "codex"[\s\S]*runMode\("codex"/u);
+  assert.match(runner, /case "admin"[\s\S]*runMode\("admin"/u);
+  assert.match(runner, /mode === "codex" \? await buildTestHost\(\) : 0/u);
+  assert.match(runner, /modeEnvironment\(mode/u);
+  assert.match(runner, /NexusPipeline CODEX FEEDBACK TEST/u);
+  assert.match(runner, /NexusPipeline ADMINISTRATOR GATE/u);
+  assert.match(processHelper, /S-1-16-(?:12288|16384)\b/u);
+  assert.match(processHelper, /getIntegrityLevel/u);
+  assert.match(e2eHelper, /executionMode/u);
+  assert.match(e2eHelper, /isCodexMode \? testHostDir : productionReleaseDir/u);
+  assert.match(e2eHelper, /NEXUS_TEST_HOST_EXIT_FILE/u);
+  assert.match(e2eSetup, /executionMode === "admin"/u);
+  assert.match(systemHelper, /executionMode/u);
+  assert.match(systemHelper, /isCodexMode \? testHostDir : productionReleaseDir/u);
+  for (const suite of systemSuites) {
+    assert.match(suite, /isAdminMode/u);
+    assert.match(suite, /if \(isAdminMode\)/u);
+  }
+  assert.match(ci, /node tests\\run\.mjs admin default/u);
+  assert.match(ci, /node tests\\run\.mjs admin ui/u);
+  assert.match(ci, /node tests\\run\.mjs admin system/u);
+
+  const activeFiles = [runner, e2eHelper, e2eSetup, systemHelper, ...systemSuites];
+  for (const activeFile of activeFiles) {
+    assert.doesNotMatch(activeFile, /AdminTestBroker|admin-broker|TestLauncher|CreateRestrictedToken|linked-token|restricted-token|PowerShell Direct|Hyper-V/u);
+  }
+  assert.doesNotMatch(ci, /TestLauncher|launcher-probe|New-LocalUser|NEXUS_CI_TEST_USER|NEXUS_CI_TEST_PASSWORD|CreateRestrictedToken|linked-token|restricted-token|AdminTestBroker|admin-broker|NEXUS_TEST_HOST/u);
+  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/NexusPipeline.TestLauncher")), false);
+  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/launcher-probe.mjs")), false);
+  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/admin-broker")), false);
+
+  for (const [relativeFile, text] of [
+    ["AGENTS.md", agents],
+    ["docs/TESTING.md", testingDocs],
+    ["docs/DEVELOPMENT.md", developmentDocs],
+    ["docs/DESIGN.md", design],
+  ]) {
+    assert.doesNotMatch(text, /AdminTestBroker|admin-broker|Elevated Test Broker|PowerShell Direct|Hyper-V|Windows Sandbox Broker/u, `${relativeFile} still describes removed Broker architecture`);
+  }
+  assert.match(testingDocs, /node tests\\run\.mjs codex all/u);
+  assert.match(testingDocs, /node tests\\run\.mjs admin all/u);
+  assert.match(testingDocs, /NEXUS_TEST_HOST/u);
+  assert.match(agents, /Codex.*Test Host/u);
+  assert.match(developmentDocs, /codex <suite>/u);
+  assert.equal(
+    spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "default"], { encoding: "utf8" }).status,
+    2,
+    "bare default must require an explicit codex/admin mode",
+  );
 });
 
 test("control-plane capability matrix has complete statuses and risk classifications", () => {

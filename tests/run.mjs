@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isMediumIntegrity, killProcessTree } from "./support/windows-process.mjs";
+import { getIntegrityLevel, isAdministrator, killProcessTree } from "./support/windows-process.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const e2eDir = path.join(projectRoot, "tests", "e2e");
@@ -10,6 +10,8 @@ const systemDir = path.join(projectRoot, "tests", "system");
 const testHostDir = path.join(projectRoot, "tests", ".artifacts", "test-host");
 const nodeCommand = process.execPath;
 const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
+const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
+const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
 
 function runProcess(command, args, options = {}) {
   return new Promise(resolve => {
@@ -94,29 +96,58 @@ function syntaxTestFiles() {
     .map(name => path.join(directory, name));
 }
 
-function requireNormal(label) {
-  if (isMediumIntegrity()) return true;
-  console.error(`[错误] ${label}必须在普通权限（Medium Integrity）终端运行。当前进程未满足普通权限测试契约。`);
+function requireAdmin(label, command) {
+  if (isAdministrator()) return true;
+  console.error(`[错误] ${label}需要 Administrator / High Integrity。当前终端权限不足，正式门禁未执行。请在管理员终端执行：node tests\\run.mjs ${command}`);
   return false;
 }
 
+function modeEnvironment(mode, { system = false, exitFile = null } = {}) {
+  const env = { ...process.env };
+  for (const key of TEST_HOST_ENV_KEYS) delete env[key];
+  delete env.NEXUS_SYSTEM_SMOKE;
+  env.NEXUS_TEST_MODE = mode;
+  if (mode === "codex") {
+    env.NEXUS_TEST_HOST = "1";
+    env.NEXUS_TEST_HOST_DIR = testHostDir;
+    if (exitFile) env.NEXUS_TEST_HOST_EXIT_FILE = exitFile;
+  }
+  if (system) env.NEXUS_SYSTEM_SMOKE = "1";
+  return env;
+}
+
+function printModeBanner(mode, suite) {
+  if (mode === "codex") {
+    console.error("====================================================");
+    console.error(" NexusPipeline CODEX FEEDBACK TEST");
+    console.error(" Runtime: Test Host");
+    console.error(` Suite: ${suite}`);
+    console.error(` Integrity: ${getIntegrityLevel()}`);
+    console.error(" Administrator validation: deferred to GitHub CI");
+    console.error("====================================================");
+    return;
+  }
+  console.error("====================================================");
+  console.error(" NexusPipeline ADMINISTRATOR GATE");
+  console.error(" Runtime: Production Release");
+  console.error(` Suite: ${suite}`);
+  console.error(` Integrity: ${getIntegrityLevel()}`);
+  console.error("====================================================");
+}
+
 async function runUnit() {
-  if (!requireNormal("Unit + Component")) return 2;
   return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo"]);
 }
 
 async function runWeb() {
-  if (!requireNormal("Web Logic")) return 2;
   return runProcess(nodeCommand, ["--test", ...webTestFiles()]);
 }
 
 async function runDocs() {
-  if (!requireNormal("Docs")) return 2;
   return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs"]);
 }
 
 async function runSyntax() {
-  if (!requireNormal("UI Smoke 语法检查")) return 2;
   const files = syntaxTestFiles();
   if (files.length === 0) throw new Error("未找到 UI Smoke 语法检查文件");
   for (const file of files) {
@@ -130,8 +161,17 @@ async function runBuild() {
   return runCmdFile(path.join(projectRoot, "build.cmd"));
 }
 
+async function runDefault(mode, { permissionChecked = false } = {}) {
+  if (mode === "admin" && !permissionChecked && !requireAdmin("管理员默认门禁", "admin default")) return 2;
+  for (const step of [runUnit, runWeb, runDocs, runSyntax, runBuild]) {
+    const code = await step();
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
 async function buildTestHost() {
-  console.error(`[Test Host] 开始构建普通权限宿主：${testHostDir}`);
+  console.error(`[Test Host] 开始构建 Codex 本地反馈宿主：${testHostDir}`);
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
   const code = await runProcess("dotnet", [
@@ -169,52 +209,45 @@ function cleanTestHost() {
   }
 }
 
-async function runDefault() {
-  if (!requireNormal("默认测试")) return 2;
-  for (const step of [runUnit, runWeb, runDocs, runSyntax, runBuild]) {
-    const code = await step();
-    if (code !== 0) return code;
-  }
-  return 0;
+async function runAll(mode, args) {
+  if (mode === "admin" && !requireAdmin("管理员全部门禁", "admin all")) return 2;
+  let code = await runDefault(mode, { permissionChecked: mode === "admin" });
+  if (code === 0) code = await runUi(mode, args);
+  if (code === 0) code = await runSystem(mode, args);
+  return code;
 }
 
-async function runUi(args) {
-  if (!requireNormal("UI Smoke")) return 2;
+async function runUi(mode, args) {
+  if (mode === "admin" && !requireAdmin("管理员 UI Smoke", "admin ui")) return 2;
   const buildCode = await runBuild();
   if (buildCode !== 0) return buildCode;
-  const testHostCode = await buildTestHost();
+  const testHostCode = mode === "codex" ? await buildTestHost() : 0;
   if (testHostCode !== 0) {
-    cleanTestHost();
+    if (mode === "codex") cleanTestHost();
     return testHostCode;
   }
-  const env = {
-    ...process.env,
-    NEXUS_TEST_HOST: "1",
-    NEXUS_TEST_HOST_DIR: testHostDir,
-    NEXUS_TEST_HOST_EXIT_FILE: path.join(e2eDir, "runtime", ".nxp", "test-host.exit"),
-  };
+  const env = modeEnvironment(mode, {
+    exitFile: path.join(e2eDir, "runtime", ".nxp", "test-host.exit"),
+  });
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   try {
     return await runProcess(nodeCommand, [playwrightCli, "test"], { cwd: e2eDir, env });
   } finally {
-    cleanTestHost();
+    if (mode === "codex") cleanTestHost();
   }
 }
 
-async function runSystem(args) {
-  if (!requireNormal("System Smoke")) return 2;
+async function runSystem(mode, args) {
+  if (mode === "admin" && !requireAdmin("管理员 System Smoke", "admin system")) return 2;
   const buildCode = await runBuild();
   if (buildCode !== 0) return buildCode;
-  const testHostCode = await buildTestHost();
+  const testHostCode = mode === "codex" ? await buildTestHost() : 0;
   if (testHostCode !== 0) {
-    cleanTestHost();
+    if (mode === "codex") cleanTestHost();
     return testHostCode;
   }
   const env = {
-    ...process.env,
-    NEXUS_SYSTEM_SMOKE: "1",
-    NEXUS_TEST_HOST: "1",
-    NEXUS_TEST_HOST_DIR: testHostDir,
+    ...modeEnvironment(mode, { system: true }),
   };
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   const suites = [
@@ -231,7 +264,9 @@ async function runSystem(args) {
       const suiteEnv = {
         ...env,
         NEXUS_SYSTEM_RUNTIME_NAME: runtimeName,
-        NEXUS_TEST_HOST_EXIT_FILE: path.join(systemDir, runtimeName, ".nxp", "test-host.exit"),
+        ...(mode === "codex"
+          ? { NEXUS_TEST_HOST_EXIT_FILE: path.join(systemDir, runtimeName, ".nxp", "test-host.exit") }
+          : {}),
       };
       const label = `${runtimeName} (${file})`;
       console.error(`[System Smoke] 开始 ${label}`);
@@ -246,21 +281,44 @@ async function runSystem(args) {
     }
     return 0;
   } finally {
-    cleanTestHost();
+    if (mode === "codex") cleanTestHost();
   }
 }
 
 function printUsage() {
-  console.error("用法：node tests/run.mjs default|unit|web|docs|syntax|build|ui|system|all");
+  console.error("用法：");
+  console.error("  node tests\\run.mjs codex <default|ui|system|all> [--realtime]");
+  console.error("  node tests\\run.mjs admin <default|ui|system|all> [--realtime]");
+  console.error("  node tests\\run.mjs unit|web|docs|syntax|build");
+  console.error("正式组合入口必须显式指定 codex 或 admin；default/ui/system/all 不能省略模式。");
 }
 
-const [command = "default", ...args] = process.argv.slice(2);
+async function runMode(mode, args) {
+  const suite = args[0]?.toLowerCase();
+  const suiteArgs = args.slice(1);
+  if (!MODE_SUITES.has(suite)) {
+    printUsage();
+    return 2;
+  }
+  printModeBanner(mode, suite);
+  switch (suite) {
+    case "default":
+      return runDefault(mode);
+    case "ui":
+      return runUi(mode, suiteArgs);
+    case "system":
+      return runSystem(mode, suiteArgs);
+    case "all":
+      return runAll(mode, suiteArgs);
+    default:
+      return 2;
+  }
+}
+
+const [command = "", ...args] = process.argv.slice(2);
 let exitCode;
 try {
   switch (command.toLowerCase()) {
-    case "default":
-      exitCode = await runDefault();
-      break;
     case "unit":
       exitCode = await runUnit();
       break;
@@ -276,20 +334,22 @@ try {
     case "build":
       exitCode = await runBuild();
       break;
+    case "codex":
+      exitCode = await runMode("codex", args);
+      break;
+    case "admin":
+      exitCode = await runMode("admin", args);
+      break;
+    case "default":
     case "ui":
-      exitCode = await runUi(args);
-      break;
     case "system":
-      exitCode = await runSystem(args);
-      break;
     case "all":
-      exitCode = await runDefault();
-      if (exitCode === 0) exitCode = await runUi(args);
-      if (exitCode === 0) exitCode = await runSystem(args);
+      printUsage();
+      exitCode = 2;
       break;
     default:
       printUsage();
-      exitCode = 1;
+      exitCode = 2;
       break;
   }
 } catch (error) {

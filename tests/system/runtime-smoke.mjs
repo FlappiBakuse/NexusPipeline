@@ -7,8 +7,10 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
+  isAdminMode,
+  executionMode,
   fetchWithTimeout,
-  isNormalIntegrity,
+  isAdministrator,
   isRuntimeAlive,
   makeFixture,
   prepareRuntime,
@@ -26,7 +28,7 @@ import {
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
-  : "System Smoke 需要普通权限 Test Host";
+  : "";
 const skip = enabled ? false : skipReason;
 
 function runCli(args, input = "", timeout = 10000) {
@@ -87,7 +89,9 @@ function runCliAsync(args, input = "", timeout = 20000) {
 
 before(async () => {
   if (!enabled) return;
-  assert.ok(isNormalIntegrity(), "System Smoke 必须在普通权限（Medium Integrity）终端运行");
+  if (isAdminMode) {
+    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
+  }
   prepareRuntime();
   startRuntime();
   await waitForService();
@@ -97,7 +101,7 @@ after(async () => {
   if (enabled) await stopRuntime();
 });
 
-test("release binary 启动并提供 status API", { skip }, async () => {
+test("当前隔离宿主启动并提供 status API", { skip }, async () => {
   const response = await fetchWithTimeout(serviceUrl() + "api/status");
   assert.equal(response.status, 200);
   const status = await response.json();
@@ -108,8 +112,10 @@ test("release binary 启动并提供 status API", { skip }, async () => {
   assert.ok(Array.isArray(status.running));
 });
 
-test("普通权限 Test Host 可在无 URLACL 的 loopback 随机端口提供 status API", { skip, concurrency: false }, async () => {
-  assert.ok(isNormalIntegrity(), "HTTP Probe 必须在普通权限（Medium Integrity）终端运行");
+test(`${executionMode === "admin" ? "管理员生产 release" : "Codex Test Host"} 可在无 URLACL 的 loopback 随机端口提供 status API`, { skip, concurrency: false }, async () => {
+  if (isAdminMode) {
+    assert.ok(isAdministrator(), "管理员 HTTP Probe 必须在 Administrator / High Integrity 终端运行");
+  }
   const settingsPath = path.join(runtimeDir, "config", "settings.json");
   const originalSettings = fs.existsSync(settingsPath)
     ? fs.readFileSync(settingsPath, "utf8")
@@ -135,8 +141,8 @@ test("普通权限 Test Host 可在无 URLACL 的 loopback 随机端口提供 st
       );
     } else {
       // HTTP.sys URLACL 查询本身可能要求管理员句柄；随机 loopback 绑定
-      // 仍由 Test Host 的托管 transport 直接验证普通权限路径。
-      process.stderr.write("ℹ 普通权限无法读取 HTTP.sys URLACL，继续验证随机 loopback 绑定。\n");
+      // 仍由当前模式的宿主 transport 直接验证。
+      process.stderr.write("ℹ 当前句柄无法读取 HTTP.sys URLACL，继续验证随机 loopback 绑定。\n");
     }
     await stopRuntime();
     startRuntime(["web"]);

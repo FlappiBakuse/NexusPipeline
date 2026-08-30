@@ -5,7 +5,8 @@ import path from "node:path";
 import {
   api,
   deleteScript,
-  isNormalIntegrity,
+  isAdminMode,
+  isAdministrator,
   makeFixture,
   projectRoot,
   prepareRuntime,
@@ -34,14 +35,16 @@ import {
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
   ? "设置 NEXUS_SYSTEM_SMOKE=1 后运行"
-  : "System Smoke 需要普通权限 Test Host";
+  : "";
 const skip = enabled ? false : skipReason;
 const pingExe = "C:\\Windows\\System32\\PING.EXE";
 const timeScale = process.env.NEXUS_TIME_SCALE || "10";
 
 before(async () => {
   if (!enabled) return;
-  assert.ok(isNormalIntegrity(), "System Smoke 必须在普通权限（Medium Integrity）终端运行");
+  if (isAdminMode) {
+    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
+  }
   prepareRuntime();
   startRuntime([], { NEXUS_TIME_SCALE: timeScale });
   await waitForService();

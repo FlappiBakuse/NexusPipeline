@@ -12,41 +12,29 @@ function run(command, args) {
   }
 }
 
-/**
- * Windows integrity levels are represented by locale-independent SIDs.
- * High and System integrity are the administrator boundaries required by
- * NexusPipeline's requireAdministrator application manifest.
- */
+/** Windows integrity levels are represented by locale-independent SIDs. */
+export function getIntegrityLevel() {
+  if (process.platform !== "win32") return "Unknown";
+  const result = run("whoami", ["/groups"]);
+  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
+  if (result.status !== 0) return "Unknown";
+  if (/S-1-16-16384\b/i.test(output)) return "System";
+  if (/S-1-16-12288\b/i.test(output)) return "High";
+  if (/S-1-16-8192\b/i.test(output)) return "Medium";
+  if (/S-1-16-4096\b/i.test(output)) return "Low";
+  if (/S-1-16-0\b/i.test(output)) return "Untrusted";
+  return "Unknown";
+}
+
+/** High and System are the administrator boundaries required by production. */
 export function isAdministrator() {
-  if (process.platform !== "win32") return false;
-  const result = run("whoami", ["/groups"]);
-  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
-  return result.status === 0 && /S-1-16-(?:12288|16384)\b/i.test(output);
+  const level = getIntegrityLevel();
+  return level === "High" || level === "System";
 }
 
-/**
- * Medium integrity is the normal desktop-user boundary used by the test host.
- * Checking the mandatory-label SID keeps this contract independent of the
- * localized text emitted by whoami.
- */
-export function isMediumIntegrity() {
-  if (process.platform !== "win32") return false;
-  const result = run("whoami", ["/groups"]);
-  const output = `${result.stdout || ""}\n${result.stderr || ""}`;
-  return result.status === 0
-    && /S-1-16-8192\b/i.test(output)
-    && !/S-1-16-(?:12288|16384)\b/i.test(output);
-}
-
-export function requireMediumIntegrity(label = "该测试入口") {
-  if (isMediumIntegrity()) return true;
-  console.error(`[错误] ${label}必须在普通权限（Medium Integrity）终端运行。请使用：node tests/run.mjs ${label === "UI Smoke" ? "ui" : label === "System Smoke" ? "system" : "default"}`);
-  return false;
-}
-
-export function requireAdministrator(label = "该测试入口") {
+export function requireAdministrator(label = "该测试入口", command = "default") {
   if (isAdministrator()) return true;
-  console.error(`[错误] ${label}需要管理员终端。请在管理员终端执行：node tests/run.mjs ${label === "UI Smoke" ? "ui" : "system"}`);
+  console.error(`[错误] ${label}需要 Administrator / High Integrity。当前终端权限不足，正式门禁未执行。请在管理员终端执行：node tests\\run.mjs ${command}`);
   return false;
 }
 
