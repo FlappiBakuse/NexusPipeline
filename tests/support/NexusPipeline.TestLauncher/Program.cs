@@ -217,12 +217,93 @@ static IntPtr CreateInheritedUserEnvironment(string userName, string password, s
     }
 
     using var token = new SafeNativeHandle(tokenHandle);
-    if (!NativeMethods.CreateEnvironmentBlock(out var environment, token.Handle, true))
+    var profileDirectory = GetUserProfileDirectory(token.Handle);
+    var homeDrive = Path.GetPathRoot(profileDirectory)?.TrimEnd('\\', '/');
+    if (string.IsNullOrWhiteSpace(homeDrive) || !profileDirectory.StartsWith(homeDrive, StringComparison.OrdinalIgnoreCase))
     {
-        throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateEnvironmentBlock 失败");
+        throw new InvalidOperationException($"无法解析 CI 普通用户配置目录：{profileDirectory}");
     }
 
-    return environment;
+    var homePath = profileDirectory[homeDrive.Length..];
+    var originalProfile = Environment.GetEnvironmentVariable("USERPROFILE");
+    var originalVariables = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+
+    void SetTemporary(string name, string? value)
+    {
+        if (!originalVariables.ContainsKey(name))
+        {
+            originalVariables[name] = Environment.GetEnvironmentVariable(name);
+        }
+
+        Environment.SetEnvironmentVariable(name, value);
+    }
+
+    try
+    {
+        if (!string.IsNullOrWhiteSpace(originalProfile)
+            && !string.Equals(originalProfile, profileDirectory, StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (System.Collections.DictionaryEntry variable in Environment.GetEnvironmentVariables())
+            {
+                var name = variable.Key?.ToString();
+                var value = variable.Value?.ToString();
+                if (string.IsNullOrEmpty(name)
+                    || name[0] == '='
+                    || string.IsNullOrEmpty(value)
+                    || value.IndexOf(originalProfile, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                SetTemporary(
+                    name,
+                    value.Replace(originalProfile, profileDirectory, StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
+        SetTemporary("USERPROFILE", profileDirectory);
+        SetTemporary("HOME", profileDirectory);
+        SetTemporary("HOMEDRIVE", homeDrive);
+        SetTemporary("HOMEPATH", homePath);
+        SetTemporary("APPDATA", Path.Combine(profileDirectory, "AppData", "Roaming"));
+        SetTemporary("LOCALAPPDATA", Path.Combine(profileDirectory, "AppData", "Local"));
+        SetTemporary("TEMP", Path.Combine(profileDirectory, "AppData", "Local", "Temp"));
+        SetTemporary("TMP", Path.Combine(profileDirectory, "AppData", "Local", "Temp"));
+        SetTemporary("USERNAME", userName);
+        SetTemporary("USERDOMAIN", domain == "." ? Environment.MachineName : domain);
+
+        if (!NativeMethods.CreateEnvironmentBlock(out var environment, token.Handle, true))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateEnvironmentBlock 失败");
+        }
+
+        return environment;
+    }
+    finally
+    {
+        foreach (var variable in originalVariables)
+        {
+            Environment.SetEnvironmentVariable(variable.Key, variable.Value);
+        }
+    }
+}
+
+static string GetUserProfileDirectory(IntPtr token)
+{
+    uint requiredLength = 0;
+    NativeMethods.GetUserProfileDirectory(token, null, ref requiredLength);
+    if (requiredLength == 0)
+    {
+        throw new Win32Exception(Marshal.GetLastWin32Error(), "读取 CI 普通用户配置目录长度失败");
+    }
+
+    var buffer = new StringBuilder(checked((int)requiredLength));
+    if (!NativeMethods.GetUserProfileDirectory(token, buffer, ref requiredLength))
+    {
+        throw new Win32Exception(Marshal.GetLastWin32Error(), "读取 CI 普通用户配置目录失败");
+    }
+
+    return buffer.ToString();
 }
 
 static InheritedStandardHandles DuplicateStandardHandles()
@@ -837,6 +918,13 @@ static class NativeMethods
         int logonType,
         int logonProvider,
         out IntPtr token);
+
+    [DllImport("userenv.dll", EntryPoint = "GetUserProfileDirectoryW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetUserProfileDirectory(
+        IntPtr token,
+        StringBuilder? profileDirectory,
+        ref uint size);
 
     [DllImport("userenv.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
