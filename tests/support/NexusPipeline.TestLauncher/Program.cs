@@ -19,6 +19,23 @@ if (command.Length == 0)
 
 try
 {
+    var ciUser = Environment.GetEnvironmentVariable("NEXUS_CI_TEST_USER");
+    var ciPassword = Environment.GetEnvironmentVariable("NEXUS_CI_TEST_PASSWORD");
+    if (!string.IsNullOrWhiteSpace(ciUser) || !string.IsNullOrWhiteSpace(ciPassword))
+    {
+        if (string.IsNullOrWhiteSpace(ciUser) || string.IsNullOrWhiteSpace(ciPassword))
+        {
+            throw new InvalidOperationException("NEXUS_CI_TEST_USER 与 NEXUS_CI_TEST_PASSWORD 必须同时设置。");
+        }
+
+        var ciDomain = Environment.GetEnvironmentVariable("NEXUS_CI_TEST_DOMAIN") ?? ".";
+        Environment.SetEnvironmentVariable("NEXUS_CI_TEST_USER", null);
+        Environment.SetEnvironmentVariable("NEXUS_CI_TEST_PASSWORD", null);
+        Environment.SetEnvironmentVariable("NEXUS_CI_TEST_DOMAIN", null);
+        Console.WriteLine("[TestLauncher] mode=ci-logon-user integrity=Medium restricted=false administrator-enabled=false");
+        return RunWithLogon(command, ciUser, ciPassword, ciDomain);
+    }
+
     using var mediumToken = AcquireMediumToken(out var tokenState);
     Console.WriteLine(
         $"[TestLauncher] mode={tokenState.Mode} integrity={DescribeIntegrity(tokenState.Integrity)} " +
@@ -137,6 +154,41 @@ static int RunWithToken(SafeNativeHandle mediumToken, string[] command)
             out processInfo))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessAsUser 失败");
+        }
+    }
+
+    return WaitForProcess(processInfo);
+}
+
+static int RunWithLogon(string[] command, string userName, string password, string domain)
+{
+    var commandLine = new StringBuilder(string.Join(" ", command.Select(QuoteArgument)));
+    NativeMethods.ProcessInformation processInfo;
+    using (var standardHandles = DuplicateStandardHandles())
+    {
+        var startupInfo = new NativeMethods.StartupInfo
+        {
+            cb = Marshal.SizeOf<NativeMethods.StartupInfo>(),
+            dwFlags = NativeMethods.StartfUseStdHandles,
+            hStdInput = standardHandles.Input.Handle,
+            hStdOutput = standardHandles.Output.Handle,
+            hStdError = standardHandles.Error.Handle,
+        };
+
+        if (!NativeMethods.CreateProcessWithLogon(
+            userName,
+            domain,
+            password,
+            NativeMethods.LogonWithProfile,
+            null,
+            commandLine,
+            NativeMethods.CreateUnicodeEnvironment,
+            IntPtr.Zero,
+            Environment.CurrentDirectory,
+            ref startupInfo,
+            out processInfo))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcessWithLogonW 失败");
         }
     }
 
@@ -652,6 +704,7 @@ static class NativeMethods
     public const int ErrorInsufficientBuffer = 122;
     public const uint Infinite = 0xFFFFFFFF;
     public const uint WaitObject0 = 0;
+    public const uint LogonWithProfile = 0x00000001;
     public const uint CreateUnicodeEnvironment = 0x00000400;
     public const uint DuplicateSameAccess = 0x00000002;
     public const int StdInputHandle = -10;
@@ -752,6 +805,21 @@ static class NativeMethods
         IntPtr processAttributes,
         IntPtr threadAttributes,
         [MarshalAs(UnmanagedType.Bool)] bool inheritHandles,
+        uint creationFlags,
+        IntPtr environment,
+        string currentDirectory,
+        ref StartupInfo startupInfo,
+        out ProcessInformation processInformation);
+
+    [DllImport("advapi32.dll", EntryPoint = "CreateProcessWithLogonW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool CreateProcessWithLogon(
+        string userName,
+        string domain,
+        string password,
+        uint logonFlags,
+        string? applicationName,
+        StringBuilder commandLine,
         uint creationFlags,
         IntPtr environment,
         string currentDirectory,
