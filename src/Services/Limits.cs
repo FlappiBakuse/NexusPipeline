@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
@@ -8,7 +9,7 @@ using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
-/// <summary>约束体系：绝对安全区间（内置默认值）静默生效；超安全值但入警告区间 → 启动警告；超警告区间或区间矛盾 → FATAL 拒绝启动。</summary>
+/// <summary>约束体系：首次启动缺失时生成默认配置；绝对安全区间（内置默认值）静默生效；超安全值但入警告区间 → 启动警告；超警告区间或区间矛盾 → FATAL 拒绝启动。</summary>
 internal static class Limits
 {
     public static AppLimits Current { get; private set; } = new();
@@ -26,10 +27,12 @@ internal static class Limits
         {
             try
             {
-                AppLimits? parsed = JsonSerializer.Deserialize<AppLimits>(File.ReadAllText(AppPaths.LimitsPath), JsonOpts.Default);
+                string text = File.ReadAllText(AppPaths.LimitsPath);
+                AppLimits? parsed = JsonSerializer.Deserialize<AppLimits>(text, JsonOpts.Default);
                 if (parsed is not null)
                 {
                     limits = parsed;
+                    TryRemoveRetiredConfigFields(text, warnings);
                 }
             }
             catch (Exception ex)
@@ -37,27 +40,71 @@ internal static class Limits
                 fatals.Add($"limits.json 解析失败：{ex.Message}");
             }
         }
+        else
+        {
+            TryCreateDefaultConfig(limits, warnings);
+        }
 
-        CheckCount(limits.MaxScripts, 25, 50, "MaxScripts（脚本实例上限）", warnings, fatals);
-        CheckCount(limits.MaxUsersPerScript, 10, 20, "MaxUsersPerScript（每脚本用户上限）", warnings, fatals);
-        CheckCount(limits.MaxUsers, 50, 150, "MaxUsers（全局用户上限）", warnings, fatals);
-        CheckCount(limits.MaxQueues, 10, 50, "MaxQueues（调度队列上限）", warnings, fatals);
-        CheckCount(limits.MaxTimeSetsPerQueue, 10, 20, "MaxTimeSetsPerQueue（每队列定时上限）", warnings, fatals);
-        CheckCount(limits.MaxQueueTotalUsers, 50, 150, "MaxQueueTotalUsers（队列任务总用户上限）", warnings, fatals);
-        CheckCount(limits.MaxScriptNameBytes, 128, 128, "MaxScriptNameBytes（脚本名称字节上限）", warnings, fatals);
-        CheckCount(limits.MaxQueueNameBytes, 128, 128, "MaxQueueNameBytes（队列名称字节上限）", warnings, fatals);
-        CheckRange(limits.MinAttempts, limits.MaxAttempts, 1, 10, 30, "尝试次数（Min/MaxAttempts）", warnings, fatals);
-        CheckRange(limits.MinStallMinutes, limits.MaxStallMinutes, 1, 60, 480, "日志无更新超时（Min/MaxStallMinutes）", warnings, fatals);
-        CheckRange(limits.MinTotalMinutes, limits.MaxTotalMinutes, 5, 720, 2880, "运行总时间超时（Min/MaxTotalMinutes）", warnings, fatals);
-        CheckCount(limits.MaxHistoryRetentionDays, 180, 365, "MaxHistoryRetentionDays（历史保留天数上限）", warnings, fatals);
+        CheckCount(limits.MaxScripts, 50, 999, "MaxScripts（脚本实例上限）", warnings, fatals);
+        CheckCount(limits.MaxUsersPerScript, 50, 999, "MaxUsersPerScript（每脚本用户上限）", warnings, fatals);
+        CheckCount(limits.MaxUsers, 50, 999, "MaxUsers（全局用户上限）", warnings, fatals);
+        CheckCount(limits.MaxQueues, 50, 999, "MaxQueues（调度队列上限）", warnings, fatals);
+        CheckCount(limits.MaxQueueTotalUsers, 50, 999, "MaxQueueTotalUsers（队列任务总用户上限）", warnings, fatals);
+        CheckCount(limits.MaxTimeSetsPerQueue, 10, 999, "MaxTimeSetsPerQueue（每队列定时上限）", warnings, fatals);
+        CheckRange(limits.MinAttempts, limits.MaxAttempts, 1, 10, 99, "尝试次数（Min/MaxAttempts）", warnings, fatals);
+        CheckRange(limits.MinStallMinutes, limits.MaxStallMinutes, 1, 60, 1440, "日志无更新超时（Min/MaxStallMinutes）", warnings, fatals);
+        CheckRange(limits.MinTotalMinutes, limits.MaxTotalMinutes, 5, 720, 10080, "运行总时间超时（Min/MaxTotalMinutes）", warnings, fatals, allowedMin: 5);
 
         Current = limits;
         Warnings.Clear();
         Warnings.AddRange(warnings);
         Fatals.Clear();
         Fatals.AddRange(fatals);
-        // 同步历史保留天数上限到 ConfigStore（settings Normalize 使用，消除硬编码 180）。
-        ConfigStore.ApplyMaxHistoryRetentionDays(limits.MaxHistoryRetentionDays);
+    }
+
+    private static void TryCreateDefaultConfig(AppLimits limits, List<string> warnings)
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.ConfigDir);
+            JsonUtil.WriteAtomic(AppPaths.LimitsPath, JsonSerializer.Serialize(limits, JsonOpts.Indented));
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"[警告] 默认 limits.json 写入失败，将继续使用内置约束值：{ex.Message}");
+        }
+    }
+
+    private static void TryRemoveRetiredConfigFields(string text, List<string> warnings)
+    {
+        try
+        {
+            if (JsonNode.Parse(text) is not JsonObject root)
+            {
+                return;
+            }
+
+            string[] retiredFields = root
+                .Select(property => property.Key)
+                .Where(key => key.Equals("MaxScriptNameBytes", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("MaxQueueNameBytes", StringComparison.OrdinalIgnoreCase)
+                    || key.Equals("MaxHistoryRetentionDays", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (retiredFields.Length == 0)
+            {
+                return;
+            }
+
+            foreach (string field in retiredFields)
+            {
+                root.Remove(field);
+            }
+            JsonUtil.WriteAtomic(AppPaths.LimitsPath, root.ToJsonString(JsonOpts.Indented));
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"[警告] limits.json 已移除字段清理失败，将继续使用固定值：{ex.Message}");
+        }
     }
 
     private static void CheckCount(int value, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals)
@@ -73,22 +120,22 @@ internal static class Limits
         }
     }
 
-    private static void CheckRange(int min, int max, int safeMin, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals)
+    private static void CheckRange(int min, int max, int safeMin, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals, int allowedMin = 1)
     {
         if (min > max)
         {
             fatals.Add($"约束配置 [{label}] 区间矛盾（Min={min} 大于 Max={max}），禁止启动");
             return;
         }
-        CheckEnd(min, safeMin, safeMax, warnMax, $"{label} Min", warnings, fatals);
-        CheckEnd(max, safeMin, safeMax, warnMax, $"{label} Max", warnings, fatals);
+        CheckEnd(min, safeMin, safeMax, warnMax, $"{label} Min", warnings, fatals, allowedMin);
+        CheckEnd(max, safeMin, safeMax, warnMax, $"{label} Max", warnings, fatals, allowedMin);
     }
 
-    private static void CheckEnd(int value, int safeMin, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals)
+    private static void CheckEnd(int value, int safeMin, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals, int allowedMin)
     {
-        if (value < 1 || value > warnMax)
+        if (value < allowedMin || value > warnMax)
         {
-            fatals.Add($"约束配置 [{label}={value}] 超出警告区间（允许 {safeMin}-{warnMax}），禁止启动");
+            fatals.Add($"约束配置 [{label}={value}] 超出警告区间（允许 {allowedMin}-{warnMax}），禁止启动");
             return;
         }
         if (value > safeMax || value < safeMin)
@@ -148,24 +195,25 @@ internal static class Limits
     }
 
     /// <summary>
-    /// 超时成对校验（长时脚本）：-1（不超时）必须成对出现——任一为 -1 而另一为正常值 → 拒绝（避免半长时语义歧义）；
-    /// 均正常时回退各自区间校验。
+    /// 校验脚本超时关系：日志无更新上限为 -1 即定义为长时脚本；长时脚本的运行总时间上限可为 -1 或有效的正数；普通脚本的运行总时间上限不能为 -1。
     /// </summary>
     public static string? CheckScriptTimeouts(int stallMinutes, int totalMinutes)
     {
-        if (stallMinutes == -1 && totalMinutes == -1)
+        if (stallMinutes == -1)
         {
-            return null;
+            return CheckTotalMinutes(totalMinutes);
         }
-        if (stallMinutes == -1 || totalMinutes == -1)
+
+        if (totalMinutes == -1)
         {
-            return "长时脚本需将「日志无更新超时」与「运行总时间超时」都设为 -1（-1 = 不超时）";
+            return "日志无更新上限未填 -1 时，运行总时间上限不能填 -1";
         }
+
         return CheckStallMinutes(stallMinutes) ?? CheckTotalMinutes(totalMinutes);
     }
 
     /// <summary>
-    /// 队列长时/普通混排校验：队列链式串行执行，长时脚本（两个超时均为 -1）会无限阻塞后续任务——
+    /// 队列长时/普通混排校验：队列链式串行执行，长时脚本（日志无更新上限为 -1）可能持续运行并阻塞后续任务——
     /// 长时脚本实例不能与普通脚本实例编排进同一队列。任务不足两项或全部同类时通过。
     /// </summary>
     public static string? CheckQueueMix(IEnumerable<ScriptInstance> scripts, DispatchQueue queue)
@@ -183,14 +231,14 @@ internal static class Limits
         bool hasNormal = tasks.Any(script => !script.IsLongRunning);
         if (hasLong && hasNormal)
         {
-            return "队列不能混合编排长时脚本（两个超时均为 -1）与普通脚本实例，请分开建立队列";
+            return "队列不能混合编排长时脚本（日志无更新上限为 -1）与普通脚本实例，请分开建立队列";
         }
         return null;
     }
 
     public static string? CheckRetentionDays(int value)
     {
-        return value >= 1 && value <= Current.MaxHistoryRetentionDays ? null : $"历史保留天数须在 1-{Current.MaxHistoryRetentionDays} 天之间";
+        return value >= 1 && value <= AppFixedLimits.HistoryRetentionDaysMax ? null : $"历史保留天数须在 1-{AppFixedLimits.HistoryRetentionDaysMax} 天之间";
     }
 
     /// <summary>

@@ -16,6 +16,8 @@ let globalManagementDraft = null;
 let userListBadgesByUser = new Map();
 let nextTimer = null;
 let nextRefreshPending = false;
+const MAX_ENTITY_NAME_BYTES = 64;
+const MAX_USER_REMARK_BYTES = 512;
 
 function userById(id) {
   return (state.users || []).find(user => user.id === id);
@@ -204,7 +206,8 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
+  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"') +
+    `<p class="muted helper-copy">用户名最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>`;
   showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true);
 }
 
@@ -213,6 +216,11 @@ export async function saveGlobalUser() {
   if (!name) {
     setFieldError("gu-name", "请填写用户名");
     toast("请填写用户名", "error");
+    return;
+  }
+  if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
+    setFieldError("gu-name", `用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
+    toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
     return;
   }
   clearFieldError("gu-name");
@@ -404,6 +412,7 @@ function renderUserManagementModal() {
     '<section class="user-management-settings">' +
       valueField("um-name", "用户名 <span class='req'>*</span>", user.name, "text", 'placeholder="全局名称，不区分大小写"') +
       textareaField("um-remark", "备注", user.remark || "", 'rows="3"', "为用户添加备注信息（可选）") +
+      '<p class="muted helper-copy">用户名最多 ' + MAX_ENTITY_NAME_BYTES + ' 个 UTF-8 字节，备注最多 ' + MAX_USER_REMARK_BYTES + ' 个 UTF-8 字节。</p>' +
       (user.avatarUrl ? '<div class="user-avatar-setting"><span class="muted">已设置自定义头像</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="' + esc(user.id) + '">移除自定义头像</button></div>' : "") +
     "</section>" +
     '<section class="subsection user-binding-section">' +
@@ -532,8 +541,19 @@ export async function saveUserManagement() {
     toast("请填写用户名", "error");
     return;
   }
+  if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
+    setFieldError("um-name", `用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
+    toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
+    return;
+  }
   clearFieldError("um-name");
   const remark = $("#um-remark")?.value.trim() || "";
+  if (new TextEncoder().encode(remark).length > MAX_USER_REMARK_BYTES) {
+    setFieldError("um-remark", `备注最多 ${MAX_USER_REMARK_BYTES} 字节`);
+    toast(`备注最多 ${MAX_USER_REMARK_BYTES} 字节`, "error");
+    return;
+  }
+  clearFieldError("um-remark");
   const userId = managementDraft.userId;
   const bindings = readBindingPayloads().map(normalizePrePost);
   try {

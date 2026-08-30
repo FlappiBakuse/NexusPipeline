@@ -1370,7 +1370,7 @@ test("脚本卡片拖拽排序：第二页只重排当前页，不移动第一�
   }
 });
 
-test("长时脚本：-1 成对校验 / 保存 / 长时徽章", async ({ page }) => {
+test("长时脚本：日志无更新 -1 定义 / 总时长校验 / 保存徽章", async ({ page }) => {
   const dir = makeScriptDir("longrun");
   try {
     await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
@@ -1386,21 +1386,22 @@ test("长时脚本：-1 成对校验 / 保存 / 长时徽章", async ({ page }) 
     await page.fill("#sm-config", dir.cfg.replace(/\\/g, "\\\\"));
     await page.fill("#sm-log", dir.log.replace(/\\/g, "\\\\"));
     await page.fill("#sm-game-exe", dir.main.replace(/\\/g, "\\\\"));
-    await page.fill("#sm-stall", "-1");
-    await page.fill("#sm-total", "120");
+    await page.fill("#sm-stall", "5");
+    await page.fill("#sm-total", "-1");
     await page.click(".modal button:has-text('保存')");
     await page.waitForTimeout(400);
-    expect(await page.$(".modal-mask"), "半 -1（stall=-1 而 total 正常）保存被拒（弹窗保留）").toBeTruthy();
-    expect((await page.textContent("body")).includes("长时脚本需将"), "半 -1 提示长时成对语义（两个超时都设为 -1）").toBeTruthy();
+    expect(await page.$(".modal-mask"), "普通脚本 total=-1 保存被拒（弹窗保留）").toBeTruthy();
+    expect((await page.textContent("body")).includes("日志无更新上限未填 -1"), "普通脚本 total=-1 提示填写关系").toBeTruthy();
 
-    await page.fill("#sm-total", "-1");
+    await page.fill("#sm-stall", "-1");
+    await page.fill("#sm-total", "120");
     await page.click(".modal button:has-text('保存')");
     await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
     await page.waitForFunction(() => document.body.textContent.includes("长时脚本测试"), null, { timeout: 5000 });
     expect(await page.$('[data-testid="script-long-badge"]'), "长时脚本卡片显示「长时」徽章").toBeTruthy();
     const list = await (await api("GET", "/api/scripts")).json();
     const saved = list.find(s => s.name === "长时脚本测试");
-    expect(!!saved && saved.logStallTimeoutMinutes === -1 && saved.totalTimeoutMinutes === -1, "长时脚本两个超时均已落盘为 -1").toBeTruthy();
+    expect(!!saved && saved.logStallTimeoutMinutes === -1 && saved.totalTimeoutMinutes === 120, "长时脚本日志无更新上限为 -1、总时长为有限值并已落盘").toBeTruthy();
   } finally {
     const list = await (await api("GET", "/api/scripts")).json();
     const target = list.find(s => s.name === "长时脚本测试");

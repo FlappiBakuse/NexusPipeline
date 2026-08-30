@@ -257,8 +257,8 @@ test("status 与 limits API 在同一服务实例可用", { skip }, async () => 
   const response = await fetchWithTimeout(serviceUrl() + "api/limits");
   assert.equal(response.status, 200);
   const payload = await response.json();
-  assert.equal(payload.limits.maxScripts, 25);
-  assert.equal(payload.limits.maxQueues, 10);
+  assert.equal(payload.limits.maxScripts, 50);
+  assert.equal(payload.limits.maxQueues, 50);
 });
 
 test("普通运行状态集中在 .nxp，安装根不再散落运行标记", { skip }, () => {

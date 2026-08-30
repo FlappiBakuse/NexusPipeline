@@ -29,6 +29,10 @@ const historyToday = localDateIso();
 let historyStartDate = offsetDateIso(historyToday, -29);
 let historyEndDate = historyToday;
 
+function isHistoryMobile() {
+  return window.matchMedia?.("(max-width: 820px)")?.matches ?? window.innerWidth <= 820;
+}
+
 /** 「2026年08月21日」样式的日期文本（date 参数形如 2026-08-21）。 */
 function fmtDateCN(dateStr) {
   const parts = String(dateStr || "").split("-");
@@ -240,6 +244,10 @@ function dateRowsMarkup() {
     : '<div class="history-dates-empty-message"><strong>该时间段暂无记录</strong><span>请选择其他日期范围。</span></div>';
 }
 
+function historyDetailBackMarkup() {
+  return '<button class="history-detail-back ghost" type="button" data-action="history-detail-back" data-testid="history-detail-back">返回日期列表</button>';
+}
+
 function entryMarkup(record) {
   const queue = record.queueName ? ` · ${esc(record.queueName)}` : "";
   const filePath = historyDir && historySelectedDate ? `${historyDir}\\${historySelectedDate}\\${esc(record.logFile || "")}` : esc(record.logFile || "");
@@ -276,7 +284,8 @@ function pluginHistoryDetailMarkup(record) {
 
 function panelsMarkup(records) {
   const emptyMessage = historySelectedDate ? "该日暂无记录" : "该时间段暂无记录";
-  return `<div class="history-browser" data-testid="history-panels">
+  const detailVisible = isHistoryMobile() && Boolean(historySelectedDate);
+  return `<div class="history-browser${detailVisible ? " history-detail-visible" : ""}" data-testid="history-panels">
     <div class="history-list-column">
       ${historyRangeMarkup()}
       <aside class="history-dates-panel">
@@ -285,6 +294,7 @@ function panelsMarkup(records) {
       </aside>
     </div>
     <div class="history-records-column">
+      ${detailVisible ? historyDetailBackMarkup() : ""}
       <section class="history-records-panel">
         <div class="history-panel-head">${icon("queues")}<h3>运行记录</h3><span class="muted" data-testid="history-records-count">${records.length} 条记录</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="刷新记录" data-testid="history-refresh">${icon("refresh")}</button></div>
         <div class="history-entry-list">${records.length ? records.map(entryMarkup).join("") : `<div class="history-empty-message">${emptyMessage}</div>`}</div>
@@ -300,6 +310,7 @@ function historyRangeLabel() {
 export async function pageHistory(token) {
   if (!isCurrent("history", token)) return;
   navActive("history"); setTopbarTitle("历史记录");
+  if (isHistoryMobile()) historySelectedDate = "";
   let data;
   try {
     data = await api("GET", `/api/history/dates?from=${encodeURIComponent(historyStartDate)}&to=${encodeURIComponent(historyEndDate)}`);
@@ -315,7 +326,7 @@ export async function pageHistory(token) {
   }
   if (!isCurrent("history", token)) return;
   historyDates = data.dates || [];
-  if (!historyDates.some(date => date.date === historySelectedDate)) {
+  if (!isHistoryMobile() && !historyDates.some(date => date.date === historySelectedDate)) {
     historySelectedDate = historyDates[0]?.date || "";
   }
   if (!historySelectedDate) {
@@ -384,6 +395,14 @@ export async function historyRefresh() {
   await loadDayRecords(state.routeToken);
 }
 
+export function historyDetailBack() {
+  if (!isHistoryMobile()) return;
+  historySelectedDate = "";
+  historyDir = "";
+  render(pageHeader("历史记录", "历史记录", `${historyRangeLabel()} · 选择运行日期`, "") + panelsMarkup([]));
+  bindHistoryRangePicker();
+}
+
 function historyLogMarkup(id, attemptKey, logInfo, label) {
   const total = logInfo?.logTotalLines || 0;
   const full = logInfo?.logText != null;
@@ -429,6 +448,7 @@ export async function historyFullLog(id, attemptKey, target) {
 export const actions = {
   "history-detail": target => historyDetail(target.dataset.id),
   "history-date": target => historySelectDate(target),
+  "history-detail-back": () => historyDetailBack(),
   "history-refresh": () => historyRefresh(),
   "history-full-log": target => withBusy(target, () => historyFullLog(target.dataset.id, target.dataset.attempt, target)),
 };

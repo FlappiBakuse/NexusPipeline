@@ -14,6 +14,7 @@ import { selectControlMarkup } from "../core/controls.js";
 let scriptDraft = null;
 let scriptPage = 1;
 const SCRIPT_PAGE_SIZE = 20;
+const MAX_ENTITY_NAME_BYTES = 64;
 
 function specializedPlugins() {
   return (state.plugins || []).filter(p => p.kind === "data-specialized" && p.configuredEnabled && p.runtimeEnabled && p.state === "Active");
@@ -70,7 +71,7 @@ function scriptCardMarkup(script, notifyOn) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
       <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
+    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${notifyOn ? `<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
       <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
@@ -212,6 +213,7 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
     </div>
+    <p class="muted helper-copy">脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <p class="muted helper-copy">由专用插件「${esc(pluginDisplayName(pluginType, state.plugins || []))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid switch-grid">
@@ -227,15 +229,16 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <p class="muted helper-copy">两个超时字段同时填 -1 表示长时运行；其他数值按超时规则判断并支持重试。</p>
+      <p class="muted helper-copy">日志无更新上限填 -1 即为长时脚本；长时脚本的运行总时间上限可填 -1（永不超时）或其他值（到时间按超时记录）；普通脚本不能将运行总时间上限填 -1。</p>
     </div>`
     : `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
     </div>
+    <p class="muted helper-copy">脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <div class="form-grid">
       ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
       ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 -x --mode=1；以路径开头（如 .\\app.exe?-args）时 ? 后为执行端参数")}
@@ -258,10 +261,10 @@ export async function openScriptModal(id = "", plugin = "") {
     <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="${l.minStallMinutes ?? 1}" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="${l.minTotalMinutes ?? 5}" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`)}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`)}
       </div>
-      <p class="muted helper-copy">两个超时字段同时填 -1 表示长时运行；其他数值按超时规则判断并支持重试。</p>
+      <p class="muted helper-copy">日志无更新上限填 -1 即为长时脚本；长时脚本的运行总时间上限可填 -1（永不超时）或其他值（到时间按超时记录）；普通脚本不能将运行总时间上限填 -1。</p>
       <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
           <label class="field-label" for="sm-succ-kw">成功关键字</label>
@@ -425,9 +428,9 @@ export async function saveScript() {
     }
   }
   const nameBytes = new TextEncoder().encode($dom("#sm-name").value.trim()).length;
-  if (l.maxScriptNameBytes && nameBytes > l.maxScriptNameBytes) {
-    setFieldError("sm-name", `脚本名称最多 ${l.maxScriptNameBytes} 字节`);
-    toast(`脚本名称最多 ${l.maxScriptNameBytes} 字节`, "error");
+  if (nameBytes > MAX_ENTITY_NAME_BYTES) {
+    setFieldError("sm-name", `脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
+    toast(`脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
     return;
   }
   const attempts = parseInt($dom("#sm-attempts")?.value, 10);
@@ -438,12 +441,12 @@ export async function saveScript() {
     toast(`最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`, "error");
     return;
   }
-  // -1 = 不超时（长时脚本），必须成对出现
+  // 日志无更新上限为 -1 定义长时脚本；普通脚本不能禁用运行总时间上限
   const longStall = stall === -1;
-  const longTotal = total === -1;
-  if (longStall !== longTotal) {
-    setFieldError("sm-stall", "长时脚本需将「日志无更新超时」与「运行总时间超时」都设为 -1（-1 = 不超时）");
-    toast("长时脚本需将「日志无更新超时」与「运行总时间超时」都设为 -1（-1 = 不超时）", "error");
+  const unlimitedTotal = total === -1;
+  if (!longStall && unlimitedTotal) {
+    setFieldError("sm-total", "日志无更新上限未填 -1 时，运行总时间上限不能填 -1");
+    toast("日志无更新上限未填 -1 时，运行总时间上限不能填 -1", "error");
     return;
   }
   if (!longStall && (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60)))) {
@@ -451,7 +454,7 @@ export async function saveScript() {
     toast(`日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`, "error");
     return;
   }
-  if (!longTotal && (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720)))) {
+  if (!unlimitedTotal && (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720)))) {
     setFieldError("sm-total", `运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`);
     toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
     return;

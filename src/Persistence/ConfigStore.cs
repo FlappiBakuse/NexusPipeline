@@ -7,14 +7,6 @@ namespace NexusPipeline.Persistence;
 
 internal static class ConfigStore
 {
-    /// <summary>历史保留天数上限（由 limits.json 约束，消除硬编码 180；Limits.Load 时同步，避免 Persistence 反向依赖 Services）。</summary>
-    private static int _maxHistoryRetentionDays = 180;
-
-    public static void ApplyMaxHistoryRetentionDays(int maxDays)
-    {
-        _maxHistoryRetentionDays = Math.Max(1, maxDays);
-    }
-
     public static AppSettings Load()
     {
         var settings = new AppSettings();
@@ -54,7 +46,7 @@ internal static class ConfigStore
 
     private static void Normalize(AppSettings settings)
     {
-        if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > _maxHistoryRetentionDays)
+        if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > AppFixedLimits.HistoryRetentionDaysMax)
         {
             settings.HistoryRetentionDays = 7;
         }

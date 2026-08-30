@@ -132,12 +132,12 @@ internal class HistoryService : IHistoryStore
     }
 
     /// <summary>按 Id 查找历史记录：默认窗口取保留天数上限：此前固定 31 天，与保留上限
-    /// （默认 180、可配 365）不一致——超出窗口的记录点详情 404；显式传 days 时沿用原语义。</summary>
+    /// （固定上限 180 天）不一致——超出窗口的记录点详情 404；显式传 days 时沿用原语义。</summary>
     public RunRecord? FindById(string id, int days = 0)
     {
         if (days <= 0)
         {
-            days = Limits.Current.MaxHistoryRetentionDays;
+            days = AppFixedLimits.HistoryRetentionDaysMax;
         }
         lock (Sync)
         {

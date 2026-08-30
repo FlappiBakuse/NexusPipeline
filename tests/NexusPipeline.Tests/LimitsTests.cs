@@ -10,14 +10,21 @@ public sealed class LimitsTests
     [Fact]
     public void DefaultLimitsExposeThePublishedSafeBoundaries()
     {
-        Assert.Equal(25, Limits.Current.MaxScripts);
-        Assert.Equal(10, Limits.Current.MaxUsersPerScript);
-        Assert.Equal(10, Limits.Current.MaxQueues);
+        Assert.Equal(50, Limits.Current.MaxScripts);
+        Assert.Equal(50, Limits.Current.MaxUsersPerScript);
+        Assert.Equal(50, Limits.Current.MaxUsers);
+        Assert.Equal(50, Limits.Current.MaxQueues);
+        Assert.Equal(50, Limits.Current.MaxQueueTotalUsers);
         Assert.Equal(10, Limits.Current.MaxTimeSetsPerQueue);
         Assert.Equal(1, Limits.Current.MinAttempts);
         Assert.Equal(10, Limits.Current.MaxAttempts);
+        Assert.Equal(1, Limits.Current.MinStallMinutes);
+        Assert.Equal(60, Limits.Current.MaxStallMinutes);
         Assert.Equal(5, Limits.Current.MinTotalMinutes);
         Assert.Equal(720, Limits.Current.MaxTotalMinutes);
+        Assert.Equal(64, AppFixedLimits.MaxEntityNameBytes);
+        Assert.Equal(512, AppFixedLimits.MaxUserRemarkBytes);
+        Assert.Equal(180, AppFixedLimits.HistoryRetentionDaysMax);
     }
 
     [Theory]
@@ -55,7 +62,7 @@ public sealed class LimitsTests
     [Fact]
     public void CheckQueueMixRejectsOnlyMixedLongAndNormalScripts()
     {
-        var longScript = new ScriptInstance { Id = "long", LogStallTimeoutMinutes = -1, TotalTimeoutMinutes = -1 };
+        var longScript = new ScriptInstance { Id = "long", LogStallTimeoutMinutes = -1, TotalTimeoutMinutes = 120 };
         var normalScript = new ScriptInstance { Id = "normal", LogStallTimeoutMinutes = 5, TotalTimeoutMinutes = 120 };
         var queue = new DispatchQueue
         {

@@ -27,7 +27,7 @@ internal static class QueueCommands
                 lock (ctx.DataLock)
                 {
                     error = Limits.CheckQueueCount(ctx.Queues.Count)
-                        ?? Limits.CheckNameBytes(candidate.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                        ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
                         ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
                         ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
@@ -86,14 +86,21 @@ internal static class QueueCommands
                     lock (ctx.DataLock)
                     {
                         existing = ctx.FindQueue(queueId);
-                        error = existing is null
-                            ? null
-                            : Limits.CheckNameBytes(candidate.Name, Limits.Current.MaxQueueNameBytes, "队列名称")
+                        if (existing is null)
+                        {
+                            error = null;
+                        }
+                        else
+                        {
+                            RemoveDuplicateTasks(candidate);
+                            NormalizeTimeSets(candidate);
+                            error = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
                                 ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
                                 ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
                                 ?? CheckQueuePluginAvailability(ctx, candidate)
                                 ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), candidate);
+                        }
                         if (existing is not null && error is null)
                         {
                             candidate.Id = existing.Id;
@@ -261,6 +268,7 @@ internal static class QueueCommands
 
     private static void NormalizeQueue(DispatchQueue queue)
     {
+        RemoveDuplicateTasks(queue);
         if (!QueueRule.IsValidAutoRunMode(queue.AutoRunMode))
         {
             queue.AutoRunMode = "none";
@@ -278,8 +286,17 @@ internal static class QueueCommands
                 task.Id = Guid.NewGuid().ToString("N");
             }
         }
+        NormalizeTimeSets(queue);
+    }
+
+    /// <summary>按列表顺序保留同启用状态、同一时间的第一项，并将后续项的星期选择合并到第一项。</summary>
+    private static void NormalizeTimeSets(DispatchQueue queue)
+    {
+        var firstByKey = new Dictionary<(bool Enabled, string Time), QueueTimeSet>();
+        var merged = new List<QueueTimeSet>();
         foreach (QueueTimeSet timeSet in queue.TimeSets)
         {
+            timeSet.Days ??= new List<int>();
             if (string.IsNullOrWhiteSpace(timeSet.Id))
             {
                 timeSet.Id = Guid.NewGuid().ToString("N");
@@ -293,18 +310,40 @@ internal static class QueueCommands
             {
                 timeSet.Time = "08:00";
             }
-        }
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var distinct = new List<QueueTimeSet>();
-        foreach (QueueTimeSet timeSet in queue.TimeSets)
-        {
-            string key = $"{timeSet.Enabled}|{string.Join(",", timeSet.Days.OrderBy(day => day))}|{timeSet.Time}";
-            if (seen.Add(key))
+
+            timeSet.Days = timeSet.Days.Distinct().OrderBy(day => day).ToList();
+            var key = (timeSet.Enabled, timeSet.Time);
+            if (firstByKey.TryGetValue(key, out QueueTimeSet? first))
             {
-                distinct.Add(timeSet);
+                first.Days = first.Days
+                    .Concat(timeSet.Days)
+                    .Distinct()
+                    .OrderBy(day => day)
+                    .ToList();
+                continue;
             }
+
+            firstByKey.Add(key, timeSet);
+            merged.Add(timeSet);
         }
-        queue.TimeSets = distinct;
+        queue.TimeSets = merged;
+    }
+
+    /// <summary>按任务排序保留每个脚本实例的第一项，移除后续重复任务。</summary>
+    private static void RemoveDuplicateTasks(DispatchQueue queue)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var distinct = new List<QueueTask>();
+        foreach (QueueTask task in queue.Tasks.OrderBy(task => task.Index))
+        {
+            if (!string.IsNullOrWhiteSpace(task.ScriptInstanceId) && !seen.Add(task.ScriptInstanceId))
+            {
+                continue;
+            }
+            task.Index = distinct.Count;
+            distinct.Add(task);
+        }
+        queue.Tasks = distinct;
     }
 
     private static OperationResult<T> Validation<T>(string message) =>

@@ -98,10 +98,10 @@ public class RuleTests
     }
 
     [Fact]
-    public void ScriptInstance_IsLongRunning_OnlyWhenBothTimeoutsAreMinusOne()
+    public void ScriptInstance_IsLongRunning_WhenStallTimeoutIsMinusOne()
     {
         Assert.False(new ScriptInstance().IsLongRunning);
-        Assert.False(new ScriptInstance { LogStallTimeoutMinutes = -1 }.IsLongRunning);
+        Assert.True(new ScriptInstance { LogStallTimeoutMinutes = -1, TotalTimeoutMinutes = 120 }.IsLongRunning);
         Assert.False(new ScriptInstance { TotalTimeoutMinutes = -1 }.IsLongRunning);
         Assert.True(new ScriptInstance { LogStallTimeoutMinutes = -1, TotalTimeoutMinutes = -1 }.IsLongRunning);
     }
@@ -125,11 +125,11 @@ public class RuleTests
     }
 
     [Fact]
-    public void Limits_CheckScriptTimeouts_RequiresPairwiseMinusOne()
+    public void Limits_CheckScriptTimeouts_AllowsFiniteTotalForLongScript()
     {
         Assert.Null(Limits.CheckScriptTimeouts(-1, -1));
+        Assert.Null(Limits.CheckScriptTimeouts(-1, 120));
         Assert.Null(Limits.CheckScriptTimeouts(5, 120));
-        Assert.NotNull(Limits.CheckScriptTimeouts(-1, 120));
         Assert.NotNull(Limits.CheckScriptTimeouts(5, -1));
         Assert.NotNull(Limits.CheckScriptTimeouts(0, 0));
     }

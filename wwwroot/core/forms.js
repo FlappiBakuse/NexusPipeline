@@ -1,8 +1,8 @@
 import { esc } from "./format.js";
 import { numberControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 
-export function pageHeader(kicker, title, description, action = "") {
-  return `<header class="page-head"><div class="page-head-copy">${kicker ? `<div class="eyebrow">${kicker}</div>` : ""}<h2>${title}</h2>${description ? `<p class="page-kicker">${description}</p>` : ""}</div>${action ? `<div class="page-head-actions">${action}</div>` : ""}</header>`;
+export function pageHeader(kicker, title, description, action = "", extraClass = "") {
+  return `<header class="page-head${extraClass ? ` ${esc(extraClass)}` : ""}"><div class="page-head-copy">${kicker ? `<div class="eyebrow">${kicker}</div>` : ""}<h2>${title}</h2>${description ? `<p class="page-kicker">${description}</p>` : ""}</div>${action ? `<div class="page-head-actions">${action}</div>` : ""}</header>`;
 }
 
 function fieldErrorSlot(id) {

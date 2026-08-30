@@ -15,9 +15,11 @@ let queueDraft = null;
 let queuePage = 1;
 let nextTimer = null;
 let queuePendingMerged = false;
+let queuePendingDuplicateMerged = false;
 let queueModalScroll = null;
 let queueOpenTimeSets = null;
 const QUEUE_PAGE_SIZE = 20;
+const MAX_ENTITY_NAME_BYTES = 64;
 
 if (typeof document !== "undefined") {
   document.addEventListener("change", event => {
@@ -197,7 +199,7 @@ function queueTaskOptions(scripts) {
     const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
     const suffix = unavailable
       ? (pluginStatus.missing ? "（未知专项）" : "（专项插件不可用）")
-      : (script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1 ? "（长时）" : "");
+      : (script.logStallTimeoutMinutes === -1 ? "（长时）" : "");
     return {
       value: script.id,
       label: `${script.name}${suffix}`,
@@ -225,6 +227,7 @@ export function renderQueueModal(skipOpenCapture = false) {
   const l = state.limits || {};
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
   const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
+    <p class="muted helper-copy">队列名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <div class="form-grid">${selectField("qm-mode", "自动运行方式", d.autoRunMode, [{ value: "none", label: "不运行" }, { value: "scheduled", label: "定时运行" }, { value: "startup", label: "启动时运行" }])}${selectField("qm-action", "运行完成操作", d.completionAction, [{ value: "none", label: "无操作" }, { value: "exit", label: "退出软件" }, { value: "sleep", label: "休眠" }, { value: "reboot", label: "重启" }, { value: "shutdown", label: "关机" }])}</div>
     <div ${notifyAvailable() ? "" : "hidden"}>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置", d.notifyEnabled, "toggle-qm-flag")}</div>
     <div class="subsection"><div class="section-heading"><h3>定时列表</h3><span class="muted">默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span><strong>定时 ${index + 1}</strong><span class="muted">${esc(timeSet.time || "未设置时间")} · ${timeSet.days.length ? `${timeSet.days.length} 天` : "未选周期"}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">执行周期（可多选）</label><div class="days-btn-grid" role="group" aria-label="执行周期">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc("日一二三四五六"[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">执行时间</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, "执行时间")}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? "已启用" : "已停用"}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">删除定时</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>+ 添加定时${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
@@ -291,10 +294,12 @@ export function queueRemoveTask(index) { syncQueueDraftFromDom(); queueDraft.tas
 
 export async function saveQueue() {
   syncQueueDraftFromDom();
+  queuePendingDuplicateMerged = false;
   const draft = queueDraft;
   draft.timeSets.forEach((timeSet, index) => { const tsEnable = $(`[data-ts-enable='${index}']`); if (tsEnable) timeSet.enabled = tsEnable.getAttribute("aria-pressed") === "true"; timeSet.time = $(`[data-ts-time='${index}']`)?.value.trim() || "05:30"; timeSet.days = $$(`[data-ts-days='${index}']`).filter(input => input.getAttribute("aria-pressed") === "true").map(input => +input.dataset.day); });
   draft.timeSets = draft.timeSets.filter(timeSet => timeSet.days.length);
   draft.tasks = draft.tasks.map((task, index) => ({ ...task, index, scriptInstanceId: $(`[data-task-idx='${index}']`)?.value || task.scriptInstanceId })).filter(task => task.scriptInstanceId);
+  queuePendingDuplicateMerged = mergeDuplicateTasks();
   if (!draft.name) { setFieldError("qm-name", "队列名称不能为空"); toast("队列名称不能为空", "error"); return; }
   clearFieldError("qm-name");
   if (!draft.tasks.length) { toast("任务列表为空，请至少添加一个脚本任务", "error"); return; }
@@ -307,33 +312,57 @@ export async function saveQueue() {
   }
   const l = state.limits || {};
   const nameBytes = new TextEncoder().encode(draft.name).length;
-  if (l.maxQueueNameBytes && nameBytes > l.maxQueueNameBytes) { setFieldError("qm-name", `队列名称最多 ${l.maxQueueNameBytes} 字节`); toast(`队列名称最多 ${l.maxQueueNameBytes} 字节`, "error"); return; }
+  if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", `队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`); toast(`队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error"); return; }
   if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(`定时列表已达上限（${draft.timeSets.length}/${l.maxTimeSetsPerQueue}）`, "error"); return; }
   const totalUsers = queueTotalUsers();
   if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(`任务列表的启用用户总数已达上限（${totalUsers}/${l.maxQueueTotalUsers}）`, "error"); return; }
-  // 长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本会无限阻塞队列后续任务）
+  // 长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本可能持续运行并阻塞队列后续任务）
   const taskScripts = draft.tasks.map(task => state.scripts.find(item => item.id === task.scriptInstanceId)).filter(Boolean);
-  const hasLong = taskScripts.some(script => script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1);
-  const hasNormal = taskScripts.some(script => !(script.logStallTimeoutMinutes === -1 && script.totalTimeoutMinutes === -1));
-  if (hasLong && hasNormal) { toast("队列不能混合编排长时脚本（两个超时均为 -1）与普通脚本实例，请分开建立队列", "error"); return; }
+  const hasLong = taskScripts.some(script => script.logStallTimeoutMinutes === -1);
+  const hasNormal = taskScripts.some(script => script.logStallTimeoutMinutes !== -1);
+  if (hasLong && hasNormal) { toast("队列不能混合编排长时脚本（日志无更新上限为 -1）与普通脚本实例，请分开建立队列", "error"); return; }
   const mergedCount = mergeTimeSets();
   queuePendingMerged = mergedCount > 0;
   if (hasTimeGap()) {
     showModal(modalShell("定时间隔警告", `<p class="modal-copy">存在间隔低于10分钟的定时任务，如果之前的定时任务还未完成，之后的定时任务可能会忽略，确定吗？</p>`, '<button class="primary" type="button" data-action="confirm-timegap-save">确定</button><button class="ghost" type="button" data-action="cancel-timegap">取消</button>'));
     return;
   }
-  await doSaveQueue(queuePendingMerged);
+  await doSaveQueue(queuePendingMerged, queuePendingDuplicateMerged);
 }
 
-/** 定时列表去重合并（启用+执行周期+时间完全一致视为同一条），修改 draft 并返回被合并条数。</summary> */
-function mergeTimeSets() {
+/** 按任务排序去重：每个脚本实例只保留排序列表中的第一项。 */
+function mergeDuplicateTasks() {
   const seen = new Set();
+  const distinct = [];
+  let removed = 0;
+  for (const task of queueDraft.tasks.slice().sort((a, b) => a.index - b.index)) {
+    if (seen.has(task.scriptInstanceId)) {
+      removed++;
+      continue;
+    }
+    seen.add(task.scriptInstanceId);
+    task.index = distinct.length;
+    distinct.push(task);
+  }
+  queueDraft.tasks = distinct;
+  return removed > 0;
+}
+
+/** 定时列表合并：同启用状态、执行时间相同的列表取星期并集，保留排序第一项。 */
+function mergeTimeSets() {
+  const firstByKey = new Map();
   const merged = [];
   let removed = 0;
   for (const timeSet of queueDraft.timeSets) {
-    const key = `${timeSet.enabled}|${[...timeSet.days].sort((a, b) => a - b).join(",")}|${timeSet.time}`;
-    if (seen.has(key)) { removed++; continue; }
-    seen.add(key);
+    timeSet.days = [...new Set(Array.isArray(timeSet.days) ? timeSet.days : [])].sort((a, b) => a - b);
+    const key = `${timeSet.enabled}|${timeSet.time}`;
+    const first = firstByKey.get(key);
+    if (first) {
+      first.days = [...new Set([...first.days, ...timeSet.days])].sort((a, b) => a - b);
+      removed++;
+      continue;
+    }
+    firstByKey.set(key, timeSet);
     merged.push(timeSet);
   }
   queueDraft.timeSets = merged;
@@ -362,13 +391,18 @@ function cancelTimeGap() {
   renderQueueModal();
 }
 
-async function doSaveQueue(merged) {
+async function doSaveQueue(merged, duplicateMerged) {
   const draft = queueDraft;
   try {
     if (draft.id) await api("PUT", "/api/queues/" + draft.id, draft);
     else await api("POST", "/api/queues", draft);
     closeModal();
-    toast(merged ? "完全一致的定时列表已被合并" : "调度队列已保存");
+    const messages = [];
+    if (duplicateMerged) messages.push("重复脚本实例任务已合并");
+    if (merged) messages.push("重复定时列表已合并");
+    toast(messages.join("；") || "调度队列已保存");
+    queuePendingMerged = false;
+    queuePendingDuplicateMerged = false;
     await pageQueues(state.routeToken);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -389,7 +423,7 @@ export const actions = {
   "delete-queue": target => deleteQueue(target.dataset.id, target.dataset.name),
   "confirm-delete-queue": target => withBusy(target, () => confirmDeleteQueue(target.dataset.id, target.dataset.name)),
   "save-queue": target => withBusy(target, () => saveQueue()),
-  "confirm-timegap-save": () => doSaveQueue(queuePendingMerged),
+  "confirm-timegap-save": () => doSaveQueue(queuePendingMerged, queuePendingDuplicateMerged),
   "cancel-timegap": () => cancelTimeGap(),
   "add-time-set": () => queueAddTimeSet(),
   "remove-time-set": target => queueRemoveTimeSet(+target.dataset.index),

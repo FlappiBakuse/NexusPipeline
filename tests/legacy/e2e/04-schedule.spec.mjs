@@ -180,7 +180,7 @@ test("调度队列：新建（定时+任务）/ 编辑 / 删除", async ({ page 
   expect(!(await page.textContent("body")).includes("测试队列A-改"), "删除后卡片消失").toBeTruthy();
 });
 
-test("定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10分钟确认卡片", async ({ page }) => {
+test("定时与任务列表：重复项合并 toast + 后端兜底去重 + 间隔<10分钟确认卡片", async ({ page }) => {
   const mDir = makeScriptDir("timeset");
   const created = await createScript({ name: "定时合并用脚本", rootPath: mDir.root, mainExe: mDir.main, configPath: mDir.cfg, logPath: mDir.log });
   expect(created.ok, "创建定时合并用脚本").toBeTruthy();
@@ -189,17 +189,21 @@ test("定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10�
   const dup = await api("POST", "/api/queues", {
     name: "合并兜底队列", autoRunMode: "scheduled", completionAction: "none",
     timeSets: [
-      { id: "", enabled: true, days: [1, 2, 3], time: "08:00" },
-      { id: "", enabled: true, days: [3, 1, 2], time: "08:00" },
-      { id: "", enabled: false, days: [1, 2, 3], time: "08:00" },
+      { id: "first-time-set", enabled: true, days: [1, 2, 3], time: "08:00" },
+      { id: "merged-time-set", enabled: true, days: [3, 4, 5], time: "08:00" },
+      { id: "disabled-time-set", enabled: false, days: [1, 2, 3], time: "08:00" },
     ],
-    tasks: [{ id: "", index: 0, scriptInstanceId: sid }],
+    tasks: [
+      { id: "first-task", index: 4, scriptInstanceId: sid },
+      { id: "duplicate-task", index: 5, scriptInstanceId: sid },
+    ],
   });
   expect(dup.ok, "API 提交含重复定时列表成功").toBeTruthy();
   const dupId = (await dup.json()).id;
   let qList = await (await fetch(baseUrl + "api/queues")).json();
   const dupGot = qList.find(q => q.id === dupId);
-  expect(dupGot && dupGot.timeSets.length === 2, "后端兜底去重：完全一致定时合并为 1 条（天数乱序也视为一致，保留启用/禁用各一）").toBeTruthy();
+  expect(dupGot && dupGot.timeSets.length === 2 && dupGot.timeSets[0].id === "first-time-set" && JSON.stringify(dupGot.timeSets[0].days) === JSON.stringify([1, 2, 3, 4, 5]), "后端兜底合并：同启用状态同时间的星期取并集并保留排序第一项").toBeTruthy();
+  expect(dupGot && dupGot.tasks.length === 1 && dupGot.tasks[0].id === "first-task" && dupGot.tasks[0].index === 0, "后端兜底去重：重复脚本实例任务保留排序第一项").toBeTruthy();
   await api("DELETE", "/api/queues/" + dupId);
 
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
@@ -210,14 +214,20 @@ test("定时列表：完全一致合并 toast + 后端兜底去重 + 间隔<10�
   await page.fill("#qm-name", "合并UI队列");
   await page.click("text=+ 添加任务");
   await page.selectOption('[data-task-idx="0"]', { label: "定时合并用脚本" });
+  await page.click("text=+ 添加任务");
+  await page.selectOption('[data-task-idx="1"]', { label: "定时合并用脚本" });
+  expect((await page.$$eval("#qm-tasks .task-row", els => els.length)) === 2, "弹窗中允许先添加两条相同脚本任务").toBeTruthy();
   await page.click("button:has-text('+ 添加定时')");
   expect((await page.$$eval(".timeset-card", els => els.length)) === 2, "弹窗中已有两条完全相同定时列表（默认复制）").toBeTruthy();
+  await page.locator(".timeset-card").nth(1).locator("summary").click();
+  await page.click('[data-ts-days="1"][data-day="0"]');
   await page.click(".modal button:has-text('保存')");
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
-  expect((await page.textContent("#toast")).includes("完全一致的定时列表已被合并"), "保存后弹出合并 toast（完全一致的定时列表已被合并）").toBeTruthy();
+  const mergeToast = await page.textContent("#toast");
+  expect(mergeToast.includes("重复脚本实例任务已合并") && mergeToast.includes("重复定时列表已合并"), "保存后弹出任务与定时合并 toast").toBeTruthy();
   qList = await (await fetch(baseUrl + "api/queues")).json();
   const uiQ = qList.find(q => q.name === "合并UI队列");
-  expect(uiQ && uiQ.timeSets.length === 1, "合并后队列仅保留 1 条定时").toBeTruthy();
+  expect(uiQ && uiQ.timeSets.length === 1 && JSON.stringify(uiQ.timeSets[0].days) === JSON.stringify([0, 1, 2, 3, 4, 5]) && uiQ.tasks.length === 1, "合并后队列保留排序第一条定时并合并全部星期与脚本任务").toBeTruthy();
   await api("DELETE", "/api/queues/" + uiQ.id);
 
   await page.click("button:has-text('新建调度队列')");
@@ -740,9 +750,9 @@ test("长时脚本运行：-1 超时不触发日志无更新超时失败", async
   const res = await api("POST", "/api/scripts", {
     name: "长时运行脚本", rootPath: dir.root, mainExe: longBat.replace(/\\/g, "\\\\"),
     configPath: dir.cfg, logPath: logFile.replace(/\\/g, "\\\\"), gameExe: PING_GAME,
-    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: -1,
+    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: 120,
   });
-  expect(res.ok, "长时脚本（两个超时 -1）保存成功").toBeTruthy();
+  expect(res.ok, "长时脚本（日志无更新上限 -1、总时间有限）保存成功").toBeTruthy();
   const sid = (await res.json()).id;
   try {
     await api("POST", `/api/scripts/${sid}/users`, { name: "默认", enabled: true });
@@ -764,7 +774,7 @@ test("调度队列：长时/普通混排拒绝，纯长时队列通过", async (
   const longRes = await api("POST", "/api/scripts", {
     name: "混排长时脚本", rootPath: longDir.root, mainExe: longDir.main,
     configPath: longDir.cfg, logPath: longDir.log, gameExe: PING_GAME,
-    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: -1,
+    maxAttempts: 1, logStallTimeoutMinutes: -1, totalTimeoutMinutes: 120,
   });
   const longId = (await longRes.json()).id;
   const normRes = await api("POST", "/api/scripts", {

@@ -20,13 +20,11 @@ internal static class ApiLimitsHandler
             limits = new
             {
                 l.MaxScripts,
-                l.MaxUsers,
                 l.MaxUsersPerScript,
+                l.MaxUsers,
                 l.MaxQueues,
-                l.MaxTimeSetsPerQueue,
                 l.MaxQueueTotalUsers,
-                l.MaxScriptNameBytes,
-                l.MaxQueueNameBytes,
+                l.MaxTimeSetsPerQueue,
                 l.MinAttempts,
                 l.MaxAttempts,
                 l.MinStallMinutes,

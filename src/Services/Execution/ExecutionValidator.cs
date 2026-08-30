@@ -71,6 +71,15 @@ internal sealed class ExecutionValidator
         {
             throw new InvalidOperationException($"脚本「{script.Name}」正在运行，请先退出后再执行");
         }
+
+        string? timeoutError = Limits.CheckScriptTimeouts(
+            script.LogStallTimeoutMinutes,
+            script.TotalTimeoutMinutes);
+        if (timeoutError is not null)
+        {
+            throw new InvalidOperationException(timeoutError);
+        }
+
         if (PluginAvailability.GetUnavailableReason(script.PluginType, _pluginAvailability) is not null)
         {
             return;
@@ -95,6 +104,23 @@ internal sealed class ExecutionValidator
     /// <summary>使用同一份脚本快照校验队列，供 ExecutionPlanBuilder 避免校验与计划读取之间漂移。</summary>
     public void ValidateQueueStartSnapshot(DispatchQueue queue, IReadOnlyList<ScriptInstance> scripts)
     {
+        foreach (QueueTask task in queue.Tasks)
+        {
+            ScriptInstance? script = scripts.FirstOrDefault(s => s.Id == task.ScriptInstanceId);
+            if (script is null)
+            {
+                continue;
+            }
+
+            string? timeoutError = Limits.CheckScriptTimeouts(
+                script.LogStallTimeoutMinutes,
+                script.TotalTimeoutMinutes);
+            if (timeoutError is not null)
+            {
+                throw new InvalidOperationException($"脚本「{script.Name}」：{timeoutError}");
+            }
+        }
+
         string? mixError = Limits.CheckQueueMix(scripts, queue);
         if (mixError is not null)
         {

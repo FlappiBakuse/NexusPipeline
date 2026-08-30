@@ -48,7 +48,7 @@ internal static class ScriptCommands
             lock (ctx.DataLock)
             {
                 limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
-                    ?? Limits.CheckNameBytes(candidate.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+                    ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称")
                     ?? Limits.CheckAttempts(candidate.MaxAttempts)
                     ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
                 if (limitError is null)
@@ -111,7 +111,7 @@ internal static class ScriptCommands
         }
         try
         {
-            string? limitError = Limits.CheckNameBytes(candidate.Name, Limits.Current.MaxScriptNameBytes, "脚本名称")
+            string? limitError = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称")
                 ?? Limits.CheckAttempts(candidate.MaxAttempts)
                 ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
             if (limitError is not null)

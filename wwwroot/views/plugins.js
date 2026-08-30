@@ -3,7 +3,7 @@ import { esc } from "../core/format.js";
 import { pageHeader } from "../core/forms.js";
 import { renderMarkdown } from "../core/markdown.js";
 import { isCurrent, state } from "../core/state.js";
-import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { initAutoScroll, navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { markRestartRequired } from "./settings.js";
 
 let activeTab = "local";
@@ -204,7 +204,8 @@ function detailMetaMarkup(detail, tab) {
   if (tab === "store" && detail.minHostVersion && detail.minHostVersion !== "0.0.0") {
     rows.push(["最低宿主版本", `v${detail.minHostVersion}`]);
   }
-  return `<dl class="plugin-detail-meta">${rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("")}<div><dt>作者</dt><dd>${authorMarkup(detail.authors)}</dd></div><div><dt>标签</dt><dd>${tagsMarkup(detail.tags)}</dd></div>${detail.homepage ? `<div><dt>项目主页</dt><dd><a href="${esc(detail.homepage)}" target="_blank" rel="noopener noreferrer">打开主页</a></dd></div>` : ""}</dl>`;
+  const homepageClass = detail.homepage ? " has-homepage" : "";
+  return `<dl class="plugin-detail-meta${homepageClass}">${rows.map(([label, value]) => `<div><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`).join("")}<div><dt>作者</dt><dd>${authorMarkup(detail.authors)}</dd></div><div><dt>标签</dt><dd>${tagsMarkup(detail.tags)}</dd></div>${detail.homepage ? `<div class="plugin-detail-homepage-row"><dt>项目主页</dt><dd><a href="${esc(detail.homepage)}" target="_blank" rel="noopener noreferrer">打开主页</a></dd></div>` : ""}</dl>`;
 }
 
 function readmeMarkup(detail) {
@@ -220,8 +221,9 @@ function readmeMarkup(detail) {
 function detailContentMarkup(detail, tab) {
   const status = tab === "store" ? statusMarkup(detail, tab) : statusMarkup({ ...detail, state: detail.runtimeState }, tab);
   const actions = tab === "store" ? storeActionMarkup(detail) : localActionMarkup(detail);
+  const displayName = esc(detail.displayName || detail.name);
   const runtimeError = tab === "local" && detail.runtimeError ? `<div class="field-error-message">${esc(detail.runtimeError)}</div>` : "";
-  return `<div class="plugin-detail-head"><div class="plugin-detail-title"><div>${pluginKindBadge(detail)}${status}</div><h3>${esc(detail.displayName || detail.name)}</h3><code>${esc(detail.name)}</code></div><div class="plugin-detail-actions">${actions}</div></div><p class="plugin-detail-description">${esc(detail.description || "暂无简介")}</p>${runtimeError}${detail.installed && detail.installedVersion && detail.installedVersion !== detail.version ? `<div class="callout callout-warning">当前安装版本：v${esc(detail.installedVersion)}${detail.installedName && detail.installedName !== detail.name ? `（${esc(detail.installedName)}）` : ""}</div>` : ""}${detailMetaMarkup(detail, tab)}<section class="plugin-detail-section"><h4>README</h4>${readmeMarkup(detail)}</section><section class="plugin-detail-section"><h4>更新记录</h4>${changelogMarkup(detail.changelog)}</section>`;
+  return `<div class="plugin-detail-head"><div class="plugin-detail-title"><div>${pluginKindBadge(detail)}${status}</div><h3 class="plugin-detail-name-scroll" tabindex="0" title="${displayName}"><span class="plugin-detail-name-scroll-inner">${displayName}</span></h3></div><div class="plugin-detail-actions">${actions}</div></div><p class="plugin-detail-description">${esc(detail.description || "暂无简介")}</p>${runtimeError}${detail.installed && detail.installedVersion && detail.installedVersion !== detail.version ? `<div class="callout callout-warning">当前安装版本：v${esc(detail.installedVersion)}</div>` : ""}${detailMetaMarkup(detail, tab)}<section class="plugin-detail-section"><h4>README</h4>${readmeMarkup(detail)}</section><section class="plugin-detail-section"><h4>更新记录</h4>${changelogMarkup(detail.changelog)}</section>`;
 }
 
 function detailPaneMarkup(tab) {
@@ -235,13 +237,17 @@ function detailPaneMarkup(tab) {
   if (!current.data) {
     return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="empty"><strong>选择一个插件</strong><span>从左侧列表选择插件查看完整信息。</span></div></section>`;
   }
-  return `<section class="plugin-detail-pane" data-testid="plugin-detail"><button class="plugin-detail-back ghost" type="button" data-action="plugin-detail-back" data-testid="plugin-detail-back">返回插件列表</button>${detailContentMarkup(current.data, tab)}</section>`;
+  return `<section class="plugin-detail-pane" data-testid="plugin-detail">${detailContentMarkup(current.data, tab)}</section>`;
+}
+
+function detailBackMarkup() {
+  return `<button class="plugin-detail-back ghost" type="button" data-action="plugin-detail-back" data-testid="plugin-detail-back">返回插件列表</button>`;
 }
 
 function pluginTabs(tab = activeTab) {
   const storeClass = tab === "store" ? "primary" : "tertiary";
   const localClass = tab === "local" ? "primary" : "tertiary";
-  return `<div class="plugin-tabs" role="tablist" aria-label="插件视图"><button type="button" class="${localClass}" role="tab" aria-selected="${String(tab === "local")}" data-action="switch-plugin-tab" data-tab="local" data-testid="plugin-local-tab">本地插件</button><button type="button" class="${storeClass}" role="tab" aria-selected="${String(tab === "store")}" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button></div>`;
+  return `<div class="plugin-tabs plugin-page-tabs" role="tablist" aria-label="插件视图"><button type="button" class="${localClass}" role="tab" aria-selected="${String(tab === "local")}" data-action="switch-plugin-tab" data-tab="local" data-testid="plugin-local-tab">本地插件</button><button type="button" class="${storeClass}" role="tab" aria-selected="${String(tab === "store")}" data-action="switch-plugin-tab" data-tab="store" data-testid="plugin-store-tab">插件仓库</button></div>`;
 }
 
 function pluginBrowserMarkup(tab) {
@@ -259,14 +265,21 @@ function pluginPageMarkup(tab) {
     "插件",
     tab === "store" ? "浏览官方插件并管理安装版本。" : "查看已安装插件并管理运行状态。",
     pluginTabs(tab),
+    "plugin-page-head",
   ) + pluginBrowserMarkup(tab);
 }
 
 function renderDetailPane() {
   const pane = document.querySelector(".plugin-detail-pane");
   if (!pane) return;
-  pane.outerHTML = detailPaneMarkup(activeTab);
+  const parent = pane.parentElement;
+  if (!parent) return;
   document.querySelector(".plugin-browser")?.classList.toggle("detail-visible", detailVisibleMobile);
+  const back = parent.querySelector(".plugin-detail-back");
+  if (detailVisibleMobile && !back) parent.insertAdjacentHTML("afterbegin", detailBackMarkup());
+  if (!detailVisibleMobile) back?.remove();
+  pane.outerHTML = detailPaneMarkup(activeTab);
+  initAutoScroll(parent);
 }
 
 function renderListPane() {
@@ -383,6 +396,7 @@ export const actions = {
     if (selectedByTab[tab] === name) {
       detailVisibleMobile = true;
       document.querySelector(".plugin-browser")?.classList.add("detail-visible");
+      renderDetailPane();
       return;
     }
     selectedByTab[tab] = name;
@@ -394,6 +408,7 @@ export const actions = {
   "plugin-detail-back": () => {
     detailVisibleMobile = false;
     document.querySelector(".plugin-browser")?.classList.remove("detail-visible");
+    document.querySelector(".plugin-detail-back")?.remove();
   },
   "filter-plugin-list": target => {
     searchQuery = target.value || "";

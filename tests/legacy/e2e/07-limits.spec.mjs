@@ -8,34 +8,35 @@ await ensureService();
 
 test("约束体系：API 默认值 + 数量上限", async () => {
   const limits = await (await fetch(baseUrl + "api/limits")).json();
-  expect(limits.limits.maxScripts === 25 && limits.limits.maxUsersPerScript === 10, "limits API 默认值（脚本 25 / 用户 10）").toBeTruthy();
-  expect(limits.limits.maxQueues === 10 && limits.limits.maxTimeSetsPerQueue === 10, "limits API 默认值（队列 10 / 定时 10）").toBeTruthy();
+  expect(limits.limits.maxScripts === 50 && limits.limits.maxUsersPerScript === 50 && limits.limits.maxUsers === 50, "limits API 默认值（脚本 50 / 每脚本用户 50 / 全局用户 50）").toBeTruthy();
+  expect(limits.limits.maxQueues === 50 && limits.limits.maxQueueTotalUsers === 50 && limits.limits.maxTimeSetsPerQueue === 10, "limits API 默认值（队列 50 / 任务用户 50 / 定时 10）").toBeTruthy();
   expect(limits.limits.maxAttempts === 10 && limits.limits.maxTotalMinutes === 720, "limits API 默认值（尝试 10 / 总时长 720）").toBeTruthy();
+  expect(!Object.hasOwn(limits.limits, "maxScriptNameBytes") && !Object.hasOwn(limits.limits, "maxQueueNameBytes") && !Object.hasOwn(limits.limits, "maxHistoryRetentionDays"), "limits API 不再暴露已移除字段").toBeTruthy();
   expect(limits.warnings.length === 0, "默认配置无警告").toBeTruthy();
 
   const ids = [];
   const xDir = makeScriptDir("limits");
   const limitBase = { rootPath: xDir.root, mainExe: xDir.main, configPath: xDir.cfg, logPath: xDir.log, gameExe: PING_GAME };
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 50; i++) {
     const r = await api("POST", "/api/scripts", { name: "约束脚本" + String(i).padStart(2, "0"), ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
   }
-  const r26 = await api("POST", "/api/scripts", { name: "超限脚本", ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
-  expect(r26.status === 400, "第 26 个脚本被拒（400）").toBeTruthy();
+  const r51 = await api("POST", "/api/scripts", { name: "超限脚本", ...limitBase, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
+  expect(r51.status === 400, "第 51 个脚本被拒（400）").toBeTruthy();
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 50; i++) {
     await api("POST", "/api/scripts/" + ids[0] + "/users", { name: "用户" + i, enabled: true });
   }
-  const r11 = await api("POST", "/api/scripts/" + ids[0] + "/users", { name: "用户11", enabled: true });
-  expect(r11.status === 400, "第 11 个用户被拒（400）").toBeTruthy();
+  const r51User = await api("POST", "/api/scripts/" + ids[0] + "/users", { name: "用户51", enabled: true });
+  expect(r51User.status === 400, "第 51 个用户被拒（400）").toBeTruthy();
 
   const qids = [];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 50; i++) {
     const r = await api("POST", "/api/queues", { name: "约束队列" + i, autoRunMode: "scheduled", completionAction: "none", timeSets: [{ id: "", enabled: true, days: [1], time: "23:59" }], tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] });
     qids.push((await r.json()).id);
   }
-  const q11 = await api("POST", "/api/queues", { name: "超限队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] });
-  expect(q11.status === 400, "第 11 个队列被拒（400）").toBeTruthy();
+  const q51 = await api("POST", "/api/queues", { name: "超限队列", autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] });
+  expect(q51.status === 400, "第 51 个队列被拒（400）").toBeTruthy();
 
   const t11 = await api("PUT", "/api/queues/" + qids[0], { name: "约束队列0", autoRunMode: "scheduled", completionAction: "none", timeSets: Array.from({ length: 11 }, (_, i) => ({ id: "", enabled: true, days: [1], time: "23:" + String(40 + i) })), tasks: [{ id: "", index: 0, scriptInstanceId: ids[1] }] });
   expect(t11.status === 400, "第 11 个定时被拒（400）").toBeTruthy();
@@ -49,10 +50,10 @@ test("约束体系：名称字节 / 数值区间 / 任务总用户", async () =>
   const base = { rootPath: fDir.root, mainExe: fDir.main, configPath: fDir.cfg, logPath: fDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 };
   const postScript = body => api("POST", "/api/scripts", body);
 
-  const longName = await postScript({ ...base, name: "长".repeat(43) });
-  expect(longName.status === 400, "脚本名 129 字节被拒（400）").toBeTruthy();
-  const okName = await postScript({ ...base, name: "长".repeat(42) });
-  expect(okName.ok, "脚本名 126 字节通过").toBeTruthy();
+  const longName = await postScript({ ...base, name: "长".repeat(22) });
+  expect(longName.status === 400, "脚本名 66 字节被拒（400）").toBeTruthy();
+  const okName = await postScript({ ...base, name: "长".repeat(21) });
+  expect(okName.ok, "脚本名 63 字节通过").toBeTruthy();
   const sid = (await okName.json()).id;
 
   expect((await postScript({ ...base, name: "attempts11", maxAttempts: 11 })).status === 400, "attempts=11 被拒").toBeTruthy();
@@ -61,8 +62,8 @@ test("约束体系：名称字节 / 数值区间 / 任务总用户", async () =>
   expect((await postScript({ ...base, name: "total4", totalTimeoutMinutes: 4 })).status === 400, "总时长 4 分钟被拒").toBeTruthy();
   expect((await postScript({ ...base, name: "total721", totalTimeoutMinutes: 721 })).status === 400, "总时长 721 分钟被拒").toBeTruthy();
 
-  const qLong = await api("POST", "/api/queues", { name: "队".repeat(43), autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: sid }] });
-  expect(qLong.status === 400, "队列名 129 字节被拒（400）").toBeTruthy();
+  const qLong = await api("POST", "/api/queues", { name: "队".repeat(22), autoRunMode: "scheduled", completionAction: "none", timeSets: [], tasks: [{ id: "", index: 0, scriptInstanceId: sid }] });
+  expect(qLong.status === 400, "队列名 66 字节被拒（400）").toBeTruthy();
 
   for (let i = 0; i < 10; i++) {
     await api("POST", "/api/scripts/" + sid + "/users", { name: "任务用户" + i, enabled: true });
@@ -81,7 +82,7 @@ test("约束体系：名称字节 / 数值区间 / 任务总用户", async () =>
 test("分页：脚本列表前端分页 + 达上限禁用 + 历史 API 分页", async ({ page }) => {
   const ids = [];
   const pgDir = makeScriptDir("pager");
-  for (let i = 0; i < 25; i++) {
+  for (let i = 0; i < 50; i++) {
     const r = await api("POST", "/api/scripts", { name: "分页脚本" + String(i).padStart(2, "0"), rootPath: pgDir.root, mainExe: pgDir.main, configPath: pgDir.cfg, logPath: pgDir.log, gameExe: PING_GAME, maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120 });
     ids.push((await r.json()).id);
   }
@@ -90,10 +91,12 @@ test("分页：脚本列表前端分页 + 达上限禁用 + 历史 API 分页", 
   const rows1 = await page.$$eval("#view .script-card", els => els.length);
   expect(rows1 === 20, "脚本分页第一页 20 张卡片（实际 " + rows1 + "）").toBeTruthy();
   const info1 = await page.textContent("[data-testid='pager-scripts'] .pager-info");
-  expect(info1.includes("共 25 条"), "分页条显示共 25 条").toBeTruthy();
+  expect(info1.includes("共 50 条"), "分页条显示共 50 条").toBeTruthy();
   await page.click("[data-testid='pager-scripts'] [data-action='pager-next']");
-  await page.waitForFunction(() => document.querySelectorAll("#view .script-card").length === 5, null, { timeout: 5000 });
-  expect(true, "翻页后第二页 5 张卡片").toBeTruthy();
+  await page.waitForFunction(() => document.querySelectorAll("#view .script-card").length === 20, null, { timeout: 5000 });
+  await page.click("[data-testid='pager-scripts'] [data-action='pager-next']");
+  await page.waitForFunction(() => document.querySelectorAll("#view .script-card").length === 10, null, { timeout: 5000 });
+  expect(true, "翻页后第三页 10 张卡片").toBeTruthy();
   const newBtn = await page.$eval("[data-testid='new-script']", el => el.disabled);
   expect(newBtn === true, "脚本达上限新建按钮禁用").toBeTruthy();
 
@@ -109,11 +112,11 @@ test("约束警告：非法配置告警 + 前端卡片（知道了/不再提醒�
   const limitsFile = path.join(runtimeDir, "config", "limits.json");
 
   fs.mkdirSync(path.dirname(limitsFile), { recursive: true });
-  fs.writeFileSync(limitsFile, '{"MaxScripts": 30}');
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 60}');
   await restartService();
   expect(readLog().includes("[警告] 约束配置 [MaxScripts"), "启动日志含约束警告").toBeTruthy();
   const l = await (await fetch(baseUrl + "api/limits")).json();
-  expect(l.limits.maxScripts === 30, "警告级配置已生效（maxScripts=30）").toBeTruthy();
+  expect(l.limits.maxScripts === 60, "警告级配置已生效（maxScripts=60）").toBeTruthy();
   expect(l.warnings.length === 1, "limits API 返回 1 条警告").toBeTruthy();
 
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
@@ -135,7 +138,7 @@ test("约束警告：非法配置告警 + 前端卡片（知道了/不再提醒�
   expect(!(await page.$("#limits-warning")), "点击「不再提醒」后重载不再出现").toBeTruthy();
   expect(readLog().includes("[警告] 约束配置 [MaxScripts"), "日志仍含约束警告（不受不再提醒影响）").toBeTruthy();
 
-  fs.writeFileSync(limitsFile, '{"MaxScripts": 40}');
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 70}');
   await restartService();
   await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
   await page.waitForSelector("#limits-warning", { timeout: 10000 });
@@ -145,7 +148,7 @@ test("约束警告：非法配置告警 + 前端卡片（知道了/不再提醒�
   fs.rmSync(limitsFile, { force: true });
   await restartService();
   const l2 = await (await fetch(baseUrl + "api/limits")).json();
-  expect(l2.warnings.length === 0 && l2.limits.maxScripts === 25, "恢复默认配置后无警告").toBeTruthy();
+  expect(l2.warnings.length === 0 && l2.limits.maxScripts === 50, "恢复默认配置后无警告").toBeTruthy();
 });
 
 test("Web 端口占用自动 +1 重试（HttpListener 复用崩溃修复验证）", async () => {
@@ -180,13 +183,13 @@ test("约束 FATAL：致命配置拒绝启动", async () => {
   const limitsFile = path.join(runtimeDir, "config", "limits.json");
 
   fs.mkdirSync(path.dirname(limitsFile), { recursive: true });
-  fs.writeFileSync(limitsFile, '{"MaxScripts": 60}');
+  fs.writeFileSync(limitsFile, '{"MaxScripts": 1000}');
   await stopService();
   await new Promise(r => setTimeout(r, 400));
   startService();
   let started = true;
   try { await waitForService(5000); } catch { started = false; }
-  expect(!started, "超警告区间（MaxScripts=60）服务拒绝启动").toBeTruthy();
+  expect(!started, "超警告区间（MaxScripts=1000）服务拒绝启动").toBeTruthy();
   await new Promise(r => setTimeout(r, 500));
   expect(readLog().includes("[FATAL] 约束配置 [MaxScripts"), "启动日志含 FATAL 约束记录").toBeTruthy();
 

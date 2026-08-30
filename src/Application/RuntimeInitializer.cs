@@ -42,7 +42,7 @@ internal static class RuntimeInitializer
             Console.Error.WriteLine($"[FATAL] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
             return 1;
         }
-        // 先加载约束（ConfigStore 历史保留天数上限随之同步），再加载设置（Normalize 使用 limits 上限）。
+        // 先加载约束，再加载设置（Normalize 使用固定的历史保留天数上限）。
         Limits.Load();
         RuntimeContext ctx = RuntimeContext.Instance;
         ctx.ReloadSettings();

@@ -140,6 +140,27 @@ export function initAutoScroll(root = view) {
       el.classList.remove("is-overflowing");
     }
   });
+  root.querySelectorAll(".plugin-detail-name-scroll").forEach(el => {
+    const inner = el.querySelector(":scope > .plugin-detail-name-scroll-inner");
+    if (!inner) return;
+    const narrowViewport = window.matchMedia?.("(max-width: 767px)")?.matches ?? true;
+    if (!narrowViewport || el.clientWidth <= 0) {
+      inner.style.removeProperty("width");
+      el.style.removeProperty("--hover-scroll-x");
+      el.classList.remove("is-overflowing");
+      return;
+    }
+    const width = inner.scrollWidth;
+    if (width > el.clientWidth + 1) {
+      inner.style.width = `${width}px`;
+      el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
+      el.classList.add("is-overflowing");
+    } else {
+      inner.style.removeProperty("width");
+      el.style.removeProperty("--hover-scroll-x");
+      el.classList.remove("is-overflowing");
+    }
+  });
   initInputHints(root);
 }
 

@@ -112,9 +112,9 @@ internal sealed class McpReadOnlyTools
         [Description("分页偏移，不能小于 0。")]
         int offset = 0)
     {
-        if (days < 1 || days > Limits.Current.MaxHistoryRetentionDays)
+        if (days < 1 || days > AppFixedLimits.HistoryRetentionDaysMax)
         {
-            return McpToolResult.Failure("validation_error", $"days 必须在 1 到 {Limits.Current.MaxHistoryRetentionDays} 之间");
+            return McpToolResult.Failure("validation_error", $"days 必须在 1 到 {AppFixedLimits.HistoryRetentionDaysMax} 之间");
         }
         if (limit < 1 || limit > 200 || offset < 0)
         {

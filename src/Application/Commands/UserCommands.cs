@@ -1359,11 +1359,11 @@ internal static class UserCommands
     {
         return string.IsNullOrWhiteSpace(name) || !ScriptUserRule.IsValidName(name.Trim())
             ? "用户名不能为空且不能包含非法字符"
-            : Limits.CheckNameBytes(name.Trim(), 128, "用户名");
+            : Limits.CheckNameBytes(name.Trim(), AppFixedLimits.MaxEntityNameBytes, "用户名");
     }
 
     private static string? ValidateRemark(string? remark) =>
-        Limits.CheckNameBytes(remark?.Trim() ?? "", 512, "备注");
+        Limits.CheckNameBytes(remark?.Trim() ?? "", AppFixedLimits.MaxUserRemarkBytes, "备注");
 
     private static string? ValidateRunDays(int value) =>
         value >= -1 ? null : "运行天数只能为 -1（永久）或 0 及以上的整数";

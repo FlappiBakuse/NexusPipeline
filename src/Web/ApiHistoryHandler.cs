@@ -35,9 +35,9 @@ internal static class ApiHistoryHandler
                 {
                     rangeDays = 1;
                 }
-                if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+                if (rangeDays > AppFixedLimits.HistoryRetentionDaysMax)
                 {
-                    rangeDays = Limits.Current.MaxHistoryRetentionDays;
+                    rangeDays = AppFixedLimits.HistoryRetentionDaysMax;
                 }
                 rangeStart = DateTime.Today.AddDays(-(rangeDays - 1));
                 rangeEnd = DateTime.Now.AddMinutes(5);
@@ -135,9 +135,9 @@ internal static class ApiHistoryHandler
             {
                 days = 1;
             }
-            if (days > Limits.Current.MaxHistoryRetentionDays)
+            if (days > AppFixedLimits.HistoryRetentionDaysMax)
             {
-                days = Limits.Current.MaxHistoryRetentionDays;
+                days = AppFixedLimits.HistoryRetentionDaysMax;
             }
             historyStart = DateTime.Today.AddDays(-(days - 1));
             historyEnd = DateTime.Now.AddMinutes(5);
@@ -195,9 +195,9 @@ internal static class ApiHistoryHandler
             return true;
         }
         int rangeDays = (int)(to.Date - from.Date).TotalDays + 1;
-        if (rangeDays > Limits.Current.MaxHistoryRetentionDays)
+        if (rangeDays > AppFixedLimits.HistoryRetentionDaysMax)
         {
-            error = $"日期范围不能超过 {Limits.Current.MaxHistoryRetentionDays} 天";
+            error = $"日期范围不能超过 {AppFixedLimits.HistoryRetentionDaysMax} 天";
             return true;
         }
         start = from.Date;
