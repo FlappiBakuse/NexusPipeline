@@ -93,9 +93,9 @@ static SafeNativeHandle ValidateCandidate(
             throw new InvalidOperationException("测试 token 仍启用了管理员组或 Power Users 组。");
         }
 
-        if (restricted && HasEnabledPrivilegeBeyondChangeNotify(candidate.Handle))
+        if (restricted && !HasTokenRestrictions(candidate.Handle))
         {
-            throw new InvalidOperationException("受限测试 token 仍启用了管理员特权。");
+            throw new InvalidOperationException("受限测试 token 未经过 Windows token 筛选。");
         }
 
         tokenState = new TokenState(mode, integrity, restricted, administratorEnabled);
@@ -468,37 +468,12 @@ static bool IsSidEnabled(IntPtr token, string expectedSid)
     }
 }
 
-static bool HasEnabledPrivilegeBeyondChangeNotify(IntPtr token)
+static bool HasTokenRestrictions(IntPtr token)
 {
-    var buffer = ReadTokenInformation(token, NativeMethods.TokenPrivileges);
+    var buffer = ReadTokenInformation(token, NativeMethods.TokenHasRestrictions);
     try
     {
-        var privilegeCount = Marshal.ReadInt32(buffer);
-        if (privilegeCount < 0 || privilegeCount > 4096)
-        {
-            throw new InvalidOperationException($"token privilege 数量异常：{privilegeCount}。");
-        }
-
-        var entryOffset = sizeof(int);
-        var entrySize = Marshal.SizeOf<NativeMethods.LuidAndAttributes>();
-        for (var index = 0; index < privilegeCount; index++)
-        {
-            var entry = IntPtr.Add(buffer, entryOffset + index * entrySize);
-            var attributes = unchecked((uint)Marshal.ReadInt32(entry, sizeof(long)));
-            if ((attributes & NativeMethods.SePrivilegeEnabled) == 0)
-            {
-                continue;
-            }
-
-            var lowPart = unchecked((uint)Marshal.ReadInt32(entry));
-            var highPart = Marshal.ReadInt32(entry, sizeof(int));
-            if (lowPart != NativeMethods.SeChangeNotifyPrivilegeLowPart || highPart != 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return Marshal.ReadInt32(buffer) != 0;
     }
     finally
     {
@@ -659,7 +634,7 @@ static class NativeMethods
 
     public const int TokenUser = 1;
     public const int TokenGroups = 2;
-    public const int TokenPrivileges = 3;
+    public const int TokenHasRestrictions = 21;
     public const int TokenLinkedToken = 19;
     public const int TokenIntegrityLevel = 25;
     public const int SecurityImpersonation = 2;
@@ -668,8 +643,6 @@ static class NativeMethods
     public const uint DisableMaxPrivilege = 0x00000001;
     public const uint SeGroupEnabled = 0x00000004;
     public const uint SeGroupIntegrity = 0x00000020;
-    public const uint SePrivilegeEnabled = 0x00000002;
-    public const uint SeChangeNotifyPrivilegeLowPart = 0x00000014;
     public const int ErrorInvalidParameter = 87;
     public const int ErrorNoSuchLogonSession = 1312;
     public const int ErrorInsufficientBuffer = 122;
@@ -809,14 +782,6 @@ static class NativeMethods
     {
         public int GroupCount;
         public SidAndAttributes Groups;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct LuidAndAttributes
-    {
-        public uint LowPart;
-        public int HighPart;
-        public uint Attributes;
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
