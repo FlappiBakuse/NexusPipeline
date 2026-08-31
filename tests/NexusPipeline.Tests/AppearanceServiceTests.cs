@@ -45,6 +45,42 @@ public sealed class AppearanceServiceTests
     }
 
     [Fact]
+    public void LegacyConfig_DefaultsSecondarySurfaceTransparencyToEnabled()
+    {
+        string root = NewTempDir();
+        try
+        {
+            WriteConfig(root, new[] { FirstId }, "off", 30, 0, 0);
+
+            AppearanceSnapshot snapshot = CreateService(root).GetSnapshot();
+
+            Assert.True(snapshot.Effects.ApplyTransparencyToSecondarySurfaces);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void ConfigCanDisableSecondarySurfaceTransparency()
+    {
+        string root = NewTempDir();
+        try
+        {
+            WriteConfig(root, new[] { FirstId }, "off", 30, 0, 0, applyTransparencyToSecondarySurfaces: false);
+
+            AppearanceSnapshot snapshot = CreateService(root).GetSnapshot();
+
+            Assert.False(snapshot.Effects.ApplyTransparencyToSecondarySurfaces);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
     public void TimerRotation_UsesOneServerRandomResultPerSlot()
     {
         string root = NewTempDir();
@@ -148,7 +184,8 @@ public sealed class AppearanceServiceTests
         string mode,
         int intervalMinutes,
         long epochUnixMs,
-        int surfaceTransparency)
+        int surfaceTransparency,
+        bool? applyTransparencyToSecondarySurfaces = null)
     {
         var assets = new JsonArray();
         foreach (string id in order)
@@ -163,6 +200,14 @@ public sealed class AppearanceServiceTests
                 ["paletteVersion"] = 0,
                 ["palette"] = new JsonObject(),
             });
+        }
+        var effects = new JsonObject
+        {
+            ["surfaceTransparencyPercent"] = surfaceTransparency,
+        };
+        if (applyTransparencyToSecondarySurfaces is bool applyTransparency)
+        {
+            effects["applyTransparencyToSecondarySurfaces"] = applyTransparency;
         }
         var config = new JsonObject
         {
@@ -182,10 +227,7 @@ public sealed class AppearanceServiceTests
                 ["intervalMinutes"] = intervalMinutes,
                 ["epochUnixMs"] = epochUnixMs,
             },
-            ["effects"] = new JsonObject
-            {
-                ["surfaceTransparencyPercent"] = surfaceTransparency,
-            },
+            ["effects"] = effects,
         };
         File.WriteAllText(Path.Combine(root, "appearance.json"), config.ToJsonString());
     }

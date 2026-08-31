@@ -2,6 +2,7 @@ import { $, $$ } from "./dom.js";
 import { esc } from "./format.js";
 import { icon } from "./icons.js";
 import { initAutoScroll, syncAllModeToggles, syncAllSwitchControls } from "./ui.js";
+import { initTooltips } from "./tooltip.js";
 
 let modalReturnFocus = null;
 
@@ -31,7 +32,7 @@ export function confirmModal(title, message, confirmAction, data = {}) {
     `<button class="ghost" type="button" data-action="close-modal">取消</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
 }
 
-export function showModal(content, wide = false, locked = false) {
+export function showModal(content, wide = false, locked = false, allowClose = false) {
   const previousBody = $(".modal-mask .modal-body");
   const previousScroll = previousBody
     ? { left: previousBody.scrollLeft, top: previousBody.scrollTop }
@@ -44,10 +45,11 @@ export function showModal(content, wide = false, locked = false) {
   mask.className = "modal-mask";
   mask.setAttribute("role", "presentation");
   const modal = document.createElement("div");
-  modal.className = wide ? "modal wide" : "modal";
+  modal.className = wide ? "modal wide secondary-surface" : "modal secondary-surface";
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
   if (locked) modal.dataset.locked = "";
+  if (allowClose) modal.dataset.allowClose = "";
   modal.innerHTML = content;
   const heading = $("[id^='modal-title-']", modal);
   if (heading) modal.setAttribute("aria-labelledby", heading.id);
@@ -95,6 +97,7 @@ export function showModal(content, wide = false, locked = false) {
   initAutoScroll(modal);
   syncAllModeToggles(modal);
   syncAllSwitchControls(modal);
+  initTooltips();
   const restorePreviousBodyScroll = () => {
     if (!previousScroll) return;
     const nextBody = $(".modal-mask .modal-body");

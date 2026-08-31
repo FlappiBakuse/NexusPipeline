@@ -9,6 +9,11 @@ import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
 let historyDates = [];
 let historySelectedDate = "";
+let historyExpandedDates = new Set();
+let historyUsersByDate = new Map();
+let historySelectedUserKey = "";
+let historySelectedUserName = "";
+let historyRecords = [];
 let historyDir = "";
 let historyRangeGlobalBound = false;
 
@@ -64,7 +69,7 @@ function historyRangeMarkup() {
       <button id="history-range-display" class="history-range-display" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="history-range-popover" data-history-range-display data-testid="history-range-display"><span data-history-range-label>${esc(displayValue)}</span>
         <span class="history-range-icon" aria-hidden="true">${icon("calendar")}</span>
       </button>
-      <div id="history-range-popover" class="history-range-popover" role="dialog" aria-label="选择时间段" hidden data-history-range-popover>
+      <div id="history-range-popover" class="history-range-popover secondary-surface" role="dialog" aria-label="选择时间段" hidden data-history-range-popover>
         <div class="history-calendar-toolbar"><button class="ghost sm" type="button" data-history-calendar-prev aria-label="上一个月份">‹</button><strong data-history-calendar-title>选择日期</strong><button class="ghost sm" type="button" data-history-calendar-next aria-label="下一个月份">›</button></div>
         <div class="history-calendar-months" data-history-calendar-months></div>
         <div class="history-range-selection"><span class="history-range-selection-item"><span class="muted">开始</span><strong data-history-range-from-label>${esc(historyStartDate.replaceAll("-", "/"))}</strong></span><span class="history-range-selection-arrow" aria-hidden="true">→</span><span class="history-range-selection-item"><span class="muted">结束</span><strong data-history-range-to-label>${esc(historyEndDate.replaceAll("-", "/"))}</strong></span></div>
@@ -241,12 +246,39 @@ function bindHistoryRangePicker() {
 
 function dateRowsMarkup() {
   return historyDates.length
-    ? historyDates.map(date => `<button class="history-date-row${date.date === historySelectedDate ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-pressed="${date.date === historySelectedDate ? "true" : "false"}">${icon("chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} 条</span></button>`).join("")
+    ? historyDates.map(date => {
+      const expanded = historyExpandedDates.has(date.date);
+      const users = historyUsersByDate.get(date.date);
+      const usersMarkup = users === undefined
+        ? '<div class="history-users-loading muted" role="status">正在加载运行用户…</div>'
+        : userRowsMarkup(date.date, users);
+      return `<div class="history-date-group${expanded ? " active" : ""}" data-history-date-group data-date="${esc(date.date)}" data-testid="history-date-group">
+        <button class="history-date-row${expanded ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-expanded="${expanded ? "true" : "false"}" aria-pressed="${expanded ? "true" : "false"}">${icon(expanded ? "chevronDown" : "chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} 条</span></button>
+        ${expanded ? `<div class="history-date-users" data-date="${esc(date.date)}" data-testid="history-date-users">${usersMarkup}</div>` : ""}
+      </div>`;
+    }).join("")
     : '<div class="history-dates-empty-message"><strong>该时间段暂无记录</strong><span>请选择其他日期范围。</span></div>';
 }
 
 function historyDetailBackMarkup() {
-  return '<button class="history-detail-back ghost" type="button" data-action="history-detail-back" data-testid="history-detail-back">返回日期列表</button>';
+  return historySelectedUserKey
+    ? '<button class="history-detail-back ghost" type="button" data-action="history-detail-back" data-testid="history-user-back">返回用户列表</button>'
+    : "";
+}
+
+function userRowsMarkup(date, users = []) {
+  if (!users.length) {
+    return '<div class="history-empty-message"><strong>该日暂无运行用户</strong><span>请选择其他日期。</span></div>';
+  }
+  return users.map(user => {
+    const name = user.userName || "未指定用户";
+    const selected = date === historySelectedDate && user.userKey === historySelectedUserKey;
+    return `<button class="history-user-row${selected ? " active" : ""}" type="button" data-action="history-user" data-history-date="${esc(date)}" data-user-key="${esc(user.userKey || "")}" data-user-name="${esc(name)}" data-testid="history-user" aria-pressed="${selected ? "true" : "false"}">
+      <span class="history-user-avatar" aria-hidden="true">${icon("user")}</span>
+      <span class="history-user-main"><strong>${esc(name)}</strong></span>
+      <span class="history-user-arrow" aria-hidden="true">${icon("chevronRight")}</span>
+    </button>`;
+  }).join("");
 }
 
 function entryMarkup(record) {
@@ -283,22 +315,30 @@ function pluginHistoryDetailMarkup(record) {
   return items ? `<section class="plugin-history-section"><div class="section-heading"><h3>插件运行信息</h3><span class="muted">运行完成时保存的展示快照</span></div>${items}</section>` : "";
 }
 
-function panelsMarkup(records) {
-  const emptyMessage = historySelectedDate ? "该日暂无记录" : "该时间段暂无记录";
-  const detailVisible = isHistoryMobile() && Boolean(historySelectedDate);
-  return `<div class="history-browser${detailVisible ? " history-detail-visible" : ""}" data-testid="history-panels">
+function panelsMarkup() {
+  const hasDate = Boolean(historySelectedDate);
+  const hasUser = Boolean(historySelectedUserKey);
+  const usersVisible = isHistoryMobile() && hasDate && !hasUser;
+  const detailVisible = isHistoryMobile() && hasUser;
+  const modeClass = hasUser ? " history-user-selected" : usersVisible ? " history-users-visible" : "";
+  const panelTitle = hasUser ? `${historySelectedUserName || "用户"} · 运行记录` : hasDate ? "运行记录" : "运行记录";
+  const panelCount = hasUser ? `${historyRecords.length} 条记录` : "选择用户";
+  const content = hasUser
+    ? (historyRecords.length ? historyRecords.map(entryMarkup).join("") : '<div class="history-empty-message">该用户当天暂无运行记录</div>')
+    : '<div class="history-empty-message"><strong>选择运行用户</strong><span>点击日期下的用户查看当天运行记录。</span></div>';
+  return `<div class="history-browser${detailVisible ? " history-detail-visible" : ""}${modeClass}" data-testid="history-panels">
     <div class="history-list-column">
       ${historyRangeMarkup()}
       <aside class="history-dates-panel">
-        <div class="history-panel-head">${icon("calendar")}<h3>运行日期</h3><span class="muted">${historyDates.length} 天</span></div>
+        <div class="history-panel-head">${icon("calendar")}<h3>日期列表</h3><span class="muted">${historyDates.length} 天</span></div>
         <div class="history-dates-list">${dateRowsMarkup()}</div>
       </aside>
     </div>
     <div class="history-records-column">
-      ${detailVisible ? historyDetailBackMarkup() : ""}
-      <section class="history-records-panel">
-        <div class="history-panel-head">${icon("queues")}<h3>运行记录</h3><span class="muted" data-testid="history-records-count">${records.length} 条记录</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="刷新记录" data-testid="history-refresh">${icon("refresh")}</button></div>
-        <div class="history-entry-list">${records.length ? records.map(entryMarkup).join("") : `<div class="history-empty-message">${emptyMessage}</div>`}</div>
+      ${hasDate ? historyDetailBackMarkup() : ""}
+      <section class="history-records-panel history-level-panel">
+        <div class="history-panel-head">${icon(hasUser ? "queues" : hasDate ? "scripts" : "history")}<h3>${esc(panelTitle)}</h3><span class="muted" data-testid="history-records-count">${esc(panelCount)}</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="刷新记录" data-testid="history-refresh">${icon("refresh")}</button></div>
+        <div class="history-entry-list history-level-list">${content}</div>
       </section>
     </div>
   </div>`;
@@ -308,10 +348,25 @@ function historyRangeLabel() {
   return `${fmtDateCN(historyStartDate)} 至 ${fmtDateCN(historyEndDate)}`;
 }
 
+function historyViewLabel() {
+  if (!historySelectedDate) return `${historyRangeLabel()} · 选择运行用户`;
+  if (!historySelectedUserKey) return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · 选择运行用户`;
+  return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · ${historySelectedUserName || "运行记录"}`;
+}
+
+function renderHistoryView() {
+  render(pageHeader("历史记录", "历史记录", historyViewLabel(), "") + panelsMarkup());
+  bindHistoryRangePicker();
+}
+
 export async function pageHistory(token) {
   if (!isCurrent("history", token)) return;
   navActive("history"); setTopbarTitle("历史记录");
-  if (isHistoryMobile()) historySelectedDate = "";
+  if (isHistoryMobile()) {
+    historySelectedDate = "";
+    historySelectedUserKey = "";
+    historySelectedUserName = "";
+  }
   let data;
   try {
     data = await api("GET", `/api/history/dates?from=${encodeURIComponent(historyStartDate)}&to=${encodeURIComponent(historyEndDate)}`);
@@ -319,43 +374,99 @@ export async function pageHistory(token) {
     if (isCurrent("history", token)) {
       historyDates = [];
       historySelectedDate = "";
+      historyExpandedDates.clear();
+      historyUsersByDate.clear();
+      historySelectedUserKey = "";
+      historySelectedUserName = "";
+      historyRecords = [];
       toast(error.message, "error");
-      render(pageHeader("历史记录", "历史记录", historyRangeLabel(), "") + panelsMarkup([]));
-      bindHistoryRangePicker();
+      renderHistoryView();
     }
     return;
   }
   if (!isCurrent("history", token)) return;
   historyDates = data.dates || [];
-  if (!isHistoryMobile() && !historyDates.some(date => date.date === historySelectedDate)) {
-    historySelectedDate = historyDates[0]?.date || "";
+  const validDates = new Set(historyDates.map(date => date.date));
+  if (isHistoryMobile()) {
+    historyExpandedDates.clear();
+    historyUsersByDate.clear();
+    historySelectedDate = "";
+    historySelectedUserKey = "";
+    historySelectedUserName = "";
+  } else {
+    for (const date of historyExpandedDates) {
+      if (!validDates.has(date)) {
+        historyExpandedDates.delete(date);
+        historyUsersByDate.delete(date);
+      }
+    }
+    if (!historyExpandedDates.size && historyDates.length) historyExpandedDates.add(historyDates[0].date);
+    if (!historyExpandedDates.has(historySelectedDate)) {
+      historySelectedDate = historyDates.find(date => historyExpandedDates.has(date.date))?.date || "";
+      historySelectedUserKey = "";
+      historySelectedUserName = "";
+      historyRecords = [];
+      historyDir = "";
+    }
   }
   if (!historySelectedDate) {
-    render(pageHeader("历史记录", "历史记录", `${historyRangeLabel()} · 暂无运行记录`, "") + panelsMarkup([]));
-    bindHistoryRangePicker();
+    historyRecords = [];
+    historyDir = "";
+    renderHistoryView();
     return;
   }
-  await loadDayRecords(token);
+  await loadExpandedDayUsers(token);
 }
 
-/** 拉取选中日期的记录并渲染（无轮询；刷新按钮与切日期共用）。 */
-async function loadDayRecords(token) {
+/** 日期展开后只拉取该日期的用户聚合；点击用户后才拉取该用户的运行明细。 */
+async function loadDayUsers(date, token, renderAfter = true) {
+  if (!date || !historyExpandedDates.has(date)) return;
   let data;
   try {
-    data = await api("GET", `/api/history?date=${encodeURIComponent(historySelectedDate)}`);
+    data = await api("GET", `/api/history/users?date=${encodeURIComponent(date)}`);
+  } catch (error) {
+    if (isCurrent("history", token) && historyExpandedDates.has(date)) {
+      historyUsersByDate.set(date, []);
+      toast(error.message, "error");
+      if (renderAfter) renderHistoryView();
+    }
+    return;
+  }
+  if (!isCurrent("history", token) || !historyExpandedDates.has(date)) return;
+  const users = data.users || [];
+  historyUsersByDate.set(date, users);
+  if (renderAfter) renderHistoryView();
+}
+
+async function loadExpandedDayUsers(token) {
+  const dates = [...historyExpandedDates];
+  await Promise.all(dates.map(date => loadDayUsers(date, token, false)));
+  if (!isCurrent("history", token)) return;
+  if (historySelectedDate && historySelectedUserKey) {
+    await loadDayRecords(token);
+    return;
+  }
+  renderHistoryView();
+}
+
+/** 用户选中后才拉取该用户当天的全部运行历史。 */
+async function loadDayRecords(token) {
+  if (!historySelectedDate || !historySelectedUserKey) return;
+  let data;
+  try {
+    data = await api("GET", `/api/history?date=${encodeURIComponent(historySelectedDate)}&userKey=${encodeURIComponent(historySelectedUserKey)}`);
   } catch (error) {
     if (isCurrent("history", token)) {
+      historyRecords = [];
       toast(error.message, "error");
-      render(pageHeader("历史记录", "历史记录", historyRangeLabel(), "") + panelsMarkup([]));
-      bindHistoryRangePicker();
+      renderHistoryView();
     }
     return;
   }
   if (!isCurrent("history", token)) return;
   historyDir = data.historyDir || "";
-  const records = data.records || [];
-  render(pageHeader("历史记录", "历史记录", `${historyRangeLabel()} · 按日期查看运行记录`, "") + panelsMarkup(records));
-  bindHistoryRangePicker();
+  historyRecords = data.records || [];
+  renderHistoryView();
   await renderPluginSlots(document.querySelector("#view"));
 }
 
@@ -376,32 +487,72 @@ export function historyRangeSearch(root = document.querySelector("[data-history-
   historyStartDate = from;
   historyEndDate = to;
   historySelectedDate = "";
+  historyExpandedDates.clear();
+  historyUsersByDate.clear();
+  historySelectedUserKey = "";
+  historySelectedUserName = "";
+  historyRecords = [];
+  historyDir = "";
   void pageHistory(state.routeToken);
 }
 
-/** 左侧日期行点击：切换选中日期并加载当日记录。 */
+/** 左侧日期行点击：独立切换日期展开状态并加载当天运行用户，同时保留当前已选运行记录。 */
 export async function historySelectDate(target) {
   const date = target.dataset.date;
-  if (!date || (date === historySelectedDate && !isHistoryMobile())) return;
+  if (!date || !historyDates.some(item => item.date === date)) return;
+  const hasSelectedHistory = Boolean(historySelectedUserKey);
+  if (historyExpandedDates.has(date)) {
+    historyExpandedDates.delete(date);
+    historyUsersByDate.delete(date);
+    if (!hasSelectedHistory && historySelectedDate === date) {
+      historySelectedDate = [...historyExpandedDates][0] || "";
+    }
+    renderHistoryView();
+    return;
+  }
+  historyExpandedDates.add(date);
+  if (!hasSelectedHistory) historySelectedDate = date;
+  renderHistoryView();
+  await loadDayUsers(date, state.routeToken);
+}
+
+/** 日期下的用户行点击：加载该用户当天的所有运行记录。 */
+export async function historySelectUser(target) {
+  const userKey = target.dataset.userKey || "";
+  const date = target.dataset.historyDate || target.closest("[data-history-date-users]")?.dataset.date || "";
+  if (!date || !historyExpandedDates.has(date) || !userKey) return;
   historySelectedDate = date;
+  historySelectedUserKey = userKey;
+  historySelectedUserName = target.dataset.userName || "未指定用户";
   await loadDayRecords(state.routeToken);
 }
 
-/** 右侧刷新按钮：重拉当前选中日期的记录。 */
+/** 右侧刷新按钮：按当前层级重新拉取用户或运行记录。 */
 export async function historyRefresh() {
   if (!historySelectedDate) {
     await pageHistory(state.routeToken);
     return;
   }
-  await loadDayRecords(state.routeToken);
+  if (historySelectedUserKey) {
+    await loadDayRecords(state.routeToken);
+    return;
+  }
+  const expandedDates = [...historyExpandedDates];
+  if (!expandedDates.length) {
+    await pageHistory(state.routeToken);
+    return;
+  }
+  await loadExpandedDayUsers(state.routeToken);
 }
 
 export function historyDetailBack() {
-  if (!isHistoryMobile()) return;
-  historySelectedDate = "";
-  historyDir = "";
-  render(pageHeader("历史记录", "历史记录", `${historyRangeLabel()} · 选择运行日期`, "") + panelsMarkup([]));
-  bindHistoryRangePicker();
+  if (historySelectedUserKey) {
+    historySelectedUserKey = "";
+    historySelectedUserName = "";
+    historyRecords = [];
+    historyDir = "";
+    renderHistoryView();
+  }
 }
 
 function historyLogMarkup(id, attemptKey, logInfo, label) {
@@ -449,6 +600,7 @@ export async function historyFullLog(id, attemptKey, target) {
 export const actions = {
   "history-detail": target => historyDetail(target.dataset.id),
   "history-date": target => historySelectDate(target),
+  "history-user": target => historySelectUser(target),
   "history-detail-back": () => historyDetailBack(),
   "history-refresh": () => historyRefresh(),
   "history-full-log": target => withBusy(target, () => historyFullLog(target.dataset.id, target.dataset.attempt, target)),

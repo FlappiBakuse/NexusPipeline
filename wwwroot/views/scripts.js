@@ -1,15 +1,14 @@
 import { api, hydrateIcons } from "../core/api.js";
 import { $ as $dom } from "../core/dom.js";
 import { esc, pluginDisplayName, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
-import { scrollField, selectField, switchControl, valueField, pageHeader } from "../core/forms.js";
+import { pathField, selectField, switchControl, valueField, pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
-import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
-import { selectControlMarkup } from "../core/controls.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -32,13 +31,20 @@ function emulatorAllowed(pluginType) {
 function gameBoxHtml(d, emulatorOk) {
   const isEmu = emulatorOk && d.gameMode === "emulator";
   const modeRow = emulatorOk
-    ? `<div class="form-grid game-mode-row">${selectField("sm-mode", "启动方式", isEmu ? "emulator" : "pc", [{ value: "pc", label: "PC 客户端" }, { value: "emulator", label: "安卓模拟器" }], 'data-action="change-sm-mode"')}<div class="game-wait-field">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}</div></div>`
-    : `<div class="form-grid game-mode-row">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"')}<div class="game-wait-field" aria-hidden="true"></div></div>`;
-  const exeField = isEmu
-    ? valueField("sm-game-exe", "模拟器ADB地址 <span class='req'>*</span>", d.gameExe, "text", 'placeholder="例如 127.0.0.1:16384"')
-    : valueField("sm-game-exe", "游戏路径 <span class='req'>*</span>", d.gameExe, "text", 'placeholder="请填写游戏可执行文件路径"');
+    ? `<div class="form-grid game-mode-row">${selectField("sm-mode", "启动方式", isEmu ? "emulator" : "pc", [{ value: "pc", label: "PC 客户端" }, { value: "emulator", label: "安卓模拟器" }], 'data-action="change-sm-mode"', "选择游戏启动方式；模拟器模式使用 ADB 地址。")}<div class="game-wait-field">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"', "启动游戏后等待指定秒数，再运行脚本。")}</div></div>`
+    : `<div class="form-grid game-mode-row">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"', "启动游戏后等待指定秒数，再运行脚本。")}<div class="game-wait-field" aria-hidden="true"></div></div>`;
+  const exeField = pathField(
+    "sm-game-exe",
+    isEmu ? "模拟器ADB地址 <span class='req'>*</span>" : "游戏路径 <span class='req'>*</span>",
+    d.gameExe,
+    "file",
+    isEmu ? 'placeholder="例如 127.0.0.1:16384"' : 'placeholder="游戏可执行文件路径"',
+    "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*",
+    isEmu ? 'hidden aria-hidden="true"' : "",
+    isEmu ? "模拟器 ADB 地址用于失败清理与重试恢复。" : "游戏路径用于失败清理与重试恢复。",
+  );
   const argsField = isEmu
-    ? valueField("sm-game-args", "启动参数", d.gameArgs, "text", 'placeholder="am start 参数，如 -n 包名/.MainActivity"')
+    ? valueField("sm-game-args", "启动参数", d.gameArgs, "text", 'placeholder="am start 参数"', "模拟器模式下，该内容会作为 adb shell am start 参数传递。")
     : valueField("sm-game-args", "启动参数", d.gameArgs);
   return `<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
 }
@@ -52,6 +58,13 @@ export function changeGameMode() {
   if (exeLabel) exeLabel.innerHTML = isEmu ? "模拟器ADB地址 <span class='req'>*</span>" : "游戏路径 <span class='req'>*</span>";
   if (exe) exe.placeholder = isEmu ? "例如 127.0.0.1:16384" : "请填写游戏可执行文件路径";
   if (args) args.placeholder = isEmu ? "am start 参数，如 -n 包名/.MainActivity" : "";
+  const pathTrigger = exe?.closest(".nxp-path")?.querySelector("[data-path-trigger]");
+  if (pathTrigger) {
+    pathTrigger.hidden = isEmu;
+    pathTrigger.setAttribute("aria-hidden", isEmu ? "true" : "false");
+    pathTrigger.disabled = isEmu;
+    pathTrigger.dataset.pathTitle = isEmu ? "模拟器ADB地址" : "游戏路径";
+  }
 }
 
 function scriptCardMarkup(script) {
@@ -156,7 +169,7 @@ export function openNewScriptChooser() {
     </button>`).join("")}
   </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("新建脚本实例", body, footer), false, true);
+  showModal(modalShell("新建脚本实例", body, footer), false, true, true);
 }
 
 export function editScript(id) {
@@ -209,82 +222,75 @@ export async function openScriptModal(id = "", plugin = "") {
   const body = isSpecial
     ? `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
+      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"', "", "", `由专用插件「${pluginDisplayName(pluginType, state.plugins || [])}」自动适配脚本主程序、自启动参数、配置文件与日志路径。`)}
     </div>
-    <p class="muted helper-copy">由专用插件「${esc(pluginDisplayName(pluginType, state.plugins || []))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
-    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
+    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
         ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", true, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate" disabled')}
       </div>
-      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；自动更新配置控制运行结束时是否同步用户配置。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
-    <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
+    <div class="subsection"><div class="section-heading"><h3>运行设置</h3></div>
       <div class="form-grid three">
-        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务的总运行时间；长时脚本可填 -1 表示永不超时。")}
       </div>
-      <p class="muted helper-copy">日志无更新上限填 -1 即为长时脚本；长时脚本的运行总时间上限可填 -1（永不超时）或其他值（到时间按超时记录）；普通脚本不能将运行总时间上限填 -1。</p>
     </div>`
     : `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
+      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"')}
     </div>
     <div class="form-grid">
-      ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
-      ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 -x --mode=1；以路径开头（如 .\\app.exe?-args）时 ? 后为执行端参数")}
+      ${pathField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "file", 'placeholder="脚本主程序文件"', "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*", "", "选择主程序后仍可手动修改路径。")}
+      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选启动参数"', "可填写普通启动参数；若以相对路径开头，可在 ? 后继续填写执行端参数。")}
     </div>
     <div class="form-grid">
-      ${valueField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "text", 'placeholder="请先填写脚本根目录"')}
-      ${scrollField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log 或 …\\log.txt")}
+      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="配置文件或文件夹"')}
+      ${pathField("sm-log", "日志路径 <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件或文件夹"', "日志文件|*.log;*.txt|所有文件|*.*")}
     </div>
-    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
+    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
         ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
       </div>
-      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；自动更新配置控制运行结束时是否同步用户配置。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
-    <div class="subsection"><div class="section-heading"><h3>运行设置</h3><span class="muted">超时后会按最大尝试次数重试</span></div>
+    <div class="subsection"><div class="section-heading"><h3>运行设置</h3></div>
       <div class="form-grid three">
-        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`)}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`)}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`)}
+        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
+        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务的总运行时间；长时脚本可填 -1 表示永不超时。")}
       </div>
-      <p class="muted helper-copy">日志无更新上限填 -1 即为长时脚本；长时脚本的运行总时间上限可填 -1（永不超时）或其他值（到时间按超时记录）；普通脚本不能将运行总时间上限填 -1。</p>
-      <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3><span class="muted">关键字与判断脚本二选一，配置脚本时脚本优先</span></div>
+      <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
-          <label class="field-label" for="sm-succ-kw">成功关键字</label>
-          <textarea id="sm-succ-kw" placeholder="每行一组：组内逗号分隔为 AND（整个日志中分别出现即命中），换行之间为 OR；留空表示不判定成功">${esc(d.successKeywords)}</textarea>
-          <label class="field-label" for="sm-fail-kw">失败关键字</label>
-          <textarea id="sm-fail-kw" placeholder="命中即判定失败并终止本次尝试，按最大尝试次数重试；语法同成功关键字">${esc(d.failureKeywords)}</textarea>
+          <div class="field" data-help="每行是一组条件；组内用逗号表示 AND，多行表示 OR。留空表示不判定成功。"><label class="field-label" for="sm-succ-kw">成功关键字</label>
+          <textarea id="sm-succ-kw" placeholder="逗号表示 AND，多行表示 OR">${esc(d.successKeywords)}</textarea></div>
+          <div class="field" data-help="任一失败关键字命中即终止本次尝试，并按最大尝试次数重试。语法与成功关键字相同。"><label class="field-label" for="sm-fail-kw">失败关键字</label>
+          <textarea id="sm-fail-kw" placeholder="命中即判定失败">${esc(d.failureKeywords)}</textarea></div>
         </div>
         <div id="sm-script-box" ${d.judgeScriptEnabled ? "" : "hidden"}>
-          <label class="field-label" for="sm-judge-lang-trigger">判断脚本语言</label>
-          ${selectControlMarkup("sm-judge-lang", d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: "JavaScript（内置引擎）" }, { value: "python", label: "Python（系统解释器）" }], "", "判断脚本语言")}
-          <label class="field-label" for="sm-judge-code">判断脚本代码</label>
-          <textarea id="sm-judge-code" class="mono code-area" placeholder="输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}">${esc(d.judgeScript)}</textarea>
-          <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
+          ${selectField("sm-judge-lang", "判断脚本语言", d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: "JavaScript（内置引擎）" }, { value: "python", label: "Python（系统解释器）" }], "", "选择判断脚本执行语言；JavaScript 使用内置引擎，Python 使用系统解释器。")}
+           <div class="field" data-help="输入包含本次尝试日志段：JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 读取路径。nexus.readFile 只读 config/script 目录，nexus.writeFile 与 nexus.listFiles 操作 script 目录。无输出或缺少 status/reason 会继续运行。"><label class="field-label" for="sm-judge-code">判断脚本代码</label><textarea id="sm-judge-code" class="mono code-area" placeholder="输出 JSON 结果">${esc(d.judgeScript)}</textarea></div>
         </div>
         <div class="judge-actions">
           <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
-          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
+          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-help="启用判断脚本后，脚本输出优先用于确定运行结果；关闭后使用成功关键字和失败关键字。" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
         </div>
       </div>
     </div>`;
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-script">保存</button>';
-  showModal(modalShell(title, body + pluginSlotMarkup("scripts.editor.sections", "scripts.editor.sections", "script-editor-plugin-slot", { mode: id ? "edit" : "create", primaryId: id || "" }), footer), true, true);
+  showModal(modalShell(title, body + pluginSlotMarkup("scripts.editor.sections", "scripts.editor.sections", "script-editor-plugin-slot", { mode: id ? "edit" : "create", primaryId: id || "" }), footer), true, true, true);
   void renderPluginSlots(document);
   syncScriptGhostState();
+  changeGameMode();
   syncJudgeBox();
   const rootInput = $dom("#sm-root");
   rootInput?.addEventListener("input", syncScriptGhostState);
@@ -308,7 +314,11 @@ export function syncScriptGhostState() {
   const hasRoot = !!(root && root.value.trim());
   ["sm-exe", "sm-args", "sm-config", "sm-log"].forEach(id => {
     const element = $dom("#" + id);
-    if (element) element.disabled = !hasRoot;
+    if (element) {
+      element.disabled = !hasRoot;
+      const trigger = element.closest(".nxp-path")?.querySelector("[data-path-trigger]");
+      if (trigger) trigger.disabled = !hasRoot;
+    }
   });
 }
 
@@ -397,13 +407,13 @@ export async function saveScript() {
   }
   const isSpecial = !!scriptDraft.pluginType;
   const required = isSpecial
-    ? [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"]]
-    : [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志路径"]];
+    ? [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-attempts", "最大尝试次数"], ["sm-stall", "日志无更新上限"], ["sm-total", "运行总时间上限"]]
+    : [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志路径"], ["sm-attempts", "最大尝试次数"], ["sm-stall", "日志无更新上限"], ["sm-total", "运行总时间上限"]];
   let firstError = null;
   for (const [id, label] of required) {
     const element = $dom("#" + id);
     if (!element?.value.trim()) {
-      setFieldError(id, "请填写" + label);
+      setRequiredFieldError(id);
       firstError ??= id;
       continue;
     }
@@ -459,7 +469,7 @@ export async function saveScript() {
   const judgeEnabled = ($dom("#sm-mode-btn")?.getAttribute("aria-pressed") ?? "false") === "true";
   const judgeCode = $dom("#sm-judge-code")?.value ?? "";
   if (judgeEnabled && !judgeCode.trim()) {
-    setFieldError("sm-judge-code", "请填写判断脚本代码，或关闭「使用脚本」");
+    setRequiredFieldError("sm-judge-code");
     toast("请填写判断脚本代码，或关闭「使用脚本」", "error");
     return;
   }
@@ -467,7 +477,7 @@ export async function saveScript() {
   const gameMode = $dom("#sm-mode")?.value === "emulator" ? "emulator" : "pc";
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
-    setFieldError("sm-game-exe", gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径");
+    setRequiredFieldError("sm-game-exe");
     toast(gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径", "error");
     return;
   }

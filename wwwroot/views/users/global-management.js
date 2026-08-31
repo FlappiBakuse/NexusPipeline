@@ -1,9 +1,9 @@
 import { api, hydrateIcons } from "../../core/api.js";
 import { esc } from "../../core/format.js";
-import { selectField, switchControl, valueField } from "../../core/forms.js";
-import { pluginMultiSelectMarkup, selectedPluginMultiSelectValues, syncPluginMultiSelect } from "../../core/plugin-fields.js";
+import { pathField, selectField, switchControl, valueField } from "../../core/forms.js";
+import { pluginMultiSelectMarkup, selectedPluginMultiSelectValues, syncPluginMultiSelect, validateRequiredPluginFields } from "../../core/plugin-fields.js";
 import { closeModal, modalShell, showModal } from "../../core/modal.js";
-import { toast, withBusy } from "../../core/ui.js";
+import { clearFieldError, setRequiredFieldError, toast, withBusy } from "../../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
 import { state } from "../../core/state.js";
@@ -27,18 +27,18 @@ function globalManagementHostMarkup(settings) {
     '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div>' +
       switchControl("gm-general-sync", "同步通用设置", "开启后覆盖每个脚本绑定的通用设置", general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
       switchControl("gm-general-enabled", "是否启用", "关闭后所有绑定均不参与运行", general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
-      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="-1 表示永久运行"') +
-      valueField("gm-general-max-success", "最多成功运行次数", typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", 'data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRuns) + '" step="1" placeholder="-1 不限制；不能填写 0"') +
+      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="-1 永久；0 停止"', "-1 表示永久运行；0 表示停止；正数表示剩余运行天数，每日递减。") +
+      valueField("gm-general-max-success", "最多成功运行次数", typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", 'data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRuns) + '" step="1" placeholder="-1 不限制；正数达到上限后跳过"', "-1 表示不限制；正整数达到上限后跳过，0 不是有效值。") +
     '</section>' +
     '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div>' +
       switchControl("gm-notification-sync", "同步通知设置", "开启后覆盖每个脚本绑定的通知设置", notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
       switchControl("gm-notification-enabled", "开启通知推送", "按用户绑定通知设置发送运行状态通知", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
-      valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"') +
+      valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"', "留空时继承每个脚本绑定的 SMTP 收件人设置。") +
     '</section>' +
     '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div>' +
       switchControl("gm-advanced-sync", "同步高级设置", "开启后覆盖每个脚本绑定的高级设置", advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
-      valueField("gm-advanced-pre", "任务前运行脚本路径", pre, "text", 'data-global-field="advanced.preRunScript" placeholder="%FIRST% 开头填写仅首次运行"') +
-      valueField("gm-advanced-post", "任务后运行脚本路径", post, "text", 'data-global-field="advanced.postRunScript" placeholder="%LAST% 开头填写仅最终运行"') +
+      pathField("gm-advanced-pre", "任务前运行脚本路径", pre, "file", 'data-global-field="advanced.preRunScript" placeholder="任务前脚本文件"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅首次运行。") +
+      pathField("gm-advanced-post", "任务后运行脚本路径", post, "file", 'data-global-field="advanced.postRunScript" placeholder="任务后脚本文件"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅最终运行。") +
     '</section>' +
   '</div>';
 }
@@ -48,30 +48,30 @@ function pluginFieldMarkup(contribution, field) {
   const id = globalFieldId(prefix, field.key);
   const type = String(field.type || "text").toLowerCase();
   const value = contribution.values?.[field.key];
-  const description = field.description ? '<span class="muted plugin-field-description">' + esc(field.description) + "</span>" : "";
+  const help = field.description ? ' data-help="' + esc(field.description) + '"' : "";
   const required = field.required ? ' <span class="req">*</span>' : "";
   const readOnly = field.readOnly ? " disabled" : "";
   if (type === "switch") {
-    return switchControl(id, esc(field.label) + required, "", value === true, "toggle-global-plugin-switch", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="switch"' + readOnly, field.label) + description;
+    return switchControl(id, esc(field.label) + required, field.description || "", value === true, "toggle-global-plugin-switch", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="switch"' + readOnly, field.label);
   }
   if (type === "textarea") {
-    return '<div class="field plugin-field"><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><textarea id="' + esc(id) + '" class="form-textarea" data-plugin-field="' + esc(field.key) + '" data-plugin-type="textarea"' + (field.maxLength > 0 ? ' maxlength="' + esc(field.maxLength) + '"' : "") + ' placeholder="' + esc(field.placeholder || "") + '"' + readOnly + '>' + esc(typeof value === "string" ? value : "") + '</textarea>' + description + '</div>';
+    return '<div class="field plugin-field"' + help + '><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><textarea id="' + esc(id) + '" class="form-textarea" data-plugin-field="' + esc(field.key) + '" data-plugin-type="textarea"' + (field.maxLength > 0 ? ' maxlength="' + esc(field.maxLength) + '"' : "") + ' placeholder="' + esc(field.placeholder || "") + '"' + readOnly + '>' + esc(typeof value === "string" ? value : "") + '</textarea></div>';
   }
   if (type === "select") {
     const options = Array.isArray(field.options) ? field.options : [];
-    return selectField(id, esc(field.label) + required, typeof value === "string" ? value : "", options, 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="select"' + (field.readOnly ? " disabled" : "")) + description;
+    return selectField(id, esc(field.label) + required, typeof value === "string" ? value : "", options, 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="select"' + (field.readOnly ? " disabled" : ""), field.description || "");
   }
   if (type === "multi-select") {
     return pluginMultiSelectMarkup(id, field, value);
   }
   if (type === "secret") {
     const configured = value?.configured === true;
-    return '<div class="field plugin-field plugin-secret-field"><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><div class="plugin-secret-row"><input id="' + esc(id) + '" type="password" data-plugin-field="' + esc(field.key) + '" data-plugin-type="secret" data-secret-action="keep" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 16384) + '" placeholder="' + esc(configured ? "已设置，留空保持不变" : (field.placeholder || "请输入密钥")) + '"' + readOnly + '>' + (configured && !field.readOnly ? '<button class="tertiary" type="button" data-action="clear-plugin-secret" data-plugin-field="' + esc(field.key) + '">清除</button>' : "") + '</div>' + description + '</div>';
+    return '<div class="field plugin-field plugin-secret-field"' + help + '><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><div class="plugin-secret-row"><input id="' + esc(id) + '" type="password" data-plugin-field="' + esc(field.key) + '" data-plugin-type="secret" data-secret-action="keep" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 16384) + '" placeholder="' + esc(configured ? "已设置，留空保持不变" : (field.placeholder || "请输入密钥")) + '"' + readOnly + '>' + (configured && !field.readOnly ? '<button class="tertiary" type="button" data-action="clear-plugin-secret" data-plugin-field="' + esc(field.key) + '">清除</button>' : "") + '</div></div>';
   }
   if (type === "status") {
-    return '<div class="field plugin-field"><span class="field-label">' + esc(field.label) + '</span><span class="plugin-status-value" data-plugin-field="' + esc(field.key) + '" data-plugin-type="status">' + esc(typeof value === "string" ? value : "暂无状态") + '</span>' + description + '</div>';
+    return '<div class="field plugin-field"' + help + '><span class="field-label">' + esc(field.label) + '</span><span class="plugin-status-value" data-plugin-field="' + esc(field.key) + '" data-plugin-type="status">' + esc(typeof value === "string" ? value : "暂无状态") + '</span></div>';
   }
-  return valueField(id, esc(field.label) + required, typeof value === "string" ? value : "", "text", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="text" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 65536) + '" placeholder="' + esc(field.placeholder || "") + '"' + readOnly) + description;
+  return valueField(id, esc(field.label) + required, typeof value === "string" ? value : "", "text", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="text" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 65536) + '" placeholder="' + esc(field.placeholder || "") + '"' + readOnly, field.description || "");
 }
 
 function globalManagementPluginMarkup(contributions) {
@@ -91,7 +91,7 @@ function renderGlobalManagementModal() {
   const draft = globalManagementDraft;
   const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions) + pluginSlotMarkup("users.global.sections", "users.global.sections", "global-management-plugin-slot", { mode: "user", primaryId: draft.userId });
   const footer = '<button class="primary" type="button" data-action="save-global-management">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("全局管理", body, footer), true, true);
+  showModal(modalShell("全局管理", body, footer), true, true, true);
   void renderPluginSlots(document);
   hydrateIcons(document);
 }
@@ -158,10 +158,25 @@ function readPluginContributionValues(contribution) {
   return values;
 }
 
+function validateGlobalPluginContributions(contributions) {
+  let valid = true;
+  const markRequired = input => setRequiredFieldError(input.id);
+  const clearRequired = input => clearFieldError(input.id);
+  for (const contribution of contributions || []) {
+    const container = document.querySelector('[data-plugin-name="' + CSS.escape(contribution.pluginName || "") + '"][data-plugin-contribution-id="' + CSS.escape(contribution.id || "") + '"]');
+    if (!validateRequiredPluginFields(container, contribution.fields || [], contribution.values || {}, "data-plugin-field", markRequired, clearRequired)) valid = false;
+  }
+  return valid;
+}
+
 export async function saveGlobalManagement() {
   if (!globalManagementDraft) return;
   const draft = globalManagementDraft;
   const settings = readGlobalManagementSettings();
+  if (!validateGlobalPluginContributions(draft.contributions)) {
+    toast("请完善插件设置中的必填项", "error");
+    return;
+  }
   try {
     const saved = await api("PUT", "/api/users/" + encodeURIComponent(draft.userId) + "/global-settings", settings);
     for (const contribution of draft.contributions || []) {

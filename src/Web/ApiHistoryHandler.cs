@@ -60,6 +60,24 @@ internal static class ApiHistoryHandler
             }).ConfigureAwait(false);
             return;
         }
+        // 当天用户索引——日期点击后才查询，运行明细继续由具体用户点击触发。
+        if (seg.Length == 2 && seg[1].ToLowerInvariant() == "users")
+        {
+            string userDateParam = context.Request.QueryString["date"] ?? "";
+            if (!DateTime.TryParseExact(userDateParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime day))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "date 参数格式须为 yyyy-MM-dd" }, 400).ConfigureAwait(false);
+                return;
+            }
+            List<HistoryUserSummary> users = RuntimeContext.Instance.History.QueryUsers(day);
+            Audit.Log(Audit.Web, "查询历史用户", $"{day:yyyy-MM-dd}：{users.Count} 个用户");
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                date = day.ToString("yyyy-MM-dd"),
+                users,
+            }).ConfigureAwait(false);
+            return;
+        }
         if (seg.Length == 2 && seg[1].ToLowerInvariant() == "detail")
         {
             string id = context.Request.QueryString["id"] ?? "";
@@ -108,11 +126,21 @@ internal static class ApiHistoryHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "date 参数格式须为 yyyy-MM-dd" }, 400).ConfigureAwait(false);
                 return;
             }
-            List<RunRecord> dayRecords = RuntimeContext.Instance.History.Query(day, day.AddDays(1).AddTicks(-1));
+            string? userKey = context.Request.QueryString["userKey"];
+            if (!string.IsNullOrWhiteSpace(userKey) && !HistoryService.IsValidUserKey(userKey))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { error = "userKey 参数格式无效" }, 400).ConfigureAwait(false);
+                return;
+            }
+            List<RunRecord> dayRecords = RuntimeContext.Instance.History.Query(
+                day,
+                day.AddDays(1).AddTicks(-1),
+                userKey: string.IsNullOrWhiteSpace(userKey) ? null : userKey);
             Audit.Log(Audit.Web, "查询历史记录", $"{dayRecords.Count} 条（{day:yyyy-MM-dd}）");
             await HttpHelper.WriteJsonAsync(context, new
             {
                 date = day.ToString("yyyy-MM-dd"),
+                userKey,
                 historyDir = AppPaths.HistoryDir,
                 records = dayRecords.OrderBy(record => record.StartTime).ToList(),
             }).ConfigureAwait(false);

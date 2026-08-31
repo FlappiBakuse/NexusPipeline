@@ -479,6 +479,12 @@ internal sealed class AppearanceService
                     0,
                     50);
             }
+            if (effects["applyTransparencyToSecondarySurfaces"] is not null)
+            {
+                config.Effects.ApplyTransparencyToSecondarySurfaces = ReadBool(
+                    effects["applyTransparencyToSecondarySurfaces"],
+                    "effects.applyTransparencyToSecondarySurfaces");
+            }
         }
         if (patch["paletteByAsset"] is JsonObject palettes)
         {
@@ -831,6 +837,8 @@ internal sealed class AppearanceEffects
     public int BlurPx { get; set; }
     public int DimPercent { get; set; } = 20;
     public int SurfaceTransparencyPercent { get; set; }
+
+    public bool ApplyTransparencyToSecondarySurfaces { get; set; } = true;
 }
 
 internal sealed class AppearanceRuntimeState

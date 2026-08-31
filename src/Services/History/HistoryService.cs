@@ -7,6 +7,17 @@ using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
+internal sealed record HistoryUserSummary(
+    string UserKey,
+    string UserId,
+    string UserName,
+    int Count,
+    int SuccessCount,
+    int FailedCount,
+    int PartialCount,
+    int CancelledCount,
+    int SkippedCount);
+
 internal class HistoryService : IHistoryStore
 {
     private static readonly object Sync = new();
@@ -120,7 +131,70 @@ internal class HistoryService : IHistoryStore
         return Path.Combine(directory, $"{baseName}-{Guid.NewGuid().ToString("N")[..6]}{extension}");
     }
 
-    public List<RunRecord> Query(DateTime start, DateTime end, string? scriptId = null, string? queueId = null)
+    /// <summary>按日期聚合当天实际出现过的运行用户；仅返回聚合结果，明细由 Query 的 userKey 过滤查询。</summary>
+    public List<HistoryUserSummary> QueryUsers(DateTime date, string? scriptId = null, string? queueId = null)
+    {
+        lock (Sync)
+        {
+            return SummarizeUsers(ReadDayRecords(date), date, scriptId, queueId);
+        }
+    }
+
+    internal static List<HistoryUserSummary> SummarizeUsers(
+        IEnumerable<RunRecord> records,
+        DateTime date,
+        string? scriptId = null,
+        string? queueId = null)
+    {
+        return records
+            .Where(record => record.StartTime.Date == date.Date && Matches(record, scriptId, queueId, null))
+            .GroupBy(GetUserKey, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                RunRecord latest = group.OrderByDescending(record => record.StartTime).First();
+                string userId = group.Select(record => (record.UserId ?? "").Trim())
+                    .FirstOrDefault(value => value.Length > 0) ?? "";
+                string userName = group.Select(record => (record.UserName ?? "").Trim())
+                    .FirstOrDefault(value => value.Length > 0) ?? "";
+                if (userName.Length == 0)
+                {
+                    userName = userId.Length == 0 ? "未指定用户" : userId;
+                }
+                return new
+                {
+                    UserKey = group.Key,
+                    UserId = userId,
+                    UserName = userName,
+                    Count = group.Count(),
+                    SuccessCount = group.Count(record => StatusOf(record) == "success"),
+                    FailedCount = group.Count(record => StatusOf(record) == "failed"),
+                    PartialCount = group.Count(record => StatusOf(record) == "partial"),
+                    CancelledCount = group.Count(record => StatusOf(record) == "cancelled"),
+                    SkippedCount = group.Count(record => StatusOf(record) == "skipped"),
+                    LatestStart = latest.StartTime,
+                };
+            })
+            .OrderByDescending(item => item.LatestStart)
+            .ThenBy(item => item.UserName, StringComparer.OrdinalIgnoreCase)
+            .Select(item => new HistoryUserSummary(
+                item.UserKey,
+                item.UserId,
+                item.UserName,
+                item.Count,
+                item.SuccessCount,
+                item.FailedCount,
+                item.PartialCount,
+                item.CancelledCount,
+                item.SkippedCount))
+            .ToList();
+    }
+
+    public List<RunRecord> Query(
+        DateTime start,
+        DateTime end,
+        string? scriptId = null,
+        string? queueId = null,
+        string? userKey = null)
     {
         var result = new List<RunRecord>();
         lock (Sync)
@@ -133,7 +207,7 @@ internal class HistoryService : IHistoryStore
                     {
                         continue;
                     }
-                    if (Matches(record, scriptId, queueId))
+                    if (Matches(record, scriptId, queueId, userKey))
                     {
                         result.Add(record);
                     }
@@ -143,7 +217,23 @@ internal class HistoryService : IHistoryStore
         return result.OrderByDescending(record => record.StartTime).ToList();
     }
 
-    private static bool Matches(RunRecord record, string? scriptId, string? queueId)
+    internal static string GetUserKey(RunRecord record)
+    {
+        string userId = (record.UserId ?? "").Trim();
+        string userName = (record.UserName ?? "").Trim();
+        return userId.Length == 0
+            ? "legacy:" + userName
+            : "id:" + userId;
+    }
+
+    internal static bool IsValidUserKey(string? userKey)
+    {
+        return !string.IsNullOrWhiteSpace(userKey)
+            && (userKey.StartsWith("id:", StringComparison.Ordinal)
+                || userKey.StartsWith("legacy:", StringComparison.Ordinal));
+    }
+
+    private static bool Matches(RunRecord record, string? scriptId, string? queueId, string? userKey)
     {
         if (!string.IsNullOrWhiteSpace(scriptId) && record.ScriptInstanceId != scriptId)
         {
@@ -153,7 +243,17 @@ internal class HistoryService : IHistoryStore
         {
             return false;
         }
+        if (!string.IsNullOrWhiteSpace(userKey) && !string.Equals(GetUserKey(record), userKey, StringComparison.Ordinal))
+        {
+            return false;
+        }
         return true;
+    }
+
+    private static string StatusOf(RunRecord record)
+    {
+        string status = string.IsNullOrWhiteSpace(record.FinalStatus) ? record.Status ?? "" : record.FinalStatus;
+        return status.Trim().ToLowerInvariant();
     }
 
     /// <summary>按 Id 查找历史记录：默认窗口取保留天数上限：此前固定 31 天，与保留上限

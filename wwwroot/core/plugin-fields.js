@@ -24,12 +24,10 @@ export function pluginMultiSelectMarkup(id, field, value) {
   const selected = [...selectedValues(value)];
   const required = field?.required ? ' <span class="req">*</span>' : "";
   const disabled = field?.readOnly ? " disabled" : "";
-  const description = field?.description
-    ? `<span class="muted plugin-field-description">${esc(field.description)}</span>`
-    : "";
+  const help = field?.description ? ` data-help="${esc(field.description)}"` : "";
   const rootAttributes = ` data-plugin-field="${esc(field?.key || "")}" data-plugin-type="multi-select"${field?.required ? ' aria-required="true"' : ""}`;
   const control = selectControlMarkup(id, selected, options, disabled, field?.label || "", true, rootAttributes);
-  return `<div class="field plugin-field"><label class="field-label" for="${esc(id)}-trigger">${esc(field?.label || "")}${required}</label>${control}${description}</div>`;
+  return `<div class="field plugin-field"${help}><label class="field-label" for="${esc(id)}-trigger">${esc(field?.label || "")}${required}</label>${control}</div>`;
 }
 
 export function selectedPluginMultiSelectValues(element) {
@@ -45,6 +43,54 @@ export function selectedPluginMultiSelectValues(element) {
   }
   return Array.from(element.querySelectorAll('[data-plugin-multi-option][aria-selected="true"]'))
     .map(option => option.dataset.value || "");
+}
+
+function selectedValuesFromCarrier(element) {
+  const carrier = element?.matches?.("[data-nxp-select-value]")
+    ? element
+    : element?.querySelector?.("[data-nxp-select-value]");
+  if (!carrier) return [];
+  if (!carrier.dataset.nxpSelectMultiple) return carrier.value ? [String(carrier.value)] : [];
+  try {
+    const values = JSON.parse(carrier.value || "[]");
+    return Array.isArray(values) ? values.map(value => String(value)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function requiredPluginFieldIsEmpty(field, element, initialValue) {
+  const type = String(field?.type || "text").toLowerCase();
+  if (type === "switch" || type === "status") return false;
+  if (type === "multi-select") return selectedValuesFromCarrier(element).length === 0;
+  if (type === "secret" && initialValue?.configured === true) return false;
+  return !String(element?.value ?? "").trim();
+}
+
+/** 返回声明式插件必填字段状态；调用方负责应用统一的字段标红样式。 */
+export function validateRequiredPluginFields(container, fields, initialValues = {}, attribute = "data-plugin-field", onInvalid = () => {}, onValid = () => {}) {
+  let valid = true;
+  for (const field of Array.isArray(fields) ? fields : []) {
+    if (!field?.required || field.readOnly || String(field.type || "").toLowerCase() === "status") continue;
+    const key = String(field.key || "");
+    if (!key || !container) continue;
+    const selector = `[${attribute}="${CSS.escape(key)}"]`;
+    const element = container.querySelector(selector);
+    if (!element) continue;
+    const input = element.matches("[data-nxp-select-value]")
+      ? element
+      : String(field.type || "").toLowerCase() === "multi-select"
+        ? element.querySelector("[data-nxp-select-value]") || element
+        : element;
+    if (!input?.id) continue;
+    if (requiredPluginFieldIsEmpty(field, element, initialValues?.[key])) {
+      onInvalid(input);
+      valid = false;
+    } else {
+      onValid(input);
+    }
+  }
+  return valid;
 }
 
 export function syncPluginMultiSelect(element) {

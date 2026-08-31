@@ -1,7 +1,8 @@
 import { api } from "./api.js";
 import { createColorControl, createNumberControl, createSelectControl } from "./controls.js";
+import { validateRequiredPluginFields } from "./plugin-fields.js";
 import { disposePluginSlot, queryContributions, renderFrontendSlots } from "./plugin-runtime.js";
-import { toast } from "./ui.js";
+import { clearFieldError, setRequiredFieldError, toast } from "./ui.js";
 
 export const pluginSlotNames = Object.freeze([
   "dashboard.cards", "dashboard.after-running", "users.list.badges", "users.binding.sections", "users.global.sections",
@@ -161,6 +162,7 @@ function readFormValues(form) {
 function renderFormContribution(parent, contribution) {
   const form = document.createElement("form");
   form.className = "plugin-contribution-form";
+  form.noValidate = true;
   form.dataset.pluginForm = `${contribution.pluginName}/${contribution.id}`;
   const fields = Array.isArray(contribution.fields) ? contribution.fields : [];
   fields.forEach(field => {
@@ -172,7 +174,7 @@ function renderFormContribution(parent, contribution) {
     const labelTarget = control.element.querySelector?.("[data-nxp-select-trigger], [data-nxp-time-trigger]") || control.input;
     label.htmlFor = labelTarget.id || controlId;
     wrapper.append(label, control.element);
-    if (field.description) wrapper.append(textElement("span", field.description, "muted plugin-field-description"));
+    if (field.description) wrapper.dataset.help = field.description;
     form.append(wrapper);
   });
   const footer = document.createElement("div");
@@ -184,6 +186,12 @@ function renderFormContribution(parent, contribution) {
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (save.disabled) return;
+    const markRequired = input => setRequiredFieldError(input.id);
+    const clearRequired = input => clearFieldError(input.id);
+    if (!validateRequiredPluginFields(form, fields, contribution.values || {}, "data-plugin-form-field", markRequired, clearRequired)) {
+      toast("请完善插件设置中的必填项", "error");
+      return;
+    }
     save.disabled = true;
     try {
       await api("PUT", `/api/plugin-contributions/ui/${encodeURIComponent(contribution.pluginName)}/${encodeURIComponent(contribution.id)}`, {

@@ -82,6 +82,7 @@ internal static class ApiAppearanceHandler
                 blurPx = snapshot.Effects.BlurPx,
                 dimPercent = snapshot.Effects.DimPercent,
                 surfaceTransparencyPercent = snapshot.Effects.SurfaceTransparencyPercent,
+                applyTransparencyToSecondarySurfaces = snapshot.Effects.ApplyTransparencyToSecondarySurfaces,
             },
             nextSwitchAt = snapshot.NextSwitchAt?.ToString("O"),
         }).ConfigureAwait(false);

@@ -5,7 +5,7 @@ import { pageHeader, valueField } from "../../core/forms.js";
 import { icon } from "../../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../../core/state.js";
 import { closeModal, modalShell, showModal } from "../../core/modal.js";
-import { navActive, render, setFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../../core/ui.js";
+import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
@@ -211,14 +211,14 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
-  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true);
+  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="输入用户名"', "用户名不区分大小写。");
+  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true, true);
 }
 
 export async function saveGlobalUser() {
   const name = $("#gu-name")?.value.trim() || "";
   if (!name) {
-    setFieldError("gu-name", "请填写用户名");
+    setRequiredFieldError("gu-name");
     toast("请填写用户名", "error");
     return;
   }
@@ -262,6 +262,11 @@ export function deleteGlobalUser(id) {
 export async function confirmDeleteGlobalUser() {
   if (!deleteDraft) return;
   const input = $("#gu-delete-name")?.value || "";
+  if (!input.trim()) {
+    setRequiredFieldError("gu-delete-name");
+    toast("请输入完整用户名以确认删除", "error");
+    return;
+  }
   if (input !== deleteDraft.name) {
     setFieldError("gu-delete-name", "请输入与用户名完全一致的内容");
     toast("请输入完整用户名以确认删除", "error");

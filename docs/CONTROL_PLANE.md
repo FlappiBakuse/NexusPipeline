@@ -17,7 +17,8 @@
 | 运行 | 调度中心/Control API | `run script/queue` | `run_script` / `run_queue` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
-| 历史 | `/api/history` | `history ...` | `list_history` |
+| 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail` | `history ...` | `list_history` |
+| 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
 | 插件商店/安装/开关 | 插件页 + Control API | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
@@ -33,6 +34,9 @@
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
 - MCP 网络边界独立于 Web 远程访问设置：仅 loopback、Host/Origin 校验、请求体上限 2 MiB。
 - 用户绑定的通用设置包含 `RunDays` 与 `MaxSuccessfulRunsPerDay`；后者使用 `-1` 表示不限制，达到正数上限后生成 `skipped` 历史记录。
+- 历史页面按日期、用户、运行记录分层查询；`/api/history/users` 与带 `userKey` 的记录查询都在宿主侧完成过滤，避免把整日记录一次性返回前端。
+- 本机路径选择器只接受回环请求，由 Windows 原生选择器返回路径；返回值写入可继续手动编辑的文本框，不提供远程文件系统浏览能力。
+- 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 
 ## 维护规则
 

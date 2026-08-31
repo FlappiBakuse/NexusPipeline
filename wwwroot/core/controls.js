@@ -1,4 +1,5 @@
 import { esc } from "./format.js";
+import { icon } from "./icons.js";
 
 function normalizedOptions(options) {
   return (Array.isArray(options) ? options : []).map(option => {
@@ -47,7 +48,7 @@ export function selectControlMarkup(id, value, options, extra = "", ariaLabel = 
   return `<div class="nxp-select" data-nxp-select${multiple ? ' data-nxp-select-multiple="true"' : ""}${rootExtra}>
     <input id="${controlId}" type="hidden" value="${esc(storedValue)}" data-nxp-select-value${hiddenAttributes} ${extra}>
     <button id="${triggerId}" class="nxp-select-trigger" type="button" data-nxp-select-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" aria-label="${esc(ariaLabel || selectedOption?.label || "请选择")}"${disabled}><span data-nxp-select-label>${esc(summary)}</span><span class="nxp-select-chevron" aria-hidden="true">⌄</span></button>
-    <div id="${menuId}" class="nxp-select-menu" data-nxp-select-menu role="listbox"${multiple ? ' aria-multiselectable="true"' : ""} hidden>${optionMarkup}</div>
+    <div id="${menuId}" class="nxp-select-menu secondary-surface" data-nxp-select-menu role="listbox"${multiple ? ' aria-multiselectable="true"' : ""} hidden>${optionMarkup}</div>
   </div>`;
 }
 
@@ -56,6 +57,18 @@ export function numberControlMarkup(id, value, extra = "", ariaLabel = "") {
   const controlId = safeId(id);
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
   return `<div class="nxp-number" data-nxp-number><input id="${controlId}" class="nxp-number-input" type="text" inputmode="decimal" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-number-value ${extra}><span class="nxp-number-actions"><button type="button" class="nxp-number-step" data-nxp-step="increment" aria-label="增加"${disabled}>＋</button><button type="button" class="nxp-number-step" data-nxp-step="decrement" aria-label="减少"${disabled}>－</button></span></div>`;
+}
+
+/** 本机路径字段：文本框保持完全可编辑，右侧仅显示自绘文件 SVG 图标。 */
+export function pathControlMarkup(id, value, kind = "file", extra = "", ariaLabel = "", filter = "", triggerExtra = "") {
+  const controlId = safeId(id);
+  const normalizedKind = ["file", "folder", "file-or-folder"].includes(String(kind)) ? String(kind) : "file";
+  const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
+  const pickerFilter = filter ? ` data-path-filter="${esc(filter)}"` : "";
+  return `<div class="nxp-path" data-nxp-path data-path-kind="${normalizedKind}">
+    <input id="${controlId}" class="nxp-path-input" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-path-value ${extra}>
+    <button type="button" class="nxp-path-trigger" data-action="pick-path" data-path-trigger data-path-target="${controlId}" data-path-kind="${normalizedKind}" data-path-title="${esc(ariaLabel || "路径")}" aria-label="选择路径" data-testid="path-picker"${pickerFilter}${disabled}${triggerExtra ? ` ${triggerExtra}` : ""}>${icon("file")}</button>
+  </div>`;
 }
 
 /** 保留 range 的键盘/语义模型，完全由 CSS 绘制轨道与滑块。 */
@@ -93,7 +106,7 @@ export function timeControlMarkup(id, value, extra = "", ariaLabel = "") {
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
   return `<div class="nxp-time" data-nxp-time data-nxp-time-hour="${esc(hour || "")}" data-nxp-time-minute="${esc(minute || "")}" data-nxp-time-disabled="${disabled ? "true" : "false"}">
     <div class="nxp-time-input-wrap"><input id="${controlId}" class="nxp-time-value" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" readonly aria-haspopup="dialog" aria-expanded="false" aria-controls="${popupId}" data-nxp-time-value ${extra}><button type="button" class="nxp-time-trigger" data-nxp-time-trigger aria-label="打开时间选择器"${disabled}>⌄</button></div>
-    <div id="${popupId}" class="nxp-time-popover" data-nxp-time-popover role="dialog" aria-label="${esc(ariaLabel || "选择时间")}" hidden><div class="nxp-time-columns" data-nxp-time-wheels>${timeWheelsMarkup(hour, minute)}</div></div>
+    <div id="${popupId}" class="nxp-time-popover secondary-surface" data-nxp-time-popover role="dialog" aria-label="${esc(ariaLabel || "选择时间")}" hidden><div class="nxp-time-columns" data-nxp-time-wheels>${timeWheelsMarkup(hour, minute)}</div></div>
   </div>`;
 }
 

@@ -118,7 +118,7 @@ test("前端：通用脚本弹窗显示「启动方式」选择器，切模拟�
   await deleteScript(created.id);
 });
 
-test("前端：MaaEnd 专项弹窗有选择器（supportsEmulator=true），BetterGI 专项无选择器", async ({ page }) => {
+test("前端：MaaEnd 专项弹窗有选择器（capabilities 含 emulator），BetterGI 专项无选择器", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts");
   await page.click('[data-testid="new-script"]');
   await page.click('.new-script-chooser [data-action="open-script-type"][data-plugin="maaend"]');

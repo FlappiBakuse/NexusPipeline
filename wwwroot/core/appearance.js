@@ -162,6 +162,7 @@ function applyWallpaperUrl(url) {
     document.documentElement.style.removeProperty("--nexus-wallpaper-dim");
     document.documentElement.style.removeProperty("--nexus-surface-opacity");
     document.body.removeAttribute("data-wallpaper");
+    document.body.dataset.secondarySurfaceTransparency = "on";
     clearWallpaperTokens();
     notifyAppearanceChanged();
     return;
@@ -178,6 +179,7 @@ function setWallpaperEffects(effects = {}) {
   document.documentElement.style.setProperty("--nexus-wallpaper-blur", `${blur}px`);
   document.documentElement.style.setProperty("--nexus-wallpaper-dim", `${dim / 100}`);
   document.documentElement.style.setProperty("--nexus-surface-opacity", `${100 - transparency}%`);
+  document.body.dataset.secondarySurfaceTransparency = effects.applyTransparencyToSecondarySurfaces === false ? "off" : "on";
 }
 
 function clearWallpaper() {
@@ -263,6 +265,7 @@ async function fetchAssetBlob(asset) {
 
 async function applyServerSnapshot(snapshot, caller = snapshot?.provider?.pluginName || "") {
   serverSnapshot = snapshot;
+  setWallpaperEffects(snapshot?.effects || {});
   if (!snapshot?.effectiveEnabled || !snapshot.currentId) {
     clearWallpaper();
     return snapshot;
@@ -274,7 +277,6 @@ async function applyServerSnapshot(snapshot, caller = snapshot?.provider?.plugin
   }
   const blob = await fetchAssetBlob(asset);
   applyWallpaperUrl(URL.createObjectURL(blob));
-  setWallpaperEffects(snapshot.effects);
   if (asset.paletteVersion === 3 && asset.palette) {
     setWallpaperTokens(asset.palette);
   } else {

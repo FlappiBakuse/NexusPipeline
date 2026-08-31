@@ -14,6 +14,7 @@ import { actions as pluginsActions, pagePlugins } from "./views/plugins.js";
 import { actions as settingsActions, pageSettings } from "./views/settings.js";
 import { initAppearance } from "./core/appearance.js";
 import { initPluginRuntime, notifyPluginDispose, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, resolvePluginAction, resolvePluginRoute, syncPluginNavActive } from "./core/plugin-runtime.js";
+import { pickPath } from "./core/path-picker.js";
 
 const shellActions = {
   "open-nav": () => setNavOpen(true),
@@ -27,6 +28,7 @@ const shellActions = {
   "pager-next": target => pagerNavigate(target.dataset.pager, "next", target),
   "cancel-system-action": () => cancelSystemAction(),
   "toggle-more-menu": target => toggleMoreMenu(target),
+  "pick-path": target => pickPath(target),
 };
 
 const allActions = {

@@ -5,6 +5,7 @@ import { icon } from "./icons.js";
 import { systemActionCard } from "./forms.js";
 import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
 import { durationClock } from "./duration.js";
+import { initTooltips } from "./tooltip.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -17,6 +18,7 @@ export function render(html) {
   initAutoScroll(view);
   syncAllModeToggles(view);
   syncAllSwitchControls(view);
+  initTooltips();
   // （P1-2）：路由渲染后焦点移到主内容区（tabindex=-1 的 #view），键盘用户切页后从页面开头继续导航；
   // preventScroll 避免打断视口位置。
   view.focus({ preventScroll: true });
@@ -301,11 +303,25 @@ export function cycleTheme() {
 }
 
 /** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */
+function visualFieldElement(element) {
+  if (!element?.matches?.("[data-nxp-select-value]")) return element;
+  return element.closest("[data-nxp-select]")?.querySelector("[data-nxp-select-trigger]") || element;
+}
+
+function eachFieldElement(element, callback) {
+  const visual = visualFieldElement(element);
+  callback(element);
+  if (visual !== element) callback(visual);
+  return visual;
+}
+
 export function setFieldError(id, message) {
   const element = $(`#${id}`);
   if (!element) return;
-  element.classList.add("field-error");
-  element.setAttribute("aria-invalid", "true");
+  const visual = eachFieldElement(element, item => {
+    item.classList.add("field-error");
+    item.setAttribute("aria-invalid", "true");
+  });
   let slot = document.getElementById(`${id}-error`);
   if (!slot) {
     slot = document.createElement("p");
@@ -317,26 +333,51 @@ export function setFieldError(id, message) {
   if (slot) {
     slot.textContent = message || "请检查此项";
     slot.hidden = false;
-    const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
+    const describedBy = (visual.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
     if (!describedBy.includes(slot.id)) describedBy.push(slot.id);
-    element.setAttribute("aria-describedby", describedBy.join(" "));
+    visual.setAttribute("aria-describedby", describedBy.join(" "));
   }
-  element.focus({ preventScroll: true });
+  visual.focus({ preventScroll: true });
+}
+
+/** 必填空值错误：保留红色边框与可访问性状态，不在字段下方显示红色文案。 */
+export function setRequiredFieldError(id) {
+  const element = $(`#${id}`);
+  if (!element) return;
+  const visual = eachFieldElement(element, item => {
+    item.classList.add("field-error");
+    item.setAttribute("aria-invalid", "true");
+    item.setAttribute("aria-required", "true");
+  });
+  const slot = document.getElementById(`${id}-error`);
+  if (slot) {
+    slot.hidden = true;
+    slot.textContent = "";
+    const describedBy = (visual.getAttribute("aria-describedby") || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter(value => value !== slot.id);
+    if (describedBy.length) visual.setAttribute("aria-describedby", describedBy.join(" "));
+    else visual.removeAttribute("aria-describedby");
+  }
+  visual.focus({ preventScroll: true });
 }
 
 /** 清除字段内联错误（无错误时无操作）。 */
 export function clearFieldError(id) {
   const element = $(`#${id}`);
   if (!element) return;
-  element.classList.remove("field-error");
-  element.removeAttribute("aria-invalid");
+  const visual = eachFieldElement(element, item => {
+    item.classList.remove("field-error");
+    item.removeAttribute("aria-invalid");
+  });
   const slot = document.getElementById(`${id}-error`);
   if (slot) {
     slot.hidden = true;
     slot.textContent = "";
-    const describedBy = (element.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean).filter(value => value !== slot.id);
-    if (describedBy.length) element.setAttribute("aria-describedby", describedBy.join(" "));
-    else element.removeAttribute("aria-describedby");
+    const describedBy = (visual.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean).filter(value => value !== slot.id);
+    if (describedBy.length) visual.setAttribute("aria-describedby", describedBy.join(" "));
+    else visual.removeAttribute("aria-describedby");
   }
 }
 

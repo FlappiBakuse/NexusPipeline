@@ -280,6 +280,8 @@ test("调度中心执行 + 历史记录详情", async ({ page }) => {
 
   await page.click('nav a[href="#/history"]');
   await page.waitForSelector("h2");
+  await page.waitForSelector('[data-testid="history-user"]', { timeout: 10000 });
+  await page.getByTestId("history-user").first().click();
   await page.waitForFunction(() => document.body.textContent.includes("跑批脚本"), null, { timeout: 10000 });
   const body = await page.textContent("body");
   expect(body.includes("跑批脚本"), "历史记录出现新运行记录").toBeTruthy();
@@ -312,6 +314,8 @@ test("历史详情：长日志默认尾部显示并可按需加载完整内容",
     expect(await waitNoRunning(30000), "完整日志测试脚本运行结束").toBeTruthy();
 
     await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="history-user"]', { timeout: 10000 });
+    await page.getByTestId("history-user").first().click();
     const row = page.locator('[data-testid="history-entry"]').filter({ hasText: "完整日志脚本" }).first();
     await row.waitFor({ timeout: 10000 });
     await row.click();
@@ -373,22 +377,31 @@ test("历史记录日期索引：仅显示有记录的日期 + 按日取记录 +
     const dayRes = await (await fetch(baseUrl + "api/history?date=" + oldDate)).json();
     expect(dayRes && dayRes.date === oldDate && Array.isArray(dayRes.records) && dayRes.records.length === 1, "按日期取记录返回当日记录").toBeTruthy();
     expect(typeof dayRes.historyDir === "string" && dayRes.historyDir.length > 0, "按日期取记录返回 historyDir").toBeTruthy();
+    const usersRes = await (await fetch(baseUrl + "api/history/users?date=" + oldDate)).json();
+    expect(usersRes && usersRes.date === oldDate && Array.isArray(usersRes.users) && usersRes.users.length === 1 && usersRes.users[0].userName === "默认", "按日期取运行用户摘要").toBeTruthy();
+    const userKey = usersRes.users[0].userKey;
+    const userDayRes = await (await fetch(baseUrl + "api/history?date=" + oldDate + "&userKey=" + encodeURIComponent(userKey))).json();
+    expect(userDayRes && userDayRes.records?.length === 1 && userDayRes.records[0].scriptName === "历史造数脚本", "按用户取当天运行记录").toBeTruthy();
     expect((await fetch(baseUrl + "api/history?date=bad-date")).status === 400, "非法 date 参数返回 400").toBeTruthy();
 
     // UI：日期列表默认选中最新日期（今日），今日记录含本用例运行
     await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="history-panels"]', { timeout: 10000 });
-    const rangeControl = await page.$eval("#history-range-display", el => ({ type: el.type, readOnly: el.readOnly, value: el.value }));
+    const rangeControl = await page.$eval("#history-range-display", el => ({ type: el.type, role: el.getAttribute("aria-haspopup"), expanded: el.getAttribute("aria-expanded") }));
     const rangeParts = await page.$$eval("#history-from, #history-to", els => els.map(el => ({ type: el.type, value: el.value })));
     const hasQueryButton = await page.$('[data-testid="history-range-search-button"]');
-    expect(rangeControl.type === "text" && rangeControl.readOnly && rangeParts.length === 2 && rangeParts.every(control => control.type === "date" && /^\\d{4}-\\d{2}-\\d{2}$/.test(control.value)) && !hasQueryButton, "历史记录使用单一时间段选择器并按年月日筛选").toBeTruthy();
+    expect(rangeControl.type === "button" && rangeControl.role === "dialog" && rangeControl.expanded === "false" && rangeParts.length === 2 && rangeParts.every(control => control.type === "hidden" && /^\\d{4}-\\d{2}-\\d{2}$/.test(control.value)) && !hasQueryButton, "历史记录使用自绘时间段选择器并按年月日筛选").toBeTruthy();
     const dateRows = await page.$$eval('[data-testid="history-date"]', els => els.map(el => el.getAttribute("data-date")));
     expect(dateRows[0] === today, "日期列表默认选中并置顶今日").toBeTruthy();
     expect(dateRows.includes(oldDate) && !dateRows.includes(absentDate), "日期列表仅显示有记录的日期").toBeTruthy();
+    await page.waitForSelector('[data-testid="history-user"]', { timeout: 5000 });
+    await page.getByTestId("history-user").first().click();
     await page.waitForFunction(() => document.body.textContent.includes("日期索引脚本"), null, { timeout: 5000 });
 
-    // 切到前 2 天：显示造数记录（失败徽章 + 原因 + 文件路径），点击弹出详情
+    // 切到前 2 天：先显示用户，再显示造数记录（失败徽章 + 原因 + 文件路径），点击弹出详情
     await page.click(`[data-testid="history-date"][data-date="${oldDate}"]`);
+    await page.waitForSelector('[data-testid="history-user"]', { timeout: 5000 });
+    await page.getByTestId("history-user").first().click();
     await page.waitForFunction(() => Array.from(document.querySelectorAll('[data-testid="history-entry"]')).some(el => el.textContent.includes("历史造数脚本")), null, { timeout: 5000 });
     const entryText = await page.textContent('[data-testid="history-entry"]');
     expect(entryText.includes("08:30:00") && entryText.includes("失败") && entryText.includes("脚本进程超时"), "记录条显示时间、失败徽章与原因").toBeTruthy();

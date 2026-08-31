@@ -1,11 +1,11 @@
 import { api, hydrateIcons } from "../../core/api.js";
 import { $ } from "../../core/dom.js";
 import { esc, scriptFallbackIcon, scriptPluginStatus, scriptPluginUnavailableMessage } from "../../core/format.js";
-import { switchControl, textareaField, valueField } from "../../core/forms.js";
+import { pathField, switchControl, textareaField, valueField } from "../../core/forms.js";
 import { icon } from "../../core/icons.js";
 import { state } from "../../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../../core/modal.js";
-import { setFieldError, clearFieldError, toast, withBusy } from "../../core/ui.js";
+import { setFieldError, setRequiredFieldError, clearFieldError, toast, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
@@ -71,7 +71,7 @@ function umBindingCardMarkup(binding) {
   const overrideHelper = category => locks[category]
     ? '<p class="muted helper-copy um-override-helper">由「全局管理」同步 / 关闭全局同步后将恢复此脚本实例原有设置</p>'
     : "";
-  const runDaysPlaceholder = "填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。";
+  const runDaysPlaceholder = "-1 永久；0 停止；正数每日递减";
   const dragEnabled = umBindingDragEnabled();
   const dragHidden = umState.bindingEditMode || !!umState.expandedId;
   const head =
@@ -92,22 +92,21 @@ function umBindingCardMarkup(binding) {
   const generalView =
     '<section class="um-binding-option-section um-view um-view-general"><div class="section-heading"><div><h4>通用</h4><p class="muted">绑定启用状态、运行天数和每日成功次数。</p></div></div>' +
       switchControl("um-" + idPart + "-enabled", "是否启用", "运行天数为 0 时不会参与运行", enabled, "toggle-user-management-switch", 'data-binding-field="enabled"' + (locks.general ? " disabled" : "")) +
-      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : "")) +
-      valueField("um-" + idPart + "-max-success", "最多成功运行次数", maxSuccessfulRuns, "number", 'data-binding-field="maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRunsLimit) + '" step="1" placeholder="填写 -1 不限制；正整数达到上限后跳过；不能填写 0。"' + (locks.general ? " disabled" : "")) +
+      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : ""), "-1 表示永久运行；0 表示停止该脚本实例；正数表示剩余运行天数，每日递减。") +
+      valueField("um-" + idPart + "-max-success", "最多成功运行次数", maxSuccessfulRuns, "number", 'data-binding-field="maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRunsLimit) + '" step="1" placeholder="-1 不限制；正数达到上限后跳过"' + (locks.general ? " disabled" : ""), "-1 表示不限制；正整数达到上限后跳过，0 不是有效值。") +
       '<p class="muted helper-copy">当天成功次数达到上限后，后续手动运行和自动运行将记录为已跳过；失败、取消和已跳过不计入成功次数。</p>' +
       overrideHelper("general") +
     "</section>";
   const notifyView =
     '<section class="um-binding-option-section um-view um-view-notify"><div class="section-heading"><div><h4>通知</h4><p class="muted">用户绑定允许时发送运行结果通知。</p></div></div>' +
       switchControl("um-" + idPart + "-notify", "开启通知推送", "按用户绑定设置发送运行状态通知", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
-      valueField("um-" + idPart + "-smtp", "SMTP 收件人", effective.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"' + (locks.notification ? " disabled" : "")) +
-      '<p class="muted helper-copy">仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。</p>' +
+      valueField("um-" + idPart + "-smtp", "SMTP 收件人", effective.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"' + (locks.notification ? " disabled" : ""), "仅 SMTP 使用；留空时继承全局收件人，Webhook 不受影响。") +
       overrideHelper("notification") +
     "</section>";
   const advancedView =
     '<section class="um-binding-option-section um-view um-view-advanced"><div class="section-heading"><div><h4>高级</h4><p class="muted">任务前后脚本设置。</p></div></div>' +
-      valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"' + (locks.advanced ? " disabled" : "")) +
-      valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"' + (locks.advanced ? " disabled" : "")) +
+      pathField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "file", 'data-binding-field="preRunScript" placeholder="任务前脚本文件"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅首次运行。") +
+      pathField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "file", 'data-binding-field="postRunScript" placeholder="任务后脚本文件"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅最终运行。") +
       overrideHelper("advanced") +
     "</section>";
   return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
@@ -158,7 +157,7 @@ function renderUserManagementModal() {
   const addArea =
     '<div class="um-add-area"' + (umState.addOpen ? " data-open" : "") + ">" +
       '<button class="um-add-script" type="button" data-action="toggle-um-add-panel" data-testid="um-add-script">' + icon("plus") + "<span>添加脚本</span></button>" +
-      '<div class="um-add-panel" data-testid="um-add-panel">' +
+      '<div class="um-add-panel secondary-surface" data-testid="um-add-panel">' +
         '<div class="um-add-head"><h4>选择要绑定的脚本实例</h4><span class="muted">可多选</span></div>' +
         addItems +
         '<div class="um-add-actions"><button class="ghost" type="button" data-action="close-um-add-panel">取消</button><button class="primary" type="button" data-action="confirm-um-add-bindings" data-testid="um-add-confirm">确认</button></div>' +
@@ -171,8 +170,8 @@ function renderUserManagementModal() {
   const bindingEditToggle = '<button class="ghost sm um-binding-edit-toggle" type="button" data-action="toggle-um-binding-edit" aria-pressed="' + (umState.bindingEditMode ? "true" : "false") + '"' + (umState.expandedId ? " hidden" : "") + '>' + (umState.bindingEditMode ? "完成编辑" : "编辑绑定") + "</button>";
   const body =
     '<section class="user-management-settings">' +
-      valueField("um-name", "用户名 <span class='req'>*</span>", user.name, "text", 'placeholder="全局名称，不区分大小写"') +
-      textareaField("um-remark", "备注", user.remark || "", 'rows="3"', "为用户添加备注信息（可选）") +
+      valueField("um-name", "用户名 <span class='req'>*</span>", user.name, "text", 'placeholder="输入用户名"', "用户名不区分大小写。") +
+      textareaField("um-remark", "备注", user.remark || "", 'rows="3"', "可选", "为用户添加备注信息。") +
       (user.avatarUrl ? '<div class="user-avatar-setting"><span class="muted">已设置自定义头像</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="' + esc(user.id) + '">移除自定义头像</button></div>' : "") +
     "</section>" +
     '<section class="subsection user-binding-section">' +
@@ -181,7 +180,7 @@ function renderUserManagementModal() {
       bindingList +
     "</section>";
   const footer = '<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">取消</button>';
-  showModal(modalShell("用户管理", body, footer), true, true);
+  showModal(modalShell("用户管理", body, footer), true, true, true);
   syncUmState();
   void renderPluginSlots(document);
   wireManagedBindingDnd();
@@ -298,7 +297,7 @@ export async function saveUserManagement() {
   if (!draft) return;
   const name = $("#um-name")?.value.trim() || "";
   if (!name) {
-    setFieldError("um-name", "请填写用户名");
+    setRequiredFieldError("um-name");
     toast("请填写用户名", "error");
     return;
   }

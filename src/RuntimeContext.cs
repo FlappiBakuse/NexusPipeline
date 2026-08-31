@@ -23,6 +23,7 @@ internal class RuntimeContext
     {
         ServiceCollection collection = new();
         collection.AddSingleton(new HistoryService());
+        collection.AddSingleton<NativePathPickerService>();
         collection.AddSingleton<IScriptRepository>(_ => new RuntimeScriptRepository(FindScript, SnapshotScripts));
         collection.AddSingleton<IQueueRepository>(_ => new RuntimeQueueRepository(FindQueue, SnapshotQueues));
         collection.AddSingleton<IExecutionSnapshotProvider>(_ => new RuntimeExecutionSnapshotProvider(
