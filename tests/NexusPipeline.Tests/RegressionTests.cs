@@ -59,14 +59,23 @@ public sealed class RegressionTests
     public void PendingSystemAction_CancelFailureKeepsPendingAndBlocksAdmission()
     {
         var store = new ExecutionStateStore();
-        var pending = new PendingSystemAction
+        var execution = new RunningExecution
         {
-            Action = "shutdown",
-            QueueName = "队列",
-            Deadline = DateTime.Now.AddMinutes(1),
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = "queue",
+            TargetId = "pending-queue",
+            TargetName = "队列",
         };
-
-        Assert.Null(store.ReplacePending(pending));
+        Assert.True(store.TryRegister(execution, new ExecutionAdmissionProfile(
+            "queue",
+            ExecutionConcurrencyClass.Standard,
+            ExecutionResourceSet.Empty,
+            "none"), out ExecutionAdmissionFailure? admissionFailure));
+        Assert.Null(admissionFailure);
+        PendingSystemAction? pending = store.Release(
+            execution,
+            new CompletionIntent(execution.Id, "队列", "shutdown"));
+        Assert.NotNull(pending);
         Assert.True(store.TryBeginCancelPending(out PendingSystemAction? cancelling));
         Assert.Same(pending, cancelling);
         Assert.Equal(ExecutionGroupState.Cancelling, store.GroupState);
@@ -75,13 +84,13 @@ public sealed class RegressionTests
         Assert.NotNull(store.CurrentSystemAction);
         Assert.Equal(ExecutionGroupState.Cancelling, store.GroupState);
 
-        var execution = new RunningExecution
+        var blockedExecution = new RunningExecution
         {
             Kind = "queue",
             TargetId = "new-queue",
             TargetName = "新队列",
         };
-        Assert.False(store.TryRegister(execution, new ExecutionAdmissionProfile(
+        Assert.False(store.TryRegister(blockedExecution, new ExecutionAdmissionProfile(
             "queue",
             ExecutionConcurrencyClass.Standard,
             ExecutionResourceSet.Empty,

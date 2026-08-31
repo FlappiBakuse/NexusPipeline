@@ -83,7 +83,7 @@ internal sealed class StableExitWindow
 
 /// <summary>
 /// 本次 Attempt 的进程所有权。Job Object 负责保留 launcher 已退出后的普通子进程，
-/// Toolhelp/identity 仅作为兼容和外部 watchdog 的补充观察来源。
+/// Toolhelp/identity 作为外部 watchdog 的补充观察来源。
 /// </summary>
 internal sealed class ProcessOwnership : IDisposable
 {

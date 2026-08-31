@@ -1,3 +1,4 @@
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 
@@ -107,7 +108,7 @@ internal sealed record JudgeSnapshot(
     string LogSnapshot,
     DateTime CapturedAt,
     ScriptInstance Script,
-    ScriptUser? User,
+    ResolvedScriptUser? User,
     string ScriptDir,
     string InputJson,
     IReadOnlyList<JudgeScriptInputFile> Files);

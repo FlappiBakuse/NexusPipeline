@@ -31,11 +31,11 @@
 以下行为默认进入 Unit 或 Component：
 
 - Normalize、参数范围、数量上限、UTF-8 字节长度和 ID 规则；
-- CRUD mutation、排序、repository、DataStore 和 migration；
+- CRUD mutation、排序、repository、DataStore 和状态恢复；
 - 调度计算、执行准入、资源冲突、重试和完成状态机；
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
-- 插件 catalog schema 1/2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
+- 插件 catalog schema 2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
 - 插件管理控制面投影、插件商店安装/更新/卸载事务、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
 - API payload 转换中可以独立出的业务规则。
 - CLI/Control API 契约中的参数解析、目标解析、JSON envelope、退出码和轻量模式监听选项。

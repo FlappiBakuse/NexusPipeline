@@ -163,7 +163,7 @@ internal static class ConfigEditCommands
                 Mark = editMark,
             };
             keepGate = true;
-            Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.Name}（主程序已启动）");
+            Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.UserName}（主程序已启动）");
             return OperationResult<ConfigEditStarted>.Ok(new ConfigEditStarted(process?.Id ?? 0));
         }
         catch (Exception ex)
@@ -310,7 +310,7 @@ internal static class ConfigEditCommands
             Audit.Log(
                 source,
                 action == "done" ? "完成编辑配置" : "取消编辑配置",
-                $"{target.Script.Name} / {target.User.Name}");
+                $"{target.Script.Name} / {target.User.UserName}");
             return OperationResult<bool>.Ok(true);
         }
         catch (Exception ex)
@@ -338,7 +338,7 @@ internal static class ConfigEditCommands
         }
 
         NexusUser? globalUser = ctx.FindUser(userReference);
-        ScriptUser? user = null;
+        ResolvedScriptUser? user = null;
         lock (ctx.DataLock)
         {
             globalUser ??= ctx.Users.FirstOrDefault(item =>
@@ -352,7 +352,7 @@ internal static class ConfigEditCommands
                     : new ResolvedScriptUser(
                         globalUser.Id,
                         globalUser.Name,
-                        binding.Clone()).ToLegacyScriptUser();
+                        binding.Clone());
             }
         }
 
@@ -452,6 +452,6 @@ internal static class ConfigEditCommands
 
     private sealed record ConfigEditTarget(
         ScriptInstance Script,
-        ScriptUser User,
+        ResolvedScriptUser User,
         string UserKey);
 }

@@ -63,18 +63,15 @@ function storeStatusLabel(plugin) {
     "not-installed": "未安装",
     installed: "已安装",
     "update-available": "有更新",
-    "replacement-available": "可替换旧插件",
     pending: "待重启",
-    "replacement-conflict": "替换冲突",
-    "layout-conflict": "目录冲突",
     incompatible: "宿主不兼容",
     unlisted: "未列入仓库",
   }[plugin.status] || "可用";
 }
 
 function storeStatusClass(plugin) {
-  if (["incompatible", "replacement-conflict", "layout-conflict"].includes(plugin.status)) return "danger";
-  if (["update-available", "replacement-available", "pending"].includes(plugin.status)) return "warning";
+  if (plugin.status === "incompatible") return "danger";
+  if (["update-available", "pending"].includes(plugin.status)) return "warning";
   if (plugin.status === "installed") return "ok";
   return "muted";
 }
@@ -175,10 +172,8 @@ function storeActionMarkup(detail) {
   if (!detail) return "";
   const pending = detail.status === "pending";
   const incompatible = detail.compatible === false;
-  const conflicted = ["replacement-conflict", "layout-conflict"].includes(detail.status);
   if (pending) return `<span class="muted">${esc(detail.pendingAction === "uninstall" ? "卸载" : "安装")} v${esc(detail.pendingVersion || detail.version)}，重启后生效</span>`;
   if (incompatible) return `<span class="muted">${esc(detail.compatibilityReason || "当前宿主版本不兼容")}</span>`;
-  if (conflicted) return `<span class="muted">${detail.status === "layout-conflict" ? "物理目录存在冲突，请先处理本地插件目录。" : "目标插件与旧插件同时存在，请先处理本地插件冲突。"}</span>`;
   if (detail.status === "unlisted") {
     return `<button class="danger" type="button" data-action="store-uninstall" data-name="${esc(detail.name)}" data-testid="plugin-uninstall-${esc(detail.name)}">卸载插件</button>`;
   }
@@ -186,7 +181,7 @@ function storeActionMarkup(detail) {
   if (!detail.installed) {
     result += `<button class="primary" type="button" data-action="store-install" data-name="${esc(detail.name)}" data-testid="plugin-install-${esc(detail.name)}">安装插件</button>`;
   } else if (detail.updateAvailable) {
-    result += `<button class="primary" type="button" data-action="store-update" data-name="${esc(detail.name)}" data-testid="plugin-update-${esc(detail.name)}">${detail.status === "replacement-available" ? "替换旧插件" : "更新插件"}</button>`;
+    result += `<button class="primary" type="button" data-action="store-update" data-name="${esc(detail.name)}" data-testid="plugin-update-${esc(detail.name)}">更新插件</button>`;
   }
   if (detail.installed && (!detail.installedName || detail.installedName === detail.name)) {
     result += `<button class="tertiary" type="button" data-action="store-uninstall" data-name="${esc(detail.name)}" data-testid="plugin-uninstall-${esc(detail.name)}">卸载插件</button>`;

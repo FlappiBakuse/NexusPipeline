@@ -25,18 +25,15 @@ internal sealed class PluginPackageService
     public Task<PluginPendingOperation> StageAsync(
         PluginCatalogEntry entry,
         string action,
-        string? sourceName = null,
         CancellationToken cancellationToken = default)
     {
-        return StageAsync(entry, action, sourceName, sourceArtifactName: null, cancellationToken: cancellationToken);
+        return StageCoreAsync(entry, action, cancellationToken);
     }
 
-    public async Task<PluginPendingOperation> StageAsync(
+    private async Task<PluginPendingOperation> StageCoreAsync(
         PluginCatalogEntry entry,
         string action,
-        string? sourceName = null,
-        string? sourceArtifactName = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken)
     {
         if (action is not ("install" or "update"))
         {
@@ -44,7 +41,6 @@ internal sealed class PluginPackageService
         }
         string? urlError = PluginRepositoryCatalog.ValidatePackageUrl(
             entry.PackageUrl,
-            allowLegacyRelease: entry.CatalogSchemaVersion == PluginRepositoryCatalog.LegacySchemaVersion,
             entry.ArtifactName,
             entry.Version);
         if (urlError is not null)
@@ -74,8 +70,6 @@ internal sealed class PluginPackageService
                 Action = action,
                 Name = entry.Name,
                 ArtifactName = entry.ArtifactName,
-                SourceName = sourceName ?? "",
-                SourceArtifactName = sourceArtifactName ?? "",
                 Version = entry.Version,
                 Kind = entry.Kind,
                 ApiVersion = entry.ApiVersion,
@@ -171,7 +165,6 @@ internal sealed class PluginPackageService
             Directory.CreateDirectory(stagingDir);
             using var archive = ZipFile.OpenRead(zipPath);
             var entries = new List<(string Name, ZipArchiveEntry Entry)>();
-            string? commonTop = null;
             long declaredTotal = 0;
             int count = 0;
             foreach (ZipArchiveEntry entry in archive.Entries)
@@ -200,27 +193,14 @@ internal sealed class PluginPackageService
                 {
                     throw new InvalidDataException("插件包解压总大小超过上限");
                 }
-                int slash = name.IndexOf('/');
-                string top = slash < 0 ? "" : name[..slash];
-                commonTop ??= top;
-                if (!string.Equals(commonTop, top, StringComparison.OrdinalIgnoreCase))
-                {
-                    commonTop = "";
-                }
                 entries.Add((name, entry));
             }
 
-            string prefix = !string.IsNullOrWhiteSpace(commonTop)
-                && entries.Any(item => item.Name.Contains('/'))
-                ? commonTop + "/"
-                : "";
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             long extractedTotal = 0;
             foreach ((string name, ZipArchiveEntry entry) in entries)
             {
-                string relative = name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                    ? name[prefix.Length..]
-                    : name;
+                string relative = name;
                 if (relative.Length == 0 || !seen.Add(relative))
                 {
                     throw new InvalidDataException($"插件包包含重复或空条目：{name}");
@@ -261,7 +241,7 @@ internal sealed class PluginPackageService
             {
                 throw new PluginRepositoryException("manifest_invalid", error ?? "plugin.json 无效");
             }
-            if (manifest.SchemaVersion != entry.CatalogSchemaVersion
+            if (manifest.SchemaVersion != PluginRepositoryCatalog.SchemaVersion
                 || !string.Equals(manifest.Name, entry.Name, StringComparison.Ordinal)
                 || !string.Equals(manifest.Version, entry.Version, StringComparison.Ordinal)
                 || !string.Equals(manifest.Kind, entry.Kind, StringComparison.Ordinal)
@@ -269,8 +249,7 @@ internal sealed class PluginPackageService
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest 与 catalog 条目不一致");
             }
-            if (entry.CatalogSchemaVersion == PluginRepositoryCatalog.SchemaVersion
-                && !string.Equals(manifest.ArtifactName, entry.ArtifactName, StringComparison.Ordinal))
+            if (!string.Equals(manifest.ArtifactName, entry.ArtifactName, StringComparison.Ordinal))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest artifactName 与 catalog 不一致");
             }
@@ -278,11 +257,6 @@ internal sealed class PluginPackageService
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest capabilities 与 catalog 不一致");
             }
-            if (!manifest.Replaces.SequenceEqual(entry.ReplacementNames, StringComparer.Ordinal))
-            {
-                throw new PluginRepositoryException("manifest_mismatch", "插件 manifest replaces 与 catalog 不一致");
-            }
-
             if (entry.Kind == "data-specialized")
             {
                 DataSpecializedPlugin? dataPlugin = DataSpecializedPlugin.Load(pluginDir, manifest);

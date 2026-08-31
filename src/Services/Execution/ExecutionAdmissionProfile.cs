@@ -290,16 +290,6 @@ internal sealed record ExecutionAdmissionProfile(
             || capabilities?.SupportsEmulator(script.PluginType) == true;
     }
 
-    /// <summary>供旧 TryRegister 兼容入口使用；新执行入口必须传入真实计划 profile。</summary>
-    public static ExecutionAdmissionProfile Legacy(RunningExecution exec)
-    {
-        return new ExecutionAdmissionProfile(
-            exec.Kind,
-            exec.Kind == "queue" ? ExecutionConcurrencyClass.Standard : null,
-            ExecutionResourceSet.Empty,
-            "none");
-    }
-
     public static string NormalizeCompletionAction(string? action)
     {
         string normalized = string.IsNullOrWhiteSpace(action) ? "none" : action.Trim().ToLowerInvariant();
@@ -367,20 +357,19 @@ internal static class ExecutionResourceSetBuilder
                 if (script is not null)
                 {
                     IEnumerable<ResolvedScriptUser>? resolvedUsers = item.ResolvedUsers;
-                    IEnumerable<ScriptUser> users = resolvedUsers is not null
-                        ? resolvedUsers.Select(user => user.ToLegacyScriptUser())
-                        : script.Users.Where(user => user.Enabled);
-                    if (item.UserNames is not null && resolvedUsers is null)
+                    if (resolvedUsers is not null)
                     {
-                        users = users.Where(user => item.UserNames.Any(name =>
-                            string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));
+                        foreach (ResolvedScriptUser user in resolvedUsers)
+                        {
+                            userDataKeys.Add($"user:{normalizedScriptId}:{user.UserKey}");
+                        }
                     }
-                    foreach (ScriptUser user in users)
+                    else if (item.UserNames is not null)
                     {
-                        string userKey = resolvedUsers?.FirstOrDefault(item =>
-                            string.Equals(item.UserName, user.Name, StringComparison.OrdinalIgnoreCase))?.UserKey
-                            ?? user.Name.Trim();
-                        userDataKeys.Add($"user:{normalizedScriptId}:{userKey}");
+                        foreach (string userName in item.UserNames.Where(name => !string.IsNullOrWhiteSpace(name)))
+                        {
+                            userDataKeys.Add($"user:{normalizedScriptId}:{userName.Trim()}");
+                        }
                     }
                 }
             }
@@ -428,19 +417,13 @@ internal static class ExecutionResourceSetBuilder
                 logResources.Add(LogResourceDescriptor.FromPath(script.LogPath));
             }
 
-            IEnumerable<ResolvedScriptUser>? resolvedAuxiliaryUsers = item.ResolvedUsers;
-            IEnumerable<ScriptUser> auxiliaryUsers = resolvedAuxiliaryUsers is not null
-                ? resolvedAuxiliaryUsers.Select(user => user.ToLegacyScriptUser())
-                : script.Users.Where(user => user.Enabled);
-            if (item.UserNames is not null && resolvedAuxiliaryUsers is null)
+            if (item.ResolvedUsers is not null)
             {
-                auxiliaryUsers = auxiliaryUsers.Where(user => item.UserNames.Any(name =>
-                    string.Equals(name, user.Name, StringComparison.OrdinalIgnoreCase)));
-            }
-            foreach (ScriptUser user in auxiliaryUsers)
-            {
-                AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.PreRunScript);
-                AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.PostRunScript);
+                foreach (ResolvedScriptUser user in item.ResolvedUsers)
+                {
+                    AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.Binding.PreRunScript);
+                    AddExecutable(auxiliaryExecutablePaths, auxiliaryProcessNames, user.Binding.PostRunScript);
+                }
             }
         }
 

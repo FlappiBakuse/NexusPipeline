@@ -65,11 +65,8 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            // 深拷贝快照后序列化——避免枚举/序列化与并发修改冲突（「集合已修改」/越界异常）。
-            List<NexusUser> users = ctx.SnapshotUsers();
             List<ScriptInstance> snapshot = ctx.SnapshotScripts()
                 .OrderBy(script => script.Index)
-                .Select(script => ProjectScriptForCompatibility(script, users))
                 .ToList();
             await HttpHelper.WriteJsonAsync(context, snapshot).ConfigureAwait(false);
             return;
@@ -86,7 +83,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
+                script.Clone()).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -97,7 +94,7 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 2 && seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
         {
             var sessions = UserConfigManager.EditSessions.Values
-                .Select(session => new { scriptId = session.Script.Id, scriptName = session.Script.Name, userName = session.User.Name })
+                .Select(session => new { scriptId = session.Script.Id, scriptName = session.Script.Name, userName = session.User.UserName })
                 .ToList();
             await HttpHelper.WriteJsonAsync(context, sessions).ConfigureAwait(false);
             return;
@@ -128,7 +125,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                ProjectScriptForCompatibility(result.Value!, ctx.SnapshotUsers())).ConfigureAwait(false);
+                result.Value!).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2)
@@ -151,7 +148,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                ProjectScriptForCompatibility(result.Value!, ctx.SnapshotUsers())).ConfigureAwait(false);
+                result.Value!).ConfigureAwait(false);
             return;
         }
         if (method == "DELETE" && seg.Length == 2)
@@ -170,7 +167,7 @@ internal static class ApiScriptsHandler
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
             return;
         }
-        await HandleScriptUsersAsync(context, method, seg, body).ConfigureAwait(false);
+        await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
     /// <summary>专用插件配置探测：前端简化弹窗在根目录填写后即时校验能否推导。</summary>
@@ -384,148 +381,6 @@ internal static class ApiScriptsHandler
         return SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
     }
 
-    private static ScriptInstance ProjectScriptForCompatibility(ScriptInstance script, IReadOnlyList<NexusUser> users)
-    {
-        ScriptInstance clone = script.Clone();
-        if (users.Count == 0)
-        {
-            return clone;
-        }
-
-        List<ScriptUser> projected = users
-            .OrderBy(user => user.Index)
-            .SelectMany(user => user.Bindings
-                .Where(binding => string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal))
-                .Select(binding =>
-                {
-                    UserScriptBinding effective = UserBindingOverrideResolver.Resolve(user, binding);
-                    return new ScriptUser
-                    {
-                        Name = user.Name,
-                        Enabled = effective.Participates,
-                        PreRunScript = effective.PreRunScript,
-                        PreRunOnceOnly = effective.PreRunOnceOnly,
-                        PostRunScript = effective.PostRunScript,
-                        PostRunOnFinalOnly = effective.PostRunOnFinalOnly,
-                    };
-                }))
-            .ToList();
-        // 迁移完成后嵌套用户已不再是权威数据；这里仅为旧客户端保留只读投影。
-        clone.Users = projected;
-        return clone;
-    }
-
-    private static Task HandleScriptUsersAsync(HttpListenerContext context, string method, string[] seg, string body)
-    {
-        return HandleGlobalScriptUsersCompatibilityAsync(context, method, seg, body);
-    }
-    private static async Task HandleGlobalScriptUsersCompatibilityAsync(
-        HttpListenerContext context,
-        string method,
-        string[] seg,
-        string body)
-    {
-        RuntimeContext ctx = RuntimeContext.Instance;
-        if (seg.Length < 3 || !seg[2].Equals("users", StringComparison.OrdinalIgnoreCase))
-        {
-            await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
-            return;
-        }
-
-        ScriptInstance? script = ctx.FindScript(seg[1]);
-        if (script is null)
-        {
-            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 3 && method == "GET")
-        {
-            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 3 && method == "POST")
-        {
-            ScriptUser? payload = HttpHelper.ParseBody<ScriptUser>(body);
-            if (payload is null)
-            {
-                await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
-                return;
-            }
-            OperationResult<NexusUser> result = UserCommands.AddCompatibilityBinding(script.Id, payload);
-            if (!result.Succeeded)
-            {
-                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-                return;
-            }
-            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 4 && method == "PUT" && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
-        {
-            await ReorderGlobalUsersForCompatibilityAsync(context, script, body).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 4 && method == "PUT")
-        {
-            string oldName = Uri.UnescapeDataString(seg[3]);
-            ScriptUser? payload = HttpHelper.ParseBody<ScriptUser>(body);
-            if (payload is null)
-            {
-                await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
-                return;
-            }
-            OperationResult<NexusUser> result = UserCommands.UpdateCompatibilityBinding(script.Id, oldName, payload);
-            if (!result.Succeeded)
-            {
-                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-                return;
-            }
-            await HttpHelper.WriteJsonAsync(context, ProjectScriptForCompatibility(script, ctx.SnapshotUsers())).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 4 && method == "DELETE")
-        {
-            string userName = Uri.UnescapeDataString(seg[3]);
-            OperationResult<bool> result = UserCommands.DeleteCompatibilityBinding(script.Id, userName);
-            if (!result.Succeeded)
-            {
-                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-                return;
-            }
-            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
-            return;
-        }
-
-        if (seg.Length == 5 && method == "POST" && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
-        {
-            await HandleEditConfigAsync(context, seg, body).ConfigureAwait(false);
-            return;
-        }
-        await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
-    }
-
-    private static async Task ReorderGlobalUsersForCompatibilityAsync(HttpListenerContext context, ScriptInstance script, string body)
-    {
-        JsonNode? node = HttpHelper.ParseBody(body);
-        List<string>? names = node?["names"] is JsonArray array
-            ? array.Select(item => item?.ToString() ?? "").ToList()
-            : null;
-        OperationResult<bool> result = UserCommands.ReorderCompatibility(script.Id, names);
-        if (!result.Succeeded)
-        {
-            await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-            return;
-        }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectScriptForCompatibility(script, RuntimeContext.Instance.SnapshotUsers())).ConfigureAwait(false);
-    }
-
     /// <summary>脚本实例顺序重排：请求体携带完整 id 名单，与现有集合完全一致时按新顺序重赋 Index 落盘。</summary>
     private static async Task HandleReorderScriptsAsync(HttpListenerContext context, string body)
     {
@@ -548,17 +403,16 @@ internal static class ApiScriptsHandler
         string userId,
         string body)
     {
-        return HandleEditConfigAsync(
-            context,
-            new[] { "scripts", scriptId, "users", Uri.EscapeDataString(userId), "edit-config" },
-            body);
+        return HandleEditConfigAsync(context, scriptId, userId, body);
     }
 
-    private static async Task HandleEditConfigAsync(HttpListenerContext context, string[] seg, string body)
+    private static async Task HandleEditConfigAsync(
+        HttpListenerContext context,
+        string scriptId,
+        string userReference,
+        string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        string scriptId = seg[1];
-        string userReference = Uri.UnescapeDataString(seg[3]);
         string action = HttpHelper.ParseBody(body).Get("action").Str();
 
         if (action == "start")

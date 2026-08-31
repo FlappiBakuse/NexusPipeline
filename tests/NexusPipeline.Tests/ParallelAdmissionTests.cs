@@ -253,7 +253,6 @@ public class ParallelAdmissionTests
             Name = "模拟器脚本",
             GameMode = "emulator",
             GameExe = "127.0.0.1:16384",
-            Users = new List<ScriptUser> { new() { Name = "user", Enabled = true } },
         };
         var queue = new DispatchQueue
         {
@@ -266,7 +265,15 @@ public class ParallelAdmissionTests
         };
         var scripts = new SingleScriptRepository(script);
         var queues = new SingleQueueRepository(queue);
-        var users = new TestUsers();
+        var users = new TestUsers(new NexusUser
+        {
+            Id = "user-id",
+            Name = "user",
+            Bindings = new List<UserScriptBinding>
+            {
+                new() { ScriptInstanceId = script.Id, Enabled = true },
+            },
+        });
         var validator = new ExecutionValidator(scripts, queues, users, new AllowAllPluginAvailability());
         var builder = new ExecutionPlanBuilder(scripts, queues, users, validator);
 
@@ -305,18 +312,18 @@ public class ParallelAdmissionTests
         ScriptInstance main = Script("main", mainExe: @"C:\Nexus\shared.exe");
         ScriptInstance preRun = Script(
             "pre-run",
-            mainExe: @"C:\Nexus\other.exe",
-            users: new[]
+            mainExe: @"C:\Nexus\other.exe");
+        var preRunUser = new ResolvedScriptUser(
+            "user-id",
+            "user",
+            new UserScriptBinding
             {
-                new ScriptUser
-                {
-                    Name = "user",
-                    Enabled = true,
-                    PreRunScript = @"C:\Nexus\shared.exe",
-                },
+                ScriptInstanceId = preRun.Id,
+                Enabled = true,
+                PreRunScript = @"C:\Nexus\shared.exe",
             });
         string? auxiliaryConflict = ExecutionAdmissionProfile.ForScript(main).Resources.FindConflict(
-            ExecutionAdmissionProfile.ForScript(preRun, "user").Resources);
+            ExecutionAdmissionProfile.ForScript(preRun, resolvedUsers: new[] { preRunUser }).Resources);
         Assert.StartsWith("executable:", auxiliaryConflict);
     }
 
@@ -355,8 +362,7 @@ public class ParallelAdmissionTests
     public void QueueTaskCount_ChargesAtLeastOneForMissingOrEmptyUsers()
     {
         var noUsers = Script(
-            "no-users",
-            users: Array.Empty<ScriptUser>());
+            "no-users");
         var task = new PlannedQueueTask(
             new QueueTask { ScriptInstanceId = noUsers.Id },
             noUsers,
@@ -427,8 +433,7 @@ public class ParallelAdmissionTests
         string logPath = "",
         string gameMode = "pc",
         string gameExe = @"C:\Nexus\game.exe",
-        string pluginType = "",
-        IEnumerable<ScriptUser>? users = null)
+        string pluginType = "")
     {
         return new ScriptInstance
         {
@@ -439,10 +444,6 @@ public class ParallelAdmissionTests
             GameMode = gameMode,
             GameExe = gameExe,
             PluginType = pluginType,
-            Users = users?.Select(user => user.Clone()).ToList() ?? new List<ScriptUser>
-            {
-                new() { Name = "user", Enabled = true },
-            },
         };
     }
 
@@ -501,17 +502,10 @@ public class ParallelAdmissionTests
         public IReadOnlyList<DispatchQueue> Snapshot() => new[] { _queue.Clone() };
     }
 
-    private sealed class TestUsers : LegacyModelUserRepository
+    private sealed class TestUsers : CurrentModelUserRepository
     {
-        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+        public TestUsers(params NexusUser[] users) : base(users)
         {
-            return script.Users.FirstOrDefault(user => user.Enabled
-                && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        public override IReadOnlyList<string> EnabledNames(ScriptInstance script)
-        {
-            return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
         }
     }
 

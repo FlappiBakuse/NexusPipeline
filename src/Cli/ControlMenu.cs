@@ -72,18 +72,6 @@ internal static class ControlMenu
         }
     }
 
-    public static void ShowSettingsForCompatibility() => ShowSettings();
-
-    public static void ShowRunsForCompatibility() => ShowRuns();
-
-    public static void ShowHistoryForCompatibility() => ShowHistory();
-
-    public static void ShowPluginsForCompatibility() => ShowPlugins();
-
-    public static void ShowMaintenanceForCompatibility() => ShowMaintenance();
-
-    public static void ShowUpdateForCompatibility() => ShowUpdate();
-
     public static void ShowResource(string resource, string label)
     {
         while (true)
@@ -302,7 +290,7 @@ internal static class ControlMenu
                     string? id = Ui.Prompt("输入运行 ID：");
                     if (!string.IsNullOrWhiteSpace(id))
                     {
-                        RunCommand("cancel", id.Trim());
+                        RunCommand("run", "cancel", id.Trim());
                     }
                     break;
                 }

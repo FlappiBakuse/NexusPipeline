@@ -83,7 +83,7 @@ public class AppSettings
     /// <summary>更新接受渠道：stable / prerelease（前项目全是 Pre-release，默认 prerelease 才能收到更新）。</summary>
     public string UpdateChannel { get; set; } = "prerelease";
 
-    /// <summary>可选更新镜像源（GitHub Releases API 兼容 JSON）；空 = 默认 GitHub。</summary>
+    /// <summary>可选更新镜像源（GitHub Releases API JSON）；空 = 默认 GitHub。</summary>
     public string UpdateSourceUrl { get; set; } = "";
 
     /// <summary>

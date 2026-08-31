@@ -25,8 +25,7 @@ internal sealed record PluginSummary(
     string ApiVersion,
     IReadOnlyList<string> Capabilities,
     bool HasFrontend,
-    string FrontendApiVersion,
-    IReadOnlyList<string> Replaces)
+    string FrontendApiVersion)
 {
     public IReadOnlyList<PluginAuthor> Authors { get; init; } = Array.Empty<PluginAuthor>();
 
@@ -134,8 +133,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     "",
                     plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Frontend is not null,
-                    plugin.Frontend?.ApiVersion ?? "",
-                    plugin.Replaces)
+                    plugin.Frontend?.ApiVersion ?? "")
                 {
                     Authors = metadata.Authors,
                     Tags = metadata.Tags,
@@ -147,9 +145,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             }
             foreach (ManagedPluginDescriptor plugin in _managedPlugins)
             {
-                string artifactName = string.IsNullOrWhiteSpace(plugin.Manifest.ArtifactName)
-                    ? Path.GetFileName(plugin.Directory)
-                    : plugin.Manifest.ArtifactName;
+                string artifactName = plugin.Manifest.ArtifactName;
                 PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
                     plugin.Directory,
                     plugin.Manifest.GameName,
@@ -165,8 +161,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Manifest.ApiVersion,
                     plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
                     plugin.Manifest.Frontend is not null,
-                    plugin.Manifest.Frontend?.ApiVersion ?? "",
-                    plugin.Manifest.Replaces)
+                    plugin.Manifest.Frontend?.ApiVersion ?? "")
                 {
                     Authors = metadata.Authors,
                     Tags = metadata.Tags,
@@ -662,8 +657,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 continue;
             }
-            if (manifest.SchemaVersion >= 2
-                && !string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
+            if (!string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
             {
                 Logger.Error($"[插件] 跳过物理目录名不匹配的插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
                 continue;
@@ -800,8 +794,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 continue;
             }
-            if (manifest.SchemaVersion >= 2
-                && !string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
+            if (!string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
             {
                 Logger.Error($"[插件] 跳过物理目录名不匹配的数据插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
                 continue;

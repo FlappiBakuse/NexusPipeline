@@ -10,7 +10,7 @@ namespace NexusPipeline.App.Commands;
 
 /// <summary>
 /// 脚本实例的应用命令。HTTP、CLI 和交互菜单都通过常驻服务进入这里，Web 层只负责协议解析与展示投影。
-/// 图标提取与旧客户端 users 投影仍属于 Web 展示适配，不放入本命令。
+/// 图标提取属于 Web 展示适配，不放入本命令。
 /// </summary>
 internal static class ScriptCommands
 {
@@ -121,7 +121,6 @@ internal static class ScriptCommands
 
             candidate.Id = existing.Id;
             candidate.Index = existing.Index;
-            candidate.Users = existing.Users;
             NormalizePaths(candidate);
             string? pluginError = string.IsNullOrWhiteSpace(candidate.PluginType)
                 ? null

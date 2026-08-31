@@ -8,7 +8,7 @@ namespace NexusPipeline.Persistence;
 internal static class LogPattern
 {
     /// <summary>解析格式路径：返回当前应监控的文件；无匹配返回 null。
-    /// 规则：已存在目录 → 目录内最新文件（旧配置兼容）；无占位符无通配 → 精确文件；含占位符 → 替换为当天日期后精确匹配；含 * → 目录内通配取最新修改。</summary>
+    /// 规则：已存在目录 → 目录内最新文件；无占位符无通配 → 精确文件；含占位符 → 替换为当天日期后精确匹配；含 * → 目录内通配取最新修改。</summary>
     public static string? ResolveFile(string pattern)
     {
         return ResolveFiles(pattern)

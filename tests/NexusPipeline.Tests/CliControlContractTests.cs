@@ -49,7 +49,7 @@ public sealed class CliControlContractTests
     }
 
     [Fact]
-    public void CliArguments_supports_json_files_stdin_and_legacy_flags()
+    public void CliArguments_supports_json_files_stdin_and_boolean_flags()
     {
         bool parsed = CliArguments.TryParse(
             new[] { "script", "create", "--json", "--file", "-", "-Auto", "--name=value" },

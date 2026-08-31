@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   api,
   adbStub,
+  createUserBinding,
   deleteScript,
   isAdminMode,
   isAdministrator,
@@ -63,7 +64,7 @@ async function runEmulator(endpoint, label) {
   assert.equal(response.status, 200);
   const script = await response.json();
   try {
-    assert.equal((await api("POST", `/api/scripts/${script.id}/users`, { name: "系统用户", enabled: true })).status, 200);
+    await createUserBinding(script.id, "系统用户");
     assert.equal((await api("POST", "/api/dispatch/script", { scriptId: script.id })).status, 200);
     assert.equal(await waitNoRunning(), true);
     const record = await waitForHistory(script.id);

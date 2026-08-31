@@ -70,7 +70,7 @@ internal sealed class FrozenQueueTaskData
 
     public List<string> EnabledUsers { get; set; } = new();
 
-    /// <summary> 冻结的全局用户身份与绑定设置；旧 scheduler-state 仅有 EnabledUsers 时仍可恢复。</summary>
+    /// <summary>冻结的全局用户身份与绑定设置。</summary>
     public List<FrozenResolvedUserData> ResolvedUsers { get; set; } = new();
 }
 

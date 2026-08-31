@@ -52,12 +52,20 @@ public class GovernanceUnitTests
         {
             Id = "script-1",
             Name = "示例脚本",
-            Users = new List<ScriptUser> { new() { Name = "user-1", Enabled = true } },
+        };
+        var user = new NexusUser
+        {
+            Id = "user-1",
+            Name = "user-1",
+            Bindings = new List<UserScriptBinding>
+            {
+                new() { ScriptInstanceId = script.Id, Enabled = true },
+            },
         };
         var validator = new ExecutionValidator(
             new TestScriptRepository(script),
             new TestQueueRepository(),
-            new TestUserRepository(),
+            new TestUserRepository(user),
             new AllowAllPluginAvailability());
 
         ExecutionResult accepted = validator.Validate(new ExecutionRequest("script", script.Id, "manual"));
@@ -201,31 +209,19 @@ public class GovernanceUnitTests
         Assert.Empty(store.Active);
         Assert.Same(first, store.FindAny(first.Id));
 
-        var pending = new PendingSystemAction
-        {
-            Action = "sleep",
-            QueueName = "每日队列",
-            Deadline = DateTime.Now.AddMinutes(1),
-        };
-        Assert.Null(store.ReplacePending(pending));
+        PendingSystemAction pending = CreatePending(store, "sleep", "每日队列");
         Assert.NotNull(store.CurrentSystemAction);
-        Assert.True(store.TryTakePending(out PendingSystemAction? taken));
+        Assert.True(store.TryBeginCancelPending(out PendingSystemAction? taken));
         Assert.Same(pending, taken);
+        Assert.True(store.CompleteCancelPending(taken!, osCancelSucceeded: true));
         Assert.Null(store.CurrentSystemAction);
 
         var armStore = new ExecutionStateStore();
-        var armPending = new PendingSystemAction
-        {
-            Action = "shutdown",
-            QueueName = "arm-queue",
-            Deadline = DateTime.Now.AddMinutes(1),
-        };
-        Assert.Null(armStore.ReplacePending(armPending));
-        Assert.True(armStore.TryArm(armPending, () => { }));
-        Assert.True(armStore.TryCancelPending(out _));
-        bool canceledCommandRan = false;
-        Assert.False(armStore.TryArm(armPending, () => canceledCommandRan = true));
-        Assert.False(canceledCommandRan);
+        PendingSystemAction armPending = CreatePending(armStore, "shutdown", "arm-queue");
+        Assert.True(armStore.TryArm(armPending));
+        Assert.True(armStore.TryBeginCancelPending(out PendingSystemAction? canceled));
+        Assert.True(armStore.CompleteCancelPending(canceled!, osCancelSucceeded: true));
+        Assert.False(armStore.TryArm(armPending));
     }
 
     [Fact]
@@ -272,8 +268,9 @@ public class GovernanceUnitTests
         Assert.False(store.TryRegister(blocked, emulator, out ExecutionAdmissionFailure? blockedFailure));
         Assert.Equal(ExecutionAdmissionFailureCode.PendingSystemAction, blockedFailure!.Code);
 
-        Assert.True(store.TryCancelPending(out PendingSystemAction? canceled));
+        Assert.True(store.TryBeginCancelPending(out PendingSystemAction? canceled));
         Assert.Same(pending, canceled);
+        Assert.True(store.CompleteCancelPending(canceled!, osCancelSucceeded: true));
         Assert.True(store.TryRegister(blocked, emulator, out _));
     }
 
@@ -316,7 +313,31 @@ public class GovernanceUnitTests
 
         PendingSystemAction? pending = store.Release(second, new CompletionIntent(second.Id, second.TargetName, "shutdown"));
         Assert.NotNull(pending);
-        Assert.True(store.TryCancelPending(out _));
+        Assert.True(store.TryBeginCancelPending(out PendingSystemAction? canceled));
+        Assert.True(store.CompleteCancelPending(canceled!, osCancelSucceeded: true));
+    }
+
+    private static PendingSystemAction CreatePending(ExecutionStateStore store, string action, string queueName)
+    {
+        var execution = new RunningExecution
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Kind = "queue",
+            TargetId = Guid.NewGuid().ToString("N"),
+            TargetName = queueName,
+        };
+        ExecutionAdmissionProfile profile = new(
+            "queue",
+            ExecutionConcurrencyClass.Standard,
+            ExecutionResourceSet.Empty,
+            "none");
+        Assert.True(store.TryRegister(execution, profile, out ExecutionAdmissionFailure? failure));
+        Assert.Null(failure);
+        PendingSystemAction? pending = store.Release(
+            execution,
+            new CompletionIntent(execution.Id, queueName, action));
+        Assert.NotNull(pending);
+        return pending!;
     }
 
     private sealed class TestCapability : IPluginCapability
@@ -344,17 +365,10 @@ public class GovernanceUnitTests
         public IReadOnlyList<DispatchQueue> Snapshot() => Array.Empty<DispatchQueue>();
     }
 
-    private sealed class TestUserRepository : LegacyModelUserRepository
+    private sealed class TestUserRepository : CurrentModelUserRepository
     {
-        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName)
+        public TestUserRepository(params NexusUser[] users) : base(users)
         {
-            return script.Users.FirstOrDefault(user => user.Enabled
-                && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
-        }
-
-        public override IReadOnlyList<string> EnabledNames(ScriptInstance script)
-        {
-            return script.Users.Where(user => user.Enabled).Select(user => user.Name).ToList();
         }
     }
 }

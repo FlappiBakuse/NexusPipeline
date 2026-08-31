@@ -135,7 +135,9 @@ public sealed class ManagedPluginTests
 
     private static string CreatePluginDirectory(string name, Type entryType, string apiVersion = "1.0", bool frontend = false)
     {
-        string root = Path.Combine(AppPaths.PluginsDir, name);
+        string artifactName = char.ToUpperInvariant(name[0])
+            + name[1..].Replace("-", "", StringComparison.Ordinal);
+        string root = Path.Combine(AppPaths.PluginsDir, artifactName);
         DeletePluginDirectory(root);
         DeletePluginState(name);
         Directory.CreateDirectory(root);
@@ -152,8 +154,9 @@ public sealed class ManagedPluginTests
             : "";
         string manifest = $$"""
         {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "name": "{{name}}",
+          "artifactName": "{{artifactName}}",
           "displayName": "{{name}}",
           "description": "managed fixture",
           "version": "0.1.0",

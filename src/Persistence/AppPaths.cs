@@ -16,10 +16,6 @@ internal static class AppPaths
 
     public static readonly string UsersPath = Path.Combine(ConfigDir, "users.json");
 
-    public static readonly string MigrationsDir = Path.Combine(ConfigDir, "migrations");
-
-    public static readonly string UserModelMigrationPath = Path.Combine(MigrationsDir, "v096-users.json");
-
     public static readonly string HistoryDir = Path.Combine(AppRoot, "history");
 
     public static readonly string OutputDir = Path.Combine(AppRoot, "outputs");
@@ -61,9 +57,6 @@ internal static class AppPaths
 
     public static readonly string PluginBackupDir = Path.Combine(PluginStateDir, "backup");
 
-    /// <summary>旧状态冲突与迁移现场的保留目录。</summary>
-    public static readonly string StateRecoveryDir = Path.Combine(StateDir, "recovery");
-
     public static readonly string AppearanceRuntimePath = Path.Combine(StateDir, "appearance-runtime.json");
 
     public static readonly string AppearanceStagingDir = Path.Combine(StateDir, "appearance-staging");
@@ -71,22 +64,13 @@ internal static class AppPaths
     /// <summary>常驻 Web 服务实际监听端口（服务启动时写入，停止时删除；CLI 用于复用端口漂移后的服务）。</summary>
     public static readonly string WebPortPath = Path.Combine(RuntimeDir, "web.port");
 
-    /// <summary>迁移前版本写入的端口标记，只读兼容一个版本周期。</summary>
-    public static readonly string LegacyWebPortPath = Path.Combine(AppRoot, "web.port");
-
     /// <summary>定时 occurrence 与待执行冻结计划的持久化状态。</summary>
     public static readonly string SchedulerStatePath = Path.Combine(StateDir, "scheduler-state.json");
-
-    /// <summary>迁移前版本的调度持久状态路径。</summary>
-    public static readonly string LegacySchedulerStatePath = Path.Combine(AppRoot, "scheduler-state.json");
 
     /// <summary>常驻 service/web 进程 PID；用于提权测试与异常退出后的精确接管清理。</summary>
     public static readonly string ServicePidPath = Path.Combine(RuntimeDir, "service.pid");
 
-    /// <summary>迁移前版本写入的 PID 标记，获得单实例所有权后作为过期标记清理。</summary>
-    public static readonly string LegacyServicePidPath = Path.Combine(AppRoot, "service.pid");
-
-    /// <summary>当前安装根的 service-owned 运行状态布局与迁移器。</summary>
+    /// <summary>当前安装根的 service-owned 运行状态布局。</summary>
     internal static readonly RuntimeStateLayout RuntimeState = new(AppRoot);
 
     /// <summary>内建更新的运行时目录：任务标记、staging、下载包（安装目录内，随安装一起被替换）。</summary>

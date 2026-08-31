@@ -8,9 +8,9 @@ namespace NexusPipeline.Services.Update;
 internal sealed record UpdateDownloadProgress(long BytesRead, long BytesTotal);
 
 /// <summary>
-/// 更新包：受策略约束的 zip/sha256 下载、SHA256 强校验、解压资源上限与布局归一。
-/// 布局：flat root = nexus-pipeline.exe + wwwroot/ + plugins/.nxp-root + README + LICENSE；
-/// 兼容「包内单个顶层目录」形态（自动归一）；拒绝数据目录、路径穿越、重复条目和 zip bomb。
+/// 更新包：受策略约束的 zip/sha256 下载、SHA256 强校验与解压资源上限。
+/// 布局：flat root = nexus-pipeline.exe + wwwroot/ + plugins/ + README + LICENSE；
+/// 拒绝数据目录、路径穿越、重复条目和 zip bomb。
 /// </summary>
 internal static class UpdatePackage
 {
@@ -24,19 +24,6 @@ internal static class UpdatePackage
     {
         "config", "data", "history", "logs", "outputs", "user-assets", ".nxp-update", ".nxp-backup", ".nxp-version",
     };
-
-    /// <summary>兼容旧内部调用方的下载入口；生产调用应传入已构造的 UpdateSourcePolicy。</summary>
-    public static Task<(bool Ok, string? Error)> DownloadAsync(
-        HttpClient http,
-        string sourceUrl,
-        string zipUrl,
-        string shaUrl,
-        string destZip,
-        string destSha,
-        CancellationToken token)
-    {
-        return DownloadAsync(http, new UpdateSourcePolicy(sourceUrl), zipUrl, shaUrl, destZip, destSha, null, token);
-    }
 
     /// <summary>流式下载 ZIP 与 SHA；ZIP 和 SHA 使用相同的 URI/重定向策略。</summary>
     public static async Task<(bool Ok, string? Error)> DownloadAsync(
@@ -179,8 +166,8 @@ internal static class UpdatePackage
     }
 
     /// <summary>
-    /// 解压 ZIP 到 staging：条目路径白名单、单顶层目录归一与归档资源上限。
-    /// 归一后必须存在根层 nexus-pipeline.exe；失败时尽力删除当前 staging。
+    /// 解压 ZIP 到 staging：条目路径白名单与归档资源上限。
+    /// 必须存在根层 nexus-pipeline.exe；失败时尽力删除当前 staging。
     /// </summary>
     public static string? Extract(string zipPath, string stagingDir)
     {
@@ -194,7 +181,6 @@ internal static class UpdatePackage
             using var archive = ZipFile.OpenRead(zipPath);
             var normalized = new List<(string TargetRelative, ZipArchiveEntry Entry)>();
             int archiveEntryCount = 0;
-            string? commonTop = null;
             long declaredExtracted = 0;
             foreach (ZipArchiveEntry entry in archive.Entries)
             {
@@ -222,31 +208,14 @@ internal static class UpdatePackage
                 {
                     throw new InvalidDataException($"zip 解压总大小超过上限（{MaxExtractedBytes / 1024 / 1024} MB）");
                 }
-                int slash = name.IndexOf('/');
-                string top = slash < 0 ? "" : name[..slash];
-                if (commonTop is null)
-                {
-                    commonTop = top;
-                }
-                else if (!string.Equals(commonTop, top, StringComparison.OrdinalIgnoreCase))
-                {
-                    commonTop = "";
-                }
                 normalized.Add((name, entry));
             }
 
-            string prefix = "";
-            if (!string.IsNullOrWhiteSpace(commonTop) && normalized.Any(item => item.TargetRelative.Contains('/')))
-            {
-                prefix = commonTop + "/";
-            }
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             long extracted = 0;
             foreach ((string targetRelative, ZipArchiveEntry entry) in normalized)
             {
-                string rel = targetRelative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-                    ? targetRelative[prefix.Length..]
-                    : targetRelative;
+                string rel = targetRelative;
                 if (rel.Length == 0)
                 {
                     continue;

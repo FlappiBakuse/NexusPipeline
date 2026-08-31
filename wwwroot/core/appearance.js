@@ -1,7 +1,6 @@
 import { api } from "./api.js";
 
 const THEME_KEY = "nexus-theme";
-const LEGACY_THEME_KEY = "nexus-appearance-theme";
 const WALLPAPER_KEY = "nexus-appearance-wallpaper";
 const DB_NAME = "nexus-appearance";
 const DB_VERSION = 1;
@@ -116,7 +115,7 @@ export function applyThemeValue(name) {
 }
 
 export function initThemeValue() {
-  const stored = safeStorageGet(THEME_KEY) || safeStorageGet(LEGACY_THEME_KEY) || "system";
+  const stored = safeStorageGet(THEME_KEY) || "system";
   return applyThemeValue(stored);
 }
 

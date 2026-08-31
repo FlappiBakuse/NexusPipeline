@@ -86,11 +86,11 @@ internal sealed class ExecutionValidator
         }
         if (!string.IsNullOrWhiteSpace(userName)
             && !string.IsNullOrWhiteSpace(script.ConfigPath)
-            && _users.FindEnabled(script, userName) is null)
+            && _users.ResolveEnabledBinding(script, userName) is null)
         {
             throw new InvalidOperationException($"用户「{userName}」不存在或已禁用");
         }
-        if (string.IsNullOrWhiteSpace(userName) && !_users.EnabledNames(script).Any())
+        if (string.IsNullOrWhiteSpace(userName) && !_users.ResolveEnabledBindings(script).Any())
         {
             throw new InvalidOperationException($"脚本「{script.Name}」未配置启用用户，无法运行");
         }
@@ -136,7 +136,7 @@ internal sealed class ExecutionValidator
     public int CountScriptTasks(ScriptInstance script, string? userName)
     {
         return string.IsNullOrWhiteSpace(userName)
-            ? Math.Max(1, _users.EnabledNames(script).Count)
+            ? Math.Max(1, _users.ResolveEnabledBindings(script).Count)
             : 1;
     }
 
@@ -146,14 +146,14 @@ internal sealed class ExecutionValidator
         foreach (QueueTask task in queue.Tasks)
         {
             ScriptInstance? script = _scripts.FindById(task.ScriptInstanceId);
-            totalTasks += script is null ? 1 : Math.Max(1, _users.EnabledNames(script).Count);
+            totalTasks += script is null ? 1 : Math.Max(1, _users.ResolveEnabledBindings(script).Count);
         }
         return totalTasks;
     }
 
     public IReadOnlyList<string> EnabledUserNames(ScriptInstance script)
     {
-        return _users.EnabledNames(script);
+        return _users.ResolveEnabledBindings(script).Select(user => user.UserName).ToList();
     }
 
     public string? QueueBlockedBy(DispatchQueue queue)

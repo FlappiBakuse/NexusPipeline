@@ -81,6 +81,9 @@ export function installEmulatorStubs(runtimeDir, fixtureDir) {
  * 再走 stdin EOF 退出，最后按 service.pid 与子进程 PID 做隔离进程树清理。
  */
 export async function stopSpawnedService({ child, exitFile, pidFilePath, exitWaitPollMs = 250 }) {
+  // 在发出退出信号前固定当前 service.pid；服务优雅退出时可能先删除 PID 文件，
+  // 仅在等待 child 后重新读取会漏掉仍在收尾的更新重拉服务。
+  const initialMarked = readPidFile(pidFilePath);
   if (process.env.NEXUS_TEST_MODE?.trim().toLowerCase() === "codex") {
     fs.mkdirSync(path.dirname(exitFile), { recursive: true });
     fs.writeFileSync(exitFile, "stop\n", "utf8");
@@ -94,6 +97,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, exitWai
     }
   }
   const pids = new Set();
+  if (initialMarked) pids.add(initialMarked);
   const marked = readPidFile(pidFilePath);
   if (marked) pids.add(marked);
   if (child?.pid) pids.add(Number(child.pid));

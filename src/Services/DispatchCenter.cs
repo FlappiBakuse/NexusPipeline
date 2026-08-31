@@ -158,7 +158,7 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
         }
     }
 
-    /// <summary>兼容现有 CLI/内部调用方的静态进程检测入口。</summary>
+    /// <summary>提供执行校验使用的静态进程检测入口。</summary>
     public static bool IsScriptRunning(ScriptInstance? script) => ExecutionValidator.IsScriptRunning(script);
 
     private void Register(RunningExecution exec, ExecutionAdmissionProfile profile, string source)

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
-using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Persistence;
 
@@ -15,13 +14,11 @@ internal static class ConfigStore
             try
             {
                 string text = File.ReadAllText(AppPaths.ConfigPath);
-                JsonNode? raw = JsonNode.Parse(text);
                 AppSettings? parsed = JsonSerializer.Deserialize<AppSettings>(text, JsonOpts.Default);
                 if (parsed is not null)
                 {
                     settings = parsed;
                 }
-                MigrateLegacyPluginPreferences(settings, raw);
             }
             catch (Exception ex)
             {
@@ -63,8 +60,6 @@ internal static class ConfigStore
             settings.LogLevel = "info";
         }
         settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
-        settings.PluginPreferences.Remove("notify");
-        settings.PluginPreferences.Remove("emulator-adapter");
         // Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
         if (!AppSettings.WebhookTypes.Contains(settings.WebhookType))
         {
@@ -114,42 +109,4 @@ internal static class ConfigStore
         }
     }
 
-    /// <summary>
-    /// 将 及更早版本的 EnabledPlugins/DisabledPlugins 一次性迁移为插件偏好。
-    /// 通知和模拟器已成为宿主内建能力，历史开关被有意丢弃。
-    /// </summary>
-    private static void MigrateLegacyPluginPreferences(AppSettings settings, JsonNode? raw)
-    {
-        if (raw is not JsonObject root)
-        {
-            return;
-        }
-        settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
-        MigrateList(root["EnabledPlugins"], settings, enabled: true);
-        MigrateList(root["DisabledPlugins"], settings, enabled: false);
-        settings.PluginPreferences.Remove("notify");
-        settings.PluginPreferences.Remove("emulator-adapter");
-    }
-
-    private static void MigrateList(JsonNode? node, AppSettings settings, bool enabled)
-    {
-        if (node is not JsonArray values)
-        {
-            return;
-        }
-        foreach (JsonNode? value in values)
-        {
-            string name = value?.ToString()?.Trim() ?? "";
-            if (string.IsNullOrWhiteSpace(name)
-                || name.Equals("notify", StringComparison.OrdinalIgnoreCase)
-                || name.Equals("emulator-adapter", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            if (!settings.PluginPreferences.ContainsKey(name))
-            {
-                settings.PluginPreferences[name] = new PluginPreference { Enabled = enabled };
-            }
-        }
-    }
 }

@@ -7,7 +7,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline;
 
 /// <summary>
-/// 应用运行时初始化：权限契约、旧配置迁移、约束加载以及共享数据加载。
+/// 应用运行时初始化：权限契约、约束加载以及共享数据加载。
 /// 该阶段只负责建立可运行的组合根，不启动服务或处理具体命令。
 /// </summary>
 internal static class RuntimeInitializer
@@ -30,18 +30,6 @@ internal static class RuntimeInitializer
         }
 
         UpdateApply.CleanupWorkerImages();
-        MigrateLegacyConfig();
-        try
-        {
-            // 必须在新模型加载和 ConfigSwap 崩溃恢复之前完成全局用户迁移。
-            UserModelMigration.EnsureMigrated();
-        }
-        catch (Exception ex)
-        {
-            Logger.Fatal($"[致命] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
-            Console.Error.WriteLine($"[FATAL] v0.9.6 全局用户迁移失败，已拒绝启动：{ex.Message}");
-            return 1;
-        }
         // 先加载约束，再加载设置（Normalize 使用固定的历史保留天数上限）。
         Limits.Load();
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -90,29 +78,4 @@ internal static class RuntimeInitializer
         }
     }
 
-    private static void MigrateLegacyConfig()
-    {
-        try
-        {
-            Directory.CreateDirectory(AppPaths.ConfigDir);
-            var pairs = new[]
-            {
-                (Legacy: Path.Combine(AppPaths.AppRoot, "settings.json"), New: AppPaths.ConfigPath, Name: "settings.json"),
-                (Legacy: Path.Combine(AppPaths.AppRoot, "scripts.json"), New: AppPaths.ScriptsPath, Name: "scripts.json"),
-                (Legacy: Path.Combine(AppPaths.AppRoot, "queues.json"), New: AppPaths.QueuesPath, Name: "queues.json"),
-            };
-            foreach ((string legacy, string dest, string name) in pairs)
-            {
-                if (File.Exists(legacy) && !File.Exists(dest))
-                {
-                    File.Move(legacy, dest);
-                    Audit.Log(Audit.System, "迁移旧配置文件", $"{name} → config\\{name}");
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 迁移旧配置文件失败：{ex.Message}");
-        }
-    }
 }

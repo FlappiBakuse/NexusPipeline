@@ -45,29 +45,12 @@ internal sealed record ResolvedScriptUser(
     string UserName,
     UserScriptBinding Binding)
 {
-    public string UserKey => string.IsNullOrWhiteSpace(UserId) ? UserName : UserId;
-
-    public ScriptUser ToLegacyScriptUser()
-    {
-        return new ScriptUser
-        {
-            Name = UserName,
-            Enabled = Binding.Enabled,
-            PreRunScript = Binding.PreRunScript,
-            PreRunOnceOnly = Binding.PreRunOnceOnly,
-            PostRunScript = Binding.PostRunScript,
-            PostRunOnFinalOnly = Binding.PostRunOnFinalOnly,
-        };
-    }
+    public string UserKey => UserId;
 }
 
 /// <summary>脚本用户读取端口，集中处理并发快照与启用用户规则。</summary>
 internal interface IUserRepository
 {
-    ScriptUser? FindEnabled(ScriptInstance script, string? userName);
-
-    IReadOnlyList<string> EnabledNames(ScriptInstance script);
-
     /// <summary>按全局用户快照解析一个启用绑定；users 为空时由实现方取当前并发快照。</summary>
     ResolvedScriptUser? ResolveEnabledBinding(
         ScriptInstance script,

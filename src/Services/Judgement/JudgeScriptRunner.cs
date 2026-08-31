@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Jint;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 
@@ -111,7 +112,7 @@ internal static class JudgeScriptRunner
     }
 
     /// <summary>构建输入 JSON：脚本字段 + 用户 + config/script 文件清单 + 日志全文（超限截断尾部）+ scriptDir。</summary>
-    public static string BuildInput(ScriptInstance script, ScriptUser? user, List<JudgeScriptInputFile> files, string scriptDir, string logText, bool logTruncated)
+    public static string BuildInput(ScriptInstance script, ResolvedScriptUser? user, List<JudgeScriptInputFile> files, string scriptDir, string logText, bool logTruncated)
     {
         return JsonSerializer.Serialize(new
         {
@@ -138,12 +139,13 @@ internal static class JudgeScriptRunner
             },
             user = user is null ? null : new
             {
-                user.Name,
-                user.Enabled,
-                user.PreRunScript,
-                user.PreRunOnceOnly,
-                user.PostRunScript,
-                user.PostRunOnFinalOnly,
+                user.UserName,
+                userId = user.UserId,
+                enabled = user.Binding.Enabled,
+                preRunScript = user.Binding.PreRunScript,
+                preRunOnceOnly = user.Binding.PreRunOnceOnly,
+                postRunScript = user.Binding.PostRunScript,
+                postRunOnFinalOnly = user.Binding.PostRunOnFinalOnly,
             },
             script.RootPath,
             script.ConfigPath,

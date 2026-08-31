@@ -97,9 +97,6 @@ internal static class ApplicationHost
                 MainMenu.Show();
                 return 0;
             case "status":
-            case "run-script":
-            case "run-queue":
-            case "cancel":
             case "help":
             case "-h":
             case "--help":

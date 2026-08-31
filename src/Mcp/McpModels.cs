@@ -6,7 +6,7 @@ using NexusPipeline.Services;
 
 namespace NexusPipeline.Mcp;
 
-/// <summary>MCP 脚本写入 DTO。排除旧版嵌套 users 投影，用户绑定通过全局用户命令管理。</summary>
+/// <summary>MCP 脚本写入 DTO。用户绑定通过全局用户命令管理。</summary>
 internal sealed class McpScriptInput
 {
     [Description("脚本实例名称。")]

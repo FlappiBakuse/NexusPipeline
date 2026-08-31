@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   api,
+  createUserBinding,
   deleteScript,
   isAdminMode,
   isAdministrator,
@@ -56,8 +57,7 @@ async function runJudge(language, code, label) {
   assert.equal(response.status, 200);
   const script = await response.json();
   try {
-    const userResponse = await api("POST", `/api/scripts/${script.id}/users`, { name: "系统用户", enabled: true });
-    assert.equal(userResponse.status, 200);
+    await createUserBinding(script.id, "系统用户");
     const runResponse = await api("POST", "/api/dispatch/script", { scriptId: script.id });
     assert.equal(runResponse.status, 200);
     assert.equal(await waitNoRunning(), true);

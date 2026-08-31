@@ -4,7 +4,7 @@ using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.Web;
 
-/// <summary>运行任务列表 API；详情与取消继续由 dispatch/cancel 兼容路由提供。</summary>
+/// <summary>运行任务列表 API；详情与取消继续由 dispatch/cancel 路由提供。</summary>
 [ApiRoute("runs")]
 internal static class ApiRunsHandler
 {

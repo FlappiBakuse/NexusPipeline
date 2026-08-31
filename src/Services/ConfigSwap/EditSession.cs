@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 
 namespace NexusPipeline.Services;
@@ -8,7 +9,7 @@ internal sealed class EditSession
 {
     public required ScriptInstance Script { get; init; }
 
-    public required ScriptUser User { get; init; }
+    public required ResolvedScriptUser User { get; init; }
 
     public Process? Process { get; set; }
 

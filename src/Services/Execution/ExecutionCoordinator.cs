@@ -66,7 +66,7 @@ internal sealed class ExecutionCoordinator : RunSession
             ?? (string.IsNullOrWhiteSpace(_userName)
                 ? null
                 : _users.ResolveEnabledBinding(_script, _userName));
-        ScriptUser? user = resolvedUser?.ToLegacyScriptUser();
+        ResolvedScriptUser? user = resolvedUser;
         if (!string.IsNullOrWhiteSpace(_userName) && user is null)
         {
             record.Status = "failed";
@@ -77,7 +77,7 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         if (user is not null)
         {
-            record.UserName = user.Name;
+            record.UserName = user.UserName;
         }
         _activeUser = user;
 
@@ -106,7 +106,7 @@ internal sealed class ExecutionCoordinator : RunSession
             // 配置运行会话在 try 内创建并准备，任何 Prepare 异常都统一进入幂等 FinalizeRun。
             _configRun = new ConfigRunSession(
                 _script.Id,
-                resolvedUser?.UserKey ?? user?.Name,
+                resolvedUser?.UserKey,
                 _script.ConfigPath,
                 _script.HasJudgeScript());
             _configRun.PrepareScriptArea();
@@ -119,7 +119,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.FinalStatus = "failed";
                     record.EndTime = DateTime.Now;
                     record.ResultDetail = $"用户配置加载失败：{prepError}";
-                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.Name}」配置加载失败：{prepError}");
+                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.UserName}」配置加载失败：{prepError}");
                     return record;
                 }
             }
@@ -167,13 +167,13 @@ internal sealed class ExecutionCoordinator : RunSession
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
                 bool runPreRun = AttemptLifecycle.ShouldRunPreRun(
-                    user is not null && !string.IsNullOrWhiteSpace(user.PreRunScript),
-                    user?.PreRunOnceOnly ?? false,
+                    user is not null && !string.IsNullOrWhiteSpace(user.Binding.PreRunScript),
+                    user?.Binding.PreRunOnceOnly ?? false,
                     _preRunCompletedSuccessfully);
                 bool mainExecuted = true;
                 if (runPreRun)
                 {
-                    RunAttemptResult? preResult = await RunUserScriptCoreAsync(user!.PreRunScript!, "任务前", attempt, OperationToken).ConfigureAwait(false);
+                    RunAttemptResult? preResult = await RunUserScriptCoreAsync(user!.Binding.PreRunScript, "任务前", attempt, OperationToken).ConfigureAwait(false);
                     if (preResult is not null)
                     {
                         // PreRun 只有成功（返回 null）才允许进入 Main；失败/取消直接结束本次 Attempt。
@@ -192,14 +192,14 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
 
                 if (mainExecuted && result.Status != "cancelled"
-                    && user is not null && !string.IsNullOrWhiteSpace(user.PostRunScript)
+                    && user is not null && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript)
                     && AttemptLifecycle.ShouldRunPostRun(
-                        user.PostRunOnFinalOnly,
+                        user.Binding.PostRunOnFinalOnly,
                         attemptNo,
                         retryPolicy,
                         result))
                 {
-                    RunAttemptResult? postResult = await RunUserScriptCoreAsync(user!.PostRunScript!, "任务后", attempt, OperationToken).ConfigureAwait(false);
+                    RunAttemptResult? postResult = await RunUserScriptCoreAsync(user!.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
                     if (postResult is not null)
                     {
                         result = RunAttemptResult.MergePostRun(result, postResult);
@@ -276,7 +276,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 {
                     string msg = $"（警告：配置还原失败，现场已保留，详见日志）";
                     record.ResultDetail += msg;
-                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.Name ?? _userName ?? ""}」配置还原失败：{restoreError}");
+                    Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
             }
         }
@@ -594,7 +594,7 @@ internal sealed class ExecutionCoordinator : RunSession
         JudgeSnapshot CaptureJudgeSnapshot(int generation)
         {
             string scriptDir = _configRun?.ScriptDir
-                ?? UserConfigManager.ScriptDir(_script.Id, _resolvedUser?.UserKey ?? _activeUser?.Name);
+                ?? UserConfigManager.ScriptDir(_script.Id, _resolvedUser?.UserKey);
             List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir)
                 .Select(file => new JudgeScriptInputFile
                 {
@@ -609,7 +609,12 @@ internal sealed class ExecutionCoordinator : RunSession
                 ? _scriptFullLog.ToString(_attemptLogStart + logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars)
                 : _scriptFullLog.ToString(_attemptLogStart, logLength);
             ScriptInstance scriptSnapshot = _script.Clone();
-            ScriptUser? userSnapshot = _activeUser?.Clone();
+            ResolvedScriptUser? userSnapshot = _activeUser is null
+                ? null
+                : new ResolvedScriptUser(
+                    _activeUser.UserId,
+                    _activeUser.UserName,
+                    _activeUser.Binding.Clone());
             string inputJson = JudgeScriptRunner.BuildInput(scriptSnapshot, userSnapshot, files, scriptDir, logText, logTruncated);
             return new JudgeSnapshot(
                 attemptId,

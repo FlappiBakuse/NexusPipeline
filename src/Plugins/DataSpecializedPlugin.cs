@@ -19,7 +19,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// <summary>插件的正式物理目录名；运行时配置等逻辑命名空间仍使用 Name。</summary>
     public string ArtifactName { get; private set; } = "";
 
-    public int SchemaVersion { get; private set; } = 1;
+    public int SchemaVersion { get; private set; } = PluginRepositoryCatalog.SchemaVersion;
 
     public string DisplayName { get; private set; } = "";
 
@@ -29,18 +29,13 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     public string Version { get; private set; } = "";
 
-    public IReadOnlyList<string> Replaces { get; private set; } = Array.Empty<string>();
-
     /// <summary>数据化插件可选的同源前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
     internal string PluginDirectory { get; private set; } = "";
 
-    /// <summary>数据化插件声明的能力 key；旧 supportsEmulator 字段会映射为 emulator。</summary>
+    /// <summary>数据化插件声明的能力 key。</summary>
     public IReadOnlySet<string> CapabilityKeys => _capabilityKeys;
-
-    /// <summary>旧内部查询兼容投影；新代码通过 capability key 查询。</summary>
-    public bool SupportsEmulator => _capabilityKeys.Contains(PluginCapabilityKeys.Emulator);
 
     private string _resolvePath = "";
 
@@ -77,15 +72,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             {
                 PluginDirectory = Path.GetFullPath(pluginDir),
                 Name = manifest.Name,
-                ArtifactName = string.IsNullOrWhiteSpace(manifest.ArtifactName)
-                    ? Path.GetFileName(Path.GetFullPath(pluginDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-                    : manifest.ArtifactName,
+                ArtifactName = manifest.ArtifactName,
                 SchemaVersion = manifest.SchemaVersion,
                 DisplayName = manifest.DisplayName,
                 GameName = manifest.GameName,
                 Description = manifest.Description,
                 Version = manifest.Version,
-                Replaces = manifest.Replaces,
                 Frontend = manifest.Frontend,
                 _resolvePath = manifest.ResolvePath,
                 _judgeScriptPath = manifest.JudgeScriptPath,

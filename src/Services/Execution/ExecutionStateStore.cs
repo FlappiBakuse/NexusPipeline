@@ -258,14 +258,6 @@ internal sealed class ExecutionStateStore
         }
     }
 
-    /// <summary>兼容旧内部调用方的入口；新执行链必须传入冻结的 profile。</summary>
-    public bool TryRegister(RunningExecution exec, out string? error)
-    {
-        bool accepted = TryRegister(exec, ExecutionAdmissionProfile.Legacy(exec), out ExecutionAdmissionFailure? failure);
-        error = failure?.Message;
-        return accepted;
-    }
-
     /// <summary>
     /// 释放活动运行并提交完成意图；若这次释放使系统空闲且存在意图，则在同一锁内预留 pending action。
     /// 返回值交给 SystemActionExecutor 启动倒计时或系统操作。
@@ -368,16 +360,6 @@ internal sealed class ExecutionStateStore
         }
     }
 
-    /// <summary>兼容旧内部调用方：取消动作已由新状态机完成后再提供原子成功语义。</summary>
-    public bool TryCancelPending(out PendingSystemAction? pending)
-    {
-        if (!TryBeginCancelPending(out pending) || pending is null)
-        {
-            return false;
-        }
-        return CompleteCancelPending(pending, osCancelSucceeded: true);
-    }
-
     /// <summary>
     /// 在状态锁内只完成 pending → armed 状态转换；实际系统调用必须在锁外执行。
     /// </summary>
@@ -392,46 +374,6 @@ internal sealed class ExecutionStateStore
                 return false;
             }
             pending.IsArmed = true;
-            return true;
-        }
-    }
-
-    /// <summary>兼容旧测试/调用方；状态转换仍在锁内，回调在锁外执行。</summary>
-    public bool TryArm(PendingSystemAction pending, Action arm)
-    {
-        if (!TryArm(pending))
-        {
-            return false;
-        }
-        arm();
-        return true;
-    }
-
-    // 以下三个方法保留给旧测试与兼容调用方；新完成操作统一经 Release 的 idle arm 语义。
-    public PendingSystemAction? ReplacePending(PendingSystemAction pending)
-    {
-        lock (_sync)
-        {
-            PendingSystemAction? previous = _pendingSystemAction;
-            _pendingSystemAction = pending;
-            _completionIntents.Clear();
-            _groupState = ExecutionGroupState.ActionPending;
-            return previous;
-        }
-    }
-
-    public bool TryTakePending(out PendingSystemAction? pending)
-    {
-        lock (_sync)
-        {
-            pending = _pendingSystemAction;
-            if (pending is null)
-            {
-                return false;
-            }
-            _pendingSystemAction = null;
-            _completionIntents.Clear();
-            _groupState = ExecutionGroupState.Open;
             return true;
         }
     }

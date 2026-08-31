@@ -398,187 +398,6 @@ internal static class UserCommands
         }
     }
 
-    /// <summary>
-    /// 旧脚本用户 URL 的新增适配：按名字解析全局用户（缺失时创建），再走统一的 AddBinding。
-    /// </summary>
-    public static OperationResult<NexusUser> AddCompatibilityBinding(
-        string scriptId,
-        ScriptUser candidate,
-        string source = Audit.Web)
-    {
-        if (ValidateName(candidate.Name) is string nameError)
-        {
-            return Validation<NexusUser>(nameError);
-        }
-        RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? script = ctx.FindScript(scriptId);
-        if (script is null)
-        {
-            return NotFound<NexusUser>($"未找到脚本实例：{scriptId}");
-        }
-        if (CheckScriptPluginAvailability(ctx, script) is string pluginError)
-        {
-            return Validation<NexusUser>(pluginError);
-        }
-
-        string normalizedName = candidate.Name.Trim();
-        NexusUser? user;
-        lock (ctx.DataLock)
-        {
-            user = ctx.Users.FirstOrDefault(item =>
-                string.Equals(item.Name, normalizedName, StringComparison.OrdinalIgnoreCase));
-        }
-        if (user is null)
-        {
-            OperationResult<NexusUser> created = Create(normalizedName, null, source);
-            if (!created.Succeeded)
-            {
-                return OperationResult<NexusUser>.Failure(created.Error!);
-            }
-            user = created.Value;
-        }
-        if (user is null)
-        {
-            return NotFound<NexusUser>($"未找到用户：{normalizedName}");
-        }
-        OperationResult<UserScriptBinding> bound = AddBinding(user.Id, CompatibilityBinding(candidate, scriptId), source);
-        if (!bound.Succeeded)
-        {
-            return OperationResult<NexusUser>.Failure(bound.Error!);
-        }
-        return OperationResult<NexusUser>.Ok(user);
-    }
-
-    /// <summary>
-    /// 旧脚本用户 URL 的编辑适配：翻译为「全局用户改名（名字有变化时）→ UpdateBinding」。
-    /// 旧契约把两步并入一次事务；两步翻译在中途失败时保留已完成的改名。
-    /// </summary>
-    public static OperationResult<NexusUser> UpdateCompatibilityBinding(
-        string scriptId,
-        string userReference,
-        ScriptUser candidate,
-        string source = Audit.Web)
-    {
-        if (ValidateName(candidate.Name) is string nameError)
-        {
-            return Validation<NexusUser>(nameError);
-        }
-        RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? script = ctx.FindScript(scriptId);
-        if (script is null)
-        {
-            return NotFound<NexusUser>($"未找到脚本实例：{scriptId}");
-        }
-        NexusUser? target = FindUserByIdOrName(ctx, userReference);
-        UserScriptBinding? binding = target?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
-        if (target is null || binding is null)
-        {
-            return NotFound<NexusUser>("用户绑定不存在");
-        }
-        if (CheckScriptPluginAvailability(ctx, script) is string pluginError)
-        {
-            return Validation<NexusUser>(pluginError);
-        }
-
-        string normalizedName = candidate.Name.Trim();
-        if (!string.Equals(target.Name, normalizedName, StringComparison.Ordinal))
-        {
-            OperationResult<NexusUser> renamed = Update(target.Id, normalizedName, target.Remark, source);
-            if (!renamed.Succeeded)
-            {
-                return OperationResult<NexusUser>.Failure(renamed.Error!);
-            }
-        }
-        OperationResult<UserScriptBinding> updated = UpdateBinding(
-            target.Id,
-            scriptId,
-            CompatibilityBinding(candidate, scriptId, binding),
-            source);
-        if (!updated.Succeeded)
-        {
-            return OperationResult<NexusUser>.Failure(updated.Error!);
-        }
-        return OperationResult<NexusUser>.Ok(target);
-    }
-
-    /// <summary>旧脚本用户 URL 的删除适配；保留全局用户，仅解除该脚本绑定（与 DeleteBinding 同语义）。</summary>
-    public static OperationResult<bool> DeleteCompatibilityBinding(
-        string scriptId,
-        string userReference,
-        string source = Audit.Web)
-    {
-        RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? script = ctx.FindScript(scriptId);
-        if (script is null)
-        {
-            return NotFound<bool>($"未找到脚本实例：{scriptId}");
-        }
-        NexusUser? target = FindUserByIdOrName(ctx, userReference);
-        UserScriptBinding? binding = target?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == script.Id);
-        if (target is null || binding is null)
-        {
-            return NotFound<bool>("用户绑定不存在");
-        }
-        return DeleteBinding(target.Id, scriptId, source);
-    }
-
-    /// <summary>旧脚本用户 URL 的排序适配：把脚本绑定用户的新顺序翻译为全局用户 Index 重排。</summary>
-    public static OperationResult<bool> ReorderCompatibility(
-        string scriptId,
-        IReadOnlyList<string>? names,
-        string source = Audit.Web)
-    {
-        RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? script = ctx.FindScript(scriptId);
-        if (script is null)
-        {
-            return NotFound<bool>($"未找到脚本实例：{scriptId}");
-        }
-        IReadOnlyList<ExecutionLeaseReference> leases = ctx.Center.FindLeases(script.Id);
-        if (leases.Count > 0)
-        {
-            return LeaseConflict<bool>(leases, $"script:{script.Id}:users");
-        }
-        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
-        if (!gate.Wait(0))
-        {
-            return Validation<bool>("脚本正在运行或编辑配置中，无法调整用户顺序");
-        }
-        try
-        {
-            List<string> ids;
-            lock (ctx.DataLock)
-            {
-                List<NexusUser> bound = ctx.Users
-                    .Where(user => user.Bindings.Any(binding => binding.ScriptInstanceId == script.Id))
-                    .OrderBy(user => user.Index)
-                    .ToList();
-                if (names is null || names.Count != bound.Count || names.Any(string.IsNullOrWhiteSpace)
-                    || names.Distinct(StringComparer.OrdinalIgnoreCase).Count() != names.Count)
-                {
-                    return Validation<bool>("用户顺序名单缺失或与当前用户列表不一致");
-                }
-                Dictionary<string, NexusUser> byName = bound.ToDictionary(user => user.Name, StringComparer.OrdinalIgnoreCase);
-                if (names.Any(name => !byName.ContainsKey(name)))
-                {
-                    return Validation<bool>("用户顺序名单与当前用户列表不一致");
-                }
-                HashSet<string> boundIds = bound.Select(user => user.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-                ids = names.Select(name => byName[name].Id)
-                    .Concat(ctx.Users
-                        .Where(user => !boundIds.Contains(user.Id))
-                        .OrderBy(user => user.Index)
-                        .Select(user => user.Id))
-                    .ToList();
-            }
-            return Reorder(ids, source);
-        }
-        finally
-        {
-            gate.Release();
-        }
-    }
-
     public static OperationResult<UserScriptBinding> AddBinding(
         string userId,
         UserScriptBinding candidate,
@@ -911,25 +730,6 @@ internal static class UserCommands
         }
     }
 
-    private static UserScriptBinding CompatibilityBinding(
-        ScriptUser candidate,
-        string scriptId,
-        UserScriptBinding? existing = null)
-    {
-        return new UserScriptBinding
-        {
-            ScriptInstanceId = scriptId,
-            Enabled = candidate.Enabled,
-            PreRunScript = candidate.PreRunScript.Trim(),
-            PreRunOnceOnly = candidate.PreRunOnceOnly,
-            PostRunScript = candidate.PostRunScript.Trim(),
-            PostRunOnFinalOnly = candidate.PostRunOnFinalOnly,
-            NotifyEnabled = existing?.NotifyEnabled ?? true,
-            SmtpTo = existing?.SmtpTo ?? "",
-            RunDays = existing?.RunDays ?? -1,
-        };
-    }
-
     private static UserScriptBinding NormalizeBindingForUser(
         NexusUser user,
         UserScriptBinding candidate)
@@ -982,20 +782,6 @@ internal static class UserCommands
             return "global_override_active|全局管理正在同步高级设置，请先关闭全局同步或保持绑定原始值不变";
         }
         return null;
-    }
-
-    private static NexusUser? FindUserByIdOrName(RuntimeContext ctx, string reference)
-    {
-        NexusUser? byId = ctx.FindUser(reference);
-        if (byId is not null)
-        {
-            return byId;
-        }
-        lock (ctx.DataLock)
-        {
-            return ctx.Users.FirstOrDefault(user =>
-                string.Equals(user.Name, reference, StringComparison.OrdinalIgnoreCase));
-        }
     }
 
     private static UserScriptBinding NormalizeBinding(UserScriptBinding candidate, string scriptId)
@@ -1054,12 +840,9 @@ internal static class UserCommands
         return null;
     }
 
-    internal static string? GetBindingBusyReason(RuntimeContext ctx, string userId, string scriptId) =>
-        CheckBindingBusy(ctx, userId, scriptId);
-
     private static string? ValidateName(string? name)
     {
-        return string.IsNullOrWhiteSpace(name) || !ScriptUserRule.IsValidName(name.Trim())
+        return string.IsNullOrWhiteSpace(name) || !UserNameRule.IsValidName(name.Trim())
             ? "用户名不能为空且不能包含非法字符"
             : Limits.CheckNameBytes(name.Trim(), AppFixedLimits.MaxEntityNameBytes, "用户名");
     }

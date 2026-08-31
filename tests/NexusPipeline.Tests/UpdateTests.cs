@@ -11,7 +11,7 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>更新域 L1：SemVer 解析比较、releases JSON 解析、渠道过滤、主机白名单、zip 校验与布局归一。</summary>
+/// <summary>更新域 L1：SemVer 解析比较、releases JSON 解析、渠道过滤、主机白名单与当前 zip 合约。</summary>
 public sealed class UpdateCatalogTests
 {
     [Theory]
@@ -181,7 +181,7 @@ public sealed class UpdateCatalogTests
     }
 }
 
-/// <summary>更新域 L1/L2：zip 校验、条目白名单、布局归一与 SHA256 比对。</summary>
+/// <summary>更新域 L1/L2：当前扁平根 zip 校验、条目白名单与 SHA256 比对。</summary>
 public sealed class UpdatePackageTests
 {
     private static string NewTempDir()
@@ -204,15 +204,15 @@ public sealed class UpdatePackageTests
     }
 
     [Fact]
-    public void Extract_NormalizesSingleTopDirectoryLayout()
+    public void Extract_AcceptsFlatPackageRoot()
     {
         string root = NewTempDir();
         try
         {
             string zip = Path.Combine(root, "pkg.zip");
             WriteZip(zip,
-                ("NexusPipeline-v0.10.1-win-x64/nexus-pipeline.exe", "exe"),
-                ("NexusPipeline-v0.10.1-win-x64/wwwroot/index.js", "app"));
+                ("nexus-pipeline.exe", "exe"),
+                ("wwwroot/index.js", "app"));
             string staging = Path.Combine(root, "staging");
 
             string? error = UpdatePackage.Extract(zip, staging);
@@ -284,6 +284,28 @@ public sealed class UpdatePackageTests
             string staging = Path.Combine(root, "staging");
 
             string? error = UpdatePackage.Extract(zip, staging);
+
+            Assert.NotNull(error);
+            Assert.Contains("nexus-pipeline.exe", error);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Extract_RejectsSingleTopDirectoryLayout()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string zip = Path.Combine(root, "wrapped.zip");
+            WriteZip(zip,
+                ("NexusPipeline-v0.10.1-win-x64/nexus-pipeline.exe", "exe"),
+                ("NexusPipeline-v0.10.1-win-x64/wwwroot/index.js", "app"));
+
+            string? error = UpdatePackage.Extract(zip, Path.Combine(root, "staging"));
 
             Assert.NotNull(error);
             Assert.Contains("nexus-pipeline.exe", error);
@@ -395,14 +417,13 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         _installDir = Path.Combine(_root, "install");
         Directory.CreateDirectory(_installDir);
 
-        // 构造与发布资产同名的 zip：exe + wwwroot + plugins/.nxp-root 兼容根标记。
+        // 构造与发布资产同名的 zip：exe + wwwroot + plugins/。
         using (var stream = new MemoryStream())
         {
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
             {
                 AddEntry(archive, "nexus-pipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
                 AddEntry(archive, "wwwroot/index.js", "// fake");
-                AddEntry(archive, "plugins/.nxp-root", "{\"owner\":\"NexusPipeline\",\"purpose\":\"plugin-runtime-root\",\"version\":1}");
             }
             _zipBytes = stream.ToArray();
         }
@@ -986,7 +1007,6 @@ public sealed class UpdateApplyFinalizationTests
             Directory.CreateDirectory(installWww);
             Directory.CreateDirectory(installPlugins);
             File.WriteAllText(Path.Combine(installWww, "marker.txt"), "new-partial-www");
-            File.WriteAllText(Path.Combine(installPlugins, ".nxp-root"), "new-root");
 
             string staging = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
             Directory.CreateDirectory(staging);

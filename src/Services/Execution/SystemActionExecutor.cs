@@ -58,33 +58,6 @@ internal sealed class SystemActionExecutor
         return cleared;
     }
 
-    /// <summary>
-    /// 兼容旧调用方的直接调度入口。并行队列完成路径不再使用 replacement 语义，而是经 CompleteExecution。
-    /// 倒计时保持真实 60 秒，不受 NEXUS_TIME_SCALE 缩放。
-    /// </summary>
-    public void Schedule(string action, string queueName, Action? execute)
-    {
-        var pending = new PendingSystemAction
-        {
-            Action = ExecutionAdmissionProfile.NormalizeCompletionAction(action),
-            QueueName = queueName,
-            Deadline = DateTime.Now.AddSeconds(60),
-        };
-        PendingSystemAction? previous = _state.ReplacePending(pending);
-        if (previous is not null)
-        {
-            try
-            {
-                previous.Cts.Cancel();
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 取消旧系统操作后台任务失败：{ex.Message}");
-            }
-        }
-        StartDelay(pending, execute, pending.Action == "exit" ? TimeSpan.Zero : TimeSpan.FromSeconds(60));
-    }
-
     private void Arm(PendingSystemAction pending)
     {
         try

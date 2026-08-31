@@ -52,7 +52,6 @@ public sealed class PluginAvailabilityPolicyTests
             Id = "plugin-policy-validator-" + Guid.NewGuid().ToString("N"),
             Name = "不可用专项脚本",
             PluginType = "missing-plugin",
-            Users = new List<ScriptUser> { new() { Name = "用户甲", Enabled = true } },
         };
         var plugins = new FakePluginAvailability();
         var validator = new NexusPipeline.Services.Execution.ExecutionValidator(
@@ -197,40 +196,6 @@ public sealed class PluginAvailabilityPolicyTests
     }
 
     [Fact]
-    public void CompatibilityBindingMutations_RejectMissingSpecializedPlugin()
-    {
-        string scriptId = "plugin-policy-compat-" + Guid.NewGuid().ToString("N");
-        string userId = Guid.NewGuid().ToString("N");
-        var script = SpecializedScript(scriptId, "兼容 API 缺失插件");
-        var user = new NexusUser
-        {
-            Id = userId,
-            Name = "用户甲",
-            Bindings = new List<UserScriptBinding>
-            {
-                new() { ScriptInstanceId = scriptId, PreRunScript = "原始前置脚本" },
-            },
-        };
-
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<NexusUser> addResult = UserCommands.AddCompatibilityBinding(
-            script.Id,
-            new ScriptUser { Name = "新用户" });
-        OperationResult<NexusUser> updateResult = UserCommands.UpdateCompatibilityBinding(
-            script.Id,
-            user.Id,
-            new ScriptUser { Name = "新名称", PreRunScript = "修改后的前置脚本" });
-
-        Assert.False(addResult.Succeeded);
-        Assert.False(updateResult.Succeeded);
-        Assert.Equal("validation_error", addResult.ErrorCode);
-        Assert.Equal("validation_error", updateResult.ErrorCode);
-        Assert.Single(user.Bindings);
-        Assert.Equal("用户甲", user.Name);
-        Assert.Equal("原始前置脚本", user.Bindings[0].PreRunScript);
-    }
-
-    [Fact]
     public void DeleteBinding_UnavailableSpecializedPluginRemainsAllowed()
     {
         string scriptId = "plugin-policy-delete-" + Guid.NewGuid().ToString("N");
@@ -305,11 +270,8 @@ public sealed class PluginAvailabilityPolicyTests
         public IReadOnlyList<DispatchQueue> Snapshot() => Array.Empty<DispatchQueue>();
     }
 
-    private sealed class EmptyUserRepository : LegacyModelUserRepository
+    private sealed class EmptyUserRepository : CurrentModelUserRepository
     {
-        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName) => null;
-
-        public override IReadOnlyList<string> EnabledNames(ScriptInstance script) => Array.Empty<string>();
     }
 
     private static ExecutionRunner CreateRunner(

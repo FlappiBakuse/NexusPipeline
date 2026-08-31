@@ -241,12 +241,12 @@ internal static class StartupPipeline
     }
 
     /// <summary>
-    /// 常驻模式（service/web）共享的启动不变量：运行时状态迁移 → 更新事务启动收尾 → 写 service.pid。
+    /// 常驻模式（service/web）共享的启动不变量：准备当前运行时目录 → 更新事务启动收尾 → 写 service.pid。
     /// 返回 false 表示更新收尾已拉起 apply-update 子进程或完成回滚，本进程应立即退出。
     /// </summary>
     private static bool PrepareHostedStart()
     {
-        AppPaths.RuntimeState.EnsureMigrated();
+        AppPaths.RuntimeState.EnsureDirectories();
         if (UpdateApply.RunStartupFinalization())
         {
             return false;

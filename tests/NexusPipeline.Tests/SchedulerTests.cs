@@ -175,11 +175,8 @@ public class SchedulerTests
         public IReadOnlyList<ScriptInstance> Snapshot() => Array.Empty<ScriptInstance>();
     }
 
-    private sealed class EmptyUserRepository : LegacyModelUserRepository
+    private sealed class EmptyUserRepository : CurrentModelUserRepository
     {
-        public override ScriptUser? FindEnabled(ScriptInstance script, string? userName) => null;
-
-        public override IReadOnlyList<string> EnabledNames(ScriptInstance script) => Array.Empty<string>();
     }
 
     private sealed class EmptyHistoryStore : IHistoryStore

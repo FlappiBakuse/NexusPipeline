@@ -47,6 +47,7 @@ export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
 export const mumuStub = path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd");
 
 let child = null;
+const scriptUserIds = new Map();
 let stdout = "";
 let stderr = "";
 
@@ -231,6 +232,37 @@ export async function waitNoRunning(timeoutMs = 30000) {
   }, timeoutMs);
 }
 
+export async function createUserBinding(scriptId, name, binding = {}) {
+  const userResponse = await api("POST", "/api/users", { name });
+  if (!userResponse.ok) {
+    throw new Error(`创建全局用户失败：HTTP ${userResponse.status} ${await userResponse.text()}`);
+  }
+  const user = await userResponse.json();
+  const userIds = scriptUserIds.get(scriptId) || [];
+  userIds.push(user.id);
+  scriptUserIds.set(scriptId, userIds);
+
+  const bindingResponse = await api(
+    "POST",
+    `/api/users/${encodeURIComponent(user.id)}/bindings`,
+    { scriptInstanceId: scriptId, enabled: true, ...binding },
+  );
+  if (!bindingResponse.ok) {
+    throw new Error(`创建用户绑定失败：HTTP ${bindingResponse.status} ${await bindingResponse.text()}`);
+  }
+  return user;
+}
+
 export async function deleteScript(scriptId) {
-  if (scriptId) await api("DELETE", `/api/scripts/${encodeURIComponent(scriptId)}`);
+  if (!scriptId) return;
+  const userIds = scriptUserIds.get(scriptId) || [];
+  for (const userId of userIds) {
+    const userResponse = await api("GET", `/api/users/${encodeURIComponent(userId)}`);
+    const user = userResponse.ok ? await userResponse.json() : null;
+    if (user) {
+      await api("DELETE", `/api/users/${encodeURIComponent(userId)}`, { confirmName: user.name });
+    }
+  }
+  await api("DELETE", `/api/scripts/${encodeURIComponent(scriptId)}`);
+  scriptUserIds.delete(scriptId);
 }

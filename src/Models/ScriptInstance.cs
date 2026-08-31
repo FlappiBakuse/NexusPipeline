@@ -63,8 +63,6 @@ public class ScriptInstance
     /// 专项脚本由前端固化恒 true；无用户或 ConfigPath 为空时开关不生效。</summary>
     public bool AutoUpdateConfig { get; set; } = true;
 
-    public List<ScriptUser> Users { get; set; } = new();
-
     private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
     {
         PropertyNameCaseInsensitive = true,

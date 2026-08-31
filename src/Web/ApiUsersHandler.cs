@@ -484,10 +484,6 @@ internal static class ApiUsersHandler
         return Directory.Exists(dir) && Directory.GetFiles(dir, "avatar.*").Any();
     }
 
-    // 保留旧回归测试与内部兼容调用的反射入口，判定逻辑由应用命令统一维护。
-    private static string? CheckBindingBusy(RuntimeContext ctx, string userId, string scriptId) =>
-        UserCommands.GetBindingBusyReason(ctx, userId, scriptId);
-
     private sealed class UserPayload
     {
         public string Name { get; set; } = "";

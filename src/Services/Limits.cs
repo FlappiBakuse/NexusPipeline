@@ -259,7 +259,7 @@ internal static class Limits
         if (EmulatorSupport.IsEmulator(script) && specialized
             && !capabilities.SupportsEmulator(script.PluginType))
         {
-            return "该专项插件不支持安卓模拟器启动方式（专用插件需在 plugin.json 声明 supportsEmulator）";
+            return "该专项插件不支持安卓模拟器启动方式（请在 plugin.json 的 capabilities 中声明 emulator）";
         }
         if (!specialized)
         {
@@ -376,11 +376,9 @@ internal static class Limits
             {
                 return 1;
             }
-            int enabled = ctx.Users.Count > 0
-                ? ctx.Users.Sum(user => user.Bindings.Count(binding =>
-                    UserBindingOverrideResolver.Resolve(user, binding).Participates
-                    && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
-                : script.Users.Count(user => user.Enabled);
+            int enabled = ctx.Users.Sum(user => user.Bindings.Count(binding =>
+                UserBindingOverrideResolver.Resolve(user, binding).Participates
+                && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
             return enabled < 1 ? 1 : enabled;
         });
     }

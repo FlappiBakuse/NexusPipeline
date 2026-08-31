@@ -32,6 +32,7 @@ test("调度队列入口：创建、编辑和删除一个手动队列", async ({
     await page.locator('[data-action="confirm-delete-queue"]').click();
     await expect(page.getByTestId("queue-card").filter({ hasText: `Smoke 队列-已编辑-${suffix}` })).toHaveCount(0);
   } finally {
+    await api("DELETE", `/api/users/${encodeURIComponent(script.userId)}`, { confirmName: script.userName });
     await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);
   }
 });
@@ -70,6 +71,7 @@ test("调度中心入口：从队列选择器启动并看到运行状态", async
     await waitNoRunning();
   } finally {
     await api("DELETE", `/api/queues/${encodeURIComponent(queue.id)}`);
+    await api("DELETE", `/api/users/${encodeURIComponent(script.userId)}`, { confirmName: script.userName });
     await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);
   }
 });

@@ -45,7 +45,6 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Equal(2, catalog.SchemaVersion);
         Assert.Equal("BetterGI", entry.ArtifactName);
         Assert.Equal("0.1.0", Assert.Single(entry.Changelog).Version);
-        Assert.Equal(2, entry.CatalogSchemaVersion);
     }
 
     [Fact]
@@ -141,20 +140,6 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Contains("官方插件仓库", urlError);
     }
 
-    [Fact]
-    public void TryParse_ValidatesReplacementIdentity()
-    {
-        JsonObject root = CreateCatalog();
-        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["replaces"] = new JsonArray("hoyolab-checkin");
-
-        Assert.True(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out PluginCatalog? catalog, out string? error), error);
-        Assert.Equal(new[] { "hoyolab-checkin" }, catalog!.Plugins[0].ReplacementNames);
-
-        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["replaces"] = new JsonArray("bettergi");
-        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? selfError));
-        Assert.Contains("当前名称", selfError);
-    }
-
     [Theory]
     [InlineData("https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/bettergi-0.1.0.txt")]
     [InlineData("https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/sub/bettergi-0.1.0.zip")]
@@ -188,7 +173,6 @@ public sealed class PluginRepositoryCatalogTests
     {
         Assert.NotNull(PluginRepositoryCatalog.ValidatePackageUrl(
             "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/CustomWallpaper/CustomWallpaper-0.1.0.zip",
-            allowLegacyRelease: false,
             artifactName: "CustomWallpaper",
             version: "0.1.1"));
     }
@@ -239,7 +223,7 @@ public sealed class PluginRepositoryCatalogTests
 
         PluginCatalogEntry compatible = new(
             "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.0", Array.Empty<string>(),
-            "0.11.0", "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/fixture-0.1.0.zip", new string('a', 64), 1);
+            "0.11.0", "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/fixture/fixture-0.1.0.zip", new string('a', 64), 1);
         Assert.True(PluginRepositoryCatalog.IsCompatible(compatible, "0.11.0", out _));
         PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.5" };
         Assert.False(PluginRepositoryCatalog.IsCompatible(newerMinor, "0.11.0", out string reason));
@@ -249,9 +233,8 @@ public sealed class PluginRepositoryCatalogTests
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, CandidateHostVersion, out _));
     }
 
-    private static JsonObject CreateCatalog(int schemaVersion = 1)
+    private static JsonObject CreateCatalog(int schemaVersion = 2)
     {
-        bool current = schemaVersion == PluginRepositoryCatalog.SchemaVersion;
         var entry = new JsonObject
         {
             ["name"] = "bettergi",
@@ -263,23 +246,18 @@ public sealed class PluginRepositoryCatalogTests
             ["apiVersion"] = "",
             ["capabilities"] = new JsonArray(),
             ["minHostVersion"] = "0.10.8",
-            ["packageUrl"] = current
-                ? "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.0.zip"
-                : "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/v0.1.0/bettergi-0.1.0.zip",
+            ["packageUrl"] = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.0.zip",
             ["sha256"] = new string('a', 64),
             ["sizeBytes"] = 128,
         };
-        if (current)
-        {
-            entry["artifactName"] = "BetterGI";
-            entry["changelog"] = new JsonArray(
-                new JsonObject
-                {
-                    ["version"] = "0.1.0",
-                    ["date"] = "2026-08-28",
-                    ["items"] = new JsonArray("加入插件仓库支持。"),
-                });
-        }
+        entry["artifactName"] = "BetterGI";
+        entry["changelog"] = new JsonArray(
+            new JsonObject
+            {
+                ["version"] = "0.1.0",
+                ["date"] = "2026-08-28",
+                ["items"] = new JsonArray("加入插件仓库支持。"),
+            });
         var plugins = new JsonArray();
         plugins.Add(entry);
         return new JsonObject
@@ -356,101 +334,6 @@ public sealed class ProxyConfigurationTests
 public sealed class PluginInstallRecoveryTests
 {
     [Fact]
-    public void ApplyPending_MigratesReplacementCodeNamespacesAndPreference()
-    {
-        string root = NewTempDir();
-        try
-        {
-            string plugins = Path.Combine(root, "plugins");
-            string config = Path.Combine(root, "config");
-            string pending = Path.Combine(root, "state", "pending.json");
-            string ownership = Path.Combine(root, "state", "ownership.json");
-            string staging = Path.Combine(root, "state", "staging");
-            string backup = Path.Combine(root, "state", "backup");
-            string source = Path.Combine(plugins, "hoyolab-checkin");
-            string staged = Path.Combine(staging, "game-checkin.1");
-            Directory.CreateDirectory(source);
-            Directory.CreateDirectory(staged);
-            File.WriteAllText(Path.Combine(source, "old.dll"), "old");
-            File.WriteAllText(Path.Combine(staged, "plugin.json"), "new");
-            Directory.CreateDirectory(Path.Combine(config, "plugins", "hoyolab-checkin"));
-            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin.json"), "config");
-            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin.secrets.json"), "secret");
-            File.WriteAllText(Path.Combine(config, "plugins", "hoyolab-checkin", "scope.json"), "scope");
-            Directory.CreateDirectory(config);
-            File.WriteAllText(Path.Combine(config, "settings.json"), "{\"PluginPreferences\":{\"hoyolab-checkin\":{\"Enabled\":true,\"FrontendTrusted\":true,\"FrontendTrustedVersion\":\"0.1.1\",\"FrontendTrustedFingerprint\":\"old\"}}}");
-
-            PluginInstallRecovery.AddPending(new PluginPendingOperation
-            {
-                Action = "update",
-                Name = "game-checkin",
-                SourceName = "hoyolab-checkin",
-                Version = "0.1.2",
-                Kind = "managed-code",
-                ApiVersion = "1.2",
-                StagedPath = staged,
-                Phase = "pending",
-            }, pending);
-
-            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, config));
-            Assert.True(File.Exists(Path.Combine(plugins, "game-checkin", "plugin.json")));
-            Assert.False(Directory.Exists(source));
-            Assert.Equal("config", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin.json")));
-            Assert.Equal("secret", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin.secrets.json")));
-            Assert.Equal("scope", File.ReadAllText(Path.Combine(config, "plugins", "game-checkin", "scope.json")));
-            JsonObject settings = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(Path.Combine(config, "settings.json"))));
-            JsonObject preference = Assert.IsType<JsonObject>(settings["PluginPreferences"]!["game-checkin"]);
-            Assert.True(preference["Enabled"]!.GetValue<bool>());
-            Assert.Null(preference["FrontendTrusted"]);
-            Assert.Null(preference["FrontendTrustedVersion"]);
-            Assert.Null(preference["FrontendTrustedFingerprint"]);
-            Assert.Empty(PluginInstallRecovery.ReadPending(pending));
-            PluginOwnership owner = Assert.Single(PluginInstallRecovery.ReadOwnership(ownership).Values);
-            Assert.Equal("game-checkin", owner.Name);
-        }
-        finally
-        {
-            DeleteTempDir(root);
-        }
-    }
-
-    [Fact]
-    public void ApplyPending_StopsReplacementWhenBothIdentitiesExist()
-    {
-        string root = NewTempDir();
-        try
-        {
-            string plugins = Path.Combine(root, "plugins");
-            string pending = Path.Combine(root, "state", "pending.json");
-            string ownership = Path.Combine(root, "state", "ownership.json");
-            string staging = Path.Combine(root, "state", "staging");
-            string backup = Path.Combine(root, "state", "backup");
-            Directory.CreateDirectory(Path.Combine(plugins, "hoyolab-checkin"));
-            Directory.CreateDirectory(Path.Combine(plugins, "game-checkin"));
-            string staged = Path.Combine(staging, "game-checkin.1");
-            Directory.CreateDirectory(staged);
-            PluginInstallRecovery.AddPending(new PluginPendingOperation
-            {
-                Action = "update",
-                Name = "game-checkin",
-                SourceName = "hoyolab-checkin",
-                Version = "0.1.2",
-                Kind = "managed-code",
-                StagedPath = staged,
-            }, pending);
-
-            Assert.False(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, Path.Combine(root, "config")));
-            Assert.Single(PluginInstallRecovery.ReadPending(pending));
-            Assert.True(Directory.Exists(Path.Combine(plugins, "hoyolab-checkin")));
-            Assert.True(Directory.Exists(Path.Combine(plugins, "game-checkin")));
-        }
-        finally
-        {
-            DeleteTempDir(root);
-        }
-    }
-
-    [Fact]
     public void ApplyPending_InstallsAndUninstallsPluginTransactionally()
     {
         string root = NewTempDir();
@@ -469,6 +352,7 @@ public sealed class PluginInstallRecoveryTests
             {
                 Action = "install",
                 Name = "bettergi",
+                ArtifactName = "BetterGI",
                 Version = "0.1.0",
                 Kind = "data-specialized",
                 StagedPath = staged,
@@ -476,7 +360,7 @@ public sealed class PluginInstallRecoveryTests
             }, pending);
 
             Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup));
-            Assert.True(File.Exists(Path.Combine(plugins, "bettergi", "plugin.json")));
+            Assert.True(File.Exists(Path.Combine(plugins, "BetterGI", "plugin.json")));
             Assert.Empty(PluginInstallRecovery.ReadPending(pending));
             Assert.False(Directory.Exists(staging));
             Assert.False(Directory.Exists(backup));
@@ -488,6 +372,7 @@ public sealed class PluginInstallRecoveryTests
             {
                 Action = "uninstall",
                 Name = "bettergi",
+                ArtifactName = "BetterGI",
                 Version = "0.1.0",
                 Kind = "data-specialized",
                 StagedPath = Path.Combine(staging, "uninstall.bettergi"),
@@ -495,34 +380,9 @@ public sealed class PluginInstallRecoveryTests
             }, pending);
 
             Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup));
-            Assert.False(Directory.Exists(Path.Combine(plugins, "bettergi")));
+            Assert.False(Directory.Exists(Path.Combine(plugins, "BetterGI")));
             Assert.Empty(PluginInstallRecovery.ReadOwnership(ownership));
             Assert.Empty(PluginInstallRecovery.ReadPending(pending));
-        }
-        finally
-        {
-            DeleteTempDir(root);
-        }
-    }
-
-    [Fact]
-    public void AddPending_AllowsLegacyPluginIdentityForUninstall()
-    {
-        string root = NewTempDir();
-        try
-        {
-            string pending = Path.Combine(root, "state", "pending.json");
-            PluginInstallRecovery.AddPending(new PluginPendingOperation
-            {
-                Action = "uninstall",
-                Name = "Legacy_Plugin",
-                ArtifactName = "Legacy_Plugin",
-                Phase = "pending",
-                StagedPath = Path.Combine(root, "state", "staging", "uninstall.Legacy_Plugin"),
-            }, pending);
-
-            PluginPendingOperation operation = Assert.Single(PluginInstallRecovery.ReadPending(pending));
-            Assert.Equal("Legacy_Plugin", operation.Name);
         }
         finally
         {
@@ -573,32 +433,6 @@ public sealed class PluginInstallRecoveryTests
     }
 
     [Fact]
-    public void FilesystemLayoutMigration_MovesKnownLegacyDirectoryToArtifactName()
-    {
-        string root = NewTempDir();
-        try
-        {
-            string plugins = Path.Combine(root, "plugins");
-            string legacy = Path.Combine(plugins, "bettergi");
-            Directory.CreateDirectory(legacy);
-            File.WriteAllText(Path.Combine(legacy, "plugin.json"), "{\"name\":\"bettergi\",\"kind\":\"data-specialized\"}");
-
-            Assert.True(PluginFilesystemLayoutMigration.Migrate(plugins));
-            string[] directories = Directory.GetDirectories(plugins)
-                .Select(Path.GetFileName)
-                .Where(name => name is not null)
-                .Cast<string>()
-                .ToArray();
-            Assert.Equal(new[] { "BetterGI" }, directories);
-            Assert.False(PluginFilesystemLayoutMigration.HasConflict("bettergi"));
-        }
-        finally
-        {
-            DeleteTempDir(root);
-        }
-    }
-
-    [Fact]
     public void ApplyPending_CompletesSwapWhenJournalWriteWasInterrupted()
     {
         string root = NewTempDir();
@@ -609,8 +443,8 @@ public sealed class PluginInstallRecoveryTests
             string ownership = Path.Combine(root, "state", "ownership.json");
             string staging = Path.Combine(root, "state", "staging");
             string backup = Path.Combine(root, "state", "backup");
-            string local = Path.Combine(plugins, "bettergi");
-            string backupPath = Path.Combine(backup, "bettergi.previous");
+            string local = Path.Combine(plugins, "BetterGI");
+            string backupPath = Path.Combine(backup, "BetterGI.previous");
             Directory.CreateDirectory(local);
             Directory.CreateDirectory(backupPath);
             File.WriteAllText(Path.Combine(local, "new.txt"), "new");
@@ -620,6 +454,7 @@ public sealed class PluginInstallRecoveryTests
             {
                 Action = "update",
                 Name = "bettergi",
+                ArtifactName = "BetterGI",
                 Version = "0.2.0",
                 Kind = "data-specialized",
                 StagedPath = Path.Combine(staging, "missing-after-swap"),
@@ -649,13 +484,14 @@ public sealed class PluginInstallRecoveryTests
             string staging = Path.Combine(root, "state", "staging");
             string backup = Path.Combine(root, "state", "backup");
             string ownership = Path.Combine(root, "state", "ownership.json");
-            Directory.CreateDirectory(Path.Combine(plugins, "bettergi"));
-            File.WriteAllText(Path.Combine(plugins, "bettergi", "old.txt"), "old");
+            Directory.CreateDirectory(Path.Combine(plugins, "BetterGI"));
+            File.WriteAllText(Path.Combine(plugins, "BetterGI", "old.txt"), "old");
 
             PluginInstallRecovery.AddPending(new PluginPendingOperation
             {
                 Action = "update",
                 Name = "bettergi",
+                ArtifactName = "BetterGI",
                 Version = "0.2.0",
                 Kind = "data-specialized",
                 StagedPath = Path.Combine(staging, "missing"),
@@ -663,7 +499,7 @@ public sealed class PluginInstallRecoveryTests
             }, pending);
 
             Assert.False(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup));
-            Assert.Equal("old", File.ReadAllText(Path.Combine(plugins, "bettergi", "old.txt")));
+            Assert.Equal("old", File.ReadAllText(Path.Combine(plugins, "BetterGI", "old.txt")));
             Assert.Single(PluginInstallRecovery.ReadPending(pending));
         }
         finally

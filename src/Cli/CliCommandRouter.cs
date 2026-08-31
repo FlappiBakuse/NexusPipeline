@@ -5,7 +5,7 @@ using NexusPipeline.App;
 
 namespace NexusPipeline.Cli;
 
-/// <summary>正式 noun/subcommand CLI 与旧命令别名的统一路由。</summary>
+/// <summary>正式 noun/subcommand CLI 路由。</summary>
 internal static class CliCommandRouter
 {
     public static int Run(string[] rawArgs)
@@ -30,10 +30,7 @@ internal static class CliCommandRouter
                 "script" or "scripts" => ExecuteScript(parsed),
                 "user" or "users" => ExecuteUser(parsed),
                 "queue" or "queues" => ExecuteQueue(parsed),
-                "run" => ExecuteRun(parsed, legacyKind: null),
-                "run-script" => ExecuteRun(parsed, "script"),
-                "run-queue" => ExecuteRun(parsed, "queue"),
-                "cancel" => ExecuteCancel(parsed),
+                "run" => ExecuteRun(parsed),
                 "history" => ExecuteHistory(parsed),
                 "settings" or "setting" => ExecuteSettings(parsed),
                 "plugin" or "plugins" => ExecutePlugin(parsed),
@@ -521,9 +518,9 @@ internal static class CliCommandRouter
         }
     }
 
-    private static int ExecuteRun(CliArguments args, string? legacyKind)
+    private static int ExecuteRun(CliArguments args)
     {
-        string? rawSub = legacyKind ?? Positional(args, 1);
+        string? rawSub = Positional(args, 1);
         string? sub = rawSub?.ToLowerInvariant();
         int error;
         if (sub is null)
@@ -532,11 +529,11 @@ internal static class CliCommandRouter
         }
         if (sub == "get")
         {
-            if (!EnsurePositionals(args, legacyKind is null ? 3 : 2, "run get 需要运行 ID") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 3, "run get 需要运行 ID") || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
-            if (!TryRequirePositional(args, legacyKind is null ? 2 : 1, "运行 ID", out string runId, out error))
+            if (!TryRequirePositional(args, 2, "运行 ID", out string runId, out error))
             {
                 return error;
             }
@@ -544,7 +541,7 @@ internal static class CliCommandRouter
         }
         if (sub == "list")
         {
-            if (!EnsurePositionals(args, legacyKind is null ? 2 : 1, "run list 不接受额外参数") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 2, "run list 不接受额外参数") || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -552,18 +549,18 @@ internal static class CliCommandRouter
         }
         if (sub == "cancel")
         {
-            if (!EnsurePositionals(args, legacyKind is null ? 3 : 2, "run cancel 需要运行 ID") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 3, "run cancel 需要运行 ID") || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
-            return ExecuteCancel(args, legacyKind is null ? 2 : 1);
+            return ExecuteCancel(args);
         }
         if (sub is not ("script" or "queue"))
         {
             return CliOutput.WriteFailure("invalid_arguments", $"未知 run 子命令：{sub}");
         }
 
-        int targetPosition = legacyKind is null ? 2 : 1;
+        int targetPosition = 2;
         if (!EnsurePositionals(args, targetPosition + 1, "run 操作需要一个目标")
             || !EnsureOptions(args, "mode", "auto", "manual", "user", "detach"))
         {
@@ -602,13 +599,13 @@ internal static class CliCommandRouter
         return PollRun(client, dispatch["runId"]!.ToString());
     }
 
-    private static int ExecuteCancel(CliArguments args, int position = 1)
+    private static int ExecuteCancel(CliArguments args)
     {
-        if (!EnsurePositionals(args, position + 1, "cancel 需要运行 ID") || !EnsureOptions(args))
+        if (!EnsurePositionals(args, 3, "run cancel 需要运行 ID") || !EnsureOptions(args))
         {
             return CliExitCodes.For("invalid_arguments");
         }
-        if (!TryRequirePositional(args, position, "运行 ID", out string runId, out int error))
+        if (!TryRequirePositional(args, 2, "运行 ID", out string runId, out int error))
         {
             return error;
         }
@@ -1360,7 +1357,7 @@ internal static class CliCommandRouter
             + "\n"
             + "机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n"
             + "目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n"
-            + "兼容别名：run-script、run-queue、cancel、manage、service、web、restart、register、unregister、apply-update。";
+            + "进程入口：manage、service、web、restart、register、unregister、apply-update。";
         if (CliOutput.MachineMode)
         {
             CliOutput.WriteSuccess(new JsonObject { ["usage"] = usage });

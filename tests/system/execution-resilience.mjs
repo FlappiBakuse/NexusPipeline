@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
+  createUserBinding,
   deleteScript,
   isAdminMode,
   isAdministrator,
@@ -88,14 +89,10 @@ async function createScript(fixture, options = {}) {
   }
   const script = await response.json();
   const users = options.users ?? ["ER-system-user"];
+  script.testUserIds = {};
   for (const name of users) {
-    const userResponse = await api("POST", `/api/scripts/${script.id}/users`, {
-      name,
-      enabled: true,
-    });
-    if (!userResponse.ok) {
-      assert.fail(`添加用户失败：HTTP ${userResponse.status} ${await userResponse.text()}`);
-    }
+    const user = await createUserBinding(script.id, name);
+    script.testUserIds[name] = user.id;
   }
   return script;
 }
@@ -412,12 +409,14 @@ test("ER09 Multi-user Config Isolation：两个用户的 store 与运行输入�
     users: ["ER09-A", "ER09-B"],
   });
   async function editUser(user, text) {
-    const start = await api("POST", `/api/scripts/${script.id}/users/${encodeURIComponent(user)}/edit-config`, { action: "start" });
+    const userId = script.testUserIds[user];
+    const editPath = `/api/users/${encodeURIComponent(userId)}/bindings/${encodeURIComponent(script.id)}/edit-config`;
+    const start = await api("POST", editPath, { action: "start" });
     if (!start.ok) {
       assert.fail(`用户配置编辑启动失败：HTTP ${start.status} ${await start.text()}`);
     }
     fs.writeFileSync(value, text, "ascii");
-    const done = await api("POST", `/api/scripts/${script.id}/users/${encodeURIComponent(user)}/edit-config`, { action: "done" });
+    const done = await api("POST", editPath, { action: "done" });
     if (!done.ok) {
       assert.fail(`用户配置编辑提交失败：HTTP ${done.status} ${await done.text()}`);
     }

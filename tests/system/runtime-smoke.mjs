@@ -7,6 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
+  createUserBinding,
+  deleteScript,
   isAdminMode,
   executionMode,
   fetchWithTimeout,
@@ -375,11 +377,7 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     assert.equal(create.status, 200, `创建重启测试脚本失败：HTTP ${create.status} ${createBody}`);
     scriptId = JSON.parse(createBody).id;
     const userName = "Restart Maintenance User";
-    const addUser = await api("POST", `/api/scripts/${encodeURIComponent(scriptId)}/users`, {
-      name: userName,
-      enabled: true,
-    });
-    assert.equal(addUser.status, 200, `添加重启测试用户失败：HTTP ${addUser.status} ${await addUser.text()}`);
+    await createUserBinding(scriptId, userName);
 
     const restart = await api("POST", "/api/settings/restart");
     const restartBody = await restart.text();
@@ -402,7 +400,7 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     await new Promise(resolve => setTimeout(resolve, 2500));
     await waitForService();
   } finally {
-    if (scriptId) await api("DELETE", `/api/scripts/${encodeURIComponent(scriptId)}`);
+    if (scriptId) await deleteScript(scriptId);
     await stopRuntime();
     startRuntime(["web"]);
     await waitForService();

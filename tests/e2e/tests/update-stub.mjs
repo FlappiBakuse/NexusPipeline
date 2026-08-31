@@ -16,7 +16,7 @@ function pluginCatalogJson() {
   const file = path.join(pluginRepositoryRoot(), "catalog.json");
   return fs.existsSync(file)
     ? fs.readFileSync(file, "utf8")
-    : JSON.stringify({ schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline-Plugins", generatedAt: new Date().toISOString(), plugins: [] });
+    : JSON.stringify({ schemaVersion: 2, repository: "FlappiBakuse/NexusPipeline-Plugins", generatedAt: new Date().toISOString(), plugins: [] });
 }
 
 export async function startUpdateStub() {

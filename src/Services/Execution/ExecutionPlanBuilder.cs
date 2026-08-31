@@ -107,19 +107,17 @@ internal sealed class ExecutionPlanBuilder
                 CloneTask(item.Task),
                 item.Script?.Clone(),
                 item.EnabledUsers.ToList(),
-                item.ResolvedUsers.Count > 0
-                    ? item.ResolvedUsers.Select(user => new ResolvedScriptUser(
-                        user.UserId,
-                        user.UserName,
-                        user.Binding.Clone())).ToList()
-                    : ResolveLegacyUsers(item.Script, item.EnabledUsers)))
+                item.ResolvedUsers.Select(user => new ResolvedScriptUser(
+                    user.UserId,
+                    user.UserName,
+                    user.Binding.Clone())).ToList()))
             .ToList();
         ExecutionAdmissionProfile admission = data.Admission is null
             ? ExecutionAdmissionProfile.ForQueue(queue, tasks, _capabilities)
             : RestoreAdmission(data.Admission);
-        int totalTasks = tasks.Sum(task => task.Script is null || task.EnabledUsers.Count == 0
+        int totalTasks = tasks.Sum(task => task.Script is null || task.ResolvedUsers is null || task.ResolvedUsers.Count == 0
             ? 1
-            : task.EnabledUsers.Count);
+            : task.ResolvedUsers.Count);
         return new QueueExecutionPlan(queue, tasks, admission, totalTasks);
     }
 
@@ -247,9 +245,9 @@ internal sealed class ExecutionPlanBuilder
         DispatchQueue queueSnapshot = queue.Clone();
         queueSnapshot.Tasks = tasks.Select(task => CloneTask(task.Task)).ToList();
         ExecutionAdmissionProfile admission = ExecutionAdmissionProfile.ForQueue(queueSnapshot, tasks, _capabilities);
-        int totalTasks = tasks.Sum(task => task.Script is null || task.EnabledUsers.Count == 0
+        int totalTasks = tasks.Sum(task => task.Script is null || task.ResolvedUsers is null || task.ResolvedUsers.Count == 0
             ? 1
-            : task.EnabledUsers.Count);
+            : task.ResolvedUsers.Count);
         return new QueueExecutionPlan(queueSnapshot, tasks, admission, totalTasks);
     }
 
@@ -263,18 +261,4 @@ internal sealed class ExecutionPlanBuilder
         };
     }
 
-    private IReadOnlyList<ResolvedScriptUser> ResolveLegacyUsers(
-        ScriptInstance? script,
-        IReadOnlyList<string> names)
-    {
-        if (script is null)
-        {
-            return Array.Empty<ResolvedScriptUser>();
-        }
-        return names
-            .Select(name => _users.ResolveEnabledBinding(script, name))
-            .Where(user => user is not null)
-            .Cast<ResolvedScriptUser>()
-            .ToList();
-    }
 }

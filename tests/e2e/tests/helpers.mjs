@@ -128,8 +128,16 @@ export async function createScript(body) {
   const response = await api("POST", "/api/scripts", { maxAttempts: 1, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 120, gameExe: PING_GAME, autoUpdateConfig: false, ...body });
   if (!response.ok) return { ok: false, id: "" };
   const script = await response.json();
-  await api("POST", `/api/scripts/${script.id}/users`, { name: "默认", enabled: true });
-  return { ok: true, id: script.id };
+  const userName = `E2E 用户-${Date.now()}`;
+  const userResponse = await api("POST", "/api/users", { name: userName });
+  if (!userResponse.ok) throw new Error(`创建 E2E 用户失败：HTTP ${userResponse.status}`);
+  const user = await userResponse.json();
+  const bindingResponse = await api("POST", `/api/users/${encodeURIComponent(user.id)}/bindings`, {
+    scriptInstanceId: script.id,
+    enabled: true,
+  });
+  if (!bindingResponse.ok) throw new Error(`创建 E2E 用户绑定失败：HTTP ${bindingResponse.status}`);
+  return { ok: true, id: script.id, userId: user.id, userName };
 }
 
 export function makeScriptDir(label) {

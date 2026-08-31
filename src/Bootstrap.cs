@@ -26,14 +26,6 @@ internal static class Bootstrap
         {
             Logger.Warn("[插件] 存在未完成的插件安装事务，保留 pending 并继续加载当前插件。");
         }
-        if (!PluginFilesystemLayoutMigration.Migrate())
-        {
-            Logger.Error("[插件] 插件物理目录存在布局冲突或迁移失败，暂停相关自动处理并继续加载可用插件。");
-        }
-        if (!PluginInstallRecovery.UpgradePersistedState())
-        {
-            Logger.Error("[插件] 插件安装状态升级失败，保留现有状态供后续启动重试。");
-        }
         ctx.ReloadSettings();
         ctx.Plugins.LoadAll();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);

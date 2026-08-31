@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
@@ -25,7 +24,8 @@ internal static class PluginInstallRecovery
         lock (Sync)
         {
             return LoadOwnership(path ?? AppPaths.PluginOwnershipPath).Plugins
-                .Where(item => PluginRepositoryCatalog.IsSafePluginName(item.Name))
+                .Where(item => PluginRepositoryCatalog.IsCanonicalPluginId(item.Name)
+                    && PluginRepositoryCatalog.IsSafeArtifactName(item.ArtifactName))
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         }
@@ -33,89 +33,24 @@ internal static class PluginInstallRecovery
 
     public static void AddPending(PluginPendingOperation operation, string? path = null)
     {
-        if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name)
-            && !string.Equals(operation.Action, "uninstall", StringComparison.OrdinalIgnoreCase))
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name))
         {
             throw new InvalidDataException($"插件名称不安全：{operation.Name}");
         }
-        if (!string.IsNullOrWhiteSpace(operation.SourceName)
-            && (!PluginRepositoryCatalog.IsSafePluginName(operation.SourceName)
-                || string.Equals(operation.Name, operation.SourceName, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidDataException($"插件来源名称不安全：{operation.SourceName}");
-        }
-        NormalizePhysicalNames(operation);
-        if (!PluginRepositoryCatalog.IsSafePluginName(operation.ArtifactName))
+        if (!PluginRepositoryCatalog.IsSafeArtifactName(operation.ArtifactName))
         {
             throw new InvalidDataException($"插件物理目录名不安全：{operation.ArtifactName}");
-        }
-        if (!string.IsNullOrWhiteSpace(operation.SourceArtifactName)
-            && !PluginRepositoryCatalog.IsSafePluginName(operation.SourceArtifactName))
-        {
-            throw new InvalidDataException($"插件来源物理目录名不安全：{operation.SourceArtifactName}");
         }
         lock (Sync)
         {
             string file = path ?? AppPaths.PluginPendingPath;
             PluginPendingState state = LoadPending(file);
-            if (state.Operations.Any(item => string.Equals(item.Name, operation.Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.SourceName, operation.Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.Name, operation.SourceName, StringComparison.OrdinalIgnoreCase)))
+            if (state.Operations.Any(item => string.Equals(item.Name, operation.Name, StringComparison.OrdinalIgnoreCase)))
             {
                 throw new InvalidOperationException($"插件已有待处理事务：{operation.Name}");
             }
             state.Operations.Add(Clone(operation));
             SavePending(file, state);
-        }
-    }
-
-    /// <summary>在目录迁移完成后把旧状态中的物理目录名升级为 artifactName。</summary>
-    public static bool UpgradePersistedState(
-        string? pendingPath = null,
-        string? ownershipPath = null)
-    {
-        lock (Sync)
-        {
-            string pendingFile = pendingPath ?? AppPaths.PluginPendingPath;
-            string ownershipFile = ownershipPath ?? AppPaths.PluginOwnershipPath;
-            try
-            {
-                if (File.Exists(pendingFile))
-                {
-                    PluginPendingState pending = LoadPending(pendingFile);
-                    foreach (PluginPendingOperation operation in pending.Operations)
-                    {
-                        if (PluginFilesystemLayoutMigration.GetCanonicalArtifactName(operation.Name) is string artifact)
-                        {
-                            operation.ArtifactName = artifact;
-                        }
-                        if (!string.IsNullOrWhiteSpace(operation.SourceName)
-                            && PluginFilesystemLayoutMigration.GetCanonicalArtifactName(operation.SourceName) is string sourceArtifact)
-                        {
-                            operation.SourceArtifactName = sourceArtifact;
-                        }
-                    }
-                    SavePending(pendingFile, pending);
-                }
-                if (File.Exists(ownershipFile))
-                {
-                    PluginOwnershipState ownership = LoadOwnership(ownershipFile);
-                    foreach (PluginOwnership item in ownership.Plugins)
-                    {
-                        if (PluginFilesystemLayoutMigration.GetCanonicalArtifactName(item.Name) is string artifact)
-                        {
-                            item.ArtifactName = artifact;
-                        }
-                    }
-                    SaveOwnership(ownershipFile, ownership);
-                }
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Error($"[插件] 升级安装状态失败：{ex.Message}");
-                return false;
-            }
         }
     }
 
@@ -125,15 +60,13 @@ internal static class PluginInstallRecovery
         string? pendingPath = null,
         string? ownershipPath = null,
         string? stagingRoot = null,
-        string? backupRoot = null,
-        string? configRoot = null)
+        string? backupRoot = null)
     {
         string localPlugins = Path.GetFullPath(pluginsDir ?? AppPaths.PluginsDir);
         string journalPath = Path.GetFullPath(pendingPath ?? AppPaths.PluginPendingPath);
         string ownersPath = Path.GetFullPath(ownershipPath ?? AppPaths.PluginOwnershipPath);
         string stagingBase = Path.GetFullPath(stagingRoot ?? AppPaths.PluginStagingDir);
         string backupBase = Path.GetFullPath(backupRoot ?? AppPaths.PluginBackupDir);
-        string configBase = Path.GetFullPath(configRoot ?? AppPaths.ConfigDir);
         lock (Sync)
         {
             PluginPendingState state;
@@ -168,7 +101,7 @@ internal static class PluginInstallRecovery
             {
                 foreach (PluginPendingOperation operation in state.Operations.ToArray())
                 {
-                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase, configBase);
+                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase);
                 }
                 TryDeleteEmptyDirectories(stagingBase);
                 TryDeleteEmptyDirectories(backupBase);
@@ -191,15 +124,13 @@ internal static class PluginInstallRecovery
         string pendingPath,
         string ownershipPath,
         string stagingRoot,
-        string backupRoot,
-        string configRoot)
+        string backupRoot)
     {
-        if (!PluginRepositoryCatalog.IsSafePluginName(operation.Name))
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name))
         {
             throw new InvalidDataException($"pending 包含不安全插件名称：{operation.Name}");
         }
-        NormalizePhysicalNames(operation);
-        if (!PluginRepositoryCatalog.IsSafePluginName(operation.ArtifactName))
+        if (!PluginRepositoryCatalog.IsSafeArtifactName(operation.ArtifactName))
         {
             throw new InvalidDataException($"pending 包含不安全物理目录名：{operation.ArtifactName}");
         }
@@ -219,12 +150,6 @@ internal static class PluginInstallRecovery
         if (operation.Action == "uninstall")
         {
             ApplyUninstall(operation, state, ownership, localPath, backupPath, pendingPath, ownershipPath, backupRoot);
-            return;
-        }
-
-        if (!string.IsNullOrWhiteSpace(operation.SourceName))
-        {
-            ApplyReplacement(operation, state, ownership, pluginsDir, pendingPath, ownershipPath, stagingRoot, backupRoot, configRoot);
             return;
         }
 
@@ -331,232 +256,6 @@ internal static class PluginInstallRecovery
         SavePending(pendingPath, state);
     }
 
-    private static void ApplyReplacement(
-        PluginPendingOperation operation,
-        PluginPendingState state,
-        PluginOwnershipState ownership,
-        string pluginsDir,
-        string pendingPath,
-        string ownershipPath,
-        string stagingRoot,
-        string backupRoot,
-        string configRoot)
-    {
-        string sourceName = operation.SourceName!;
-        if (!PluginRepositoryCatalog.IsSafePluginName(sourceName)
-            || string.Equals(sourceName, operation.Name, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidDataException($"替换来源名称无效：{sourceName}");
-        }
-        NormalizePhysicalNames(operation);
-        if (!PluginRepositoryCatalog.IsSafePluginName(operation.SourceArtifactName))
-        {
-            throw new InvalidDataException($"替换来源物理目录名无效：{operation.SourceArtifactName}");
-        }
-        string targetPath = Path.Combine(pluginsDir, operation.ArtifactName);
-        string sourcePath = Path.Combine(pluginsDir, operation.SourceArtifactName);
-        EnsureChildPath(pluginsDir, sourcePath);
-        EnsureChildPath(pluginsDir, targetPath);
-        string stagedPath = Path.GetFullPath(operation.StagedPath ?? "");
-        EnsureChildPath(stagingRoot, stagedPath);
-        string backupPath = string.IsNullOrWhiteSpace(operation.BackupPath)
-            ? Path.Combine(backupRoot, operation.ArtifactName + ".from-" + operation.SourceArtifactName + "." + Guid.NewGuid().ToString("N"))
-            : Path.GetFullPath(operation.BackupPath);
-        EnsureChildPath(backupRoot, backupPath);
-
-        if (operation.Phase is "pending" or "backed-up")
-        {
-            if (PathExists(targetPath))
-            {
-                throw new IOException($"插件替换冲突：目标插件已存在：{operation.Name}");
-            }
-            if (operation.Phase == "pending" && string.IsNullOrWhiteSpace(operation.BackupPath))
-            {
-                operation.BackupPath = backupPath;
-                SavePending(pendingPath, state);
-            }
-            if (PathExists(sourcePath) && !PathExists(backupPath))
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
-                Directory.Move(sourcePath, backupPath);
-            }
-            if (PathExists(sourcePath) && PathExists(backupPath))
-            {
-                throw new IOException($"插件替换事务同时存在来源目录和 backup：{sourceName}");
-            }
-            if (!PathExists(backupPath))
-            {
-                throw new IOException($"插件替换来源目录不存在：{sourceName}");
-            }
-            operation.Phase = "backed-up";
-            SavePending(pendingPath, state);
-        }
-
-        if (operation.Phase is "pending" or "backed-up")
-        {
-            if (PathExists(targetPath))
-            {
-                operation.Phase = "swapped";
-                SavePending(pendingPath, state);
-            }
-            else if (Directory.Exists(stagedPath))
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!);
-                Directory.Move(stagedPath, targetPath);
-                operation.Phase = "swapped";
-                SavePending(pendingPath, state);
-            }
-            else
-            {
-                throw new IOException($"插件 staging 不存在：{stagedPath}");
-            }
-        }
-
-        if (operation.Phase == "swapped")
-        {
-            if (!Directory.Exists(targetPath))
-            {
-                throw new IOException($"插件替换目标目录不存在：{targetPath}");
-            }
-            MigratePluginNamespaces(configRoot, sourceName, operation.Name);
-            operation.Phase = "migrated";
-            SavePending(pendingPath, state);
-        }
-
-        if (operation.Phase == "migrated")
-        {
-            MigratePluginPreference(configRoot, sourceName, operation.Name);
-            operation.Phase = "preferences";
-            SavePending(pendingPath, state);
-        }
-
-        if (operation.Phase == "preferences")
-        {
-            ownership.Plugins.RemoveAll(item => string.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase));
-            UpsertOwnership(ownership, new PluginOwnership
-            {
-                Name = operation.Name,
-                ArtifactName = operation.ArtifactName,
-                Version = operation.Version,
-                Kind = operation.Kind,
-                ApiVersion = operation.ApiVersion,
-                Sha256 = operation.Sha256,
-                InstalledAt = DateTimeOffset.UtcNow,
-            });
-            SaveOwnership(ownershipPath, ownership);
-            operation.Phase = "owned";
-            SavePending(pendingPath, state);
-        }
-
-        if (operation.Phase == "owned")
-        {
-            DeletePath(backupPath);
-            state.Operations.Remove(operation);
-            SavePending(pendingPath, state);
-        }
-    }
-
-    private static void MigratePluginNamespaces(string configRoot, string sourceName, string targetName)
-    {
-        string pluginsConfig = Path.Combine(configRoot, "plugins");
-        Directory.CreateDirectory(pluginsConfig);
-        string[] names =
-        {
-            sourceName + ".json",
-            sourceName + ".secrets.json",
-        };
-        foreach (string sourceFileName in names)
-        {
-            string targetFileName = targetName + sourceFileName[sourceName.Length..];
-            MoveNamespacePath(
-                Path.Combine(pluginsConfig, sourceFileName),
-                Path.Combine(pluginsConfig, targetFileName));
-        }
-        MoveNamespacePath(
-            Path.Combine(pluginsConfig, sourceName),
-            Path.Combine(pluginsConfig, targetName));
-    }
-
-    private static void MoveNamespacePath(string source, string target)
-    {
-        bool sourceExists = PathExists(source);
-        bool targetExists = PathExists(target);
-        if (sourceExists && targetExists)
-        {
-            throw new IOException($"插件身份迁移冲突：{Path.GetFileName(source)} 与 {Path.GetFileName(target)} 同时存在");
-        }
-        if (!sourceExists || targetExists)
-        {
-            return;
-        }
-        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-        if (Directory.Exists(source))
-        {
-            Directory.Move(source, target);
-        }
-        else
-        {
-            File.Move(source, target);
-        }
-    }
-
-    private static void MigratePluginPreference(string configRoot, string sourceName, string targetName)
-    {
-        string settingsPath = Path.Combine(configRoot, "settings.json");
-        if (!File.Exists(settingsPath))
-        {
-            return;
-        }
-        JsonNode? parsed = JsonNode.Parse(File.ReadAllText(settingsPath));
-        if (parsed is not JsonObject root)
-        {
-            throw new InvalidDataException("设置文件不是 JSON 对象");
-        }
-        string? preferencesName = root.Select(pair => pair.Key)
-            .FirstOrDefault(name => string.Equals(name, "PluginPreferences", StringComparison.OrdinalIgnoreCase));
-        if (preferencesName is null)
-        {
-            return;
-        }
-        if (root[preferencesName] is not JsonObject preferences)
-        {
-            throw new InvalidDataException("PluginPreferences 不是 JSON 对象");
-        }
-        string? sourceKey = preferences.Select(pair => pair.Key)
-            .FirstOrDefault(name => string.Equals(name, sourceName, StringComparison.OrdinalIgnoreCase));
-        string? targetKey = preferences.Select(pair => pair.Key)
-            .FirstOrDefault(name => string.Equals(name, targetName, StringComparison.OrdinalIgnoreCase));
-        if (sourceKey is null)
-        {
-            return;
-        }
-        if (targetKey is not null)
-        {
-            throw new IOException($"插件偏好迁移冲突：{sourceName} 与 {targetName} 同时存在");
-        }
-        JsonNode value = preferences[sourceKey]?.DeepClone()
-            ?? new JsonObject();
-        if (value is JsonObject preference)
-        {
-            RemovePropertyIgnoreCase(preference, "FrontendTrusted");
-            RemovePropertyIgnoreCase(preference, "FrontendTrustedVersion");
-            RemovePropertyIgnoreCase(preference, "FrontendTrustedFingerprint");
-        }
-        preferences.Remove(sourceKey);
-        preferences[targetName] = value;
-        JsonUtil.WriteAtomic(settingsPath, root.ToJsonString(JsonOpts.Indented));
-    }
-
-    private static void RemovePropertyIgnoreCase(JsonObject objectNode, string propertyName)
-    {
-        string? existing = objectNode.Select(pair => pair.Key)
-            .FirstOrDefault(name => string.Equals(name, propertyName, StringComparison.OrdinalIgnoreCase));
-        if (existing is not null)
-        {
-            objectNode.Remove(existing);
-        }
-    }
-
     private static void ApplyUninstall(
         PluginPendingOperation operation,
         PluginPendingState state,
@@ -636,15 +335,11 @@ internal static class PluginInstallRecovery
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
         PluginPendingState state = JsonSerializer.Deserialize<PluginPendingState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 pending.json 为空");
-        if (state.SchemaVersion is not (1 or 2))
+        if (state.SchemaVersion != 2)
         {
             throw new InvalidDataException($"不支持的插件 pending schemaVersion：{state.SchemaVersion}");
         }
         state.Operations ??= new List<PluginPendingOperation>();
-        foreach (PluginPendingOperation operation in state.Operations)
-        {
-            NormalizePhysicalNames(operation);
-        }
         return state;
     }
 
@@ -657,18 +352,11 @@ internal static class PluginInstallRecovery
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
         PluginOwnershipState state = JsonSerializer.Deserialize<PluginOwnershipState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 ownership.json 为空");
-        if (state.SchemaVersion is not (1 or 2))
+        if (state.SchemaVersion != 2)
         {
             throw new InvalidDataException($"不支持的插件 ownership schemaVersion：{state.SchemaVersion}");
         }
         state.Plugins ??= new List<PluginOwnership>();
-        foreach (PluginOwnership item in state.Plugins)
-        {
-            if (string.IsNullOrWhiteSpace(item.ArtifactName))
-            {
-                item.ArtifactName = item.Name;
-            }
-        }
         return state;
     }
 
@@ -692,9 +380,7 @@ internal static class PluginInstallRecovery
         {
             Action = source.Action,
             Name = source.Name,
-            SourceName = source.SourceName,
             ArtifactName = source.ArtifactName,
-            SourceArtifactName = source.SourceArtifactName,
             Version = source.Version,
             Kind = source.Kind,
             ApiVersion = source.ApiVersion,
@@ -704,19 +390,6 @@ internal static class PluginInstallRecovery
             Phase = source.Phase,
             CreatedAt = source.CreatedAt,
         };
-    }
-
-    private static void NormalizePhysicalNames(PluginPendingOperation operation)
-    {
-        if (string.IsNullOrWhiteSpace(operation.ArtifactName))
-        {
-            operation.ArtifactName = operation.Name;
-        }
-        if (!string.IsNullOrWhiteSpace(operation.SourceName)
-            && string.IsNullOrWhiteSpace(operation.SourceArtifactName))
-        {
-            operation.SourceArtifactName = operation.SourceName;
-        }
     }
 
     private static bool PathExists(string path) => Directory.Exists(path) || File.Exists(path);
@@ -774,7 +447,7 @@ internal static class PluginInstallRecovery
 
 internal sealed class PluginPendingState
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; }
 
     public List<PluginPendingOperation> Operations { get; set; } = new();
 }
@@ -785,14 +458,8 @@ internal sealed class PluginPendingOperation
 
     public string Name { get; set; } = "";
 
-    /// <summary>替换安装时的旧插件机器标识；普通安装/更新为空。</summary>
-    public string SourceName { get; set; } = "";
-
-    /// <summary>新插件的正式物理目录名；旧 pending 缺失时回退到 Name。</summary>
+    /// <summary>插件的正式物理目录名。</summary>
     public string ArtifactName { get; set; } = "";
-
-    /// <summary>替换来源的旧物理目录名；旧 pending 缺失时回退到 SourceName。</summary>
-    public string SourceArtifactName { get; set; } = "";
 
     public string Version { get; set; } = "";
 
@@ -813,7 +480,7 @@ internal sealed class PluginPendingOperation
 
 internal sealed class PluginOwnershipState
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; }
 
     public List<PluginOwnership> Plugins { get; set; } = new();
 }

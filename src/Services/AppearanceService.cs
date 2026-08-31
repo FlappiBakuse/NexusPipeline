@@ -840,8 +840,6 @@ internal sealed class AppearanceRuntimeState
     public long TimerEpochUnixMs { get; set; }
     public int TimerIntervalMinutes { get; set; }
 
-    // 兼容旧版运行时文件；新算法不再读取该顺序游标。
-    public int StartupCursor { get; set; } = -1;
 }
 
 internal sealed class AppearanceSnapshot

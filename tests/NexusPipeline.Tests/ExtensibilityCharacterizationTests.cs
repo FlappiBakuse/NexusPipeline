@@ -7,7 +7,7 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>v0.7.9 治理前的行为特征：重构不得改变结果分类、配置形态和数据化插件兼容语义。</summary>
+/// <summary>核心行为特征：重构不得改变结果分类、配置形态和数据化插件能力语义。</summary>
 public class ExtensibilityCharacterizationTests
 {
     private static string MakeTempDir()
@@ -67,10 +67,10 @@ public class ExtensibilityCharacterizationTests
     }
 
     [Fact]
-    public void DataPlugin_LegacySupportsEmulatorField_RemainsCompatible()
+    public void DataPlugin_DeclaresEmulatorCapability()
     {
         string root = MakeTempDir();
-        string pluginDir = Path.Combine(root, "legacy-plugin");
+        string pluginDir = Path.Combine(root, "current-plugin");
         string scriptRoot = Path.Combine(root, "script-root");
         Directory.CreateDirectory(Path.Combine(pluginDir, "data"));
         Directory.CreateDirectory(scriptRoot);
@@ -78,12 +78,15 @@ public class ExtensibilityCharacterizationTests
         File.WriteAllText(mainExe, "placeholder");
         File.WriteAllText(Path.Combine(pluginDir, "plugin.json"), JsonSerializer.Serialize(new
         {
-            name = "legacy",
-            displayName = "Legacy",
+            schemaVersion = 2,
+            name = "current",
+            artifactName = "Current",
+            displayName = "Current",
+            version = "1.0.0",
+            kind = "data-specialized",
             resolve = "data/resolve.json",
             judgeScript = "data/judge.js",
-            supportsEmulator = true,
-            capabilities = new[] { "probe" },
+            capabilities = new[] { "probe", PluginCapabilityKeys.Emulator },
         }));
         File.WriteAllText(Path.Combine(pluginDir, "data", "resolve.json"), JsonSerializer.Serialize(new
         {
@@ -95,7 +98,6 @@ public class ExtensibilityCharacterizationTests
         DataSpecializedPlugin plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
         ScriptProfile profile = Assert.IsType<ScriptProfile>(plugin.Resolve(scriptRoot));
 
-        Assert.True(plugin.SupportsEmulator);
         Assert.Contains("probe", plugin.CapabilityKeys);
         Assert.Contains(PluginCapabilityKeys.Emulator, plugin.CapabilityKeys);
         Assert.Equal(mainExe, profile.MainExe);

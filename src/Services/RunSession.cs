@@ -26,7 +26,7 @@ internal class RunSession
     protected readonly Action<string>? _statusChanged;
     protected readonly Action<string, LogLevel>? _logLine;
     protected RunBudget? _budget;
-    protected ScriptUser? _activeUser;
+    protected ResolvedScriptUser? _activeUser;
     protected bool _gameFronted;
     protected ProcessOwnership? _processOwnership;
     protected List<string>? _pendingReplaceConfigs;
@@ -44,7 +44,7 @@ internal class RunSession
         _queueName = queueName;
         _userName = userName;
         _resolvedUser = resolvedUser;
-        _userKey = resolvedUser?.UserKey ?? userName;
+        _userKey = resolvedUser?.UserKey;
         _token = token;
         _attemptChanged = attemptChanged;
         _statusChanged = statusChanged;
@@ -68,7 +68,7 @@ internal class RunSession
     internal StringBuilder ScriptFullLog => _results.FullLog;
     internal bool ScriptLogTruncated { get => _results.IsTruncated; set => _results.IsTruncated = value; }
     internal RunBudget? Budget { get => _budget; set => _budget = value; }
-    internal ScriptUser? ActiveUser { get => _activeUser; set => _activeUser = value; }
+    internal ResolvedScriptUser? ActiveUser { get => _activeUser; set => _activeUser = value; }
     internal int AttemptLogStart { get => _results.AttemptStart; set => _results.AttemptStart = value; }
     internal ResultCollector Results => _results;
     internal bool GameFronted { get => _gameFronted; set => _gameFronted = value; }

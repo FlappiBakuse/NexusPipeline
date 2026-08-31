@@ -18,7 +18,6 @@ if errorlevel 1 goto build_failed
 if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
 xcopy /e /i /y "%~dp0wwwroot" "%~dp0release\wwwroot" >nul
 mkdir "%~dp0release\plugins" >nul 2>nul
-> "%~dp0release\plugins\.nxp-root" echo {"owner":"NexusPipeline","purpose":"plugin-runtime-root","version":1}
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
 echo Production executable uses the requireAdministrator manifest.

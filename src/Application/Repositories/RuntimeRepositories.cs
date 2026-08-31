@@ -58,7 +58,7 @@ internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvi
 }
 
 /// <summary>
-/// 用户读取仓储：以全局用户快照为唯一数据源（启动时的 UserModelMigration 保证脚本不再携带嵌套用户）。
+/// 用户读取仓储：以全局用户快照为唯一数据源。
 /// </summary>
 internal sealed class RuntimeUserRepository : IUserRepository
 {
@@ -67,25 +67,6 @@ internal sealed class RuntimeUserRepository : IUserRepository
     public RuntimeUserRepository(Func<List<NexusUser>> snapshotUsers)
     {
         _snapshotUsers = snapshotUsers;
-    }
-
-    public ScriptUser? FindEnabled(ScriptInstance script, string? userName)
-    {
-        return ResolveEnabledBinding(script, userName)?.ToLegacyScriptUser();
-    }
-
-    public IReadOnlyList<string> EnabledNames(ScriptInstance script)
-    {
-        return _snapshotUsers()
-            .OrderBy(user => user.Index)
-            .Select(user => new
-            {
-                user.Name,
-                Binding = ResolveParticipatingBinding(script, user),
-            })
-            .Where(item => item.Binding is not null)
-            .Select(item => item.Name)
-            .ToList();
     }
 
     public ResolvedScriptUser? ResolveEnabledBinding(

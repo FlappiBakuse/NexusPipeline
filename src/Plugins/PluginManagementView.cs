@@ -11,7 +11,6 @@ internal sealed record PluginManagementView(
     string Kind,
     string ApiVersion,
     IReadOnlyList<string> Capabilities,
-    IReadOnlyList<string> Replaces,
     bool SupportsEmulator,
     bool ConfiguredEnabled,
     bool RuntimeEnabled,
@@ -47,8 +46,7 @@ internal sealed record PluginManagementView(
     {
         ownership.TryGetValue(summary.Name, out PluginOwnership? owner);
         PluginPendingOperation? operation = pending.LastOrDefault(item =>
-            string.Equals(item.Name, summary.Name, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(item.SourceName, summary.Name, StringComparison.OrdinalIgnoreCase));
+            string.Equals(item.Name, summary.Name, StringComparison.OrdinalIgnoreCase));
         bool configuredEnabled = manager.IsConfiguredEnabled(summary.Name);
         bool runtimeEnabled = manager.IsEnabled(summary.Name);
         return new PluginManagementView(
@@ -61,7 +59,6 @@ internal sealed record PluginManagementView(
             summary.Kind,
             summary.ApiVersion,
             summary.Capabilities,
-            summary.Replaces,
             manager.HasCapability(summary.Name, Extensibility.PluginCapabilityKeys.Emulator),
             configuredEnabled,
             runtimeEnabled,

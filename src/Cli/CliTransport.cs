@@ -80,13 +80,13 @@ internal static class CliTransport
 
     internal static IEnumerable<int> CandidatePorts(int configuredPort)
     {
-        return CandidatePorts(configuredPort, AppPaths.WebPortPath, AppPaths.LegacyWebPortPath);
+        return CandidatePorts(configuredPort, AppPaths.WebPortPath);
     }
 
-    internal static IEnumerable<int> CandidatePorts(int configuredPort, string markedPath, string legacyMarkedPath)
+    internal static IEnumerable<int> CandidatePorts(int configuredPort, string markedPath)
     {
         var seen = new HashSet<int>();
-        foreach (int marked in ReadMarkedPorts(markedPath, legacyMarkedPath))
+        foreach (int marked in ReadMarkedPorts(markedPath))
         {
             if (marked is >= 1024 and <= 65535 && seen.Add(marked))
             {
@@ -103,24 +103,21 @@ internal static class CliTransport
         }
     }
 
-    private static IEnumerable<int> ReadMarkedPorts(string markedPath, string legacyMarkedPath)
+    private static IEnumerable<int> ReadMarkedPorts(string markedPath)
     {
         var ports = new List<int>();
-        foreach (string path in new[] { markedPath, legacyMarkedPath })
+        try
         {
-            try
+            if (File.Exists(markedPath)
+                && int.TryParse(File.ReadAllText(markedPath), System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out int marked))
             {
-                if (File.Exists(path)
-                    && int.TryParse(File.ReadAllText(path), System.Globalization.NumberStyles.Integer,
-                        System.Globalization.CultureInfo.InvariantCulture, out int marked))
-                {
-                    ports.Add(marked);
-                }
+                ports.Add(marked);
             }
-            catch (Exception ex)
-            {
-                Logger.Debug($"读取 Web 实际端口标记失败：{ex.Message}");
-            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"读取 Web 实际端口标记失败：{ex.Message}");
         }
         return ports;
     }

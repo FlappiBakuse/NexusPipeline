@@ -63,17 +63,6 @@ internal static class UserConfigManager
         ConfigSwapPaths.CleanupScriptArea(scriptId, userName);
     }
 
-    public static ScriptUser? FindEnabledUser(ScriptInstance script, string? userName)
-    {
-        if (string.IsNullOrWhiteSpace(userName))
-        {
-            return null;
-        }
-        // 执行域现在通过 IUserRepository 读取用户；该兼容静态入口保留原签名，
-        // 由调用方在需要时使用数据仓储提供的并发快照。
-        return script.Users.FirstOrDefault(user => user.Enabled && string.Equals(user.Name, userName, StringComparison.OrdinalIgnoreCase));
-    }
-
     /* ---------------- 对外操作 ---------------- */
 
     /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。专项插件的默认配置模板允许配置位置暂不存在。</summary>

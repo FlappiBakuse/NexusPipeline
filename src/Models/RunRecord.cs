@@ -32,7 +32,7 @@ public class RunRecord
 
     public string UserName { get; set; } = "";
 
-    /// <summary>运行时冻结的全局用户身份；旧历史没有该字段时保持空值。</summary>
+    /// <summary>运行时冻结的全局用户身份。</summary>
     public string UserId { get; set; } = "";
 
     public DateTime StartTime { get; set; }

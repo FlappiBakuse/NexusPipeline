@@ -270,11 +270,6 @@ public sealed class BindingAndSchedulerTests
             Assert.False((bool)lookup.Invoke(context.Scheduler, new object[] { userId, unrelatedScriptId })!);
             Assert.False((bool)lookup.Invoke(context.Scheduler, new object[] { Guid.NewGuid().ToString("N"), scriptId })!);
 
-            MethodInfo check = typeof(ApiUsersHandler).GetMethod(
-                "CheckBindingBusy",
-                BindingFlags.Static | BindingFlags.NonPublic)!;
-            string? error = (string?)check.Invoke(null, new object[] { context, userId, scriptId });
-            Assert.Contains("待执行", error);
         }
         finally
         {

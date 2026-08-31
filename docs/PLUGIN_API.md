@@ -159,13 +159,13 @@ settings.sections               shell.nav
 
 `wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
 
-`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion`、`replaces` 和 `error` 字段中查看。
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion` 和 `error` 字段中查看。
 
 插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，更新时间取最新更新记录日期。
 
 ## plugin.json（根文件）
 
-schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、SemVer `version` 和插件类型。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致；schema 1 仍可被宿主读取，并由启动迁移处理已知或 catalog 可推导的旧物理目录。
+运行时 manifest 使用 schema 2，至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、SemVer `version` 和插件类型。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致。
 
 ```json
 {
@@ -186,13 +186,12 @@ schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-ca
 
 | 字段 | 说明 |
 |---|---|
-| `schemaVersion` | manifest 格式版本；当前为 `2`，宿主兼容旧版 `1` |
-| `name` | 稳定机器标识（脚本实例 `PluginType` 引用）；必须使用小写 kebab-case，改名需通过 `replaces` 迁移 |
+| `schemaVersion` | manifest 格式版本；必须为 `2` |
+| `name` | 稳定机器标识（脚本实例 `PluginType` 引用）；必须使用小写 kebab-case |
 | `artifactName` | 源码、宿主安装、发行目录和 ZIP 的正式物理身份；ASCII 字母/数字，首字符为字母且至少包含一个大写字母，大小写必须与目录和文件名完全一致 |
 | `displayName` / `gameName` | 列表显示名 / 中文游戏名（脚本卡片徽章「{gameName}专项」） |
 | `description` / `version` | 插件说明 / SemVer 版本（插件页展示） |
 | `minHostVersion` | 可选的最低宿主版本；缺省按 `0.0.0` 处理 |
-| `replaces` | 可选的旧插件机器标识数组；商店安装时按跨重启事务迁移旧插件代码目录、配置、密钥、作用域和插件偏好 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configTemplate` | 可选：默认配置模板目录（编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置） |
@@ -269,21 +268,9 @@ schema 2 的运行时 manifest 至少声明 `schemaVersion: 2`、小写 kebab-ca
 - 编辑用户配置会话 start 时若 `ConfigPath` 不存在且插件提供 `config-template/` 目录 → 目录内容**整体复制**到配置位置（configPath 父目录），cancel 时按复制清单精确清理（清单随 `.session` 标记持久化，重启崩溃恢复同样生效）。
 - 建议放入「可直接使用的默认配置」而非空模板；BetterGI 示例为内置标准任务列表的 NexusPipeline.json。
 
-## 历史兼容：插件身份替换与布局迁移（完成态）
-
-> 本节机制随 v0.11.5 的 schema 2 身份改造交付并进入维护完成态：宿主保留兼容能力以支持已发布版本，不再扩展新的迁移特性。新插件应直接选定稳定的机器 ID 与 artifactName 并避免改名；确需替换旧身份时按既有 `replaces` 协议执行，勿期待新增迁移能力。
-
-插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。需要改机器标识时，新插件在 manifest 和 catalog 中声明 `replaces`，宿主会在重启阶段完成一次可恢复的身份迁移：
-
-1. 完成旧 pending journal 后，校验新旧身份与 staging 目录，旧代码目录进入稳定 backup，新的 artifactName 目录完成交换；
-2. 将 `config/plugins/<旧名>.json`、`<旧名>.secrets.json` 和 `<旧名>/` 作用域目录移动为新身份；
-3. 将 `AppSettings.PluginPreferences` 中的旧键迁移为新键，保留 `Enabled`；
-4. 更新商店 `ownership.json` 并清理旧身份归属；
-5. 任一阶段失败时保留 `pending.json`，下次启动从已记录阶段继续。
-
-新旧身份同时存在时，宿主报告 `replacement-conflict` 并停止替换；同一 artifact 的多个大小写目录会报告 `layout-conflict`，保留全部现场并暂停相关自动安装/更新。`replaces` 每个条目最多 8 个安全机器标识，同一个旧身份在 catalog 中只能被一个新插件声明替换。
+插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。发布后应保持两者稳定；变更身份时按新插件重新配置用户绑定和插件设置。
 
 ## 构建与部署
 
-- 插件仓库单独构建 ZIP 并提交到 `packages/<ArtifactName>/`；宿主从 catalog 的官方 raw 地址下载，主程序 `release/plugins/.nxp-root` 仅作为旧版本更新器的兼容根标记，主程序更新不会覆盖用户插件目录。
+- 插件仓库单独构建 ZIP 并提交到 `packages/<ArtifactName>/`；宿主从 catalog 的官方 raw 地址下载，主程序更新不会覆盖用户插件目录。
 - 修改插件文件后重启服务生效；`/api/status` 的 `plugins` 列表可见，新建脚本选择卡片层出现「新建{displayName}专项脚本实例」。

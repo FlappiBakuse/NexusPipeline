@@ -66,7 +66,6 @@ internal sealed class ConfigSwapRecovery
         try
         {
             Dictionary<string, HashSet<string>> userKeysByScript = BuildRecoveryUserKeys(users);
-            ConfigSwapPaths.MigrateLegacyLayoutForRecovery(AppPaths.DataDir, userKeysByScript);
             RecoverStoreTransactions(userKeysByScript);
             if (!Directory.Exists(AppPaths.DataDir))
             {
@@ -265,7 +264,7 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false（保持旧恢复行为）。</summary>
+    /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false。</summary>
     private bool ScriptProcessRunning(string scriptId)
     {
         ScriptInstance? script = _findScript(scriptId);

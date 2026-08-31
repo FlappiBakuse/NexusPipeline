@@ -4,7 +4,7 @@ using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.Web;
 
-/// <summary>执行租约与准入冲突的统一 Web 响应，保留 error 字段兼容旧客户端。</summary>
+/// <summary>执行租约与准入冲突的统一 Web 响应。</summary>
 internal static class ExecutionConflictResponse
 {
     public static async Task<bool> WriteLeaseConflictAsync(

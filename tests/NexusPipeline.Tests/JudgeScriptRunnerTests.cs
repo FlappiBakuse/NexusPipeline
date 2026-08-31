@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using Xunit;
@@ -65,7 +66,14 @@ public sealed class JudgeScriptRunnerTests : IDisposable
             ConfigPath = _configFile,
             RootPath = _root,
         };
-        var user = new ScriptUser { Name = "用户甲", Enabled = true };
+        var user = new ResolvedScriptUser(
+            "user-id",
+            "用户甲",
+            new UserScriptBinding
+            {
+                ScriptInstanceId = script.Id,
+                Enabled = true,
+            });
         string input = JudgeScriptRunner.BuildInput(
             script,
             user,
@@ -77,7 +85,7 @@ public sealed class JudgeScriptRunnerTests : IDisposable
         using JsonDocument document = JsonDocument.Parse(input);
         JsonElement root = document.RootElement;
         Assert.Equal("script-1", root.GetProperty("script").GetProperty("Id").GetString());
-        Assert.Equal("用户甲", root.GetProperty("user").GetProperty("Name").GetString());
+        Assert.Equal("用户甲", root.GetProperty("user").GetProperty("UserName").GetString());
         Assert.Equal("当前尝试日志", root.GetProperty("log").GetString());
         Assert.False(root.GetProperty("logTruncated").GetBoolean());
         Assert.Equal(_scriptDir, root.GetProperty("scriptDir").GetString());

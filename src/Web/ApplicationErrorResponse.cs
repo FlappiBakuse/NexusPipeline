@@ -3,7 +3,7 @@ using NexusPipeline.App.Contracts;
 
 namespace NexusPipeline.Web;
 
-/// <summary>将无 HTTP 依赖的应用错误适配为现有 Web API 的兼容响应。</summary>
+/// <summary>将无 HTTP 依赖的应用错误适配为 Web API 响应。</summary>
 internal static class ApplicationErrorResponse
 {
     public static async Task WriteAsync(HttpListenerContext context, OperationError error)

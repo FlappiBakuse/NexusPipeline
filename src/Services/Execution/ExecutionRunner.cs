@@ -50,10 +50,7 @@ internal sealed class ExecutionRunner
                 _pluginAvailability);
             if (unavailableReason is not null)
             {
-                List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(
-                    script,
-                    plan.Users,
-                    plan.ResolvedUsers);
+                List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(plan.ResolvedUsers);
                 List<RunRecord> skippedRecords = SkipUnavailableScript(
                     exec,
                     script,
@@ -65,7 +62,7 @@ internal sealed class ExecutionRunner
                 exec.Status = exec.Status == "cancelled" ? "cancelled" : "done";
                 return;
             }
-            List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, plan.Users, plan.ResolvedUsers);
+            List<ResolvedScriptUser> runUsers = ResolvePlanUsers(plan.ResolvedUsers);
             List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
             if (records.Count > 0 && records[^1].Status == "cancelled")
             {
@@ -318,10 +315,7 @@ internal sealed class ExecutionRunner
                     _pluginAvailability);
                 if (unavailableReason is not null)
                 {
-                    List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(
-                        script,
-                        planned.EnabledUsers,
-                        planned.ResolvedUsers);
+                    List<ResolvedScriptUser> unavailableUsers = ResolvePlanUsers(planned.ResolvedUsers);
                     List<RunRecord> skippedRecords = SkipUnavailableScript(
                         exec,
                         script,
@@ -336,7 +330,7 @@ internal sealed class ExecutionRunner
                     }
                     continue;
                 }
-                List<ResolvedScriptUser> runUsers = ResolvePlanUsers(script, planned.EnabledUsers, planned.ResolvedUsers);
+                List<ResolvedScriptUser> runUsers = ResolvePlanUsers(planned.ResolvedUsers);
                 if (runUsers.Count == 0)
                 {
                     var skipped = new RunRecord
@@ -500,19 +494,8 @@ internal sealed class ExecutionRunner
         return published;
     }
 
-    private List<ResolvedScriptUser> ResolvePlanUsers(
-        ScriptInstance script,
-        IReadOnlyList<string> names,
-        IReadOnlyList<ResolvedScriptUser>? resolved)
+    private static List<ResolvedScriptUser> ResolvePlanUsers(IReadOnlyList<ResolvedScriptUser>? resolved)
     {
-        if (resolved is not null)
-        {
-            return resolved.ToList();
-        }
-        return names
-            .Select(name => _users.ResolveEnabledBinding(script, name))
-            .Where(user => user is not null)
-            .Cast<ResolvedScriptUser>()
-            .ToList();
+        return resolved?.ToList() ?? new List<ResolvedScriptUser>();
     }
 }

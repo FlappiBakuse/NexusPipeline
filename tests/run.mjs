@@ -191,11 +191,6 @@ async function buildTestHost() {
   fs.cpSync(path.join(projectRoot, "wwwroot"), path.join(testHostDir, "wwwroot"), { recursive: true });
   const pluginsDir = path.join(testHostDir, "plugins");
   fs.mkdirSync(pluginsDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(pluginsDir, ".nxp-root"),
-    JSON.stringify({ owner: "NexusPipeline", purpose: "plugin-runtime-root", version: 1 }),
-    "utf8",
-  );
   console.error(`[Test Host] 构建完成：${path.join(testHostDir, "nexus-pipeline.exe")}`);
   return 0;
 }

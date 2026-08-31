@@ -87,8 +87,7 @@ public sealed class PluginManagementParityTests
             "1.4",
             new[] { "frontend-module" },
             true,
-            "1.2",
-            new[] { "legacy-fixture" });
+            "1.2");
         var ownership = new Dictionary<string, PluginOwnership>(StringComparer.OrdinalIgnoreCase)
         {
             ["fixture"] = new PluginOwnership { Name = "fixture", ArtifactName = "Fixture", Version = "1.2.3" },
@@ -103,7 +102,6 @@ public sealed class PluginManagementParityTests
         Assert.Equal("Fixture", view.ArtifactName);
         Assert.Equal("1.2", view.FrontendApiVersion);
         Assert.True(view.HasFrontend);
-        Assert.Equal(new[] { "legacy-fixture" }, view.Replaces);
         Assert.True(view.ManagedByStore);
         Assert.Equal("official-store", view.InstallationSource);
         Assert.Equal("update", view.PendingAction);

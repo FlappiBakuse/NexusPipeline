@@ -124,37 +124,21 @@ internal sealed class PluginRepositoryService
         CancellationToken cancellationToken = default)
     {
         PluginCatalogEntry entry = await RequireEntryAsync(name, cancellationToken).ConfigureAwait(false);
-        if (PluginFilesystemLayoutMigration.HasConflict(entry.Name)
-            || entry.ReplacementNames.Any(PluginFilesystemLayoutMigration.HasConflict))
-        {
-            throw new PluginRepositoryException(
-                "layout_conflict",
-                $"插件「{entry.Name}」存在物理目录布局冲突，请先处理冲突目录");
-        }
         if (!PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason))
         {
             throw new PluginRepositoryException("incompatible", compatibilityReason);
         }
         PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
             string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
-        PluginSummary? replacementSource = _plugins().PluginSummaries.FirstOrDefault(item =>
-            entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)));
-        if (installed is not null && replacementSource is not null)
-        {
-            throw new PluginRepositoryException("replacement_conflict", $"插件替换冲突：{entry.Name} 与 {replacementSource.Name} 同时存在");
-        }
         if (update && installed is null)
         {
-            if (replacementSource is null)
-            {
-                throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
-            }
+            throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
         }
-        if (!update && (installed is not null || replacementSource is not null))
+        if (!update && installed is not null)
         {
             throw new PluginRepositoryException("already_installed", $"插件已安装：{entry.Name}");
         }
-        if (HasPending(entry.Name, replacementSource?.Name))
+        if (HasPending(entry.Name))
         {
             throw new PluginRepositoryException("pending", $"插件已有待重启事务：{entry.Name}");
         }
@@ -166,8 +150,6 @@ internal sealed class PluginRepositoryService
         return await _packages.StageAsync(
             entry,
             update ? "update" : "install",
-            replacementSource?.Name,
-            replacementSource?.ArtifactName,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -176,7 +158,7 @@ internal sealed class PluginRepositoryService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!PluginRepositoryCatalog.IsSafePluginName(name))
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
         {
             throw new PluginRepositoryException("invalid_name", "插件名称无效");
         }
@@ -218,7 +200,7 @@ internal sealed class PluginRepositoryService
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!PluginRepositoryCatalog.IsSafePluginName(name))
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
         {
             return null;
         }
@@ -462,13 +444,10 @@ internal sealed class PluginRepositoryService
         return entry ?? throw new PluginRepositoryException("not_found", $"插件仓库中不存在：{name}");
     }
 
-    private bool HasPending(string name, string? sourceName = null)
+    private static bool HasPending(string name)
     {
         return PluginInstallRecovery.ReadPending()
-            .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.SourceName, name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.Name, sourceName, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.SourceName, sourceName, StringComparison.OrdinalIgnoreCase));
+            .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<(PluginCatalog Catalog, DateTimeOffset FetchedAt)> FetchCatalogAsync(
@@ -528,33 +507,18 @@ internal sealed class PluginRepositoryService
         {
             listedNames.Add(entry.Name);
             installed.TryGetValue(entry.Name, out PluginSummary? local);
-            PluginSummary? replacementSource = installed.Values.FirstOrDefault(item =>
-                entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)));
             PluginPendingOperation? operation = pending.LastOrDefault(item =>
-                string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.SourceName, entry.Name, StringComparison.OrdinalIgnoreCase)
-                || entry.ReplacementNames.Any(name => string.Equals(name, item.Name, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(name, item.SourceName, StringComparison.OrdinalIgnoreCase)));
+                string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
             bool compatible = PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason);
-            bool replacementConflict = local is not null && replacementSource is not null;
-            bool layoutConflict = PluginFilesystemLayoutMigration.HasConflict(entry.Name)
-                || entry.ReplacementNames.Any(PluginFilesystemLayoutMigration.HasConflict);
-            bool updateAvailable = replacementConflict
-                || replacementSource is not null
-                || local is not null && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
-            PluginSummary? effectiveInstalled = local ?? replacementSource;
+            bool updateAvailable = local is not null
+                && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
             string status = operation is not null
                 ? "pending"
-                : layoutConflict
-                    ? "layout-conflict"
-                : replacementConflict
-                    ? "replacement-conflict"
                 : !compatible
                     ? "incompatible"
-                : effectiveInstalled is null
+                : local is null
                     ? "not-installed"
-                        : replacementSource is not null ? "replacement-available"
-                        : updateAvailable ? "update-available" : "installed";
+                : updateAvailable ? "update-available" : "installed";
             items.Add(new PluginStoreItem(
                 entry.Name,
                 entry.ArtifactName,
@@ -566,17 +530,16 @@ internal sealed class PluginRepositoryService
                 entry.ApiVersion,
                 entry.Capabilities,
                 entry.MinHostVersion,
-                effectiveInstalled is not null,
-                effectiveInstalled?.Version ?? "",
+                local is not null,
+                local?.Version ?? "",
                 updateAvailable,
                 compatible,
                 compatible ? "" : compatibilityReason,
-                ownership.ContainsKey(entry.Name)
-                    || replacementSource is not null && ownership.ContainsKey(replacementSource.Name),
+                ownership.ContainsKey(entry.Name),
                 operation?.Action ?? "",
                 operation?.Version ?? "",
                 status,
-                effectiveInstalled?.Name ?? "",
+                local?.Name ?? "",
                 entry.Changelog)
             {
                 Authors = entry.Authors,
@@ -594,8 +557,7 @@ internal sealed class PluginRepositoryService
                 ? owner
                 : null;
             PluginPendingOperation? operation = pending.LastOrDefault(item =>
-                string.Equals(item.Name, local.Name, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(item.SourceName, local.Name, StringComparison.OrdinalIgnoreCase));
+                string.Equals(item.Name, local.Name, StringComparison.OrdinalIgnoreCase));
             items.Add(new PluginStoreItem(
                 local.Name,
                 local.ArtifactName,

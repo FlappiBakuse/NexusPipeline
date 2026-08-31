@@ -69,25 +69,6 @@ public class ConfigSwapSyncTests
         }
     }
 
-    [Fact]
-    public void MigrateLegacyLayout_ReservedUserName_IsNotRenamed()
-    {
-        string dataRoot = MakeTempDir();
-        string legacyScript = Path.Combine(dataRoot, "legacy-script");
-        string reservedUserScript = Path.Combine(dataRoot, "reserved-user-script");
-        Directory.CreateDirectory(Path.Combine(legacyScript, "config"));
-        File.WriteAllText(Path.Combine(legacyScript, "config", "state.json"), "legacy");
-        Directory.CreateDirectory(Path.Combine(reservedUserScript, "config", "store"));
-        File.WriteAllText(Path.Combine(reservedUserScript, "config", "store", "state.json"), "user");
-
-        ConfigSwapPaths.MigrateLegacyLayout(dataRoot);
-
-        Assert.True(File.Exists(Path.Combine(legacyScript, "store", "state.json")));
-        Assert.True(File.Exists(Path.Combine(reservedUserScript, "config", "store", "state.json")));
-        Assert.False(Directory.Exists(Path.Combine(reservedUserScript, "store")));
-        Directory.Delete(dataRoot, recursive: true);
-    }
-
     /* ---------------- 还原描述路径 DSL（LocateNode） ---------------- */
 
     [Fact]

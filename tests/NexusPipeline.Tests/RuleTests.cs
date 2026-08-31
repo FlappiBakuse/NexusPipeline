@@ -12,9 +12,9 @@ public class RuleTests
     [InlineData("甲")]
     [InlineData("user_1")]
     [InlineData("A-B")]
-    public void ScriptUserRule_ValidNames(string name)
+    public void UserNameRule_ValidNames(string name)
     {
-        Assert.True(ScriptUserRule.IsValidName(name));
+        Assert.True(UserNameRule.IsValidName(name));
     }
 
     [Theory]
@@ -30,9 +30,9 @@ public class RuleTests
     [InlineData("CON")]
     [InlineData("CON.txt")]
     [InlineData("COM1")]
-    public void ScriptUserRule_InvalidNames(string name)
+    public void UserNameRule_InvalidNames(string name)
     {
-        Assert.False(ScriptUserRule.IsValidName(name));
+        Assert.False(UserNameRule.IsValidName(name));
     }
 
     [Theory]
@@ -83,7 +83,7 @@ public class RuleTests
             MainExe = "C:\\a.exe",
             Args = "-x",
             SuccessKeywords = "完成",
-            Users = { new ScriptUser { Name = "甲", Enabled = true } },
+            PluginType = "test-plugin",
         };
 
         var clone = original.Clone();
@@ -92,8 +92,7 @@ public class RuleTests
         Assert.Equal(original.MainExe, clone.MainExe);
         Assert.Equal(original.Args, clone.Args);
         Assert.Equal(original.SuccessKeywords, clone.SuccessKeywords);
-        Assert.Single(clone.Users);
-        Assert.NotSame(original.Users[0], clone.Users[0]);
+        Assert.Equal(original.PluginType, clone.PluginType);
         Assert.NotSame(original, clone);
     }
 

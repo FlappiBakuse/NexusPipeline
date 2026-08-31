@@ -67,10 +67,10 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `release\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
 | `release\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
 | `release\nexus-pipeline.exe status` | 查看当前状态 |
-| `release\nexus-pipeline.exe run-script ...` / `run-queue ...` / `cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
+| `release\nexus-pipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
 | `release\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
 
-网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会执行旧配置迁移和崩溃恢复扫描。
+网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会创建当前运行时目录并执行崩溃恢复扫描。
 
 ## 4. 测试入口
 
@@ -112,7 +112,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 - `SessionJudge`、`KeywordRule`：完成判定和关键字规则；
 - `LogPattern`、`LogMonitor`：日志路径解析和增量读取；
-- `ScriptUserRule`、`QueueRule`：模型约束；
+- `UserNameRule`、`QueueRule`：模型约束；
 - `ConfigSwapSyncTests`：快照同步、还原描述和事务镜像；
 - `ProcessTreeTests`、执行准入和更新测试：进程清理、资源租约和更新状态机。
 
@@ -127,10 +127,10 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `logs/` | 管理器日志 |
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 | `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |
-| `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的内部运行状态；旧根目录状态由取得单实例所有权的服务幂等迁移 |
+| `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的内部运行状态 |
 | `.nxp/state/plugins/` | 插件仓库 catalog 缓存、商店归属、待重启事务以及 staging/backup 操作现场 |
 
-`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录，不纳入普通运行状态收纳迁移。旧版本的根目录 `service.pid`、`web.port` 会在服务取得单实例互斥体后作为过期标记清理；旧 `scheduler-state.json` 在新文件不存在时原子移动，新旧同时存在时旧文件进入 `.nxp/state/recovery/`。
+`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录；它们与 `.nxp/` 当前运行状态目录职责分离。
 
 磁盘 JSON 使用 PascalCase，Web API 返回 camelCase。测试和调试应使用隔离 runtime，不能把运行时数据写入项目根目录。
 
@@ -260,12 +260,11 @@ refactor(core): 抽取运行会话状态机
 nexus-pipeline.exe
 wwwroot/
 plugins/
-  .nxp-root
 README.md
 LICENSE
 ```
 
-包内 `plugins/.nxp-root` 仅用于兼容旧版本更新器。主程序更新引擎只交换 `nexus-pipeline.exe` 和 `wwwroot/`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎兼容包内单个顶层目录形态，并拒绝绝对路径、`..` 路径和重复目录条目。
+主程序更新引擎只交换 `nexus-pipeline.exe` 和 `wwwroot/`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。
 
 SHA 文件内容为纯 hash，不含文件名和空格，使用 UTF-8 无 BOM。PowerShell 示例：
 

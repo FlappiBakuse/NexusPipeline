@@ -6,11 +6,11 @@ namespace NexusPipeline.Plugins.Managed;
 /// <summary>只在程序集加载前读取的插件 manifest 投影。</summary>
 internal sealed class PluginManifest
 {
-    public int SchemaVersion { get; private init; } = 1;
+    public int SchemaVersion { get; private init; } = PluginRepositoryCatalog.SchemaVersion;
 
     public string Name { get; private init; } = "";
 
-    /// <summary>插件在文件系统中的正式目录和发行包身份；schema 1 插件为空并按旧目录兼容。</summary>
+    /// <summary>插件在文件系统中的正式目录和发行包身份。</summary>
     public string ArtifactName { get; private init; } = "";
 
     public string DisplayName { get; private init; } = "";
@@ -39,8 +39,6 @@ internal sealed class PluginManifest
 
     public IReadOnlySet<string> Capabilities => _capabilities;
 
-    public IReadOnlyList<string> Replaces { get; private set; } = Array.Empty<string>();
-
     public PluginFrontendManifest? Frontend { get; private set; }
 
     private readonly HashSet<string> _capabilities = new(StringComparer.OrdinalIgnoreCase);
@@ -62,42 +60,38 @@ internal sealed class PluginManifest
                 error = "plugin.json 不是 JSON 对象";
                 return false;
             }
-            int schemaVersion = root["schemaVersion"]?.GetValue<int>() ?? 1;
-            if (schemaVersion is not (1 or 2))
+            if (root["schemaVersion"] is null)
+            {
+                error = "plugin.json 缺少 schemaVersion";
+                return false;
+            }
+            int schemaVersion = root["schemaVersion"]!.GetValue<int>();
+            if (schemaVersion != PluginRepositoryCatalog.SchemaVersion)
             {
                 error = $"不支持的 plugin.json schemaVersion：{schemaVersion}";
                 return false;
             }
             string name = root["name"]?.ToString()?.Trim() ?? "";
-            if (schemaVersion == 2
-                ? !PluginRepositoryCatalog.IsCanonicalPluginId(name)
-                : !PluginRepositoryCatalog.IsSafePluginName(name))
+            if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
             {
                 error = "插件 name 不符合命名规范";
                 return false;
             }
             string artifactName = root["artifactName"]?.ToString()?.Trim() ?? "";
-            if (schemaVersion == 2 && !PluginRepositoryCatalog.IsSafeArtifactName(artifactName))
-            {
-                error = "插件 artifactName 不符合大小写命名规范";
-                return false;
-            }
-            if (schemaVersion == 1 && !string.IsNullOrWhiteSpace(artifactName)
-                && !PluginRepositoryCatalog.IsSafeArtifactName(artifactName))
+            if (!PluginRepositoryCatalog.IsSafeArtifactName(artifactName))
             {
                 error = "插件 artifactName 不符合大小写命名规范";
                 return false;
             }
 
-            string kind = root["kind"]?.ToString()?.Trim().ToLowerInvariant() ?? "data-specialized";
-            if (kind is not ("managed-code" or "data-specialized" or "specialized"))
+            string kind = root["kind"]?.ToString()?.Trim().ToLowerInvariant() ?? "";
+            if (kind is not ("managed-code" or "data-specialized"))
             {
                 error = $"不支持的插件类型：{kind}";
                 return false;
             }
-            kind = kind == "specialized" ? "data-specialized" : kind;
             string version = root["version"]?.ToString()?.Trim() ?? "";
-            if (schemaVersion == 2 && !PluginRepositoryCatalog.TryParseVersion(version, out _))
+            if (!PluginRepositoryCatalog.TryParseVersion(version, out _))
             {
                 error = $"插件 version 无效：{version}";
                 return false;
@@ -106,6 +100,11 @@ internal sealed class PluginManifest
             if (!PluginRepositoryCatalog.TryParseVersion(minHostVersion, out _))
             {
                 error = $"插件 minHostVersion 无效：{minHostVersion}";
+                return false;
+            }
+            if (root.ContainsKey("supportsEmulator") || root.ContainsKey("replaces"))
+            {
+                error = "plugin.json 不支持 supportsEmulator 或 replaces 字段，请使用 capabilities 声明插件能力";
                 return false;
             }
 
@@ -138,21 +137,6 @@ internal sealed class PluginManifest
                     }
                 }
             }
-            if (root["supportsEmulator"]?.GetValue<bool>() == true)
-            {
-                result._capabilities.Add("emulator");
-            }
-            if (!PluginRepositoryCatalog.TryParseReplaces(
-                    root,
-                    result.Name,
-                    out IReadOnlyList<string> replaces,
-                    out string? replacesError,
-                    requireCanonicalNames: schemaVersion == 2))
-            {
-                error = $"replaces 无效：{replacesError}";
-                return false;
-            }
-            result.Replaces = replaces;
             if (!PluginFrontendManifest.TryParse(root, result._capabilities, out PluginFrontendManifest? frontend, out string? frontendError))
             {
                 error = frontendError;
@@ -184,7 +168,7 @@ internal sealed class PluginManifest
 
     public bool IsCompatibleWith(int apiMajor, int apiMinor)
     {
-        if (SchemaVersion is not (1 or 2)
+        if (SchemaVersion != PluginRepositoryCatalog.SchemaVersion
             || !TryParseApiVersion(ApiVersion, out int parsedMajor, out int parsedMinor))
         {
             return false;

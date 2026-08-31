@@ -1070,7 +1070,7 @@ internal static class ConfigSwapSession
         return node;
     }
 
-    /* ---------------- 会话与恢复（兼容 façade） ---------------- */
+    /* ---------------- 会话与恢复入口 ---------------- */
 
     private static ConfigSwapRecovery? _recovery;
 
