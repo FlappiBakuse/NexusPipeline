@@ -638,10 +638,17 @@ internal static class CliCommandRouter
             }
             if (!status.Equals("running", StringComparison.OrdinalIgnoreCase))
             {
+                static string FinalStatus(JsonNode? record)
+                {
+                    string finalStatus = record?["finalStatus"]?.ToString() ?? "";
+                    return string.IsNullOrWhiteSpace(finalStatus)
+                        ? record?["status"]?.ToString() ?? ""
+                        : finalStatus;
+                }
                 bool cancelled = body?["records"] is JsonArray records
-                    && records.Any(record => record?["status"]?.ToString() == "cancelled");
+                    && records.Any(record => FinalStatus(record).Equals("cancelled", StringComparison.OrdinalIgnoreCase));
                 bool failed = body?["records"] is JsonArray failedRecords
-                    && failedRecords.Any(record => record?["status"]?.ToString() != "success");
+                    && failedRecords.Any(record => FinalStatus(record) is not ("success" or "skipped"));
                 if (cancelled)
                 {
                     return CliOutput.WriteFailure("cancelled", "运行已取消", body);

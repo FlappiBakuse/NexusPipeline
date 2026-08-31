@@ -91,7 +91,7 @@ async function createScript(fixture, options = {}) {
   const users = options.users ?? ["ER-system-user"];
   script.testUserIds = {};
   for (const name of users) {
-    const user = await createUserBinding(script.id, name);
+    const user = await createUserBinding(script.id, name, options.binding || {});
     script.testUserIds[name] = user.id;
   }
   return script;
@@ -117,7 +117,8 @@ async function runScript(scriptId, userName, timeoutMs = 60000) {
   let record = null;
   await waitFor(async () => {
     const records = await historyRecords(scriptId);
-    record = records.at(-1) || null;
+    const timestamp = item => Date.parse(item.startTime || item.StartTime || "") || 0;
+    record = records.slice().sort((left, right) => timestamp(left) - timestamp(right)).at(-1) || null;
     return record !== null;
   }, 10000, 100);
   assert.ok(record, `脚本 ${scriptId} 未产生历史记录`);
@@ -163,6 +164,27 @@ function managerLogText() {
   const file = pathJoin(runtimeDir, "logs", `nexus-pipeline-${stamp}.log`);
   return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
 }
+
+test("ER00 每日成功运行上限：达到上限后写入 skipped 且不再次启动脚本", { skip }, async () => {
+  const fixture = makeFixture("er00-daily-cap");
+  writeBatchCode(fixture, [`echo ER00-RUN>>"${fixture.log}"`]);
+  const script = await createScript(fixture, {
+    name: "ER00 Daily Cap",
+    binding: { maxSuccessfulRunsPerDay: 1 },
+  });
+  try {
+    const first = await runScript(script.id);
+    assert.equal(recordStatus(first), "success");
+    const second = await runScript(script.id);
+    assert.equal(recordStatus(second), "skipped");
+    assert.equal(recordAttempts(second), 0);
+    assert.match(second.resultDetail || second.ResultDetail || "", /最多成功运行次数/);
+    const log = fs.existsSync(fixture.log) ? fs.readFileSync(fixture.log, "utf8") : "";
+    assert.equal((log.match(/ER00-RUN/g) || []).length, 1, "达到上限后脚本进程未再次启动");
+  } finally {
+    await deleteScript(script.id);
+  }
+});
 
 test("ER01 Batch Judge → Final Judge：进程退出后的最终判定仍执行", { skip }, async () => {
   const fixture = makeFixture("er01-batch-final");

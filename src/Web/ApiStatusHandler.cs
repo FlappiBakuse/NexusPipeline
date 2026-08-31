@@ -27,12 +27,11 @@ internal static class ApiStatusHandler
         var next = RuntimeContext.Instance.Scheduler.NextTrigger();
         PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
         // 锁内读取计数，避免与并发修改冲突（「集合已修改」）。
-        int scriptCount, queueCount, enabledScripts, enabledQueues;
+        int scriptCount, queueCount, enabledQueues;
         lock (RuntimeContext.Instance.DataLock)
         {
             scriptCount = RuntimeContext.Instance.Scripts.Count;
             queueCount = RuntimeContext.Instance.Queues.Count;
-            enabledScripts = RuntimeContext.Instance.Scripts.Count(script => script.NotifyEnabled);
             enabledQueues = RuntimeContext.Instance.Queues.Count(queue => queue.NotifyEnabled);
         }
         return new
@@ -51,7 +50,6 @@ internal static class ApiStatusHandler
             systemAction = pending is null ? null : new { action = pending.Action, queueName = pending.QueueName, deadline = pending.Deadline },
             notifyStats = new
             {
-                enabledScripts,
                 enabledQueues,
             },
             running = RuntimeContext.Instance.Center.Active.Select(exec =>

@@ -21,6 +21,7 @@ test("statusBadge maps public status values and has a failure fallback", () => {
   assert.match(statusBadge("partial"), /部分失败/);
   assert.match(statusBadge("running"), /运行中/);
   assert.match(statusBadge("cancelled"), /已取消/);
+  assert.match(statusBadge("skipped"), /已跳过/);
   assert.match(statusBadge("unknown"), /失败/);
 });
 

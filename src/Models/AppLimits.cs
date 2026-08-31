@@ -16,6 +16,12 @@ internal class AppLimits
 
     public int MaxTimeSetsPerQueue { get; set; } = 10;
 
+    /// <summary>运行天数配置允许的当前最大值；-1 表示不允许正数运行天数。</summary>
+    public int MaxRunDays { get; set; } = 365;
+
+    /// <summary>每日成功运行次数配置允许的当前最大值。</summary>
+    public int MaxSuccessfulRunsPerDay { get; set; } = 10;
+
     public int MinAttempts { get; set; } = 1;
 
     public int MaxAttempts { get; set; } = 10;

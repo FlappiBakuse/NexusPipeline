@@ -18,17 +18,13 @@ import {
   reloadUsers,
   scriptById,
   setManagementDraft,
-  syncManagementSwitch,
+  toggleManagementSwitch,
   unavailableScriptMessage,
   userById,
 } from "./shared.js";
 
 function bindingIdPart(id) {
   return String(id || "script").replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function umSwitch(id, label, pressed, field) {
-  return `<button id="${esc(id)}" class="mode-toggle switch-control" type="button" aria-label="${esc(label)}" aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="toggle-user-management-switch" data-binding-field="${esc(field)}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${pressed ? "已启用" : "已停用"}</span></button>`;
 }
 
 function umScriptName(binding) {
@@ -66,7 +62,10 @@ function umBindingCardMarkup(binding) {
   const locks = binding.locks || {};
   const notifyEnabled = effective.notifyEnabled !== false;
   const runDays = typeof effective.runDays === "number" ? effective.runDays : -1;
+  const maxSuccessfulRuns = typeof effective.maxSuccessfulRunsPerDay === "number" ? effective.maxSuccessfulRunsPerDay : -1;
   const enabled = effective.enabled !== false;
+  const maxRunDays = state.limits?.maxRunDays ?? 365;
+  const maxSuccessfulRunsLimit = state.limits?.maxSuccessfulRunsPerDay ?? 10;
   const preValue = encodePrePost(PRE_ONLY_MARKER, effective.preRunOnceOnly, effective.preRunScript || "");
   const postValue = encodePrePost(POST_FINAL_MARKER, effective.postRunOnFinalOnly, effective.postRunScript || "");
   const overrideHelper = category => locks[category]
@@ -83,58 +82,43 @@ function umBindingCardMarkup(binding) {
         '<span class="um-binding-copy"><strong class="um-binding-name">' + esc(name) + '</strong><span class="um-binding-badges">' + umBadges(binding) + "</span></span>" +
       "</button>" +
       '<button class="danger um-binding-remove" type="button" data-action="delete-user-binding" data-testid="um-remove-binding" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '">移除绑定</button>' +
-      '<span class="um-binding-bottom-arrow" aria-hidden="true">' + icon("chevronDown") + "</span>" +
+      '<span class="um-binding-bottom-arrow" aria-hidden="true">' + icon("chevronRight") + "</span>" +
     "</div>";
-  const subhead =
-    '<button class="um-binding-subhead" type="button" data-action="user-management-back" aria-label="返回上级，点击标题区域返回">' +
-      '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="28" height="28" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
-      '<strong class="um-binding-subname">' + esc(name) + '</strong>' +
-      '<span class="um-binding-subtitle" data-subtitle="general">·通用选项</span>' +
-      '<span class="um-binding-subtitle" data-subtitle="notify">·通知推送选项</span>' +
-      '<span class="um-binding-subtitle" data-subtitle="advanced">·高级选项</span>' +
-      '<span class="um-binding-bottom-arrow" aria-hidden="true">' + icon("chevronDown") + "</span>" +
-    "</button>";
   const mainView =
-    '<div class="um-view um-view-main">' +
-      '<button class="um-edit-config' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="edit-user-config-global" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '"' + (unavailable ? ' title="' + esc(unavailableMessage) + '"' : '') + '>' +
-        '<span class="um-edit-config-copy"><strong>编辑配置</strong><span class="muted">启动主程序打开该脚本实例的用户配置</span></span>' +
-        '<span class="um-edit-config-arrow">' + icon("chevronRight") + "</span>" +
-      "</button>" +
-      '<div class="um-option-grid">' +
-        '<button class="um-option-card" type="button" data-action="set-um-subview" data-view="general"><strong>通用选项</strong><span class="muted">绑定启用状态与运行天数</span>' + icon("chevronRight", "um-option-arrow") + "</button>" +
-        '<button class="um-option-card" type="button" data-action="set-um-subview" data-view="notify"><strong>通知推送选项</strong><span class="muted">用户级通知开关与 SMTP 收件人</span>' + icon("chevronRight", "um-option-arrow") + "</button>" +
-        '<button class="um-option-card" type="button" data-action="set-um-subview" data-view="advanced"><strong>高级选项</strong><span class="muted">任务前后脚本</span>' + icon("chevronRight", "um-option-arrow") + "</button>" +
-      "</div>" +
-    "</div>";
+    '<button class="um-edit-config' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="edit-user-config-global" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '"' + (unavailable ? ' title="' + esc(unavailableMessage) + '"' : '') + '>' +
+      '<span class="um-edit-config-copy"><strong>编辑配置</strong><span class="muted">启动主程序打开该脚本实例的用户配置</span></span>' +
+      '<span class="um-edit-config-arrow">' + icon("chevronRight") + "</span>" +
+    "</button>";
   const generalView =
-    '<div class="um-view um-view-general">' +
+    '<section class="um-binding-option-section um-view um-view-general"><div class="section-heading"><div><h4>通用</h4><p class="muted">绑定启用状态、运行天数和每日成功次数。</p></div></div>' +
       switchControl("um-" + idPart + "-enabled", "是否启用", "运行天数为 0 时不会参与运行", enabled, "toggle-user-management-switch", 'data-binding-field="enabled"' + (locks.general ? " disabled" : "")) +
-      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : "")) +
+      valueField("um-" + idPart + "-run-days", "运行天数", runDays, "number", 'data-binding-field="runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : "")) +
+      valueField("um-" + idPart + "-max-success", "最多成功运行次数", maxSuccessfulRuns, "number", 'data-binding-field="maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRunsLimit) + '" step="1" placeholder="填写 -1 不限制；正整数达到上限后跳过；不能填写 0。"' + (locks.general ? " disabled" : "")) +
+      '<p class="muted helper-copy">当天成功次数达到上限后，后续手动运行和自动运行将记录为已跳过；失败、取消和已跳过不计入成功次数。</p>' +
       overrideHelper("general") +
-    "</div>";
+    "</section>";
   const notifyView =
-    '<div class="um-view um-view-notify">' +
-      switchControl("um-" + idPart + "-notify", "开启通知推送", "脚本实例通知开启时才会发送", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
+    '<section class="um-binding-option-section um-view um-view-notify"><div class="section-heading"><div><h4>通知</h4><p class="muted">用户绑定允许时发送运行结果通知。</p></div></div>' +
+      switchControl("um-" + idPart + "-notify", "开启通知推送", "按用户绑定设置发送运行状态通知", notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
       valueField("um-" + idPart + "-smtp", "SMTP 收件人", effective.smtpTo || "", "text", 'data-binding-field="smtpTo" placeholder="留空继承全局收件人"' + (locks.notification ? " disabled" : "")) +
       '<p class="muted helper-copy">仅 SMTP 使用；留空继承全局收件人，Webhook 不受影响。</p>' +
       overrideHelper("notification") +
-    "</div>";
+    "</section>";
   const advancedView =
-    '<div class="um-view um-view-advanced">' +
+    '<section class="um-binding-option-section um-view um-view-advanced"><div class="section-heading"><div><h4>高级</h4><p class="muted">任务前后脚本设置。</p></div></div>' +
       valueField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "text", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"' + (locks.advanced ? " disabled" : "")) +
       valueField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "text", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"' + (locks.advanced ? " disabled" : "")) +
       overrideHelper("advanced") +
-    "</div>";
-  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '" data-subview="main"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
-    head + subhead +
-    '<div class="um-binding-body">' + mainView + generalView + notifyView + advancedView + pluginSlotMarkup("users.binding.sections", "binding-" + draft.userId + "-" + binding.scriptInstanceId, "user-binding-plugin-slot", { mode: "binding", primaryId: binding.scriptInstanceId, secondaryId: draft.userId }) + "</div>" +
+    "</section>";
+  return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
+    head +
+    '<div class="um-binding-body"><div class="um-binding-options">' + mainView + generalView + notifyView + advancedView + '</div>' + pluginSlotMarkup("users.binding.sections", "binding-" + draft.userId + "-" + binding.scriptInstanceId, "user-binding-plugin-slot", { mode: "binding", primaryId: binding.scriptInstanceId, secondaryId: draft.userId }) + "</div>" +
   "</article>";
 }
 
-/** 用户管理界面状态：展开卡片、二级页、添加脚本面板与多选集合。 */
+/** 用户管理界面状态：展开卡片、添加脚本面板与多选集合。 */
 const umState = {
   expandedId: null,
-  subview: "main",
   addOpen: false,
   bindingEditMode: false,
   addSelected: new Set(),
@@ -189,7 +173,6 @@ function renderUserManagementModal() {
     '<section class="user-management-settings">' +
       valueField("um-name", "用户名 <span class='req'>*</span>", user.name, "text", 'placeholder="全局名称，不区分大小写"') +
       textareaField("um-remark", "备注", user.remark || "", 'rows="3"', "为用户添加备注信息（可选）") +
-      '<p class="muted helper-copy">用户名最多 ' + MAX_ENTITY_NAME_BYTES + ' 个 UTF-8 字节，备注最多 ' + MAX_USER_REMARK_BYTES + ' 个 UTF-8 字节。</p>' +
       (user.avatarUrl ? '<div class="user-avatar-setting"><span class="muted">已设置自定义头像</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="' + esc(user.id) + '">移除自定义头像</button></div>' : "") +
     "</section>" +
     '<section class="subsection user-binding-section">' +
@@ -197,7 +180,7 @@ function renderUserManagementModal() {
       addArea +
       bindingList +
     "</section>";
-  const footer = `<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${umState.expandedId ? "返回上级" : "取消"}</button>`;
+  const footer = '<button class="primary" type="button" data-action="save-user-management">保存</button><button class="ghost user-management-back" type="button" data-action="user-management-back">取消</button>';
   showModal(modalShell("用户管理", body, footer), true, true);
   syncUmState();
   void renderPluginSlots(document);
@@ -228,8 +211,6 @@ function syncUmState() {
     editToggle.textContent = umState.bindingEditMode ? "完成编辑" : "编辑绑定";
     editToggle.setAttribute("aria-pressed", umState.bindingEditMode ? "true" : "false");
   }
-  const footerBack = document.querySelector(".user-management-back");
-  if (footerBack) footerBack.textContent = umState.expandedId ? "返回上级" : "取消";
   const list = document.getElementById("um-binding-list");
   if (list) {
     const dragEnabled = umBindingDragEnabled();
@@ -237,13 +218,16 @@ function syncUmState() {
       const expanded = card.dataset.bindingId === umState.expandedId;
       card.classList.toggle("is-expanded", expanded);
       card.classList.toggle("is-binding-editing", umState.bindingEditMode);
-      card.dataset.subview = expanded ? umState.subview : "main";
       const toggle = card.querySelector(".um-binding-toggle");
       if (toggle) {
         const unavailable = card.dataset.pluginUnavailable === "true";
         toggle.disabled = umState.bindingEditMode;
         toggle.setAttribute("aria-disabled", unavailable || umState.bindingEditMode ? "true" : "false");
         toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+      }
+      const arrow = card.querySelector(".um-binding-bottom-arrow");
+      if (arrow) {
+        arrow.innerHTML = icon(expanded ? "chevronDown" : "chevronRight");
       }
       const dragHandle = card.querySelector(".um-binding-drag-handle");
       if (dragHandle) {
@@ -273,7 +257,6 @@ export function openUserManagement(userId) {
   if (!user) return;
   setManagementDraft({ userId, user: cloneUser(user) });
   umState.expandedId = null;
-  umState.subview = "main";
   umState.addOpen = false;
   umState.bindingEditMode = false;
   umState.addSelected.clear();
@@ -288,6 +271,8 @@ function readBindingPayloads() {
     const locks = raw.locks || {};
     const rawRunDays = parseInt((read("runDays")?.value || "-1"), 10);
     const runDays = Number.isNaN(rawRunDays) ? -1 : rawRunDays;
+    const rawMaxSuccessfulRuns = parseInt((read("maxSuccessfulRunsPerDay")?.value || "-1"), 10);
+    const maxSuccessfulRuns = Number.isNaN(rawMaxSuccessfulRuns) ? -1 : rawMaxSuccessfulRuns;
     const pre = splitPrePost(PRE_ONLY_MARKER, read("preRunScript")?.value || "");
     const post = splitPrePost(POST_FINAL_MARKER, read("postRunScript")?.value || "");
     const payload = {
@@ -300,6 +285,9 @@ function readBindingPayloads() {
       postRunScript: locks.advanced ? (raw.postRunScript || "") : post.value,
       postRunOnFinalOnly: locks.advanced ? raw.postRunOnFinalOnly === true : post.onceOnly,
       runDays: locks.general ? (typeof raw.runDays === "number" ? raw.runDays : -1) : runDays,
+      maxSuccessfulRunsPerDay: locks.general
+        ? (typeof raw.maxSuccessfulRunsPerDay === "number" ? raw.maxSuccessfulRunsPerDay : -1)
+        : maxSuccessfulRuns,
     };
     return payload;
   });
@@ -358,7 +346,6 @@ async function refreshManagedUser(knownBindings = []) {
     for (const binding of knownBindings) mergeManagedBinding(user, binding);
     setManagementDraft({ userId: draft.userId, user: cloneUser(user) });
     umState.expandedId = null;
-    umState.subview = "main";
     umState.addOpen = false;
     umState.addSelected.clear();
     renderUserManagementModal();
@@ -368,7 +355,6 @@ async function refreshManagedUser(knownBindings = []) {
     if (current && knownBindings.length) {
       for (const binding of knownBindings) mergeManagedBinding(current.user, binding);
       umState.expandedId = null;
-      umState.subview = "main";
       umState.addOpen = false;
       umState.addSelected.clear();
       renderUserManagementModal();
@@ -422,7 +408,6 @@ export function toggleUmAddPanel() {
   umState.addSelected.clear();
   if (umState.addOpen) {
     umState.expandedId = null;
-    umState.subview = "main";
   }
   syncUmState();
 }
@@ -468,6 +453,7 @@ export async function confirmUmAddBindings() {
         postRunOnFinalOnly: false,
         smtpTo: "",
         runDays: -1,
+        maxSuccessfulRunsPerDay: -1,
       };
       addedBindings.push((await api("POST", "/api/users/" + encodeURIComponent(draft.userId) + "/bindings", payload)) || payload);
     }
@@ -492,35 +478,23 @@ export function toggleUmBinding(target) {
   const id = card.dataset.bindingId;
   if (umState.expandedId === id) {
     umState.expandedId = null;
-    umState.subview = "main";
   } else {
     umState.expandedId = id;
-    umState.subview = "main";
     umState.addOpen = false;
   }
   syncUmState();
 }
 
-/** 「返回上级」：收回展开的绑定卡片，还原 1/2 网格布局（效果同再次点击卡片收起）。 */
+/** 收回展开的绑定卡片。 */
 export function collapseUmBinding() {
   umState.expandedId = null;
-  umState.subview = "main";
   umState.addOpen = false;
   syncUmState();
 }
 
-/** 用户管理弹窗底部返回：二级页返回绑定主卡，主卡返回绑定列表，普通状态关闭弹窗。 */
+/** 用户管理弹窗底部取消。 */
 export function userManagementBack() {
-  if (!umState.expandedId) {
-    closeModal();
-    return;
-  }
-  if (umState.subview !== "main") {
-    umState.subview = "main";
-    syncUmState();
-    return;
-  }
-  collapseUmBinding();
+  closeModal();
 }
 
 /** 切换绑定编辑模式：编辑模式只允许移除绑定，不允许进入绑定设置。 */
@@ -531,14 +505,6 @@ export function toggleUmBindingEdit() {
     umState.addOpen = false;
     umState.addSelected.clear();
   }
-  syncUmState();
-}
-
-/** 展开卡片内的二级页切换（main/notify/advanced）。 */
-export function setUmSubview(target) {
-  const card = target.closest(".um-binding-card");
-  if (umState.bindingEditMode || !card || card.dataset.bindingId !== umState.expandedId) return;
-  umState.subview = target.dataset.view || "main";
   syncUmState();
 }
 
@@ -617,7 +583,6 @@ export const actions = {
   "confirm-um-add-bindings": target => withBusy(target, () => confirmUmAddBindings()),
   "toggle-um-binding": target => toggleUmBinding(target),
   "collapse-um-binding": () => collapseUmBinding(),
-  "set-um-subview": target => setUmSubview(target),
   "delete-user-binding": target => deleteUserBinding(target.dataset.userId, target.dataset.scriptId),
   "confirm-delete-user-binding": target => withBusy(target, () => confirmDeleteUserBinding(target.dataset.userId, target.dataset.scriptId)),
   "upload-user-avatar": target => uploadUserAvatar(target.dataset.userId),

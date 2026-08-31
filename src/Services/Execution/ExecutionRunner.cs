@@ -95,6 +95,8 @@ internal sealed class ExecutionRunner
         IReadOnlyList<ResolvedScriptUser> users)
     {
         var records = new List<RunRecord>();
+        Dictionary<string, int>? successfulRunsByUser = null;
+        DateTime successfulRunsDate = DateTime.MinValue;
         foreach (ResolvedScriptUser runUser in users)
         {
             if (exec.Cts.IsCancellationRequested)
@@ -118,49 +120,108 @@ internal sealed class ExecutionRunner
                 break;
             }
             ExecutionCoordinator? session = null;
-            RunRecord record;
+            RunRecord? record = null;
+            RunRecord? skippedRecord = null;
+            RunRecord? publishedRecord = null;
             try
             {
-                try
+                int maxSuccessfulRuns = runUser.Binding.MaxSuccessfulRunsPerDay;
+                if (maxSuccessfulRuns > 0)
                 {
-                    _userRunEvents?.Publish(new PluginUserRunStartingEvent(
-                        runUser.UserId,
-                        runUser.UserName,
-                        script.Id,
-                        script.Name,
-                        queueId,
-                        queueName,
-                        exec.Mode,
-                        DateTimeOffset.Now));
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[插件] 用户运行事件发布异常：{ex.Message}");
-                }
-                session = new ExecutionCoordinator(
-                    script, exec.Mode, queueId, queueName, runUser.UserName,
-                    exec.Cts.Token,
-                    (attempt, max) =>
+                    DateTime today = DateTime.Today;
+                    if (successfulRunsByUser is null || successfulRunsDate != today)
                     {
-                        exec.CurrentAttempt = attempt;
-                        exec.CurrentMaxAttempts = max;
-                    },
-                    status => exec.CurrentStatus = status,
-                    (line, level) => exec.AppendLog(level, line),
-                    target => exec.SetPreviewTarget(target),
-                    _users,
-                    runUser);
-
-                try
-                {
-                    record = await session.RunAsync().ConfigureAwait(false);
+                        successfulRunsByUser = _history
+                            .GetSuccessfulRunsByUser(today, script.Id)
+                            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+                        successfulRunsDate = today;
+                    }
+                    successfulRunsByUser.TryGetValue(runUser.UserId, out int successfulRuns);
+                    if (successfulRuns >= maxSuccessfulRuns)
+                    {
+                        skippedRecord = CreateDailyCapSkippedRecord(
+                            script,
+                            exec.Mode,
+                            queueId,
+                            queueName,
+                            runUser,
+                            successfulRuns,
+                            maxSuccessfulRuns);
+                    }
                 }
-                catch (Exception ex)
+
+                if (skippedRecord is null)
                 {
-                    // Coordinator 异常也必须形成可查询的失败历史，并继续队列后续任务。
-                    record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser.UserName, ex);
-                    record.UserId = runUser.UserId;
-                    Logger.Error($"[错误] 脚本「{displayName}」协调器异常，已生成失败历史并继续：{ex}");
+                    try
+                    {
+                        _userRunEvents?.Publish(new PluginUserRunStartingEvent(
+                            runUser.UserId,
+                            runUser.UserName,
+                            script.Id,
+                            script.Name,
+                            queueId,
+                            queueName,
+                            exec.Mode,
+                            DateTimeOffset.Now));
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[插件] 用户运行事件发布异常：{ex.Message}");
+                    }
+                    session = new ExecutionCoordinator(
+                        script, exec.Mode, queueId, queueName, runUser.UserName,
+                        exec.Cts.Token,
+                        (attempt, max) =>
+                        {
+                            exec.CurrentAttempt = attempt;
+                            exec.CurrentMaxAttempts = max;
+                        },
+                        status => exec.CurrentStatus = status,
+                        (line, level) => exec.AppendLog(level, line),
+                        target => exec.SetPreviewTarget(target),
+                        _users,
+                        runUser);
+
+                    try
+                    {
+                        record = await session.RunAsync().ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Coordinator 异常也必须形成可查询的失败历史，并继续队列后续任务。
+                        record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser.UserName, ex);
+                        record.UserId = runUser.UserId;
+                        Logger.Error($"[错误] 脚本「{displayName}」协调器异常，已生成失败历史并继续：{ex}");
+                    }
+                }
+                if (skippedRecord is not null)
+                {
+                    publishedRecord = PersistRecord(
+                        exec,
+                        skippedRecord,
+                        new List<string>(),
+                        displayName);
+                }
+                else
+                {
+                    if (record is null)
+                    {
+                        throw new InvalidOperationException($"脚本「{displayName}」未生成运行记录");
+                    }
+                    if (string.IsNullOrWhiteSpace(record.FinalStatus))
+                    {
+                        record.FinalStatus = record.Status == "success" ? "success" : record.Status;
+                    }
+                    publishedRecord = PersistRecord(
+                        exec,
+                        record,
+                        session?.AttemptLogs ?? new List<string>(),
+                        displayName);
+                    if (successfulRunsByUser is not null
+                        && string.Equals(publishedRecord.FinalStatus, "success", StringComparison.OrdinalIgnoreCase))
+                    {
+                        successfulRunsByUser[runUser.UserId] = successfulRunsByUser.GetValueOrDefault(runUser.UserId) + 1;
+                    }
                 }
             }
             finally
@@ -168,33 +229,81 @@ internal sealed class ExecutionRunner
                 gate.Release();
             }
 
-            if (string.IsNullOrWhiteSpace(record.FinalStatus))
+            if (publishedRecord is null)
             {
-                record.FinalStatus = record.Status == "success" ? "success" : record.Status;
+                throw new InvalidOperationException($"脚本「{displayName}」未生成已提交的运行记录");
             }
-            RunRecord published = PersistRecord(
-                exec,
-                record,
-                session?.AttemptLogs ?? new List<string>(),
-                displayName);
-            records.Add(published);
-            exec.AddRecordAndIncrement(published);
-            exec.CurrentStatus = published.Status == "success" ? "运行成功" : (published.Status == "cancelled" ? "已取消" : "运行失败");
-            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」最终结果：{published.Status}（{published.ResultDetail}）");
-            if (script.NotifyEnabled && runUser.Binding.NotifyEnabled)
+            records.Add(publishedRecord);
+            exec.AddRecordAndIncrement(publishedRecord);
+            exec.CurrentStatus = publishedRecord.Status switch
             {
-                try
-                {
-                    // 脚本级通知与队列级汇总通知相互独立，按每个用户完成立即发送。
-                    await _notifications.NotifyScriptAsync(script, published, runUser.Binding).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[通知] 脚本「{displayName}」通知发送异常：{ex.Message}");
-                }
+                "success" => "运行成功",
+                "cancelled" => "已取消",
+                "skipped" => "已跳过",
+                _ => "运行失败",
+            };
+            string statusDetail = publishedRecord.Status == "skipped"
+                ? publishedRecord.ResultDetail
+                : $"最终结果：{publishedRecord.Status}（{publishedRecord.ResultDetail}）";
+            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」{statusDetail}");
+            if (publishedRecord.Status == "skipped")
+            {
+                exec.AppendLog(LogLevel.Info, $"[{displayName}] {publishedRecord.ResultDetail}");
             }
+            await NotifyScriptIfEnabledAsync(script, publishedRecord, runUser.Binding, displayName).ConfigureAwait(false);
         }
         return records;
+    }
+
+    private async Task NotifyScriptIfEnabledAsync(
+        ScriptInstance script,
+        RunRecord record,
+        UserScriptBinding binding,
+        string displayName)
+    {
+        if (!binding.NotifyEnabled)
+        {
+            return;
+        }
+        try
+        {
+            // 用户绑定通知开关与队列级汇总通知相互独立，按每个用户完成立即发送。
+            await _notifications.NotifyScriptAsync(script, record, binding).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[通知] 脚本「{displayName}」通知发送异常：{ex.Message}");
+        }
+    }
+
+    internal static RunRecord CreateDailyCapSkippedRecord(
+        ScriptInstance script,
+        string mode,
+        string queueId,
+        string queueName,
+        ResolvedScriptUser user,
+        int successfulRuns,
+        int maxSuccessfulRuns)
+    {
+        DateTime now = DateTime.Now;
+        string detail = $"当天已成功运行 {successfulRuns}/{maxSuccessfulRuns} 次，达到最多成功运行次数，已跳过本次运行";
+        return new RunRecord
+        {
+            ScriptInstanceId = script.Id,
+            ScriptName = script.Name,
+            QueueId = queueId,
+            QueueName = queueName,
+            Mode = mode,
+            UserName = user.UserName,
+            UserId = user.UserId,
+            StartTime = now,
+            EndTime = now,
+            Attempts = 0,
+            MaxAttempts = Math.Max(1, script.MaxAttempts),
+            Status = "skipped",
+            FinalStatus = "skipped",
+            ResultDetail = detail,
+        };
     }
 
     private RunRecord PersistRecord(
@@ -395,7 +504,7 @@ internal sealed class ExecutionRunner
         IReadOnlyList<ResolvedScriptUser> users,
         IReadOnlyList<RunRecord> records)
     {
-        if (!script.NotifyEnabled || users.Count == 0)
+        if (users.Count == 0)
         {
             return;
         }
@@ -403,18 +512,11 @@ internal sealed class ExecutionRunner
         for (int i = 0; i < users.Count && i < records.Count; i++)
         {
             ResolvedScriptUser user = users[i];
-            if (!user.Binding.NotifyEnabled)
-            {
-                continue;
-            }
-            try
-            {
-                await _notifications.NotifyScriptAsync(script, records[i], user.Binding).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[通知] 脚本「{script.Name}（{user.UserName}）」专项插件不可用的跳过结果通知发送异常：{ex.Message}");
-            }
+            await NotifyScriptIfEnabledAsync(
+                script,
+                records[i],
+                user.Binding,
+                $"{script.Name}（{user.UserName}）").ConfigureAwait(false);
         }
     }
 

@@ -211,8 +211,7 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"') +
-    `<p class="muted helper-copy">用户名最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>`;
+  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="全局名称，不区分大小写"');
   showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true);
 }
 

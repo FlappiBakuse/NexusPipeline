@@ -77,6 +77,31 @@ internal class HistoryService : IHistoryStore
         return records;
     }
 
+    public IReadOnlyDictionary<string, int> GetSuccessfulRunsByUser(DateTime date, string scriptInstanceId)
+    {
+        lock (Sync)
+        {
+            return CountSuccessfulRunsByUser(ReadDayRecords(date), date, scriptInstanceId);
+        }
+    }
+
+    internal static IReadOnlyDictionary<string, int> CountSuccessfulRunsByUser(
+        IEnumerable<RunRecord> records,
+        DateTime date,
+        string scriptInstanceId)
+    {
+        return records
+            .Where(record => record.StartTime.Date == date.Date
+                && string.Equals(record.ScriptInstanceId, scriptInstanceId, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(record.UserId)
+                && string.Equals(
+                    string.IsNullOrWhiteSpace(record.FinalStatus) ? record.Status : record.FinalStatus,
+                    "success",
+                    StringComparison.OrdinalIgnoreCase))
+            .GroupBy(record => record.UserId, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+    }
+
     private static string FindFreePath(string directory, string baseName, string extension)
     {
         string candidate = Path.Combine(directory, baseName + extension);

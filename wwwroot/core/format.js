@@ -14,6 +14,7 @@ export function statusBadge(status) {
   if (status === "partial") return '<span class="badge warn">部分失败</span>';
   if (status === "running") return '<span class="badge blue">运行中</span>';
   if (status === "cancelled") return '<span class="badge warn">已取消</span>';
+  if (status === "skipped") return '<span class="badge blue">已跳过</span>';
   if (status === "error") return '<span class="badge bad">异常</span>';
   return '<span class="badge bad">失败</span>';
 }

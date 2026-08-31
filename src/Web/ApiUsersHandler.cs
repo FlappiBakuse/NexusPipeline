@@ -457,6 +457,7 @@ internal static class ApiUsersHandler
             binding.NotifyEnabled,
             binding.SmtpTo,
             binding.RunDays,
+            binding.MaxSuccessfulRunsPerDay,
             effective = new
             {
                 effective.Enabled,
@@ -467,6 +468,7 @@ internal static class ApiUsersHandler
                 effective.NotifyEnabled,
                 effective.SmtpTo,
                 effective.RunDays,
+                effective.MaxSuccessfulRunsPerDay,
                 effective.Participates,
             },
             locks = new
@@ -511,6 +513,8 @@ internal static class ApiUsersHandler
 
         public int RunDays { get; set; } = -1;
 
+        public int MaxSuccessfulRunsPerDay { get; set; } = -1;
+
         public UserScriptBinding ToBinding()
         {
             return new UserScriptBinding
@@ -524,6 +528,7 @@ internal static class ApiUsersHandler
                 NotifyEnabled = NotifyEnabled,
                 SmtpTo = SmtpTo.Trim(),
                 RunDays = RunDays,
+                MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
             };
         }
     }

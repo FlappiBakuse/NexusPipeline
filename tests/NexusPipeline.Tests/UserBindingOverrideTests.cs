@@ -17,7 +17,7 @@ public sealed class UserBindingOverrideTests
             Name = "用户",
             BindingOverrides = new UserBindingOverrides
             {
-                General = new UserGeneralOverride { SyncEnabled = true, Enabled = true, RunDays = 6 },
+                General = new UserGeneralOverride { SyncEnabled = true, Enabled = true, RunDays = 6, MaxSuccessfulRunsPerDay = 4 },
                 Notification = new UserNotificationOverride { SyncEnabled = true, NotifyEnabled = false, SmtpTo = "global@example.com" },
                 Advanced = new UserAdvancedOverride { SyncEnabled = true, PreRunScript = "global-pre", PreRunOnceOnly = true, PostRunScript = "global-post", PostRunOnFinalOnly = true },
             },
@@ -37,6 +37,7 @@ public sealed class UserBindingOverrideTests
 
         Assert.True(effective.Enabled);
         Assert.Equal(6, effective.RunDays);
+        Assert.Equal(4, effective.MaxSuccessfulRunsPerDay);
         Assert.False(effective.NotifyEnabled);
         Assert.Equal("global@example.com", effective.SmtpTo);
         Assert.Equal("global-pre", effective.PreRunScript);
@@ -58,7 +59,7 @@ public sealed class UserBindingOverrideTests
             Name = "用户",
             BindingOverrides = new UserBindingOverrides
             {
-                General = new UserGeneralOverride { SyncEnabled = true, Enabled = true, RunDays = -1 },
+                General = new UserGeneralOverride { SyncEnabled = true, Enabled = true, RunDays = -1, MaxSuccessfulRunsPerDay = 2 },
             },
             Bindings =
             {
@@ -72,6 +73,7 @@ public sealed class UserBindingOverrideTests
         Assert.NotNull(resolved);
         Assert.True(resolved!.Binding.Enabled);
         Assert.Equal(-1, resolved.Binding.RunDays);
+        Assert.Equal(2, resolved.Binding.MaxSuccessfulRunsPerDay);
         Assert.False(user.Bindings[0].Enabled);
     }
 

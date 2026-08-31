@@ -6,6 +6,7 @@ import { closeModal, modalShell, showModal } from "../../core/modal.js";
 import { toast, withBusy } from "../../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
+import { state } from "../../core/state.js";
 import { reloadUsers, syncManagementSwitch, userById } from "./shared.js";
 
 let globalManagementDraft = null;
@@ -18,17 +19,20 @@ function globalManagementHostMarkup(settings) {
   const general = settings.general || {};
   const notification = settings.notification || {};
   const advanced = settings.advanced || {};
+  const maxRunDays = state.limits?.maxRunDays ?? 365;
+  const maxSuccessfulRuns = state.limits?.maxSuccessfulRunsPerDay ?? 10;
   const pre = encodePrePost(PRE_ONLY_MARKER, advanced.preRunOnceOnly, advanced.preRunScript);
   const post = encodePrePost(POST_FINAL_MARKER, advanced.postRunOnFinalOnly, advanced.postRunScript);
   return '<div class="global-management-grid">' +
     '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div>' +
       switchControl("gm-general-sync", "同步通用设置", "开启后覆盖每个脚本绑定的通用设置", general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
       switchControl("gm-general-enabled", "是否启用", "关闭后所有绑定均不参与运行", general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
-      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" step="1" placeholder="-1 表示永久运行"') +
+      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="-1 表示永久运行"') +
+      valueField("gm-general-max-success", "最多成功运行次数", typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", 'data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRuns) + '" step="1" placeholder="-1 不限制；不能填写 0"') +
     '</section>' +
     '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div>' +
       switchControl("gm-notification-sync", "同步通知设置", "开启后覆盖每个脚本绑定的通知设置", notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
-      switchControl("gm-notification-enabled", "开启通知推送", "脚本实例通知开启时才会发送", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
+      switchControl("gm-notification-enabled", "开启通知推送", "按用户绑定通知设置发送运行状态通知", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
       valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"') +
     '</section>' +
     '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div>' +
@@ -110,10 +114,16 @@ function readGlobalManagementSettings() {
   const pressed = id => document.getElementById(id)?.getAttribute("aria-pressed") === "true";
   const value = id => document.getElementById(id)?.value || "";
   const runDays = parseInt(value("gm-general-run-days"), 10);
+  const maxSuccessfulRuns = parseInt(value("gm-general-max-success"), 10);
   const pre = splitPrePost(PRE_ONLY_MARKER, value("gm-advanced-pre"));
   const post = splitPrePost(POST_FINAL_MARKER, value("gm-advanced-post"));
   return {
-    general: { syncEnabled: pressed("gm-general-sync"), enabled: pressed("gm-general-enabled"), runDays: Number.isNaN(runDays) ? -1 : runDays },
+    general: {
+      syncEnabled: pressed("gm-general-sync"),
+      enabled: pressed("gm-general-enabled"),
+      runDays: Number.isNaN(runDays) ? -1 : runDays,
+      maxSuccessfulRunsPerDay: Number.isNaN(maxSuccessfulRuns) ? -1 : maxSuccessfulRuns,
+    },
     notification: { syncEnabled: pressed("gm-notification-sync"), notifyEnabled: pressed("gm-notification-enabled"), smtpTo: value("gm-notification-smtp").trim() },
     advanced: {
       syncEnabled: pressed("gm-advanced-sync"),

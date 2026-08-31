@@ -56,8 +56,6 @@ public class ScriptInstance
     /// <summary>判断脚本代码内容（上传文件读入或手写）。</summary>
     public string JudgeScript { get; set; } = "";
 
-    public bool NotifyEnabled { get; set; }
-
     /// <summary>自动更新配置：默认开。开 = 每次运行收尾把 config 最终状态全量镜像回用户快照 store
     /// （保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）；关 = 仅运行开始 15 秒后检测同步一次。
     /// 专项脚本由前端固化恒 true；无用户或 ConfigPath 为空时开关不生效。</summary>

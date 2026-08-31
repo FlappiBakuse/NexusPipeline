@@ -25,6 +25,8 @@ internal static class ApiLimitsHandler
                 l.MaxQueues,
                 l.MaxQueueTotalUsers,
                 l.MaxTimeSetsPerQueue,
+                l.MaxRunDays,
+                l.MaxSuccessfulRunsPerDay,
                 l.MinAttempts,
                 l.MaxAttempts,
                 l.MinStallMinutes,

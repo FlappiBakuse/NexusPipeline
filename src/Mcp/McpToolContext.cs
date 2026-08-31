@@ -76,7 +76,6 @@ internal sealed class McpToolContext
             mcpEndpoint = IsRunningEndpoint(settings.McpPort),
             scriptCount = scripts.Count,
             queueCount = queues.Count,
-            enabledScripts = scripts.Count(item => item.NotifyEnabled),
             enabledQueues = queues.Count(item => item.NotifyEnabled),
             nextSchedule = next is null ? null : new { queueName = next.Value.QueueName, time = next.Value.TriggerTime },
             systemAction = pending is null ? null : new

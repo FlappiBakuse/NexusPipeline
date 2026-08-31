@@ -135,7 +135,6 @@ internal static class JudgeScriptRunner
                 script.MaxAttempts,
                 script.LogStallTimeoutMinutes,
                 script.TotalTimeoutMinutes,
-                script.NotifyEnabled,
             },
             user = user is null ? null : new
             {

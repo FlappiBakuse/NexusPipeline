@@ -51,6 +51,8 @@ internal static class Limits
         CheckCount(limits.MaxQueues, 50, 999, "MaxQueues（调度队列上限）", warnings, fatals);
         CheckCount(limits.MaxQueueTotalUsers, 50, 999, "MaxQueueTotalUsers（队列任务总用户上限）", warnings, fatals);
         CheckCount(limits.MaxTimeSetsPerQueue, 10, 999, "MaxTimeSetsPerQueue（每队列定时上限）", warnings, fatals);
+        CheckSentinelUpper(limits.MaxRunDays, -1, 365, 3650, "MaxRunDays（运行天数上限）", warnings, fatals);
+        CheckSentinelUpper(limits.MaxSuccessfulRunsPerDay, -1, 10, 99, "MaxSuccessfulRunsPerDay（每日成功运行次数上限）", warnings, fatals);
         CheckRange(limits.MinAttempts, limits.MaxAttempts, 1, 10, 99, "尝试次数（Min/MaxAttempts）", warnings, fatals);
         CheckRange(limits.MinStallMinutes, limits.MaxStallMinutes, 1, 60, 1440, "日志无更新超时（Min/MaxStallMinutes）", warnings, fatals);
         CheckRange(limits.MinTotalMinutes, limits.MaxTotalMinutes, 5, 720, 10080, "运行总时间超时（Min/MaxTotalMinutes）", warnings, fatals, allowedMin: 5);
@@ -131,6 +133,19 @@ internal static class Limits
         CheckEnd(max, safeMin, safeMax, warnMax, $"{label} Max", warnings, fatals, allowedMin);
     }
 
+    private static void CheckSentinelUpper(int value, int allowedMin, int safeMax, int allowedMax, string label, List<string> warnings, List<string> fatals)
+    {
+        if (value < allowedMin || value > allowedMax)
+        {
+            fatals.Add($"约束配置 [{label}={value}] 超出警告区间（允许 {allowedMin}-{allowedMax}），禁止启动");
+            return;
+        }
+        if (value > safeMax)
+        {
+            warnings.Add($"[警告] 约束配置 [{label}={value}] 超出绝对安全上限 {safeMax}（允许 {allowedMin}-{allowedMax}），已按配置生效，请注意运行规模");
+        }
+    }
+
     private static void CheckEnd(int value, int safeMin, int safeMax, int warnMax, string label, List<string> warnings, List<string> fatals, int allowedMin)
     {
         if (value < allowedMin || value > warnMax)
@@ -192,6 +207,32 @@ internal static class Limits
             return null;
         }
         return value >= Current.MinTotalMinutes && value <= Current.MaxTotalMinutes ? null : $"运行总时间超时须在 {Current.MinTotalMinutes}-{Current.MaxTotalMinutes} 分钟之间（-1 为不超时）";
+    }
+
+    public static string? CheckRunDays(int value)
+    {
+        if (value < -1)
+        {
+            return "运行天数只能为 -1（永久）、0（停止）或当前上限以内的正整数";
+        }
+        if (value > 0 && (Current.MaxRunDays < 1 || value > Current.MaxRunDays))
+        {
+            return $"运行天数须在 -1（永久）、0（停止）或 1-{Current.MaxRunDays} 之间";
+        }
+        return null;
+    }
+
+    public static string? CheckMaxSuccessfulRunsPerDay(int value)
+    {
+        if (value == 0 || value < -1)
+        {
+            return "最多成功运行次数只能为 -1（不限制）或当前上限以内的正整数，不能为 0";
+        }
+        if (value > 0 && (Current.MaxSuccessfulRunsPerDay < 1 || value > Current.MaxSuccessfulRunsPerDay))
+        {
+            return $"最多成功运行次数须为 -1（不限制）或 1-{Current.MaxSuccessfulRunsPerDay}";
+        }
+        return null;
     }
 
     /// <summary>

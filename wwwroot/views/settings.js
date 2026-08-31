@@ -89,7 +89,7 @@ function serviceSettingsMarkup(settings) {
 function remoteMcpSettingsMarkup(settings, lanList) {
   const port = Number(settings.mcpPort) || 58732;
   return `<div class="settings-merged-content">
-    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true')}</div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div><p class="muted helper-copy lan-helper"${settings.allowRemoteAccess ? "" : " hidden"}>其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p><p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>
+    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}</div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空=不修改"')}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail">${lanList}</div><p class="muted helper-copy lan-helper"${settings.allowRemoteAccess ? "" : " hidden"}>其他设备请访问上述「局域网访问地址」（不要用 localhost / 0.0.0.0，它们只指向本机）；首次访问会要求输入访问令牌。</p><p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>
     <section class="settings-subsection mcp-settings"><div class="settings-list">
     ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
   </div><div class="form-grid settings-single-field">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div><p class="muted helper-copy">端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。</p></section>
@@ -563,7 +563,11 @@ export const actions = {
   "toggle-st-flag": target => {
     const btn = $("#" + target.dataset.flag);
     if (!btn) return;
-    btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    const pressed = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.dataset.state = pressed ? "on" : "off";
+    const stateText = btn.querySelector("[data-switch-state]");
+    if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
     if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },

@@ -28,11 +28,15 @@ public sealed class UserGeneralOverride
 
     public int RunDays { get; set; } = -1;
 
+    /// <summary>当天最多成功运行次数：-1 = 不限制；正数达到上限后跳过；0 为非法配置。</summary>
+    public int MaxSuccessfulRunsPerDay { get; set; } = -1;
+
     public UserGeneralOverride Clone() => new()
     {
         SyncEnabled = SyncEnabled,
         Enabled = Enabled,
         RunDays = RunDays,
+        MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
     };
 }
 

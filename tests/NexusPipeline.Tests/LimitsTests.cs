@@ -16,6 +16,8 @@ public sealed class LimitsTests
         Assert.Equal(50, Limits.Current.MaxQueues);
         Assert.Equal(50, Limits.Current.MaxQueueTotalUsers);
         Assert.Equal(10, Limits.Current.MaxTimeSetsPerQueue);
+        Assert.Equal(365, Limits.Current.MaxRunDays);
+        Assert.Equal(10, Limits.Current.MaxSuccessfulRunsPerDay);
         Assert.Equal(1, Limits.Current.MinAttempts);
         Assert.Equal(10, Limits.Current.MaxAttempts);
         Assert.Equal(1, Limits.Current.MinStallMinutes);
@@ -57,6 +59,29 @@ public sealed class LimitsTests
     public void CheckTotalMinutesSupportsUnlimitedSentinel(int value, bool rejected)
     {
         Assert.Equal(rejected, Limits.CheckTotalMinutes(value) is not null);
+    }
+
+    [Theory]
+    [InlineData(-2, true)]
+    [InlineData(-1, false)]
+    [InlineData(0, false)]
+    [InlineData(365, false)]
+    [InlineData(366, true)]
+    public void CheckRunDaysUsesConfiguredUpperBound(int value, bool rejected)
+    {
+        Assert.Equal(rejected, Limits.CheckRunDays(value) is not null);
+    }
+
+    [Theory]
+    [InlineData(-2, true)]
+    [InlineData(-1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, false)]
+    [InlineData(10, false)]
+    [InlineData(11, true)]
+    public void CheckMaxSuccessfulRunsPerDayRejectsZeroAndUsesConfiguredUpperBound(int value, bool rejected)
+    {
+        Assert.Equal(rejected, Limits.CheckMaxSuccessfulRunsPerDay(value) is not null);
     }
 
     [Fact]

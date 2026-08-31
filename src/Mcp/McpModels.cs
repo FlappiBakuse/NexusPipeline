@@ -53,8 +53,6 @@ internal sealed class McpScriptInput
 
     public string JudgeScript { get; set; } = "";
 
-    public bool NotifyEnabled { get; set; }
-
     public bool AutoUpdateConfig { get; set; } = true;
 
     public ScriptInstance ToModel()
@@ -82,7 +80,6 @@ internal sealed class McpScriptInput
             JudgeScriptEnabled = JudgeScriptEnabled,
             JudgeScriptLanguage = JudgeScriptLanguage.Trim(),
             JudgeScript = JudgeScript,
-            NotifyEnabled = NotifyEnabled,
             AutoUpdateConfig = AutoUpdateConfig,
         };
     }
@@ -117,6 +114,8 @@ internal sealed class McpBindingInput
 
     public int RunDays { get; set; } = -1;
 
+    public int MaxSuccessfulRunsPerDay { get; set; } = -1;
+
     public UserScriptBinding ToModel(string scriptId)
     {
         return new UserScriptBinding
@@ -130,6 +129,7 @@ internal sealed class McpBindingInput
             NotifyEnabled = NotifyEnabled,
             SmtpTo = SmtpTo.Trim(),
             RunDays = RunDays,
+            MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
         };
     }
 }
@@ -238,7 +238,6 @@ internal static class McpViews
             script.JudgeScriptEnabled,
             script.JudgeScriptLanguage,
             script.JudgeScript,
-            script.NotifyEnabled,
             script.AutoUpdateConfig,
             boundUsers = users
                 .OrderBy(user => user.Index)
@@ -275,6 +274,7 @@ internal static class McpViews
             binding.NotifyEnabled,
             binding.SmtpTo,
             binding.RunDays,
+            binding.MaxSuccessfulRunsPerDay,
             binding.Participates,
             effective = new
             {
@@ -286,6 +286,7 @@ internal static class McpViews
                 effective.NotifyEnabled,
                 effective.SmtpTo,
                 effective.RunDays,
+                effective.MaxSuccessfulRunsPerDay,
                 effective.Participates,
             },
             locks = new

@@ -159,6 +159,10 @@ internal static class UserCommands
         {
             return Validation<UserBindingOverrides>(runDaysError);
         }
+        if (ValidateMaxSuccessfulRunsPerDay(normalized.General.MaxSuccessfulRunsPerDay) is string maxSuccessfulRunsError)
+        {
+            return Validation<UserBindingOverrides>(maxSuccessfulRunsError);
+        }
         if (ValidateSmtp(normalized.Notification.SmtpTo) is string smtpError)
         {
             return Validation<UserBindingOverrides>(smtpError);
@@ -415,6 +419,10 @@ internal static class UserCommands
         {
             return Validation<UserScriptBinding>(runDaysError);
         }
+        if (ValidateMaxSuccessfulRunsPerDay(candidate.MaxSuccessfulRunsPerDay) is string maxSuccessfulRunsError)
+        {
+            return Validation<UserScriptBinding>(maxSuccessfulRunsError);
+        }
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? user = ctx.FindUser(userId);
         ScriptInstance? script = ctx.FindScript(candidate.ScriptInstanceId);
@@ -551,6 +559,10 @@ internal static class UserCommands
         if (ValidateRunDays(candidate.RunDays) is string runDaysError)
         {
             return Validation<UserScriptBinding>(runDaysError);
+        }
+        if (ValidateMaxSuccessfulRunsPerDay(candidate.MaxSuccessfulRunsPerDay) is string maxSuccessfulRunsError)
+        {
+            return Validation<UserScriptBinding>(maxSuccessfulRunsError);
         }
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? user = ctx.FindUser(userId);
@@ -740,6 +752,7 @@ internal static class UserCommands
         {
             normalized.Enabled = true;
             normalized.RunDays = -1;
+            normalized.MaxSuccessfulRunsPerDay = -1;
         }
         if (overrides.Notification?.SyncEnabled == true)
         {
@@ -763,7 +776,9 @@ internal static class UserCommands
     {
         UserBindingOverrides overrides = user.BindingOverrides ?? new UserBindingOverrides();
         if (overrides.General?.SyncEnabled == true
-            && (previous.Enabled != candidate.Enabled || previous.RunDays != candidate.RunDays))
+            && (previous.Enabled != candidate.Enabled
+                || previous.RunDays != candidate.RunDays
+                || previous.MaxSuccessfulRunsPerDay != candidate.MaxSuccessfulRunsPerDay))
         {
             return "global_override_active|全局管理正在同步通用设置，请先关闭全局同步或保持绑定原始值不变";
         }
@@ -797,6 +812,7 @@ internal static class UserCommands
             NotifyEnabled = candidate.NotifyEnabled,
             SmtpTo = candidate.SmtpTo.Trim(),
             RunDays = candidate.RunDays,
+            MaxSuccessfulRunsPerDay = candidate.MaxSuccessfulRunsPerDay,
         };
     }
 
@@ -850,8 +866,10 @@ internal static class UserCommands
     private static string? ValidateRemark(string? remark) =>
         Limits.CheckNameBytes(remark?.Trim() ?? "", AppFixedLimits.MaxUserRemarkBytes, "备注");
 
-    private static string? ValidateRunDays(int value) =>
-        value >= -1 ? null : "运行天数只能为 -1（永久）或 0 及以上的整数";
+    private static string? ValidateRunDays(int value) => Limits.CheckRunDays(value);
+
+    private static string? ValidateMaxSuccessfulRunsPerDay(int value) =>
+        Limits.CheckMaxSuccessfulRunsPerDay(value);
 
     private static string? ValidateSmtp(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : SmtpSender.ValidateRecipients(value.Trim());

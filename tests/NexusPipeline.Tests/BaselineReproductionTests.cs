@@ -230,6 +230,9 @@ public sealed class BaselineReproductionTests
             return new HistorySaveResult(record.Clone(), null);
         }
 
+        public IReadOnlyDictionary<string, int> GetSuccessfulRunsByUser(DateTime date, string scriptInstanceId) =>
+            new Dictionary<string, int>();
+
         public void Cleanup(int retentionDays)
         {
         }

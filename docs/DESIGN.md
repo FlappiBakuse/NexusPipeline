@@ -41,7 +41,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 |---|---|
 | 脚本实例（ScriptInstance） | 一次可运行的脚本单元：主程序/参数/根目录/配置路径/日志路径/游戏配置/运行设置；参与运行的用户由全局用户绑定解析 |
 | 全局用户（NexusUser） | 具有稳定 `UserId` 的账号实体：可改用户名、全局优先级、头像和插件用户设置；可绑定多个脚本实例 |
-| 用户脚本绑定（UserScriptBinding） | 用户与脚本的运行关系：参与运行开关、配置快照、前置/后置脚本、用户通知开关和 SMTP 收件人覆盖 |
+| 用户脚本绑定（UserScriptBinding） | 用户与脚本的运行关系：参与运行开关、运行天数、每日成功次数上限、配置快照、前置/后置脚本、用户通知开关和 SMTP 收件人覆盖 |
 | 调度队列（DispatchQueue） | 按 Index 顺序链式执行一组脚本实例（每实例内仍按用户串行）；可定时/启动时自动运行，结束可执行完成操作 |
 | 尝试（RunAttempt） | 一次尝试 = 一次完整的进程启动→监控→判定→清理；失败按 MaxAttempts 重试 |
 | 运行（RunRecord） | 一次「脚本实例 × 全局用户绑定」的完整运行（含全部尝试），落盘历史（.json 纯状态 + 按尝试分批日志） |
@@ -93,6 +93,10 @@ sequenceDiagram
     E-->>DC: 接受或返回准入失败码
     DC->>R: 启动后台任务
     R->>S: 编排该用户运行
+    S->>S: 在脚本级门禁内读取当天成功次数
+    alt 达到绑定的每日成功上限
+        S-->>R: 写入 skipped 历史（0 次尝试），不发布用户运行开始事件
+    else 未达到上限
     loop 尝试 1..MaxAttempts
         S->>S: 执行本次尝试
         S->>S: 前置脚本、游戏/脚本启动、日志监控、判定和清理
@@ -112,6 +116,7 @@ sequenceDiagram
         else 失败且未达上限
             S->>S: 当前 config → retry-store → 还原 original → 重新配置交换 → 下一次尝试
         end
+    end
     end
     S->>S: 还原替换配置 → 清空脚本区 → 配置交换还原现场
     R->>R: 历史落盘（.json 纯状态 + 按尝试分批日志）→ 通知分发
@@ -161,7 +166,7 @@ flowchart TD
     H --> D
     D -- 遍历完成 --> M{queue.NotifyEnabled}
     M -- 是 --> N[队列级汇总通知]
-    M -- 否 --> O[逐脚本通知 script.NotifyEnabled]
+    M -- 否 --> O[按用户绑定通知开关逐脚本通知]
     N --> P[提交完成意图]
     O --> P
     P --> Q[所有活动运行空闲后 arm 完成操作]
@@ -172,7 +177,8 @@ flowchart TD
 - 调度中心启用实时画面时，日志卡片与实时画面卡片共享拉伸高度并对齐上下边界；日志最小高度跟随实时画面卡片最小高度，最大高度为该最小高度的 2.5 倍。
 - 队列任务数大于零、全部引用可解析脚本实例、每个脚本 `GameMode == "emulator"`、ADB 端点格式有效且专项插件声明支持模拟器时归类为 `EmulatorOnly`；任意数量 `EmulatorOnly` 可并行，最多一个 `Standard` 队列。空队列、缺失引用、无效端点和其他无法证明为纯模拟器的情况归类为 `Standard`。
 - 独立脚本不占用 `Standard` 队列名额，但与队列共同申请脚本 ID、用户数据键、解析后的启动目标、进程基名、配置路径、日志路径模式、前/后置脚本可执行文件和模拟器 ADB 端点资源租约；同一资源或配置父子路径冲突时准入失败，无法证明日志模式互不重叠时按冲突处理。
-- 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送；用户级脚本通知须同时满足 `script.NotifyEnabled=true` 与 `binding.NotifyEnabled=true`，SMTP 收件人为空时继承全局设置。
+- 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送；用户级脚本通知由有效绑定的 `binding.NotifyEnabled=true` 决定，SMTP 收件人为空时继承全局设置。
+- 有效绑定的 `MaxSuccessfulRunsPerDay=-1` 表示不限制；达到正数上限后，在脚本级配置门禁内写入 `skipped` 历史，记录 0 次尝试，不发布用户运行开始事件，也不计入成功次数；失败、取消和已跳过记录不计入成功次数。
 - 脚本实例绑定的数据化专项插件缺失、类型不匹配或运行态不可用时，前端显示状态徽章并收紧脚本编辑、用户配置和队列任务入口；运行入口保留队列生命周期，写入错误日志与失败历史后跳过该脚本实例，继续处理队列中的后续任务。
 - 专项插件可用性门禁在 Application Command 层统一执行：`UserCommands` 的绑定新增/编辑、`ScriptCommands`、配置编辑和队列写入共享同一策略；门禁在配置快照和持久化之前完成。解除绑定、删除脚本和从队列移除任务等清理操作保持可用。
 - `ExecutionValidator` 发现专项插件不可用时保留执行计划创建路径，由 `ExecutionRunner` 记录失败历史、写入可读原因并跳过脚本；队列后续任务继续执行。插件启停和安装更新仍按重启后生效的生命周期约定处理。
@@ -392,8 +398,8 @@ flowchart LR
     D --> C2[宿主 SMTP]
 ```
 
-- **用户脚本级**：实例开启通知且绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
-- **队列级**：队列开启通知后忽略实例级，统一在队列结束后汇总发送所有脚本状态（`· {ScriptName}：成功（...）/失败（...）`，按 record.Status 非 FinalStatus）。
+- **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
+- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/失败（...）/已跳过（...）`，按 record.Status 非 FinalStatus）。
 - 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；队列级汇总不使用。
 - 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
 
@@ -403,7 +409,7 @@ flowchart LR
   - `history/YYYY-MM-DD/HH-mm-ss.json`：**纯运行状态**（PascalCase，Attempts/FinalStatus/每次尝试详情（含各尝试 `LogFile` 引用）等，**不含任何日志内容**；同秒冲突加 `-1` 后缀）；
   - `history/YYYY-MM-DD/HH-mm-ss-{尝试号}.log`：**每次尝试一个独立日志文件**，保存脚本日志全文（20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）——重试失败按尝试分批标号，排查清晰；
   - 控制台输出（stdout/stderr）**不再落盘**（运行中实时显示仍保留）；历史详情按尝试展示各日志文件尾部。
-- `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled。
+- `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled / skipped（达到绑定的每日成功运行次数上限）。
 - `PluginHistory`：运行落盘前由已注册插件生成的纯文本展示快照；单贡献 16 KiB、单次运行总量 64 KiB，插件异常不会影响运行结果，卸载插件后历史仍保留快照。
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。

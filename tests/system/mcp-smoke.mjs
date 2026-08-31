@@ -299,20 +299,26 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     const user = await userResponse.json();
     userId = user.id;
 
-    const bindingResponse = await api("POST", `/api/users/${encodeURIComponent(userId)}/bindings`, {
-      scriptInstanceId: scriptId,
-      enabled: true,
-      notifyEnabled: false,
-      runDays: -1,
+    const addedBinding = await mcpTool("add_binding", {
+      userReference: userId,
+      input: {
+        scriptInstanceId: scriptId,
+        enabled: true,
+        notifyEnabled: false,
+        runDays: -1,
+        maxSuccessfulRunsPerDay: 1,
+      },
     });
-    if (bindingResponse.status !== 200) {
-      assert.fail(`创建 MCP Smoke 绑定失败：HTTP ${bindingResponse.status} ${await bindingResponse.text()}`);
-    }
+    assert.equal(addedBinding.data.maxSuccessfulRunsPerDay, 1);
 
     const listedScripts = await mcpTool("list_scripts");
     assert.ok(listedScripts.data.some(item => item.id === scriptId));
     const listedUsers = await mcpTool("list_users");
     assert.ok(listedUsers.data.some(item => item.id === userId));
+    const listedUser = listedUsers.data.find(item => item.id === userId);
+    const listedBinding = listedUser?.bindings?.find(item => item.scriptInstanceId === scriptId);
+    assert.equal(listedBinding?.maxSuccessfulRunsPerDay, 1);
+    assert.equal(listedBinding?.effective?.maxSuccessfulRunsPerDay, 1);
 
     const dangerousQueueResponse = await api("POST", "/api/queues", {
       name: `MCP Dangerous Queue ${Date.now()}`,

@@ -71,7 +71,7 @@ function scriptCardMarkup(script) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
       <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}<span class="badge ${script.notifyEnabled ? "ok" : "muted"}" data-testid="script-notify">${script.notifyEnabled ? "通知已开启" : "通知未开启"}</span>${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
+    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
       <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
@@ -199,7 +199,6 @@ export async function openScriptModal(id = "", plugin = "") {
     totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
     successKeywords: value.successKeywords || "", failureKeywords: value.failureKeywords || "",
     judgeScriptEnabled: !!value.judgeScriptEnabled, judgeScriptLanguage: value.judgeScriptLanguage || "", judgeScript: value.judgeScript || "",
-    notifyEnabled: !!value.notifyEnabled,
     autoUpdateConfig: isSpecial ? true : (value.autoUpdateConfig ?? true),
   };
   const d = scriptDraft;
@@ -212,15 +211,14 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\YourGame"')}
     </div>
-    <p class="muted helper-copy">脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <p class="muted helper-copy">由专用插件「${esc(pluginDisplayName(pluginType, state.plugins || []))}」自动适配脚本主程序、自启动参数、配置文件与日志路径，无需手动填写。</p>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        <div>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
+        ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", true, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate" disabled')}
       </div>
-      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
+      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；自动更新配置控制运行结束时是否同步用户配置。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
@@ -237,7 +235,6 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${valueField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "text", 'placeholder="例如 C:\\Scripts\\Daily"')}
     </div>
-    <p class="muted helper-copy">脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 个 UTF-8 字节。</p>
     <div class="form-grid">
       ${valueField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "text", 'placeholder="请先填写脚本根目录"')}
       ${scrollField("sm-args", "脚本自启动参数", d.args, "可选；如 -x --mode=1；以路径开头（如 .\\app.exe?-args）时 ? 后为执行端参数")}
@@ -250,9 +247,9 @@ export async function openScriptModal(id = "", plugin = "") {
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        <div>${switchControl("sm-notify", "运行通知", "发送运行状态到通知渠道", d.notifyEnabled, "toggle-sm-flag", 'data-flag="notify"')}</div>
+        ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
       </div>
-      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；运行通知发送状态到通知渠道。</p>
+      <p class="muted helper-copy">游戏路径/模拟器ADB地址用于失败清理与重试恢复；启动游戏仅控制任务开始前是否主动启动；强制关闭控制任务结束或失败时的游戏清理；自动更新配置控制运行结束时是否同步用户配置。</p>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
@@ -278,10 +275,9 @@ export async function openScriptModal(id = "", plugin = "") {
           <textarea id="sm-judge-code" class="mono code-area" placeholder="输出一行 JSON：{&quot;status&quot;:&quot;success|failed&quot;,&quot;reason&quot;:&quot;原因&quot;,&quot;notifyText&quot;:&quot;可选&quot;,&quot;replaceConfigs&quot;:[&quot;相对script目录文件&quot;]}">${esc(d.judgeScript)}</textarea>
           <p class="muted helper-copy">输入含本次尝试日志段（JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 路径）；nexus.readFile 只读 config/script 目录、nexus.writeFile/nexus.listFiles 操作 script 目录；无输出或缺 status/reason 视为继续运行。</p>
         </div>
-        <div class="judge-actions${d.judgeScriptEnabled ? " judge-enabled" : ""}">
-          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
+        <div class="judge-actions">
           <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
-          ${switchControl("sm-autoupdate", "自动更新配置", "保存时同步专项配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
+          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
         </div>
       </div>
     </div>`;
@@ -316,17 +312,15 @@ export function syncScriptGhostState() {
   });
 }
 
-/** 自定义完成标志开关（按钮切换模式）：开启显示脚本区（隐藏关键字区），关闭反之；开启时上传按钮与判断脚本按钮交换位置。 */
+/** 自定义完成标志开关（按钮切换模式）：开启显示脚本区（隐藏关键字区），关闭反之。 */
 export function syncJudgeBox() {
   const enabled = $dom("#sm-mode-btn")?.getAttribute("aria-pressed") === "true";
   const kw = $dom("#sm-kw-box");
   const script = $dom("#sm-script-box");
   const upload = $dom("#sm-upload-btn");
-  const actions = document.querySelector(".judge-actions");
   if (kw) kw.hidden = enabled;
   if (script) script.hidden = !enabled;
   if (upload) upload.hidden = !enabled;
-  if (actions) actions.classList.toggle("judge-enabled", enabled);
 }
 
 /** 切换「使用判断脚本」按钮状态。 */
@@ -337,11 +331,15 @@ export function toggleJudgeMode() {
   syncJudgeBox();
 }
 
-/** 切换游戏/通知开关按钮状态（启动游戏｜强制关闭｜运行通知）。 */
+/** 切换游戏联动开关按钮状态（启动游戏｜强制关闭｜自动更新配置）。 */
 function toggleSmFlag(flag) {
   const btn = $dom("#sm-" + flag);
   if (!btn) return;
-  btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
+  const pressed = btn.getAttribute("aria-pressed") !== "true";
+  btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+  btn.dataset.state = pressed ? "on" : "off";
+  const stateText = btn.querySelector("[data-switch-state]");
+  if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
 }
 
 /** 上传判断脚本文件：读取内容填入代码框，按扩展名自动识别语言（.py=Python，其余=JavaScript）。 */
@@ -494,7 +492,6 @@ export async function saveScript() {
     forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
-    notifyEnabled: $dom("#sm-notify")?.getAttribute("aria-pressed") === "true" || !!scriptDraft.notifyEnabled,
     autoUpdateConfig: isSpecial ? true : ($dom("#sm-autoupdate")?.getAttribute("aria-pressed") === "true"),
   };
   try {

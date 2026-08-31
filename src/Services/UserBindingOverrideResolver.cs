@@ -13,6 +13,7 @@ internal static class UserBindingOverrideResolver
         {
             effective.Enabled = overrides.General.Enabled;
             effective.RunDays = overrides.General.RunDays;
+            effective.MaxSuccessfulRunsPerDay = overrides.General.MaxSuccessfulRunsPerDay;
         }
         if (overrides.Notification?.SyncEnabled == true)
         {

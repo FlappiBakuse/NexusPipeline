@@ -47,7 +47,7 @@ public class UserScriptBinding
 
     public bool PostRunOnFinalOnly { get; set; }
 
-    /// <summary>用户级脚本运行通知开关；与 ScriptInstance.NotifyEnabled 共同生效。</summary>
+    /// <summary>用户级脚本运行通知开关。</summary>
     public bool NotifyEnabled { get; set; } = true;
 
     /// <summary>SMTP 用户级收件人覆盖；为空时继承全局设置。</summary>
@@ -58,6 +58,9 @@ public class UserScriptBinding
     /// 0 = 不运行该脚本实例（视为不参与运行）；正数 = 运行且每日减 1，减至 0 后不再参与。
     /// </summary>
     public int RunDays { get; set; } = -1;
+
+    /// <summary>当天最多成功运行次数：-1 = 不限制；正数达到上限后跳过后续运行；0 为非法配置。</summary>
+    public int MaxSuccessfulRunsPerDay { get; set; } = -1;
 
     /// <summary>绑定是否实际参与运行：启用开关打开且运行天数未耗尽（0 = 不参与）。</summary>
     public bool Participates => Enabled && RunDays != 0;
@@ -75,6 +78,7 @@ public class UserScriptBinding
             NotifyEnabled = NotifyEnabled,
             SmtpTo = SmtpTo,
             RunDays = RunDays,
+            MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
         };
     }
 }

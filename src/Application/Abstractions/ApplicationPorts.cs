@@ -74,6 +74,8 @@ internal interface IHistoryStore
 {
     HistorySaveResult Save(RunRecord record, List<string> attemptLogs);
 
+    IReadOnlyDictionary<string, int> GetSuccessfulRunsByUser(DateTime date, string scriptInstanceId);
+
     void Cleanup(int retentionDays);
 }
 

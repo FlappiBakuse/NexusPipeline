@@ -32,6 +32,7 @@
 - `run_queue` 提交执行前经 `McpPolicy.ValidateQueueExecution` 复核队列快照的完成操作，任何非 `none` 动作返回 `dangerous_completion_action`。
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
 - MCP 网络边界独立于 Web 远程访问设置：仅 loopback、Host/Origin 校验、请求体上限 2 MiB。
+- 用户绑定的通用设置包含 `RunDays` 与 `MaxSuccessfulRunsPerDay`；后者使用 `-1` 表示不限制，达到正数上限后生成 `skipped` 历史记录。
 
 ## 维护规则
 

@@ -15,6 +15,7 @@ internal static class NotificationFormatter
         {
             "success" => $"运行成功（{record.ResultDetail}）",
             "cancelled" => "运行已取消",
+            "skipped" => $"运行已跳过（{record.ResultDetail}）",
             _ => $"运行失败（{record.ResultDetail}）",
         };
         var lines = new List<string>
@@ -50,6 +51,7 @@ internal static class NotificationFormatter
             {
                 "success" => $"成功（{record.ResultDetail}）",
                 "cancelled" => "已取消",
+                "skipped" => $"已跳过（{record.ResultDetail}）",
                 _ => $"失败（{record.ResultDetail}）",
             };
             lines.Add($"· {record.ScriptName}：{status}");

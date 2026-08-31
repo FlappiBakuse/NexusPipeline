@@ -52,6 +52,7 @@ function entryBadge(record) {
   if (status === "success") return '<span class="badge ok">✓ 完成</span>';
   if (status === "partial") return '<span class="badge warn">⚠ 部分完成</span>';
   if (status === "cancelled") return '<span class="badge warn">已取消</span>';
+  if (status === "skipped") return '<span class="badge blue">已跳过</span>';
   const reason = record.resultDetail ? `：${record.resultDetail}` : "";
   return `<span class="badge bad" title="${esc(reason)}">✕ 失败${esc(reason)}</span>`;
 }
@@ -381,7 +382,7 @@ export function historyRangeSearch(root = document.querySelector("[data-history-
 /** 左侧日期行点击：切换选中日期并加载当日记录。 */
 export async function historySelectDate(target) {
   const date = target.dataset.date;
-  if (!date || date === historySelectedDate) return;
+  if (!date || (date === historySelectedDate && !isHistoryMobile())) return;
   historySelectedDate = date;
   await loadDayRecords(state.routeToken);
 }

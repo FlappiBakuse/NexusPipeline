@@ -10,6 +10,11 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
     await page.locator('.new-script-chooser [data-action="open-script-type"][data-plugin=""]').click();
     const modal = page.locator(".modal");
     await expect(modal).toBeVisible();
+    const judgeMode = modal.locator("#sm-mode-btn");
+    await judgeMode.click();
+    const judgeUpload = modal.locator("#sm-upload-btn");
+    await expect(judgeUpload).toBeVisible();
+    await judgeMode.click();
     await modal.locator("#sm-name").fill("Smoke 普通脚本");
     await modal.locator("#sm-root").fill(fixture.root);
     await modal.locator("#sm-exe").fill(fixture.main);
@@ -207,15 +212,20 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     await expect(dialog.getByTestId("um-binding-card")).toHaveCount(1);
     const binding = dialog.getByTestId("um-binding-card").first();
     await binding.locator('[data-action="toggle-um-binding"]').click();
-    await binding.locator('[data-action="set-um-subview"][data-view="notify"]').click();
+    await expect(binding.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
+    await expect(binding.getByRole("heading", { name: "通知", exact: true })).toBeVisible();
+    await expect(binding.getByRole("heading", { name: "高级", exact: true })).toBeVisible();
+    await expect(binding.locator('[data-action="set-um-subview"]')).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "返回上级", exact: true })).toHaveCount(0);
     await dialog.getByLabel("SMTP 收件人", { exact: true }).fill("new@example.com");
-    await dialog.getByRole("button", { name: "返回上级", exact: true }).click();
+    await dialog.getByLabel("最多成功运行次数", { exact: true }).fill("2");
     await dialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(dialog).toBeHidden();
 
     const updated = await (await api("GET", `/api/users/${encodeURIComponent(user.id)}`)).json();
     const updatedBinding = updated.bindings.find(item => item.scriptInstanceId === script.id);
     expect(updatedBinding.smtpTo).toBe("new@example.com");
+    expect(updatedBinding.maxSuccessfulRunsPerDay).toBe(2);
   } finally {
     await api("DELETE", `/api/users/${encodeURIComponent(user.id)}`, { confirmName: user.name });
     await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);
