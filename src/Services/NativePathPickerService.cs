@@ -65,6 +65,19 @@ internal sealed class NativePathPickerService : IDisposable
         return completion.Task;
     }
 
+    internal static bool IsExistingDirectory(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        try
+        {
+            return Directory.Exists(path.Trim());
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     internal static string ResolveInitialDirectory(string? initialPath)
     {
         string fallback = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);

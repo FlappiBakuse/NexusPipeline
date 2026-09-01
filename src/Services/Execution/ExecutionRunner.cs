@@ -201,6 +201,7 @@ internal sealed class ExecutionRunner
                         exec,
                         skippedRecord,
                         new List<string>(),
+                        Array.Empty<RunScreenshot>(),
                         displayName);
                 }
                 else
@@ -217,6 +218,7 @@ internal sealed class ExecutionRunner
                         exec,
                         record,
                         session?.AttemptLogs ?? new List<string>(),
+                        session?.ScreenshotStore.SnapshotForHistory() ?? Array.Empty<RunScreenshot>(),
                         displayName);
                     if (successfulRunsByUser is not null
                         && string.Equals(publishedRecord.FinalStatus, "success", StringComparison.OrdinalIgnoreCase))
@@ -242,7 +244,9 @@ internal sealed class ExecutionRunner
                 }
                 if (session is not null && record is not null)
                 {
-                    RunScreenshot? selected = session.ScreenshotStore.SelectForNotification(record.NotifyScreenshotId);
+                    RunScreenshot? selected = session.ScreenshotStore.SelectForNotification(
+                        record.Attempts,
+                        record.NotifyScreenshotId);
                     if (selected is not null)
                     {
                         notificationImage = new NotificationImage(
@@ -343,13 +347,14 @@ internal sealed class ExecutionRunner
         RunningExecution exec,
         RunRecord record,
         List<string> attemptLogs,
+        IReadOnlyList<RunScreenshot> screenshots,
         string displayName)
     {
         _plugins?.EnrichHistory(record);
         HistorySaveResult result;
         try
         {
-            result = _history.Save(record, attemptLogs);
+            result = _history.Save(record, attemptLogs, screenshots);
         }
         catch (Exception ex)
         {
@@ -442,7 +447,7 @@ internal sealed class ExecutionRunner
                         FinalStatus = "failed",
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
-                    RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), queue.Name);
+                    RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedMissing);
                     exec.AddRecordAndIncrement(publishedMissing);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
@@ -489,7 +494,7 @@ internal sealed class ExecutionRunner
                         FinalStatus = "failed",
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
-                    RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), queue.Name);
+                    RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedSkipped);
                     exec.AddRecordAndIncrement(publishedSkipped);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
@@ -625,7 +630,7 @@ internal sealed class ExecutionRunner
         string displayName = string.IsNullOrWhiteSpace(user?.UserName)
             ? script.Name
             : $"{script.Name}（{user.UserName}）";
-        RunRecord published = PersistRecord(exec, record, new List<string>(), displayName);
+        RunRecord published = PersistRecord(exec, record, new List<string>(), Array.Empty<RunScreenshot>(), displayName);
         exec.AddRecordAndIncrement(published);
         return published;
     }

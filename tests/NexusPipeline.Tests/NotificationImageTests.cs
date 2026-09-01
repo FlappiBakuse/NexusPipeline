@@ -79,6 +79,69 @@ public sealed class NotificationImageTests
         Assert.Contains(Convert.ToBase64String(image.Data), allRequests, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task GenericWebhookExpandsImagePlaceholders()
+    {
+        await using var server = new CapturingHttpServer(1, "", 204);
+        var settings = new AppSettings
+        {
+            WebhookUrl = server.Url,
+            WebhookType = "generic",
+            WebhookTemplate = "{\"text\":{text},\"base64\":{imageBase64},\"uri\":{imageDataUri},\"name\":{imageFileName},\"type\":{imageContentType}}",
+            WebhookTimeout = 5,
+        };
+        var image = new NotificationImage(
+            "screenshot-generic",
+            "run-1-s1.jpg",
+            "image/jpeg",
+            new byte[] { 0x10, 0x20, 0x30 },
+            320,
+            240,
+            DateTimeOffset.Now);
+
+        bool ok = await WebhookSender.SendAsync(
+            settings,
+            "通知正文",
+            new OutboundHttpClientProvider(() => settings),
+            image);
+        byte[] request = await server.Completion;
+        string body = Encoding.UTF8.GetString(request);
+
+        Assert.True(ok);
+        Assert.Contains("\"text\":\"通知正文\"", body, StringComparison.Ordinal);
+        Assert.Contains($"\"base64\":\"{Convert.ToBase64String(image.Data)}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"\"uri\":\"data:image/jpeg;base64,{Convert.ToBase64String(image.Data)}\"", body, StringComparison.Ordinal);
+        Assert.Contains($"\"name\":\"{image.FileName}\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"type\":\"image/jpeg\"", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenericWebhookClearsImagePlaceholdersWithoutImage()
+    {
+        await using var server = new CapturingHttpServer(1, "", 204);
+        var settings = new AppSettings
+        {
+            WebhookUrl = server.Url,
+            WebhookType = "generic",
+            WebhookTemplate = "{\"text\":{text},\"base64\":{imageBase64},\"uri\":{imageDataUri},\"name\":{imageFileName},\"type\":{imageContentType}}",
+            WebhookTimeout = 5,
+        };
+
+        bool ok = await WebhookSender.SendAsync(
+            settings,
+            "普通通知",
+            new OutboundHttpClientProvider(() => settings));
+        byte[] request = await server.Completion;
+        string body = Encoding.UTF8.GetString(request);
+
+        Assert.True(ok);
+        Assert.Contains("\"text\":\"普通通知\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"base64\":\"\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"uri\":\"\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"name\":\"\"", body, StringComparison.Ordinal);
+        Assert.Contains("\"type\":\"\"", body, StringComparison.Ordinal);
+    }
+
     private sealed class CapturingHttpServer : IAsyncDisposable
     {
         private readonly TcpListener _listener;

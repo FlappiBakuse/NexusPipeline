@@ -14,6 +14,7 @@ internal static class SettingsCommands
     private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "webhookUrl", "webhookSecret", "smtpPassword", "proxyPassword", "accessToken",
+        "feishuAppSecret", "slackBotToken", "dingTalkAppSecret",
     };
 
     public static OperationResult<AppSettings> Update(JsonObject patch, string source = Audit.Web)
@@ -57,7 +58,8 @@ internal static class SettingsCommands
                     {
                         string key = secretKeyNode.Str();
                         string value = secretValueNode.Str();
-                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "proxyPassword" or "accessToken")
+                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "proxyPassword" or "accessToken"
+                            or "feishuAppSecret" or "slackBotToken" or "dingTalkAppSecret")
                         {
                             if (string.IsNullOrWhiteSpace(value))
                             {
@@ -235,6 +237,15 @@ internal static class SettingsCommands
             case "accessToken":
                 settings.AccessToken = encrypted;
                 break;
+            case "feishuAppSecret":
+                settings.FeishuAppSecret = encrypted;
+                break;
+            case "slackBotToken":
+                settings.SlackBotToken = encrypted;
+                break;
+            case "dingTalkAppSecret":
+                settings.DingTalkAppSecret = encrypted;
+                break;
         }
     }
 
@@ -256,6 +267,15 @@ internal static class SettingsCommands
                 break;
             case "accessToken":
                 settings.AccessToken = "";
+                break;
+            case "feishuAppSecret":
+                settings.FeishuAppSecret = "";
+                break;
+            case "slackBotToken":
+                settings.SlackBotToken = "";
+                break;
+            case "dingTalkAppSecret":
+                settings.DingTalkAppSecret = "";
                 break;
         }
     }

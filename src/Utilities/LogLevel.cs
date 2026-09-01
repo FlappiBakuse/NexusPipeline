@@ -35,7 +35,7 @@ internal static class LogLevelUtil
         {
             return fallback;
         }
-        string? token = ReadBracketToken(text);
+        string? token = ReadPipeToken(text) ?? ReadBracketToken(text);
         token ??= text.Split(':', 2)[0].Trim().TrimStart('[').TrimEnd(']').ToUpperInvariant();
         return token switch
         {
@@ -46,6 +46,25 @@ internal static class LogLevelUtil
             "FATAL" or "致命" => LogLevel.Fatal,
             _ => fallback,
         };
+    }
+
+    private static string? ReadPipeToken(string text)
+    {
+        if (!text.Contains('|', StringComparison.Ordinal))
+        {
+            return null;
+        }
+        foreach (string part in text.Split('|'))
+        {
+            string token = part.Trim().ToUpperInvariant();
+            if (token is "DEBUG" or "调试" or "INFO" or "INFORMATION" or "信息"
+                or "WARN" or "WARNING" or "警告" or "ERROR" or "ERR" or "错误"
+                or "FATAL" or "致命")
+            {
+                return token;
+            }
+        }
+        return null;
     }
 
     private static string? ReadBracketToken(string text)

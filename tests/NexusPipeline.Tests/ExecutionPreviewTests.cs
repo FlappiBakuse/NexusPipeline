@@ -18,10 +18,20 @@ public sealed class ExecutionPreviewTests
     [InlineData("[WARN] details", "Warn")]
     [InlineData("[ERROR] details", "Error")]
     [InlineData("[FATAL] details", "Fatal")]
+    [InlineData("2026-08-31 14:58:21 | INFO | 游戏启动", "Info")]
+    [InlineData("2026-08-31 14:58:21 | ERROR | 游戏启动失败", "Error")]
     [InlineData("ordinary output", "Info")]
     public void ParseObserved_MapsExplicitPrefixesAndUsesInfoFallback(string line, string expected)
     {
         Assert.Equal(Enum.Parse<LogLevel>(expected), LogLevelUtil.ParseObserved(line));
+    }
+
+    [Fact]
+    public void ConsoleDataIsPublishedOnlyWhenNoConfiguredLogPath()
+    {
+        Assert.True(ExecutionCoordinator.ShouldPublishConsoleData(""));
+        Assert.True(ExecutionCoordinator.ShouldPublishConsoleData("  "));
+        Assert.False(ExecutionCoordinator.ShouldPublishConsoleData("C:\\logs\\game.log"));
     }
 
     [Fact]

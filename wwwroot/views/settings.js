@@ -112,12 +112,20 @@ function networkSettingsMarkup(settings) {
 function notificationSettingsMarkup(settings) {
   const body = `<div class="notification-settings">
     <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook 通知</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? "已启用" : "已禁用"}</span></button>
-    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", "启用 Webhook", "发送运行状态到 Webhook 服务", settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", "发送截图", "脚本完成通知附带所选截图；部分 Webhook 协议可能不支持图片；队列汇总通知不附图", settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", "Webhook 类型", settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-generic-template"')} ${valueField("st-whtimeout", "超时秒数", settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="留空时保持已保存的 Webhook 地址不变。"><label class="field-label" for="st-whurl">Webhook 地址 ${settings.webhookUrl ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? "已设置，留空不变" : "https://…"}"></div><div class="field" data-help="留空时保持已保存的 Webhook 签名密钥不变。"><label class="field-label" for="st-whsec">Webhook 签名密钥 ${settings.webhookSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? "已设置，留空不变" : ""}"></div></div><div id="st-whtpl-box" class="field" data-help="JSON 模板中的 {text} 会替换为通知正文。" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">generic 自定义模板（JSON）</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
+    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", "启用 Webhook", "发送运行状态到 Webhook 服务", settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", "发送截图", "脚本完成通知附带所选截图；队列汇总通知不附图", settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", "Webhook 类型", settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-webhook-fields"')} ${valueField("st-whtimeout", "超时秒数", settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="留空时保持已保存的 Webhook 地址不变。"><label class="field-label" for="st-whurl">Webhook 地址 ${settings.webhookUrl ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? "已设置，留空不变" : "https://…"}"></div><div class="field" data-help="留空时保持已保存的 Webhook 签名密钥不变。"><label class="field-label" for="st-whsec">Webhook 签名密钥 ${settings.webhookSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? "已设置，留空不变" : ""}"></div></div>${webhookAdvancedMarkup(settings)}<div id="st-whtpl-box" class="field" data-help="JSON 模板中的 {text}、{imageBase64}、{imageDataUri}、{imageFileName}、{imageContentType} 会替换为对应值。" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">generic 自定义模板（JSON）</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
     <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP 邮件通知</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? "已启用" : "已禁用"}</span></button>
     <div id="panel-smtp" class="panel-body" hidden><div class="settings-list">${switchControl("st-smtp-enabled", "启用 SMTP", "发送运行状态到邮箱", settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}${switchControl("st-smtp-screenshot", "发送截图", "脚本完成通知附带所选截图；队列汇总通知不附图", settings.smtpScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-smtp-screenshot"')}</div><div class="form-grid three">${valueField("st-host", "SMTP 服务器", settings.smtpHost)}${valueField("st-port2", "端口", settings.smtpPort, "number")}${selectField("st-secure", "加密方式", settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", "账号", settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">授权码 ${settings.smtpPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? "（已设置，留空不变）" : ""}"></div></div><div class="form-grid">${valueField("st-to", "收件人（逗号分隔）", settings.smtpTo)}${valueField("st-from", "发件人显示地址（留空=账号）", settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", "主题前缀", settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", "超时秒数", settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
     <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">测试通知</button></div>
   </div>`;
   return body.replaceAll("▾", icon("chevronDown", "icon panel-arrow-icon")).replaceAll("▸", icon("chevronRight", "icon panel-arrow-icon"));
+}
+
+function webhookAdvancedMarkup(settings) {
+  const type = settings.webhookType || "feishu";
+  const hidden = name => type === name ? "" : " hidden";
+  return `<div class="webhook-advanced-fields" data-webhook-advanced="feishu"${hidden("feishu")}><div class="form-grid">${valueField("st-feishu-appid", "飞书 App ID", settings.feishuAppId || "", "text", "", "用于上传图片的自建应用凭据。")}<div class="field" data-help="留空时保持已保存的 App Secret 不变。"><label class="field-label" for="st-feishu-secret">飞书 App Secret ${settings.feishuAppSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-feishu-secret" type="password" placeholder="${settings.feishuAppSecret ? "已设置，留空不变" : ""}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="slack"${hidden("slack")}><div class="form-grid">${valueField("st-slack-channel", "Slack Channel ID", settings.slackChannelId || "", "text", "", "机器人需要已加入该频道。")}<div class="field" data-help="留空时保持已保存的 Bot Token 不变。"><label class="field-label" for="st-slack-token">Slack Bot Token ${settings.slackBotToken ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-slack-token" type="password" placeholder="${settings.slackBotToken ? "已设置，留空不变" : "xoxb-…"}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="dingtalk"${hidden("dingtalk")}><div class="form-grid">${valueField("st-dingtalk-key", "钉钉 App Key", settings.dingTalkAppKey || "")}${valueField("st-dingtalk-robot", "Robot Code", settings.dingTalkRobotCode || "")}</div><div class="form-grid">${valueField("st-dingtalk-conversation", "Open Conversation ID", settings.dingTalkOpenConversationId || "")}<div class="field" data-help="留空时保持已保存的 App Secret 不变。"><label class="field-label" for="st-dingtalk-secret">钉钉 App Secret ${settings.dingTalkAppSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-dingtalk-secret" type="password" placeholder="${settings.dingTalkAppSecret ? "已设置，留空不变" : ""}"></div></div></div>`;
 }
 
 /** 更新区：设置（自动检查/渠道/镜像源）与检查 / 下载 / 应用状态区。 */
@@ -309,9 +317,13 @@ function togglePanel(panelId, trigger) {
   }
 }
 
-function toggleGenericTemplate() {
+function toggleWebhookFields() {
   const box = $("#st-whtpl-box"); if (!box) return;
   box.toggleAttribute("hidden", $("#st-whtype")?.value !== "generic");
+  const type = $("#st-whtype")?.value || "";
+  document.querySelectorAll("[data-webhook-advanced]").forEach(field => {
+    field.toggleAttribute("hidden", field.dataset.webhookAdvanced !== type);
+  });
 }
 
 async function saveNotifySettings() {
@@ -323,6 +335,11 @@ async function saveNotifySettings() {
     webhookType: $("#st-whtype")?.value || "generic",
     webhookTimeout: +($("#st-whtimeout")?.value || 30),
     webhookTemplate: $("#st-whtpl")?.value.trim() || "",
+    feishuAppId: $("#st-feishu-appid")?.value.trim() || "",
+    slackChannelId: $("#st-slack-channel")?.value.trim() || "",
+    dingTalkAppKey: $("#st-dingtalk-key")?.value.trim() || "",
+    dingTalkRobotCode: $("#st-dingtalk-robot")?.value.trim() || "",
+    dingTalkOpenConversationId: $("#st-dingtalk-conversation")?.value.trim() || "",
     smtpHost: $("#st-host")?.value.trim() || "",
     smtpPort: +($("#st-port2")?.value || 465),
     smtpSecure: $("#st-secure")?.value || "auto",
@@ -335,6 +352,9 @@ async function saveNotifySettings() {
   const secrets = [
     ["webhookUrl", $("#st-whurl")?.value.trim() || "", "st-whurl"],
     ["webhookSecret", $("#st-whsec")?.value.trim() || "", "st-whsec"],
+    ["feishuAppSecret", $("#st-feishu-secret")?.value.trim() || "", "st-feishu-secret"],
+    ["slackBotToken", $("#st-slack-token")?.value.trim() || "", "st-slack-token"],
+    ["dingTalkAppSecret", $("#st-dingtalk-secret")?.value.trim() || "", "st-dingtalk-secret"],
     ["smtpPassword", $("#st-pwd")?.value.trim() || "", "st-pwd"],
   ].filter(([, value]) => value.length > 0);
   let data = await api("PUT", "/api/settings", payload);
@@ -478,7 +498,7 @@ function bindAutoSave() {
       autoSave();
     });
   });
-  bindSettingsFields(["st-whtype", "st-whtimeout", "st-whurl", "st-whsec", "st-whtpl", "st-host", "st-port2", "st-secure", "st-user", "st-pwd", "st-to", "st-from", "st-subject", "st-smtp-timeout"], queueNotifySave);
+  bindSettingsFields(["st-whtype", "st-whtimeout", "st-whurl", "st-whsec", "st-feishu-appid", "st-feishu-secret", "st-slack-channel", "st-slack-token", "st-dingtalk-key", "st-dingtalk-secret", "st-dingtalk-robot", "st-dingtalk-conversation", "st-whtpl", "st-host", "st-port2", "st-secure", "st-user", "st-pwd", "st-to", "st-from", "st-subject", "st-smtp-timeout"], queueNotifySave);
   bindSettingsFields(["st-update-channel", "st-update-source"], queueUpdateSave);
   bindSettingsFields(["st-proxy-url", "st-proxy-user", "st-proxy-pwd"], queueNetworkSave);
 }
@@ -606,7 +626,8 @@ export const actions = {
   },
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
   "toggle-panel": target => togglePanel(target.dataset.panel, target),
-  "toggle-generic-template": () => toggleGenericTemplate(),
+  "toggle-webhook-fields": () => toggleWebhookFields(),
+  "toggle-generic-template": () => toggleWebhookFields(),
   "toggle-proxy-fields": () => toggleProxyFields(),
   "toggle-notify-flag": target => {
     const btn = $("#" + target.dataset.flag);

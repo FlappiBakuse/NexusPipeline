@@ -8,7 +8,7 @@ namespace NexusPipeline.Tests;
 public sealed class RunScreenshotStoreTests
 {
     [Fact]
-    public async Task StoreUsesFifoCapacityAndLatestDefaultSelection()
+    public async Task StoreUsesPerAttemptFifoCapacityAndAttemptScopedSelection()
     {
         byte[] jpeg = MakeJpeg(640, 480);
         int calls = 0;
@@ -20,17 +20,29 @@ public sealed class RunScreenshotStoreTests
 
         for (int index = 1; index <= RunScreenshotStore.Capacity + 1; index++)
         {
-            RunScreenshot? captured = await store.CaptureAsync(index, "judge-manual", CancellationToken.None);
+            RunScreenshot? captured = await store.CaptureAsync(1, "judge-manual", CancellationToken.None);
+            Assert.NotNull(captured);
+        }
+        for (int index = 1; index <= 2; index++)
+        {
+            RunScreenshot? captured = await store.CaptureAsync(2, "judge-manual", CancellationToken.None);
             Assert.NotNull(captured);
         }
 
-        Assert.Equal(RunScreenshotStore.Capacity, store.Metadata.Count);
-        Assert.Equal(2, store.Metadata[0].Ordinal);
-        Assert.Equal(17, store.Metadata[^1].Ordinal);
-        Assert.Equal("screenshot-0000000017", store.SelectForNotification(null)?.Id);
+        Assert.Equal(RunScreenshotStore.Capacity + 2, store.Metadata.Count);
+        Assert.Equal(RunScreenshotStore.Capacity, store.MetadataForAttempt(1).Count);
+        Assert.Equal(2, store.MetadataForAttempt(1)[0].Ordinal);
+        Assert.Equal(9, store.MetadataForAttempt(1)[^1].Ordinal);
+        Assert.Equal(2, store.MetadataForAttempt(2).Count);
+        Assert.Equal(10, store.MetadataForAttempt(2)[0].Ordinal);
+        Assert.Equal(11, store.MetadataForAttempt(2)[^1].Ordinal);
+        Assert.Equal("screenshot-0000000009", store.SelectForNotification(1, null)?.Id);
+        Assert.Equal("screenshot-0000000011", store.SelectForNotification(2, null)?.Id);
         Assert.Null(store.SelectForNotification("screenshot-0000000001"));
-        Assert.Equal("screenshot-0000000002", store.SelectForNotification("screenshot-0000000002")?.Id);
-        Assert.Equal(RunScreenshotStore.Capacity + 1, calls);
+        Assert.Null(store.SelectForNotification(1, "screenshot-0000000010"));
+        Assert.Equal("screenshot-0000000002", store.SelectForNotification(1, "screenshot-0000000002")?.Id);
+        Assert.Equal("screenshot-0000000011", store.SelectForNotification(null)?.Id);
+        Assert.Equal(RunScreenshotStore.Capacity + 3, calls);
     }
 
     [Fact]
@@ -48,7 +60,7 @@ public sealed class RunScreenshotStoreTests
         fail = true;
         Assert.Null(await store.CaptureAsync(1, "judge-success", CancellationToken.None));
         Assert.Single(store.Metadata);
-        Assert.Equal(first!.Id, store.SelectForNotification(null)?.Id);
+        Assert.Equal(first!.Id, store.SelectForNotification(1, null)?.Id);
 
         store.Dispose();
         Assert.Empty(store.Metadata);

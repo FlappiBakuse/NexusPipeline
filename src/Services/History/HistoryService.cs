@@ -1,9 +1,11 @@
-﻿using System.Text;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
-using NexusPipeline.App.Abstractions;
 
 namespace NexusPipeline.Services;
 
@@ -20,69 +22,199 @@ internal sealed record HistoryUserSummary(
 
 internal class HistoryService : IHistoryStore
 {
+    private const int ScreenshotCapacity = 8;
     private static readonly object Sync = new();
 
-    /// <summary>保存运行历史（精简）：.json 纯运行状态 + 按尝试分批 .log（{base}-{尝试号}.log）。</summary>
-    public HistorySaveResult Save(RunRecord record, List<string> attemptLogs)
+    private readonly string _historyDir;
+    private readonly string _outputDir;
+    private readonly string _logDir;
+
+    public HistoryService(string? historyDir = null, string? outputDir = null, string? logDir = null)
+    {
+        _historyDir = Path.GetFullPath(historyDir ?? AppPaths.HistoryDir);
+        _outputDir = Path.GetFullPath(outputDir ?? AppPaths.OutputDir);
+        _logDir = Path.GetFullPath(logDir ?? AppPaths.LogDir);
+    }
+
+    /// <summary>
+    /// 将旧版 /history/YYYY-MM-DD/*.json 与对应日志迁移到
+    /// /history/YYYY-MM-DD/用户/HH-mm-ss/。迁移采用临时目录和复制提交，源文件在提交成功后才清理；
+    /// 失败时保留旧文件，下一次启动仍可继续处理。
+    /// </summary>
+    public void MigrateLegacy()
+    {
+        lock (Sync)
+        {
+            if (!Directory.Exists(_historyDir))
+            {
+                return;
+            }
+
+            foreach (string dayDir in Directory.GetDirectories(_historyDir))
+            {
+                string dayName = Path.GetFileName(dayDir);
+                if (!DateTime.TryParseExact(
+                        dayName,
+                        "yyyy-MM-dd",
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out _))
+                {
+                    continue;
+                }
+                MigrateLegacyDay(dayDir);
+            }
+        }
+    }
+
+    /// <summary>保存运行历史：每个运行拥有独立目录，JSON、Attempt 日志和截图一起提交。</summary>
+    public HistorySaveResult Save(
+        RunRecord record,
+        List<string> attemptLogs,
+        IReadOnlyList<RunScreenshot> screenshots)
     {
         if (record.StartTime == DateTime.MinValue)
         {
             return new HistorySaveResult(record.Clone(), null);
         }
+
         RunRecord persisted = record.Clone();
+        persisted.AttemptDetails ??= new List<RunAttempt>();
+        attemptLogs ??= new List<string>();
+        string? temporaryDir = null;
         try
         {
             lock (Sync)
             {
-                string dayDir = Path.Combine(AppPaths.HistoryDir, persisted.StartTime.ToString("yyyy-MM-dd"));
-                Directory.CreateDirectory(dayDir);
-                string baseName = persisted.StartTime.ToString("HH-mm-ss");
-                string jsonPath = FindFreePath(dayDir, baseName, ".json");
-                string jsonBase = Path.GetFileNameWithoutExtension(jsonPath);
-                persisted.LogFile = Path.GetFileName(jsonPath);
-                for (int i = 0; i < persisted.AttemptDetails.Count && i < attemptLogs.Count; i++)
+                string dateName = persisted.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                string dayDir = Path.Combine(_historyDir, dateName);
+                string userDirName = SafeSegment(persisted.UserName, "未指定用户");
+                string userDir = Path.Combine(dayDir, userDirName);
+                Directory.CreateDirectory(userDir);
+
+                string baseName = persisted.StartTime.ToString("HH-mm-ss", CultureInfo.InvariantCulture);
+                string runDirName = FindFreeDirectoryName(userDir, baseName);
+                string finalDir = Path.Combine(userDir, runDirName);
+                temporaryDir = Path.Combine(userDir, $".{runDirName}.{Guid.NewGuid():N}.tmp");
+                Directory.CreateDirectory(temporaryDir);
+
+                persisted.HistoryDirectory = Path.Combine(userDirName, runDirName);
+                persisted.LogFile = $"{baseName}.json";
+
+                IReadOnlyList<RunScreenshot> historyScreenshots = screenshots ?? Array.Empty<RunScreenshot>();
+                foreach (RunAttempt attempt in persisted.AttemptDetails)
                 {
-                    string attemptLogName = $"{jsonBase}-{persisted.AttemptDetails[i].Number}.log";
-                    persisted.AttemptDetails[i].LogFile = attemptLogName;
-                    string attemptLogText = string.IsNullOrWhiteSpace(attemptLogs[i])
-                        ? "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine
-                        : attemptLogs[i];
-                    File.WriteAllText(Path.Combine(dayDir, attemptLogName), attemptLogText, new UTF8Encoding(true));
+                    int attemptNumber = Math.Max(1, attempt.Number);
+                    string logName = $"{baseName}-{attemptNumber}.log";
+                    attempt.LogFile = logName;
+                    string logText = attempt.Number > 0 && attempt.Number <= attemptLogs.Count
+                        ? attemptLogs[attempt.Number - 1]
+                        : "";
+                    if (string.IsNullOrWhiteSpace(logText))
+                    {
+                        logText = "（未配置日志路径或未监控到脚本日志）" + Environment.NewLine;
+                    }
+                    File.WriteAllText(
+                        Path.Combine(temporaryDir, logName),
+                        logText,
+                        new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+                    List<RunScreenshot> attemptScreenshots = historyScreenshots
+                        .Where(item => item.AttemptNumber == attemptNumber)
+                        .OrderBy(item => item.Ordinal)
+                        .TakeLast(ScreenshotCapacity)
+                        .ToList();
+                    attempt.Screenshots = new List<RunHistoryScreenshot>(attemptScreenshots.Count);
+                    for (int index = 0; index < attemptScreenshots.Count; index++)
+                    {
+                        RunScreenshot screenshot = attemptScreenshots[index];
+                        string imageName = $"{baseName}-{attemptNumber}-s{index + 1}.jpg";
+                        File.WriteAllBytes(Path.Combine(temporaryDir, imageName), screenshot.Data);
+                        attempt.Screenshots.Add(new RunHistoryScreenshot
+                        {
+                            Id = screenshot.Id,
+                            FileName = imageName,
+                            CapturedAt = screenshot.CapturedAt,
+                            Width = screenshot.Width,
+                            Height = screenshot.Height,
+                            Source = screenshot.Source,
+                            Trigger = screenshot.Trigger,
+                            Ordinal = screenshot.Ordinal,
+                        });
+                    }
                 }
-                // RunRecord JSON 是提交标记：尝试日志全部写完后才原子替换 JSON。
-                JsonUtil.WriteAtomic(jsonPath, JsonSerializer.Serialize(persisted, JsonOpts.Indented));
+
+                // JSON 是运行目录的提交标记：全部日志和图片写入临时目录后才生成。
+                JsonUtil.WriteAtomic(
+                    Path.Combine(temporaryDir, persisted.LogFile),
+                    JsonSerializer.Serialize(persisted, JsonOpts.Indented));
+                Directory.Move(temporaryDir, finalDir);
+                temporaryDir = null;
             }
             return new HistorySaveResult(persisted.Clone(), null);
         }
         catch (Exception ex)
         {
+            if (temporaryDir is not null)
+            {
+                TryDeleteTemporaryDirectory(temporaryDir);
+            }
             Logger.Warn($"[警告] 保存运行历史失败：{ex.Message}");
             return new HistorySaveResult(persisted.Clone(), $"保存运行历史失败：{ex.Message}");
         }
     }
 
-    /// <summary>读取某天的运行记录：直接扫描 .json 目录（起无 jsonl 索引）。</summary>
-    private static List<RunRecord> ReadDayRecords(DateTime date)
+    /// <summary>兼容只保存状态与日志的内部调用。</summary>
+    public HistorySaveResult Save(RunRecord record, List<string> attemptLogs) =>
+        Save(record, attemptLogs, Array.Empty<RunScreenshot>());
+
+    /// <summary>读取某天的运行记录；只识别新的「用户/运行目录」两级结构。</summary>
+    private List<RunRecord> ReadDayRecords(DateTime date)
     {
         var records = new List<RunRecord>();
-        string dayDir = Path.Combine(AppPaths.HistoryDir, date.ToString("yyyy-MM-dd"));
+        string dayDir = Path.Combine(_historyDir, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
         if (!Directory.Exists(dayDir))
         {
             return records;
         }
-        foreach (string file in Directory.GetFiles(dayDir, "*.json"))
+
+        foreach (string userDir in Directory.GetDirectories(dayDir))
         {
-            try
+            if (Path.GetFileName(userDir).StartsWith(".", StringComparison.Ordinal))
             {
-                RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
-                if (record is not null)
-                {
-                    records.Add(record);
-                }
+                continue;
             }
-            catch (Exception ex)
+            foreach (string runDir in Directory.GetDirectories(userDir))
             {
-                Logger.Debug($"历史记录文件解析失败已跳过（{file}）：{ex.Message}");
+                if (Path.GetFileName(runDir).StartsWith(".", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                foreach (string file in Directory.GetFiles(runDir, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    try
+                    {
+                        RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
+                        if (record is null)
+                        {
+                            continue;
+                        }
+                        if (string.IsNullOrWhiteSpace(record.HistoryDirectory))
+                        {
+                            record.HistoryDirectory = Path.GetRelativePath(dayDir, runDir);
+                        }
+                        if (string.IsNullOrWhiteSpace(record.LogFile))
+                        {
+                            record.LogFile = Path.GetFileName(file);
+                        }
+                        record.AttemptDetails ??= new List<RunAttempt>();
+                        records.Add(record);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"历史记录文件解析失败已跳过（{file}）：{ex.Message}");
+                    }
+                }
             }
         }
         return records;
@@ -113,25 +245,7 @@ internal class HistoryService : IHistoryStore
             .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
     }
 
-    private static string FindFreePath(string directory, string baseName, string extension)
-    {
-        string candidate = Path.Combine(directory, baseName + extension);
-        if (!File.Exists(candidate))
-        {
-            return candidate;
-        }
-        for (int i = 1; i < 1000; i++)
-        {
-            candidate = Path.Combine(directory, $"{baseName}-{i}{extension}");
-            if (!File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-        return Path.Combine(directory, $"{baseName}-{Guid.NewGuid().ToString("N")[..6]}{extension}");
-    }
-
-    /// <summary>按日期聚合当天实际出现过的运行用户；仅返回聚合结果，明细由 Query 的 userKey 过滤查询。</summary>
+    /// <summary>按日期聚合当天实际出现过的运行用户。</summary>
     public List<HistoryUserSummary> QueryUsers(DateTime date, string? scriptId = null, string? queueId = null)
     {
         lock (Sync)
@@ -256,8 +370,7 @@ internal class HistoryService : IHistoryStore
         return status.Trim().ToLowerInvariant();
     }
 
-    /// <summary>按 Id 查找历史记录：默认窗口取保留天数上限：此前固定 31 天，与保留上限
-    /// （固定上限 180 天）不一致——超出窗口的记录点详情 404；显式传 days 时沿用原语义。</summary>
+    /// <summary>按 Id 查找历史记录；默认窗口与历史保留上限一致。</summary>
     public RunRecord? FindById(string id, int days = 0)
     {
         if (days <= 0)
@@ -281,36 +394,25 @@ internal class HistoryService : IHistoryStore
         return null;
     }
 
-    /// <summary>读取某次尝试的脚本日志（.log 按尝试分批文件）。</summary>
+    /// <summary>读取某次尝试的脚本日志。</summary>
     public (string LogText, int TotalLines)? ReadScriptLog(RunRecord record, int attemptNo)
     {
-        RunAttempt? attempt = record.AttemptDetails.FirstOrDefault(a => a.Number == attemptNo);
-        return attempt is null ? null : ReadDayFile(record, attempt.LogFile);
+        RunAttempt? attempt = (record.AttemptDetails ?? new List<RunAttempt>()).FirstOrDefault(a => a.Number == attemptNo);
+        string? text = attempt is null ? null : ReadRunFile(record, attempt.LogFile);
+        return text is null ? null : (text, CountLines(text));
     }
 
-    private static (string LogText, int TotalLines)? ReadDayFile(RunRecord record, string attemptLogFile)
+    /// <summary>读取并校验历史截图；只允许访问记录元数据登记的文件。</summary>
+    public byte[]? ReadScreenshot(RunRecord record, int attemptNo, string screenshotId)
     {
-        if (string.IsNullOrWhiteSpace(attemptLogFile))
+        if (string.IsNullOrWhiteSpace(screenshotId))
         {
             return null;
         }
-        try
-        {
-            string dayDir = Path.Combine(AppPaths.HistoryDir, record.StartTime.ToString("yyyy-MM-dd"));
-            string target = Path.Combine(dayDir, Path.GetFileName(attemptLogFile));
-            if (!File.Exists(target))
-            {
-                return null;
-            }
-            string text = File.ReadAllText(target, Encoding.UTF8);
-            int lines = text.Count(c => c == '\n') + (text.Length == 0 ? 0 : 1);
-            return (text, lines);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 读取历史文件失败：{ex.Message}");
-            return null;
-        }
+        RunAttempt? attempt = (record.AttemptDetails ?? new List<RunAttempt>()).FirstOrDefault(a => a.Number == attemptNo);
+        RunHistoryScreenshot? screenshot = attempt?.Screenshots?.FirstOrDefault(item =>
+            string.Equals(item.Id, screenshotId.Trim(), StringComparison.OrdinalIgnoreCase));
+        return screenshot is null ? null : ReadRunBytes(record, screenshot.FileName);
     }
 
     public List<RunRecord> Recent(int days = 3)
@@ -328,62 +430,299 @@ internal class HistoryService : IHistoryStore
         DateTime cutoff = DateTime.Today.AddDays(-(retentionDays - 1));
         int removed = 0;
 
-        // （P4）：与 Save 共享 Sync 锁——此前无锁时删除中的 dayDir 若被 Save 的 CreateDirectory 重建，
-        // 递归删除会清掉刚写入的历史文件（历史丢失）。
         lock (Sync)
         {
-        if (Directory.Exists(AppPaths.HistoryDir))
-        {
-            foreach (string directory in Directory.GetDirectories(AppPaths.HistoryDir))
+            if (Directory.Exists(_historyDir))
             {
-                string name = Path.GetFileName(directory);
-                if (DateTime.TryParseExact(name, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime dirDate)
-                    && dirDate < cutoff)
+                foreach (string directory in Directory.GetDirectories(_historyDir))
                 {
-                    try
+                    string name = Path.GetFileName(directory);
+                    if (DateTime.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dirDate)
+                        && dirDate < cutoff)
                     {
-                        Directory.Delete(directory, recursive: true);
-                        removed++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[警告] 删除过期历史目录失败：{ex.Message}");
+                        try
+                        {
+                            Directory.Delete(directory, recursive: true);
+                            removed++;
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[警告] 删除过期历史目录失败：{ex.Message}");
+                        }
                     }
                 }
             }
-        }
 
-        foreach (string directory in new[] { AppPaths.OutputDir, AppPaths.LogDir })
-        {
-            if (!Directory.Exists(directory))
+            foreach (string directory in new[] { _outputDir, _logDir })
             {
-                continue;
-            }
-            foreach (string file in Directory.GetFiles(directory))
-            {
-                DateTime fileDate;
-                try
-                {
-                    fileDate = File.GetLastWriteTime(file).Date;
-                }
-                catch
+                if (!Directory.Exists(directory))
                 {
                     continue;
                 }
-                if (fileDate < cutoff)
+                foreach (string file in Directory.GetFiles(directory))
                 {
+                    DateTime fileDate;
                     try
                     {
-                        File.Delete(file);
-                        removed++;
+                        fileDate = File.GetLastWriteTime(file).Date;
                     }
                     catch
                     {
+                        continue;
+                    }
+                    if (fileDate < cutoff)
+                    {
+                        try
+                        {
+                            File.Delete(file);
+                            removed++;
+                        }
+                        catch
+                        {
+                        }
                     }
                 }
             }
         }
-        }
         Logger.Info($"清理完成，共删除 {removed} 个过期项。");
+    }
+
+    private void MigrateLegacyDay(string dayDir)
+    {
+        string[] jsonFiles = Directory.GetFiles(dayDir, "*.json", SearchOption.TopDirectoryOnly);
+        var claimedLogs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string jsonFile in jsonFiles)
+        {
+            RunRecord? record;
+            try
+            {
+                record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(jsonFile), JsonOpts.Default);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
+                continue;
+            }
+            if (record is null)
+            {
+                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：JSON 为空。");
+                continue;
+            }
+            record.AttemptDetails ??= new List<RunAttempt>();
+
+            string userName = SafeSegment(record.UserName, "未指定用户");
+            string userDir = Path.Combine(dayDir, userName);
+            Directory.CreateDirectory(userDir);
+            string baseName = Path.GetFileNameWithoutExtension(jsonFile);
+            string runDirName = FindFreeDirectoryName(userDir, baseName);
+            string finalDir = Path.Combine(userDir, runDirName);
+            string temporaryDir = Path.Combine(userDir, $".{runDirName}.{Guid.NewGuid():N}.tmp");
+            var sourceLogs = new List<string>();
+            var referencedLogs = new List<(RunAttempt Attempt, string Source, string FileName)>();
+            foreach (RunAttempt attempt in record.AttemptDetails)
+            {
+                string oldLogName = Path.GetFileName(attempt.LogFile);
+                if (string.IsNullOrWhiteSpace(oldLogName))
+                {
+                    oldLogName = $"{baseName}-{Math.Max(1, attempt.Number)}.log";
+                }
+                string sourceLog = Path.Combine(dayDir, oldLogName);
+                if (IsDirectChild(dayDir, sourceLog))
+                {
+                    string fullSourceLog = Path.GetFullPath(sourceLog);
+                    claimedLogs.Add(fullSourceLog);
+                    referencedLogs.Add((attempt, fullSourceLog, oldLogName));
+                }
+            }
+            try
+            {
+                Directory.CreateDirectory(temporaryDir);
+                foreach ((RunAttempt attempt, string sourceLog, string oldLogName) in referencedLogs)
+                {
+                    attempt.LogFile = oldLogName;
+                    if (!File.Exists(sourceLog))
+                    {
+                        continue;
+                    }
+                    File.Copy(sourceLog, Path.Combine(temporaryDir, oldLogName));
+                    sourceLogs.Add(sourceLog);
+                }
+                record.HistoryDirectory = Path.Combine(userName, runDirName);
+                record.LogFile = Path.GetFileName(jsonFile);
+                record.AttemptDetails.ForEach(attempt => attempt.Screenshots ??= new List<RunHistoryScreenshot>());
+                JsonUtil.WriteAtomic(
+                    Path.Combine(temporaryDir, record.LogFile),
+                    JsonSerializer.Serialize(record, JsonOpts.Indented));
+                Directory.Move(temporaryDir, finalDir);
+
+                File.Delete(jsonFile);
+                foreach (string sourceLog in sourceLogs)
+                {
+                    TryDeleteFile(sourceLog);
+                }
+                Logger.Info($"已迁移旧历史：{Path.Combine(userName, runDirName)}");
+            }
+            catch (Exception ex)
+            {
+                TryDeleteTemporaryDirectory(temporaryDir);
+                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
+            }
+        }
+
+        // 没有 JSON 所属关系的旧日志仍从日期目录移出，避免继续混在旧协议根层。
+        foreach (string orphan in Directory.GetFiles(dayDir, "*.log", SearchOption.TopDirectoryOnly))
+        {
+            if (claimedLogs.Contains(Path.GetFullPath(orphan)) || !File.Exists(orphan))
+            {
+                continue;
+            }
+            try
+            {
+                string userDir = Path.Combine(dayDir, "未指定用户");
+                Directory.CreateDirectory(userDir);
+                string stem = SafeSegment(Path.GetFileNameWithoutExtension(orphan), "孤立日志");
+                string runDir = FindFreeDirectoryName(userDir, $"孤立日志-{stem}");
+                string targetDir = Path.Combine(userDir, runDir);
+                Directory.CreateDirectory(targetDir);
+                File.Move(orphan, Path.Combine(targetDir, Path.GetFileName(orphan)));
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 孤立历史日志迁移失败，保留源文件（{orphan}）：{ex.Message}");
+            }
+        }
+    }
+
+    private string? ReadRunFile(RunRecord record, string fileName)
+    {
+        byte[]? bytes = ReadRunBytes(record, fileName);
+        return bytes is null ? null : Encoding.UTF8.GetString(bytes);
+    }
+
+    private byte[]? ReadRunBytes(RunRecord record, string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(record.HistoryDirectory) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+        try
+        {
+            string dayDir = Path.Combine(_historyDir, record.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            string runDir = ResolveWithin(dayDir, record.HistoryDirectory);
+            string target = ResolveWithin(runDir, Path.GetFileName(fileName));
+            if (!Directory.Exists(runDir) || !File.Exists(target))
+            {
+                return null;
+            }
+            return File.ReadAllBytes(target);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 读取历史文件失败：{ex.Message}");
+            return null;
+        }
+    }
+
+    private static string ResolveWithin(string root, string relative)
+    {
+        string rootFull = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(Path.Combine(root, relative));
+        if (!full.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException("历史文件路径越界");
+        }
+        return full;
+    }
+
+    private static bool IsDirectChild(string parent, string child)
+    {
+        string parentFull = Path.GetFullPath(parent).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        string childFull = Path.GetFullPath(child);
+        string relative = childFull.StartsWith(parentFull, StringComparison.OrdinalIgnoreCase)
+            ? childFull[parentFull.Length..]
+            : "";
+        return relative.Length > 0
+            && !relative.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            && !relative.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static string FindFreeDirectoryName(string parent, string baseName)
+    {
+        string candidate = Path.Combine(parent, baseName);
+        if (!Directory.Exists(candidate) && !File.Exists(candidate))
+        {
+            return baseName;
+        }
+        for (int index = 2; index < 1000; index++)
+        {
+            string name = $"{baseName}-{index}";
+            candidate = Path.Combine(parent, name);
+            if (!Directory.Exists(candidate) && !File.Exists(candidate))
+            {
+                return name;
+            }
+        }
+        return $"{baseName}-{Guid.NewGuid():N}";
+    }
+
+    private static string SafeSegment(string? value, string fallback)
+    {
+        string text = (value ?? "").Trim();
+        if (text.Length == 0)
+        {
+            return fallback;
+        }
+        char[] invalid = Path.GetInvalidFileNameChars();
+        text = new string(text.Select(ch => invalid.Contains(ch) ? '_' : ch).ToArray()).Trim().TrimEnd('.', ' ');
+        if (text.Length == 0 || text is "." or "..")
+        {
+            return fallback;
+        }
+        if (text.Length > 80)
+        {
+            text = text[..80].TrimEnd('.', ' ');
+        }
+        string upper = text.ToUpperInvariant();
+        if (upper is "CON" or "PRN" or "AUX" or "NUL"
+            || (upper.Length == 4 && upper.StartsWith("COM", StringComparison.Ordinal) && upper[3] is >= '1' and <= '9')
+            || (upper.Length == 4 && upper.StartsWith("LPT", StringComparison.Ordinal) && upper[3] is >= '1' and <= '9'))
+        {
+            return "_" + text;
+        }
+        return text;
+    }
+
+    private static int CountLines(string text) => text.Count(c => c == '\n') + (text.Length == 0 ? 0 : 1);
+
+    private static void TryDeleteTemporaryDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理历史临时目录失败：{path}：{ex.Message}");
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理旧历史源文件失败：{path}：{ex.Message}");
+        }
     }
 }

@@ -266,7 +266,15 @@ data/{脚本Id}/{UserId}/
 └── .session        会话标记（崩溃恢复用）
 ```
 
-运行期截图保存在内存中的 `RunScreenshotStore`，不增加上述数据目录内容；每个「脚本实例 × 用户」运行最多保留 16 张，覆盖全部重试，脚本通知完成后释放。
+运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
+
+```text
+history/YYYY-MM-DD/<用户昵称>/<HH-mm-ss>/
+├── HH-mm-ss.json
+├── HH-mm-ss-1.log
+├── HH-mm-ss-1-s1.jpg
+└── HH-mm-ss-2-s1.jpg
+```
 
 `NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 用于展示和当前用户查找。配置交换会话使用当前全局用户绑定的 ID 目录，磁盘 `.session` 的 `UserName` 字段记录会话所属用户。
 
@@ -345,7 +353,7 @@ flowchart LR
 - **输入 JSON**：脚本字段 + 用户 + `config`（运行时生效配置，只读）与 `script` 目录（可读写）全递归文件清单 + `scriptDir` + **本次尝试日志段**（按尝试切片，上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 `logTruncated=true`）。
 - **触发时机**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
 - **输出契约**：stdout 尾行 JSON `{"status":"success|failed","reason":"必填","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":[...]}`；无输出/非 JSON/缺字段 = 继续运行；单次执行 30 秒上限；执行错误 = 警告 + 继续运行。
-- **截图契约**：输入 `screenshots` 提供当前池内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。空 `notifyScreenshotId` 选择仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本成功/失败结果时触发。
+- **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本成功/失败结果时触发。
 - **边界**：JS 内置 Jint 引擎（`nexus.readFile` 限 config/script 范围、单文件 2MB；`nexus.writeFile` 防 `../` 与绝对路径逃逸；无 Node 库）；Python 用系统 `python.exe`（`sys.argv[1]` 输入 JSON 路径），截图 RPC 仅绑定本机回环且随单次调用失效。
 
 ### 5.3 判断脚本信任边界
@@ -403,17 +411,18 @@ flowchart LR
 
 - **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
 - **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/失败（...）/已跳过（...）`，按 record.Status 非 FinalStatus）。
-- 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择脚本级通知附图，截图池最多 16 张且 FIFO 淘汰；队列级汇总不使用运行截图。
+- 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择最终 Attempt 的脚本级通知附图，单个 Attempt 的截图池最多 8 张且 FIFO 淘汰；队列级汇总不使用运行截图。
 - 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
-- Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书/钉钉/Slack/Generic 仅发送文字并记录兼容性警告。SMTP 截图作为 JPEG MIME 附件发送。
+- Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书、钉钉和 Slack 使用各自的最小应用级上传凭据，Generic 通过模板图片占位符接入。SMTP 截图作为 JPEG MIME 附件发送。
 
 ### 7.2 历史与日志落盘
 
-- 每次「脚本实例 × 全局用户绑定」运行结束保存（纯状态 + 按尝试分批日志）：
-  - `history/YYYY-MM-DD/HH-mm-ss.json`：**纯运行状态**（PascalCase，Attempts/FinalStatus/每次尝试详情（含各尝试 `LogFile` 引用）等，**不含任何日志内容**；同秒冲突加 `-1` 后缀）；
-  - `history/YYYY-MM-DD/HH-mm-ss-{尝试号}.log`：**每次尝试一个独立日志文件**，保存脚本日志全文（20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）——重试失败按尝试分批标号，排查清晰；
-   - 控制台输出（stdout/stderr）**不再落盘**（运行中实时显示仍保留）；历史详情按尝试展示各日志文件尾部。
-- 运行期截图仅存在于当前运行的内存截图池，不进入 `RunRecord`、历史 JSON、日志文件或用户配置；通知发送完成后立即释放。
+- 每次「脚本实例 × 全局用户绑定」运行结束保存到 `history/YYYY-MM-DD/<用户昵称>/<本轮运行任务>/`：
+  - `<HH-mm-ss>.json`：**纯运行状态**（PascalCase，包含 `HistoryDirectory`、Attempts/FinalStatus、各 Attempt 的 `LogFile` 与截图元数据，不含日志正文和图片字节）；同一用户同一秒的运行目录追加 `-2`、`-3` 等后缀；
+  - `<HH-mm-ss>-<尝试号>.log`：**每个 Attempt 一个独立日志文件**，保存脚本日志全文（20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）；
+  - `<HH-mm-ss>-<尝试号>-s<序号>.jpg`：按该 Attempt 当前 FIFO 保留顺序编号，序号范围为 1–8。
+- 配置了 `LogPath` 时，业务日志以日志文件监控结果为单一来源；未配置 `LogPath` 时，业务日志来自脚本 stdout/stderr。实时显示和历史详情沿用相同的等级解析。
+- 每个 Attempt 最终保留的截图写入同一运行目录，JSON 保存元数据；通知发送完成后释放运行期内存截图池。
 - `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled / skipped（达到绑定的每日成功运行次数上限）。
 - `PluginHistory`：运行落盘前由已注册插件生成的纯文本展示快照；单贡献 16 KiB、单次运行总量 64 KiB，插件异常不会影响运行结果，卸载插件后历史仍保留快照。
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
@@ -600,7 +609,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
 | `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时、截图 API 和 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
-| `RunScreenshotStore` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 运行级 16 张 FIFO 原分辨率截图池与 Python 判断脚本的临时 loopback 截图桥接；截图只在脚本实例 × 用户运行期间存在 |
+| `RunScreenshotStore` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断/替换三形态；替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话、模板复制与隐藏配置管理 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |

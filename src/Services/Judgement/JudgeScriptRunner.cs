@@ -21,7 +21,7 @@ internal class JudgeScriptResult
 
     public string NotifyText { get; set; } = "";
 
-    /// <summary>脚本选择随最终通知发送的运行期截图 ID；空字符串表示使用当前池中最后一张。</summary>
+/// <summary>脚本选择随最终通知发送的运行期截图 ID；空字符串表示使用最终 Attempt 中最后一张。</summary>
     public string NotifyScreenshotId { get; set; } = "";
 
     /// <summary>请求替换到 config 的配置文件（相对 script 目录的路径）；仅 status=failed 时由宿主应用。</summary>

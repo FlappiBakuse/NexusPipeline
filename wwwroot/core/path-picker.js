@@ -69,6 +69,19 @@ function pathForDialog(value) {
   return stripOuterQuotes(String(value || "").replace(/^\s*(%FIRST%|%LAST%)\s+/i, ""));
 }
 
+function dialogPathForTrigger(input, trigger) {
+  const rootTarget = trigger.dataset.pathRootTarget || "";
+  if (!rootTarget) {
+    return { initialPath: pathForDialog(input.value), requiresExistingDirectory: false, invalidMessage: "" };
+  }
+  const rootInput = document.getElementById(rootTarget);
+  return {
+    initialPath: pathForDialog(rootInput?.value),
+    requiresExistingDirectory: true,
+    invalidMessage: trigger.dataset.pathRootError || "脚本根目录错误",
+  };
+}
+
 /** 路径选择只替换路径正文，保留任务前/后脚本的执行范围标记。 */
 function applySelectedPath(input, selected) {
   const current = String(input.value || "");
@@ -84,6 +97,11 @@ export async function pickPath(trigger) {
   const kind = ["file", "folder", "file-or-folder"].includes(trigger.dataset.pathKind)
     ? trigger.dataset.pathKind
     : "file";
+  const dialogPath = dialogPathForTrigger(input, trigger);
+  if (dialogPath.requiresExistingDirectory && !dialogPath.initialPath) {
+    toast(dialogPath.invalidMessage, "error");
+    return;
+  }
   const wasDisabled = trigger.disabled;
   let selected = false;
   let selectedInput = null;
@@ -94,8 +112,10 @@ export async function pickPath(trigger) {
     const result = await api("POST", "/api/native-dialog", {
       kind,
       title: `选择${trigger.dataset.pathTitle || "路径"}`,
-      initialPath: pathForDialog(input.value),
+      initialPath: dialogPath.initialPath,
       filter: trigger.dataset.pathFilter || "",
+      requireInitialDirectory: dialogPath.requiresExistingDirectory,
+      invalidInitialPathMessage: dialogPath.invalidMessage,
     });
     if (result?.path) {
       selected = true;

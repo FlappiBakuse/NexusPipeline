@@ -246,12 +246,12 @@ export async function openScriptModal(id = "", plugin = "") {
       ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"')}
     </div>
     <div class="form-grid">
-      ${pathField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "file", 'placeholder="脚本主程序文件"', "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*", "", "选择主程序后仍可手动修改路径。")}
+      ${pathField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "file", 'placeholder="脚本主程序文件"', "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*", 'data-path-root-target="sm-root" data-path-root-error="脚本主程序路径错误"', "选择主程序后仍可手动修改路径。")}
       ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选启动参数"', "可选；如 -x --mode=1；若以路径开头（如 .\\app.exe?-args），问号后的内容作为执行参数。")}
     </div>
     <div class="form-grid">
-      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="请先填写脚本根目录"', "", "", "配置路径相对于脚本根目录，可选择配置文件或配置文件夹。")}
-      ${pathField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件路径"', "日志文件|*.log;*.txt|所有文件|*.*", "", "支持日期占位符与通配符；例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log，或 D:\\Scripts\\logs\\*.log。")}
+      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="请先填写脚本根目录"', "", 'data-path-root-target="sm-root" data-path-root-error="脚本根目录错误"', "配置路径相对于脚本根目录，可选择配置文件或配置文件夹。")}
+      ${pathField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件路径"', "日志文件|*.log;*.txt|所有文件|*.*", 'data-path-root-target="sm-root" data-path-root-error="脚本根目录错误"', "支持日期占位符与通配符；例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log，或 D:\\Scripts\\logs\\*.log。")}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
       <div class="toggle-grid switch-grid">

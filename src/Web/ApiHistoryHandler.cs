@@ -17,6 +17,36 @@ internal static class ApiHistoryHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
+        if (seg.Length == 2 && seg[1].Equals("image", StringComparison.OrdinalIgnoreCase))
+        {
+            string id = context.Request.QueryString["id"] ?? "";
+            string screenshotId = context.Request.QueryString["screenshot"] ?? "";
+            if (!int.TryParse(context.Request.QueryString["attempt"], out int attemptNumber)
+                || string.IsNullOrWhiteSpace(id)
+                || string.IsNullOrWhiteSpace(screenshotId))
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            RunRecord? record = RuntimeContext.Instance.History.FindById(id);
+            byte[]? image = record is null
+                ? null
+                : RuntimeContext.Instance.History.ReadScreenshot(record, attemptNumber, screenshotId);
+            if (image is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteBinaryAsync(
+                context,
+                image,
+                "image/jpeg",
+                new Dictionary<string, string>
+                {
+                    ["Referrer-Policy"] = "no-referrer",
+                }).ConfigureAwait(false);
+            return;
+        }
         // 日期索引——范围内有记录的日期（倒序、含当日条数），供历史页左侧日期列表。
         if (seg.Length == 2 && seg[1].ToLowerInvariant() == "dates")
         {
@@ -108,6 +138,18 @@ internal static class ApiHistoryHandler
                     logText = includeFull && (string.IsNullOrWhiteSpace(fullAttempt) || fullAttempt == attempt.Number.ToString())
                         ? log?.LogText
                         : null,
+                    screenshots = (attempt.Screenshots ?? new List<RunHistoryScreenshot>()).Select(screenshot => new
+                    {
+                        id = screenshot.Id,
+                        fileName = screenshot.FileName,
+                        capturedAt = screenshot.CapturedAt,
+                        width = screenshot.Width,
+                        height = screenshot.Height,
+                        source = screenshot.Source,
+                        trigger = screenshot.Trigger,
+                        ordinal = screenshot.Ordinal,
+                        imageUrl = $"/api/history/image?id={Uri.EscapeDataString(record.Id)}&attempt={attempt.Number}&screenshot={Uri.EscapeDataString(screenshot.Id)}",
+                    }).ToList(),
                 });
             }
             await HttpHelper.WriteJsonAsync(context, new

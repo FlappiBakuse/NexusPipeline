@@ -65,6 +65,25 @@ public class AppSettings
 
     public int WebhookTimeout { get; set; } = 30;
 
+    /// <summary>飞书图片消息所需的自建应用凭据；AppSecret 使用 DPAPI 加密保存。</summary>
+    public string FeishuAppId { get; set; } = "";
+
+    public string FeishuAppSecret { get; set; } = "";
+
+    /// <summary>Slack 图片上传所需的 Bot Token 与目标频道；Token 使用 DPAPI 加密保存。</summary>
+    public string SlackBotToken { get; set; } = "";
+
+    public string SlackChannelId { get; set; } = "";
+
+    /// <summary>钉钉应用机器人图片消息所需配置；AppSecret 使用 DPAPI 加密保存。</summary>
+    public string DingTalkAppKey { get; set; } = "";
+
+    public string DingTalkAppSecret { get; set; } = "";
+
+    public string DingTalkRobotCode { get; set; } = "";
+
+    public string DingTalkOpenConversationId { get; set; } = "";
+
     public string SmtpHost { get; set; } = "";
 
     public int SmtpPort { get; set; } = 465;

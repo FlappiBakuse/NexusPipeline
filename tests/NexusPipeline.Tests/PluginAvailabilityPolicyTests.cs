@@ -290,7 +290,7 @@ public sealed class PluginAvailabilityPolicyTests
     {
         public List<RunRecord> Records { get; } = new();
 
-        public HistorySaveResult Save(RunRecord record, List<string> attemptLogs)
+        public HistorySaveResult Save(RunRecord record, List<string> attemptLogs, IReadOnlyList<RunScreenshot> screenshots)
         {
             Records.Add(record.Clone());
             return new HistorySaveResult(record.Clone(), null);

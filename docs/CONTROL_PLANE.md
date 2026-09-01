@@ -17,7 +17,7 @@
 | 运行 | 调度中心/Control API | `run script/queue` | `run_script` / `run_queue` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
-| 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail` | `history ...` | `list_history` |
+| 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ...` | `list_history` |
 | 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
 | 插件商店/安装/开关 | 插件页 + Control API | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |

@@ -14,6 +14,31 @@ public class RunAttempt
 
     /// <summary>本尝试脚本日志文件名（如 HH-mm-ss-1.log，按尝试分批落盘）。</summary>
     public string LogFile { get; set; } = "";
+
+    /// <summary>本次尝试最终保留的截图元数据；截图本体与本尝试日志存放在同一运行目录。</summary>
+    public List<RunHistoryScreenshot> Screenshots { get; set; } = new();
+}
+
+public class RunHistoryScreenshot
+{
+    /// <summary>运行期截图 ID，供判断脚本选择通知图片。</summary>
+    public string Id { get; set; } = "";
+
+    /// <summary>运行目录内的截图文件名。</summary>
+    public string FileName { get; set; } = "";
+
+    public DateTimeOffset CapturedAt { get; set; }
+
+    public int Width { get; set; }
+
+    public int Height { get; set; }
+
+    public string Source { get; set; } = "";
+
+    public string Trigger { get; set; } = "";
+
+    /// <summary>本次尝试内按采集顺序递增的序号。</summary>
+    public long Ordinal { get; set; }
 }
 
 public class RunRecord
@@ -49,11 +74,14 @@ public class RunRecord
 
     public string ResultDetail { get; set; } = "";
 
+    /// <summary>相对于当天 history 目录的运行目录，例如「张三\\14-58-21」。</summary>
+    public string HistoryDirectory { get; set; } = "";
+
     /// <summary>判断脚本返回的自定义通知文本（仅本次运行有效，不落盘历史）；为空则通知使用默认正文。</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string CustomNotifyText { get; set; } = "";
 
-    /// <summary>运行期通知选择的截图 ID（仅内存，截图本体不进入历史记录）。</summary>
+    /// <summary>运行期通知选择的截图 ID（仅内存）。</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string NotifyScreenshotId { get; set; } = "";
 

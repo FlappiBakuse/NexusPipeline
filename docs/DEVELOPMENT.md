@@ -81,7 +81,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 ### 5.1 日志
 
 - 管理器日志：`logs/nexus-pipeline-YYYY-MM-DD.log`，包含级别、来源和审计行。
-- 脚本日志：`history/YYYY-MM-DD/HH-mm-ss-{attempt}.log`，按尝试分批保存。
+- 脚本日志：`history/YYYY-MM-DD/<用户昵称>/<HH-mm-ss>/<HH-mm-ss>-{attempt}.log`，按运行目录和 Attempt 分批保存；同一秒的运行目录按 `-2`、`-3` 递增。
 - `LogLevel=debug` 可以查看 Web 请求级日志；`GET /api/status` 轮询不记录。
 - 判断脚本异常时，结合管理器日志中的 JudgeError、历史状态文件和对应尝试日志定位。
 
@@ -123,7 +123,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `config/settings.json`、`scripts.json`、`queues.json` | 用户配置、密钥和脚本/队列数据，永不提交 |
 | `config/limits.json` | 约束配置 |
 | `config/plugins/` | managed-code 插件配置和 DPAPI 密钥 |
-| `history/YYYY-MM-DD/` | 运行状态 JSON 与按尝试分批的脚本日志 |
+| `history/YYYY-MM-DD/<用户昵称>/<运行目录>/` | 运行状态 JSON、按 Attempt 分批的脚本日志和当前保留截图 |
 | `logs/` | 管理器日志 |
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 | `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |

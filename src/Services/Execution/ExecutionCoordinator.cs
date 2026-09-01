@@ -56,6 +56,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     internal void DisposeScreenshots() => _screenshotStore.Dispose();
 
+    internal static bool ShouldPublishConsoleData(string? logPath) => string.IsNullOrWhiteSpace(logPath);
+
     public async Task<RunRecord> RunAsync()
     {
         _budget = new RunBudget(_script.TotalTimeoutMinutes, DateTime.Now);
@@ -567,7 +569,10 @@ internal sealed class ExecutionCoordinator : RunSession
             {
                 return;
             }
-            _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+            if (ShouldPublishConsoleData(_script.LogPath))
+            {
+                _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+            }
         }
 
         if (process is not null && stdoutAttached)
@@ -633,7 +638,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 scriptDir,
                 logText,
                 logTruncated,
-                _screenshotStore.Metadata);
+                _screenshotStore.MetadataForAttempt(attempt.Number));
             return new JudgeSnapshot(
                 attemptId,
                 attempt.Number,

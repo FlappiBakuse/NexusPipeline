@@ -33,9 +33,20 @@ internal static class ApiNativeDialogHandler
             : payload.Title.Trim();
         string initialPath = payload?.InitialPath?.Trim() ?? "";
         string filter = payload?.Filter?.Trim() ?? "";
-        if (title.Length > 128 || initialPath.Length > 4096 || filter.Length > 1024)
+        string invalidInitialPathMessage = payload?.InvalidInitialPathMessage?.Trim() ?? "";
+        if (title.Length > 128 || initialPath.Length > 4096 || filter.Length > 1024 || invalidInitialPathMessage.Length > 128)
         {
             await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_request", error = "路径选择器请求参数过长" }, 400).ConfigureAwait(false);
+            return;
+        }
+        if (payload?.RequireInitialDirectory == true && !NativePathPickerService.IsExistingDirectory(initialPath))
+        {
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                ok = false,
+                code = "initial_directory_not_found",
+                error = string.IsNullOrWhiteSpace(invalidInitialPathMessage) ? "脚本根目录错误" : invalidInitialPathMessage,
+            }, 400).ConfigureAwait(false);
             return;
         }
 
@@ -73,5 +84,9 @@ internal static class ApiNativeDialogHandler
         public string? InitialPath { get; set; }
 
         public string? Filter { get; set; }
+
+        public bool RequireInitialDirectory { get; set; }
+
+        public string? InvalidInitialPathMessage { get; set; }
     }
 }

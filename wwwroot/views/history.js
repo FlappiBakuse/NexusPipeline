@@ -283,7 +283,8 @@ function userRowsMarkup(date, users = []) {
 
 function entryMarkup(record) {
   const queue = record.queueName ? ` · ${esc(record.queueName)}` : "";
-  const filePath = historyDir && historySelectedDate ? `${historyDir}\\${historySelectedDate}\\${esc(record.logFile || "")}` : esc(record.logFile || "");
+  const pathParts = [historyDir, historySelectedDate, record.historyDirectory, record.logFile].filter(Boolean);
+  const filePath = pathParts.length ? esc(pathParts.join("\\")) : "";
   return `<button class="history-entry history-status-${esc(finalStatusOf(record))}" type="button" data-action="history-detail" data-id="${esc(record.id)}" data-testid="history-entry">
     <span class="history-entry-bar" aria-hidden="true"></span>
     <span class="history-entry-main">
@@ -566,6 +567,97 @@ function historyLogMarkup(id, attemptKey, logInfo, label) {
   return `<div class="history-log" data-history-log data-attempt="${esc(attemptKey)}"><div class="qk-row" data-history-log-meta>${label}${logInfo ? `，${total} 行${tailNote}` : ""}</div>${action}<pre class="logbox" data-history-log-body>${esc(text)}</pre></div>`;
 }
 
+function historyImageUrl(id, attemptNumber, screenshotId) {
+  return `/api/history/image?id=${encodeURIComponent(id)}&attempt=${encodeURIComponent(attemptNumber)}&screenshot=${encodeURIComponent(screenshotId)}`;
+}
+
+function historyAttemptScreenshotsMarkup(id, attempt, logInfo) {
+  const screenshots = attempt.screenshots || logInfo?.screenshots || [];
+  if (!screenshots.length) return "";
+  const items = screenshots.map((screenshot, index) => {
+    const imageUrl = screenshot.imageUrl || historyImageUrl(id, attempt.number, screenshot.id);
+    const label = `第 ${attempt.number} 次尝试截图 ${index + 1}`;
+    const details = [screenshot.width && screenshot.height ? `${screenshot.width}×${screenshot.height}` : "", screenshot.trigger || ""].filter(Boolean).join(" · ");
+    return `<button class="history-screenshot-thumb" type="button" data-action="history-image" data-image-url="${esc(imageUrl)}" data-image-alt="${esc(label)}" data-image-caption="${esc(details)}" data-testid="history-screenshot"><img src="${esc(imageUrl)}" alt="${esc(label)}" loading="lazy"><span class="history-screenshot-index">${index + 1}</span></button>`;
+  }).join("");
+  return `<div class="history-attempt-screenshots" data-testid="history-attempt-screenshots"><div class="qk-row">运行截图（${screenshots.length} 张）</div><div class="history-screenshot-strip" role="list" aria-label="第 ${attempt.number} 次尝试运行截图">${items}</div></div>`;
+}
+
+function historyDetailMetaMarkup(record) {
+  const user = record.userName || "未指定用户";
+  const mode = record.mode === "auto" ? "自动运行" : "手动运行";
+  return `<div class="history-detail-meta" data-testid="history-detail-meta">
+    <div class="history-detail-meta-item"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))}</span></div>
+    <div class="history-detail-meta-item"><span class="k">运行模式</span><span>${mode}</span></div>
+    <div class="history-detail-meta-item"><span class="k">运行用户</span><span>${esc(user)}</span></div>
+    <div class="history-detail-meta-item"><span class="k">尝试次数</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div>
+    <div class="history-detail-meta-item"><span class="k">开始时间</span><span>${esc(fmtTime(record.startTime))}</span></div>
+    <div class="history-detail-meta-item"><span class="k">结束时间</span><span>${esc(fmtTime(record.endTime))}</span></div>
+    <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">结果说明</span><span>${esc(record.resultDetail || "-")}</span></div>
+  </div>`;
+}
+
+function historyImageLightboxMarkup() {
+  return `<div class="history-image-lightbox" data-history-lightbox hidden role="dialog" aria-modal="true" aria-label="查看运行截图">
+    <div class="history-image-lightbox-backdrop" data-action="history-image-close" aria-hidden="true"></div>
+    <figure class="history-image-lightbox-content" data-history-lightbox-content><img data-history-lightbox-image alt=""><figcaption data-history-lightbox-caption></figcaption></figure>
+    <button class="icon-button history-image-lightbox-close" type="button" data-action="history-image-close" aria-label="关闭截图预览">${icon("close")}</button>
+  </div>`;
+}
+
+let historyLightboxOrigin = null;
+let historyLightboxEscapeBound = false;
+let historyLightboxParent = null;
+let historyLightboxNextSibling = null;
+
+function bindHistoryLightboxEscape() {
+  if (historyLightboxEscapeBound) return;
+  window.addEventListener("keydown", event => {
+    if (event.key !== "Escape") return;
+    const lightbox = document.querySelector("[data-history-lightbox]");
+    if (!lightbox || lightbox.hidden) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    historyCloseImage();
+  }, true);
+  historyLightboxEscapeBound = true;
+}
+
+export function historyOpenImage(target) {
+  const lightbox = document.querySelector("[data-history-lightbox]");
+  const image = lightbox?.querySelector("[data-history-lightbox-image]");
+  if (!lightbox || !image || !target.dataset.imageUrl) return;
+  if (lightbox.parentElement !== document.body) {
+    historyLightboxParent = lightbox.parentNode;
+    historyLightboxNextSibling = lightbox.nextSibling;
+    document.body.appendChild(lightbox);
+  }
+  historyLightboxOrigin = target;
+  image.src = target.dataset.imageUrl;
+  image.alt = target.dataset.imageAlt || "运行截图";
+  const caption = lightbox.querySelector("[data-history-lightbox-caption]");
+  if (caption) caption.textContent = target.dataset.imageCaption || "";
+  lightbox.hidden = false;
+  lightbox.querySelector("[data-action=history-image-close]")?.focus();
+}
+
+export function historyCloseImage() {
+  const lightbox = document.querySelector("[data-history-lightbox]");
+  if (!lightbox || lightbox.hidden) return;
+  lightbox.hidden = true;
+  const image = lightbox.querySelector("[data-history-lightbox-image]");
+  if (image) image.removeAttribute("src");
+  const origin = historyLightboxOrigin;
+  historyLightboxOrigin = null;
+  const parent = historyLightboxParent;
+  const nextSibling = historyLightboxNextSibling;
+  historyLightboxParent = null;
+  historyLightboxNextSibling = null;
+  if (parent?.isConnected) parent.insertBefore(lightbox, nextSibling?.isConnected ? nextSibling : null);
+  else lightbox.remove();
+  if (origin && document.contains(origin)) origin.focus();
+}
+
 export async function historyDetail(id) {
   try {
     const data = await api("GET", "/api/history/detail?id=" + encodeURIComponent(id));
@@ -573,10 +665,12 @@ export async function historyDetail(id) {
     if (!record) return;
     const attempts = (record.attemptDetails || []).map(attempt => {
       const logInfo = (data.attemptLogs || []).find(l => l.number === attempt.number);
-      return `<div class="subsection"><h3>第 ${attempt.number} 次尝试：${attempt.status === "success" ? "成功" : attempt.status === "cancelled" ? "已取消" : "失败"}</h3><div class="detail"><div class="kv"><span class="k">原因</span><span>${esc(attempt.reason || "-")}</span></div><div class="kv"><span class="k">时间</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, `脚本日志（第 ${attempt.number} 次尝试）`)} </div>`;
+      const status = attempt.status === "success" ? "成功" : attempt.status === "cancelled" ? "已取消" : attempt.status === "skipped" ? "已跳过" : "失败";
+      return `<section class="subsection history-attempt-detail"><div class="section-heading"><h3>第 ${attempt.number} 次尝试</h3><span class="badge ${attempt.status === "success" ? "ok" : attempt.status === "cancelled" ? "warn" : "bad"}">${status}</span></div><div class="history-attempt-meta"><div><span class="k">时间</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div><div><span class="k">原因</span><span>${esc(attempt.reason || "-")}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, `脚本日志（第 ${attempt.number} 次尝试）`)}${historyAttemptScreenshotsMarkup(id, attempt, logInfo)}</section>`;
     }).join("");
-    const body = `<div class="history-summary"><div><span class="k">结果</span><span class="v">${statusBadge(finalStatusOf(record))}</span></div><div><span class="k">运行模式</span><span class="v">${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div><div><span class="k">尝试次数</span><span class="v">${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div><div><span class="k">开始时间</span><span class="v">${esc(fmtTime(record.startTime))}</span></div></div><div class="detail"><div class="kv"><span class="k">开始</span><span>${esc(fmtTime(record.startTime))}</span></div><div class="kv"><span class="k">结束</span><span>${esc(fmtTime(record.endTime))}</span></div><div class="kv"><span class="k">模式</span><span>${record.mode === "auto" ? "自动运行" : "手动运行"}</span></div>${record.userName ? `<div class="kv"><span class="k">用户</span><span>${esc(record.userName)}</span></div>` : ""}<div class="kv"><span class="k">重试</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"} 次</span></div><div class="kv"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))} ${esc(record.resultDetail)}</span></div></div>${pluginHistoryDetailMarkup(record)}${pluginSlotMarkup("history.detail.sections", "history.detail.sections", "history-detail-plugin-slot", { mode: "detail", primaryId: record.id })}${attempts}`;
+    const body = `${historyDetailMetaMarkup(record)}${pluginHistoryDetailMarkup(record)}${pluginSlotMarkup("history.detail.sections", "history.detail.sections", "history-detail-plugin-slot", { mode: "detail", primaryId: record.id })}<div class="history-attempt-list">${attempts}</div>${historyImageLightboxMarkup()}`;
     showModal(modalShell(`${esc(record.scriptName)} 运行详情`, body, '<button class="ghost" type="button" data-action="close-modal">关闭</button>'), true);
+    bindHistoryLightboxEscape();
     void renderPluginSlots(document);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -604,4 +698,6 @@ export const actions = {
   "history-detail-back": () => historyDetailBack(),
   "history-refresh": () => historyRefresh(),
   "history-full-log": target => withBusy(target, () => historyFullLog(target.dataset.id, target.dataset.attempt, target)),
+  "history-image": target => historyOpenImage(target),
+  "history-image-close": () => historyCloseImage(),
 };

@@ -226,13 +226,13 @@ settings.sections               shell.nav
 
 ### 判断脚本截图
 
-一次「脚本实例 × 用户」运行拥有一个内存截图池，覆盖该运行的全部重试尝试，最多保存 16 张；第 17 张加入时移除最早的一张。截图不写入历史或用户数据，脚本实例收尾后全部释放。
+一次「脚本实例 × 用户」运行按 Attempt 分别维护内存截图池；每个 Attempt 最多保存 8 张，第 9 张加入时移除该 Attempt 最早的一张。运行收尾时，当前保留截图会写入本轮运行的 history 目录。
 
 - 截图来源为游戏窗口客户区或模拟器画面，保留采集到的原始像素宽高，编码为高质量 JPEG。
 - 关键字模式在首次接受成功/失败关键字判定时自动截图；判断脚本模式在首次接受 `status: "success"` / `"failed"` 时自动截图。
 - JavaScript 判断脚本可随时调用 `nexus.captureScreenshot()`，返回截图 ID；Python 判断脚本可使用输入中的 `screenshotApi.endpoint` 和 `screenshotApi.token`，向 endpoint 发送带 `X-Nexus-Screenshot-Token` 请求头的 `POST` 请求来截图。该地址仅绑定本机回环，并随当前判断脚本调用结束失效。
 - 输入中的 `screenshots` 仅包含 ID、序号、时间、尝试次数、尺寸、来源和触发类型等元数据，不包含图片字节。
-- 输出的 `notifyScreenshotId` 指定脚本通知附带的截图。留空时选择当前仍保留的最新截图；填写已被淘汰或不存在的 ID 时不附图，并记录警告。脚本通知发送后截图池释放；队列汇总通知不附图。
+- 输出的 `notifyScreenshotId` 指定最终 Attempt 的脚本通知附带截图。留空时选择最终 Attempt 当前仍保留的最新截图；填写已被淘汰、属于其他 Attempt 或不存在的 ID 时不附图，并记录警告。脚本通知发送后截图池释放；队列汇总通知不附图。
 
 ## 配置还原描述（config-restore.json）
 

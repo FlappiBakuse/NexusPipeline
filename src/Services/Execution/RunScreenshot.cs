@@ -24,7 +24,7 @@ internal sealed record RunScreenshotMetadata(
     string Source,
     string Trigger);
 
-/// <summary>运行期截图池中的单张截图；仅存于当前脚本实例用户运行的内存上下文。</summary>
+/// <summary>运行期截图池中的单张截图；数据在运行上下文中驻留，收尾时由历史服务复制到本轮运行目录。</summary>
 internal sealed record RunScreenshot(
     string Id,
     long Ordinal,
@@ -50,17 +50,17 @@ internal sealed record RunScreenshot(
 }
 
 /// <summary>
-/// 一次「脚本实例 × 用户」运行的有界截图池：最多 16 张，超出后按 FIFO 移除最早截图。
-/// 图片只保留在内存，运行收尾后由调用方 Dispose 丢弃。
+/// 一次「脚本实例 × 用户」运行的按尝试隔离截图池：每次尝试最多 8 张，超出后按 FIFO 移除最早截图。
 /// </summary>
 internal sealed class RunScreenshotStore : IDisposable
 {
-    internal const int Capacity = 16;
+    internal const int Capacity = 8;
+    internal const int CapacityPerAttempt = Capacity;
 
     private readonly Func<int, string, CancellationToken, Task<RunScreenshotCaptureResult>> _capture;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _captureGate = new(1, 1);
-    private readonly List<RunScreenshot> _screenshots = new();
+    private readonly Dictionary<int, List<RunScreenshot>> _screenshotsByAttempt = new();
     private long _nextOrdinal;
     private bool _disposed;
 
@@ -69,15 +69,42 @@ internal sealed class RunScreenshotStore : IDisposable
         _capture = capture ?? throw new ArgumentNullException(nameof(capture));
     }
 
-    /// <summary>当前池的元数据快照，按截图加入顺序排列。</summary>
+    /// <summary>当前运行所有尝试的元数据快照，按尝试号与截图加入顺序排列。</summary>
     public IReadOnlyList<RunScreenshotMetadata> Metadata
     {
         get
         {
             lock (_sync)
             {
-                return _screenshots.Select(item => item.Metadata).ToList();
+                return _screenshotsByAttempt
+                    .OrderBy(pair => pair.Key)
+                    .SelectMany(pair => pair.Value.OrderBy(item => item.Ordinal))
+                    .Select(item => item.Metadata)
+                    .ToList();
             }
+        }
+    }
+
+    /// <summary>取得指定尝试当前保留的截图元数据，供该尝试的判断脚本读取。</summary>
+    public IReadOnlyList<RunScreenshotMetadata> MetadataForAttempt(int attemptNumber)
+    {
+        lock (_sync)
+        {
+            return _screenshotsByAttempt.TryGetValue(Math.Max(1, attemptNumber), out List<RunScreenshot>? screenshots)
+                ? screenshots.Select(item => item.Metadata).ToList()
+                : Array.Empty<RunScreenshotMetadata>();
+        }
+    }
+
+    /// <summary>取得所有尝试当前保留的截图，供历史提交复制图片本体。</summary>
+    public IReadOnlyList<RunScreenshot> SnapshotForHistory()
+    {
+        lock (_sync)
+        {
+            return _screenshotsByAttempt
+                .OrderBy(pair => pair.Key)
+                .SelectMany(pair => pair.Value.OrderBy(item => item.Ordinal))
+                .ToList();
         }
     }
 
@@ -137,11 +164,17 @@ internal sealed class RunScreenshotStore : IDisposable
                         source,
                         normalizedTrigger,
                         captured.Data);
-                    if (_screenshots.Count >= Capacity)
+                    int bucketKey = Math.Max(1, attemptNumber);
+                    if (!_screenshotsByAttempt.TryGetValue(bucketKey, out List<RunScreenshot>? screenshots))
                     {
-                        _screenshots.RemoveAt(0);
+                        screenshots = new List<RunScreenshot>();
+                        _screenshotsByAttempt[bucketKey] = screenshots;
                     }
-                    _screenshots.Add(screenshot);
+                    if (screenshots.Count >= CapacityPerAttempt)
+                    {
+                        screenshots.RemoveAt(0);
+                    }
+                    screenshots.Add(screenshot);
                     return screenshot;
                 }
             }
@@ -165,23 +198,22 @@ internal sealed class RunScreenshotStore : IDisposable
         }
     }
 
-    /// <summary>
-    /// 按判断脚本选择通知图片：ID 未指定时取当前池中最后一张；指定 ID 已被 FIFO 淘汰时不回退到其他图片。
-    /// </summary>
-    public RunScreenshot? SelectForNotification(string? requestedId)
+    /// <summary>按最终尝试选择通知图片：ID 未指定时取该尝试最后一张；ID 失效时不回退到其他尝试。</summary>
+    public RunScreenshot? SelectForNotification(int attemptNumber, string? requestedId)
     {
         lock (_sync)
         {
-            if (_screenshots.Count == 0 || _disposed)
+            if (_disposed || !_screenshotsByAttempt.TryGetValue(Math.Max(1, attemptNumber), out List<RunScreenshot>? screenshots)
+                || screenshots.Count == 0)
             {
                 return null;
             }
             if (string.IsNullOrWhiteSpace(requestedId))
             {
-                return _screenshots[^1];
+                return screenshots[^1];
             }
             string id = requestedId.Trim();
-            RunScreenshot? selected = _screenshots.FirstOrDefault(item =>
+            RunScreenshot? selected = screenshots.FirstOrDefault(item =>
                 string.Equals(item.Id, id, StringComparison.OrdinalIgnoreCase));
             if (selected is null)
             {
@@ -189,6 +221,17 @@ internal sealed class RunScreenshotStore : IDisposable
             }
             return selected;
         }
+    }
+
+    /// <summary>兼容内部旧调用的全局选择；新通知流程必须传入最终尝试号。</summary>
+    public RunScreenshot? SelectForNotification(string? requestedId)
+    {
+        int attempt;
+        lock (_sync)
+        {
+            attempt = _screenshotsByAttempt.Keys.DefaultIfEmpty(0).Max();
+        }
+        return attempt > 0 ? SelectForNotification(attempt, requestedId) : null;
     }
 
     public void Dispose()
@@ -200,7 +243,7 @@ internal sealed class RunScreenshotStore : IDisposable
                 return;
             }
             _disposed = true;
-            _screenshots.Clear();
+            _screenshotsByAttempt.Clear();
         }
         _captureGate.Dispose();
     }

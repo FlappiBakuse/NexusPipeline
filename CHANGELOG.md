@@ -2,6 +2,29 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.12.7（Pre-release）
+
+### 历史记录与运行截图
+
+- history 改为按日期、用户和本轮运行任务分目录保存 JSON、Attempt 日志与截图；同一用户同一秒的运行自动使用碰撞后缀，旧版日期目录记录在启动时迁移。
+- 每个 Attempt 独立保留最多 8 张截图并按 FIFO 淘汰，历史记录保存当前保留截图的元数据与 JPEG 文件；历史详情按 Attempt 展示缩略图，支持横向滚动和完整图片预览。
+- 判断脚本输入的 `screenshots` 与 `notifyScreenshotId` 均按 Attempt 隔离，最终通知只从最终 Attempt 选择截图。
+
+### 通知与日志
+
+- 飞书、钉钉、Slack 增加最小图片上传适配，Generic Webhook 增加图片 Base64、Data URI、文件名和 MIME 类型占位符。
+- 配置 `LogPath` 时由日志文件承担业务日志单一来源，消除 stdout/stderr fallback 等级造成的重复与错误等级显示。
+
+### 验收修复
+
+- 修复移动端历史截图预览居中与原图横向截断问题。
+- 修复通用脚本实例的主程序、配置和日志路径选择器按脚本根目录定位，并在根目录无效时提示错误。
+
+### 本轮问题修复
+
+- 调整历史运行详情中 Attempt 卡片的顶部间距，避免卡片上边缘被弹窗内容边界遮挡。
+- 修复 DingTalk Webhook 设置中第二组字段的上下间距，使六个填写框的排列保持一致。
+
 ## v0.12.6（Pre-release）
 
 ### 运行截图与通知

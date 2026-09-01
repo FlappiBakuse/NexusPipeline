@@ -618,7 +618,7 @@ internal sealed class Scheduler : IDisposable
                 FinalStatus = "failed",
                 ResultDetail = reason,
             };
-            _history.Save(skipped, new List<string>());
+            _history.Save(skipped, new List<string>(), Array.Empty<RunScreenshot>());
         }
         SaveState();
     }

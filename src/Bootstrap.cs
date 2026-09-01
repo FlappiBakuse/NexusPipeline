@@ -28,6 +28,7 @@ internal static class Bootstrap
         }
         ctx.ReloadSettings();
         ctx.Plugins.LoadAll();
+        ctx.History.MigrateLegacy();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();
         UserConfigManager.StartRecoveryRetry();
