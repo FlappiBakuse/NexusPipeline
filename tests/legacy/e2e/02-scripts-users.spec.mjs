@@ -895,7 +895,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const profile = (await probeOk.json()).profile;
   expect(probeOk.ok && profile.mainExe.endsWith("BetterGI.exe"), "probe 推导出主程序路径").toBeTruthy();
   expect(profile.args === "--startOneDragon", "probe 推导出自启动参数 --startOneDragon").toBeTruthy();
-  expect(profile.configPath.includes("NexusPipeline.json"), "probe 推导出配置文件路径（NexusPipeline.json）").toBeTruthy();
+  expect(profile.configPath.endsWith("OneDragon"), "probe 推导出配置目录路径（User/OneDragon）").toBeTruthy();
   expect(profile.logPath.endsWith("better-genshin-impact.log"), "probe 推导出日志路径（Serilog 当前文件 better-genshin-impact.log，带日期为归档）").toBeTruthy();
   expect(profile.successMarkers === undefined, "probe 不再返回完成标志字段（已废弃）").toBeTruthy();
   expect(profile.judgeScript && profile.judgeScript.includes("一条龙和配置组任务结束"), "probe 提供判断脚本（含运行结束关键字）").toBeTruthy();
@@ -909,7 +909,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
   expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.includes("NexusPipeline.json") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.configPath.endsWith("OneDragon") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
   expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);
@@ -996,7 +996,7 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   await api("DELETE", "/api/scripts/" + sid);
 });
 
-test("专项脚本编辑配置：模板生成/隐藏默认配置/cancel 恢复/done 快照/残留自愈", async () => {
+test("专项脚本首次编辑配置：无快照需选方式/fresh 生成与取消还原/reuse 复用/done 快照", async () => {
   const root = path.join(runtimeDir, "sim-bgi-edit");
   fs.rmSync(root, { recursive: true, force: true });
   fs.mkdirSync(path.join(root, "User", "OneDragon"), { recursive: true });
@@ -1006,42 +1006,59 @@ test("专项脚本编辑配置：模板生成/隐藏默认配置/cancel 恢复/d
   expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
   const sp = await created.json();
   await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
-  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
-  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const cfgDir = path.join(root, "User", "OneDragon");
+  const defaultCfg = path.join(cfgDir, "默认配置.json");
   const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
 
-  const start = await api("POST", editBase, { action: "start" });
-  expect(start.ok, "首次编辑配置 start 成功（生成模板）").toBeTruthy();
-  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "首次编辑生成 NexusPipeline.json 文件（非目录）").toBeTruthy();
-  expect(!fs.existsSync(defaultCfg), "编辑期间默认配置被隐藏（BetterGI 仅 NexusPipeline 可选）").toBeTruthy();
-  const text = fs.readFileSync(cfgPath, "utf8");
-  expect(text.includes('"TaskEnabledList"') && text.includes('"NexusPipeline"'), "模板含任务列表结构与配置名").toBeTruthy();
-  expect(text.includes('"TaskDefinitions"') && text.includes('"CompletionAction"'), "模板含任务定义与完成动作键").toBeTruthy();
+  // v0.12.8：绑定不建快照，首次编辑必须显式选择方式
+  const status = await (await api("GET", editBase)).json();
+  expect(status.hasSnapshot === false, "首次编辑前置状态：无配置快照").toBeTruthy();
+  const bareStart = await api("POST", editBase, { action: "start" });
+  expect(bareStart.status === 400, "无快照且不带 mode 的 start 被拒绝").toBeTruthy();
 
-  const cancel = await api("POST", editBase, { action: "cancel" });
-  expect(cancel.ok, "取消编辑成功").toBeTruthy();
-  expect(!fs.existsSync(cfgPath), "cancel 清理本次生成的模板").toBeTruthy();
-  expect(fs.existsSync(defaultCfg), "cancel 后默认配置恢复").toBeTruthy();
+  // fresh（全新配置文件）：原配置目录整体移入缓存区，由脚本生成全新配置
+  const freshStart = await api("POST", editBase, { action: "start", mode: "fresh" });
+  expect(freshStart.ok, "fresh start 成功").toBeTruthy();
+  expect(!fs.existsSync(cfgDir), "fresh 期间配置目录已移入缓存区（等待脚本生成）").toBeTruthy();
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "全新配置", TaskEnabledList: {} }, null, 2), "utf8");
+  const freshDone = await api("POST", editBase, { action: "done" });
+  expect(freshDone.ok, "fresh done 成功").toBeTruthy();
+  const freshStore = path.join(runtimeDir, "data", sp.id, "默认", "store");
+  expect(fs.readFileSync(path.join(freshStore, "默认配置.json"), "utf8").includes("全新配置"), "生成的新配置已入库用户快照").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("默认配置"), "fresh done 后原配置移回配置位置").toBeTruthy();
 
-  const start2 = await api("POST", editBase, { action: "start" });
-  expect(start2.ok, "再次 start 成功（快照恢复）").toBeTruthy();
-  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "再次 start NexusPipeline.json 为文件（快照恢复，非目录残留）").toBeTruthy();
-  fs.writeFileSync(cfgPath, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }, null, 2), "utf8");
-  const done = await api("POST", editBase, { action: "done" });
-  expect(done.ok, "完成编辑成功").toBeTruthy();
-  expect(!fs.existsSync(cfgPath), "done 后 config 位置清理（还原语义）").toBeTruthy();
-  expect(fs.existsSync(defaultCfg), "done 后默认配置恢复").toBeTruthy();
+  // reuse（复用配置文件）：直接编辑现有配置目录，无文件动作
+  const status2 = await (await api("GET", editBase)).json();
+  expect(status2.hasSnapshot === true, "fresh done 后已有配置快照").toBeTruthy();
+  const reuseStart = await api("POST", editBase, { action: "start", mode: "reuse" });
+  expect(reuseStart.ok, "reuse start 成功（无文件动作）").toBeTruthy();
+  expect(fs.existsSync(defaultCfg) && fs.readFileSync(defaultCfg, "utf8").includes("默认配置"), "reuse 期间配置目录原位保留").toBeTruthy();
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }, null, 2), "utf8");
+  const reuseDone = await api("POST", editBase, { action: "done" });
+  expect(reuseDone.ok, "reuse done 成功").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("用户配置"), "reuse done 后配置保持原位").toBeTruthy();
   const store = path.join(runtimeDir, "data", sp.id, "默认", "store");
-  expect(fs.existsSync(path.join(store, "NexusPipeline.json")), "编辑产物已入库用户快照").toBeTruthy();
-  expect(fs.readFileSync(path.join(store, "NexusPipeline.json"), "utf8").includes("用户配置"), "快照内容为编辑后的配置").toBeTruthy();
+  expect(fs.readFileSync(path.join(store, "默认配置.json"), "utf8").includes("用户配置"), "编辑结果已入库用户快照").toBeTruthy();
 
-  fs.mkdirSync(cfgPath);
-  fs.writeFileSync(path.join(cfgPath, "NexusPipeline.json"), "{}", "utf8");
-  const start3 = await api("POST", editBase, { action: "start" });
-  expect(start3.ok, "残留目录场景 start 成功").toBeTruthy();
-  expect(fs.existsSync(cfgPath) && !fs.statSync(cfgPath).isDirectory(), "残留目录被清理并生成模板文件（自愈）").toBeTruthy();
+  // 非首次 start 不带 mode → 走既有快照交换流程
+  const normalStart = await api("POST", editBase, { action: "start" });
+  expect(normalStart.ok, "有快照后 start 不带 mode 成功（既有交换流程）").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("用户配置"), "交换流程把快照复制回配置位置").toBeTruthy();
+  const normalCancel = await api("POST", editBase, { action: "cancel" });
+  expect(normalCancel.ok, "交换流程取消成功").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("用户配置"), "交换流程取消后现场配置原样还原").toBeTruthy();
+
+  // fresh 取消：脚本生成的配置被清除，原配置目录原样还原
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "将被移走的原配置", TaskEnabledList: {} }), "utf8");
+  const start3 = await api("POST", editBase, { action: "start", mode: "fresh" });
+  expect(start3.ok, "fresh 取消场景 start 成功").toBeTruthy();
+  expect(!fs.existsSync(cfgDir), "fresh 取消场景配置目录移入缓存区").toBeTruthy();
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(defaultCfg, "{}", "utf8");
   const cancel2 = await api("POST", editBase, { action: "cancel" });
-  expect(cancel2.ok, "自愈会话取消成功").toBeTruthy();
+  expect(cancel2.ok, "fresh 取消成功").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("将被移走的原配置"), "取消后生成物清除、原配置原样还原").toBeTruthy();
 
   await api("DELETE", "/api/scripts/" + sp.id);
 });
@@ -1056,18 +1073,20 @@ test("编辑配置：文件被占用时提交失败、释放后重试成功且�
   expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
   const sp = await created.json();
   await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
-  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
-  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const cfgDir = path.join(root, "User", "OneDragon");
+  const defaultCfg = path.join(cfgDir, "默认配置.json");
   const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
 
-  const start = await api("POST", editBase, { action: "start" });
-  expect(start.ok, "编辑配置 start 成功（生成模板）").toBeTruthy();
-  fs.writeFileSync(cfgPath, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }), "utf8");
+  const start = await api("POST", editBase, { action: "start", mode: "fresh" });
+  expect(start.ok, "编辑配置 start 成功（fresh，原配置目录移入缓存区）").toBeTruthy();
+  // 模拟脚本在空配置位置生成全新配置
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "用户配置", TaskEnabledList: {} }), "utf8");
 
   // PowerShell 持只读共享句柄（FileShare.Read：允许复制、阻止删除——复现「复制成功、删除源失败」路径）；
   // READY 信号确认句柄已建立后再提交。
   const holder = spawn("powershell", ["-NoProfile", "-NonInteractive", "-Command",
-    `Write-Output 'READY'; $fs = [System.IO.File]::Open('${cfgPath}', [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read); Start-Sleep 30`],
+    `Write-Output 'READY'; $fs = [System.IO.File]::Open('${defaultCfg}', [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::Read); Start-Sleep 30`],
     { stdio: ["ignore", "pipe", "ignore"] });
   await new Promise(resolve => holder.stdout.once("data", resolve));
   await new Promise(r => setTimeout(r, 300));
@@ -1075,17 +1094,16 @@ test("编辑配置：文件被占用时提交失败、释放后重试成功且�
   expect(done1.status === 400, "文件被占用时提交失败（400）").toBeTruthy();
   const errBody = await done1.json();
   expect(errBody.error.includes("提交失败"), "失败原因含「提交失败」（复制成功但删除源失败）").toBeTruthy();
-  expect(fs.existsSync(cfgPath), "提交失败后配置文件仍在（未被误删）").toBeTruthy();
+  expect(fs.existsSync(defaultCfg), "提交失败后生成的配置文件仍在（未被误删）").toBeTruthy();
   expect(fs.existsSync(path.join(runtimeDir, "data", sp.id, "默认", ".session")), "提交失败后 .session 标记保留（自愈前提）").toBeTruthy();
 
   spawnSync("taskkill", ["/PID", String(holder.pid), "/F"], { stdio: "ignore" });
   await new Promise(r => setTimeout(r, 500));
   const done2 = await api("POST", editBase, { action: "done" });
   expect(done2.ok, "释放占用后重试提交成功").toBeTruthy();
-  expect(!fs.existsSync(cfgPath), "提交成功后 config 位置无残留").toBeTruthy();
-  expect(fs.existsSync(defaultCfg), "提交成功后默认配置恢复").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("默认配置"), "提交成功后原配置移回配置位置").toBeTruthy();
   const store = path.join(runtimeDir, "data", sp.id, "默认", "store");
-  expect(fs.readFileSync(path.join(store, "NexusPipeline.json"), "utf8").includes("用户配置"), "编辑产物已入库用户快照").toBeTruthy();
+  expect(fs.readFileSync(path.join(store, "默认配置.json"), "utf8").includes("用户配置"), "编辑产物已入库用户快照").toBeTruthy();
   expect(!fs.existsSync(path.join(runtimeDir, "data", sp.id, "默认", ".session")), "提交成功后 .session 已清除").toBeTruthy();
 
   await api("DELETE", "/api/scripts/" + sp.id);
@@ -1104,12 +1122,15 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   expect(created.ok, "API 创建专项脚本（cmd 冒充 BetterGI.exe）").toBeTruthy();
   const sp = await created.json();
   await api("POST", `/api/scripts/${sp.id}/users`, { name: "默认", enabled: true });
-  const cfgPath = path.join(root, "User", "OneDragon", "NexusPipeline.json");
-  const defaultCfg = path.join(root, "User", "OneDragon", "默认配置.json");
+  const cfgDir = path.join(root, "User", "OneDragon");
+  const defaultCfg = path.join(cfgDir, "默认配置.json");
   const editBase = `/api/scripts/${sp.id}/users/${encodeURIComponent("默认")}/edit-config`;
 
-  const start = await api("POST", editBase, { action: "start" });
+  const start = await api("POST", editBase, { action: "start", mode: "fresh" });
   expect(start.ok, "编辑配置 start 成功").toBeTruthy();
+  // 模拟脚本在空配置位置生成全新配置
+  fs.mkdirSync(cfgDir, { recursive: true });
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "会话配置", TaskEnabledList: {} }), "utf8");
   await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".modal[data-locked]", { timeout: 10000 });
   expect((await page.textContent(".modal")).includes("配置编辑中"), "刷新后自动恢复「配置编辑中」锁定卡片").toBeTruthy();
@@ -1120,12 +1141,12 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   expect(!(await page.isVisible(".modal-close")), "锁定弹窗：无关闭按钮").toBeTruthy();
   await page.click('[data-action="global-edit-config-cancel"]');
   await page.waitForSelector(".modal-mask", { state: "detached", timeout: 5000 });
-  expect(!fs.existsSync(cfgPath), "取消后本次生成的模板已清理").toBeTruthy();
-  expect(fs.existsSync(defaultCfg), "取消后默认配置恢复").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("默认配置"), "取消后生成物清理、原配置移回").toBeTruthy();
 
-  const start2 = await api("POST", editBase, { action: "start" });
+  const start2 = await api("POST", editBase, { action: "start", mode: "fresh" });
   expect(start2.ok, "再次 start 成功（重启恢复前置）").toBeTruthy();
-  expect(fs.existsSync(cfgPath), "模板已生成").toBeTruthy();
+  fs.writeFileSync(defaultCfg, JSON.stringify({ Name: "会话配置", TaskEnabledList: {} }), "utf8");
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("会话配置"), "会话配置已生成").toBeTruthy();
   // v0.6.6+：恢复逻辑等待脚本进程退出；重启前清理孤儿进程（cmd 副本不随服务退出，会挡住启动恢复）。
   spawnSync("taskkill", ["/IM", "BetterGI.exe", "/F"], { stdio: "ignore" });
   await new Promise(r => setTimeout(r, 400));
@@ -1134,8 +1155,7 @@ test("编辑配置会话：弹窗锁定 / 刷新后恢复锁定弹窗 / 重启�
   } else {
     await restartService();
   }
-  expect(!fs.existsSync(cfgPath), "重启后编辑会话生成的模板已清理（恢复编辑前状态）").toBeTruthy();
-  expect(fs.existsSync(defaultCfg), "重启后隐藏的默认配置已恢复").toBeTruthy();
+  expect(fs.readFileSync(defaultCfg, "utf8").includes("默认配置"), "重启后编辑会话生成物已清理（原配置恢复）").toBeTruthy();
 
   await api("DELETE", "/api/scripts/" + sp.id);
 });

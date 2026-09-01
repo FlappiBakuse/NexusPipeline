@@ -466,7 +466,6 @@ internal static class UserCommands
                         return;
                     }
 
-                    ScriptInstance snapshotScript;
                     lock (ctx.DataLock)
                     {
                         if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
@@ -481,18 +480,9 @@ internal static class UserCommands
                         {
                             return;
                         }
-                        snapshotScript = script.Clone();
                     }
 
-                    string? snapshotError = UserConfigManager.SnapshotOnAddUser(
-                        snapshotScript,
-                        user.Id,
-                        ctx.Resolve<IPluginCapabilityResolver>());
-                    if (snapshotError is not null)
-                    {
-                        error = "初始配置快照失败：" + snapshotError;
-                        return;
-                    }
+                    // v0.12.8：绑定不再建立配置快照、不做任何文件动作；初始快照延迟到首次编辑配置或首次运行时建立。
 
                     lock (ctx.DataLock)
                     {

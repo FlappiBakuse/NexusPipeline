@@ -433,9 +433,15 @@ test("ER09 Multi-user Config Isolation：两个用户的 store 与运行输入�
   async function editUser(user, text) {
     const userId = script.testUserIds[user];
     const editPath = `/api/users/${encodeURIComponent(userId)}/bindings/${encodeURIComponent(script.id)}/edit-config`;
-    const start = await api("POST", editPath, { action: "start" });
+    // v0.12.8：无快照的首次编辑用 fresh（原目录整体入缓存区，done 后还原为编辑前内容）；有快照走既有交换
+    const status = await (await api("GET", editPath)).json();
+    const start = await api("POST", editPath, { action: "start", ...(status && status.hasSnapshot ? {} : { mode: "fresh" }) });
     if (!start.ok) {
       assert.fail(`用户配置编辑启动失败：HTTP ${start.status} ${await start.text()}`);
+    }
+    if (!status.hasSnapshot) {
+      // fresh 已把原配置目录移入缓存区：模拟脚本启动时重建默认配置目录，再写入编辑后的值
+      fs.mkdirSync(fixture.cfg, { recursive: true });
     }
     fs.writeFileSync(value, text, "ascii");
     const done = await api("POST", editPath, { action: "done" });

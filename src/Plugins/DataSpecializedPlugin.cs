@@ -7,8 +7,7 @@ namespace NexusPipeline.Plugins;
 
 /// <summary>
 /// 数据化专项插件：纯目录形态 plugins/&lt;artifactName&gt;/——
-/// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）、
-/// 可选 data/config-template/（默认配置模板目录，编辑会话生成用）。
+/// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）。
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
 /// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）。
 /// </summary>
@@ -40,8 +39,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     private string _resolvePath = "";
 
     private string _judgeScriptPath = "";
-
-    private string? _configTemplateDir;
 
     private string? _resolveText;
 
@@ -86,14 +83,11 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             {
                 plugin._capabilityKeys.Add(capability);
             }
-            string templateRef = manifest.ConfigTemplatePath;
             if (string.IsNullOrWhiteSpace(plugin.Name) || string.IsNullOrWhiteSpace(plugin._resolvePath) || string.IsNullOrWhiteSpace(plugin._judgeScriptPath))
             {
                 return null;
             }
-            if (!IsSafeRelativePath(plugin._resolvePath)
-                || !IsSafeRelativePath(plugin._judgeScriptPath)
-                || !string.IsNullOrWhiteSpace(templateRef) && !IsSafeRelativePath(templateRef))
+            if (!IsSafeRelativePath(plugin._resolvePath) || !IsSafeRelativePath(plugin._judgeScriptPath))
             {
                 return null;
             }
@@ -102,14 +96,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             if (!File.Exists(plugin._resolvePath) || !File.Exists(plugin._judgeScriptPath))
             {
                 return null;
-            }
-            if (!string.IsNullOrWhiteSpace(templateRef))
-            {
-                string templateDir = Path.Combine(pluginDir, templateRef);
-                if (Directory.Exists(templateDir))
-                {
-                    plugin._configTemplateDir = templateDir;
-                }
             }
             return plugin;
         }
@@ -140,9 +126,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             return ext == ".py" ? "python" : "javascript";
         }
     }
-
-    /// <summary>默认配置模板目录（不存在/未配置为 null）。</summary>
-    public string? ConfigTemplateDir => _configTemplateDir;
 
     /// <summary>按脚本根目录推导配置快照：require 全部满足才成功；解析失败返回 null。</summary>
     public ScriptProfile? Resolve(string rootPath)
@@ -225,10 +208,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             return null;
         }
         profile.JudgeScript = ReadJudgeScript();
-        if (!string.IsNullOrWhiteSpace(_configTemplateDir))
-        {
-            profile.ConfigTemplateDir = _configTemplateDir;
-        }
         return profile;
     }
 

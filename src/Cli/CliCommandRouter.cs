@@ -371,7 +371,7 @@ internal static class CliCommandRouter
 
         if (action.Equals("config", StringComparison.OrdinalIgnoreCase))
         {
-            if (!EnsurePositionals(args, 6, "user binding config 需要配置操作") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 6, "user binding config 需要配置操作") || !EnsureOptions(args, "mode"))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -385,8 +385,18 @@ internal static class CliCommandRouter
             {
                 return CliOutput.WriteFailure("invalid_arguments", "config 子命令必须为 start、done 或 cancel");
             }
+            // v0.12.8：首次编辑（无配置快照）必须显式选择配置方式；--mode 缺省按 normal（有快照时行为不变）。
+            string configMode = args.Get("mode")?.ToLowerInvariant() ?? "";
+            if (configAction == "start" && configMode is not ("" or "normal" or "fresh" or "reuse"))
+            {
+                return CliOutput.WriteFailure("invalid_arguments", "--mode 仅支持 normal、fresh 或 reuse");
+            }
+            if (configAction != "start" && !string.IsNullOrEmpty(configMode))
+            {
+                return CliOutput.WriteFailure("invalid_arguments", "--mode 仅在 config start 时可用");
+            }
             string configPath = $"/api/users/{Escape(userId)}/bindings/{Escape(configScriptId)}/edit-config";
-            return ReturnApi(client.Post(configPath, Object(("action", configAction))));
+            return ReturnApi(client.Post(configPath, Object(("action", configAction), ("mode", configMode))));
         }
 
         string scriptReference;

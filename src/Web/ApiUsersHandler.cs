@@ -201,14 +201,26 @@ internal static class ApiUsersHandler
             await DeleteBindingAsync(context, userId, Uri.UnescapeDataString(seg[3])).ConfigureAwait(false);
             return;
         }
-        if (seg.Length == 5 && method == "POST" && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
+        if (seg.Length == 5 && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
         {
-            await ApiScriptsHandler.HandleEditConfigByUserIdAsync(
-                context,
-                Uri.UnescapeDataString(seg[3]),
-                userId,
-                body).ConfigureAwait(false);
-            return;
+            if (method == "GET")
+            {
+                // v0.12.8：编辑配置前置状态——该用户在脚本实例上是否已有配置快照（首次编辑需选择配置方式）。
+                bool hasSnapshot = UserConfigManager.HasSnapshot(
+                    Uri.UnescapeDataString(seg[3]),
+                    userId);
+                await HttpHelper.WriteJsonAsync(context, new { hasSnapshot }).ConfigureAwait(false);
+                return;
+            }
+            if (method == "POST")
+            {
+                await ApiScriptsHandler.HandleEditConfigByUserIdAsync(
+                    context,
+                    Uri.UnescapeDataString(seg[3]),
+                    userId,
+                    body).ConfigureAwait(false);
+                return;
+            }
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }

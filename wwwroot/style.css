@@ -497,6 +497,7 @@ tbody tr:hover td { background: var(--content-card-hover); }
 
 .new-script-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .new-script-chooser .chooser-card:first-child { grid-column: 1 / -1; }
+.first-edit-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .chooser-card { display: block; width: 100%; min-height: 64px; margin-left: 0; padding: 14px 16px; border: 1px solid var(--content-card-border); border-radius: 8px; background: var(--content-card-soft); color: var(--text); text-align: left; box-shadow: none; }
 .chooser-card:hover { background: var(--content-card-hover); }
 .chooser-card strong { display: block; font-size: 14px; line-height: 1.4; }
@@ -719,6 +720,7 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .user-actions { gap: var(--space-2); }
   .user-actions button { padding-inline: var(--space-2); }
   .new-script-chooser { grid-template-columns: minmax(0, 1fr); }
+  .first-edit-chooser { grid-template-columns: minmax(0, 1fr); }
   .row, .row.three, .row.four, .form-grid, .form-grid.three, .form-grid.four { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
   .modal-body > .form-grid { margin-bottom: var(--space-3); }
   .modal-body > div:not(.form-grid):not(.subsection):not(.toggle-row):not(.toggle-grid):not(.field-btn-row) { margin-bottom: var(--space-3); }

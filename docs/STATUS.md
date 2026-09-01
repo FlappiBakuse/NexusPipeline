@@ -1,6 +1,6 @@
 # 项目状态（Status）
 
-**更新日期**：2026-08-31｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**更新日期**：2026-09-01｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 

@@ -204,7 +204,7 @@ async function restoreEditSessionCard() {
       candidate.id === session.userId || candidate.name === session.userName);
     const binding = user?.bindings?.find(item => item.scriptInstanceId === session.scriptId);
     const script = scriptById(session.scriptId);
-    if (user && binding && script) showGlobalEditConfigCard(user.id, script.id, user.name, script.name);
+    if (user && binding && script) showGlobalEditConfigCard(user.id, script.id, user.name, script.name, session.editMode);
   } catch {
     // 编辑会话恢复失败时保留页面，用户可从绑定卡片重新进入配置编辑。
   }
@@ -295,9 +295,15 @@ export async function reorderGlobalUsers(ids) {
   }
 }
 
-function showGlobalEditConfigCard(userId, scriptId, userName, scriptName) {
-  showModal(modalShell("配置编辑中", '<p class="modal-copy">主程序已启动（不带参数）。请设置用户「' + esc(userName) + '」在脚本「' + esc(scriptName) + '」中的配置。完成后保存，或取消本次修改。</p>',
-    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">完成</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">取消</button>'), false, true);
+function showGlobalEditConfigCard(userId, scriptId, userName, scriptName, editMode) {
+  const mode = editMode || "normal";
+  const copy = mode === "fresh"
+    ? '主程序已启动，脚本将生成全新配置。完成后新配置存为快照，取消恢复原配置。'
+    : mode === "reuse"
+      ? '主程序已启动，正在编辑现有配置文件。完成后存为快照，取消不做改动。'
+      : '主程序已启动（不带参数）。请设置用户「' + esc(userName) + '」在脚本「' + esc(scriptName) + '」中的配置。完成后保存，或取消本次修改。';
+  showModal(modalShell("配置编辑中", '<p class="modal-copy">' + copy + '</p>',
+    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">完成</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">取消</button>'), false, true);
 }
 
 export async function editGlobalUserConfig(userId, scriptId) {
@@ -310,19 +316,61 @@ export async function editGlobalUserConfig(userId, scriptId) {
     return;
   }
   try {
-    await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start" });
-    showGlobalEditConfigCard(userId, scriptId, user.name, binding.scriptName || "脚本实例");
+    const status = await api("GET", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config");
+    if (status && status.hasSnapshot) {
+      await startEditConfig(userId, scriptId, "normal");
+      return;
+    }
+    // 首次编辑（无配置快照）：选择全新生成或复用现有配置
+    openFirstEditConfigChooser(userId, scriptId);
   } catch (error) {
     toast(error.message, "error");
   }
 }
 
-export async function globalEditConfigAction(userId, scriptId, action) {
+function openFirstEditConfigChooser(userId, scriptId) {
+  const body = '<p class="modal-copy">这是你第一次编辑该脚本实例的配置文件，请选择编辑方式：</p>' +
+    '<div class="first-edit-chooser">' +
+    '<button type="button" class="chooser-card" data-action="first-edit-config-fresh" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
+    '<strong>全新配置文件</strong><span class="muted">由脚本生成全新配置</span></button>' +
+    '<button type="button" class="chooser-card" data-action="first-edit-config-reuse" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
+    '<strong>复用配置文件</strong><span class="muted">直接编辑现有配置文件</span></button>' +
+    '</div>';
+  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
+  showModal(modalShell("首次编辑配置", body, footer), false, true, true);
+}
+
+async function startEditConfig(userId, scriptId, mode) {
+  await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start", mode });
+  const user = userById(userId);
+  const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
+  showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || "脚本实例", mode);
+}
+
+export async function chooseFirstEditConfigMode(target) {
+  const mode = target.dataset.action === "first-edit-config-fresh" ? "fresh" : "reuse";
+  const userId = target.dataset.userId;
+  const scriptId = target.dataset.scriptId;
+  try {
+    closeModal();
+    await startEditConfig(userId, scriptId, mode);
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+export async function globalEditConfigAction(userId, scriptId, action, mode) {
   try {
     await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action });
     setManagementDraft(null);
     closeModal();
-    toast(action === "done" ? "用户配置已保存" : "已取消，配置已还原");
+    let message;
+    if (action === "done") {
+      message = mode === "fresh" ? "新配置已存为快照" : "用户配置已保存";
+    } else {
+      message = mode === "reuse" ? "已取消" : "已取消，配置已还原";
+    }
+    toast(message);
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");
@@ -350,6 +398,8 @@ export const actions = {
   "delete-global-user": target => deleteGlobalUser(target.dataset.userId),
   "confirm-delete-global-user": target => withBusy(target, () => confirmDeleteGlobalUser()),
   "edit-user-config-global": target => editGlobalUserConfig(target.dataset.userId, target.dataset.scriptId),
-  "global-edit-config-done": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "done")),
-  "global-edit-config-cancel": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "cancel")),
+  "global-edit-config-done": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "done", target.dataset.mode)),
+  "global-edit-config-cancel": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "cancel", target.dataset.mode)),
+  "first-edit-config-fresh": target => chooseFirstEditConfigMode(target),
+  "first-edit-config-reuse": target => chooseFirstEditConfigMode(target),
 };

@@ -17,13 +17,17 @@ internal sealed class ConfigSessionMark
 
     public string Phase { get; set; } = "run";
 
+    /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置，无文件动作）。
+    /// 旧版本标记无此字段，反序列化后保持默认 normal，收尾与恢复行为与旧版一致。</summary>
+    public string EditMode { get; set; } = "normal";
+
+    /// <summary>全新配置编辑会话且原配置形态为 Missing：缓存区为空时 config 位置的脚本生成物仍需还原清理。
+    /// （对应旧版 GeneratedTemplate 模板会话的恢复语义。）</summary>
+    public bool NeedsFreshRestore =>
+        string.Equals(EditMode, "fresh", StringComparison.OrdinalIgnoreCase)
+        && PathKindUtil.Parse(OriginalKind) == PathKind.Missing;
+
     public DateTime StartedAt { get; set; } = DateTime.Now;
-
-    /// <summary>本次编辑会话由宿主生成了配置模板（重启恢复时清理 config 位置的编辑产物，还原编辑前状态）。</summary>
-    public bool GeneratedTemplate { get; set; }
-
-    /// <summary>模板目录复制生成的文件清单（相对 configPath 父目录， 模板目录形态；cancel/重启恢复按清单精确清理）。</summary>
-    public List<string> TemplateFiles { get; set; } = new();
 
     private static readonly JsonSerializerOptions Options = new()
     {

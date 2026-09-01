@@ -35,8 +35,6 @@ internal sealed class PluginManifest
 
     public string JudgeScriptPath { get; private init; } = "";
 
-    public string ConfigTemplatePath { get; private init; } = "";
-
     public IReadOnlySet<string> Capabilities => _capabilities;
 
     public PluginFrontendManifest? Frontend { get; private set; }
@@ -124,7 +122,6 @@ internal sealed class PluginManifest
                 EntryType = root["entryType"]?.ToString()?.Trim() ?? "",
                 ResolvePath = root["resolve"]?.ToString()?.Trim() ?? "",
                 JudgeScriptPath = root["judgeScript"]?.ToString()?.Trim() ?? "",
-                ConfigTemplatePath = root["configTemplate"]?.ToString()?.Trim() ?? "",
             };
             if (root["capabilities"] is JsonArray capabilities)
             {

@@ -13,9 +13,7 @@ NexusPipeline-Plugins/plugins/
 │   ├── store.json                # 商店展示元数据与更新记录
 │   └── data/
 │       ├── resolve.json          # 推导配置（require 校验 + paths 模板）
-│       ├── judge.js              # 判断脚本（.js = 内置 Jint 引擎 / .py = 系统 python.exe）
-│       └── config-template/      # 可选：默认配置模板目录（编辑会话生成用）
-│           └── NexusPipeline.json
+│       └── judge.js              # 判断脚本（.js = 内置 Jint 引擎 / .py = 系统 python.exe）
 ├── GameCheckIn/                  # 可选 managed-code 插件；name = game-checkin
 │   ├── plugin.json
 │   ├── CheckInPlugin.dll
@@ -177,10 +175,9 @@ settings.sections               shell.nav
   "description": "BetterGenshinImpact 专项脚本实例配置接管（自动推导主程序、配置、日志路径与自启动参数）",
   "version": "0.1.0",
   "kind": "data-specialized",
-  "minHostVersion": "0.10.8",
+  "minHostVersion": "0.12.8",
   "resolve": "data/resolve.json",
-  "judgeScript": "data/judge.js",
-  "configTemplate": "data/config-template"
+  "judgeScript": "data/judge.js"
 }
 ```
 
@@ -194,7 +191,6 @@ settings.sections               shell.nav
 | `minHostVersion` | 可选的最低宿主版本；缺省按 `0.0.0` 处理 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
-| `configTemplate` | 可选：默认配置模板目录（编辑用户配置会话中 ConfigPath 不存在时整体复制到配置位置） |
 
 ## resolve.json（推导配置）
 
@@ -258,7 +254,7 @@ settings.sections               shell.nav
       ]
     },
     {
-      "file": "NexusPipeline.json",
+      "file": "默认配置.json",
       "toggles": [
         { "type": "map", "path": "TaskEnabledList", "initial": { "<guid>": true } }
       ]
@@ -272,11 +268,6 @@ settings.sections               shell.nav
 - map 型：`path` 为 JSON 对象键，遍历 `initial` 逐键设布尔；**未覆盖键保持当前值**。
 - 仅作用于插队文件（`replaceConfigs` 清单内）；还原描述缺失/解析失败/应用失败时，该文件按「无还原描述」处理（不写入快照）。
 - 现有专项实现参考：`maaend/data/judge.js`（array 型，`instances[id=...].tasks`）、`bettergi/data/judge.js`（map 型，`TaskEnabledList`）。
-
-## 默认配置模板（config-template/）
-
-- 编辑用户配置会话 start 时若 `ConfigPath` 不存在且插件提供 `config-template/` 目录 → 目录内容**整体复制**到配置位置（configPath 父目录），cancel 时按复制清单精确清理（清单随 `.session` 标记持久化，重启崩溃恢复同样生效）。
-- 建议放入「可直接使用的默认配置」而非空模板；BetterGI 示例为内置标准任务列表的 NexusPipeline.json。
 
 插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。发布后应保持两者稳定；变更身份时按新插件重新配置用户绑定和插件设置。
 

@@ -94,7 +94,13 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 2 && seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
         {
             var sessions = UserConfigManager.EditSessions.Values
-                .Select(session => new { scriptId = session.Script.Id, scriptName = session.Script.Name, userName = session.User.UserName })
+                .Select(session => new
+                {
+                    scriptId = session.Script.Id,
+                    scriptName = session.Script.Name,
+                    userName = session.User.UserName,
+                    editMode = string.IsNullOrWhiteSpace(session.Mark.EditMode) ? "normal" : session.Mark.EditMode,
+                })
                 .ToList();
             await HttpHelper.WriteJsonAsync(context, sessions).ConfigureAwait(false);
             return;
@@ -413,12 +419,14 @@ internal static class ApiScriptsHandler
         string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        string action = HttpHelper.ParseBody(body).Get("action").Str();
+        var parsed = HttpHelper.ParseBody(body);
+        string action = parsed.Get("action").Str();
+        string mode = parsed.Get("mode").Str();
 
         if (action == "start")
         {
             OperationResult<ConfigEditStarted> result =
-                ConfigEditCommands.Start(ctx, scriptId, userReference);
+                ConfigEditCommands.Start(ctx, scriptId, userReference, mode);
             if (!result.Succeeded)
             {
                 await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
@@ -427,7 +435,7 @@ internal static class ApiScriptsHandler
 
             await HttpHelper.WriteJsonAsync(
                 context,
-                new { ok = true, pid = result.Value!.ProcessId }).ConfigureAwait(false);
+                new { ok = true, pid = result.Value!.ProcessId, editMode = result.Value!.EditMode }).ConfigureAwait(false);
             return;
         }
 

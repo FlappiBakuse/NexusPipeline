@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.App.Commands;
 
 /// <summary>配置编辑生命周期的应用命令结果。</summary>
-internal sealed record ConfigEditStarted(int ProcessId);
+internal sealed record ConfigEditStarted(int ProcessId, string EditMode);
 
 /// <summary>
 /// 配置编辑生命周期应用命令。
@@ -21,6 +21,7 @@ internal static class ConfigEditCommands
         RuntimeContext ctx,
         string scriptId,
         string userReference,
+        string mode = "normal",
         string source = Audit.Web)
     {
         OperationResult<ConfigEditTarget> targetResult = ResolveTarget(ctx, scriptId, userReference);
@@ -40,6 +41,22 @@ internal static class ConfigEditCommands
         if (string.IsNullOrWhiteSpace(target.Script.ConfigPath))
         {
             return Validation<ConfigEditStarted>("脚本未配置「配置文件路径/文件夹」");
+        }
+
+        string? editMode = NormalizeEditMode(mode);
+        if (editMode is null)
+        {
+            return Validation<ConfigEditStarted>("未知的编辑方式：" + mode + "（支持 fresh / reuse / normal）");
+        }
+        bool hasSnapshot = UserConfigManager.HasSnapshot(target.Script.Id, target.UserKey);
+        if (editMode == "normal" && !hasSnapshot)
+        {
+            return Validation<ConfigEditStarted>("首次编辑请先选择配置方式：全新配置文件或复用配置文件");
+        }
+        if (editMode != "normal" && hasSnapshot)
+        {
+            // 快照已存在（前端状态过期或并发编辑后）：按既有快照交换流程执行，保持数据一致。
+            editMode = "normal";
         }
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
@@ -106,19 +123,21 @@ internal static class ConfigEditCommands
                 target.Script.Id,
                 target.UserKey,
                 target.Script.ConfigPath);
-            string? prepError = UserConfigManager.PrepareForEdit(
-                target.Script.Id,
-                target.UserKey,
-                target.Script.ConfigPath);
+            string? prepError = editMode switch
+            {
+                "fresh" => UserConfigManager.PrepareForEditFresh(
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+                "reuse" => UserConfigManager.PrepareForEditReuse(
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+                _ => UserConfigManager.PrepareForEdit(
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+            };
             if (prepError is not null)
             {
                 return Validation<ConfigEditStarted>("配置交换失败：" + prepError);
             }
 
-            List<string> generatedTemplateFiles = UserConfigManager.EnsureConfigForEdit(
-                target.Script,
-                ctx.Resolve<IPluginCapabilityResolver>());
-            bool generatedTemplate = generatedTemplateFiles.Count > 0;
+            // 交换/准备动作已在服务层写入会话标记；此处统一把 Phase 收敛为 edit 并记录实际编辑模式。
             var editMark = new ConfigSessionMark
             {
                 ScriptId = target.Script.Id,
@@ -127,11 +146,14 @@ internal static class ConfigEditCommands
                 OriginalKind = ConfigSessionMark.TryRead(target.Script.Id, target.UserKey)?.OriginalKind
                     ?? PathKindUtil.Text(PathKindUtil.KindOf(target.Script.ConfigPath)),
                 Phase = "edit",
-                GeneratedTemplate = generatedTemplate,
-                TemplateFiles = generatedTemplateFiles,
+                EditMode = editMode,
             };
             editMark.Write();
-            UserConfigManager.HideOtherConfigs(target.Script, target.Script.Id, target.UserKey);
+            if (editMode != "reuse")
+            {
+                // reuse 语义为「无任何文件动作」：不隐藏 config 同目录的其他配置文件。
+                UserConfigManager.HideOtherConfigs(target.Script, target.Script.Id, target.UserKey);
+            }
 
             Process? process;
             try
@@ -159,12 +181,11 @@ internal static class ConfigEditCommands
                 Script = target.Script,
                 User = target.User,
                 Process = process,
-                GeneratedConfigTemplate = generatedTemplate,
                 Mark = editMark,
             };
             keepGate = true;
-            Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.UserName}（主程序已启动）");
-            return OperationResult<ConfigEditStarted>.Ok(new ConfigEditStarted(process?.Id ?? 0));
+            Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.UserName}（主程序已启动，方式={editMode}）");
+            return OperationResult<ConfigEditStarted>.Ok(new ConfigEditStarted(process?.Id ?? 0, editMode));
         }
         catch (Exception ex)
         {
@@ -257,6 +278,15 @@ internal static class ConfigEditCommands
         bool sessionRemoved = false;
         try
         {
+            string editMode = NormalizeEditMode(session.Mark?.EditMode ?? "normal") ?? "normal";
+            if (action == "done"
+                && editMode != "normal"
+                && !ConfigLocationHasContent(session.Script.ConfigPath))
+            {
+                // fresh/reuse 提交时 config 位置为空（脚本未生成或配置被删）：不杀进程，保留会话供用户继续配置或取消。
+                return Validation<bool>("配置文件尚未生成，请先完成配置或取消本次编辑");
+            }
+
             string launchExe = ResolveLaunchTargetExe(session.Script);
             bool processClean = session.Process is not null
                 ? SystemActions.KillOwnedProcessTree(
@@ -290,11 +320,6 @@ internal static class ConfigEditCommands
                 return Validation<bool>(
                     "execution_failed",
                     (action == "done" ? "提交" : "取消") + "失败：" + swapError);
-            }
-
-            if (action == "cancel" && session.GeneratedConfigTemplate)
-            {
-                DeleteGeneratedTemplateFiles(session.Mark);
             }
 
             UserConfigManager.RestoreHiddenConfigs(
@@ -373,47 +398,32 @@ internal static class ConfigEditCommands
         return SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
     }
 
-    private static void DeleteGeneratedTemplateFiles(ConfigSessionMark mark)
+    /// <summary>归一化编辑方式：空值视为 normal；非法值返回 null。</summary>
+    private static string? NormalizeEditMode(string? mode)
     {
-        if (mark.TemplateFiles.Count > 0)
+        string value = (mode ?? "").Trim().ToLowerInvariant();
+        return value switch
         {
-            string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
-            if (string.IsNullOrWhiteSpace(baseDir))
-            {
-                return;
-            }
+            "" or "normal" => "normal",
+            "fresh" => "fresh",
+            "reuse" => "reuse",
+            _ => null,
+        };
+    }
 
-            foreach (string relativePath in mark.TemplateFiles)
-            {
-                try
-                {
-                    string destination = Path.Combine(baseDir, relativePath);
-                    if (File.Exists(destination))
-                    {
-                        File.Delete(destination);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn(
-                        $"[警告] 清理编辑会话生成的配置模板失败：{relativePath}（{ex.Message}）");
-                }
-            }
-
-            return;
-        }
-
-        try
+    /// <summary>config 位置是否存在可入库的配置内容（文件存在，或目录非空）。</summary>
+    private static bool ConfigLocationHasContent(string configPath)
+    {
+        PathKind kind = PathKindUtil.KindOf(configPath);
+        if (kind == PathKind.Missing)
         {
-            if (File.Exists(mark.ConfigPath))
-            {
-                File.Delete(mark.ConfigPath);
-            }
+            return false;
         }
-        catch (Exception ex)
+        if (kind == PathKind.File)
         {
-            Logger.Warn($"[警告] 清理编辑会话生成的配置模板失败：{ex.Message}");
+            return true;
         }
+        return Directory.Exists(configPath) && Directory.EnumerateFileSystemEntries(configPath).Any();
     }
 
     private static OperationResult<T> Validation<T>(

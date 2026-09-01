@@ -179,8 +179,10 @@ public sealed class BindingAndSchedulerTests
     }
 
     [Fact]
-    public void AddBinding_SnapshotFailure_DoesNotCreateBinding()
+    public void AddBinding_WithoutSnapshot_CreatesBindingWithoutStore()
     {
+        // v0.12.8：绑定不再建立配置快照、不做任何文件动作；配置缺失也必须绑定成功，
+        // 初始快照延迟到首次编辑配置（显式选择方式）或首次运行（复用现场配置）时建立。
         RuntimeContext context = RuntimeContext.Instance;
         string scriptId = "regression-snapshot-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");
@@ -213,10 +215,10 @@ public sealed class BindingAndSchedulerTests
                 userId,
                 new UserScriptBinding { ScriptInstanceId = scriptId });
 
-            Assert.False(result.Succeeded);
-            Assert.Equal(OperationErrorKind.Validation, result.ErrorKind);
-            Assert.Contains("初始配置快照失败", result.ErrorMessage);
-            Assert.Empty(user.Bindings);
+            Assert.True(result.Succeeded);
+            Assert.Single(user.Bindings);
+            Assert.False(UserConfigManager.HasSnapshot(scriptId, userId));
+            Assert.False(Directory.Exists(Path.Combine(AppPaths.DataDir, scriptId, userId)));
         }
         finally
         {

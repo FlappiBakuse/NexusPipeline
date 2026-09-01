@@ -34,6 +34,4 @@ internal sealed class ScriptProfile
     public string JudgeScript { get; set; } = "";
 
     public string JudgeScriptLanguage { get; set; } = "javascript";
-
-    public string ConfigTemplateDir { get; set; } = "";
 }

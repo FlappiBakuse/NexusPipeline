@@ -14,7 +14,4 @@ internal sealed class EditSession
     public Process? Process { get; set; }
 
     public ConfigSessionMark Mark { get; init; } = new();
-
-    /// <summary>本次会话由宿主生成了配置模板（cancel 时需清理生成文件）。</summary>
-    public bool GeneratedConfigTemplate { get; set; }
 }

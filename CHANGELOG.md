@@ -2,6 +2,21 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.12.8（Pre-release）
+
+### 配置快照时机改造
+- 新增脚本绑定不再建立配置快照、不再做任何文件动作；初始快照延迟到首次编辑配置（显式选择方式）或首次运行（自动复制现场配置为复用快照）时建立。
+- 首次编辑配置（无快照）时前端弹出编辑方式选择：全新配置文件（移走原配置并由脚本生成全新配置，完成后新配置存为快照、原配置移回原位，取消仅移回原配置）或复用配置文件（直接编辑现有文件，完成后复制存为快照，取消不做任何改动）。
+- 有快照的既有编辑流程保持不变；配置交换、插队替换与崩溃恢复语义不受影响。
+- 编辑配置 API 新增快照状态查询（GET edit-config 返回 hasSnapshot）与 start 的 mode 参数（fresh/reuse/normal）；CLI `user binding config start` 新增 `--mode`；会话标记新增 EditMode（旧标记自动按 normal 兼容）。
+
+### 移除配置模板
+- 完全移除专项插件的默认配置模板（config-template）功能：宿主不再读取、复制或清理模板，插件仓库删除 BetterGI/MaaEnd 的模板目录与 manifest 字段。
+
+### 判定与插件配套
+- March7thAssistant 判断脚本运行结束标志兼容未开启「运行后动作」的配置（「停止运行」收尾盒线）；4 个专项插件 minHostVersion 提升至 0.12.8。
+- BetterGI 配置接管范围由固定文件改为一条龙配置目录 `User/OneDragon`，判断脚本自动识别目录内首个 `.json` 配置（按名称排序），支持用户自定义配置文件命名；选择性重试与还原描述按识别到的文件名生效。
+
 ## v0.12.7（Pre-release）
 
 ### 历史记录与运行截图

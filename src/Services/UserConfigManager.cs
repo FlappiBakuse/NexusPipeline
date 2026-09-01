@@ -65,51 +65,15 @@ internal static class UserConfigManager
 
     /* ---------------- 对外操作 ---------------- */
 
-    /// <summary>首次添加用户：把当前配置内容复制为程序内部储存配置（config 保留）。专项插件的默认配置模板允许配置位置暂不存在。</summary>
-    public static string? SnapshotOnAddUser(
-        ScriptInstance script,
-        string userKey,
-        IPluginCapabilityResolver capabilities)
+    /// <summary>判断用户在脚本实例上是否已有配置快照（store 目录存在且非空）；首次编辑配置以此为准。</summary>
+    public static bool HasSnapshot(string scriptId, string userName)
     {
-        string store = StoreDir(script.Id, userKey);
-        string? error = null;
-        ConfigSwapPrimitives.WithSwapLock(script.Id, () =>
-        {
-            try
-            {
-                if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
-                {
-                    return;
-                }
-                ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
-                if (string.IsNullOrWhiteSpace(script.ConfigPath))
-                {
-                    Directory.CreateDirectory(store);
-                    return;
-                }
-                if (PathKindUtil.KindOf(script.ConfigPath) == PathKind.Missing)
-                {
-                    if (ResolveConfigTemplateDir(script, capabilities) is null)
-                    {
-                        throw new IOException($"配置路径不存在：{script.ConfigPath}");
-                    }
-                    Directory.CreateDirectory(store);
-                    Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userKey}：配置模板将在编辑配置时生成");
-                    return;
-                }
-                ConfigSwapPrimitives.CopyAs(script.ConfigPath, store, PathKind.Dir);
-                Audit.Log(Audit.Web, "建立用户初始配置快照", $"{script.Name} / {userKey} → {store}");
-            }
-            catch (Exception ex)
-            {
-                ConfigSwapPrimitives.TryDeleteDir(store);
-                error = ex.Message;
-            }
-        });
-        return error;
+        string store = StoreDir(scriptId, userName);
+        return Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
     }
 
-    /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。</summary>
+    /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。
+    /// v0.12.8 起绑定不再建立快照：快照为空且现场配置存在时，先把现场配置复制为初始快照（复用语义），再执行交换。</summary>
     public static bool PrepareForRun(string scriptId, string userName, string configPath, out string? error)
     {
         error = null;
@@ -119,6 +83,16 @@ internal static class UserConfigManager
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                string store = StoreDir(scriptId, userName);
+                if (!Directory.Exists(store) || !Directory.EnumerateFileSystemEntries(store).Any())
+                {
+                    if (PathKindUtil.KindOf(configPath) != PathKind.Missing)
+                    {
+                        ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
+                        ConfigSwapPrimitives.CopyAs(configPath, store, PathKind.Dir);
+                        Audit.Log(Audit.System, "运行前建立初始配置快照", $"脚本 {scriptId} / 用户 {userName}：{configPath} → {store}");
+                    }
+                }
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
@@ -128,7 +102,6 @@ internal static class UserConfigManager
                     Phase = "run",
                 };
                 string cache = CacheDir(scriptId, userName);
-                string store = StoreDir(scriptId, userName);
                 string retryStore = RetryStoreDir(scriptId, userName);
                 // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——original 空时恢复仅清标记（现场未动），original 有内容时完整还原。
                 mark.Write();
@@ -225,111 +198,84 @@ internal static class UserConfigManager
     {
         return PrepareForRun(scriptId, userName, configPath, out string? error) ? null : (error ?? "配置交换失败");
     }
-    /// <summary>编辑配置会话：ConfigPath 不存在且数据化插件提供默认配置模板目录（config-template/）时整体复制到配置位置（用户按需修改）；
-    /// 返回复制生成的文件清单（相对 configPath 父目录；空 = 未生成模板，cancel 时无需清理）。</summary>
-    public static List<string> EnsureConfigForEdit(ScriptInstance script, IPluginCapabilityResolver capabilities)
+
+    /// <summary>全新配置编辑开始（无快照首选）：标记先行（EditMode=fresh）→ config 存在则移入 original 缓存区，
+    /// 让脚本主程序在空配置位置生成全新配置。失败自动回滚还原现场。</summary>
+    public static string? PrepareForEditFresh(string scriptId, string userName, string configPath)
     {
-        if (File.Exists(script.ConfigPath))
+        string? error = null;
+        try
         {
-            return new List<string>();
-        }
-        string? configTemplateDir = ResolveConfigTemplateDir(script, capabilities);
-        if (configTemplateDir is null)
-        {
-            return new List<string>();
-        }
-        bool dirKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath));
-        string? parentDir = Path.GetDirectoryName(script.ConfigPath);
-        // 目录型 ConfigPath（无扩展名，如 MaaEnd 的 config\）：目录为合法配置形态，绝不递归删除——
-        // 第二次编辑会话时目录是刚从 store 还原的用户配置快照，误删会造成用户数据损失（修复）。
-        // 目录非空即视为用户已有配置，直接跳过模板生成；空目录仍复制模板兜底。
-        if (dirKind && Directory.Exists(script.ConfigPath))
-        {
-            if (string.IsNullOrWhiteSpace(parentDir))
+            ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
-                return new List<string>();
-            }
-            return Directory.EnumerateFileSystemEntries(script.ConfigPath).Any()
-                ? new List<string>()
-                : TryCopyTemplateFiles(configTemplateDir, script.ConfigPath, parentDir);
+                ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                var mark = new ConfigSessionMark
+                {
+                    ScriptId = scriptId,
+                    UserName = userName,
+                    ConfigPath = configPath,
+                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
+                    Phase = "edit",
+                    EditMode = "fresh",
+                };
+                mark.Write();
+                string cache = CacheDir(scriptId, userName);
+                ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
+                if (PathKindUtil.KindOf(configPath) != PathKind.Missing)
+                {
+                    ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
+                }
+            });
         }
-        // 防御自愈（仅文件型 + 模板场景）：config 位置被误建为同名目录（历史缺失形态误建/复制残留）时递归清理，
-        // 避免复制对目录写文件报拒绝访问。
-        if (Directory.Exists(script.ConfigPath))
+        catch (Exception ex)
         {
+            error = ex.Message;
             try
             {
-                Directory.Delete(script.ConfigPath, recursive: true);
-                Logger.Warn($"[警告] 编辑配置会话已清理误建的配置残留目录：{script.ConfigPath}");
+                ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+                {
+                    ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                    if (mark is not null)
+                    {
+                        ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                    }
+                });
             }
-            catch (Exception ex)
+            catch (Exception rollback)
             {
-                Logger.Warn($"[警告] 编辑配置会话清理残留目录失败（目录可能被占用，请手动检查）：{script.ConfigPath}（{ex.Message}）");
-                return new List<string>();
+                Logger.Error($"[错误] 全新配置编辑准备失败且回滚异常：{rollback.Message}");
             }
         }
+        return error;
+    }
+
+    /// <summary>复用配置编辑开始（无快照）：仅写会话标记（EditMode=reuse）记录会话，无任何文件动作，
+    /// 脚本主程序直接编辑现场配置文件。</summary>
+    public static string? PrepareForEditReuse(string scriptId, string userName, string configPath)
+    {
+        string? error = null;
         try
         {
-            if (string.IsNullOrWhiteSpace(parentDir))
+            ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
-                return new List<string>();
-            }
-            // 目录型 ConfigPath 模板整体复制到 ConfigPath 本身；文件型（如 BetterGI 的 NexusPipeline.json）复制到父目录（文件落在 ConfigPath 位置）。
-            // 复制清单相对 ConfigPath 父目录记录（与 DoRestore 清理基准一致），目录型恢复时按 "config\mxu-MaaEnd.json" 精确清理。
-            string targetDir = dirKind ? script.ConfigPath : parentDir;
-            Directory.CreateDirectory(targetDir);
-            return CopyTemplateFiles(configTemplateDir, targetDir, parentDir);
+                ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                var mark = new ConfigSessionMark
+                {
+                    ScriptId = scriptId,
+                    UserName = userName,
+                    ConfigPath = configPath,
+                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
+                    Phase = "edit",
+                    EditMode = "reuse",
+                };
+                mark.Write();
+            });
         }
         catch (Exception ex)
         {
-            Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
-            return new List<string>();
+            error = ex.Message;
         }
-    }
-
-    /// <summary>返回专项插件可用的配置模板目录；通用脚本或模板目录缺失时返回 null。</summary>
-    private static string? ResolveConfigTemplateDir(
-        ScriptInstance script,
-        IPluginCapabilityResolver capabilities)
-    {
-        if (string.IsNullOrWhiteSpace(script.PluginType))
-        {
-            return null;
-        }
-        ScriptProfile? profile = capabilities.ResolveProfile(script.PluginType, script.RootPath);
-        return profile is not null
-            && !string.IsNullOrWhiteSpace(profile.ConfigTemplateDir)
-            && Directory.Exists(profile.ConfigTemplateDir)
-            ? profile.ConfigTemplateDir
-            : null;
-    }
-
-    /// <summary>复制模板目录内容到目标目录（异常兜底记 Error，返回空清单）。</summary>
-    private static List<string> TryCopyTemplateFiles(string templateDir, string targetDir, string relBaseDir)
-    {
-        try
-        {
-            return CopyTemplateFiles(templateDir, targetDir, relBaseDir);
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"[错误] 编辑配置会话生成配置模板失败：{ex.Message}");
-            return new List<string>();
-        }
-    }
-
-    /// <summary>递归复制模板目录内容到目标目录（覆盖同名，不删除其他文件）；返回文件相对 relBaseDir 的相对路径清单（DoRestore 清理用）。</summary>
-    private static List<string> CopyTemplateFiles(string sourceDir, string targetDir, string relBaseDir)
-    {
-        var files = new List<string>();
-        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            string dest = Path.Combine(targetDir, Path.GetRelativePath(sourceDir, file));
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            File.Copy(file, dest, overwrite: true);
-            files.Add(Path.GetRelativePath(relBaseDir, dest));
-        }
-        return files;
+        return error;
     }
 
     /// <summary>编辑会话隐藏目录：暂存 config 同目录的其他配置文件（如 BetterGI 自带配置），使编辑目标成为唯一可选配置。</summary>
@@ -410,7 +356,7 @@ internal static class UserConfigManager
         return true;
     }
 
-    /// <summary>编辑配置提交：先 config → store（新配置入库），再 original → config（还原原配置）。</summary>
+    /// <summary>编辑配置提交：config → store 复制入库；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。</summary>
     public static string? CommitEdit(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -425,7 +371,10 @@ internal static class UserConfigManager
                 }
                 string store = StoreDir(scriptId, userName);
                 ConfigSwapSession.CommitStoreSnapshot(configPath, store);
-                ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                if (!IsReuseEdit(mark))
+                {
+                    ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                }
                 ConfigSessionMark.Clear(scriptId, userName);
             });
         }
@@ -436,7 +385,7 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>编辑配置取消：清 config（编辑产物），original → config 还原原配置。</summary>
+    /// <summary>编辑配置取消：normal/fresh 模式清 config（编辑/生成产物）后 original → config 还原原配置；reuse 模式无文件动作。</summary>
     public static string? CancelEdit(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -449,7 +398,11 @@ internal static class UserConfigManager
                 {
                     throw new IOException("未找到配置编辑会话");
                 }
-                ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                if (!IsReuseEdit(mark))
+                {
+                    ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                }
+                ConfigSessionMark.Clear(scriptId, userName);
             });
         }
         catch (Exception ex)
@@ -457,6 +410,12 @@ internal static class UserConfigManager
             error = ex.Message;
         }
         return error;
+    }
+
+    /// <summary>reuse 编辑会话只把现场配置复制入库，无 original 现场可还原；fresh/normal 共用现有还原路径。</summary>
+    private static bool IsReuseEdit(ConfigSessionMark? mark)
+    {
+        return string.Equals(mark?.EditMode, "reuse", StringComparison.OrdinalIgnoreCase);
     }
 
     /* ---------------- 恢复（转发 ConfigSwapSession；运行期替换/同步/重试由 ConfigRunSession 直达 ConfigSwapSession） ---------------- */

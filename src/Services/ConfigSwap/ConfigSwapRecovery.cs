@@ -34,9 +34,10 @@ internal sealed class ConfigSwapRecovery
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
-            // （P2）：语义对齐 TryRecoverItem——GeneratedTemplate（编辑会话模板产物）仍需 DoRestore
-            // 清理（恢复编辑前状态）；非模板会话 cache 空 = 现场已还原，仅清标记（避免窄窗口误删用户新写入的 config）。
-            if (mark.GeneratedTemplate)
+            // （P2）：语义对齐 TryRecoverItem——fresh 编辑会话（原配置 Missing，config 位置为脚本生成物）
+            // 仍需 DoRestore 清理（恢复编辑前状态）；其余会话 cache 空 = 现场已还原，仅清标记
+            // （避免窄窗口误删用户新写入的 config）。
+            if (mark.NeedsFreshRestore)
             {
                 DoRestore(scriptId, userName, mark);
             }
@@ -198,11 +199,11 @@ internal sealed class ConfigSwapRecovery
                 string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
                 if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
                 {
-                    // （P2）：与 RecoverIfNeeded 语义对齐——GeneratedTemplate（编辑会话模板产物）仍需
-                    // DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；非模板会话 cache 空 =
-                    // 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」删除
-                    // config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
-                    if (mark.GeneratedTemplate)
+                    // （P2）：与 RecoverIfNeeded 语义对齐——fresh 编辑会话（原配置 Missing，config 位置为
+                    // 脚本生成物）仍需 DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；其余会话
+                    // cache 空 = 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」
+                    // 删除 config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
+                    if (mark.NeedsFreshRestore)
                     {
                         DoRestore(scriptId, userName, mark);
                     }
@@ -445,23 +446,19 @@ internal sealed class ConfigSwapRecovery
     }
 
     /// <summary>执行还原：清 config（当前形态），original → config 还原原配置，随后清除标记。
-    /// original 为空（首次会话）时：清理会话期间在 config 位置产生的文件/目录，还原为编辑前状态——
-    /// ① 编辑会话生成的配置模板（GeneratedTemplate）；② 运行会话原配置形态为 Missing（运行前 config 位置不存在，
-    /// 运行生效的 store 快照为会话产物，必须删除，否则残留污染 config 位置与后续快照）。</summary>
+    /// original 为空（首次会话）时：OriginalKind 为 Missing（运行前 config 位置不存在）则清理会话期间在
+    /// config 位置产生的文件/目录，还原为编辑前状态——运行生效的 store 快照为会话产物，必须删除，
+    /// 否则残留污染 config 位置与后续快照；其余情况（如 reuse 编辑会话）现场未动，仅清标记。</summary>
     public void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
     {
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
-            bool restoreMissing = mark.GeneratedTemplate
-                || PathKindUtil.Parse(mark.OriginalKind) == PathKind.Missing;
-            if (restoreMissing)
+            if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Missing)
             {
                 PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
                 if (current != PathKind.Missing)
                 {
-                    // 模板目录形态：先按清单删除复制生成的模板文件，再对 configPath 位置兜底清理（防残留）
-                    DeleteTemplateFiles(mark);
                     // 删除失败自然抛出（ClearPath 带重试），标记保留，交由调用方（自愈/后台延迟重试）再次尝试
                     ConfigSwapPrimitives.ClearPath(mark.ConfigPath, current);
                     Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");
@@ -470,41 +467,9 @@ internal sealed class ConfigSwapRecovery
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
-        // （台账外）：cache 非空路径同样先按清单删除模板兄弟文件——StartVisible 失败/CancelEdit 且原配置存在时，
-        // 文件型 config 模板复制到父目录的非 ConfigPath 同名文件（如 maa_option.json）此前残留。
-        DeleteTemplateFiles(mark);
         PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
         ConfigSwapPrimitives.ClearPath(mark.ConfigPath, currentState);
         ConfigSwapPrimitives.MoveAs(cache, mark.ConfigPath, ConfigSwapPrimitives.RestoreKind(mark));
         ConfigSessionMark.Clear(scriptId, userName);
-    }
-
-    /// <summary>按 TemplateFiles 清单删除编辑会话生成的模板文件（相对 ConfigPath 父目录）；删除失败保留标记交自愈重试。</summary>
-    private void DeleteTemplateFiles(ConfigSessionMark mark)
-    {
-        if (mark.TemplateFiles.Count == 0)
-        {
-            return;
-        }
-        string? baseDir = Path.GetDirectoryName(mark.ConfigPath);
-        if (string.IsNullOrWhiteSpace(baseDir))
-        {
-            return;
-        }
-        foreach (string rel in mark.TemplateFiles)
-        {
-            try
-            {
-                string dest = Path.Combine(baseDir, rel);
-                if (File.Exists(dest))
-                {
-                    File.Delete(dest);
-                }
-            }
-            catch
-            {
-                // 删除失败保留标记，交由调用方（自愈/后台延迟重试）再次尝试
-            }
-        }
     }
 }
