@@ -51,6 +51,25 @@ public class SessionJudgeTests
     }
 
     [Fact]
+    public void ApplyJudgeResult_RetainsSelectedScreenshotIdOnlyForAcceptedResult()
+    {
+        var judge = new SessionJudge(MakeScript(s =>
+        {
+            s.JudgeScriptEnabled = true;
+            s.JudgeScript = "x";
+        }));
+
+        Assert.Equal(
+            SessionJudge.JudgeOutcome.Success,
+            judge.ApplyJudgeResult("success", "ok", "", [], _ => { }, "screenshot-1"));
+        Assert.Equal("screenshot-1", judge.NotifyScreenshotId);
+        Assert.Equal(
+            SessionJudge.JudgeOutcome.None,
+            judge.ApplyJudgeResult("success", "later", "", [], _ => { }, "screenshot-2"));
+        Assert.Equal("screenshot-1", judge.NotifyScreenshotId);
+    }
+
+    [Fact]
     public void KeywordMode_LineGroup_And_Semantics()
     {
         var judge = new SessionJudge(MakeScript(s => s.SuccessKeywords = "任务完成,全部成功"));

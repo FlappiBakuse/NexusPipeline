@@ -1834,6 +1834,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .global-management-card .section-heading h3 { margin: 0; }
 .global-management-card .switch-row, .global-management-card .field { margin-top: var(--space-3); }
 .global-management-card .switch-row:first-of-type, .global-management-card .field:first-of-type { margin-top: 0; }
+.global-management-card .settings-list .switch-row { margin-top: 0; }
 .global-management-plugins { display: grid; gap: var(--space-3); margin-top: var(--space-5); }
 .global-management-plugins > .section-heading { margin-bottom: 0; }
 .global-management-plugin { display: grid; min-width: 0; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }

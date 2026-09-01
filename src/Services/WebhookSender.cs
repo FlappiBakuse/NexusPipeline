@@ -1,8 +1,10 @@
 ﻿using System.Security.Cryptography;
 using System.Text;
+using System.Net.Http.Headers;
 using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Notification;
 using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
@@ -53,7 +55,8 @@ internal static class WebhookSender
     public static async Task<bool> SendAsync(
         AppSettings settings,
         string text,
-        OutboundHttpClientProvider? outbound = null)
+        OutboundHttpClientProvider? outbound = null,
+        NotificationImage? image = null)
     {
         string? webhookUrl = SecretStore.TryDecrypt(settings.WebhookUrl, out string? url) ? url : null;
         string? webhookSecret = SecretStore.TryDecrypt(settings.WebhookSecret, out string? secret) ? secret : null;
@@ -69,9 +72,120 @@ internal static class WebhookSender
             Logger.Error("[错误] webhook_type=generic 但未配置 webhook_template，无法发送。");
             return false;
         }
-        int timeout = settings.WebhookTimeout < 1 ? 30 : settings.WebhookTimeout;
         string body = BuildBody(type, text, template);
         (string targetUrl, Dictionary<string, string> signatureHeaders) = ApplySignature(type, webhookUrl, webhookSecret);
+        if (image is not null && type == "discord")
+        {
+            return await SendDiscordWithImageAsync(
+                settings,
+                targetUrl,
+                signatureHeaders,
+                body,
+                image,
+                outbound).ConfigureAwait(false);
+        }
+        if (image is not null && type == "wecom")
+        {
+            return await SendWeComWithImageAsync(
+                settings,
+                targetUrl,
+                signatureHeaders,
+                body,
+                image,
+                outbound).ConfigureAwait(false);
+        }
+        if (image is not null)
+        {
+            Logger.Warn($"[通知] 当前 Webhook 类型「{TypeDisplay(type)}」不支持图片附件，已发送文字通知。");
+        }
+        return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, body, outbound).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> SendDiscordWithImageAsync(
+        AppSettings settings,
+        string targetUrl,
+        Dictionary<string, string> signatureHeaders,
+        string body,
+        NotificationImage image,
+        OutboundHttpClientProvider? outbound)
+    {
+        using var multipart = new MultipartFormDataContent();
+        multipart.Add(new StringContent(body, Encoding.UTF8, "application/json"), "payload_json");
+        var file = new ByteArrayContent(image.Data);
+        file.Headers.ContentType = new MediaTypeHeaderValue(image.ContentType);
+        multipart.Add(file, "files[0]", image.FileName);
+        return await SendRequestAsync(
+            settings,
+            "discord",
+            targetUrl,
+            signatureHeaders,
+            multipart,
+            outbound).ConfigureAwait(false);
+    }
+
+    private static async Task<bool> SendWeComWithImageAsync(
+        AppSettings settings,
+        string targetUrl,
+        Dictionary<string, string> signatureHeaders,
+        string textBody,
+        NotificationImage image,
+        OutboundHttpClientProvider? outbound)
+    {
+        bool textOk = await SendJsonAsync(
+            settings,
+            "wecom",
+            targetUrl,
+            signatureHeaders,
+            textBody,
+            outbound).ConfigureAwait(false);
+        if (!textOk)
+        {
+            return false;
+        }
+
+        string base64 = Convert.ToBase64String(image.Data);
+        string md5 = Convert.ToHexString(MD5.HashData(image.Data)).ToLowerInvariant();
+        string imageBody = $"{{\"msgtype\":\"image\",\"image\":{{\"base64\":{JsonLiteral(base64)},\"md5\":{JsonLiteral(md5)}}}}}";
+        bool imageOk = await SendJsonAsync(
+            settings,
+            "wecom",
+            targetUrl,
+            signatureHeaders,
+            imageBody,
+            outbound).ConfigureAwait(false);
+        if (!imageOk)
+        {
+            Logger.Warn("[通知] 企业微信文字通知已发送，但图片附件发送失败。");
+        }
+        return imageOk;
+    }
+
+    private static Task<bool> SendJsonAsync(
+        AppSettings settings,
+        string type,
+        string targetUrl,
+        Dictionary<string, string> signatureHeaders,
+        string body,
+        OutboundHttpClientProvider? outbound)
+    {
+        return SendRequestAsync(
+            settings,
+            type,
+            targetUrl,
+            signatureHeaders,
+            new StringContent(body, Encoding.UTF8, "application/json"),
+            outbound);
+    }
+
+    private static async Task<bool> SendRequestAsync(
+        AppSettings settings,
+        string type,
+        string targetUrl,
+        Dictionary<string, string> signatureHeaders,
+        HttpContent content,
+        OutboundHttpClientProvider? outbound)
+    {
+        int timeout = settings.WebhookTimeout < 1 ? 30 : settings.WebhookTimeout;
         try
         {
             Uri target = new(targetUrl);
@@ -79,7 +193,7 @@ internal static class WebhookSender
                 .CreateClient(target, TimeSpan.FromSeconds(timeout));
             using var request = new HttpRequestMessage(HttpMethod.Post, targetUrl)
             {
-                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+                Content = content,
             };
             foreach (KeyValuePair<string, string> header in signatureHeaders)
             {
@@ -90,7 +204,7 @@ internal static class WebhookSender
             string responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             // ：成功判定补 HTTP 状态码——此前飞书/钉钉只看 body code==0，HTTP 500 但 code==0 误判成功。
             bool ok = response.IsSuccessStatusCode
-                && (type is not ("feishu" or "dingtalk") || JsonNode.Parse(responseText).Get("code").Int(-1) == 0);
+                && IsResponseBodySuccessful(type, responseText);
             if (ok)
             {
                 Logger.Info($"{TypeDisplay(type)} Webhook 发送成功。");
@@ -106,6 +220,21 @@ internal static class WebhookSender
             Logger.Error($"[错误] Webhook 发送失败：{ex.Message}");
             return false;
         }
+    }
+
+    private static bool IsResponseBodySuccessful(string type, string responseText)
+    {
+        if (type is "feishu" or "dingtalk")
+        {
+            return JsonNode.Parse(responseText).Get("code").Int(-1) == 0;
+        }
+        if (type == "wecom" && !string.IsNullOrWhiteSpace(responseText))
+        {
+            JsonNode? response = JsonNode.Parse(responseText);
+            JsonNode? errorCode = response.Get("errcode");
+            return errorCode is null || errorCode.Int(-1) == 0;
+        }
+        return true;
     }
 
     private static string BuildBody(string type, string text, string template)

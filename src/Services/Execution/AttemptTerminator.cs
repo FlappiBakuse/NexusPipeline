@@ -38,12 +38,14 @@ internal sealed class AttemptTerminator
         {
             RunAttemptResult failed = RunAttemptResult.Failed(_judge.Reason ?? "日志出现失败关键字，任务判定失败");
             failed.NotifyText = _judge.NotifyText;
+            failed.NotifyScreenshotId = _judge.NotifyScreenshotId;
             return failed;
         }
         if (_judge.IsMarker)
         {
             RunAttemptResult success = RunAttemptResult.Success(_judge.Reason ?? "判断脚本判定成功");
             success.NotifyText = _judge.NotifyText;
+            success.NotifyScreenshotId = _judge.NotifyScreenshotId;
             return success;
         }
         return RunAttemptResult.Failed(_terminalFailureReason);
@@ -91,11 +93,13 @@ internal sealed class AttemptTerminator
         {
             result = RunAttemptResult.Failed(_judge.Reason ?? "日志出现失败关键字，任务判定失败");
             result.NotifyText = _judge.NotifyText;
+            result.NotifyScreenshotId = _judge.NotifyScreenshotId;
         }
         else if (_judge.IsMarker)
         {
             result = RunAttemptResult.Success(_judge.Reason ?? "日志出现完成标志，脚本正常运行结束");
             result.NotifyText = _judge.NotifyText;
+            result.NotifyScreenshotId = _judge.NotifyScreenshotId;
         }
         else if (_judge.IsConfigured)
         {

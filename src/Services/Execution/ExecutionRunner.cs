@@ -123,6 +123,7 @@ internal sealed class ExecutionRunner
             RunRecord? record = null;
             RunRecord? skippedRecord = null;
             RunRecord? publishedRecord = null;
+            NotificationImage? notificationImage = null;
             try
             {
                 int maxSuccessfulRuns = runUser.Binding.MaxSuccessfulRunsPerDay;
@@ -227,30 +228,61 @@ internal sealed class ExecutionRunner
             finally
             {
                 gate.Release();
+                if (publishedRecord is null)
+                {
+                    session?.DisposeScreenshots();
+                }
             }
 
-            if (publishedRecord is null)
+            try
             {
-                throw new InvalidOperationException($"脚本「{displayName}」未生成已提交的运行记录");
+                if (publishedRecord is null)
+                {
+                    throw new InvalidOperationException($"脚本「{displayName}」未生成已提交的运行记录");
+                }
+                if (session is not null && record is not null)
+                {
+                    RunScreenshot? selected = session.ScreenshotStore.SelectForNotification(record.NotifyScreenshotId);
+                    if (selected is not null)
+                    {
+                        notificationImage = new NotificationImage(
+                            selected.Id,
+                            selected.FileName,
+                            "image/jpeg",
+                            selected.Data,
+                            selected.Width,
+                            selected.Height,
+                            selected.CapturedAt);
+                    }
+                }
+                records.Add(publishedRecord);
+                exec.AddRecordAndIncrement(publishedRecord);
+                exec.CurrentStatus = publishedRecord.Status switch
+                {
+                    "success" => "运行成功",
+                    "cancelled" => "已取消",
+                    "skipped" => "已跳过",
+                    _ => "运行失败",
+                };
+                string statusDetail = publishedRecord.Status == "skipped"
+                    ? publishedRecord.ResultDetail
+                    : $"最终结果：{publishedRecord.Status}（{publishedRecord.ResultDetail}）";
+                Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」{statusDetail}");
+                if (publishedRecord.Status == "skipped")
+                {
+                    exec.AppendLog(LogLevel.Info, $"[{displayName}] {publishedRecord.ResultDetail}");
+                }
+                await NotifyScriptIfEnabledAsync(
+                    script,
+                    publishedRecord,
+                    runUser.Binding,
+                    displayName,
+                    notificationImage).ConfigureAwait(false);
             }
-            records.Add(publishedRecord);
-            exec.AddRecordAndIncrement(publishedRecord);
-            exec.CurrentStatus = publishedRecord.Status switch
+            finally
             {
-                "success" => "运行成功",
-                "cancelled" => "已取消",
-                "skipped" => "已跳过",
-                _ => "运行失败",
-            };
-            string statusDetail = publishedRecord.Status == "skipped"
-                ? publishedRecord.ResultDetail
-                : $"最终结果：{publishedRecord.Status}（{publishedRecord.ResultDetail}）";
-            Logger.Info($"[{(exec.Mode == "auto" ? "自动" : "手动")}运行] 脚本「{displayName}」{statusDetail}");
-            if (publishedRecord.Status == "skipped")
-            {
-                exec.AppendLog(LogLevel.Info, $"[{displayName}] {publishedRecord.ResultDetail}");
+                session?.DisposeScreenshots();
             }
-            await NotifyScriptIfEnabledAsync(script, publishedRecord, runUser.Binding, displayName).ConfigureAwait(false);
         }
         return records;
     }
@@ -259,7 +291,8 @@ internal sealed class ExecutionRunner
         ScriptInstance script,
         RunRecord record,
         UserScriptBinding binding,
-        string displayName)
+        string displayName,
+        NotificationImage? image = null)
     {
         if (!binding.NotifyEnabled)
         {
@@ -268,7 +301,7 @@ internal sealed class ExecutionRunner
         try
         {
             // 用户绑定通知开关与队列级汇总通知相互独立，按每个用户完成立即发送。
-            await _notifications.NotifyScriptAsync(script, record, binding).ConfigureAwait(false);
+            await _notifications.NotifyScriptAsync(script, record, binding, image).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -330,6 +363,7 @@ internal sealed class ExecutionRunner
         }
         // HistoryService 返回的是提交后的快照；通知文本属于运行时字段，需要随最终快照保留。
         result.Record.CustomNotifyText = record.CustomNotifyText;
+        result.Record.NotifyScreenshotId = record.NotifyScreenshotId;
         return result.Record;
     }
 

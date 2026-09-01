@@ -71,7 +71,7 @@ function umBindingCardMarkup(binding) {
   const overrideHelper = category => locks[category]
     ? '<p class="muted helper-copy um-override-helper">由「全局管理」同步 / 关闭全局同步后将恢复此脚本实例原有设置</p>'
     : "";
-  const runDaysPlaceholder = "-1 永久；0 停止；正数每日递减";
+  const runDaysPlaceholder = "填写 -1 永久运行；填写 0 则不运行该脚本实例；填写 0 以上的数字则运行，每日减 1。";
   const dragEnabled = umBindingDragEnabled();
   const dragHidden = umState.bindingEditMode || !!umState.expandedId;
   const head =
@@ -105,8 +105,8 @@ function umBindingCardMarkup(binding) {
     "</section>";
   const advancedView =
     '<section class="um-binding-option-section um-view um-view-advanced"><div class="section-heading"><div><h4>高级</h4><p class="muted">任务前后脚本设置。</p></div></div>' +
-      pathField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "file", 'data-binding-field="preRunScript" placeholder="任务前脚本文件"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅首次运行。") +
-      pathField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "file", 'data-binding-field="postRunScript" placeholder="任务后脚本文件"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅最终运行。") +
+      pathField("um-" + idPart + "-pre", "任务前运行脚本路径", preValue, "file", 'data-binding-field="preRunScript" placeholder="%FIRST% 开头填写仅首次运行"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%FIRST% 开头填写仅首次运行。") +
+      pathField("um-" + idPart + "-post", "任务后运行脚本路径", postValue, "file", 'data-binding-field="postRunScript" placeholder="%LAST% 开头填写仅最终运行"' + (locks.advanced ? " disabled" : ""), "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%LAST% 开头填写仅最终运行。") +
       overrideHelper("advanced") +
     "</section>";
   return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +

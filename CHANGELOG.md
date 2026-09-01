@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.12.6（Pre-release）
+
+### 运行截图与通知
+
+- 新增运行期游戏截图能力：每个「脚本实例 × 用户」运行最多保留 16 张原分辨率高质量 JPEG，跨重试使用 FIFO 截图池；截图仅驻留内存，通知完成后释放。
+- 关键字首次形成有效成功/失败判定时自动截图；判断脚本首次接受成功/失败结果时自动截图，并提供 JavaScript `nexus.captureScreenshot()` 与 Python 临时 loopback API。
+- 判断脚本可通过 `notifyScreenshotId` 选择通知截图；Webhook 与 SMTP 增加全局发送截图开关，Discord/企业微信支持图片发送，其他协议保留文字通知并记录兼容性提示；队列汇总通知不附图。
+
+### 回归修复
+
+- 恢复任务前/后脚本、配置路径、日志路径、运行天数和参数填写框的完整说明。
+- 修复延时气泡陈旧定时器导致的未聚焦偶发弹出。
+- 合并连续上下排列的 1/1 宽度轨道切换按钮卡片，修复上传判断脚本时原生文件选择器未显示忙碌状态。
+
 ## v0.12.5（Pre-release）
 
 ### 表单与交互

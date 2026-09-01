@@ -24,21 +24,24 @@ function globalManagementHostMarkup(settings) {
   const pre = encodePrePost(PRE_ONLY_MARKER, advanced.preRunOnceOnly, advanced.preRunScript);
   const post = encodePrePost(POST_FINAL_MARKER, advanced.postRunOnFinalOnly, advanced.postRunScript);
   return '<div class="global-management-grid">' +
-    '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div>' +
+    '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div><div class="settings-list">' +
       switchControl("gm-general-sync", "同步通用设置", "开启后覆盖每个脚本绑定的通用设置", general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
       switchControl("gm-general-enabled", "是否启用", "关闭后所有绑定均不参与运行", general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
+    '</div>' +
       valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="-1 永久；0 停止"', "-1 表示永久运行；0 表示停止；正数表示剩余运行天数，每日递减。") +
       valueField("gm-general-max-success", "最多成功运行次数", typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", 'data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRuns) + '" step="1" placeholder="-1 不限制；正数达到上限后跳过"', "-1 表示不限制；正整数达到上限后跳过，0 不是有效值。") +
     '</section>' +
-    '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div>' +
+    '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div><div class="settings-list">' +
       switchControl("gm-notification-sync", "同步通知设置", "开启后覆盖每个脚本绑定的通知设置", notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
       switchControl("gm-notification-enabled", "开启通知推送", "按用户绑定通知设置发送运行状态通知", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
+    '</div>' +
       valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"', "留空时继承每个脚本绑定的 SMTP 收件人设置。") +
     '</section>' +
-    '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div>' +
+    '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div><div class="settings-list">' +
       switchControl("gm-advanced-sync", "同步高级设置", "开启后覆盖每个脚本绑定的高级设置", advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
-      pathField("gm-advanced-pre", "任务前运行脚本路径", pre, "file", 'data-global-field="advanced.preRunScript" placeholder="任务前脚本文件"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅首次运行。") +
-      pathField("gm-advanced-post", "任务后运行脚本路径", post, "file", 'data-global-field="advanced.postRunScript" placeholder="任务后脚本文件"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；前缀用于指定仅最终运行。") +
+    '</div>' +
+      pathField("gm-advanced-pre", "任务前运行脚本路径", pre, "file", 'data-global-field="advanced.preRunScript" placeholder="%FIRST% 开头填写仅首次运行"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%FIRST% 开头填写仅首次运行。") +
+      pathField("gm-advanced-post", "任务后运行脚本路径", post, "file", 'data-global-field="advanced.postRunScript" placeholder="%LAST% 开头填写仅最终运行"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%LAST% 开头填写仅最终运行。") +
     '</section>' +
   '</div>';
 }

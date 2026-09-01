@@ -65,7 +65,7 @@ function positionTooltip() {
 function showNow(context) {
   const element = context?.target;
   const text = helpText(element);
-  if (!text || !element?.isConnected) return;
+  if (!text || !isContextActive(context)) return;
   hideTooltip();
   target = element;
   anchor = context.anchor || element;
@@ -88,8 +88,18 @@ function schedule(context) {
   if (!helpText(element)) return;
   timer = window.setTimeout(() => {
     timer = null;
+    if (!isContextActive(context)) return;
     showNow(context);
   }, 680);
+}
+
+function isContextActive(context) {
+  const element = context?.target;
+  const contextAnchor = context?.anchor;
+  if (!element?.isConnected || !contextAnchor?.isConnected || !helpText(element)) return false;
+  if (context.trigger === "focus") return document.activeElement === contextAnchor;
+  if (context.trigger === "pointer") return element.matches(":hover");
+  return true;
 }
 
 function closestHelpTarget(node) {
@@ -124,7 +134,7 @@ export function initTooltips() {
       return;
     }
     if (next === related && closestHelpContext(event.relatedTarget)?.anchor === context.anchor) return;
-    schedule(context);
+    schedule({ ...context, trigger: "pointer" });
   });
   document.addEventListener("pointerout", event => {
     const current = closestHelpTarget(event.target);
@@ -137,8 +147,9 @@ export function initTooltips() {
       hideTooltip();
       return;
     }
+    const focusContext = { ...context, trigger: "focus" };
     const scheduleAfterFocusScroll = () => {
-      if (document.activeElement === context.anchor && context.anchor?.isConnected) schedule(context);
+      if (document.activeElement === focusContext.anchor && focusContext.anchor?.isConnected) schedule(focusContext);
     };
     if (typeof window.requestAnimationFrame === "function") window.requestAnimationFrame(scheduleAfterFocusScroll);
     else window.setTimeout(scheduleAfterFocusScroll, 0);
@@ -155,4 +166,8 @@ export function initTooltips() {
   });
   document.addEventListener("scroll", hideTooltip, true);
   window.addEventListener("resize", hideTooltip);
+  window.addEventListener("blur", hideTooltip);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) hideTooltip();
+  });
 }

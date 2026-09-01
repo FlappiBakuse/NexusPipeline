@@ -149,7 +149,7 @@ settings.sections               shell.nav
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
 - `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
 - `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
-- `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。
+- `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。该接口用于运行预览，不等同于判断脚本的运行期通知截图。
 
 前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 兼容性、公开资源路径、扩展名和文件存在性。同源前端可以访问管理页面可用的 DOM 与请求能力，插件发布前应完成代码审查。可见选择、数字、时间、文件和颜色交互应优先使用 `host.controls`；文件选择器和取色器的浏览器载体保持隐藏，range 使用可访问的语义 input 并由宿主 CSS 绘制视觉层。
 
@@ -221,8 +221,18 @@ settings.sections               shell.nav
 
 ## 判断脚本
 
-- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|failed","reason":"…","notifyText":"…","replaceConfigs":[…]}`；宿主固化 `JudgeScriptEnabled=true` 且用户不可编辑（专项弹窗不渲染自定义完成标志区）。
+- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；宿主固化 `JudgeScriptEnabled=true` 且用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
+
+### 判断脚本截图
+
+一次「脚本实例 × 用户」运行拥有一个内存截图池，覆盖该运行的全部重试尝试，最多保存 16 张；第 17 张加入时移除最早的一张。截图不写入历史或用户数据，脚本实例收尾后全部释放。
+
+- 截图来源为游戏窗口客户区或模拟器画面，保留采集到的原始像素宽高，编码为高质量 JPEG。
+- 关键字模式在首次接受成功/失败关键字判定时自动截图；判断脚本模式在首次接受 `status: "success"` / `"failed"` 时自动截图。
+- JavaScript 判断脚本可随时调用 `nexus.captureScreenshot()`，返回截图 ID；Python 判断脚本可使用输入中的 `screenshotApi.endpoint` 和 `screenshotApi.token`，向 endpoint 发送带 `X-Nexus-Screenshot-Token` 请求头的 `POST` 请求来截图。该地址仅绑定本机回环，并随当前判断脚本调用结束失效。
+- 输入中的 `screenshots` 仅包含 ID、序号、时间、尝试次数、尺寸、来源和触发类型等元数据，不包含图片字节。
+- 输出的 `notifyScreenshotId` 指定脚本通知附带的截图。留空时选择当前仍保留的最新截图；填写已被淘汰或不存在的 ID 时不附图，并记录警告。脚本通知发送后截图池释放；队列汇总通知不附图。
 
 ## 配置还原描述（config-restore.json）
 

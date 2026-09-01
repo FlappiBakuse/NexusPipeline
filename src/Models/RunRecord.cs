@@ -53,6 +53,10 @@ public class RunRecord
     [System.Text.Json.Serialization.JsonIgnore]
     public string CustomNotifyText { get; set; } = "";
 
+    /// <summary>运行期通知选择的截图 ID（仅内存，截图本体不进入历史记录）。</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string NotifyScreenshotId { get; set; } = "";
+
     public string LogFile { get; set; } = "";
 
     public List<RunAttempt> AttemptDetails { get; set; } = new();

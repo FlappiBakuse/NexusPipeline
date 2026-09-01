@@ -19,6 +19,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     private readonly Action<string> _statusChanged;
     private readonly Func<int, JudgeSnapshot> _captureSnapshot;
     private readonly Action<List<string>> _replaceRequested;
+    private readonly Func<int, string, CancellationToken, Task<RunScreenshot?>>? _captureScreenshot;
     private readonly SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult> _judgeWorker;
     private readonly SingleFlightWorker<ConfigSyncRequest, bool> _configSyncWorker;
 
@@ -27,6 +28,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     private bool _finalJudgeRequested;
     private bool _finalJudgeQueuePending;
     private bool _finalJudgeCompleted;
+    private bool _autoScreenshotCaptured;
 
     /// <summary>最终判定是否已完成（结果由宿主经 AttemptTerminator.TryApplyFinalDecision 应用）。</summary>
     public bool FinalJudgeCompleted => _finalJudgeCompleted;
@@ -41,7 +43,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         Action<string> statusChanged,
         Func<int, JudgeSnapshot> captureSnapshot,
         Action<List<string>> replaceRequested,
-        Action<ConfigSyncRequest> configSync)
+        Action<ConfigSyncRequest> configSync,
+        Func<int, string, CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null)
     {
         _attemptId = attemptId;
         _attemptNumber = attemptNumber;
@@ -52,6 +55,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         _statusChanged = statusChanged;
         _captureSnapshot = captureSnapshot;
         _replaceRequested = replaceRequested;
+        _captureScreenshot = captureScreenshot;
         _judgeWorker = new SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult>(async (snapshot, workerToken) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, _operationToken);
@@ -66,7 +70,10 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                 }).ToList(),
                 snapshot.Script.ConfigPath,
                 snapshot.ScriptDir,
-                linked.Token).ConfigureAwait(false);
+                linked.Token,
+                _captureScreenshot is null
+                    ? null
+                    : captureToken => _captureScreenshot(snapshot.AttemptNumber, "judge-manual", captureToken)).ConfigureAwait(false);
             return new JudgeWorkerResult(
                 snapshot.AttemptId,
                 snapshot.AttemptNumber,
@@ -96,7 +103,9 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         return true;
     }
 
-    public bool ConsumeJudgeResult()
+    public bool ConsumeJudgeResult() => ConsumeJudgeResultAsync().GetAwaiter().GetResult();
+
+    public async Task<bool> ConsumeJudgeResultAsync()
     {
         if (!_judgeWorker.TryTakeCompleted(out JudgeWorkerResult completed, out Exception? error))
         {
@@ -148,16 +157,19 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                     // 消除进程仍运行时复制覆盖 config 的文件占用/半写窗口。
                     _replaceRequested(replace);
                     Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本请求替换配置（{replace.Count} 个文件），收尾后应用并重试。");
-                });
+                },
+                judgeResult.NotifyScreenshotId);
             if (outcome == SessionJudge.JudgeOutcome.Success)
             {
                 _statusChanged?.Invoke("判断脚本判定成功，等待脚本退出...");
                 Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本判定成功：{judgeResult.Reason}");
+                await CaptureAutoScreenshotAsync("judge-success").ConfigureAwait(false);
             }
             else if (outcome == SessionJudge.JudgeOutcome.Failure)
             {
                 _statusChanged?.Invoke("判断脚本判定失败");
                 Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本判定失败：{judgeResult.Reason}");
+                await CaptureAutoScreenshotAsync("judge-failed").ConfigureAwait(false);
             }
         }
         if (isFinal)
@@ -165,6 +177,24 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
             _finalJudgeCompleted = true;
         }
         return true;
+    }
+
+    private async Task CaptureAutoScreenshotAsync(string trigger)
+    {
+        if (_captureScreenshot is null || _autoScreenshotCaptured)
+        {
+            return;
+        }
+        _autoScreenshotCaptured = true;
+        try
+        {
+            await _captureScreenshot(_attemptNumber, trigger, _operationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // 截图失败不得改变判断脚本的 success/failed 结果，也不得阻塞最终判定收拢。
+            Logger.Warn($"[{_modeText}运行] 脚本「{_scriptName}」自动截图失败：{ex.Message}");
+        }
     }
 
     /// <summary>触发判断脚本执行（批次/周期/最终共用）；单飞 worker 忙时返回 false（调用方按 final 语义保留排队）。</summary>
@@ -213,7 +243,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     /// <summary>先收拢后台 worker（消费残留结果并停止），再允许宿主进入进程清理与配置收尾，防止旧 Attempt 继续写入状态或文件。</summary>
     public async Task StopAsync()
     {
-        ConsumeJudgeResult();
+        await ConsumeJudgeResultAsync().ConfigureAwait(false);
         ConsumeConfigSyncResult();
         await _judgeWorker.StopAsync().ConfigureAwait(false);
         await _configSyncWorker.StopAsync().ConfigureAwait(false);

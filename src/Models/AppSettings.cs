@@ -44,7 +44,13 @@ public class AppSettings
 
     public bool WebhookEnabled { get; set; } = true;
 
+    /// <summary>脚本完成通知是否尝试附带判断脚本选择的截图；队列汇总通知不附图。</summary>
+    public bool WebhookScreenshotEnabled { get; set; }
+
     public bool SmtpEnabled { get; set; }
+
+    /// <summary>脚本完成邮件是否附带判断脚本选择的截图；队列汇总通知不附图。</summary>
+    public bool SmtpScreenshotEnabled { get; set; }
 
     public string WebhookType { get; set; } = "feishu";
 

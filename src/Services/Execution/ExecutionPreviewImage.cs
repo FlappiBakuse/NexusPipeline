@@ -14,15 +14,27 @@ internal sealed record ExecutionPreviewImageResult(bool Ok, byte[] Data, string 
     public static ExecutionPreviewImageResult Failure(string error) => new(false, Array.Empty<byte>(), error);
 }
 
-/// <summary>将目标游戏客户区或模拟器 PNG 转换为 360p JPEG。所有 PC 捕获路径都绑定到指定 HWND 的客户区。</summary>
+/// <summary>将目标游戏客户区或模拟器 PNG 转换为预览或通知 JPEG。所有 PC 捕获路径都绑定到指定 HWND 的客户区。</summary>
 internal static class ExecutionPreviewImage
 {
     private const int PreviewHeight = 360;
-    private const long JpegQuality = 75L;
+    private const long PreviewJpegQuality = 75L;
+    private const long NotificationJpegQuality = 90L;
     private const uint PrintWindowClientOnly = 0x00000001;
     private const uint PrintWindowRenderFullContent = 0x00000002;
 
     internal static ExecutionPreviewImageResult CapturePc(int processId)
+    {
+        return CapturePcCore(processId, preview: true);
+    }
+
+    /// <summary>捕获游戏客户区原始像素尺寸的高质量 JPEG，供运行期通知附件使用。</summary>
+    internal static ExecutionPreviewImageResult CapturePcOriginal(int processId)
+    {
+        return CapturePcCore(processId, preview: false);
+    }
+
+    private static ExecutionPreviewImageResult CapturePcCore(int processId, bool preview)
     {
         if (processId <= 0)
         {
@@ -47,18 +59,29 @@ internal static class ExecutionPreviewImage
         using Bitmap? printed = CaptureWithPrintWindow(window, width, height);
         if (printed is not null && !LooksBlank(printed))
         {
-            return EncodeJpeg(printed);
+            return EncodeJpeg(printed, preview);
         }
 
         using Bitmap? copied = CaptureClientRectangle(window, width, height);
         if (copied is not null && !LooksBlank(copied))
         {
-            return EncodeJpeg(copied);
+            return EncodeJpeg(copied, preview);
         }
         return ExecutionPreviewImageResult.Failure("游戏窗口暂未提供有效画面");
     }
 
     internal static ExecutionPreviewImageResult ConvertPng(byte[] png)
+    {
+        return ConvertPngCore(png, preview: true);
+    }
+
+    /// <summary>将模拟器 PNG 编码为保持源像素尺寸的高质量 JPEG，供运行期通知附件使用。</summary>
+    internal static ExecutionPreviewImageResult ConvertPngOriginal(byte[] png)
+    {
+        return ConvertPngCore(png, preview: false);
+    }
+
+    private static ExecutionPreviewImageResult ConvertPngCore(byte[] png, bool preview)
     {
         if (!EmulatorSupport.IsPng(png))
         {
@@ -68,7 +91,7 @@ internal static class ExecutionPreviewImage
         {
             using var stream = new MemoryStream(png, writable: false);
             using Image image = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
-            return EncodeJpeg(image);
+            return EncodeJpeg(image, preview);
         }
         catch (Exception ex)
         {
@@ -147,7 +170,7 @@ internal static class ExecutionPreviewImage
         return true;
     }
 
-    private static ExecutionPreviewImageResult EncodeJpeg(Image source)
+    private static ExecutionPreviewImageResult EncodeJpeg(Image source, bool preview)
     {
         try
         {
@@ -157,8 +180,8 @@ internal static class ExecutionPreviewImage
             {
                 return ExecutionPreviewImageResult.Failure("截图尺寸无效");
             }
-            int outputHeight = height > PreviewHeight ? PreviewHeight : height;
-            int outputWidth = height > PreviewHeight
+            int outputHeight = preview && height > PreviewHeight ? PreviewHeight : height;
+            int outputWidth = preview && height > PreviewHeight
                 ? Math.Max(1, (int)Math.Round(width * (double)PreviewHeight / height))
                 : width;
             using var resized = new Bitmap(outputWidth, outputHeight, PixelFormat.Format24bppRgb);
@@ -178,7 +201,9 @@ internal static class ExecutionPreviewImage
                 return ExecutionPreviewImageResult.Failure("系统缺少 JPEG 编码器");
             }
             using var parameters = new EncoderParameters(1);
-            parameters.Param[0] = new EncoderParameter(System.Drawing.Imaging.Encoder.Quality, JpegQuality);
+            parameters.Param[0] = new EncoderParameter(
+                System.Drawing.Imaging.Encoder.Quality,
+                preview ? PreviewJpegQuality : NotificationJpegQuality);
             using var output = new MemoryStream();
             resized.Save(output, codec, parameters);
             return ExecutionPreviewImageResult.Success(output.ToArray());

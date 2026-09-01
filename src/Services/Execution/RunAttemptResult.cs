@@ -9,6 +9,7 @@ internal sealed class RunAttemptResult
     public string Reason { get; set; } = "";
     public bool IsFatal { get; set; }
     public string NotifyText { get; set; } = "";
+    public string NotifyScreenshotId { get; set; } = "";
 
     public static RunAttemptResult Success(string reason) => new() { Status = "success", Reason = reason };
     public static RunAttemptResult Failed(string reason) => new() { Status = "failed", Reason = reason };
@@ -29,6 +30,9 @@ internal sealed class RunAttemptResult
             Reason = main.Reason,
             IsFatal = main.IsFatal,
             NotifyText = string.IsNullOrWhiteSpace(main.NotifyText) ? post.NotifyText : main.NotifyText,
+            NotifyScreenshotId = string.IsNullOrWhiteSpace(main.NotifyScreenshotId)
+                ? post.NotifyScreenshotId
+                : main.NotifyScreenshotId,
         };
 
         if (!string.IsNullOrWhiteSpace(post.Reason)

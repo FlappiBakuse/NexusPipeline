@@ -3,6 +3,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Notification;
 
 namespace NexusPipeline.App.Abstractions;
 
@@ -106,6 +107,15 @@ internal interface INotificationService
     Task NotifyScriptAsync(ScriptInstance script, RunRecord record, UserScriptBinding binding)
     {
         return NotifyScriptAsync(script, record);
+    }
+
+    Task NotifyScriptAsync(
+        ScriptInstance script,
+        RunRecord record,
+        UserScriptBinding binding,
+        NotificationImage? image)
+    {
+        return NotifyScriptAsync(script, record, binding);
     }
 
     Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records);

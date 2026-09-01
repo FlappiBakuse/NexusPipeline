@@ -28,7 +28,9 @@ internal static class ApiSettingsHandler
                     channels = new
                     {
                         webhookEnabled = ctx.Settings.WebhookEnabled,
+                        webhookScreenshotEnabled = ctx.Settings.WebhookScreenshotEnabled,
                         smtpEnabled = ctx.Settings.SmtpEnabled,
+                        smtpScreenshotEnabled = ctx.Settings.SmtpScreenshotEnabled,
                     },
                     autoStart = TaskRegistration.IsRegistered(),
                     remote = new
@@ -120,7 +122,9 @@ internal static class ApiSettingsHandler
             settings.ProxyUsername,
             proxyPassword = string.IsNullOrWhiteSpace(settings.ProxyPassword) ? "" : "enc:***",
             settings.WebhookEnabled,
+            settings.WebhookScreenshotEnabled,
             settings.SmtpEnabled,
+            settings.SmtpScreenshotEnabled,
             settings.WebhookType,
             // 密钥一律不回显明文——空=未设置；非空（无论是否 DPAPI 加密，含旧版明文遗留
             // 与手工编辑的明文）统一返回占位符，杜绝明文泄露；前端协议为「非空=已设置，留空不变」。

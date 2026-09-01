@@ -51,6 +51,8 @@ internal sealed class SessionJudge
 
     private string? _judgeNotifyText;
 
+    private string? _judgeNotifyScreenshotId;
+
     private DateTime _lastJudgeAt = DateTime.Now;
 
     public SessionJudge(ScriptInstance script)
@@ -86,6 +88,9 @@ internal sealed class SessionJudge
     public string? Reason => _judgeReason;
 
     public string NotifyText => _judgeNotifyText ?? "";
+
+    /// <summary>判断脚本选择随最终通知发送的截图 ID；空字符串表示未指定。</summary>
+    public string NotifyScreenshotId => _judgeNotifyScreenshotId ?? "";
 
     public void TouchJudge()
     {
@@ -160,13 +165,20 @@ internal sealed class SessionJudge
     }
 
     /// <summary>应用判断脚本结果：success → 成功标记；failed → 失败标记并（首次）执行配置替换回调。返回是否设置了判定。</summary>
-    public JudgeOutcome ApplyJudgeResult(string status, string reason, string notifyText, List<string> replaceConfigs, Action<List<string>> onReplace)
+    public JudgeOutcome ApplyJudgeResult(
+        string status,
+        string reason,
+        string notifyText,
+        List<string> replaceConfigs,
+        Action<List<string>> onReplace,
+        string? notifyScreenshotId = null)
     {
         if (status == "success" && _markerSeenAt is null)
         {
             _markerSeenAt = DateTime.Now;
             _judgeReason = "判断脚本判定成功：" + reason;
             _judgeNotifyText = notifyText;
+            _judgeNotifyScreenshotId = notifyScreenshotId?.Trim() ?? "";
             return JudgeOutcome.Success;
         }
         if (status == "failed" && _failureSeenAt is null)
@@ -174,6 +186,7 @@ internal sealed class SessionJudge
             _failureSeenAt = DateTime.Now;
             _judgeReason = "判断脚本判定失败：" + reason;
             _judgeNotifyText = notifyText;
+            _judgeNotifyScreenshotId = notifyScreenshotId?.Trim() ?? "";
             if (replaceConfigs.Count > 0)
             {
                 onReplace(replaceConfigs);

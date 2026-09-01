@@ -224,7 +224,7 @@ export async function openScriptModal(id = "", plugin = "") {
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
       ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"', "", "", `由专用插件「${pluginDisplayName(pluginType, state.plugins || [])}」自动适配脚本主程序、自启动参数、配置文件与日志路径。`)}
     </div>
-    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
+    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid switch-grid">
         ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
         ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
@@ -238,7 +238,7 @@ export async function openScriptModal(id = "", plugin = "") {
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
         ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务的总运行时间；长时脚本可填 -1 表示永不超时。")}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务总运行时间；长时脚本可填 -1（永不超时），普通脚本需填写有效分钟数；总时间包含全部重试以及任务前/后脚本。")}
       </div>
     </div>`
     : `<div class="form-grid">
@@ -247,11 +247,11 @@ export async function openScriptModal(id = "", plugin = "") {
     </div>
     <div class="form-grid">
       ${pathField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "file", 'placeholder="脚本主程序文件"', "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*", "", "选择主程序后仍可手动修改路径。")}
-      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选启动参数"', "可填写普通启动参数；若以相对路径开头，可在 ? 后继续填写执行端参数。")}
+      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选启动参数"', "可选；如 -x --mode=1；若以路径开头（如 .\\app.exe?-args），问号后的内容作为执行参数。")}
     </div>
     <div class="form-grid">
-      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="配置文件或文件夹"')}
-      ${pathField("sm-log", "日志路径 <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件或文件夹"', "日志文件|*.log;*.txt|所有文件|*.*")}
+      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="请先填写脚本根目录"', "", "", "配置路径相对于脚本根目录，可选择配置文件或配置文件夹。")}
+      ${pathField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件路径"', "日志文件|*.log;*.txt|所有文件|*.*", "", "支持日期占位符与通配符；例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log，或 D:\\Scripts\\logs\\*.log。")}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
       <div class="toggle-grid switch-grid">
@@ -267,7 +267,7 @@ export async function openScriptModal(id = "", plugin = "") {
       <div class="form-grid three">
         ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
         ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务的总运行时间；长时脚本可填 -1 表示永不超时。")}
+        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务总运行时间；长时脚本可填 -1（永不超时），普通脚本需填写有效分钟数；总时间包含全部重试以及任务前/后脚本。")}
       </div>
       <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
@@ -278,7 +278,7 @@ export async function openScriptModal(id = "", plugin = "") {
         </div>
         <div id="sm-script-box" ${d.judgeScriptEnabled ? "" : "hidden"}>
           ${selectField("sm-judge-lang", "判断脚本语言", d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: "JavaScript（内置引擎）" }, { value: "python", label: "Python（系统解释器）" }], "", "选择判断脚本执行语言；JavaScript 使用内置引擎，Python 使用系统解释器。")}
-           <div class="field" data-help="输入包含本次尝试日志段：JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 读取路径。nexus.readFile 只读 config/script 目录，nexus.writeFile 与 nexus.listFiles 操作 script 目录。无输出或缺少 status/reason 会继续运行。"><label class="field-label" for="sm-judge-code">判断脚本代码</label><textarea id="sm-judge-code" class="mono code-area" placeholder="输出 JSON 结果">${esc(d.judgeScript)}</textarea></div>
+           <div class="field" data-help="输入包含本次尝试日志段与 screenshots 截图元数据：JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 读取路径。nexus.readFile 只读 config/script 目录，nexus.writeFile 与 nexus.listFiles 操作 script 目录；JavaScript 可调用 nexus.captureScreenshot()，Python 可使用临时 screenshotApi。输出可用 notifyScreenshotId 选择通知截图。无输出或缺少 status/reason 会继续运行。"><label class="field-label" for="sm-judge-code">判断脚本代码</label><textarea id="sm-judge-code" class="mono code-area" placeholder="输出 JSON 结果">${esc(d.judgeScript)}</textarea></div>
         </div>
         <div class="judge-actions">
           <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
@@ -357,11 +357,27 @@ export function uploadJudgeScript() {
   const input = document.createElement("input");
   input.type = "file";
   input.accept = ".js,.py";
-  input.addEventListener("change", () => {
+  return new Promise(resolve => {
+    let settled = false;
+    let focusTimer = null;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (focusTimer) window.clearTimeout(focusTimer);
+      window.removeEventListener("focus", onWindowFocus);
+      resolve();
+    };
+    const onWindowFocus = () => {
+      if (!input.files?.length) focusTimer = window.setTimeout(finish, 0);
+    };
+    window.addEventListener("focus", onWindowFocus);
+    input.addEventListener("cancel", finish, { once: true });
+    input.addEventListener("change", () => {
     const file = input.files?.[0];
-    if (!file) return;
+    if (!file) { finish(); return; }
     if (file.size > 256 * 1024) {
       toast("脚本文件过大（上限 256KB）", "error");
+      finish();
       return;
     }
     const reader = new FileReader();
@@ -375,10 +391,16 @@ export function uploadJudgeScript() {
         language.dispatchEvent(new Event("change", { bubbles: true }));
       }
       toast(`已载入脚本（${lang === "python" ? "Python" : "JavaScript"}）`);
+      finish();
+    };
+    reader.onerror = () => {
+      toast("读取脚本文件失败", "error");
+      finish();
     };
     reader.readAsText(file, "utf-8");
+    });
+    input.click();
   });
-  input.click();
 }
 
 /** 去除成对首尾引号（"…" / '…'），与后端 StripPathQuotes 语义一致；内部引号保留。</summary> */
@@ -531,7 +553,7 @@ export const actions = {
   "confirm-delete-script": target => withBusy(target, () => confirmDeleteScript(target.dataset.id, target.dataset.name)),
   "save-script": target => withBusy(target, () => saveScript()),
   "change-sm-mode": () => changeGameMode(),
-  "upload-judge-script": () => uploadJudgeScript(),
+  "upload-judge-script": target => withBusy(target, () => uploadJudgeScript()),
   "toggle-judge-mode": () => toggleJudgeMode(),
   "toggle-sm-flag": target => toggleSmFlag(target.dataset.flag),
 };

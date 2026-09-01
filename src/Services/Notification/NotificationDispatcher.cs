@@ -27,10 +27,19 @@ internal sealed class NotificationDispatcher : INotificationService
 
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
     {
-        await NotifyScriptAsync(script, record, null).ConfigureAwait(false);
+        await NotifyScriptAsync(script, record, null, null).ConfigureAwait(false);
     }
 
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record, UserScriptBinding? binding)
+    {
+        await NotifyScriptAsync(script, record, binding, null).ConfigureAwait(false);
+    }
+
+    public async Task NotifyScriptAsync(
+        ScriptInstance script,
+        RunRecord record,
+        UserScriptBinding? binding,
+        NotificationImage? image)
     {
         AppSettings settings = _settings.Current;
         string? smtpToOverride = string.IsNullOrWhiteSpace(binding?.SmtpTo) ? null : binding!.SmtpTo.Trim();
@@ -40,7 +49,12 @@ internal sealed class NotificationDispatcher : INotificationService
             return;
         }
         Logger.Info($"======== 发送脚本运行状态通知：「{script.Name}」 ========");
-        await SendTextAsync(settings, NotificationFormatter.Script(script, record), "脚本", smtpToOverride).ConfigureAwait(false);
+        await SendTextAsync(
+            settings,
+            NotificationFormatter.Script(script, record),
+            "脚本",
+            smtpToOverride,
+            image).ConfigureAwait(false);
     }
 
     public async Task NotifyQueueAsync(DispatchQueue queue, List<RunRecord> records)
@@ -52,7 +66,7 @@ internal sealed class NotificationDispatcher : INotificationService
             return;
         }
         Logger.Info($"======== 发送调度队列汇总通知：「{queue.Name}」 ========");
-        await SendTextAsync(settings, NotificationFormatter.Queue(queue, records), "队列", null).ConfigureAwait(false);
+        await SendTextAsync(settings, NotificationFormatter.Queue(queue, records), "队列", null, null).ConfigureAwait(false);
     }
 
     /// <summary>供 Plugin API v1 使用的宿主通知入口；插件不接触 AppSettings 或具体 sender。</summary>
@@ -70,14 +84,24 @@ internal sealed class NotificationDispatcher : INotificationService
         }
         string title = string.IsNullOrWhiteSpace(notification.Title) ? "插件通知" : notification.Title.Trim();
         string body = $"[NexusPipeline] {title}\r\n{notification.Body ?? ""}";
-        await SendTextAsync(settings, body, "插件", null).WaitAsync(_channelTimeout, cancellationToken).ConfigureAwait(false);
+        await SendTextAsync(settings, body, "插件", null, null).WaitAsync(_channelTimeout, cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task SendTextAsync(AppSettings settings, string text, string kind, string? smtpToOverride)
+    private async Task SendTextAsync(
+        AppSettings settings,
+        string text,
+        string kind,
+        string? smtpToOverride,
+        NotificationImage? image)
     {
         try
         {
-            await NotifySender.SendAsync(settings, text, smtpToOverride, _outbound).WaitAsync(_channelTimeout).ConfigureAwait(false);
+            await NotifySender.SendAsync(
+                settings,
+                text,
+                smtpToOverride,
+                _outbound,
+                image).WaitAsync(_channelTimeout).ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

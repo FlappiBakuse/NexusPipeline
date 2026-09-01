@@ -17,7 +17,11 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
 
+    private readonly RunScreenshotStore _screenshotStore;
+
     private int? _gameProcessId;
+
+    private ExecutionPreviewTarget? _currentPreviewTarget;
 
     private EmulatorTarget? _emulatorTarget;
 
@@ -44,8 +48,13 @@ internal sealed class ExecutionCoordinator : RunSession
     {
         _users = users;
         _previewTargetChanged = previewTargetChanged;
+        _screenshotStore = new RunScreenshotStore(CaptureCurrentScreenshotAsync);
         SetInitialPreviewTarget();
     }
+
+    internal RunScreenshotStore ScreenshotStore => _screenshotStore;
+
+    internal void DisposeScreenshots() => _screenshotStore.Dispose();
 
     public async Task<RunRecord> RunAsync()
     {
@@ -210,6 +219,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
                 record.Attempts = attemptNo;
+                record.NotifyScreenshotId = result.NotifyScreenshotId;
                 if (!string.IsNullOrWhiteSpace(result.NotifyText))
                 {
                     record.CustomNotifyText = result.NotifyText;
@@ -586,6 +596,7 @@ internal sealed class ExecutionCoordinator : RunSession
         var attemptMonitor = new AttemptMonitor();
         var judge = new SessionJudge(_script);
         bool scriptMode = judge.ScriptMode;
+        bool keywordScreenshotCaptured = false;
         DateTime? firstEntryAt = null;
         RunAttemptResult? result = null;
 
@@ -615,7 +626,14 @@ internal sealed class ExecutionCoordinator : RunSession
                     _activeUser.UserId,
                     _activeUser.UserName,
                     _activeUser.Binding.Clone());
-            string inputJson = JudgeScriptRunner.BuildInput(scriptSnapshot, userSnapshot, files, scriptDir, logText, logTruncated);
+            string inputJson = JudgeScriptRunner.BuildInput(
+                scriptSnapshot,
+                userSnapshot,
+                files,
+                scriptDir,
+                logText,
+                logTruncated,
+                _screenshotStore.Metadata);
             return new JudgeSnapshot(
                 attemptId,
                 attempt.Number,
@@ -645,7 +663,8 @@ internal sealed class ExecutionCoordinator : RunSession
                 OperationToken.ThrowIfCancellationRequested();
                 _configRun?.SyncToStore(request.FirstCheck);
                 OperationToken.ThrowIfCancellationRequested();
-            });
+            },
+            (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken));
         var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
         await using var workersScope = workers;
 
@@ -655,7 +674,7 @@ internal sealed class ExecutionCoordinator : RunSession
             {
                 OperationToken.ThrowIfCancellationRequested();
                 workers.ConsumeConfigSyncResult();
-                workers.ConsumeJudgeResult();
+                await workers.ConsumeJudgeResultAsync().ConfigureAwait(false);
                 workers.TryQueuePendingFinalJudge();
                 result = terminator.TryApplyFinalDecision();
                 if (result is not null)
@@ -690,6 +709,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     {
                         result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
                         result.NotifyText = judge.NotifyText;
+                        result.NotifyScreenshotId = judge.NotifyScreenshotId;
                     }
                     else
                     {
@@ -719,7 +739,22 @@ internal sealed class ExecutionCoordinator : RunSession
                         }
                         _logLine?.Invoke(line, LogLevelUtil.ParseObserved(line));
                         AppendScriptLog(line);
-                        switch (judge.HandleLine(line))
+                        SessionJudge.LineHit lineHit = judge.HandleLine(line);
+                        bool effectiveKeywordHit = lineHit switch
+                        {
+                            SessionJudge.LineHit.SuccessKeyword => judge.IsMarker && !judge.IsFailure,
+                            SessionJudge.LineHit.FailureKeyword => judge.IsFailure,
+                            _ => false,
+                        };
+                        if (effectiveKeywordHit && !keywordScreenshotCaptured)
+                        {
+                            keywordScreenshotCaptured = true;
+                            await _screenshotStore.CaptureAsync(
+                                attempt.Number,
+                                lineHit == SessionJudge.LineHit.FailureKeyword ? "keyword-failed" : "keyword-success",
+                                OperationToken).ConfigureAwait(false);
+                        }
+                        switch (lineHit)
                         {
                             case SessionJudge.LineHit.SuccessKeyword:
                                 _statusChanged?.Invoke("已检测到成功关键字，等待脚本退出...");
@@ -750,7 +785,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     workers.QueueJudge(final: false);
                 }
 
-                workers.ConsumeJudgeResult();
+                await workers.ConsumeJudgeResultAsync().ConfigureAwait(false);
                 result = terminator.TryApplyFinalDecision();
                 if (result is not null)
                 {
@@ -798,6 +833,7 @@ internal sealed class ExecutionCoordinator : RunSession
                         ? RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功")
                         : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
                     result.NotifyText = judge.NotifyText;
+                    result.NotifyScreenshotId = judge.NotifyScreenshotId;
                     break;
                 }
 
@@ -1026,38 +1062,90 @@ internal sealed class ExecutionCoordinator : RunSession
         return _budget?.RemainingCommandSeconds(cap) ?? cap;
     }
 
+    /// <summary>按当前宿主已冻结的游戏目标采集一张原始像素尺寸通知截图。</summary>
+    private async Task<RunScreenshotCaptureResult> CaptureCurrentScreenshotAsync(
+        int attemptNumber,
+        string trigger,
+        CancellationToken cancellationToken)
+    {
+        ExecutionPreviewTarget? target = _currentPreviewTarget;
+        if (target is null || target.Source == ExecutionPreviewSource.None)
+        {
+            return RunScreenshotCaptureResult.Failure("", "未配置可截图的游戏目标");
+        }
+        if (target.Source == ExecutionPreviewSource.Pc)
+        {
+            int? processId = target.ProcessId ?? _gameProcessId;
+            if (processId is not int pid || pid <= 0)
+            {
+                return RunScreenshotCaptureResult.Failure("pc", "正在等待游戏窗口");
+            }
+            ExecutionPreviewImageResult image = await Task.Run(
+                () => ExecutionPreviewImage.CapturePcOriginal(pid),
+                cancellationToken).ConfigureAwait(false);
+            return image.Ok
+                ? RunScreenshotCaptureResult.Success(image.Data, "pc")
+                : RunScreenshotCaptureResult.Failure("pc", image.Error);
+        }
+
+        IEmulatorDriver? driver = target.EmulatorDriver ?? _emulatorDriver;
+        if (driver is null)
+        {
+            return RunScreenshotCaptureResult.Failure("emulator", "正在等待模拟器目标就绪");
+        }
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        EmulatorBinaryResult binary = await driver
+            .CaptureScreenAsync(timeout.Token, 8)
+            .ConfigureAwait(false);
+        if (!binary.Ok)
+        {
+            return RunScreenshotCaptureResult.Failure("emulator", binary.Error);
+        }
+        ExecutionPreviewImageResult converted = ExecutionPreviewImage.ConvertPngOriginal(binary.Data);
+        return converted.Ok
+            ? RunScreenshotCaptureResult.Success(converted.Data, "emulator")
+            : RunScreenshotCaptureResult.Failure("emulator", converted.Error);
+    }
+
     private void SetInitialPreviewTarget()
     {
         bool configured = !string.IsNullOrWhiteSpace(_script.GameExe);
         ExecutionPreviewSource source = !configured
             ? ExecutionPreviewSource.None
             : EmulatorSupport.IsEmulator(_script) ? ExecutionPreviewSource.Emulator : ExecutionPreviewSource.Pc;
-        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+        var target = new ExecutionPreviewTarget(
             _script.Id,
             _script.Name,
             source,
             configured ? ExecutionPreviewState.Waiting : ExecutionPreviewState.Unavailable,
-            Error: configured ? null : "未配置游戏目标"));
+            Error: configured ? null : "未配置游戏目标");
+        _currentPreviewTarget = target;
+        _previewTargetChanged?.Invoke(target);
     }
 
     private void SetPcPreviewTarget(int? processId)
     {
-        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+        var target = new ExecutionPreviewTarget(
             _script.Id,
             _script.Name,
             ExecutionPreviewSource.Pc,
             processId is > 0 ? ExecutionPreviewState.Ready : ExecutionPreviewState.Waiting,
-            processId));
+            processId);
+        _currentPreviewTarget = target;
+        _previewTargetChanged?.Invoke(target);
     }
 
     private void SetEmulatorPreviewTarget(IEmulatorDriver? driver, bool ready)
     {
-        _previewTargetChanged?.Invoke(new ExecutionPreviewTarget(
+        var target = new ExecutionPreviewTarget(
             _script.Id,
             _script.Name,
             ExecutionPreviewSource.Emulator,
             ready ? ExecutionPreviewState.Ready : ExecutionPreviewState.Waiting,
-            EmulatorDriver: driver));
+            EmulatorDriver: driver);
+        _currentPreviewTarget = target;
+        _previewTargetChanged?.Invoke(target);
     }
 
     private int? FindGameProcessId(int? preferredProcessId)

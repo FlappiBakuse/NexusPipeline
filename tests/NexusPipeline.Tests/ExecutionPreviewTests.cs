@@ -105,6 +105,28 @@ public sealed class ExecutionPreviewTests
     }
 
     [Fact]
+    public void ExecutionPreviewImage_ConvertsPngForNotificationWithoutResizing()
+    {
+        byte[] png;
+        using (var source = new Bitmap(800, 600))
+        using (Graphics graphics = Graphics.FromImage(source))
+        using (var stream = new MemoryStream())
+        {
+            graphics.Clear(Color.CornflowerBlue);
+            source.Save(stream, ImageFormat.Png);
+            png = stream.ToArray();
+        }
+
+        ExecutionPreviewImageResult result = ExecutionPreviewImage.ConvertPngOriginal(png);
+
+        Assert.True(result.Ok, result.Error);
+        using var jpegStream = new MemoryStream(result.Data);
+        using Image image = Image.FromStream(jpegStream, useEmbeddedColorManagement: false, validateImageData: true);
+        Assert.Equal(800, image.Width);
+        Assert.Equal(600, image.Height);
+    }
+
+    [Fact]
     public void ExecutionPreviewImage_RejectsInvalidPng()
     {
         ExecutionPreviewImageResult result = ExecutionPreviewImage.ConvertPng(new byte[] { 1, 2, 3 });

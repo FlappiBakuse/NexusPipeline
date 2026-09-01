@@ -4,6 +4,7 @@ using MailKit.Security;
 using MimeKit;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -41,7 +42,11 @@ internal static class SmtpSender
         return (true, "已配置");
     }
 
-    public static async Task<bool> SendAsync(AppSettings settings, string text, string? recipientOverride = null)
+    public static async Task<bool> SendAsync(
+        AppSettings settings,
+        string text,
+        string? recipientOverride = null,
+        NotificationImage? image = null)
     {
         string? host = settings.SmtpHost;
         string? user = settings.SmtpUser;
@@ -73,10 +78,25 @@ internal static class SmtpSender
             message.To.Add(MailboxAddress.Parse(recipient));
         }
         message.Subject = $"{prefix} {firstLine}";
-        message.Body = new TextPart("plain")
+        if (image is null)
         {
-            Text = text,
-        };
+            message.Body = new TextPart("plain")
+            {
+                Text = text,
+            };
+        }
+        else
+        {
+            var builder = new BodyBuilder
+            {
+                TextBody = text,
+            };
+            builder.Attachments.Add(
+                image.FileName,
+                image.Data,
+                ContentType.Parse(image.ContentType));
+            message.Body = builder.ToMessageBody();
+        }
         try
         {
             using var client = new SmtpClient();
@@ -141,16 +161,25 @@ internal static class NotifySender
         AppSettings settings,
         string text,
         string? smtpToOverride = null,
-        Networking.OutboundHttpClientProvider? outbound = null)
+        Networking.OutboundHttpClientProvider? outbound = null,
+        NotificationImage? image = null)
     {
         var tasks = new List<Task<bool>>();
         if (settings.WebhookEnabled)
         {
-            tasks.Add(WebhookSender.SendAsync(settings, text, outbound));
+            tasks.Add(WebhookSender.SendAsync(
+                settings,
+                text,
+                outbound,
+                settings.WebhookScreenshotEnabled ? image : null));
         }
         if (settings.SmtpEnabled)
         {
-            tasks.Add(SmtpSender.SendAsync(settings, text, smtpToOverride));
+            tasks.Add(SmtpSender.SendAsync(
+                settings,
+                text,
+                smtpToOverride,
+                settings.SmtpScreenshotEnabled ? image : null));
         }
         if (tasks.Count == 0)
         {
