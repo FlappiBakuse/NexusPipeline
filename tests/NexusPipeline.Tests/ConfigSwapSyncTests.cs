@@ -196,7 +196,10 @@ public class ConfigSwapSyncTests
     public void MirrorToStoreAtomic_CommitsAndKeepsPreviousSnapshot()
     {
         string cfg = MakeTempDir();
-        string store = Path.Combine(MakeTempDir(), "store");
+        string baseDir = MakeTempDir();
+        string store = Path.Combine(baseDir, "store");
+        string temp = Path.Combine(baseDir, "store-tmp");
+        string previous = Path.Combine(baseDir, "store-previous");
         Directory.CreateDirectory(store);
         File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
         File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
@@ -204,6 +207,8 @@ public class ConfigSwapSyncTests
         (int written, int preserved) = ConfigSwapSession.MirrorToStoreAtomic(
             cfg,
             store,
+            temp,
+            previous,
             new HashSet<string>(),
             null,
             ConfigSwapSession.SampleConfig(cfg));
@@ -211,15 +216,18 @@ public class ConfigSwapSyncTests
         Assert.Equal(1, written);
         Assert.Equal(0, preserved);
         Assert.Equal("NEW", File.ReadAllText(Path.Combine(store, "state.txt")));
-        Assert.Equal("OLD", File.ReadAllText(Path.Combine(store + ".previous", "state.txt")));
-        Assert.False(Directory.Exists(store + ".tmp"));
+        Assert.Equal("OLD", File.ReadAllText(Path.Combine(previous, "state.txt")));
+        Assert.False(Directory.Exists(temp));
     }
 
     [Fact]
     public void MirrorToStoreAtomic_SourceChangedAbortsAndKeepsOldStore()
     {
         string cfg = MakeTempDir();
-        string store = Path.Combine(MakeTempDir(), "store");
+        string baseDir = MakeTempDir();
+        string store = Path.Combine(baseDir, "store");
+        string temp = Path.Combine(baseDir, "store-tmp");
+        string previous = Path.Combine(baseDir, "store-previous");
         Directory.CreateDirectory(store);
         File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
         File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
@@ -227,12 +235,14 @@ public class ConfigSwapSyncTests
         Assert.Throws<IOException>(() => ConfigSwapSession.MirrorToStoreAtomic(
             cfg,
             store,
+            temp,
+            previous,
             new HashSet<string>(),
             null,
             "stale-sample"));
 
         Assert.Equal("OLD", File.ReadAllText(Path.Combine(store, "state.txt")));
-        Assert.False(Directory.Exists(store + ".tmp"));
+        Assert.False(Directory.Exists(temp));
     }
 
     [Fact]

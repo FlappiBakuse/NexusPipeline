@@ -12,8 +12,9 @@ namespace NexusPipeline.Services;
 /// </summary>
 internal sealed class UserDataPruner
 {
-    /// <summary>脚本级保留名（非用户目录，无论是否绑定都不视作遗留候选）。</summary>
-    private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase) { "script", "swap-backup" };
+    /// <summary>脚本级保留名（非用户目录，无论是否绑定都不视作遗留候选）。
+    /// work 为 v0.13.1 起的会话事务工作区；script/swap-backup 为 v0.13.0 及更早的旧布局名，防御性保留。</summary>
+    private static readonly HashSet<string> ReservedNames = new(StringComparer.OrdinalIgnoreCase) { "work", "script", "swap-backup" };
 
     private readonly Func<IReadOnlyList<NexusUser>> _snapshotUsers;
 

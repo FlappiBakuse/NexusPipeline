@@ -31,9 +31,9 @@ public sealed class UserDataPrunerTests
         IReadOnlyList<string> legacy = UserDataPruner.ClassifyLegacyUserKeys(
             users,
             "script-a",
-            new[] { "uid-1", "uid-2", "OldUserName", "script", "swap-backup", "STORE", "unknown" });
+            new[] { "uid-1", "uid-2", "OldUserName", "work", "script", "swap-backup", "STORE", "unknown" });
 
-        // uid-1 已绑定 script-a → 排除；script/swap-backup 为保留名 → 排除；其余均为遗留。
+        // uid-1 已绑定 script-a → 排除；work/script/swap-backup 为保留名 → 排除；其余均为遗留。
         Assert.Equal(new[] { "OldUserName", "STORE", "uid-2", "unknown" }, legacy);
     }
 

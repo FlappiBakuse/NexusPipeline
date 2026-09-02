@@ -38,6 +38,10 @@ internal static class RuntimeInitializer
         // 配置交换恢复的数据源由组合根装配（恢复路径不再反向依赖 RuntimeContext；
         // 所有进程模式共用，service/web 的 StartupPipeline 启动恢复与 CLI 运行时自愈均由此覆盖）。
         ConfigSwapSession.ConfigureRecovery(ctx.FindScript, ctx.SnapshotUsers);
+        // v0.13.1 布局迁移：旧散落事务目录归并进 work/，必须在任何恢复扫描/自愈之前完成。
+        ConfigWorkDirMaintenance.MigrateLegacyWorkDirs();
+        // runtime/staging 属可重建暂存区，启动时清掉上次进程的残留临时文件。
+        ConfigWorkDirMaintenance.SweepRuntimeStaging();
         if (Limits.Fatals.Count > 0)
         {
             foreach (string fatal in Limits.Fatals)

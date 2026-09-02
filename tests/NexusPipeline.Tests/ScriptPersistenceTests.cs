@@ -152,7 +152,7 @@ public sealed class ScriptPersistenceTests
             Assert.True(File.Exists(storage.JudgeScripts.GetPath("legacy-generic", "python")));
             Assert.NotEmpty(Directory.GetFiles(Path.Combine(root, "config", "migrations", "v0.13.0"), "scripts.json", SearchOption.AllDirectories));
             ConfigStoreMetadata? legacyMetadata = JsonSerializer.Deserialize<ConfigStoreMetadata>(
-                File.ReadAllText(Path.Combine(root, "data", "legacy-special", legacyUser, "store.meta.json")),
+                File.ReadAllText(Path.Combine(root, "data", "legacy-special", legacyUser, "store-meta.json")),
                 JsonOpts.Default);
             Assert.NotNull(legacyMetadata);
             Assert.Equal(ConfigStoreMetadata.HashLocator("stale.json"), legacyMetadata!.ConfigLocatorHash);
@@ -364,7 +364,7 @@ public sealed class ScriptPersistenceTests
             Assert.Contains("不存在", changedPathError, StringComparison.Ordinal);
             string archiveRoot = ConfigSwapPaths.StoreArchiveDir(scriptId, userId);
             string archive = Assert.Single(Directory.GetDirectories(archiveRoot));
-            Assert.True(File.Exists(Path.Combine(archive, "store.meta.json")));
+            Assert.True(File.Exists(Path.Combine(archive, "store-meta.json")));
             Assert.NotEmpty(Directory.GetFiles(Path.Combine(archive, "store"), "*", SearchOption.AllDirectories));
             Assert.False(Directory.Exists(ConfigSwapPaths.StoreDir(scriptId, userId)));
         }

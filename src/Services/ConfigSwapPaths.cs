@@ -3,12 +3,46 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
 
-/// <summary>数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。</summary>
+/// <summary>
+/// 数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。
+/// 布局分两类：持久层（store、store-meta.json、store-archive、store-previous）常驻用户目录顶层；
+/// 会话事务层统一置于 work/ 下（original、script、swap-backup、edit-hidden、retry-store、store-tmp），
+/// 仅运行/编辑/同步期间存在，空闲态整体消失。
+/// </summary>
 internal static class ConfigSwapPaths
 {
+    /// <summary>会话事务工作区目录名（v0.13.1 起归并宿主；v0.13.0 及更早为散落的顶层子目录）。</summary>
+    public const string WorkDirName = "work";
+
+    /// <summary>v0.13.0 及更早版本散落在用户/脚本目录顶层的事务目录名 → work/ 内规范名（dot 后缀一并改为 kebab-case）。</summary>
+    public static readonly IReadOnlyDictionary<string, string> LegacyWorkItemMap = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["original"] = "original",
+        ["script"] = "script",
+        ["swap-backup"] = "swap-backup",
+        ["edit-hidden"] = "edit-hidden",
+        ["retry-store"] = "retry-store",
+        ["store.tmp"] = "store-tmp",
+    };
+
+    /// <summary>v0.13.0 及更早版本用户目录顶层的 dot 后缀命名 → kebab-case 规范名（原地改名）。</summary>
+    public static readonly IReadOnlyDictionary<string, string> LegacyDotSuffixRenames = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["store.previous"] = "store-previous",
+        ["store.meta.json"] = "store-meta.json",
+    };
+
     public static string UserDir(string scriptId, string userKey)
     {
         return Path.Combine(AppPaths.DataDir, scriptId, userKey);
+    }
+
+    /// <summary>会话事务工作区：仅会话期间存在；无用户时兜底 data/{脚本Id}/work。</summary>
+    public static string WorkDir(string scriptId, string? userName)
+    {
+        return string.IsNullOrWhiteSpace(userName)
+            ? Path.Combine(AppPaths.DataDir, scriptId, WorkDirName)
+            : Path.Combine(UserDir(scriptId, userName), WorkDirName);
     }
 
     public static string StoreDir(string scriptId, string userKey)
@@ -19,7 +53,7 @@ internal static class ConfigSwapPaths
     /// <summary>用户快照元数据；记录 profile/配置定位指纹，不保存插件 profile 内容。</summary>
     public static string StoreMetadataPath(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userKey), "store.meta.json");
+        return Path.Combine(UserDir(scriptId, userKey), "store-meta.json");
     }
 
     public static string StoreArchiveDir(string scriptId, string userKey)
@@ -27,37 +61,45 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userKey), "store-archive");
     }
 
+    /// <summary>同步事务后保留的上一份快照（进程崩溃/新快照异常时的恢复兜底，保留至下次同步）。</summary>
+    public static string StorePreviousDir(string scriptId, string userKey)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store-previous");
+    }
+
+    /// <summary>同步事务临时目录（config → store 全量镜像的暂存），位于 work/ 内。</summary>
+    public static string StoreTempDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "store-tmp");
+    }
+
     public static string CacheDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userKey), "original");
+        return Path.Combine(WorkDir(scriptId, userKey), "original");
     }
 
     /// <summary>当前运行重试轮使用的临时配置快照；不等同于用户永久 store。</summary>
     public static string RetryStoreDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userKey), "retry-store");
+        return Path.Combine(WorkDir(scriptId, userKey), "retry-store");
     }
 
     /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
     public static string HiddenConfigDir(string scriptId, string userKey)
     {
-        return Path.Combine(UserDir(scriptId, userKey), "edit-hidden");
+        return Path.Combine(WorkDir(scriptId, userKey), "edit-hidden");
     }
 
-    /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
+    /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/work/script。</summary>
     public static string ScriptDir(string scriptId, string? userName)
     {
-        return string.IsNullOrWhiteSpace(userName)
-            ? Path.Combine(AppPaths.DataDir, scriptId, "script")
-            : Path.Combine(UserDir(scriptId, userName), "script");
+        return Path.Combine(WorkDir(scriptId, userName), "script");
     }
 
     /// <summary>配置替换备份目录（无用户交换时用于还原；有用户时由配置交换机制还原，备份作双保险）。</summary>
     public static string ReplaceBackupDir(string scriptId, string? userName)
     {
-        return string.IsNullOrWhiteSpace(userName)
-            ? Path.Combine(AppPaths.DataDir, scriptId, "swap-backup")
-            : Path.Combine(UserDir(scriptId, userName), "swap-backup");
+        return Path.Combine(WorkDir(scriptId, userName), "swap-backup");
     }
 
     /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>

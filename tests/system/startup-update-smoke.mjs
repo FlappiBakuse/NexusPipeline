@@ -38,17 +38,17 @@ function createReleaseServer() {
       const release = {
         draft: false,
         prerelease: true,
-        tag_name: "v0.13.1",
-        name: "v0.13.1 test release",
+        tag_name: "v0.13.2",
+        name: "v0.13.2 test release",
         body: "startup update regression fixture",
         assets: [
           {
-            name: "NexusPipeline-v0.13.1-win-x64.zip",
-            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.1-win-x64.zip`,
+            name: "NexusPipeline-v0.13.2-win-x64.zip",
+            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.2-win-x64.zip`,
           },
           {
-            name: "NexusPipeline-v0.13.1-win-x64.zip.sha256",
-            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.1-win-x64.zip.sha256`,
+            name: "NexusPipeline-v0.13.2-win-x64.zip.sha256",
+            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.2-win-x64.zip.sha256`,
           },
         ],
       };
@@ -103,7 +103,7 @@ test("启动自动检查：开启时无需手动调用且只请求一次更新�
     assert.equal(fixture.requestCount, 1, "启动自动检查不得重复触发");
     const status = await (await api("GET", "/api/update/status")).json();
     assert.equal(status.available, true);
-    assert.equal(status.latest, "0.13.1");
+    assert.equal(status.latest, "0.13.2");
   } finally {
     await close(fixture.server);
   }

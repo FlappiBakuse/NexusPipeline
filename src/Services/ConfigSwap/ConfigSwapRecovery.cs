@@ -90,6 +90,7 @@ internal sealed class ConfigSwapRecovery
                     TryRecoverItem(scriptId, userKey);
                 }
             }
+            ConfigWorkDirMaintenance.SweepIdleWorkDirs();
         }
         catch (Exception ex)
         {
@@ -97,7 +98,7 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store.previous，临时目录只作为未完成事务清理。</summary>
+    /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store-previous，work/store-tmp 只作为未完成事务清理。</summary>
     private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
         IEnumerable<NexusUser> source = users ?? _snapshotUsers();
@@ -141,23 +142,25 @@ internal sealed class ConfigSwapRecovery
             }
             foreach (string allowedDirectory in allowedDirectories.Where(Directory.Exists))
             {
-                foreach (string temp in Directory.GetDirectories(allowedDirectory, "store.tmp", SearchOption.TopDirectoryOnly))
+                string temp = Path.Combine(allowedDirectory, ConfigSwapPaths.WorkDirName, "store-tmp");
+                if (!Directory.Exists(temp))
                 {
-                    string store = temp[..^4];
-                    string previous = store + ".previous";
-                    try
+                    continue;
+                }
+                string store = Path.Combine(allowedDirectory, "store");
+                string previous = Path.Combine(allowedDirectory, "store-previous");
+                try
+                {
+                    if (!Directory.Exists(store) && Directory.Exists(previous))
                     {
-                        if (!Directory.Exists(store) && Directory.Exists(previous))
-                        {
-                            Directory.Move(previous, store);
-                            Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复用户快照：{store}");
-                        }
-                        ConfigSwapPrimitives.TryDeleteDir(temp);
+                        Directory.Move(previous, store);
+                        Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复用户快照：{store}");
                     }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
-                    }
+                    ConfigSwapPrimitives.TryDeleteDir(temp);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
                 }
             }
         }

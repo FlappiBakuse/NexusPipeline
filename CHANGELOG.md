@@ -2,6 +2,16 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.13.1（Pre-release）
+
+### 文件治理：work/ 事务工作区与命名规范
+- `data/{脚本Id}/{UserId}/` 的 6 个会话事务目录（original、script、swap-backup、edit-hidden、retry-store、store.tmp）归并为统一的 `work/` 工作区；持久层（store、store-meta.json、store-archive、store-previous）与会话标记（.session/.session.bak）保持顶层不变。正常收尾后每用户目录只剩 `store/` 与 `store-meta.json`。
+- 命名规范收敛：目录与普通数据文件一律 kebab-case，禁止 dot 后缀命名——`store.previous → store-previous`、`store.meta.json → store-meta.json`、`store.tmp → store-tmp`；dot 前缀仅保留给隐藏内部标记（.nxp/、.session、.session.bak、swap-backup 内 .meta）。
+- 新增 v0.13.0 → v0.13.1 一次性幂等启动迁移：旧散落事务目录在恢复扫描前整体移入 `work/`（`store.tmp → work/store-tmp`），旧 dot 后缀命名原地改名，旧崩溃现场按原语义恢复；同名冲突保留现场并告警。无用户交互的脚本级兜底目录同步收敛为 `data/{脚本Id}/work/{script,swap-backup}`。
+- 启动恢复完成后清扫空闲 `work/`：判断脚本工作目录与重试快照直接清理；存在 `.session` 标记或不可丢弃残留（swap-backup/original/edit-hidden/store-tmp 有内容）时保留现场。
+- `.nxp/state/appearance-staging/` 迁至 `.nxp/runtime/staging/appearance/` 并纳入启动清扫：上传暂存属可重建临时数据，残留不再跨启动堆积。
+- 新增文档化「文件布局治理规范」（DESIGN.md §7.6）：目录四类归位、命名约定、单一事实源、损坏保全、一次性迁移模式与有意保留项清单。
+
 ## v0.13.0（Pre-release）
 
 ### 脚本声明与插件 profile

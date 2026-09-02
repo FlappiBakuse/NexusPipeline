@@ -458,7 +458,11 @@ internal static class UserConfigManager
                     throw new IOException("未找到配置编辑会话");
                 }
                 string store = StoreDir(scriptId, userName);
-                ConfigSwapSession.CommitStoreSnapshot(configPath, store);
+                ConfigSwapSession.CommitStoreSnapshot(
+                    configPath,
+                    store,
+                    ConfigSwapPaths.StoreTempDir(scriptId, userName),
+                    ConfigSwapPaths.StorePreviousDir(scriptId, userName));
                 ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
                 if (!IsReuseEdit(mark))
                 {

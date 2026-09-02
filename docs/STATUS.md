@@ -4,11 +4,17 @@
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 
-## v0.13.0 当前版本基线
+## v0.13.1 当前版本基线
+
+- `data/{脚本Id}/{UserId}/` 的会话事务目录归并为 `work/` 工作区（original、script、swap-backup、edit-hidden、retry-store、store-tmp）；持久层与会话标记保持顶层，正常收尾后每用户目录只剩 `store/` 与 `store-meta.json`。
+- v0.13.0 旧布局与 dot 后缀命名（store.previous、store.meta.json、store.tmp）由一次性幂等启动迁移归并/改名，在恢复扫描前执行，旧崩溃现场按原语义恢复；空闲 `work/` 在启动恢复后清扫。
+- `.nxp/state/appearance-staging/` 迁至 `.nxp/runtime/staging/appearance/` 并纳入启动清扫；文件布局治理规范固化于 `DESIGN.md` §7.6。
+
+## v0.13.0 版本基线
 
 - `scripts.json` 保存脚本实例声明；通用判断脚本源码位于 `config/judge-scripts/<scriptId>.js|py`，由文件名和语言确定归属。
 - 数据化专项实例保存 `PluginType`、`RootPath` 及用户可配置运行字段；主程序、参数、配置路径、日志路径和判断脚本在 API、准入、配置编辑与运行时读取当前插件 profile。
-- 已触发的调度 occurrence 冻结本次有效 profile；尚未触发的 occurrence 在触发时重新解析。用户快照通过 `store.meta.json` 记录配置定位指纹，定位或文件/目录形态改变时进入可恢复归档流程。
+- 已触发的调度 occurrence 冻结本次有效 profile；尚未触发的 occurrence 在触发时重新解析。用户快照通过 `store-meta.json` 记录配置定位指纹，定位或文件/目录形态改变时进入可恢复归档流程。
 - v0.12.9 旧脚本清单支持一次性、幂等迁移；迁移备份、判断脚本资产冲突和未引用源码均保留于隔离目录，供人工核查。
 
 ## 后续功能：插件生态扩展

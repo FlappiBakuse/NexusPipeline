@@ -280,7 +280,14 @@ internal static class ConfigSwapSession
                 HashSet<string> swapFiles = ReadSwapFiles(ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
                 ConfigRestoreDescriptor? descriptor = ReadRestoreDescriptor(ConfigSwapPaths.ScriptDir(scriptId, userName));
                 // 5. 全量镜像到临时目录并原子替换，源配置在复制期间再次变化则整次放弃。
-                (int written, int preserved) = MirrorToStoreAtomic(configPath, store, swapFiles, descriptor, stableSample);
+                (int written, int preserved) = MirrorToStoreAtomic(
+                    configPath,
+                    store,
+                    ConfigSwapPaths.StoreTempDir(scriptId, userName),
+                    ConfigSwapPaths.StorePreviousDir(scriptId, userName),
+                    swapFiles,
+                    descriptor,
+                    stableSample);
                 ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
                 Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，保留插队 {preserved}，{SyncPhaseText(firstCheck)}）");
             });
@@ -663,19 +670,19 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>
-    /// 事务化全量镜像：先写 store.tmp，复制期间源配置发生变化则放弃；成功后将旧 store 保留为
-    /// store.previous，再把临时目录移动为 store。store.previous 用于进程崩溃后的恢复。
+    /// 事务化全量镜像：先写暂存目录 temp，复制期间源配置发生变化则放弃；成功后将旧 store 保留为
+    /// previous，再把临时目录移动为 store。previous 用于进程崩溃后的恢复。
     /// 无还原描述的插队文件从旧 store 保留，不参与本轮内容覆盖或清理。
     /// </summary>
     internal static (int Written, int Preserved) MirrorToStoreAtomic(
         string configPath,
         string store,
+        string temp,
+        string previous,
         HashSet<string> swapFiles,
         ConfigRestoreDescriptor? descriptor,
         string expectedSample)
     {
-        string temp = store + ".tmp";
-        string previous = store + ".previous";
         int written = 0;
         int preserved = 0;
         try
@@ -853,9 +860,8 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>将编辑后的配置先完整复制到临时快照，再以目录事务替换用户 store。</summary>
-    public static void CommitStoreSnapshot(string configPath, string store)
+    public static void CommitStoreSnapshot(string configPath, string store, string temp, string previous)
     {
-        string temp = store + ".tmp";
         try
         {
             if (Directory.Exists(temp))
@@ -867,7 +873,7 @@ internal static class ConfigSwapSession
                 File.Delete(temp);
             }
             ConfigSwapPrimitives.CopyAs(configPath, temp, PathKind.Dir);
-            CommitStagedStore(temp, store, store + ".previous");
+            CommitStagedStore(temp, store, previous);
         }
         catch
         {

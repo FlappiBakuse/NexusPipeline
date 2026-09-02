@@ -65,7 +65,11 @@ internal static class AppPaths
 
     public static readonly string AppearanceRuntimePath = Path.Combine(StateDir, "appearance-runtime.json");
 
-    public static readonly string AppearanceStagingDir = Path.Combine(StateDir, "appearance-staging");
+    /// <summary>可重建的进程内暂存区（上传/校验临时文件），启动时整体清扫。</summary>
+    public static readonly string RuntimeStagingDir = Path.Combine(RuntimeDir, "staging");
+
+    /// <summary>壁纸上传暂存目录（校验 SHA256 后移入 AppearanceAssetsDir；残留由启动清扫移除）。</summary>
+    public static readonly string AppearanceStagingDir = Path.Combine(RuntimeStagingDir, "appearance");
 
     /// <summary>常驻 Web 服务实际监听端口（服务启动时写入，停止时删除；CLI 用于复用端口漂移后的服务）。</summary>
     public static readonly string WebPortPath = Path.Combine(RuntimeDir, "web.port");

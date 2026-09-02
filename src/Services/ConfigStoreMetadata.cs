@@ -90,8 +90,9 @@ internal sealed class ConfigStoreMetadata
             {
                 continue;
             }
-            string metadataPath = Path.Combine(userDir, "store.meta.json");
-            if (File.Exists(metadataPath))
+            string metadataPath = Path.Combine(userDir, "store-meta.json");
+            if (File.Exists(metadataPath)
+                || File.Exists(Path.Combine(userDir, "store.meta.json")))
             {
                 continue;
             }
@@ -182,7 +183,7 @@ internal sealed class ConfigStoreMetadata
         string metadata = ConfigSwapPaths.StoreMetadataPath(scriptId, userKey);
         if (File.Exists(metadata))
         {
-            File.Move(metadata, Path.Combine(destination, "store.meta.json"));
+            File.Move(metadata, Path.Combine(destination, "store-meta.json"));
         }
         Logger.Info($"配置快照已归档：{store} → {destination}");
         return destination;
