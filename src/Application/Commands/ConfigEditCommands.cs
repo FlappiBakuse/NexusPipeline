@@ -64,6 +64,11 @@ internal static class ConfigEditCommands
             editMode = "normal";
         }
 
+        ConfigSessionRuntimeMetadata metadata = ConfigSessionMark.FromScript(
+            target.Script,
+            target.Spec?.ProfileHash ?? "",
+            target.Spec?.PluginVersion ?? "");
+
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
         bool gateBusy = false;
@@ -131,11 +136,11 @@ internal static class ConfigEditCommands
             string? prepError = editMode switch
             {
                 "fresh" => UserConfigManager.PrepareForEditFresh(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
                 "reuse" => UserConfigManager.PrepareForEditReuse(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
                 _ => UserConfigManager.PrepareForEdit(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath),
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
             };
             if (prepError is not null)
             {
@@ -147,12 +152,21 @@ internal static class ConfigEditCommands
             {
                 ScriptId = target.Script.Id,
                 UserName = target.UserKey,
+                UserId = target.UserKey,
                 ConfigPath = target.Script.ConfigPath,
                 OriginalKind = ConfigSessionMark.TryRead(target.Script.Id, target.UserKey)?.OriginalKind
                     ?? PathKindUtil.Text(PathKindUtil.KindOf(target.Script.ConfigPath)),
                 Phase = "edit",
+                SessionPhase = "edit",
                 EditMode = editMode,
             };
+            editMark.WorkingDirectory = metadata.WorkingDirectory;
+            editMark.LaunchExe = metadata.LaunchExe;
+            editMark.ProcessIdentity = metadata.ProcessIdentity;
+            editMark.ProfileHash = metadata.ProfileHash;
+            editMark.PluginName = metadata.PluginName;
+            editMark.PluginVersion = metadata.PluginVersion;
+            editMark.ConfigKind = metadata.ConfigKind;
             editMark.Write();
             if (editMode != "reuse")
             {
@@ -171,10 +185,21 @@ internal static class ConfigEditCommands
             }
             catch (Exception ex)
             {
-                UserConfigManager.CancelEdit(
-                    target.Script.Id,
-                    target.UserKey,
-                    target.Script.ConfigPath);
+                try
+                {
+                    UserConfigManager.CancelEdit(
+                        target.Script.Id,
+                        target.UserKey,
+                        target.Script.ConfigPath);
+                }
+                finally
+                {
+                    // 主程序启动失败时 CancelEdit 只负责配置交换回滚；同目录隐藏配置也必须立即恢复。
+                    UserConfigManager.RestoreHiddenConfigs(
+                        target.Script.Id,
+                        target.UserKey,
+                        target.Script.ConfigPath);
+                }
                 return Validation<ConfigEditStarted>(
                     "execution_failed",
                     "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试");
@@ -187,6 +212,7 @@ internal static class ConfigEditCommands
                 User = target.User,
                 Process = process,
                 Mark = editMark,
+                Spec = target.Spec,
             };
             keepGate = true;
             Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.UserName}（主程序已启动，方式={editMode}）");
@@ -265,19 +291,26 @@ internal static class ConfigEditCommands
             return Validation<ConfigEditCompleted>("未知操作：" + action);
         }
 
-        OperationResult<ConfigEditTarget> targetResult = ResolveTarget(ctx, scriptId, userReference);
-        if (!targetResult.Succeeded)
-        {
-            return OperationResult<ConfigEditCompleted>.Failure(targetResult.Error!);
-        }
-
-        ConfigEditTarget target = targetResult.Value!;
         if (!UserConfigManager.EditSessions.TryGetValue(
-                target.Script.Id,
+                scriptId,
                 out EditSession? session))
         {
             return Conflict<ConfigEditCompleted>("resource_busy", "没有进行中的编辑配置会话");
         }
+
+        if (!IsSessionUser(session.User, userReference))
+        {
+            return NotFound<ConfigEditCompleted>("用户绑定不存在");
+        }
+        // 完成/取消沿用开始编辑时冻结的脚本、用户和 validator；当前插件 profile 变化不影响收尾路径。
+        ConfigEditTarget target = new(
+            session.Script,
+            session.User,
+            ResolveSessionUserKey(session),
+            session.Spec);
+        string sessionUserKey = string.IsNullOrWhiteSpace(session.Mark.UserId)
+            ? target.UserKey
+            : session.Mark.UserId;
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool sessionRemoved = false;
@@ -313,13 +346,13 @@ internal static class ConfigEditCommands
 
             string? swapError = action == "done"
                 ? UserConfigManager.CommitEdit(
-                    target.Script.Id,
-                    target.UserKey,
-                    target.Script.ConfigPath)
+                    session.Script.Id,
+                    sessionUserKey,
+                    session.Script.ConfigPath)
                 : UserConfigManager.CancelEdit(
-                    target.Script.Id,
-                    target.UserKey,
-                    target.Script.ConfigPath);
+                    session.Script.Id,
+                    sessionUserKey,
+                    session.Script.ConfigPath);
             if (swapError is not null)
             {
                 return Validation<ConfigEditCompleted>(
@@ -328,18 +361,18 @@ internal static class ConfigEditCommands
             }
 
             UserConfigManager.RestoreHiddenConfigs(
-                target.Script.Id,
-                target.UserKey,
-                target.Script.ConfigPath);
+                session.Script.Id,
+                sessionUserKey,
+                session.Script.ConfigPath);
 
             ConfigValidationResult validation = action == "done"
-                ? RunConfigValidator(ctx, session.Script, session.User, target.UserKey)
+                ? RunConfigValidator(session.Script, session.User, sessionUserKey, session.Spec?.ConfigValidator)
                 : ConfigValidationResult.Skipped;
 
             sessionRemoved = UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
             if (sessionRemoved)
             {
-                ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
+                ctx.Center.EndEditSession(session.Script.Id, sessionUserKey);
             }
 
             Audit.Log(
@@ -362,14 +395,12 @@ internal static class ConfigEditCommands
     }
 
     private static ConfigValidationResult RunConfigValidator(
-        RuntimeContext ctx,
         ScriptInstance script,
         ResolvedScriptUser user,
-        string userKey)
+        string userKey,
+        ConfigValidatorDescriptor? resolvedDescriptor)
     {
-        if (string.IsNullOrWhiteSpace(script.PluginType)
-            || !ctx.Plugins.TryGetConfigValidator(script.PluginType, out ConfigValidatorDescriptor? descriptor)
-            || descriptor is null)
+        if (string.IsNullOrWhiteSpace(script.PluginType) || resolvedDescriptor is null)
         {
             return ConfigValidationResult.Skipped;
         }
@@ -378,7 +409,7 @@ internal static class ConfigEditCommands
         try
         {
             return ConfigValidationScriptRunner.ExecuteAsync(
-                    descriptor,
+                    resolvedDescriptor,
                     script,
                     user,
                     storeRoot)
@@ -404,11 +435,17 @@ internal static class ConfigEditCommands
         string scriptId,
         string userReference)
     {
-        ScriptInstance? script = ctx.FindScript(scriptId);
-        if (script is null)
+        ScriptInstance? declaration = ctx.FindScript(scriptId);
+        if (declaration is null)
         {
             return NotFound<ConfigEditTarget>($"未找到脚本实例：{scriptId}");
         }
+        ResolvedScriptSpec spec = ctx.ResolveScriptSpec(declaration);
+        if (!spec.Succeeded)
+        {
+            return Validation<ConfigEditTarget>(spec.Error ?? "脚本有效配置解析失败");
+        }
+        ScriptInstance script = spec.Script;
 
         NexusUser? globalUser = ctx.FindUser(userReference);
         ResolvedScriptUser? user = null;
@@ -435,7 +472,7 @@ internal static class ConfigEditCommands
         }
 
         return OperationResult<ConfigEditTarget>.Ok(
-            new ConfigEditTarget(script, user, globalUser.Id));
+            new ConfigEditTarget(script, user, globalUser.Id, spec));
     }
 
     private static string ResolveLaunchTargetExe(ScriptInstance script)
@@ -444,6 +481,26 @@ internal static class ConfigEditCommands
             ? Path.GetDirectoryName(script.MainExe) ?? ""
             : script.RootPath;
         return SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
+    }
+
+    private static bool IsSessionUser(ResolvedScriptUser user, string userReference)
+    {
+        return !string.IsNullOrWhiteSpace(userReference)
+            && (string.Equals(user.UserId, userReference, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(user.UserName, userReference, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ResolveSessionUserKey(EditSession session)
+    {
+        if (!string.IsNullOrWhiteSpace(session.Mark.UserId))
+        {
+            return session.Mark.UserId;
+        }
+        if (!string.IsNullOrWhiteSpace(session.User.UserId))
+        {
+            return session.User.UserId;
+        }
+        return session.Mark.UserName;
     }
 
     /// <summary>归一化编辑方式：空值视为 normal；非法值返回 null。</summary>
@@ -511,5 +568,6 @@ internal static class ConfigEditCommands
     private sealed record ConfigEditTarget(
         ScriptInstance Script,
         ResolvedScriptUser User,
-        string UserKey);
+        string UserKey,
+        ResolvedScriptSpec? Spec = null);
 }

@@ -72,6 +72,66 @@ internal sealed class FrozenQueueTaskData
 
     /// <summary>冻结的全局用户身份与绑定设置。</summary>
     public List<FrozenResolvedUserData> ResolvedUsers { get; set; } = new();
+
+    /// <summary>触发时解析出的专项 profile 与判断脚本资产指纹；未触发 occurrence 仍会重新解析。</summary>
+    public FrozenResolvedScriptSpecData? ResolvedSpec { get; set; }
+}
+
+internal sealed class FrozenResolvedScriptSpecData
+{
+    public string PluginVersion { get; set; } = "";
+
+    public string ProfileHash { get; set; } = "";
+
+    public string? Error { get; set; }
+
+    public FrozenJudgeScriptData JudgeScript { get; set; } = new();
+
+    public static FrozenResolvedScriptSpecData From(ResolvedScriptSpec spec)
+    {
+        return new FrozenResolvedScriptSpecData
+        {
+            PluginVersion = spec.PluginVersion,
+            ProfileHash = spec.ProfileHash,
+            Error = spec.Error,
+            JudgeScript = new FrozenJudgeScriptData
+            {
+                Enabled = spec.JudgeScript.Enabled,
+                Language = spec.JudgeScript.Language,
+                SourceKind = spec.JudgeScript.SourceKind,
+                SourcePath = spec.JudgeScript.SourcePath,
+                ContentHash = spec.JudgeScript.ContentHash,
+            },
+        };
+    }
+
+    public ResolvedScriptSpec ToRuntime(Models.ScriptInstance script)
+    {
+        return new ResolvedScriptSpec(
+            script,
+            PluginVersion,
+            new ResolvedJudgeScript(
+                JudgeScript.Enabled,
+                JudgeScript.Language,
+                JudgeScript.SourceKind,
+                JudgeScript.SourcePath,
+                JudgeScript.ContentHash),
+            ProfileHash,
+            Error);
+    }
+}
+
+internal sealed class FrozenJudgeScriptData
+{
+    public bool Enabled { get; set; }
+
+    public string Language { get; set; } = "javascript";
+
+    public string SourceKind { get; set; } = "";
+
+    public string SourcePath { get; set; } = "";
+
+    public string ContentHash { get; set; } = "";
 }
 
 internal sealed class FrozenResolvedUserData

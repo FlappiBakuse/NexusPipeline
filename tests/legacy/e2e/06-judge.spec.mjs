@@ -265,7 +265,7 @@ if (n >= 2) {
   await api("DELETE", "/api/scripts/" + id);
 });
 
-test("自定义完成标志前端：关键字区/脚本区切换、上传识别语言、专用脚本不显示（判断脚本固化）", async ({ page }) => {
+test("自定义完成标志前端：关键字区/脚本区切换、上传识别语言、专用脚本不显示（当前插件判断脚本）", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.waitForFunction(() => document.querySelector("h2") && document.querySelector("h2").textContent.includes("脚本实例"), null, { timeout: 5000 });
   await page.click('[data-testid="new-script"]');
@@ -366,19 +366,19 @@ test("自定义完成标志前端：关键字区/脚本区切换、上传识别�
   await page.waitForSelector(".new-script-chooser", { timeout: 5000 });
   await page.click('[data-action="open-script-type"][data-plugin="bettergi"]');
   await page.waitForSelector("#sm-root", { timeout: 5000 });
-  expect(!(await page.$("#sm-mode-btn")), "专项脚本弹窗不显示自定义完成标志区（判断脚本由插件固化，用户不可编辑）").toBeTruthy();
+  expect(!(await page.$("#sm-mode-btn")), "专项脚本弹窗不显示自定义完成标志区（判断脚本由当前插件 profile 提供，用户不可编辑）").toBeTruthy();
   await page.click('[data-action="close-modal"]');
 
   const created = await api("POST", "/api/scripts", {
-    name: "专项判断脚本固化", pluginType: "bettergi",
+    name: "专项判断脚本动态解析", pluginType: "bettergi",
     rootPath: bgiRoot.replace(/\\/g, "\\\\"),
     maxAttempts: 3, logStallTimeoutMinutes: 5, totalTimeoutMinutes: 30, gameExe: PING_GAME,
   });
   expect(created.ok, "API 创建 BetterGI 专项脚本（模拟目录）").toBeTruthy();
   const sp = await created.json();
-  expect(sp.judgeScriptEnabled === true, "专项脚本自动固化判断脚本（JudgeScriptEnabled=true）").toBeTruthy();
-  expect(sp.judgeScript.includes("一条龙和配置组任务结束"), "固化判断脚本含运行结束关键字").toBeTruthy();
-  expect(sp.judgeScript.includes("config-restore.json") && sp.judgeScript.includes("TaskEnabledList"), "固化判断脚本含选择性重试与还原描述逻辑").toBeTruthy();
+  expect(sp.judgeScriptEnabled === true, "专项脚本自动解析当前判断脚本（JudgeScriptEnabled=true）").toBeTruthy();
+  expect(sp.judgeScript.includes("一条龙和配置组任务结束"), "当前插件判断脚本含运行结束关键字").toBeTruthy();
+  expect(sp.judgeScript.includes("config-restore.json") && sp.judgeScript.includes("TaskEnabledList"), "当前插件判断脚本含选择性重试与还原描述逻辑").toBeTruthy();
   expect(sp.configPath.endsWith("OneDragon"), "专项 ConfigPath 指向一条龙配置目录（User/OneDragon）").toBeTruthy();
   const forcedOff = await api("PUT", "/api/scripts/" + sp.id, { ...sp, autoUpdateConfig: false });
   expect(forcedOff.ok, "API 修改专项脚本成功").toBeTruthy();

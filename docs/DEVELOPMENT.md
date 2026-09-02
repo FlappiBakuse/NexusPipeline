@@ -120,7 +120,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 | 位置 | 内容 |
 |---|---|
-| `config/settings.json`、`scripts.json`、`queues.json` | 用户配置、密钥和脚本/队列数据，永不提交 |
+| `config/settings.json`、`scripts.json`、`config/judge-scripts/`、`queues.json` | 用户配置、脚本声明、通用判断脚本资产和队列数据，永不提交 |
 | `config/limits.json` | 约束配置 |
 | `config/plugins/` | managed-code 插件配置和 DPAPI 密钥 |
 | `history/YYYY-MM-DD/<用户昵称>/<运行目录>/` | 运行状态 JSON、按 Attempt 分批的脚本日志和当前保留截图 |

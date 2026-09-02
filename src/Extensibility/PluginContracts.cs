@@ -20,7 +20,7 @@ internal static class PluginCapabilityKeys
     public const string ExecutionPreviewClient = "execution-preview-client";
 }
 
-/// <summary>专项插件推导出的脚本配置快照。</summary>
+/// <summary>专项插件按当前插件文件推导出的运行时配置快照。</summary>
 internal sealed class ScriptProfile
 {
     public string MainExe { get; set; } = "";
@@ -34,4 +34,11 @@ internal sealed class ScriptProfile
     public string JudgeScript { get; set; } = "";
 
     public string JudgeScriptLanguage { get; set; } = "javascript";
+
+    /// <summary>插件 manifest 校验过的判断脚本物理路径，供运行时快照与诊断使用。</summary>
+    public string JudgeScriptPath { get; set; } = "";
+
+    public string PluginName { get; set; } = "";
+
+    public string PluginVersion { get; set; } = "";
 }

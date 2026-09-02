@@ -281,6 +281,7 @@ internal static class ConfigSwapSession
                 ConfigRestoreDescriptor? descriptor = ReadRestoreDescriptor(ConfigSwapPaths.ScriptDir(scriptId, userName));
                 // 5. 全量镜像到临时目录并原子替换，源配置在复制期间再次变化则整次放弃。
                 (int written, int preserved) = MirrorToStoreAtomic(configPath, store, swapFiles, descriptor, stableSample);
+                ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
                 Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，保留插队 {preserved}，{SyncPhaseText(firstCheck)}）");
             });
         }

@@ -179,6 +179,30 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
+test("v0.13.0 persistence and plugin-profile contract stays documented", () => {
+  const project = read("src/NexusPipeline.csproj");
+  const status = read("docs/STATUS.md");
+  const design = read("docs/DESIGN.md");
+  const pluginApi = read("docs/PLUGIN_API.md");
+  const development = read("docs/DEVELOPMENT.md");
+
+  assert.match(project, /<Version>0\.13\.0<\/Version>/u);
+  assert.match(status, /v0\.13\.0 当前版本基线/u);
+  assert.doesNotMatch(status, /KN-74[\s\S]*调查中/u);
+  assert.match(design, /config\/judge-scripts\/<scriptId>\.js\|py/u);
+  assert.match(design, /PluginType \+ RootPath/u);
+  assert.match(pluginApi, /当前 profile 解析成功后将 `judgeScript`/u);
+  assert.match(development, /config\/judge-scripts\//u);
+
+  const stale = /保存脚本实例时固化解析结果|ApplyProfile.*保存时覆盖|判断脚本由插件固化/u;
+  for (const [relativeFile, text] of [
+    ["docs/DESIGN.md", design],
+    ["docs/PLUGIN_API.md", pluginApi],
+  ]) {
+    assert.doesNotMatch(text, stale, `${relativeFile} still describes the pre-v0.13.0 profile snapshot contract`);
+  }
+});
+
 test("dual-mode production contracts stay on data files and behavior", () => {
   // 权限门禁以 manifest 数据文件为准（产品 requireAdministrator，Test Host asInvoker）。
   const productionManifest = read("src/app.manifest");

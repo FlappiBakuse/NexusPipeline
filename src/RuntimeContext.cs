@@ -9,6 +9,7 @@ using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 
@@ -63,6 +64,7 @@ internal class RuntimeContext
             provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<ScriptSpecResolver>();
         collection.AddSingleton<IUserRunStartingPublisher>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
@@ -150,9 +152,28 @@ internal class RuntimeContext
     {
         lock (DataLock)
         {
-            Scripts = DataStore.LoadScripts();
+            Scripts = DataStore.LoadScripts(out bool scriptsAuthoritative);
             Queues = DataStore.LoadQueues();
             Users = DataStore.LoadUsers();
+            if (scriptsAuthoritative)
+            {
+                HashSet<string> scriptIds = Scripts
+                    .Select(script => script.Id)
+                    .ToHashSet(StringComparer.Ordinal);
+                int removedBindings = ScriptBindingCleanup.RemoveMissingScriptBindings(Users, scriptIds);
+                if (removedBindings > 0)
+                {
+                    try
+                    {
+                        DataStore.SaveUsers(Users);
+                        Logger.Info($"启动时清理已删除脚本的用户绑定：{removedBindings} 条");
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[用户绑定] 启动清理落盘失败（保留当前内存清理结果）：{ex.Message}");
+                    }
+                }
+            }
         }
     }
 
@@ -187,6 +208,30 @@ internal class RuntimeContext
         {
             return Scripts.Select(script => script.Clone()).ToList();
         }
+    }
+
+    /// <summary>脚本展示/编辑所需的有效快照；持久化声明仍通过 SnapshotScripts 读取。</summary>
+    internal List<ScriptInstance> SnapshotEffectiveScripts()
+    {
+        List<ScriptInstance> declarations = SnapshotScripts();
+        ScriptSpecResolver resolver = Resolve<ScriptSpecResolver>();
+        return declarations.Select(resolver.ResolveScript).ToList();
+    }
+
+    /// <summary>按当前插件和判断脚本资产解析单个脚本，供配置编辑等即时操作使用。</summary>
+    internal ScriptInstance ResolveEffectiveScript(ScriptInstance declaration)
+    {
+        return Resolve<ScriptSpecResolver>().ResolveScript(declaration);
+    }
+
+    internal ResolvedScriptSpec ResolveScriptSpec(ScriptInstance declaration)
+    {
+        return Resolve<ScriptSpecResolver>().Resolve(declaration);
+    }
+
+    internal ResolvedScriptSpec ResolveScriptCandidateSpec(ScriptInstance candidate)
+    {
+        return Resolve<ScriptSpecResolver>().ResolveCandidate(candidate);
     }
 
     /// <summary>队列列表深拷贝快照：跨线程读取/序列化用。</summary>

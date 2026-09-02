@@ -65,7 +65,7 @@ internal static class ApiScriptsHandler
         if (method == "GET" && seg.Length == 1)
         {
             Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            List<ScriptInstance> snapshot = ctx.SnapshotScripts()
+            List<ScriptInstance> snapshot = ctx.SnapshotEffectiveScripts()
                 .OrderBy(script => script.Index)
                 .ToList();
             await HttpHelper.WriteJsonAsync(context, snapshot).ConfigureAwait(false);
@@ -75,15 +75,15 @@ internal static class ApiScriptsHandler
             && !seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
         {
             string scriptId = Uri.UnescapeDataString(seg[1]);
-            ScriptInstance? script = ctx.FindScript(scriptId);
-            if (script is null)
+            ScriptInstance? declaration = ctx.FindScript(scriptId);
+            if (declaration is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                script.Clone()).ConfigureAwait(false);
+                ctx.ResolveEffectiveScript(declaration)).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -131,7 +131,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                result.Value!).ConfigureAwait(false);
+                ctx.ResolveEffectiveScript(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2)
@@ -154,7 +154,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                result.Value!).ConfigureAwait(false);
+                ctx.ResolveEffectiveScript(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "DELETE" && seg.Length == 2)
@@ -194,7 +194,10 @@ internal static class ApiScriptsHandler
     /// <summary>脚本主程序图标（提取关联图标转 PNG，内存缓存；无图标/主程序无效返回 404，前端使用占位图）。</summary>
     private static async Task HandleIconAsync(HttpListenerContext context, string scriptId)
     {
-        ScriptInstance? script = RuntimeContext.Instance.FindScript(scriptId);
+        ScriptInstance? declaration = RuntimeContext.Instance.FindScript(scriptId);
+        ScriptInstance? script = declaration is null
+            ? null
+            : RuntimeContext.Instance.ResolveEffectiveScript(declaration);
         if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);

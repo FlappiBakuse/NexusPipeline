@@ -5,6 +5,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.App.Commands;
 
@@ -24,26 +25,27 @@ internal static class ScriptCommands
             }
 
             NormalizePaths(candidate);
-            string? pluginError = string.IsNullOrWhiteSpace(candidate.PluginType)
-                ? null
-                : ApplyProfile(candidate);
-            if (pluginError is not null)
+            // 候选脚本在解析判断脚本资产前必须拥有最终实例 ID；新建请求中的空 ID 不能参与文件名生成。
+            candidate.Id = Guid.NewGuid().ToString("N");
+            RuntimeContext ctx = RuntimeContext.Instance;
+            ResolvedScriptSpec? resolvedCandidate = ResolveCandidate(candidate, ctx, out string? pluginError);
+            if (pluginError is not null || resolvedCandidate is null)
             {
-                return Validation<ScriptInstance>(pluginError);
+                return Validation<ScriptInstance>(pluginError ?? "专用插件配置解析失败");
             }
-            if (candidate.JudgeScriptEnabled && string.IsNullOrWhiteSpace(candidate.JudgeScript))
+            ScriptInstance effectiveCandidate = resolvedCandidate.Script;
+            if (effectiveCandidate.JudgeScriptEnabled && string.IsNullOrWhiteSpace(effectiveCandidate.JudgeScript))
             {
                 return Validation<ScriptInstance>("开启「使用判断脚本」但判断脚本代码为空");
             }
             string? pathError = Limits.CheckScriptPaths(
-                candidate,
-                RuntimeContext.Instance.Resolve<IPluginCapabilityResolver>());
+                effectiveCandidate,
+                ctx.Resolve<IPluginCapabilityResolver>());
             if (pathError is not null)
             {
                 return Validation<ScriptInstance>(pathError);
             }
 
-            RuntimeContext ctx = RuntimeContext.Instance;
             string? limitError = null;
             lock (ctx.DataLock)
             {
@@ -53,7 +55,6 @@ internal static class ScriptCommands
                     ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
                 if (limitError is null)
                 {
-                    candidate.Id = Guid.NewGuid().ToString("N");
                     candidate.Index = ctx.Scripts.Count == 0 ? 0 : ctx.Scripts.Max(item => item.Index) + 1;
                     ctx.Scripts.Add(candidate);
                     try
@@ -74,7 +75,7 @@ internal static class ScriptCommands
 
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "添加脚本实例", $"{candidate.Name}（id={candidate.Id}）");
-            return OperationResult<ScriptInstance>.Ok(candidate);
+            return OperationResult<ScriptInstance>.Ok(ctx.ResolveEffectiveScript(candidate));
         }
         catch (Exception ex)
         {
@@ -122,19 +123,18 @@ internal static class ScriptCommands
             candidate.Id = existing.Id;
             candidate.Index = existing.Index;
             NormalizePaths(candidate);
-            string? pluginError = string.IsNullOrWhiteSpace(candidate.PluginType)
-                ? null
-                : ApplyProfile(candidate);
-            if (pluginError is not null)
+            ResolvedScriptSpec? resolvedCandidate = ResolveCandidate(candidate, ctx, out string? pluginError);
+            if (pluginError is not null || resolvedCandidate is null)
             {
-                return Validation<ScriptInstance>(pluginError);
+                return Validation<ScriptInstance>(pluginError ?? "专用插件配置解析失败");
             }
-            if (candidate.JudgeScriptEnabled && string.IsNullOrWhiteSpace(candidate.JudgeScript))
+            ScriptInstance effectiveCandidate = resolvedCandidate.Script;
+            if (effectiveCandidate.JudgeScriptEnabled && string.IsNullOrWhiteSpace(effectiveCandidate.JudgeScript))
             {
                 return Validation<ScriptInstance>("开启「使用判断脚本」但判断脚本代码为空");
             }
             string? pathError = Limits.CheckScriptPaths(
-                candidate,
+                effectiveCandidate,
                 ctx.Resolve<IPluginCapabilityResolver>());
             if (pathError is not null)
             {
@@ -142,6 +142,8 @@ internal static class ScriptCommands
             }
 
             IReadOnlyList<ExecutionLeaseReference> leases;
+            ScriptInstance? previous = null;
+            int previousIndex = -1;
             bool changed = ctx.Center.TryExecuteLeaseMutation(
                 existing.Id,
                 null,
@@ -154,8 +156,22 @@ internal static class ScriptCommands
                         {
                             return;
                         }
+                        previousIndex = index;
+                        previous = ctx.Scripts[index];
                         ctx.Scripts[index] = candidate;
-                        DataStore.SaveScripts(ctx.Scripts);
+                        try
+                        {
+                            DataStore.SaveScripts(ctx.Scripts);
+                        }
+                        catch
+                        {
+                            // 保存失败时撤销内存替换，避免运行态已经切换到未落盘的候选配置。
+                            if (previous is not null && previousIndex >= 0 && previousIndex < ctx.Scripts.Count)
+                            {
+                                ctx.Scripts[previousIndex] = previous;
+                            }
+                            throw;
+                        }
                     }
                 },
                 out leases,
@@ -167,7 +183,7 @@ internal static class ScriptCommands
 
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "修改脚本实例", $"{candidate.Name}（id={candidate.Id}）");
-            return OperationResult<ScriptInstance>.Ok(candidate);
+            return OperationResult<ScriptInstance>.Ok(ctx.ResolveEffectiveScript(candidate));
         }
         catch (Exception ex)
         {
@@ -196,6 +212,9 @@ internal static class ScriptCommands
             }
         }
 
+        FileSnapshot? scriptsFile = null;
+        FileSnapshot? usersFile = null;
+        List<RemovedScriptBinding> removedBindings = new();
         try
         {
             bool changed = ctx.Center.TryExecuteLeaseMutation(
@@ -206,19 +225,47 @@ internal static class ScriptCommands
                     lock (ctx.DataLock)
                     {
                         int index = ctx.Scripts.FindIndex(script => script.Id == scriptId);
+                        bool hasBindings = ctx.Users.Any(user => user.Bindings.Any(binding =>
+                            string.Equals(binding.ScriptInstanceId, scriptId, StringComparison.Ordinal)));
+                        ScriptInstance? removedEntry = null;
+                        if (index >= 0 || hasBindings)
+                        {
+                            scriptsFile = CaptureFileSnapshot(AppPaths.ScriptsPath);
+                            usersFile = CaptureFileSnapshot(AppPaths.UsersPath);
+                        }
                         if (index >= 0)
                         {
-                            ScriptInstance removedEntry = ctx.Scripts[index];
+                            removedEntry = ctx.Scripts[index];
                             ctx.Scripts.RemoveAt(index);
-                            try
+                        }
+                        removedBindings = ScriptBindingCleanup.RemoveForScript(ctx.Users, scriptId);
+                        try
+                        {
+                            if (removedBindings.Count > 0)
+                            {
+                                DataStore.SaveUsers(ctx.Users);
+                            }
+                            if (index >= 0)
                             {
                                 DataStore.SaveScripts(ctx.Scripts);
                             }
-                            catch
+                        }
+                        catch
+                        {
+                            if (removedEntry is not null && index >= 0)
                             {
                                 ctx.Scripts.Insert(index, removedEntry);
-                                throw;
                             }
+                            ScriptBindingCleanup.Restore(removedBindings);
+                            if (scriptsFile is not null)
+                            {
+                                RestoreFileSnapshot(scriptsFile);
+                            }
+                            if (usersFile is not null)
+                            {
+                                RestoreFileSnapshot(usersFile);
+                            }
+                            throw;
                         }
                     }
                     if (removed is not null)
@@ -273,11 +320,26 @@ internal static class ScriptCommands
                     else
                     {
                         Dictionary<string, ScriptInstance> byId = ctx.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
+                        Dictionary<string, int> oldIndexes = ctx.Scripts.ToDictionary(
+                            script => script.Id,
+                            script => script.Index,
+                            StringComparer.Ordinal);
                         for (int i = 0; i < ids.Count; i++)
                         {
                             byId[ids[i]].Index = i;
                         }
-                        DataStore.SaveScripts(ctx.Scripts);
+                        try
+                        {
+                            DataStore.SaveScripts(ctx.Scripts);
+                        }
+                        catch
+                        {
+                            foreach (ScriptInstance script in ctx.Scripts)
+                            {
+                                script.Index = oldIndexes[script.Id];
+                            }
+                            throw;
+                        }
                     }
                 }
             }
@@ -316,33 +378,20 @@ internal static class ScriptCommands
             : OperationResult<ScriptProfile>.Ok(profile);
     }
 
-    private static string? ApplyProfile(ScriptInstance script)
+    private static ResolvedScriptSpec? ResolveCandidate(
+        ScriptInstance candidate,
+        RuntimeContext ctx,
+        out string? error)
     {
-        string? availabilityError = PluginAvailability.GetUnavailableReason(
-            script,
-            RuntimeContext.Instance.Resolve<IPluginAvailability>());
-        if (availabilityError is not null)
+        error = null;
+        ResolvedScriptSpec resolved = ctx.ResolveScriptCandidateSpec(candidate);
+        if (!resolved.Succeeded)
         {
-            return availabilityError;
+            error = resolved.Error ?? (string.IsNullOrWhiteSpace(candidate.PluginType)
+                ? "通用判断脚本资产不存在或不可读"
+                : "专用插件无法从脚本根目录推导配置（请检查脚本根目录，并确认专用插件已启用）");
         }
-        ScriptProfile? profile = RuntimeContext.Instance.Plugins.ResolveProfile(script.PluginType, script.RootPath);
-        if (profile is null)
-        {
-            return "专用插件无法从脚本根目录推导配置（请检查脚本根目录，并确认专用插件已启用）";
-        }
-        script.MainExe = profile.MainExe;
-        script.Args = profile.Args;
-        script.ConfigPath = profile.ConfigPath;
-        script.LogPath = profile.LogPath;
-        script.SuccessKeywords = "";
-        script.FailureKeywords = "";
-        script.AutoUpdateConfig = true;
-        script.JudgeScriptEnabled = !string.IsNullOrWhiteSpace(profile.JudgeScript);
-        script.JudgeScriptLanguage = string.IsNullOrWhiteSpace(profile.JudgeScriptLanguage)
-            ? "javascript"
-            : profile.JudgeScriptLanguage;
-        script.JudgeScript = profile.JudgeScript ?? "";
-        return null;
+        return resolved;
     }
 
     private static void NormalizePaths(ScriptInstance script)
@@ -403,4 +452,31 @@ internal static class ScriptCommands
 
     private static OperationResult<T> Internal<T>(Exception exception) =>
         OperationResult<T>.Failure("internal_error", exception.Message, OperationErrorKind.Internal);
+
+    private static FileSnapshot CaptureFileSnapshot(string path)
+    {
+        bool exists = File.Exists(path);
+        return new FileSnapshot(path, exists, exists ? File.ReadAllText(path) : "");
+    }
+
+    private static void RestoreFileSnapshot(FileSnapshot snapshot)
+    {
+        try
+        {
+            if (snapshot.Existed)
+            {
+                JsonUtil.WriteAtomic(snapshot.Path, snapshot.Content);
+            }
+            else if (File.Exists(snapshot.Path))
+            {
+                File.Delete(snapshot.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[错误] 脚本删除回滚文件失败（{snapshot.Path}）：{ex.Message}");
+        }
+    }
+
+    private sealed record FileSnapshot(string Path, bool Existed, string Content);
 }

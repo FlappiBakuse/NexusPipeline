@@ -74,7 +74,12 @@ internal static class UserConfigManager
 
     /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。
     /// v0.12.8 起绑定不再建立快照：快照为空且现场配置存在时，先把现场配置复制为初始快照（复用语义），再执行交换。</summary>
-    public static bool PrepareForRun(string scriptId, string userName, string configPath, out string? error)
+    public static bool PrepareForRun(
+        string scriptId,
+        string userName,
+        string configPath,
+        out string? error,
+        ConfigSessionRuntimeMetadata? metadata = null)
     {
         error = null;
         bool prepared = false;
@@ -84,22 +89,58 @@ internal static class UserConfigManager
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
                 string store = StoreDir(scriptId, userName);
-                if (!Directory.Exists(store) || !Directory.EnumerateFileSystemEntries(store).Any())
+                PathKind currentConfigKind = PathKindUtil.KindOf(configPath);
+                ConfigStoreMetadata expectedMetadata = ConfigStoreMetadata.For(configPath, metadata);
+                bool hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
+                ConfigStoreMetadata? existingMetadata = hasStore
+                    ? ConfigStoreMetadata.Load(scriptId, userName)
+                    : null;
+                if (hasStore
+                    && existingMetadata is null
+                    && !string.IsNullOrWhiteSpace(metadata?.PluginName))
                 {
-                    if (PathKindUtil.KindOf(configPath) != PathKind.Missing)
+                    // 专项旧快照的归属必须由 v0.13.0 迁移建立；元数据缺失或损坏时拒绝静默复用，保留完整现场。
+                    throw new IOException($"专项配置快照缺少归属元数据，已保留原快照：{store}");
+                }
+                if (hasStore
+                    && existingMetadata is not null
+                    && !existingMetadata.Matches(expectedMetadata))
+                {
+                    // 配置定位发生变化：旧快照先归档，严禁把旧路径的内容静默套到新路径。
+                    ConfigStoreMetadata.ArchiveStore(scriptId, userName);
+                    hasStore = false;
+                    if (currentConfigKind == PathKind.Missing)
                     {
-                        ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
-                        ConfigSwapPrimitives.CopyAs(configPath, store, PathKind.Dir);
-                        Audit.Log(Audit.System, "运行前建立初始配置快照", $"脚本 {scriptId} / 用户 {userName}：{configPath} → {store}");
+                        throw new IOException($"配置路径已变更但新位置不存在：{configPath}；旧配置快照已归档，未自动复用");
                     }
+                }
+                if (!hasStore && currentConfigKind != PathKind.Missing)
+                {
+                    ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
+                    ConfigSwapPrimitives.CopyAs(configPath, store, PathKind.Dir);
+                    hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
+                    Audit.Log(Audit.System, "运行前建立配置快照", $"脚本 {scriptId} / 用户 {userName}：{configPath} → {store}");
+                }
+                if (hasStore)
+                {
+                    ConfigStoreMetadata.Save(scriptId, userName, expectedMetadata);
                 }
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
                     UserName = userName,
+                    UserId = userName,
                     ConfigPath = configPath,
                     OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     Phase = "run",
+                    SessionPhase = "run",
+                    ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
+                    WorkingDirectory = metadata?.WorkingDirectory ?? "",
+                    LaunchExe = metadata?.LaunchExe ?? "",
+                    ProcessIdentity = metadata?.ProcessIdentity ?? "",
+                    ProfileHash = metadata?.ProfileHash ?? "",
+                    PluginName = metadata?.PluginName ?? "",
+                    PluginVersion = metadata?.PluginVersion ?? "",
                 };
                 string cache = CacheDir(scriptId, userName);
                 string retryStore = RetryStoreDir(scriptId, userName);
@@ -124,6 +165,14 @@ internal static class UserConfigManager
         catch (Exception ex)
         {
             error = ex.Message;
+            if ((File.Exists(ConfigSessionMark.MarkFile(scriptId, userName))
+                    || File.Exists(ConfigSessionMark.BackupMarkFile(scriptId, userName)))
+                && ConfigSessionMark.TryRead(scriptId, userName) is null)
+            {
+                // 主/备标记均损坏时无法确认原配置路径，保留 cache/config 现场，禁止回退到扩展名猜测。
+                Logger.Error($"[错误] 配置准备失败且会话标记不可解析，保留现场等待人工处理：脚本 {scriptId} / 用户 {userName}");
+                return false;
+            }
             try
             {
                 ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
@@ -194,14 +243,22 @@ internal static class UserConfigManager
     }
 
     /// <summary>编辑配置开始：config → original（移动），store → config（复制）。</summary>
-    public static string? PrepareForEdit(string scriptId, string userName, string configPath)
+    public static string? PrepareForEdit(
+        string scriptId,
+        string userName,
+        string configPath,
+        ConfigSessionRuntimeMetadata? metadata = null)
     {
-        return PrepareForRun(scriptId, userName, configPath, out string? error) ? null : (error ?? "配置交换失败");
+        return PrepareForRun(scriptId, userName, configPath, out string? error, metadata) ? null : (error ?? "配置交换失败");
     }
 
     /// <summary>全新配置编辑开始（无快照首选）：标记先行（EditMode=fresh）→ config 存在则移入 original 缓存区，
     /// 让脚本主程序在空配置位置生成全新配置。失败自动回滚还原现场。</summary>
-    public static string? PrepareForEditFresh(string scriptId, string userName, string configPath)
+    public static string? PrepareForEditFresh(
+        string scriptId,
+        string userName,
+        string configPath,
+        ConfigSessionRuntimeMetadata? metadata = null)
     {
         string? error = null;
         try
@@ -216,7 +273,16 @@ internal static class UserConfigManager
                     ConfigPath = configPath,
                     OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     Phase = "edit",
+                    SessionPhase = "edit",
+                    UserId = userName,
+                    ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     EditMode = "fresh",
+                    WorkingDirectory = metadata?.WorkingDirectory ?? "",
+                    LaunchExe = metadata?.LaunchExe ?? "",
+                    ProcessIdentity = metadata?.ProcessIdentity ?? "",
+                    ProfileHash = metadata?.ProfileHash ?? "",
+                    PluginName = metadata?.PluginName ?? "",
+                    PluginVersion = metadata?.PluginVersion ?? "",
                 };
                 mark.Write();
                 string cache = CacheDir(scriptId, userName);
@@ -251,7 +317,11 @@ internal static class UserConfigManager
 
     /// <summary>复用配置编辑开始（无快照）：仅写会话标记（EditMode=reuse）记录会话，无任何文件动作，
     /// 脚本主程序直接编辑现场配置文件。</summary>
-    public static string? PrepareForEditReuse(string scriptId, string userName, string configPath)
+    public static string? PrepareForEditReuse(
+        string scriptId,
+        string userName,
+        string configPath,
+        ConfigSessionRuntimeMetadata? metadata = null)
     {
         string? error = null;
         try
@@ -266,7 +336,16 @@ internal static class UserConfigManager
                     ConfigPath = configPath,
                     OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     Phase = "edit",
+                    SessionPhase = "edit",
+                    UserId = userName,
+                    ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     EditMode = "reuse",
+                    WorkingDirectory = metadata?.WorkingDirectory ?? "",
+                    LaunchExe = metadata?.LaunchExe ?? "",
+                    ProcessIdentity = metadata?.ProcessIdentity ?? "",
+                    ProfileHash = metadata?.ProfileHash ?? "",
+                    PluginName = metadata?.PluginName ?? "",
+                    PluginVersion = metadata?.PluginVersion ?? "",
                 };
                 mark.Write();
             });
@@ -293,15 +372,24 @@ internal static class UserConfigManager
             return;
         }
         string? dir = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrWhiteSpace(dir))
+        if (string.IsNullOrWhiteSpace(dir))
         {
-            Directory.CreateDirectory(dir);
+            Logger.Warn($"[警告] 恢复隐藏配置失败：配置路径没有父目录（{configPath}），隐藏文件保持原样");
+            return;
         }
+        Directory.CreateDirectory(dir);
         foreach (string file in Directory.GetFiles(hideDir))
         {
             try
             {
-                File.Move(file, Path.Combine(dir, Path.GetFileName(file)), overwrite: true);
+                string destination = Path.Combine(dir, Path.GetFileName(file));
+                if (File.Exists(destination) || Directory.Exists(destination))
+                {
+                    // 目标已被用户或程序重新生成时保留隐藏副本，绝不覆盖现有配置。
+                    Logger.Warn($"[警告] 恢复隐藏配置跳过冲突文件（保留隐藏副本）：{destination}");
+                    continue;
+                }
+                File.Move(file, destination);
             }
             catch (Exception ex)
             {
@@ -371,6 +459,7 @@ internal static class UserConfigManager
                 }
                 string store = StoreDir(scriptId, userName);
                 ConfigSwapSession.CommitStoreSnapshot(configPath, store);
+                ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
                 if (!IsReuseEdit(mark))
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);

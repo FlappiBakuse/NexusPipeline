@@ -8,7 +8,8 @@ internal sealed record PlannedQueueTask(
     QueueTask Task,
     ScriptInstance? Script,
     IReadOnlyList<string> EnabledUsers,
-    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null);
+    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null,
+    ResolvedScriptSpec? ResolvedSpec = null);
 
 /// <summary>脚本运行计划，运行期间不再回读共享仓储。</summary>
 internal sealed record ScriptExecutionPlan(
@@ -16,7 +17,8 @@ internal sealed record ScriptExecutionPlan(
     IReadOnlyList<string> Users,
     ExecutionAdmissionProfile Admission,
     int TotalTasks,
-    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null);
+    IReadOnlyList<ResolvedScriptUser>? ResolvedUsers = null,
+    ResolvedScriptSpec? ResolvedSpec = null);
 
 /// <summary>队列运行计划，包含队列、任务、脚本和准入 profile 的同一时刻快照。</summary>
 internal sealed record QueueExecutionPlan(
@@ -36,6 +38,8 @@ internal sealed class ExecutionPlanBuilder
     private readonly ExecutionValidator _validator;
     private readonly IExecutionSnapshotProvider? _snapshots;
     private readonly IPluginCapabilityResolver? _capabilities;
+    private readonly ScriptSpecResolver? _specs;
+    private readonly IPluginAvailability? _availability;
 
     public ExecutionPlanBuilder(
         IScriptRepository scripts,
@@ -43,7 +47,9 @@ internal sealed class ExecutionPlanBuilder
         IUserRepository users,
         ExecutionValidator validator,
         IExecutionSnapshotProvider? snapshots = null,
-        IPluginCapabilityResolver? capabilities = null)
+        IPluginCapabilityResolver? capabilities = null,
+        ScriptSpecResolver? specs = null,
+        IPluginAvailability? availability = null)
     {
         _scripts = scripts;
         _queues = queues;
@@ -51,6 +57,8 @@ internal sealed class ExecutionPlanBuilder
         _validator = validator;
         _snapshots = snapshots;
         _capabilities = capabilities;
+        _specs = specs;
+        _availability = availability;
     }
 
     public ScriptExecutionPlan BuildScript(string scriptId, string? userName)
@@ -61,6 +69,12 @@ internal sealed class ExecutionPlanBuilder
         if (script is null)
         {
             throw new InvalidOperationException($"脚本实例不存在：{scriptId}");
+        }
+
+        ResolvedScriptSpec? resolvedSpec = ResolveForExecution(script);
+        if (resolvedSpec is not null)
+        {
+            script = resolvedSpec.Script;
         }
 
         _validator.ValidateScriptStart(script, userName);
@@ -82,7 +96,8 @@ internal sealed class ExecutionPlanBuilder
             users,
             ExecutionAdmissionProfile.ForScript(script, userName, _capabilities, resolvedUsers),
             string.IsNullOrWhiteSpace(userName) ? Math.Max(1, users.Count) : 1,
-            resolvedUsers);
+            resolvedUsers,
+            resolvedSpec);
     }
 
     public QueueExecutionPlan BuildQueue(string queueId)
@@ -110,7 +125,10 @@ internal sealed class ExecutionPlanBuilder
                 item.ResolvedUsers.Select(user => new ResolvedScriptUser(
                     user.UserId,
                     user.UserName,
-                    user.Binding.Clone())).ToList()))
+                    user.Binding.Clone())).ToList(),
+                item.Script is null || item.ResolvedSpec is null
+                    ? null
+                    : item.ResolvedSpec.ToRuntime(item.Script.Clone())))
             .ToList();
         ExecutionAdmissionProfile admission = data.Admission is null
             ? ExecutionAdmissionProfile.ForQueue(queue, tasks, _capabilities)
@@ -137,6 +155,9 @@ internal sealed class ExecutionPlanBuilder
                     UserName = user.UserName,
                     Binding = user.Binding.Clone(),
                 }).ToList() ?? new List<FrozenResolvedUserData>(),
+                ResolvedSpec = task.ResolvedSpec is null
+                    ? null
+                    : FrozenResolvedScriptSpecData.From(task.ResolvedSpec),
             }).ToList(),
             Admission = FreezeAdmission(plan.Admission),
         };
@@ -215,6 +236,24 @@ internal sealed class ExecutionPlanBuilder
         }
         DispatchQueue queue = source;
 
+        HashSet<string> queuedScriptIds = queue.Tasks
+            .Select(task => task.ScriptInstanceId)
+            .ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, ResolvedScriptSpec?> resolvedSpecs = new(StringComparer.Ordinal);
+        var effectiveScripts = new List<ScriptInstance>(scripts.Count);
+        foreach (ScriptInstance declaration in scripts)
+        {
+            if (!queuedScriptIds.Contains(declaration.Id))
+            {
+                // 队列准入只依赖实际引用的脚本；无关脚本 profile 损坏不应阻断本队列。
+                effectiveScripts.Add(declaration);
+                continue;
+            }
+            ResolvedScriptSpec? resolved = ResolveForExecution(declaration);
+            effectiveScripts.Add(resolved?.Script ?? declaration);
+            resolvedSpecs[declaration.Id] = resolved;
+        }
+        scripts = effectiveScripts;
         _validator.ValidateQueueStartSnapshot(queue, scripts);
         List<PlannedQueueTask> tasks = queue.Tasks
             .OrderBy(task => task.Index)
@@ -224,11 +263,13 @@ internal sealed class ExecutionPlanBuilder
                 IReadOnlyList<ResolvedScriptUser> resolvedUsers = script is null
                     ? Array.Empty<ResolvedScriptUser>()
                     : _users.ResolveEnabledBindings(script, executionSnapshot?.Users);
+                resolvedSpecs.TryGetValue(task.ScriptInstanceId, out ResolvedScriptSpec? resolvedSpec);
                 return new PlannedQueueTask(
                     CloneTask(task),
                     script,
                     resolvedUsers.Select(user => user.UserName).ToList(),
-                    resolvedUsers);
+                    resolvedUsers,
+                    resolvedSpec);
             })
             .ToList();
 
@@ -249,6 +290,29 @@ internal sealed class ExecutionPlanBuilder
             ? 1
             : task.ResolvedUsers.Count);
         return new QueueExecutionPlan(queueSnapshot, tasks, admission, totalTasks);
+    }
+
+    private ResolvedScriptSpec? ResolveForExecution(ScriptInstance declaration)
+    {
+        if (_specs is null)
+        {
+            return null;
+        }
+
+        ResolvedScriptSpec resolved = _specs.Resolve(declaration);
+        if (!resolved.Succeeded)
+        {
+            // 插件缺失/禁用时保留声明交给既有 runner fallback，执行记录仍会明确报告插件不可用；
+            // 当前插件已启用但 profile/用户判断脚本损坏时则立即阻止计划，避免空路径启动。
+            bool unavailable = !string.IsNullOrWhiteSpace(declaration.PluginType)
+                && _availability is not null
+                && PluginAvailability.GetUnavailableReason(declaration.PluginType, _availability) is not null;
+            if (!unavailable)
+            {
+                throw new InvalidOperationException(resolved.Error);
+            }
+        }
+        return resolved;
     }
 
     private static QueueTask CloneTask(QueueTask task)

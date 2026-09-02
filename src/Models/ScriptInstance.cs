@@ -9,7 +9,7 @@ public class ScriptInstance
     /// <summary>列表展示顺序（拖拽排序落盘；新建追加为当前最大值 +1）。</summary>
     public int Index { get; set; }
 
-    /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由专用插件在保存时固化。</summary>
+    /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由当前插件在运行时解析。</summary>
     public string PluginType { get; set; } = "";
 
     public string RootPath { get; set; } = "";
@@ -53,12 +53,12 @@ public class ScriptInstance
     /// <summary>判断脚本语言：javascript（内置引擎）/ python（系统解释器）。</summary>
     public string JudgeScriptLanguage { get; set; } = "";
 
-    /// <summary>判断脚本代码内容（上传文件读入或手写）。</summary>
+    /// <summary>判断脚本代码内容（运行时加载的正文；通用脚本持久化于独立 judge-scripts 资产）。</summary>
     public string JudgeScript { get; set; } = "";
 
     /// <summary>自动更新配置：默认开。开 = 每次运行收尾把 config 最终状态全量镜像回用户快照 store
     /// （保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）；关 = 仅运行开始 15 秒后检测同步一次。
-    /// 专项脚本由前端固化恒 true；无用户或 ConfigPath 为空时开关不生效。</summary>
+    /// 专项脚本由当前插件 profile 固定为 true；无用户或 ConfigPath 为空时开关不生效。</summary>
     public bool AutoUpdateConfig { get; set; } = true;
 
     private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()

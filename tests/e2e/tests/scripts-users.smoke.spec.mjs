@@ -22,6 +22,7 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
     await modal.locator("#sm-log").fill(fixture.log);
     await modal.locator("#sm-game-exe").fill(PING_GAME);
     await modal.getByRole("button", { name: "保存", exact: true }).click();
+    await expect(modal).toBeHidden();
     const created = (await (await api("GET", "/api/scripts")).json()).find(item => item.name === "Smoke 普通脚本");
     createdId = created?.id || "";
     await expect(page.getByTestId("script-card").filter({ hasText: "Smoke 普通脚本" })).toBeVisible();
@@ -226,6 +227,19 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     const updatedBinding = updated.bindings.find(item => item.scriptInstanceId === script.id);
     expect(updatedBinding.smtpTo).toBe("new@example.com");
     expect(updatedBinding.maxSuccessfulRunsPerDay).toBe(2);
+
+    const deleteScriptResponse = await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);
+    expect(deleteScriptResponse.ok).toBeTruthy();
+    const afterScriptDelete = await (await api("GET", `/api/users/${encodeURIComponent(user.id)}`)).json();
+    expect(afterScriptDelete.bindings.some(item => item.scriptInstanceId === script.id)).toBeFalsy();
+
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const refreshedCard = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
+    await refreshedCard.getByRole("button", { name: "用户管理", exact: true }).click();
+    const refreshedDialog = page.getByRole("dialog", { name: "用户管理" });
+    await expect(refreshedDialog.getByTestId("um-binding-card")).toHaveCount(0);
+    await expect(refreshedDialog).not.toContainText("（脚本实例不存在）");
+    await refreshedDialog.locator('[data-action="close-modal"]').click();
   } finally {
     await api("DELETE", `/api/users/${encodeURIComponent(user.id)}`, { confirmName: user.name });
     await api("DELETE", `/api/scripts/${encodeURIComponent(script.id)}`);

@@ -10,8 +10,25 @@ internal static class JsonUtil
     public static void WriteAtomic(string path, string content)
     {
         string temp = path + ".tmp";
-        File.WriteAllText(temp, content, new UTF8Encoding(true));
-        File.Move(temp, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(temp, content, new UTF8Encoding(true));
+            File.Move(temp, path, overwrite: true);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+            catch
+            {
+                // 临时文件清理失败时保留现场，不覆盖原始写入异常。
+            }
+        }
     }
 
     public static JsonNode? Get(this JsonNode? node, string key)

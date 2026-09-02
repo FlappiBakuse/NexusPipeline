@@ -1,4 +1,6 @@
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Execution;
+using NexusPipeline.Models;
 
 namespace NexusPipeline.Services;
 
@@ -20,17 +22,24 @@ internal sealed class ConfigRunSession
     private readonly string? _userKey;
     private readonly string _configPath;
     private readonly bool _hasJudgeScript;
+    private readonly ConfigSessionRuntimeMetadata? _metadata;
     private readonly object _finalizationGate = new();
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
     private string? _finalizationError;
 
-    public ConfigRunSession(string scriptId, string? userKey, string configPath, bool hasJudgeScript)
+    public ConfigRunSession(
+        string scriptId,
+        string? userKey,
+        string configPath,
+        bool hasJudgeScript,
+        ResolvedScriptSpec? resolvedSpec = null)
     {
         _scriptId = scriptId;
         _userKey = userKey;
         _configPath = configPath;
         _hasJudgeScript = hasJudgeScript;
+        _metadata = resolvedSpec is null ? null : BuildMetadata(resolvedSpec);
     }
 
     public bool IsPrepared { get; private set; }
@@ -49,8 +58,13 @@ internal sealed class ConfigRunSession
         {
             return true;
         }
-        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error);
+        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error, _metadata);
         return IsPrepared;
+    }
+
+    private static ConfigSessionRuntimeMetadata BuildMetadata(ResolvedScriptSpec spec)
+    {
+        return ConfigSessionMark.FromScript(spec.Script, spec.ProfileHash, spec.PluginVersion);
     }
 
     public string? PrepareForRetry()

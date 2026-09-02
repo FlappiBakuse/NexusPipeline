@@ -60,6 +60,15 @@ public class RunRecord
     /// <summary>运行时冻结的全局用户身份。</summary>
     public string UserId { get; set; } = "";
 
+    /// <summary>本次运行使用的插件/解析快照诊断信息，不参与下次运行配置。</summary>
+    public string PluginVersion { get; set; } = "";
+
+    public string ProfileHash { get; set; } = "";
+
+    public string JudgeSourceKind { get; set; } = "";
+
+    public string JudgeHash { get; set; } = "";
+
     public DateTime StartTime { get; set; }
 
     public DateTime? EndTime { get; set; }

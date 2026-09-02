@@ -63,7 +63,7 @@ internal sealed class ExecutionRunner
                 return;
             }
             List<ResolvedScriptUser> runUsers = ResolvePlanUsers(plan.ResolvedUsers);
-            List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers).ConfigureAwait(false);
+            List<RunRecord> records = await RunUsersAsync(exec, script, "", "", runUsers, plan.ResolvedSpec).ConfigureAwait(false);
             if (records.Count > 0 && records[^1].Status == "cancelled")
             {
                 exec.Status = "cancelled";
@@ -92,7 +92,8 @@ internal sealed class ExecutionRunner
         ScriptInstance script,
         string queueId,
         string queueName,
-        IReadOnlyList<ResolvedScriptUser> users)
+        IReadOnlyList<ResolvedScriptUser> users,
+        ResolvedScriptSpec? resolvedSpec = null)
     {
         var records = new List<RunRecord>();
         Dictionary<string, int>? successfulRunsByUser = null;
@@ -181,7 +182,8 @@ internal sealed class ExecutionRunner
                         (line, level) => exec.AppendLog(level, line),
                         target => exec.SetPreviewTarget(target),
                         _users,
-                        runUser);
+                        runUser,
+                        resolvedSpec);
 
                     try
                     {
@@ -500,7 +502,7 @@ internal sealed class ExecutionRunner
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
                 }
-                records.AddRange(await RunUsersAsync(exec, script, queue.Id, queue.Name, runUsers).ConfigureAwait(false));
+                records.AddRange(await RunUsersAsync(exec, script, queue.Id, queue.Name, runUsers, planned.ResolvedSpec).ConfigureAwait(false));
                 if (exec.Status == "cancelled")
                 {
                     break;

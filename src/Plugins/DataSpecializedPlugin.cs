@@ -48,10 +48,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     private string? _configValidatorPath;
 
-    private string? _resolveText;
-
-    private string? _judgeScript;
-
     private string? _configValidator;
 
     private readonly object _sync = new();
@@ -160,10 +156,15 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         }
         rootPath = NormalizePathSeparators(rootPath.Trim());
         string resolveText;
-        lock (_sync)
+        try
         {
-            _resolveText ??= File.ReadAllText(_resolvePath);
-            resolveText = _resolveText;
+            // resolve.json 属于插件资产；每次解析读取当前版本，插件更新后无需重新保存脚本实例。
+            resolveText = File.ReadAllText(_resolvePath);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"专项插件解析规则读取失败（{_resolvePath}）：{ex.Message}");
+            return null;
         }
         JsonNode? resolve;
         try
@@ -226,6 +227,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             ConfigPath = ResolvePath(paths["configPath"]?.ToString(), rootPath, bindings),
             LogPath = ResolvePath(paths["logPath"]?.ToString(), rootPath, bindings),
             JudgeScriptLanguage = JudgeScriptLanguage,
+            JudgeScriptPath = _judgeScriptPath,
+            PluginName = Name,
+            PluginVersion = Version,
         };
         if (string.IsNullOrWhiteSpace(profile.MainExe) || !File.Exists(profile.MainExe))
         {
@@ -237,21 +241,15 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     private string ReadJudgeScript()
     {
-        lock (_sync)
+        try
         {
-            if (_judgeScript is null)
-            {
-                try
-                {
-                    _judgeScript = File.ReadAllText(_judgeScriptPath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"专项判断脚本读取失败（{_judgeScriptPath}），判定将退化为进程退出语义：{ex.Message}");
-                    _judgeScript = "";
-                }
-            }
-            return _judgeScript;
+            // 判断脚本和 resolve.json 一样是插件当前版本的资产，解析时只读取一次并交给本次运行快照。
+            return File.ReadAllText(_judgeScriptPath);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"专项判断脚本读取失败（{_judgeScriptPath}），判定将退化为进程退出语义：{ex.Message}");
+            return "";
         }
     }
 

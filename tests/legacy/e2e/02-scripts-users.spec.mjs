@@ -226,6 +226,11 @@ test("用户管理：按钮改名 / 二级页 / 用户 CRUD / 配置快照与交
   await page.click('[data-action="confirm-delete-script"]');
   await waitAbsent(page, "用户测试脚本");
   expect(!fs.existsSync(dataDir), "删除脚本后 data 目录已清理").toBeTruthy();
+  const usersAfterScriptDelete = await (await fetch(baseUrl + "api/users")).json();
+  expect(
+    usersAfterScriptDelete.every(user => !(user.bindings || []).some(binding => binding.scriptInstanceId === sid)),
+    "删除脚本后同步移除所有用户绑定",
+  ).toBeTruthy();
   const queues = await (await fetch(baseUrl + "api/queues")).json();
   for (const q of queues) {
     if (q.name === "用户队列测试") await api("DELETE", "/api/queues/" + q.id);
@@ -908,8 +913,8 @@ test("专用插件：BetterGI 适配 / probe / 简化弹窗 / 新建卡片 / 图
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "bettergi", "专用实例保存 pluginType=bettergi").toBeTruthy();
-  expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.endsWith("OneDragon") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.mainExe.endsWith("BetterGI.exe") && got.args === "--startOneDragon", "主程序/自启动参数由当前插件 profile 提供").toBeTruthy();
+  expect(got.configPath.endsWith("OneDragon") && got.logPath.endsWith("better-genshin-impact.log"), "配置/日志路径由当前插件 profile 提供").toBeTruthy();
   expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   const cfg = JSON.parse(fs.readFileSync(path.join(runtimeDir, "config", "scripts.json"), "utf8").replace(/^\uFEFF/, ""));
   const cfgGot = cfg.find(s => s.Id === sid);

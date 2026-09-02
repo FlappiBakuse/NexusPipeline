@@ -73,7 +73,7 @@ internal static class ApiUsersHandler
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         List<NexusUser> users = ctx.SnapshotUsers().OrderBy(user => user.Index).ToList();
-        List<ScriptInstance> scripts = ctx.SnapshotScripts();
+        List<ScriptInstance> scripts = ctx.SnapshotEffectiveScripts();
         List<DispatchQueue> queues = ctx.SnapshotQueues();
         Audit.Log(Audit.Web, "查询全局用户列表", $"{users.Count} 个");
         await HttpHelper.WriteJsonAsync(context, users.Select(user => ProjectUser(user, scripts, queues))).ConfigureAwait(false);
@@ -90,7 +90,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectUser(user, ctx.SnapshotScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+            ProjectUser(user, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
     }
 
     private static async Task CreateUserAsync(HttpListenerContext context, string body)
@@ -112,7 +112,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectUser(result.Value!, ctx.SnapshotScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+            ProjectUser(result.Value!, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
     }
 
     private static async Task UpdateUserAsync(HttpListenerContext context, string userId, string body)
@@ -135,7 +135,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectUser(result.Value!, ctx.SnapshotScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+            ProjectUser(result.Value!, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
     }
 
     private static async Task DeleteUserAsync(HttpListenerContext context, string userId, string body)
@@ -182,7 +182,7 @@ internal static class ApiUsersHandler
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            List<ScriptInstance> scripts = ctx.SnapshotScripts();
+            List<ScriptInstance> scripts = ctx.SnapshotEffectiveScripts();
             await HttpHelper.WriteJsonAsync(context, user.Bindings.Select(binding => ProjectBinding(user, binding, scripts))).ConfigureAwait(false);
             return;
         }
@@ -257,7 +257,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
+            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotEffectiveScripts())).ConfigureAwait(false);
     }
 
     private static async Task UpdateBindingAsync(HttpListenerContext context, string userId, string scriptId, string body)
@@ -280,7 +280,7 @@ internal static class ApiUsersHandler
         }
         await HttpHelper.WriteJsonAsync(
             context,
-            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotScripts())).ConfigureAwait(false);
+            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotEffectiveScripts())).ConfigureAwait(false);
     }
 
     private static async Task DeleteBindingAsync(HttpListenerContext context, string userId, string scriptId)

@@ -183,9 +183,9 @@ test("专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "march7th", "专项实例保存 pluginType=march7th").toBeTruthy();
-  expect(got.mainExe.endsWith("March7th Launcher.exe"), "主程序由插件固化（Launcher）").toBeTruthy();
-  expect(got.args === ".\\March7th Assistant.exe", "Args 启动目标由插件固化（.\\ 显式相对路径，无引号）").toBeTruthy();
-  expect(got.configPath.endsWith("config.yaml") && got.logPath.includes("{YYYY-MM-DD}.log"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.mainExe.endsWith("March7th Launcher.exe"), "主程序由当前插件 profile 提供（Launcher）").toBeTruthy();
+  expect(got.args === ".\\March7th Assistant.exe", "Args 启动目标由当前插件 profile 提供（.\\ 显式相对路径，无引号）").toBeTruthy();
+  expect(got.configPath.endsWith("config.yaml") && got.logPath.includes("{YYYY-MM-DD}.log"), "配置/日志路径由当前插件 profile 提供").toBeTruthy();
   expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sid);
 
@@ -198,7 +198,7 @@ test("专用插件：March7thAssistant 适配 / probe / 启动目标推导 / 上
   await page.click(".modal button:has-text('取消')");
 });
 
-test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建卡片", async ({ page }) => {
+test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 动态解析 / 新建卡片", async ({ page }) => {
   const zRoot = path.join(runtimeDir, "sim-zenless");
   fs.rmSync(zRoot, { recursive: true, force: true });
   fs.mkdirSync(path.join(zRoot, ".log"), { recursive: true });
@@ -232,8 +232,8 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "zzzonedragon", "专项实例保存 pluginType=zzzonedragon").toBeTruthy();
-  expect(got.mainExe.endsWith("OneDragon-Launcher.exe") && got.args === "-o -c", "主程序/启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.endsWith("config") && got.logPath.endsWith("log.txt"), "配置/日志路径由插件固化").toBeTruthy();
+  expect(got.mainExe.endsWith("OneDragon-Launcher.exe") && got.args === "-o -c", "主程序/启动参数由当前插件 profile 提供").toBeTruthy();
+  expect(got.configPath.endsWith("config") && got.logPath.endsWith("log.txt"), "配置/日志路径由当前插件 profile 提供").toBeTruthy();
   expect(got.successMarkers === undefined, "专项实例不再返回完成标志字段（已废弃）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sid);
 
@@ -247,7 +247,7 @@ test("专用插件：ZenlessZoneZeroOneDragon 适配 / probe / 固化 / 新建�
   await page.click(".modal button:has-text('取消')");
 });
 
-test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ page }) => {
+test("专用插件：MaaEnd 适配 / probe / 动态解析 / 新建卡片", async ({ page }) => {
   const mRoot = path.join(runtimeDir, "sim-maaend");
   fs.rmSync(mRoot, { recursive: true, force: true });
   fs.mkdirSync(mRoot, { recursive: true });
@@ -280,9 +280,9 @@ test("专用插件：MaaEnd 适配 / probe / 固化 / 新建卡片", async ({ pa
   const list = await (await fetch(baseUrl + "api/scripts")).json();
   const got = list.find(s => s.id === sid);
   expect(got && got.pluginType === "maaend", "专项实例保存 pluginType=maaend").toBeTruthy();
-  expect(got.mainExe.endsWith("MaaEnd.exe") && got.args === "--autostart --quit-after-run", "主程序/启动参数由插件固化").toBeTruthy();
-  expect(got.configPath.endsWith("config") && got.logPath.includes("{YYYY-MM-DD}-*.log"), "配置/日志路径由插件固化").toBeTruthy();
-  expect(got.judgeScriptEnabled === true && got.judgeScriptLanguage === "javascript" && got.judgeScript.includes("mxu-MaaEnd.json"), "判断脚本由插件固化（JudgeScriptEnabled=true、JavaScript、读取 mxu-MaaEnd.json）").toBeTruthy();
+  expect(got.mainExe.endsWith("MaaEnd.exe") && got.args === "--autostart --quit-after-run", "主程序/启动参数由当前插件 profile 提供").toBeTruthy();
+  expect(got.configPath.endsWith("config") && got.logPath.includes("{YYYY-MM-DD}-*.log"), "配置/日志路径由当前插件 profile 提供").toBeTruthy();
+  expect(got.judgeScriptEnabled === true && got.judgeScriptLanguage === "javascript" && got.judgeScript.includes("mxu-MaaEnd.json"), "判断脚本由当前插件 profile 提供（JudgeScriptEnabled=true、JavaScript、读取 mxu-MaaEnd.json）").toBeTruthy();
   await api("DELETE", "/api/scripts/" + sid);
 
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });

@@ -2,6 +2,22 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.13.0（Pre-release）
+
+### 脚本声明与插件 profile
+- `scripts.json` 收敛为脚本实例声明；通用判断脚本源码迁移至 `config/judge-scripts/<scriptId>.js|py`，支持原子写入、语言切换和隔离式孤儿资产清理。
+- 数据化专项脚本实例按 `PluginType + RootPath` 保存稳定身份，API、准入、配置编辑和运行时读取当前插件 profile；已触发的调度 occurrence 冻结当次有效运行计划。
+- 新增 v0.12.9 → v0.13.0 一次性幂等迁移，迁移备份、源码冲突和未引用资产均保留在可恢复隔离目录。
+
+### 配置快照与恢复安全
+- 用户快照增加 `store.meta.json` 归属元数据；配置定位或文件/目录形态改变时归档旧快照，缺少新配置位置时阻断运行并保留现场。
+- 配置会话标记增加 `.session.bak`、用户/阶段/启动目标/profile 指纹等冗余元数据；主备标记同时损坏时保留 original/config 现场并报告错误。
+- 配置编辑启动失败和隐藏配置恢复遇到目标冲突时保留原现场；脚本、排序和快照保存失败时恢复内存状态。
+- 运行历史增加插件版本、profile 指纹、判断脚本来源和内容指纹字段。
+
+### 文档与验证
+- 更新宿主与 NexusPipeline-Plugins 的专项插件运行语义、配置迁移、贡献和发布文档，并加入相应治理检查。
+
 ## v0.12.9（Pre-release）
 
 ### 专项插件配置校验

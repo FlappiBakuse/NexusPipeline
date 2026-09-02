@@ -28,7 +28,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 - **本地优先、少外部依赖**：所有产品能力内置于单个 exe（.NET 8 WinForms 托盘 + HttpListener + 零构建静态 Web UI）。不依赖云平台、数据库或前端构建环境；发布物为框架依赖的单文件，运行机器需安装 .NET 8 Desktop Runtime。
 - **直接接管脚本进程**：宿主以管理员身份创建进程、捕获输出、监控日志、强制清理进程树，脚本自身无需任何改造；bat 经 `cmd /d /s /c` 包装以规避 ShellExecute 弹窗陷阱。
 - **多用户配置隔离（配置交换）**：全局用户通过脚本绑定参与多个脚本实例；每个绑定各存一份配置快照，运行前把绑定快照交换到 configPath，运行后还原现场。数据保全序：**original（原配置）> config（运行时生效）> store（用户快照，可重建）**。
-- **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由插件固化脚本驱动），其次成功/失败关键字；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
+- **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由当前 profile 指向的插件脚本驱动），其次成功/失败关键字；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
 - **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态，不只看进程退出码，因此日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
 - **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 使用宿主通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知和调度端口；启用且兼容的插件可通过独立 Frontend API 1.2 加载同源 ES module/CSS，扩展页面路由、导航、slot、主题、服务端同步壁纸和运行画面 sidecar；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记。
@@ -255,7 +255,9 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 ```
 data/{脚本Id}/{UserId}/
-├── store/          用户配置快照（添加用户时从 configPath 复制；运行后可自动更新回写，任务完成记录/计数保留延续；可重建）
+├── store/          用户配置快照（首次编辑或运行时按当前 configPath 建立；运行后可自动更新回写，任务完成记录/计数保留延续；可重建）
+├── store.meta.json 快照归属元数据（配置定位/形态与 profile 指纹）
+├── store-archive/  配置定位或形态变化时的旧快照归档
 ├── store.previous/ 上一份完整用户快照（自动更新事务保留，崩溃恢复用）
 ├── store.tmp       自动更新事务临时目录
 ├── retry-store/    当前运行重试轮临时快照，不等同于用户永久 store
@@ -263,8 +265,11 @@ data/{脚本Id}/{UserId}/
 ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
 ├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
 ├── edit-hidden/    编辑会话隐藏配置暂存（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）
-└── .session        会话标记（崩溃恢复用）
+├── .session        会话主标记（崩溃恢复用）
+└── .session.bak    会话冗余标记（主标记损坏时使用）
 ```
+
+通用判断脚本属于宿主配置资产，路径为 `config/judge-scripts/<scriptId>.js|py`。源码通过临时文件原子替换；脚本实例删除、语言切换和未引用资产会进入 `orphaned/` 隔离目录。专项判断脚本保留在插件目录，由 `PluginType + RootPath` 解析当前 profile。
 
 运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
 
@@ -295,7 +300,7 @@ flowchart LR
     end
 ```
 
-1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照（v0.12.8：绑定不再建快照，复用语义延迟建立）→ `.session` 标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。任一步失败自动回滚并还原现场。
+1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照（v0.12.8：绑定阶段保持现场，复用语义延迟建立）→ `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store.meta.json` 不一致时，旧快照先进入 `store-archive/`，新位置缺失则阻断本次运行并保留旧快照。
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式——`fresh`（全新配置：config 存在则移入 original，脚本在空位置生成新配置，done=复制入库+original 移回，cancel=清生成物+original 移回）或 `reuse`（复用配置：全程无文件动作，done=复制入库，cancel=仅清标记）。运行与编辑经 `ScriptConfigGate` 互斥。
 
@@ -346,7 +351,7 @@ flowchart LR
 
 判断脚本（启用即优先，忽略关键字）→ 成功/失败关键字（组内逗号 AND——整个尝试日志中分别出现即命中，跨行累积且顺序无关；换行 OR）→ 无任何配置按「进程自行退出」判定成功。
 
-> **专用插件判定**：专项脚本实例的判断脚本由插件固化（`ApplyProfile` 保存时覆盖 `JudgeScriptEnabled/Language/JudgeScript`，用户不可编辑），判定走脚本模式，同时强制清空自定义关键字字段。
+> **专用插件判定**：专项脚本实例在操作开始时从当前插件 profile 读取 manifest 的 `judgeScript` 资产，并将本次操作使用的源码、语言和内容指纹冻结到运行计划；用户不可编辑插件判断脚本，判定走脚本模式，同时强制清空自定义关键字字段。
 
 ### 5.2 判断脚本输入与触发
 
@@ -367,7 +372,7 @@ flowchart LR
 ### 5.4 关键字模式
 
 - 成功/失败关键字：每行一组，组内逗号分隔为 AND、换行之间为 OR；失败命中立即终止本次尝试，成功命中等待退出 60 秒。无任何配置时按「进程自行退出」判定成功。
-- 专用插件判定：判断脚本由插件固化（用户不可编辑，前端专项弹窗不渲染自定义完成标志区；后端 `ApplyProfile` 兜底清空关键字字段），判定完全由插件固化判断脚本驱动。
+- 专用插件判定：判断脚本由当前插件 profile 提供（用户不可编辑，前端专项弹窗不渲染自定义完成标志区；宿主在解析 profile 时清空关键字字段），判定完全由本次操作冻结的插件脚本驱动。
 
 ## 6. 日志监控机制
 
@@ -761,7 +766,7 @@ Capability 扩展约束：
 
 - managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并通过 `IPluginHostContextV1_3` 使用宿主提供的通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户全局管理、用户列表徽章、用户运行事件、HTTP、日志、通知和任务端口。
 - 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.2`，入口位于 `web/` 并导出 `activate(host)`；启用且兼容后由宿主直接加载，版本和声明变化继续经过 manifest、路径和资源校验。
-- 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份，宿主在保存脚本实例时固化解析结果。
+- 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份。脚本实例持久化 `PluginType + RootPath` 等稳定声明，宿主在 API、准入、配置编辑和运行时解析当前 profile，并将当次操作的有效结果冻结到执行计划或会话标记。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 
 ### 10.9 功能定位指南（找代码）

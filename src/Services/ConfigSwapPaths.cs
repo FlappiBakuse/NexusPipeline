@@ -16,6 +16,17 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userKey), "store");
     }
 
+    /// <summary>用户快照元数据；记录 profile/配置定位指纹，不保存插件 profile 内容。</summary>
+    public static string StoreMetadataPath(string scriptId, string userKey)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store.meta.json");
+    }
+
+    public static string StoreArchiveDir(string scriptId, string userKey)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store-archive");
+    }
+
     public static string CacheDir(string scriptId, string userKey)
     {
         return Path.Combine(UserDir(scriptId, userKey), "original");

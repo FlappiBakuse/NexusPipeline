@@ -26,7 +26,7 @@ internal sealed class McpToolContext
 
     internal PluginUserGlobalSettingsService UserGlobalSettings => Runtime.Resolve<PluginUserGlobalSettingsService>();
 
-    public IReadOnlyList<ScriptInstance> Scripts => Runtime.SnapshotScripts()
+    public IReadOnlyList<ScriptInstance> Scripts => Runtime.SnapshotEffectiveScripts()
         .OrderBy(item => item.Index)
         .ToList();
 

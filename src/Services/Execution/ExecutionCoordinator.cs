@@ -15,6 +15,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly IUserRepository _users;
 
+    private readonly ResolvedScriptSpec? _resolvedSpec;
+
     private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
 
     private readonly RunScreenshotStore _screenshotStore;
@@ -43,10 +45,12 @@ internal sealed class ExecutionCoordinator : RunSession
         Action<string, LogLevel>? logLine,
         Action<ExecutionPreviewTarget>? previewTargetChanged,
         IUserRepository users,
-        ResolvedScriptUser? resolvedUser = null)
+        ResolvedScriptUser? resolvedUser = null,
+        ResolvedScriptSpec? resolvedSpec = null)
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
+        _resolvedSpec = resolvedSpec;
         _previewTargetChanged = previewTargetChanged;
         _screenshotStore = new RunScreenshotStore(CaptureCurrentScreenshotAsync);
         SetInitialPreviewTarget();
@@ -70,6 +74,10 @@ internal sealed class ExecutionCoordinator : RunSession
             Mode = _mode,
             UserName = _userName ?? "",
             UserId = _resolvedUser?.UserId ?? "",
+            PluginVersion = _resolvedSpec?.PluginVersion ?? "",
+            ProfileHash = _resolvedSpec?.ProfileHash ?? "",
+            JudgeSourceKind = _resolvedSpec?.JudgeScript.SourceKind ?? "",
+            JudgeHash = _resolvedSpec?.JudgeScript.ContentHash ?? "",
             StartTime = DateTime.Now,
         };
 
@@ -119,7 +127,8 @@ internal sealed class ExecutionCoordinator : RunSession
                 _script.Id,
                 resolvedUser?.UserKey,
                 _script.ConfigPath,
-                _script.HasJudgeScript());
+                _script.HasJudgeScript(),
+                _resolvedSpec);
             _configRun.PrepareScriptArea();
             if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
             {

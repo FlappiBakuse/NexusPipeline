@@ -29,6 +29,11 @@ internal sealed class ConfigSwapRecovery
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark is null)
         {
+            if (HasSessionMarkFiles(scriptId, userName))
+            {
+                // 当前启动阶段可能尚未加载插件；主/备标记均损坏时禁止使用声明中的旧路径猜测恢复。
+                throw new IOException($"配置会话主标记与冗余标记均损坏，已保留现场，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            }
             return;
         }
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
@@ -173,8 +178,17 @@ internal sealed class ConfigSwapRecovery
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
         bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
             || (!string.IsNullOrWhiteSpace(userName)
-                && File.Exists(ConfigSessionMark.MarkFile(scriptId, userName)));
-        if (hasRecoveryResidue && ScriptProcessRunning(scriptId))
+                && HasSessionMarkFiles(scriptId, userName));
+        if (!string.IsNullOrWhiteSpace(userName)
+            && HasSessionMarkFiles(scriptId, userName)
+            && ConfigSessionMark.TryRead(scriptId, userName) is null)
+        {
+            // 主/冗余标记均不可解析时，当前插件可能已经改写 ConfigPath；保留 original/config 现场，等待人工或更高层恢复。
+            Logger.Error($"[错误] 配置会话主标记与冗余标记均损坏，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            EnqueuePendingRecover(scriptId, userName);
+            return false;
+        }
+        if (hasRecoveryResidue && ScriptProcessRunning(scriptId, userName))
         {
             Logger.Info($"[恢复] 脚本 {scriptId} 进程仍在运行，等待其退出后恢复配置。");
             EnqueuePendingRecover(scriptId, userName);
@@ -188,11 +202,6 @@ internal sealed class ConfigSwapRecovery
         if (ok && !string.IsNullOrWhiteSpace(userName))
         {
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
-            if (mark is null && File.Exists(ConfigSessionMark.MarkFile(scriptId, userName)))
-            {
-                ok = RecoverCorruptMark(scriptId, userName);
-            }
-            mark = ok ? ConfigSessionMark.TryRead(scriptId, userName) : null;
             if (mark is not null)
             {
                 RestoreHiddenQuiet(scriptId, userName, mark.ConfigPath);
@@ -225,51 +234,28 @@ internal sealed class ConfigSwapRecovery
         return ok;
     }
 
-    /// <summary>会话标记损坏时，使用当前脚本固化的 ConfigPath 和 original 目录形态做保守恢复。</summary>
-    private bool RecoverCorruptMark(string scriptId, string userName)
+    /// <summary>优先用会话标记冻结的启动目标检测进程；恢复阶段不重新解析专项插件。</summary>
+    private bool ScriptProcessRunning(string scriptId, string? userName = null)
     {
-        ScriptInstance? script = _findScript(scriptId);
-        if (script is null || string.IsNullOrWhiteSpace(script.ConfigPath))
+        ConfigSessionMark? mark = string.IsNullOrWhiteSpace(userName)
+            ? null
+            : ConfigSessionMark.TryRead(scriptId, userName);
+        if (mark is not null && !string.IsNullOrWhiteSpace(mark.LaunchExe))
         {
-            Logger.Error($"[错误] 配置会话标记损坏且无法找到脚本配置路径：脚本 {scriptId} / 用户 {userName}");
-            EnqueuePendingRecover(scriptId, userName);
+            return !SystemActions.IsExeStoppedStable(mark.LaunchExe, waitIfInitiallyStopped: false);
+        }
+
+        ScriptInstance? script = _findScript(scriptId);
+        if (script is null)
+        {
             return false;
         }
-        string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
-        var mark = new ConfigSessionMark
+        if (!string.IsNullOrWhiteSpace(script.PluginType) && string.IsNullOrWhiteSpace(script.MainExe))
         {
-            ScriptId = scriptId,
-            UserName = userName,
-            ConfigPath = script.ConfigPath,
-            OriginalKind = string.IsNullOrWhiteSpace(Path.GetExtension(script.ConfigPath)) ? "dir" : "file",
-            Phase = "run",
-        };
-        try
-        {
-            if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
-            {
-                DoRestore(scriptId, userName, mark);
-            }
-            else
-            {
-                ConfigSessionMark.Clear(scriptId, userName);
-            }
-            Logger.Warn($"[恢复] 配置会话标记损坏，已按当前脚本配置路径完成保守恢复：脚本 {scriptId} / 用户 {userName}");
+            // 专项脚本的声明没有启动路径；无法证明孤儿进程已退出时宁可延迟恢复。
             return true;
         }
-        catch (Exception ex)
-        {
-            Logger.Error($"[错误] 配置会话标记损坏，保守恢复失败（脚本 {scriptId} / 用户 {userName}）：{ex.Message}");
-            EnqueuePendingRecover(scriptId, userName);
-            return false;
-        }
-    }
-
-    /// <summary>解析脚本运行时启动目标（含 Args 显式路径语义）并检测进程是否在运行；脚本已删除时返回 false。</summary>
-    private bool ScriptProcessRunning(string scriptId)
-    {
-        ScriptInstance? script = _findScript(scriptId);
-        if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
+        if (string.IsNullOrWhiteSpace(script.MainExe))
         {
             return false;
         }
@@ -280,6 +266,12 @@ internal sealed class ConfigSwapRecovery
         // 启动扫描只在确有残留会话/备份时调用；当前没有进程即可继续恢复，
         // 避免每个普通脚本都串行等待完整稳定窗口阻塞 Web 服务接管。
         return !SystemActions.IsExeStoppedStable(launchExe, waitIfInitiallyStopped: false);
+    }
+
+    private static bool HasSessionMarkFiles(string scriptId, string userName)
+    {
+        return File.Exists(ConfigSessionMark.MarkFile(scriptId, userName))
+            || File.Exists(ConfigSessionMark.BackupMarkFile(scriptId, userName));
     }
 
     private bool HasBackupResidue(string scriptId, string? userName)
@@ -313,23 +305,31 @@ internal sealed class ConfigSwapRecovery
             return;
         }
         string? dir = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrWhiteSpace(dir))
+        if (string.IsNullOrWhiteSpace(dir))
         {
-            try
-            {
-                Directory.CreateDirectory(dir);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[恢复] 重建配置目录失败（{dir}）：{ex.Message}");
-                return;
-            }
+            Logger.Warn($"[恢复] 重建配置目录失败：配置路径没有父目录（{configPath}），隐藏文件保持原样");
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(dir);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[恢复] 重建配置目录失败（{dir}）：{ex.Message}");
+            return;
         }
         foreach (string file in Directory.GetFiles(hideDir))
         {
             try
             {
-                File.Move(file, Path.Combine(dir, Path.GetFileName(file)), overwrite: true);
+                string destination = Path.Combine(dir, Path.GetFileName(file));
+                if (File.Exists(destination) || Directory.Exists(destination))
+                {
+                    Logger.Warn($"[恢复] 隐藏配置与现有文件冲突，保留隐藏副本：{destination}");
+                    continue;
+                }
+                File.Move(file, destination);
             }
             catch (Exception ex)
             {
@@ -349,7 +349,8 @@ internal sealed class ConfigSwapRecovery
     }
 
     private bool RecoverSwapQuiet(string scriptId, string? userName, ConfigSessionMark mark)
-    {        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
+    {
+        Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
         try
         {
             DoRestore(scriptId, userName!, mark);
