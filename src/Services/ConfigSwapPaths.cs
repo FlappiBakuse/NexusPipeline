@@ -5,13 +5,13 @@ namespace NexusPipeline.Services;
 
 /// <summary>
 /// 数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。
-/// 布局分两类：持久层（store、store-meta.json、store-archive、store-previous）常驻用户目录顶层；
-/// 会话事务层统一置于 work/ 下（original、script、swap-backup、edit-hidden、retry-store、store-tmp），
-/// 仅运行/编辑/同步期间存在，空闲态整体消失。
+/// v0.13.2 空闲态只保留一份权威快照 store 与小型 store-meta.json；
+/// work/ 下保留运行现场与增量 store-txn，提交完成后事务目录清理。
+/// store-archive、store-previous、store-tmp、retry-store 仅作为旧版本迁移入口识别，禁止新流程创建。
 /// </summary>
 internal static class ConfigSwapPaths
 {
-    /// <summary>会话事务工作区目录名（v0.13.1 起归并宿主；v0.13.0 及更早为散落的顶层子目录）。</summary>
+    /// <summary>会话事务工作区目录名（v0.13.2 起归并宿主；v0.13.0 及更早为散落的顶层子目录）。</summary>
     public const string WorkDirName = "work";
 
     /// <summary>v0.13.0 及更早版本散落在用户/脚本目录顶层的事务目录名 → work/ 内规范名（dot 后缀一并改为 kebab-case）。</summary>
@@ -56,18 +56,19 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userKey), "store-meta.json");
     }
 
+    /// <summary>旧版持久快照归档目录；v0.13.2 不再创建，仅用于安全迁移。</summary>
     public static string StoreArchiveDir(string scriptId, string userKey)
     {
         return Path.Combine(UserDir(scriptId, userKey), "store-archive");
     }
 
-    /// <summary>同步事务后保留的上一份快照（进程崩溃/新快照异常时的恢复兜底，保留至下次同步）。</summary>
+    /// <summary>旧版完整上一代快照；v0.13.2 不再创建，仅用于启动恢复与安全迁移。</summary>
     public static string StorePreviousDir(string scriptId, string userKey)
     {
         return Path.Combine(UserDir(scriptId, userKey), "store-previous");
     }
 
-    /// <summary>同步事务临时目录（config → store 全量镜像的暂存），位于 work/ 内。</summary>
+    /// <summary>旧版全量镜像暂存目录；v0.13.2 不再创建，仅用于启动恢复与安全迁移。</summary>
     public static string StoreTempDir(string scriptId, string userKey)
     {
         return Path.Combine(WorkDir(scriptId, userKey), "store-tmp");
@@ -78,7 +79,7 @@ internal static class ConfigSwapPaths
         return Path.Combine(WorkDir(scriptId, userKey), "original");
     }
 
-    /// <summary>当前运行重试轮使用的临时配置快照；不等同于用户永久 store。</summary>
+    /// <summary>旧版重试完整快照；v0.13.2 重试直接复用当前活动配置，不再创建。</summary>
     public static string RetryStoreDir(string scriptId, string userKey)
     {
         return Path.Combine(WorkDir(scriptId, userKey), "retry-store");
@@ -102,6 +103,38 @@ internal static class ConfigSwapPaths
         return Path.Combine(WorkDir(scriptId, userName), "swap-backup");
     }
 
+    /// <summary>配置快照增量事务目录：manifest/stage/rollback/commit 只保存本轮变更。</summary>
+    public static string StoreTransactionDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "store-txn");
+    }
+
+    public static string StoreTransactionManifestPath(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "manifest.json");
+
+    public static string StoreTransactionStageDir(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "stage");
+
+    public static string StoreTransactionRollbackDir(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "rollback");
+
+    public static string StoreTransactionCommitPath(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "commit.json");
+
+    /// <summary>损坏事务的人工处理阻断标记；存在时禁止继续写入该用户快照。</summary>
+    public static string StoreTransactionBlockedPath(string scriptId, string userKey) =>
+        Path.Combine(UserDir(scriptId, userKey), ".store-txn-blocked.json");
+
+    /// <summary>配置定位变更时的一次性旧快照隔离区；成功重建新快照后删除。</summary>
+    public static string StoreRebindDir(string scriptId, string userKey) =>
+        Path.Combine(WorkDir(scriptId, userKey), "store-rebind");
+
+    public static string StoreRebindOldDir(string scriptId, string userKey) =>
+        Path.Combine(StoreRebindDir(scriptId, userKey), "old");
+
+    public static string StoreRebindNewMetadataPath(string scriptId, string userKey) =>
+        Path.Combine(StoreRebindDir(scriptId, userKey), "new-store-meta.json");
+
     /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>
     public static void PrepareScriptDir(string scriptId, string? userName)
     {
@@ -121,10 +154,6 @@ internal static class ConfigSwapPaths
     public static void CleanupScriptArea(string scriptId, string? userName)
     {
         ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
-        if (!string.IsNullOrWhiteSpace(userName))
-        {
-            ConfigSwapPrimitives.TryDeleteDir(RetryStoreDir(scriptId, userName));
-        }
     }
 
     /// <summary>删除脚本时将其全部数据目录移入应用根目录下的隔离区，保留人工恢复机会。</summary>

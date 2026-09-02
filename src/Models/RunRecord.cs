@@ -83,7 +83,7 @@ public class RunRecord
 
     public string ResultDetail { get; set; } = "";
 
-    /// <summary>相对于当天 history 目录的运行目录，例如「张三\\14-58-21」。</summary>
+    /// <summary>相对于当天 history 目录的运行目录，例如「张三\\每日脚本-14-58-21」。</summary>
     public string HistoryDirectory { get; set; } = "";
 
     /// <summary>判断脚本返回的自定义通知文本（仅本次运行有效，不落盘历史）；为空则通知使用默认正文。</summary>

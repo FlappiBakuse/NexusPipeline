@@ -4,6 +4,7 @@ using NexusPipeline.Extensibility;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Configuration;
 
 namespace NexusPipeline.Services;
 
@@ -88,13 +89,24 @@ internal static class UserConfigManager
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                if (File.Exists(ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)))
+                {
+                    throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)}");
+                }
                 string store = StoreDir(scriptId, userName);
+                ConfigStoreMetadata.RecoverRebind(scriptId, userName);
+                ConfigStoreMetadata.TryRestoreLegacyArchive(scriptId, userName);
                 PathKind currentConfigKind = PathKindUtil.KindOf(configPath);
                 ConfigStoreMetadata expectedMetadata = ConfigStoreMetadata.For(configPath, metadata);
                 bool hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
+                bool metadataFileExists = File.Exists(ConfigSwapPaths.StoreMetadataPath(scriptId, userName));
                 ConfigStoreMetadata? existingMetadata = hasStore
                     ? ConfigStoreMetadata.Load(scriptId, userName)
                     : null;
+                if (hasStore && metadataFileExists && existingMetadata is null)
+                {
+                    throw new IOException($"配置快照元数据损坏，已保留原快照：{store}");
+                }
                 if (hasStore
                     && existingMetadata is null
                     && !string.IsNullOrWhiteSpace(metadata?.PluginName))
@@ -106,13 +118,13 @@ internal static class UserConfigManager
                     && existingMetadata is not null
                     && !existingMetadata.Matches(expectedMetadata))
                 {
-                    // 配置定位发生变化：旧快照先归档，严禁把旧路径的内容静默套到新路径。
-                    ConfigStoreMetadata.ArchiveStore(scriptId, userName);
-                    hasStore = false;
                     if (currentConfigKind == PathKind.Missing)
                     {
-                        throw new IOException($"配置路径已变更但新位置不存在：{configPath}；旧配置快照已归档，未自动复用");
+                        throw new IOException($"配置路径已变更但新位置不存在：{configPath}；旧配置快照已保留，未自动复用");
                     }
+                    // 配置定位发生变化：旧快照先进入一次性重绑定隔离区，新位置成功物化后才清理。
+                    ConfigStoreMetadata.RebindStore(scriptId, userName, configPath, expectedMetadata);
+                    hasStore = true;
                 }
                 if (!hasStore && currentConfigKind != PathKind.Missing)
                 {
@@ -124,6 +136,8 @@ internal static class UserConfigManager
                 if (hasStore)
                 {
                     ConfigStoreMetadata.Save(scriptId, userName, expectedMetadata);
+                    ConfigStoreMetadata.CleanupRebindIfMatches(scriptId, userName, expectedMetadata);
+                    ConfigStoreMetadata.CleanupLegacyArtifacts(scriptId, userName);
                 }
                 var mark = new ConfigSessionMark
                 {
@@ -143,16 +157,13 @@ internal static class UserConfigManager
                     PluginVersion = metadata?.PluginVersion ?? "",
                 };
                 string cache = CacheDir(scriptId, userName);
-                string retryStore = RetryStoreDir(scriptId, userName);
                 // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——original 空时恢复仅清标记（现场未动），original 有内容时完整还原。
                 mark.Write();
                 ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
-                ConfigSwapPrimitives.ClearPath(retryStore, PathKindUtil.KindOf(retryStore));
                 ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
                 if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
                 {
                     ConfigSwapPrimitives.CopyAs(store, configPath, ConfigSwapPrimitives.RestoreKind(mark));
-                    ConfigSwapPrimitives.CopyAs(store, retryStore, PathKind.Dir);
                 }
                 else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
                 {
@@ -266,6 +277,7 @@ internal static class UserConfigManager
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                ThrowIfStoreTransactionBlocked(scriptId, userName);
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
@@ -329,6 +341,7 @@ internal static class UserConfigManager
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
+                ThrowIfStoreTransactionBlocked(scriptId, userName);
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
@@ -444,7 +457,7 @@ internal static class UserConfigManager
         return true;
     }
 
-    /// <summary>编辑配置提交：config → store 复制入库；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。</summary>
+    /// <summary>编辑配置提交：按文件差异增量写入 store；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。</summary>
     public static string? CommitEdit(string scriptId, string userName, string configPath)
     {
         string? error = null;
@@ -457,13 +470,14 @@ internal static class UserConfigManager
                 {
                     throw new IOException("未找到配置编辑会话");
                 }
-                string store = StoreDir(scriptId, userName);
-                ConfigSwapSession.CommitStoreSnapshot(
+                ConfigStoreTransaction.Apply(
+                    scriptId,
+                    userName,
                     configPath,
-                    store,
-                    ConfigSwapPaths.StoreTempDir(scriptId, userName),
-                    ConfigSwapPaths.StorePreviousDir(scriptId, userName));
-                ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                    null,
+                    null,
+                    mark);
                 if (!IsReuseEdit(mark))
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
@@ -509,6 +523,15 @@ internal static class UserConfigManager
     private static bool IsReuseEdit(ConfigSessionMark? mark)
     {
         return string.Equals(mark?.EditMode, "reuse", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void ThrowIfStoreTransactionBlocked(string scriptId, string userName)
+    {
+        string marker = ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName);
+        if (File.Exists(marker))
+        {
+            throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{marker}");
+        }
     }
 
     /* ---------------- 恢复（转发 ConfigSwapSession；运行期替换/同步/重试由 ConfigRunSession 直达 ConfigSwapSession） ---------------- */

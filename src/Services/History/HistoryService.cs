@@ -38,7 +38,7 @@ internal class HistoryService : IHistoryStore
 
     /// <summary>
     /// 将旧版 /history/YYYY-MM-DD/*.json 与对应日志迁移到
-    /// /history/YYYY-MM-DD/用户/HH-mm-ss/。迁移采用临时目录和复制提交，源文件在提交成功后才清理；
+    /// /history/YYYY-MM-DD/用户/脚本名称-HH-mm-ss/。迁移采用临时目录和复制提交，源文件在提交成功后才清理；
     /// 失败时保留旧文件，下一次启动仍可继续处理。
     /// </summary>
     public void MigrateLegacy()
@@ -92,20 +92,23 @@ internal class HistoryService : IHistoryStore
                 string userDir = Path.Combine(dayDir, userDirName);
                 Directory.CreateDirectory(userDir);
 
-                string baseName = persisted.StartTime.ToString("HH-mm-ss", CultureInfo.InvariantCulture);
-                string runDirName = FindFreeDirectoryName(userDir, baseName);
+                string timeName = persisted.StartTime.ToString("HH-mm-ss", CultureInfo.InvariantCulture);
+                string scriptName = SafeSegment(persisted.ScriptName, "未命名脚本");
+                string runDirBaseName = $"{scriptName}-{timeName}";
+                string runDirName = FindFreeDirectoryName(userDir, runDirBaseName);
                 string finalDir = Path.Combine(userDir, runDirName);
                 temporaryDir = Path.Combine(userDir, $".{runDirName}.{Guid.NewGuid():N}.tmp");
                 Directory.CreateDirectory(temporaryDir);
 
                 persisted.HistoryDirectory = Path.Combine(userDirName, runDirName);
-                persisted.LogFile = $"{baseName}.json";
+                // 运行目录体现脚本名称，目录内文件继续使用时间主键，保持历史读取与导出兼容。
+                persisted.LogFile = $"{timeName}.json";
 
                 IReadOnlyList<RunScreenshot> historyScreenshots = screenshots ?? Array.Empty<RunScreenshot>();
                 foreach (RunAttempt attempt in persisted.AttemptDetails)
                 {
                     int attemptNumber = Math.Max(1, attempt.Number);
-                    string logName = $"{baseName}-{attemptNumber}.log";
+                    string logName = $"{timeName}-{attemptNumber}.log";
                     attempt.LogFile = logName;
                     string logText = attempt.Number > 0 && attempt.Number <= attemptLogs.Count
                         ? attemptLogs[attempt.Number - 1]
@@ -128,7 +131,7 @@ internal class HistoryService : IHistoryStore
                     for (int index = 0; index < attemptScreenshots.Count; index++)
                     {
                         RunScreenshot screenshot = attemptScreenshots[index];
-                        string imageName = $"{baseName}-{attemptNumber}-s{index + 1}.jpg";
+                        string imageName = $"{timeName}-{attemptNumber}-s{index + 1}.jpg";
                         File.WriteAllBytes(Path.Combine(temporaryDir, imageName), screenshot.Data);
                         attempt.Screenshots.Add(new RunHistoryScreenshot
                         {
@@ -493,81 +496,10 @@ internal class HistoryService : IHistoryStore
         var claimedLogs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string jsonFile in jsonFiles)
         {
-            RunRecord? record;
-            try
-            {
-                record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(jsonFile), JsonOpts.Default);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
-                continue;
-            }
-            if (record is null)
-            {
-                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：JSON 为空。");
-                continue;
-            }
-            record.AttemptDetails ??= new List<RunAttempt>();
-
-            string userName = SafeSegment(record.UserName, "未指定用户");
-            string userDir = Path.Combine(dayDir, userName);
-            Directory.CreateDirectory(userDir);
-            string baseName = Path.GetFileNameWithoutExtension(jsonFile);
-            string runDirName = FindFreeDirectoryName(userDir, baseName);
-            string finalDir = Path.Combine(userDir, runDirName);
-            string temporaryDir = Path.Combine(userDir, $".{runDirName}.{Guid.NewGuid():N}.tmp");
-            var sourceLogs = new List<string>();
-            var referencedLogs = new List<(RunAttempt Attempt, string Source, string FileName)>();
-            foreach (RunAttempt attempt in record.AttemptDetails)
-            {
-                string oldLogName = Path.GetFileName(attempt.LogFile);
-                if (string.IsNullOrWhiteSpace(oldLogName))
-                {
-                    oldLogName = $"{baseName}-{Math.Max(1, attempt.Number)}.log";
-                }
-                string sourceLog = Path.Combine(dayDir, oldLogName);
-                if (IsDirectChild(dayDir, sourceLog))
-                {
-                    string fullSourceLog = Path.GetFullPath(sourceLog);
-                    claimedLogs.Add(fullSourceLog);
-                    referencedLogs.Add((attempt, fullSourceLog, oldLogName));
-                }
-            }
-            try
-            {
-                Directory.CreateDirectory(temporaryDir);
-                foreach ((RunAttempt attempt, string sourceLog, string oldLogName) in referencedLogs)
-                {
-                    attempt.LogFile = oldLogName;
-                    if (!File.Exists(sourceLog))
-                    {
-                        continue;
-                    }
-                    File.Copy(sourceLog, Path.Combine(temporaryDir, oldLogName));
-                    sourceLogs.Add(sourceLog);
-                }
-                record.HistoryDirectory = Path.Combine(userName, runDirName);
-                record.LogFile = Path.GetFileName(jsonFile);
-                record.AttemptDetails.ForEach(attempt => attempt.Screenshots ??= new List<RunHistoryScreenshot>());
-                JsonUtil.WriteAtomic(
-                    Path.Combine(temporaryDir, record.LogFile),
-                    JsonSerializer.Serialize(record, JsonOpts.Indented));
-                Directory.Move(temporaryDir, finalDir);
-
-                File.Delete(jsonFile);
-                foreach (string sourceLog in sourceLogs)
-                {
-                    TryDeleteFile(sourceLog);
-                }
-                Logger.Info($"已迁移旧历史：{Path.Combine(userName, runDirName)}");
-            }
-            catch (Exception ex)
-            {
-                TryDeleteTemporaryDirectory(temporaryDir);
-                Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
-            }
+            MigrateFlatHistoryRecord(dayDir, jsonFile, claimedLogs);
         }
+
+        MigrateLegacyNestedRuns(dayDir);
 
         // 没有 JSON 所属关系的旧日志仍从日期目录移出，避免继续混在旧协议根层。
         foreach (string orphan in Directory.GetFiles(dayDir, "*.log", SearchOption.TopDirectoryOnly))
@@ -591,6 +523,263 @@ internal class HistoryService : IHistoryStore
                 Logger.Warn($"[警告] 孤立历史日志迁移失败，保留源文件（{orphan}）：{ex.Message}");
             }
         }
+    }
+
+    private void MigrateFlatHistoryRecord(string dayDir, string jsonFile, HashSet<string> claimedLogs)
+    {
+        RunRecord? record;
+        try
+        {
+            record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(jsonFile), JsonOpts.Default);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
+            return;
+        }
+        if (record is null)
+        {
+            Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：JSON 为空。");
+            return;
+        }
+
+        record.AttemptDetails ??= new List<RunAttempt>();
+        string userDirName = SafeSegment(record.UserName, "未指定用户");
+        string userDir = Path.Combine(dayDir, userDirName);
+        Directory.CreateDirectory(userDir);
+        string timeName = HistoryTimeName(record, Path.GetFileNameWithoutExtension(jsonFile));
+        string runDirName = FindFreeDirectoryName(userDir, BuildRunDirectoryBase(record.ScriptName, timeName));
+        string finalDir = Path.Combine(userDir, runDirName);
+        string temporaryDir = Path.Combine(userDir, $".{runDirName}.{Guid.NewGuid():N}.tmp");
+        var sourceLogs = new List<string>();
+        var referencedLogs = new List<(RunAttempt Attempt, string Source, string FileName)>();
+        foreach (RunAttempt attempt in record.AttemptDetails)
+        {
+            string oldLogName = Path.GetFileName(attempt.LogFile);
+            if (string.IsNullOrWhiteSpace(oldLogName))
+            {
+                oldLogName = $"{timeName}-{Math.Max(1, attempt.Number)}.log";
+            }
+            string sourceLog = Path.Combine(dayDir, oldLogName);
+            if (IsDirectChild(dayDir, sourceLog))
+            {
+                string fullSourceLog = Path.GetFullPath(sourceLog);
+                claimedLogs.Add(fullSourceLog);
+                referencedLogs.Add((attempt, fullSourceLog, oldLogName));
+            }
+        }
+
+        // Directory.Move 与源文件清理之间进程可能退出；已有同 ID 的完整目标说明迁移已提交，
+        // 只需清理尚未删除的旧源，避免重试产生 -2 目录。
+        string? existingDirectory = FindExistingRunDirectory(userDir, record.Id, null);
+        if (existingDirectory is not null)
+        {
+            TryDeleteFile(jsonFile);
+            foreach (var referencedLog in referencedLogs)
+            {
+                TryDeleteFile(referencedLog.Source);
+            }
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(temporaryDir);
+            foreach ((RunAttempt attempt, string sourceLog, string oldLogName) in referencedLogs)
+            {
+                attempt.LogFile = oldLogName;
+                if (!File.Exists(sourceLog))
+                {
+                    continue;
+                }
+                File.Copy(sourceLog, Path.Combine(temporaryDir, oldLogName));
+                sourceLogs.Add(sourceLog);
+            }
+            record.HistoryDirectory = Path.Combine(userDirName, runDirName);
+            record.LogFile = Path.GetFileName(jsonFile);
+            record.AttemptDetails.ForEach(attempt => attempt.Screenshots ??= new List<RunHistoryScreenshot>());
+            JsonUtil.WriteAtomic(
+                Path.Combine(temporaryDir, record.LogFile),
+                JsonSerializer.Serialize(record, JsonOpts.Indented));
+            Directory.Move(temporaryDir, finalDir);
+
+            File.Delete(jsonFile);
+            foreach (string sourceLog in sourceLogs)
+            {
+                TryDeleteFile(sourceLog);
+            }
+            Logger.Info($"已迁移旧历史：{Path.Combine(userDirName, runDirName)}");
+        }
+        catch (Exception ex)
+        {
+            TryDeleteTemporaryDirectory(temporaryDir);
+            Logger.Warn($"[警告] 旧历史记录迁移失败，保留源文件（{jsonFile}）：{ex.Message}");
+        }
+    }
+
+    private void MigrateLegacyNestedRuns(string dayDir)
+    {
+        foreach (string userDir in Directory.GetDirectories(dayDir))
+        {
+            if (Path.GetFileName(userDir).StartsWith(".", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (string sourceRunDir in Directory.GetDirectories(userDir))
+            {
+                string sourceRunName = Path.GetFileName(sourceRunDir);
+                if (sourceRunName.StartsWith(".", StringComparison.Ordinal) || !LooksLikeLegacyTimeDirectory(sourceRunName))
+                {
+                    continue;
+                }
+
+                string[] recordFiles = Directory.GetFiles(sourceRunDir, "*.json", SearchOption.TopDirectoryOnly);
+                if (recordFiles.Length != 1)
+                {
+                    Logger.Warn($"[警告] 旧历史运行目录包含 {recordFiles.Length} 个 JSON，保留现场等待人工核查：{sourceRunDir}");
+                    continue;
+                }
+
+                RunRecord? record;
+                try
+                {
+                    record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(recordFiles[0]), JsonOpts.Default);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[警告] 旧历史运行目录迁移失败，保留源目录（{sourceRunDir}）：{ex.Message}");
+                    continue;
+                }
+                if (record is null)
+                {
+                    Logger.Warn($"[警告] 旧历史运行目录迁移失败，保留源目录（{sourceRunDir}）：JSON 为空。");
+                    continue;
+                }
+
+                record.AttemptDetails ??= new List<RunAttempt>();
+                if (string.IsNullOrWhiteSpace(record.UserName))
+                {
+                    record.UserName = Path.GetFileName(userDir);
+                }
+                string userDirName = SafeSegment(record.UserName, "未指定用户");
+                string targetUserDir = Path.Combine(dayDir, userDirName);
+                Directory.CreateDirectory(targetUserDir);
+                string? existingDirectory = FindExistingRunDirectory(targetUserDir, record.Id, sourceRunDir);
+                if (existingDirectory is not null)
+                {
+                    try
+                    {
+                        Directory.Delete(sourceRunDir, recursive: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Warn($"[警告] 已提交历史的旧源目录清理失败，保留源目录（{sourceRunDir}）：{ex.Message}");
+                    }
+                    continue;
+                }
+                string timeName = HistoryTimeName(record, sourceRunName);
+                string targetRunName = FindFreeDirectoryName(targetUserDir, BuildRunDirectoryBase(record.ScriptName, timeName));
+                string targetDir = Path.Combine(targetUserDir, targetRunName);
+                string temporaryDir = Path.Combine(targetUserDir, $".{targetRunName}.{Guid.NewGuid():N}.tmp");
+                try
+                {
+                    Directory.CreateDirectory(temporaryDir);
+                    CopyDirectoryContents(sourceRunDir, temporaryDir);
+                    record.HistoryDirectory = Path.Combine(userDirName, targetRunName);
+                    record.LogFile = Path.GetFileName(recordFiles[0]);
+                    foreach (RunAttempt attempt in record.AttemptDetails)
+                    {
+                        attempt.LogFile = Path.GetFileName(attempt.LogFile);
+                        attempt.Screenshots ??= new List<RunHistoryScreenshot>();
+                    }
+                    JsonUtil.WriteAtomic(
+                        Path.Combine(temporaryDir, record.LogFile),
+                        JsonSerializer.Serialize(record, JsonOpts.Indented));
+                    Directory.Move(temporaryDir, targetDir);
+                    Directory.Delete(sourceRunDir, recursive: true);
+                    Logger.Info($"已迁移旧历史：{Path.Combine(userDirName, targetRunName)}");
+                }
+                catch (Exception ex)
+                {
+                    TryDeleteTemporaryDirectory(temporaryDir);
+                    Logger.Warn($"[警告] 旧历史运行目录迁移失败，保留源目录（{sourceRunDir}）：{ex.Message}");
+                }
+            }
+        }
+    }
+
+    private static void CopyDirectoryContents(string sourceDir, string targetDir)
+    {
+        foreach (string directory in Directory.GetDirectories(sourceDir))
+        {
+            string childTarget = Path.Combine(targetDir, Path.GetFileName(directory));
+            Directory.CreateDirectory(childTarget);
+            CopyDirectoryContents(directory, childTarget);
+        }
+        foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.TopDirectoryOnly))
+        {
+            File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)));
+        }
+    }
+
+    private static string? FindExistingRunDirectory(string userDir, string? recordId, string? excludedDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(recordId) || !Directory.Exists(userDir))
+        {
+            return null;
+        }
+        string? excluded = excludedDirectory is null ? null : Path.GetFullPath(excludedDirectory);
+        foreach (string runDir in Directory.GetDirectories(userDir))
+        {
+            if (Path.GetFileName(runDir).StartsWith(".", StringComparison.Ordinal)
+                || (excluded is not null && string.Equals(Path.GetFullPath(runDir), excluded, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            foreach (string jsonFile in Directory.GetFiles(runDir, "*.json", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    RunRecord? existing = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(jsonFile), JsonOpts.Default);
+                    if (existing is not null && string.Equals(existing.Id, recordId, StringComparison.Ordinal))
+                    {
+                        return runDir;
+                    }
+                }
+                catch
+                {
+                    // 单个目标记录损坏不应阻止其他旧历史继续迁移。
+                }
+            }
+        }
+        return null;
+    }
+
+    private static string BuildRunDirectoryBase(string? scriptName, string timeName) =>
+        $"{SafeSegment(scriptName, "未命名脚本")}-{timeName}";
+
+    private static string HistoryTimeName(RunRecord record, string fallback)
+    {
+        if (record.StartTime != DateTime.MinValue)
+        {
+            return record.StartTime.ToString("HH-mm-ss", CultureInfo.InvariantCulture);
+        }
+
+        string candidate = fallback.Length >= 8 ? fallback[..8] : fallback;
+        return TimeSpan.TryParseExact(candidate, "hh\\-mm\\-ss", CultureInfo.InvariantCulture, out _)
+            ? candidate
+            : "00-00-00";
+    }
+
+    private static bool LooksLikeLegacyTimeDirectory(string name)
+    {
+        if (name.Length < 8 || !TimeSpan.TryParseExact(name[..8], "hh\\-mm\\-ss", CultureInfo.InvariantCulture, out _))
+        {
+            return false;
+        }
+        return name.Length == 8
+            || (name[8] == '-' && name[9..].All(char.IsDigit));
     }
 
     private string? ReadRunFile(RunRecord record, string fileName)
@@ -680,9 +869,9 @@ internal class HistoryService : IHistoryStore
         {
             return fallback;
         }
-        if (text.Length > 80)
+        if (text.EnumerateRunes().Count() > 80)
         {
-            text = text[..80].TrimEnd('.', ' ');
+            text = string.Concat(text.EnumerateRunes().Take(80)).TrimEnd('.', ' ');
         }
         string upper = text.ToUpperInvariant();
         if (upper is "CON" or "PRN" or "AUX" or "NUL"

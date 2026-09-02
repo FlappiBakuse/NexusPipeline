@@ -58,6 +58,14 @@ export function copyReleaseArtifacts(releaseDir, runtimeDir) {
     throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在（runtime 缺构建产物）。`);
   }
   fs.copyFileSync(sourceExe, path.join(runtimeDir, "nexus-pipeline.exe"));
+  // 发布包通常是单文件；本机 framework-dependent Test Host 还需要同目录依赖，
+  // 将这些旁车文件一并复制，保持两种构建产物都能运行在隔离 runtime 中。
+  for (const entry of fs.readdirSync(releaseDir, { withFileTypes: true })) {
+    if (["nexus-pipeline.exe", "wwwroot", "plugins"].includes(entry.name)) continue;
+    const source = path.join(releaseDir, entry.name);
+    const target = path.join(runtimeDir, entry.name);
+    fs.cpSync(source, target, { recursive: entry.isDirectory() });
+  }
   fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(runtimeDir, "wwwroot"), { recursive: true });
   const plugins = path.join(releaseDir, "plugins");
   if (fs.existsSync(plugins)) fs.cpSync(plugins, path.join(runtimeDir, "plugins"), { recursive: true });

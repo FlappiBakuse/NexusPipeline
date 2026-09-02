@@ -51,6 +51,9 @@ internal static class ScriptCommands
             {
                 limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
                     ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称")
+                    ?? (EntityNameRules.HasConflict(ctx.Scripts, candidate.Name, script => script.Name)
+                        ? "脚本名称重复：脚本实例已存在同名脚本"
+                        : null)
                     ?? Limits.CheckAttempts(candidate.MaxAttempts)
                     ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
                 if (limitError is null)
@@ -144,6 +147,7 @@ internal static class ScriptCommands
             IReadOnlyList<ExecutionLeaseReference> leases;
             ScriptInstance? previous = null;
             int previousIndex = -1;
+            string? mutationError = null;
             bool changed = ctx.Center.TryExecuteLeaseMutation(
                 existing.Id,
                 null,
@@ -154,6 +158,15 @@ internal static class ScriptCommands
                         int index = ctx.Scripts.IndexOf(existing);
                         if (index < 0)
                         {
+                            return;
+                        }
+                        if (EntityNameRules.HasConflict(
+                                ctx.Scripts,
+                                candidate.Name,
+                                script => script.Name,
+                                script => string.Equals(script.Id, existing.Id, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            mutationError = "脚本名称重复：脚本实例已存在同名脚本";
                             return;
                         }
                         previousIndex = index;
@@ -179,6 +192,10 @@ internal static class ScriptCommands
             if (!changed)
             {
                 return LeaseConflict<ScriptInstance>(leases, $"script:{existing.Id}", failureCode);
+            }
+            if (mutationError is not null)
+            {
+                return Validation<ScriptInstance>(mutationError);
             }
 
             ctx.Scheduler.RevalidatePendingPlans();

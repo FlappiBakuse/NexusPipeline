@@ -56,7 +56,7 @@ public class ScriptInstance
     /// <summary>判断脚本代码内容（运行时加载的正文；通用脚本持久化于独立 judge-scripts 资产）。</summary>
     public string JudgeScript { get; set; } = "";
 
-    /// <summary>自动更新配置：默认开。开 = 每次运行收尾把 config 最终状态全量镜像回用户快照 store
+    /// <summary>自动更新配置：默认开。开 = 每次运行收尾把 config 最终状态按文件差异写回用户快照 store
     /// （保留游戏脚本自身写入的任务完成记录/计数/新任务，供下次运行延续）；关 = 仅运行开始 15 秒后检测同步一次。
     /// 专项脚本由当前插件 profile 固定为 true；无用户或 ConfigPath 为空时开关不生效。</summary>
     public bool AutoUpdateConfig { get; set; } = true;

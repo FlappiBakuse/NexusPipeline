@@ -83,6 +83,7 @@ public sealed class HistoryServiceTests
             DateTime start = new(2026, 8, 31, 14, 58, 21);
             var record = Record("u1", "测试用户", "failed", "failed", start);
             record.Id = "run-nested-1";
+            record.ScriptName = "示例脚本";
             record.Attempts = 2;
             record.MaxAttempts = 2;
             record.AttemptDetails = new List<RunAttempt>
@@ -97,7 +98,7 @@ public sealed class HistoryServiceTests
 
             HistorySaveResult saved = service.Save(record, new List<string> { "attempt one", "attempt two" }, screenshots);
             Assert.Null(saved.PersistenceWarning);
-            Assert.Equal(Path.Combine("测试用户", "14-58-21"), saved.Record.HistoryDirectory);
+            Assert.Equal(Path.Combine("测试用户", "示例脚本-14-58-21"), saved.Record.HistoryDirectory);
 
             string runDirectory = Path.Combine(historyRoot, "2026-08-31", saved.Record.HistoryDirectory);
             Assert.True(File.Exists(Path.Combine(runDirectory, "14-58-21.json")));
@@ -123,7 +124,7 @@ public sealed class HistoryServiceTests
             Assert.Equal("attempt two", service.ReadScriptLog(persisted, 2)?.LogText.Trim().TrimStart('\uFEFF'));
 
             HistorySaveResult collision = service.Save(record, new List<string> { "attempt one", "attempt two" }, screenshots);
-            Assert.Equal(Path.Combine("测试用户", "14-58-21-2"), collision.Record.HistoryDirectory);
+            Assert.Equal(Path.Combine("测试用户", "示例脚本-14-58-21-2"), collision.Record.HistoryDirectory);
             Assert.Equal(2, service.Query(start.Date, start.Date.AddDays(1).AddTicks(-1)).Count);
         }
         finally
@@ -145,6 +146,7 @@ public sealed class HistoryServiceTests
             string logPath = Path.Combine(dayDirectory, "14-58-21-1.log");
             var record = Record("u1", "迁移用户", "success", "success", new DateTime(2026, 8, 31, 14, 58, 21));
             record.Id = "legacy-run-1";
+            record.ScriptName = "迁移脚本";
             record.LogFile = "14-58-21.json";
             record.Attempts = 1;
             record.AttemptDetails = new List<RunAttempt>
@@ -166,12 +168,49 @@ public sealed class HistoryServiceTests
                 Path.Combine(root, "logs"));
             service.MigrateLegacy();
 
-            string runDirectory = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "14-58-21");
+            string runDirectory = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "迁移脚本-14-58-21");
             Assert.False(File.Exists(jsonPath));
             Assert.False(File.Exists(logPath));
             Assert.True(File.Exists(Path.Combine(runDirectory, "14-58-21.json")));
             Assert.Equal("legacy log", File.ReadAllText(Path.Combine(runDirectory, "14-58-21-1.log"), Encoding.UTF8).Trim());
             Assert.Equal("legacy-run-1", Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1))).Id);
+
+            service.MigrateLegacy();
+            Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1)));
+        }
+        finally
+        {
+            DeleteTempDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void MigrateLegacyNestedTimeDirectory_UsesFrozenScriptName_AndIsIdempotent()
+    {
+        string root = CreateTempDirectory();
+        try
+        {
+            string historyRoot = Path.Combine(root, "history");
+            string oldRunDir = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "14-58-21");
+            Directory.CreateDirectory(oldRunDir);
+            var record = Record("u1", "迁移用户", "success", "success", new DateTime(2026, 8, 31, 14, 58, 21));
+            record.Id = "legacy-nested-run";
+            record.ScriptName = "嵌套脚本";
+            record.LogFile = "14-58-21.json";
+            record.AttemptDetails = new List<RunAttempt>
+            {
+                new() { Number = 1, StartTime = record.StartTime, Status = "success", LogFile = "14-58-21-1.log" },
+            };
+            File.WriteAllText(Path.Combine(oldRunDir, record.LogFile), JsonSerializer.Serialize(record));
+            File.WriteAllText(Path.Combine(oldRunDir, "14-58-21-1.log"), "nested log", Encoding.UTF8);
+
+            var service = new HistoryService(historyRoot, Path.Combine(root, "output"), Path.Combine(root, "logs"));
+            service.MigrateLegacy();
+
+            string target = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "嵌套脚本-14-58-21");
+            Assert.False(Directory.Exists(oldRunDir));
+            Assert.Equal("nested log", File.ReadAllText(Path.Combine(target, "14-58-21-1.log"), Encoding.UTF8).Trim());
+            Assert.Equal("legacy-nested-run", Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1))).Id);
 
             service.MigrateLegacy();
             Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1)));

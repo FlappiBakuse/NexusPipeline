@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   api,
   prepareRuntime,
+  projectRoot,
   runtimeDir,
   sleep,
   startRuntime,
@@ -13,9 +14,11 @@ import {
   waitFor,
   waitForService,
 } from "./runtime-helper.mjs";
+import { deriveCandidateVersion, readProjectVersion } from "../support/project-version.mjs";
 
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = enabled ? false : "设置 NEXUS_SYSTEM_SMOKE=1 后运行";
+const updateVersion = deriveCandidateVersion(readProjectVersion(projectRoot));
 
 function writeSettings(updateCheckEnabled) {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
@@ -38,17 +41,17 @@ function createReleaseServer() {
       const release = {
         draft: false,
         prerelease: true,
-        tag_name: "v0.13.2",
-        name: "v0.13.2 test release",
+        tag_name: `v${updateVersion}`,
+        name: `v${updateVersion} test release`,
         body: "startup update regression fixture",
         assets: [
           {
-            name: "NexusPipeline-v0.13.2-win-x64.zip",
-            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.2-win-x64.zip`,
+            name: `NexusPipeline-v${updateVersion}-win-x64.zip`,
+            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v${updateVersion}-win-x64.zip`,
           },
           {
-            name: "NexusPipeline-v0.13.2-win-x64.zip.sha256",
-            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v0.13.2-win-x64.zip.sha256`,
+            name: `NexusPipeline-v${updateVersion}-win-x64.zip.sha256`,
+            browser_download_url: `http://127.0.0.1:${server.address()?.port || 0}/NexusPipeline-v${updateVersion}-win-x64.zip.sha256`,
           },
         ],
       };
@@ -103,7 +106,7 @@ test("启动自动检查：开启时无需手动调用且只请求一次更新�
     assert.equal(fixture.requestCount, 1, "启动自动检查不得重复触发");
     const status = await (await api("GET", "/api/update/status")).json();
     assert.equal(status.available, true);
-    assert.equal(status.latest, "0.13.2");
+    assert.equal(status.latest, updateVersion);
   } finally {
     await close(fixture.server);
   }

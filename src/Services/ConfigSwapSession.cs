@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Configuration;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -246,9 +247,9 @@ internal static class ConfigSwapSession
         }
     }
 
-    /* ---------------- 自动更新配置：config → store 全量镜像同步 ---------------- */
+    /* ---------------- 自动更新配置：config → store 增量事务同步 ---------------- */
 
-    /// <summary>自动更新配置同步：把运行生效的 config 当前内容全量镜像到用户快照 store。
+    /// <summary>自动更新配置同步：把运行生效的 config 变更增量提交到用户快照 store。
     /// 插队文件（swap-backup/.meta 清单内）有还原描述（script/config-restore.json）时先还原启停字段再写入；
     /// 无还原描述时跳过（store 保持原样）。失败仅告警不阻断运行收尾；不改 .session 标记、不清 swap-backup。</summary>
     public static void SyncConfigToStore(string scriptId, string userName, string configPath, bool firstCheck)
@@ -279,17 +280,16 @@ internal static class ConfigSwapSession
                 // 4. 插队清单 + 还原描述。
                 HashSet<string> swapFiles = ReadSwapFiles(ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
                 ConfigRestoreDescriptor? descriptor = ReadRestoreDescriptor(ConfigSwapPaths.ScriptDir(scriptId, userName));
-                // 5. 全量镜像到临时目录并原子替换，源配置在复制期间再次变化则整次放弃。
-                (int written, int preserved) = MirrorToStoreAtomic(
+                // 5. 只暂存新增/变更文件，并为替换/删除文件保存回滚副本；源配置变化则整次放弃。
+                ConfigStoreTransactionResult result = ConfigStoreTransaction.Apply(
+                    scriptId,
+                    userName,
                     configPath,
-                    store,
-                    ConfigSwapPaths.StoreTempDir(scriptId, userName),
-                    ConfigSwapPaths.StorePreviousDir(scriptId, userName),
                     swapFiles,
                     descriptor,
-                    stableSample);
-                ConfigStoreMetadata.TrySaveFromMark(scriptId, userName, mark);
-                Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（写入 {written}，保留插队 {preserved}，{SyncPhaseText(firstCheck)}）");
+                    stableSample,
+                    mark);
+                Audit.Log(Audit.System, "自动更新配置", $"{scriptId} / {userName} → store（新增 {result.Added}，变更 {result.Changed}，删除 {result.Deleted}，保留 {result.Preserved}，{SyncPhaseText(firstCheck)}）");
             });
         }
         catch (Exception ex)
@@ -299,9 +299,8 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>
-    /// 失败重试前重新执行一次完整配置交换：当前尝试的最终 config 先保存到 retry-store，
-    /// 再把 original 现场恢复并重新移入 original，最后从 retry-store 复制下一轮配置到 config。
-    /// retry-store 只服务本次运行，不等同于用户永久快照 store。
+    /// 失败重试前复用当前活动配置。进程确认退出后不再复制 retry-store，也不重新搬运 original；
+    /// original 继续保存运行前现场，当前 config 直接作为下一轮输入。
     /// </summary>
     public static string? PrepareForRetry(string scriptId, string userName, string configPath)
     {
@@ -315,34 +314,13 @@ internal static class ConfigSwapSession
                 {
                     throw new IOException("未找到有效的运行配置交换会话");
                 }
-                string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
-                string retryStore = ConfigSwapPaths.RetryStoreDir(scriptId, userName);
-                PathKind currentKind = PathKindUtil.KindOf(configPath);
-                ConfigSwapPrimitives.ClearPath(retryStore, PathKindUtil.KindOf(retryStore));
-                if (currentKind != PathKind.Missing)
+                if (File.Exists(ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)))
                 {
-                    ConfigSwapPrimitives.CopyAs(configPath, retryStore, PathKind.Dir);
+                    throw new IOException($"配置快照事务已被阻断，请先处理现场：{ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)}");
                 }
-
-                if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
+                if (PathKindUtil.KindOf(configPath) == PathKind.Missing)
                 {
-                    ConfigSwapPrimitives.ClearPath(configPath, currentKind);
-                    ConfigSwapPrimitives.MoveAs(cache, configPath, ConfigSwapPrimitives.RestoreKind(mark));
-                    ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
-                    ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
-                }
-                else
-                {
-                    ConfigSwapPrimitives.ClearPath(configPath, currentKind);
-                }
-
-                if (Directory.Exists(retryStore) && Directory.EnumerateFileSystemEntries(retryStore).Any())
-                {
-                    ConfigSwapPrimitives.CopyAs(retryStore, configPath, ConfigSwapPrimitives.RestoreKind(mark));
-                }
-                else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
-                {
-                    Directory.CreateDirectory(configPath);
+                    throw new IOException("当前活动配置不存在，无法安全复用进行重试");
                 }
                 Logger.Info($"[配置交换] 脚本「{scriptId}」用户「{userName}」已重新准备重试配置。");
             });
@@ -790,7 +768,7 @@ internal static class ConfigSwapSession
         return 1;
     }
 
-    private static (string Content, Encoding Encoding) ReadTextPreservingEncoding(string path)
+    internal static (string Content, Encoding Encoding) ReadTextPreservingEncoding(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         byte[] prefix = new byte[4];
@@ -882,15 +860,15 @@ internal static class ConfigSwapSession
         }
     }
 
-    private static FileRestore? FindRestoreFile(ConfigRestoreDescriptor? descriptor, string rel)
+    internal static FileRestore? FindRestoreFile(ConfigRestoreDescriptor? descriptor, string rel)
     {
         return descriptor?.Files.FirstOrDefault(file =>
             string.Equals(NormalizeRelative(file.File), NormalizeRelative(rel), StringComparison.OrdinalIgnoreCase));
     }
 
-    private static string NormalizeRelative(string value)
+    internal static string NormalizeRelative(string value)
     {
-        return value.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
+        return ConfigStoreDiff.NormalizeRelative(value);
     }
 
     /// <summary>镜像单个文件到 store：插队文件有还原描述 → 还原启停后写入；无还原描述 → 跳过（store 保留原样）；其余复制覆盖。</summary>

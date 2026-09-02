@@ -333,7 +333,7 @@ public sealed class ScriptPersistenceTests
     }
 
     [Fact]
-    public void ConfigPathChange_ArchivesStoreAndBlocksWhenNewLocationIsMissing()
+    public void ConfigPathChange_KeepsOldStoreUntilNewLocationExists()
     {
         string root = MakeTempDir();
         string scriptId = "metadata-path-" + Guid.NewGuid().ToString("N");
@@ -362,16 +362,102 @@ public sealed class ScriptPersistenceTests
 
             Assert.False(reused);
             Assert.Contains("不存在", changedPathError, StringComparison.Ordinal);
-            string archiveRoot = ConfigSwapPaths.StoreArchiveDir(scriptId, userId);
-            string archive = Assert.Single(Directory.GetDirectories(archiveRoot));
-            Assert.True(File.Exists(Path.Combine(archive, "store-meta.json")));
-            Assert.NotEmpty(Directory.GetFiles(Path.Combine(archive, "store"), "*", SearchOption.AllDirectories));
-            Assert.False(Directory.Exists(ConfigSwapPaths.StoreDir(scriptId, userId)));
+            Assert.Equal("{\"state\":\"old\"}", File.ReadAllText(Path.Combine(
+                ConfigSwapPaths.StoreDir(scriptId, userId), "old.json")));
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreArchiveDir(scriptId, userId)));
+
+            File.WriteAllText(newConfig, "{\"state\":\"new\"}");
+            bool rebound = UserConfigManager.PrepareForRun(
+                scriptId,
+                userId,
+                newConfig,
+                out string? reboundError);
+            Assert.True(rebound, reboundError);
+            Assert.Equal("{\"state\":\"new\"}", File.ReadAllText(newConfig));
+            Assert.Null(UserConfigManager.RestoreAfterRun(scriptId, userId, newConfig));
+            Assert.Equal("{\"state\":\"new\"}", File.ReadAllText(Path.Combine(
+                ConfigSwapPaths.StoreDir(scriptId, userId), "new.json")));
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreRebindDir(scriptId, userId)));
         }
         finally
         {
             DeleteExact(root);
             ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
+        }
+    }
+
+    [Fact]
+    public void RebindRecovery_PartialNewStoreRestoresOldSnapshot()
+    {
+        string scriptId = "metadata-rebind-recovery-" + Guid.NewGuid().ToString("N");
+        string userId = "user-" + Guid.NewGuid().ToString("N");
+        string oldConfig = Path.Combine(Path.GetTempPath(), "old-" + Guid.NewGuid().ToString("N") + ".json");
+        string newConfig = Path.Combine(Path.GetTempPath(), "new-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            File.WriteAllText(oldConfig, "{\"state\":\"old\"}");
+            ConfigStoreMetadata oldMetadata = ConfigStoreMetadata.For(oldConfig);
+            ConfigStoreMetadata newMetadata = ConfigStoreMetadata.For(newConfig);
+            string store = ConfigSwapPaths.StoreDir(scriptId, userId);
+            string rebindDir = ConfigSwapPaths.StoreRebindDir(scriptId, userId);
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "old.json"), "old");
+            ConfigStoreMetadata.Save(scriptId, userId, oldMetadata);
+            Directory.CreateDirectory(rebindDir);
+            Directory.Move(store, ConfigSwapPaths.StoreRebindOldDir(scriptId, userId));
+            File.Move(
+                ConfigSwapPaths.StoreMetadataPath(scriptId, userId),
+                Path.Combine(rebindDir, "old-store-meta.json"));
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "partial.json"), "partial");
+            JsonUtil.WriteAtomic(
+                ConfigSwapPaths.StoreRebindNewMetadataPath(scriptId, userId),
+                JsonSerializer.Serialize(newMetadata, JsonOpts.Indented));
+
+            ConfigStoreMetadata.RecoverRebind(scriptId, userId);
+
+            Assert.Equal("old", File.ReadAllText(Path.Combine(store, "old.json")));
+            Assert.False(File.Exists(Path.Combine(store, "partial.json")));
+            Assert.NotNull(ConfigStoreMetadata.Load(scriptId, userId));
+            Assert.False(Directory.Exists(rebindDir));
+        }
+        finally
+        {
+            ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
+            TryDeleteFile(oldConfig);
+            TryDeleteFile(newConfig);
+        }
+    }
+
+    [Fact]
+    public void RebindRecovery_CommittedNewStoreCleansIsolation()
+    {
+        string scriptId = "metadata-rebind-commit-" + Guid.NewGuid().ToString("N");
+        string userId = "user-" + Guid.NewGuid().ToString("N");
+        string newConfig = Path.Combine(Path.GetTempPath(), "new-" + Guid.NewGuid().ToString("N") + ".json");
+        try
+        {
+            ConfigStoreMetadata expected = ConfigStoreMetadata.For(newConfig);
+            string store = ConfigSwapPaths.StoreDir(scriptId, userId);
+            string rebindDir = ConfigSwapPaths.StoreRebindDir(scriptId, userId);
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "new.json"), "new");
+            ConfigStoreMetadata.Save(scriptId, userId, expected);
+            Directory.CreateDirectory(ConfigSwapPaths.StoreRebindOldDir(scriptId, userId));
+            File.WriteAllText(Path.Combine(ConfigSwapPaths.StoreRebindOldDir(scriptId, userId), "old.json"), "old");
+            JsonUtil.WriteAtomic(
+                ConfigSwapPaths.StoreRebindNewMetadataPath(scriptId, userId),
+                JsonSerializer.Serialize(expected, JsonOpts.Indented));
+
+            ConfigStoreMetadata.RecoverRebind(scriptId, userId);
+
+            Assert.Equal("new", File.ReadAllText(Path.Combine(store, "new.json")));
+            Assert.False(Directory.Exists(rebindDir));
+        }
+        finally
+        {
+            ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
+            TryDeleteFile(newConfig);
         }
     }
 
@@ -550,6 +636,20 @@ public sealed class ScriptPersistenceTests
             if (Directory.Exists(path))
             {
                 Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
             }
         }
         catch

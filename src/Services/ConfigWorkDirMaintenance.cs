@@ -4,18 +4,18 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>
-/// work/ 事务工作区的布局维护（v0.13.1）：
+/// work/ 事务工作区的布局维护（v0.13.2）：
 /// - 一次性迁移：把 v0.13.0 及更早散落在 data/{脚本Id}/[用户目录]/ 顶层的事务目录按
 ///   <see cref="ConfigSwapPaths.LegacyWorkItemMap"/> 移入 work/（dot 后缀同步改为 kebab-case 规范名），
 ///   并把用户目录顶层旧 dot 后缀命名的持久层条目（store.previous、store.meta.json）按
 ///   <see cref="ConfigSwapPaths.LegacyDotSuffixRenames"/> 原地改名；在启动恢复扫描之前执行，
 ///   保证旧版本崩溃现场仍按原语义恢复；幂等（旧路径缺失或新路径已存在时跳过，冲突保留现场）。
-/// - 空闲清扫：启动恢复完成后，删除 work/ 中无恢复价值的残留（script、retry-store 与空目录）；
-///   存在 .session 标记或不可丢弃残留（swap-backup、original、edit-hidden、store-tmp 有内容）时保留现场。
+/// - 空闲清扫：启动恢复完成后，删除 work/ 中无恢复价值的残留（script、旧 retry-store 与空目录）；
+///   存在 .session 标记或不可丢弃残留（swap-backup、original、edit-hidden、store-tmp、store-txn 有内容）时保留现场。
 /// </summary>
 internal static class ConfigWorkDirMaintenance
 {
-    /// <summary>把旧版散落的顶层事务目录与旧命名持久层条目迁移为 v0.13.1 规范布局；在 RuntimeInitializer 中对所有进程模式执行。</summary>
+    /// <summary>把旧版散落的顶层事务目录与旧命名持久层条目迁移为 v0.13.2 规范布局；在 RuntimeInitializer 中对所有进程模式执行。</summary>
     public static void MigrateLegacyWorkDirs()
     {
         if (!Directory.Exists(AppPaths.DataDir))
@@ -158,10 +158,10 @@ internal static class ConfigWorkDirMaintenance
         {
             return;
         }
-        // 判断脚本工作目录与重试快照每轮清空重建、无恢复价值，可直接删除。
+        // 脚本工作目录与旧版重试快照每轮清空重建、无恢复价值，可直接删除。
         ConfigSwapPrimitives.TryDeleteDir(Path.Combine(workDir, "script"));
         ConfigSwapPrimitives.TryDeleteDir(Path.Combine(workDir, "retry-store"));
-        // 其余子项可能承载恢复现场（swap-backup/original/edit-hidden/store-tmp）：
+        // 其余子项可能承载恢复现场（swap-backup/original/edit-hidden/store-tmp/store-txn）：
         // 只清掉空目录，存在任何内容时整体保留 work/，交由恢复逻辑或人工处理。
         foreach (string entry in Directory.GetFileSystemEntries(workDir))
         {

@@ -6,7 +6,7 @@ namespace NexusPipeline.Services;
 
 /// <summary>
 /// 一次脚本运行所拥有的配置交换作用域。调用者只表达生命周期动作，
-/// 不再需要记住 original/retry-store/swap-backup 的底层顺序。
+/// 不再需要记住 original、store-txn、swap-backup 的底层顺序。
 /// </summary>
 internal sealed class ConfigRunSession
 {

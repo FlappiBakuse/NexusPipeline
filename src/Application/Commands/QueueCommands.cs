@@ -28,6 +28,9 @@ internal static class QueueCommands
                 {
                     error = Limits.CheckQueueCount(ctx.Queues.Count)
                         ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
+                        ?? (EntityNameRules.HasConflict(ctx.Queues, candidate.Name, queue => queue.Name)
+                            ? "队列名称重复：调度队列已存在同名队列"
+                            : null)
                         ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
                         ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
@@ -95,6 +98,13 @@ internal static class QueueCommands
                             RemoveDuplicateTasks(candidate);
                             NormalizeTimeSets(candidate);
                             error = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
+                                ?? (EntityNameRules.HasConflict(
+                                        ctx.Queues,
+                                        candidate.Name,
+                                        queue => queue.Name,
+                                        queue => string.Equals(queue.Id, existing.Id, StringComparison.OrdinalIgnoreCase))
+                                    ? "队列名称重复：调度队列已存在同名队列"
+                                    : null)
                                 ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
                                 ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))

@@ -1,6 +1,7 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Configuration;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -26,6 +27,8 @@ internal sealed class ConfigSwapRecovery
     /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
     public void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {
+        ConfigStoreMetadata.RecoverRebind(scriptId, userName);
+        ConfigStoreTransactionRecovery.Recover(scriptId, userName);
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark is null)
         {
@@ -50,7 +53,6 @@ internal sealed class ConfigSwapRecovery
             {
                 ConfigSessionMark.Clear(scriptId, userName);
             }
-            ConfigSwapPrimitives.TryDeleteDir(ConfigSwapPaths.RetryStoreDir(scriptId, userName));
             return;
         }
         Logger.Info($"[恢复] 检测到脚本「{scriptId}」用户「{userName}」存在未完成的配置交换，正在还原。");
@@ -98,7 +100,7 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>恢复自动更新配置的目录事务：store 缺失时提升 store-previous，work/store-tmp 只作为未完成事务清理。</summary>
+    /// <summary>恢复增量快照事务，并兼容旧版 store-previous/store-tmp 残留；旧残留仅在新快照成功后清理。</summary>
     private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
         IEnumerable<NexusUser> source = users ?? _snapshotUsers();
@@ -142,25 +144,40 @@ internal sealed class ConfigSwapRecovery
             }
             foreach (string allowedDirectory in allowedDirectories.Where(Directory.Exists))
             {
-                string temp = Path.Combine(allowedDirectory, ConfigSwapPaths.WorkDirName, "store-tmp");
-                if (!Directory.Exists(temp))
+                if (string.Equals(allowedDirectory, scriptDir, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
-                string store = Path.Combine(allowedDirectory, "store");
-                string previous = Path.Combine(allowedDirectory, "store-previous");
+                string userKey = Path.GetFileName(allowedDirectory);
                 try
                 {
+                    ConfigStoreMetadata.RecoverRebind(scriptId, userKey);
+                    ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+                    ConfigStoreMetadata.TryRestoreLegacyArchive(scriptId, userKey);
+                    string temp = ConfigSwapPaths.StoreTempDir(scriptId, userKey);
+                    string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
+                    string previous = ConfigSwapPaths.StorePreviousDir(scriptId, userKey);
                     if (!Directory.Exists(store) && Directory.Exists(previous))
                     {
                         Directory.Move(previous, store);
                         Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复用户快照：{store}");
                     }
-                    ConfigSwapPrimitives.TryDeleteDir(temp);
+                    if (Directory.Exists(temp))
+                    {
+                        if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
+                        {
+                            ConfigSwapPrimitives.TryDeleteDir(temp);
+                            Logger.Warn($"[恢复] 已丢弃未提交的旧版全量快照暂存：{temp}");
+                        }
+                        else
+                        {
+                            Logger.Warn($"[恢复] 检测到旧版全量快照暂存，暂不接管：{temp}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"[警告] 清理自动更新配置临时事务失败（{temp}）：{ex.Message}");
+                    Logger.Warn($"[警告] 恢复用户配置快照事务失败（{allowedDirectory}）：{ex.Message}");
                 }
             }
         }
@@ -357,7 +374,6 @@ internal sealed class ConfigSwapRecovery
         try
         {
             DoRestore(scriptId, userName!, mark);
-            ConfigSwapPrimitives.TryDeleteDir(ConfigSwapPaths.RetryStoreDir(scriptId, userName!));
             Audit.Log(Audit.System, "启动恢复配置交换", $"脚本 {scriptId} / 用户 {userName}（{mark.ConfigPath}）");
             return true;
         }

@@ -5,7 +5,7 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>v0.13.1 work/ 事务工作区治理：旧布局一次性迁移（幂等、保留现场、dot 后缀改名）、
+/// <summary>v0.13.2 work/ 事务工作区治理：旧布局一次性迁移（幂等、保留现场、dot 后缀改名）、
 /// store 同步事务恢复（work/store-tmp + store-previous）、空闲清扫（无标记且无残留时整体消失）、
 /// 以及 data/{脚本Id}/{UserId} 新布局的路径钉扎。</summary>
 public class ConfigWorkDirMaintenanceTests
@@ -210,7 +210,7 @@ public class ConfigWorkDirMaintenanceTests
             UserConfigManager.RecoverInterrupted([user]);
 
             Assert.Equal("current", File.ReadAllText(Path.Combine(ConfigSwapPaths.StoreDir(scriptId, userName), "config.json")));
-            // store-previous 保留（下次同步覆盖的兜底）
+            // 当前 store 继续作为权威快照；旧 store-previous 仍保留，等待一次新协议成功操作后清理。
             Assert.True(Directory.Exists(ConfigSwapPaths.StorePreviousDir(scriptId, userName)));
             Assert.False(Directory.Exists(ConfigSwapPaths.WorkDir(scriptId, userName)));
         }

@@ -39,7 +39,7 @@ internal static class UserCommands
                 {
                     string normalizedName = name!.Trim();
                     error = Limits.CheckGlobalUserCount(ctx.Users.Count)
-                        ?? (ctx.Users.Any(user => string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase))
+                        ?? (EntityNameRules.HasConflict(ctx.Users, normalizedName, user => user.Name)
                             ? "用户名重复：全局用户已存在同名用户"
                             : null);
                     if (error is not null)
@@ -112,8 +112,11 @@ internal static class UserCommands
                 lock (ctx.DataLock)
                 {
                     string normalizedName = name!.Trim();
-                    if (ctx.Users.Any(user => !ReferenceEquals(user, target)
-                        && string.Equals(user.Name, normalizedName, StringComparison.OrdinalIgnoreCase)))
+                    if (EntityNameRules.HasConflict(
+                            ctx.Users,
+                            normalizedName,
+                            user => user.Name,
+                            user => string.Equals(user.Id, target.Id, StringComparison.OrdinalIgnoreCase)))
                     {
                         error = "用户名重复：全局用户已存在同名用户";
                         return;

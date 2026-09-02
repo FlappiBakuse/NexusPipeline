@@ -114,7 +114,7 @@ sequenceDiagram
         alt 成功或达到最大次数
             S-->>DC: 返回 RunRecord
         else 失败且未达上限
-            S->>S: 当前 config → retry-store → 还原 original → 重新配置交换 → 下一次尝试
+            S->>S: 进程确认退出后复用当前 config → 应用 replaceConfigs → 下一次尝试
         end
     end
     end
@@ -142,8 +142,8 @@ sequenceDiagram
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：`LogStallTimeoutMinutes=-1` 时跳过日志无更新超时检查，其余有效值在启动后无任何日志条目、日志超过该时长无更新或未找到日志文件时判定失败；`RunBudget` 集中计算 `TotalTimeoutMinutes` 的 elapsed/remaining，按**整个运行（含全部重试与前置/后置脚本）**计时，`TotalTimeoutMinutes=-1` 时不设总时长上限，其余有效值到时判定失败且不再重试；判断脚本执行仍保持独立 30 秒上限。
 8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
-9. **重试**：失败且未达 `MaxAttempts` → 将最终 config 保存到运行期 `retry-store`，恢复 original 真实现场，再重新执行完整配置交换；每尝试独立 LogMonitor 与 SessionJudge；判断脚本返回的 `replaceConfigs` 在**尝试收尾、杀进程确认退出后**应用，供下一轮工作快照使用。
-10. **运行收尾（finally）**：`ConfigRunSession` 固定执行自动更新配置收尾同步（config → store 全量镜像，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）。同步先于插队还原与配置交换还原，确保 store 看到脚本最终态，同时避免恢复动作覆盖用户快照。
+9. **重试**：失败且未达 `MaxAttempts` → 进程确认退出后继续复用当前活动 `config`，在下一轮开始前应用判断脚本返回的 `replaceConfigs`；不创建 `retry-store`，每尝试仍独立 LogMonitor 与 SessionJudge。
+10. **运行收尾（finally）**：`ConfigRunSession` 固定执行自动更新配置收尾同步（按文件差异写入 store，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）。同步先于插队还原与配置交换还原，确保 store 看到脚本最终态，同时避免恢复动作覆盖用户快照。
 
 ### 3.2 队列执行链路
 
@@ -255,29 +255,27 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 ```
 data/{脚本Id}/{UserId}/
-├── store/            用户配置快照（首次编辑或运行时按当前 configPath 建立；运行后可自动更新回写，任务完成记录/计数保留延续；可重建）
-├── store-meta.json   快照归属元数据（配置定位/形态与 profile 指纹）
-├── store-archive/    配置定位或形态变化时的旧快照归档
-├── store-previous/   上一份完整用户快照（自动更新事务保留，崩溃恢复用）
+├── store/            唯一权威用户配置快照（可重建）
+├── store-meta.json   快照归属元数据（schema/generation、配置定位/形态与 profile 指纹）
 ├── .session          会话主标记（崩溃恢复用）
 ├── .session.bak      会话冗余标记（主标记损坏时使用）
-└── work/             会话事务工作区（仅运行/编辑/同步期间存在；正常收尾与启动清扫后整体消失）
+└── work/             会话与增量事务工作区
     ├── original/       运行前 configPath 原内容（移动进来，运行后移回；崩溃恢复保底）
     ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
     ├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
     ├── edit-hidden/    编辑会话隐藏配置暂存（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）
-    ├── retry-store/    当前运行重试轮临时快照，不等同于用户永久 store
-    └── store-tmp/      自动更新事务临时目录
+    ├── store-rebind/   配置定位变更时的一次性旧快照隔离区
+    └── store-txn/      增量快照事务（manifest、stage、rollback、commit）
 ```
 
-持久层（store、store-meta.json、store-archive、store-previous）与会话标记常驻用户目录顶层；全部会话事务目录收拢在 `work/` 下，**空闲态每用户目录只剩 `store/` 与 `store-meta.json`**（发生过自动更新同步后另保留 `store-previous` 兜底）。v0.13.0 及更早版本散落的顶层事务目录与 dot 后缀命名（store.previous、store.meta.json、store.tmp）由启动时的一次性迁移（`ConfigWorkDirMaintenance`，幂等）归并进 `work/` 并改为 kebab-case 规范名，保证旧崩溃现场仍按原语义恢复；无用户交互的脚本级兜底目录同样收敛为 `data/{脚本Id}/work/{script,swap-backup}`。
+`store/` 是空闲态唯一的完整持久快照；运行期间由于外部 `configPath` 可能位于不同磁盘，允许同时存在 `store/` 与实际被脚本使用的 `configPath`。增量事务只在 `work/store-txn/` 暂存本轮新增/变更文件及被替换/删除文件的 rollback 副本，成功提交后清理，不创建完整 `retry-store`、`store-previous` 或 `store-tmp`。旧版 `store-archive` 仅在启动发现当前 `store` 缺失时尝试恢复，旧版残留在一次成功的新协议操作后清理。v0.13.0 及更早版本散落的顶层事务目录与 dot 后缀命名（store.previous、store.meta.json、store.tmp）由启动时的一次性迁移（`ConfigWorkDirMaintenance`，幂等）归并进 `work/` 并改为 kebab-case 规范名，保证旧版本崩溃现场仍按原语义恢复；无用户交互的脚本级兜底目录同样收敛为 `data/{脚本Id}/work/{script,swap-backup}`。
 
 通用判断脚本属于宿主配置资产，路径为 `config/judge-scripts/<scriptId>.js|py`。源码通过临时文件原子替换；脚本实例删除、语言切换和未引用资产会进入 `orphaned/` 隔离目录。专项判断脚本保留在插件目录，由 `PluginType + RootPath` 解析当前 profile。
 
 运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
 
 ```text
-history/YYYY-MM-DD/<用户昵称>/<HH-mm-ss>/
+history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/
 ├── HH-mm-ss.json
 ├── HH-mm-ss-1.log
 ├── HH-mm-ss-1-s1.jpg
@@ -303,7 +301,7 @@ flowchart LR
     end
 ```
 
-1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照（v0.12.8：绑定阶段保持现场，复用语义延迟建立）→ `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，旧快照先进入 `store-archive/`，新位置缺失则阻断本次运行并保留旧快照。
+1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照（v0.12.8：绑定阶段保持现场，复用语义延迟建立）→ `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置存在则执行一次性重绑定：旧 store 移入 `work/store-rebind/`，新位置成功物化为唯一 store 后清理隔离区；新位置缺失则阻断本次运行并保留旧快照。
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式——`fresh`（全新配置：config 存在则移入 original，脚本在空位置生成新配置，done=复制入库+original 移回，cancel=清生成物+original 移回）或 `reuse`（复用配置：全程无文件动作，done=复制入库，cancel=仅清标记）。运行与编辑经 `ScriptConfigGate` 互斥。
 
@@ -311,7 +309,7 @@ flowchart LR
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后应用**，避免进程仍持有配置文件时出现文件占用或半写窗口。**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
-- 本次尝试失败后先将最终 config 保存到 retry-store，恢复 original 真实现场，再重新执行完整配置交换加载下一轮；可多轮替换，计入 MaxAttempts。
+- 本次尝试失败后，进程确认退出即可直接复用当前活动 config；`replaceConfigs` 在下一次尝试开始前继续应用，不创建完整 retry-store。
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
@@ -324,7 +322,7 @@ flowchart LR
 
 ### 4.5 自动更新配置：config → store 反向同步
 
-`ScriptInstance.AutoUpdateConfig`（**默认开**，专项脚本由后端强制恒开）允许运行产生的配置更改（任务完成记录、运行计数和脚本新增任务）**反向同步回用户快照 store**（config → store 全量镜像），供下次运行延续。同步先写入 `work/store-tmp`，成功后将旧快照保留为 `store-previous`，再以目录移动完成替换。
+`ScriptInstance.AutoUpdateConfig`（**默认开**，专项脚本由后端强制恒开）允许运行产生的配置更改（任务完成记录、运行计数和脚本新增任务）**反向同步回用户快照 store**（config → store 按文件差异同步），供下次运行延续。空闲态只保留一份完整 store；同步期间在 `work/store-txn/` 只暂存变更文件与 rollback 副本。
 
 **触发时机**：
 
@@ -335,7 +333,7 @@ flowchart LR
 
 **同步语义**（`UserConfigManager.SyncConfigToStore` → `ConfigSwapSession`，`WithSwapLock` 内）：
 
-- **事务化全量镜像**：先复制 config → store-tmp（全部文件），复制期间源配置变化则放弃本次同步；成功后将旧 store 移动为 store-previous，再将 store-tmp 移动为 store，避免逐文件写入造成混合快照。
+- **增量事务**：先扫描 config 与 store 建立 O(N) 差异清单，只把新增/变更文件写入 `stage/`，把将被替换/删除的旧文件写入 `rollback/`，再写入 manifest；逐文件提交后写 `commit.json`，最后更新 generation 元数据。未变化文件始终保留在原 store 中。
 - **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时从旧 store 保留原文件，不写入插队编排产物。
 - **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `PLUGIN_API.md`「配置还原描述」。
 
@@ -344,7 +342,7 @@ flowchart LR
 1. **会话有效性**：`.session` 存在且 Phase=run 才同步（防 15s 首次检测与收尾还原的时序异常）。
 2. **内容有效性**：config 缺失/为空/文件数骤降一半以上 → 跳过；明确 JSON 内容执行语法校验，非 JSON 文本不强行解析；解析失败视为脚本被杀瞬间半写 → 跳过整个同步，保留旧快照。
 3. **稳定性检查**：短间隔两次采样不一致，或复制期间源配置再次变化（脚本或外部守护进程仍在写）→ 放弃本次事务，保留旧快照。
-4. 同步失败仅告警，**不阻断**收尾还原；临时目录清理失败或旧快照替换失败时保留 `store-tmp`/`store-previous`，下次启动恢复。
+4. 同步失败仅告警，**不阻断**收尾还原；未写入 commit 标记的事务下次启动按 manifest 回滚，已写入 commit 标记的事务补写下一代元数据后清理；manifest/commit 损坏时保留 store 与隔离现场并阻断继续写入，等待人工核查。
 
 **与既有机制的关系**：收尾顺序固定为「自动更新同步 → 插队还原（swap-backup → config）→ 配置交换还原（original → config）」——同步读的是脚本最终态，插队/交换还原在同步之后把 config 还原为运行前现场；store 则保留同步后的「启停还原 + 计数延续」内容供下次运行。
 
@@ -496,11 +494,11 @@ managed-code 插件可以通过 Plugin API v1.4 注册用户列表徽章、通�
 运行时文件系统的统一约定（新增或调整持久化路径时必须遵循，并同步更新本节与 §4.1/§7.5 布局树）：
 
 1. **单一事实源**：全部路径常量集中在 `src/Persistence/AppPaths.cs` 与 `src/Services/ConfigSwapPaths.cs`，业务代码不得自行拼接安装根相对路径。
-2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/、store-archive/）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离归档类永不自动清理、保留人工恢复。
-3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-previous`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
-4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖。
+2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/、store-rebind/ 的中断现场）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认新快照提交前保留。
+3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-rebind`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
+4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。
 5. **一次性迁移模式**：改变既有布局时提供幂等的一次性启动迁移（旧路径存在且新路径不存在才移动，冲突保留现场并告警），在启动恢复扫描之前执行，保证旧版本崩溃现场按原语义恢复；迁移完成后旧路径消失，不保留双路径读取。
-6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是 v0.12.1 的既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`HH-mm-ss/HH-mm-ss.json`）为既定布局，改名收益不抵前端与历史记录兼容成本。
+6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是 v0.12.1 的既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为 v0.13.2 布局。
 
 ## 8. 已知行为与边界
 
@@ -638,6 +636,9 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
 | `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、fresh 生成物/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的委托 |
+| `ConfigStoreDiff` | src/Services/Configuration/ConfigStoreDiff.cs | 扫描外部 config 与权威 store，按文件内容生成 added/changed/deleted/preserved 差异计划；避免按完整快照重复复制 |
+| `ConfigStoreTransaction` / `ConfigStoreTransactionRecovery` | src/Services/Configuration/ConfigStoreTransaction.cs | manifest/stage/rollback/commit 增量事务、generation 元数据提交与崩溃回滚；无法确认事务状态时隔离现场并阻断后续写入 |
+| `ConfigStoreMetadata` | src/Services/ConfigStoreMetadata.cs | store 归属、定位/形态指纹与 generation 管理；兼容旧 archive/previous/temp 残留的安全恢复和一次性清理 |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位与清理（持久层在用户目录顶层，会话事务目录收敛于 work/） |
 | `ConfigWorkDirMaintenance` | src/Services/ConfigWorkDirMaintenance.cs | work/ 布局维护：v0.13.0 旧布局一次性幂等迁移、空闲 work/ 清扫、runtime/staging 启动清扫 |
