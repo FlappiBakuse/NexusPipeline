@@ -2,6 +2,7 @@ const PATHS = Object.freeze({
   dashboard: '<path d="M4 13.5h6V20H4zM14 4h6v6.5h-6zM14 13.5h6V20h-6zM4 4h6v6.5H4z"/>',
   scripts: '<path d="M7 3.5h7l4 4V20.5H7z"/><path d="M14 3.5v4h4M10 12h5M10 15.5h5"/>',
   file: '<path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4M9.5 12h5M9.5 15.5h5"/>',
+  folder: '<path d="M3.5 6.5h6l2 2h9v10a2 2 0 0 1-2 2h-15z"/><path d="M3.5 6.5V5a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1.5"/>',
   user: '<circle cx="12" cy="8" r="3.25"/><path d="M5.5 20c.8-3.7 3-5.5 6.5-5.5s5.7 1.8 6.5 5.5"/>',
   queues: '<path d="M5 6h14M5 12h14M5 18h14"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01" stroke-width="3"/>',
   dispatch: '<path d="m8 5 11 7-11 7z"/>',

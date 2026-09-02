@@ -316,8 +316,9 @@ export function syncScriptGhostState() {
     const element = $dom("#" + id);
     if (element) {
       element.disabled = !hasRoot;
-      const trigger = element.closest(".nxp-path")?.querySelector("[data-path-trigger]");
-      if (trigger) trigger.disabled = !hasRoot;
+      element.closest(".nxp-path")?.querySelectorAll("[data-path-trigger]").forEach(trigger => {
+        trigger.disabled = !hasRoot;
+      });
     }
   });
 }

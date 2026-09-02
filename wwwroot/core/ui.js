@@ -12,6 +12,7 @@ let toastTimer = null;
 let lastToastMessage = null;
 let lastToastAt = 0;
 const SHAKE_WINDOW_MS = 2500;
+let noticeSequence = 0;
 
 export function render(html) {
   view.innerHTML = html;
@@ -202,6 +203,42 @@ export function toast(message, kind = "info") {
   element.classList.remove("hidden");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => element.classList.add("hidden"), 3200);
+}
+
+/** 页面角落通知：使用 DOM textContent 组装，允许多条并存并由用户逐条关闭。 */
+export function pushNotice(title, body = "", kind = "info") {
+  const stack = $("#notice-stack");
+  if (!stack) return;
+  const allowedKinds = new Set(["info", "success", "warning", "error"]);
+  const tone = allowedKinds.has(String(kind)) ? String(kind) : "info";
+  const notice = document.createElement("article");
+  notice.className = `notice ${tone}`;
+  notice.dataset.noticeId = String(++noticeSequence);
+  notice.setAttribute("role", "status");
+
+  const content = document.createElement("div");
+  content.className = "notice-content";
+  const heading = document.createElement("strong");
+  heading.className = "notice-title";
+  heading.textContent = String(title ?? "");
+  content.append(heading);
+  if (String(body ?? "").length > 0) {
+    const copy = document.createElement("p");
+    copy.className = "notice-body";
+    copy.textContent = String(body);
+    content.append(copy);
+  }
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "notice-close";
+  close.setAttribute("aria-label", "关闭通知");
+  close.textContent = "×";
+  close.addEventListener("click", () => notice.remove());
+  notice.append(content, close);
+  stack.append(notice);
+  while (stack.children.length > 12) stack.firstElementChild?.remove();
+  window.setTimeout(() => notice.remove(), 9000);
 }
 
 let countdownTimer = null;

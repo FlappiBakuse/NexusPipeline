@@ -65,9 +65,13 @@ export function pathControlMarkup(id, value, kind = "file", extra = "", ariaLabe
   const normalizedKind = ["file", "folder", "file-or-folder"].includes(String(kind)) ? String(kind) : "file";
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
   const pickerFilter = filter ? ` data-path-filter="${esc(filter)}"` : "";
+  const trigger = (pickerKind, label, testId) => `<button type="button" class="nxp-path-trigger${normalizedKind === "file-or-folder" ? " nxp-path-choice" : ""}" data-action="pick-path" data-path-trigger data-path-target="${controlId}" data-path-kind="${pickerKind}" data-path-title="${esc(ariaLabel || label)}" aria-label="${esc(label)}" title="${esc(label)}" data-testid="${testId}"${pickerFilter}${disabled}${triggerExtra ? ` ${triggerExtra}` : ""}>${icon(pickerKind)}</button>`;
+  const triggers = normalizedKind === "file-or-folder"
+    ? `<span class="nxp-path-actions" role="group" aria-label="选择${esc(ariaLabel || "路径")}">${trigger("file", "选择文件", "path-picker-file")}${trigger("folder", "选择文件夹", "path-picker-folder")}</span>`
+    : trigger(normalizedKind, "选择路径", "path-picker");
   return `<div class="nxp-path" data-nxp-path data-path-kind="${normalizedKind}">
     <input id="${controlId}" class="nxp-path-input" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-path-value ${extra}>
-    <button type="button" class="nxp-path-trigger" data-action="pick-path" data-path-trigger data-path-target="${controlId}" data-path-kind="${normalizedKind}" data-path-title="${esc(ariaLabel || "路径")}" aria-label="选择路径" data-testid="path-picker"${pickerFilter}${disabled}${triggerExtra ? ` ${triggerExtra}` : ""}>${icon("file")}</button>
+    ${triggers}
   </div>`;
 }
 

@@ -42,6 +42,7 @@ internal sealed class UpdateService
     private UpdateOperation? _operation;
     private string? _readyStagingDir;
     private HostMaintenanceLease? _maintenanceLease;
+    private bool _hasChecked;
 
     public UpdateService(
         Func<AppSettings> settings,
@@ -204,6 +205,10 @@ internal sealed class UpdateService
         }
         finally
         {
+            lock (_gate)
+            {
+                if (IsCurrentLocked(operation)) _hasChecked = true;
+            }
             CompleteOperation(operation, UpdateState.Checking);
         }
         return GetStatus();
@@ -620,7 +625,8 @@ internal sealed class UpdateService
             _latest?.Prerelease,
             EffectiveChannel(_settings()),
             _latest is not null,
-            _latest?.Notes ?? "");
+            _latest?.Notes ?? "",
+            _hasChecked);
     }
 
     private static int? BytesToPercent(long bytesRead, long bytesTotal)
@@ -660,7 +666,8 @@ internal sealed record UpdateStatusSnapshot(
     bool? LatestPrerelease,
     string Channel,
     bool Available,
-    string Notes);
+    string Notes,
+    bool HasChecked);
 
 /// <summary>应用请求结果：Succeeded=true 表示已受理（Deferred 区分立即/下次启动）。</summary>
 internal sealed record UpdateApplyResult(bool Succeeded, bool Deferred, string? Code, string? Error)

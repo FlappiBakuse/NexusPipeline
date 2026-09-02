@@ -407,6 +407,10 @@ input[type=time], input[type=date] { color-scheme: inherit; }
 .nxp-path-trigger:hover { border-color: var(--accent); background: var(--content-control-hover); color: var(--text); }
 .nxp-path-trigger:disabled { cursor: not-allowed; opacity: .45; }
 .nxp-path-trigger .icon { width: 18px; height: 18px; }
+.nxp-path-actions { display: inline-flex; flex: 0 0 auto; align-items: stretch; }
+.nxp-path-actions .nxp-path-choice { width: var(--field-action-width); min-width: var(--field-action-width); flex: 0 0 var(--field-action-width); padding: 0; border-radius: 0; }
+.nxp-path-actions .nxp-path-choice:first-child { border-radius: 0; }
+.nxp-path-actions .nxp-path-choice:last-child { border-radius: 0 8px 8px 0; }
 .nxp-file { display: inline-flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .nxp-file-trigger { flex: 0 0 auto; }
 .nxp-file-name { min-width: 0; overflow: hidden; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -680,6 +684,16 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   80% { transform: translateX(calc(-50% + 5px)); }
 }
 .toast.shake { animation: toast-shake .45s ease; }
+#notice-stack { position: fixed; right: 24px; bottom: 24px; z-index: 210; display: grid; width: min(360px, calc(100vw - 32px)); gap: 10px; pointer-events: none; }
+.notice { display: flex; align-items: flex-start; gap: 12px; padding: 13px 14px; border: 1px solid var(--content-control-border); border-left: 3px solid var(--accent); border-radius: 9px; background: var(--content-card); box-shadow: var(--shadow); color: var(--text); pointer-events: auto; }
+.notice.success { border-left-color: var(--ok); }
+.notice.warning { border-left-color: var(--warn); }
+.notice.error { border-left-color: var(--bad); }
+.notice-content { min-width: 0; flex: 1; }
+.notice-title { display: block; font-size: 13px; line-height: 1.45; }
+.notice-body { margin: 4px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.notice-close { flex: 0 0 auto; min-width: 24px; min-height: 24px; padding: 0; border: 0; background: transparent; color: var(--muted); box-shadow: none; font-size: 20px; line-height: 1; }
+.notice-close:hover { background: var(--content-control-hover); color: var(--text); }
 .running-records { display: none; }
 
 @media (max-width: 1100px) {
@@ -752,6 +766,7 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .script-ops, .queue-ops, .global-user-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .script-ops button, .queue-ops button, .global-user-actions button { width: 100%; min-width: 0; padding-inline: var(--space-2); }
   .toast { left: 50%; right: auto; top: 12px; width: max-content; max-width: min(420px, calc(100vw - 32px)); min-width: 0; transform: translateX(-50%); }
+  #notice-stack { right: 12px; bottom: 12px; width: calc(100vw - 24px); }
   .running-table { display: none; }
   .running-records { display: grid; gap: var(--space-2); }
 .running-record { padding: var(--space-3); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }
@@ -884,8 +899,8 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
 .history-detail-meta-item .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .history-detail-meta-wide { grid-column: 1 / -1; }
 .history-detail-meta-wide > :last-child { white-space: normal; }
-.history-attempt-list { display: grid; gap: var(--space-4); padding-top: var(--space-2); }
-.history-attempt-detail { margin: 0; padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }
+.history-attempt-list { display: grid; gap: var(--space-4); padding-top: var(--space-5); }
+.history-attempt-list > .history-attempt-detail { margin: 0; padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }
 .history-attempt-detail > .section-heading { margin-bottom: 0; }
 .history-attempt-detail > .section-heading h3 { margin: 0; font-size: 14px; }
 .history-attempt-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; margin-top: var(--space-3); border-top: 1px solid var(--content-card-border); }

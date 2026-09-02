@@ -298,23 +298,10 @@ internal static class StartupPipeline
     private static void ScheduleStartupUpdateCheck()
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        if (!ctx.Settings.UpdateCheckEnabled)
-        {
-            return;
-        }
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(TestHooks.ScaledMs(5000)).ConfigureAwait(false);
-                UpdateService service = ctx.Resolve<UpdateService>();
-                await service.CheckAsync(Audit.System).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[更新] 启动检查失败：{ex.Message}");
-            }
-        });
+        new StartupUpdateCheckService(
+            () => ctx.Settings.UpdateCheckEnabled,
+            () => ctx.Resolve<UpdateService>())
+            .Start();
     }
 
     private static void WaitForSafeShutdown()

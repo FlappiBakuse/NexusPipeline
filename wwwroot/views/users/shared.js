@@ -5,7 +5,7 @@ import { pageHeader, valueField } from "../../core/forms.js";
 import { icon } from "../../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../../core/state.js";
 import { closeModal, modalShell, showModal } from "../../core/modal.js";
-import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../../core/ui.js";
+import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
@@ -361,7 +361,7 @@ export async function chooseFirstEditConfigMode(target) {
 
 export async function globalEditConfigAction(userId, scriptId, action, mode) {
   try {
-    await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action });
+    const result = await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action });
     setManagementDraft(null);
     closeModal();
     let message;
@@ -371,6 +371,18 @@ export async function globalEditConfigAction(userId, scriptId, action, mode) {
       message = mode === "reuse" ? "已取消" : "已取消，配置已还原";
     }
     toast(message);
+    if (action === "done") {
+      const validation = result?.validation;
+      for (const item of Array.isArray(validation?.toasts) ? validation.toasts : []) {
+        toast(item?.message || "", item?.kind || "info");
+      }
+      for (const item of Array.isArray(validation?.notifications) ? validation.notifications : []) {
+        pushNotice(item?.title || "配置检查", item?.body || "", item?.kind || "info");
+      }
+      if (validation?.error) {
+        toast("配置已保存，但专项插件配置校验执行失败。", "error");
+      }
+    }
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");

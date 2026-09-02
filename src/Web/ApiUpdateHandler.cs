@@ -93,6 +93,7 @@ internal static class ApiUpdateHandler
             latest = status.Latest,
             channel = status.Channel,
             available = status.Available,
+            @checked = status.HasChecked,
             prerelease = status.LatestPrerelease == true,
             notes = status.Notes,
             progress = status.Progress,

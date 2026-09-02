@@ -177,7 +177,8 @@ settings.sections               shell.nav
   "kind": "data-specialized",
   "minHostVersion": "0.12.8",
   "resolve": "data/resolve.json",
-  "judgeScript": "data/judge.js"
+  "judgeScript": "data/judge.js",
+  "configValidator": "data/config-validator.js"
 }
 ```
 
@@ -191,6 +192,29 @@ settings.sections               shell.nav
 | `minHostVersion` | 可选的最低宿主版本；缺省按 `0.0.0` 处理 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
+| `configValidator` | 配置编辑完成后运行的可选配置校验/自修复脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
+
+### 配置校验脚本
+
+`configValidator` 在用户完成配置编辑并保存后执行。宿主先提交编辑结果，再以当前脚本实例用户的配置 store 作为唯一工作根目录运行脚本；取消编辑不会触发执行。脚本错误或超时会记录并通过结果反馈，已提交的配置及脚本此前写入的文件保持不变。
+
+脚本入口可使用稳定输入 DTO `nexus.input`：
+
+```json
+{
+  "script": {
+    "id": "...", "name": "...", "pluginType": "...", "rootPath": "...",
+    "mainExe": "...", "args": "...", "configPath": "...", "logPath": "...",
+    "launchGame": false, "gameMode": "...", "gameExe": "...", "gameArgs": "...",
+    "gameWaitSeconds": 0, "forceCloseGame": false, "maxAttempts": 1,
+    "logStallTimeoutMinutes": 0, "totalTimeoutMinutes": 0, "autoUpdateConfig": true
+  },
+  "user": { "userId": "...", "userName": "..." },
+  "snapshot": { "files": [{ "path": "config.json", "size": 123 }] }
+}
+```
+
+可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是 store 内的相对路径；读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
 
 ## resolve.json（推导配置）
 

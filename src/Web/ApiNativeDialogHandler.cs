@@ -23,7 +23,7 @@ internal static class ApiNativeDialogHandler
 
         NativePathPickerPayload? payload = HttpHelper.ParseBody<NativePathPickerPayload>(body);
         string kind = (payload?.Kind ?? "file").Trim().ToLowerInvariant();
-        if (kind is not ("file" or "folder" or "file-or-folder"))
+        if (kind is not ("file" or "folder"))
         {
             await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_request", error = "路径选择器类型无效" }, 400).ConfigureAwait(false);
             return;

@@ -94,7 +94,7 @@ export async function pickPath(trigger) {
   const targetId = trigger.dataset.pathTarget || "";
   const input = document.getElementById(targetId);
   if (!input || input.disabled) return;
-  const kind = ["file", "folder", "file-or-folder"].includes(trigger.dataset.pathKind)
+  const kind = ["file", "folder"].includes(trigger.dataset.pathKind)
     ? trigger.dataset.pathKind
     : "file";
   const dialogPath = dialogPathForTrigger(input, trigger);

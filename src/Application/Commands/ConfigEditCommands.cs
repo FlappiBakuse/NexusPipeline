@@ -2,7 +2,9 @@ using System.Diagnostics;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
 
@@ -10,6 +12,9 @@ namespace NexusPipeline.App.Commands;
 
 /// <summary>配置编辑生命周期的应用命令结果。</summary>
 internal sealed record ConfigEditStarted(int ProcessId, string EditMode);
+
+/// <summary>完成配置编辑后的提交结果；validator feedback 随同本次 API 响应返回。</summary>
+internal sealed record ConfigEditCompleted(bool Success, ConfigValidationResult Validation);
 
 /// <summary>
 /// 配置编辑生命周期应用命令。
@@ -248,7 +253,7 @@ internal static class ConfigEditCommands
         }
     }
 
-    public static OperationResult<bool> Complete(
+    public static OperationResult<ConfigEditCompleted> Complete(
         RuntimeContext ctx,
         string scriptId,
         string userReference,
@@ -257,13 +262,13 @@ internal static class ConfigEditCommands
     {
         if (action is not ("done" or "cancel"))
         {
-            return Validation<bool>("未知操作：" + action);
+            return Validation<ConfigEditCompleted>("未知操作：" + action);
         }
 
         OperationResult<ConfigEditTarget> targetResult = ResolveTarget(ctx, scriptId, userReference);
         if (!targetResult.Succeeded)
         {
-            return OperationResult<bool>.Failure(targetResult.Error!);
+            return OperationResult<ConfigEditCompleted>.Failure(targetResult.Error!);
         }
 
         ConfigEditTarget target = targetResult.Value!;
@@ -271,7 +276,7 @@ internal static class ConfigEditCommands
                 target.Script.Id,
                 out EditSession? session))
         {
-            return Conflict<bool>("resource_busy", "没有进行中的编辑配置会话");
+            return Conflict<ConfigEditCompleted>("resource_busy", "没有进行中的编辑配置会话");
         }
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
@@ -284,7 +289,7 @@ internal static class ConfigEditCommands
                 && !ConfigLocationHasContent(session.Script.ConfigPath))
             {
                 // fresh/reuse 提交时 config 位置为空（脚本未生成或配置被删）：不杀进程，保留会话供用户继续配置或取消。
-                return Validation<bool>("配置文件尚未生成，请先完成配置或取消本次编辑");
+                return Validation<ConfigEditCompleted>("配置文件尚未生成，请先完成配置或取消本次编辑");
             }
 
             string launchExe = ResolveLaunchTargetExe(session.Script);
@@ -301,7 +306,7 @@ internal static class ConfigEditCommands
                     stableSeconds: 3);
             if (!processClean)
             {
-                return Conflict<bool>(
+                return Conflict<ConfigEditCompleted>(
                     "resource_busy",
                     "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试");
             }
@@ -317,7 +322,7 @@ internal static class ConfigEditCommands
                     target.Script.ConfigPath);
             if (swapError is not null)
             {
-                return Validation<bool>(
+                return Validation<ConfigEditCompleted>(
                     "execution_failed",
                     (action == "done" ? "提交" : "取消") + "失败：" + swapError);
             }
@@ -326,6 +331,11 @@ internal static class ConfigEditCommands
                 target.Script.Id,
                 target.UserKey,
                 target.Script.ConfigPath);
+
+            ConfigValidationResult validation = action == "done"
+                ? RunConfigValidator(ctx, session.Script, session.User, target.UserKey)
+                : ConfigValidationResult.Skipped;
+
             sessionRemoved = UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
             if (sessionRemoved)
             {
@@ -336,11 +346,11 @@ internal static class ConfigEditCommands
                 source,
                 action == "done" ? "完成编辑配置" : "取消编辑配置",
                 $"{target.Script.Name} / {target.User.UserName}");
-            return OperationResult<bool>.Ok(true);
+            return OperationResult<ConfigEditCompleted>.Ok(new ConfigEditCompleted(true, validation));
         }
         catch (Exception ex)
         {
-            return Internal<bool>(ex);
+            return Internal<ConfigEditCompleted>(ex);
         }
         finally
         {
@@ -348,6 +358,44 @@ internal static class ConfigEditCommands
             {
                 gate.Release();
             }
+        }
+    }
+
+    private static ConfigValidationResult RunConfigValidator(
+        RuntimeContext ctx,
+        ScriptInstance script,
+        ResolvedScriptUser user,
+        string userKey)
+    {
+        if (string.IsNullOrWhiteSpace(script.PluginType)
+            || !ctx.Plugins.TryGetConfigValidator(script.PluginType, out ConfigValidatorDescriptor? descriptor)
+            || descriptor is null)
+        {
+            return ConfigValidationResult.Skipped;
+        }
+
+        string storeRoot = UserConfigManager.StoreDir(script.Id, userKey);
+        try
+        {
+            return ConfigValidationScriptRunner.ExecuteAsync(
+                    descriptor,
+                    script,
+                    user,
+                    storeRoot)
+                .GetAwaiter()
+                .GetResult();
+        }
+        catch (Exception ex)
+        {
+            // Runner 内部已捕获脚本错误；这里兜住插件查询/编排层异常，确保提交结果保持成功。
+            string error = "JavaScript 执行失败：" + ex.Message;
+            Logger.Warn($"[专项配置校验:{script.PluginType}] {error}");
+            return new ConfigValidationResult(
+                true,
+                error,
+                Array.Empty<string>(),
+                Array.Empty<ConfigValidationToast>(),
+                Array.Empty<ConfigValidationNotification>());
         }
     }
 

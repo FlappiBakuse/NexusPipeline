@@ -441,7 +441,7 @@ internal static class ApiScriptsHandler
 
         if (action == "done" || action == "cancel")
         {
-            OperationResult<bool> result =
+            OperationResult<ConfigEditCompleted> result =
                 ConfigEditCommands.Complete(ctx, scriptId, userReference, action);
             if (!result.Succeeded)
             {
@@ -449,7 +449,9 @@ internal static class ApiScriptsHandler
                 return;
             }
 
-            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(
+                context,
+                new { ok = result.Value!.Success, validation = result.Value.Validation }).ConfigureAwait(false);
             return;
         }
 

@@ -11,6 +11,12 @@ namespace NexusPipeline.Plugins;
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
 /// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）。
 /// </summary>
+internal sealed record ConfigValidatorDescriptor(
+    string PluginName,
+    string PluginDirectory,
+    string ValidatorPath,
+    string Script);
+
 internal sealed class DataSpecializedPlugin : IProfileResolver
 {
     public string Name { get; private set; } = "";
@@ -40,9 +46,13 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     private string _judgeScriptPath = "";
 
+    private string? _configValidatorPath;
+
     private string? _resolveText;
 
     private string? _judgeScript;
+
+    private string? _configValidator;
 
     private readonly object _sync = new();
 
@@ -78,6 +88,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 Frontend = manifest.Frontend,
                 _resolvePath = manifest.ResolvePath,
                 _judgeScriptPath = manifest.JudgeScriptPath,
+                _configValidatorPath = manifest.ConfigValidatorPath,
             };
             foreach (string capability in manifest.Capabilities)
             {
@@ -96,6 +107,19 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             if (!File.Exists(plugin._resolvePath) || !File.Exists(plugin._judgeScriptPath))
             {
                 return null;
+            }
+            if (plugin._configValidatorPath is not null)
+            {
+                if (!IsSafeRelativePath(plugin._configValidatorPath)
+                    || !plugin._configValidatorPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+                plugin._configValidatorPath = Path.Combine(pluginDir, plugin._configValidatorPath);
+                if (!File.Exists(plugin._configValidatorPath))
+                {
+                    return null;
+                }
             }
             return plugin;
         }
@@ -228,6 +252,32 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 }
             }
             return _judgeScript;
+        }
+    }
+
+    internal bool HasConfigValidator => _configValidatorPath is not null;
+
+    internal ConfigValidatorDescriptor? ReadConfigValidator()
+    {
+        if (_configValidatorPath is null)
+        {
+            return null;
+        }
+        lock (_sync)
+        {
+            if (_configValidator is null)
+            {
+                try
+                {
+                    _configValidator = File.ReadAllText(_configValidatorPath);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"专项配置校验脚本读取失败（{_configValidatorPath}）：{ex.Message}");
+                    _configValidator = "";
+                }
+            }
+            return new ConfigValidatorDescriptor(Name, PluginDirectory, _configValidatorPath!, _configValidator);
         }
     }
 

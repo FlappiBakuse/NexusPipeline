@@ -251,6 +251,7 @@ async function runSystem(mode, args) {
     ["runtime-judge", "judge-smoke.mjs"],
     ["runtime-execution-resilience", "execution-resilience.mjs"],
     ["runtime-emulator", "emulator-smoke.mjs"],
+    ["runtime-startup-update", "startup-update-smoke.mjs"],
     ["runtime-update", "update-smoke.mjs"],
   ];
   const suiteTimeoutMs = 5 * 60 * 1000;

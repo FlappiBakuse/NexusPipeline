@@ -139,7 +139,6 @@ internal sealed class NativePathPickerService : IDisposable
         return request.Kind switch
         {
             "folder" => PickFolder(request, owner),
-            "file-or-folder" => PickFileOrFolder(request, owner),
             _ => PickFile(request, owner),
         };
     }
@@ -178,65 +177,6 @@ internal sealed class NativePathPickerService : IDisposable
         return ShowDialog(dialog, owner) == DialogResult.OK
             ? dialog.SelectedPath.Trim()
             : null;
-    }
-
-    private static string? PickFileOrFolder(NativePathPickerRequest request, IWin32Window? owner)
-    {
-        using var chooser = new Form
-        {
-            Text = request.Title,
-            StartPosition = FormStartPosition.CenterScreen,
-            FormBorderStyle = FormBorderStyle.FixedDialog,
-            MinimizeBox = false,
-            MaximizeBox = false,
-            ShowInTaskbar = false,
-            TopMost = true,
-            ClientSize = new Size(360, 132),
-        };
-        var prompt = new Label
-        {
-            AutoSize = false,
-            Location = new Point(16, 14),
-            Size = new Size(328, 34),
-            Text = "请选择要填写的文件或文件夹。",
-        };
-        var fileButton = new Button
-        {
-            Text = "选择文件",
-            DialogResult = DialogResult.None,
-            Location = new Point(16, 70),
-            Size = new Size(104, 32),
-        };
-        var folderButton = new Button
-        {
-            Text = "选择文件夹",
-            DialogResult = DialogResult.None,
-            Location = new Point(128, 70),
-            Size = new Size(104, 32),
-        };
-        var cancelButton = new Button
-        {
-            Text = "取消",
-            DialogResult = DialogResult.Cancel,
-            Location = new Point(240, 70),
-            Size = new Size(104, 32),
-        };
-        string? selected = null;
-        fileButton.Click += (_, _) =>
-        {
-            selected = PickFile(request with { Kind = "file", OwnerHandle = chooser.Handle }, new WindowHandle(chooser.Handle));
-            if (selected is not null) chooser.DialogResult = DialogResult.OK;
-        };
-        folderButton.Click += (_, _) =>
-        {
-            selected = PickFolder(request with { Kind = "folder", OwnerHandle = chooser.Handle }, new WindowHandle(chooser.Handle));
-            if (selected is not null) chooser.DialogResult = DialogResult.OK;
-        };
-        chooser.AcceptButton = fileButton;
-        chooser.CancelButton = cancelButton;
-        chooser.Controls.AddRange(new Control[] { prompt, fileButton, folderButton, cancelButton });
-        ShowDialog(chooser, owner);
-        return selected;
     }
 
     private static DialogResult ShowDialog(CommonDialog dialog, IWin32Window? owner)

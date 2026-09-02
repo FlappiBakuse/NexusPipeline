@@ -7,9 +7,13 @@ import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.j
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { initialUpdateStatus, updateActionsMarkup } from "../core/update-status.js";
 
 let restartRequired = false;
 let openSettingsPanel = "service";
+let updateManualCheck = false;
+let updateAutoNoticeKey = "";
+let updateStartupPollCount = 0;
 
 export async function pageSettings(token) {
   if (!isCurrent("settings", token)) return;
@@ -37,7 +41,7 @@ export async function pageSettings(token) {
   syncSettingsPanels();
   bindAutoSave();
   renderUpdateStatus();
-  loadUpdateStatus();
+  loadUpdateStatus(token);
 }
 
 function settingsCardMarkup(id, title, description, body, testId) {
@@ -139,12 +143,43 @@ function updateSectionMarkup(settings) {
 
 let updateStatus = null;
 
-async function loadUpdateStatus() {
+async function loadUpdateStatus(token = state.routeToken) {
   try {
     const data = await api("GET", "/api/update/status");
+    if (!isCurrent("settings", token)) return;
     updateStatus = data;
-    renderUpdateStatus(data);
+    const autoCheckEnabled = state.settings?.updateCheckEnabled === true;
+    renderUpdateStatus(updateManualCheck ? data : initialUpdateStatus(data, autoCheckEnabled));
+    notifyAutomaticUpdate(data, autoCheckEnabled);
+    if (!updateManualCheck && autoCheckEnabled && data.checked !== true) scheduleStartupUpdateStatusPoll(token);
   } catch { /* 状态区保持占位 */ }
+}
+
+function notifyAutomaticUpdate(data, autoCheckEnabled) {
+  if (!autoCheckEnabled || updateManualCheck || !data?.available || !data.latest) return;
+  const key = `${data.latest}|${data.channel || ""}`;
+  if (key === updateAutoNoticeKey) return;
+  updateAutoNoticeKey = key;
+  toast(`发现新版本 v${data.latest}`);
+}
+
+/** 自动检查有启动延迟；前端在设置页存活期间等待一次后台结果，检测完成即停止轮询。 */
+function scheduleStartupUpdateStatusPoll(token) {
+  if (updateStartupPollCount >= 15) return;
+  schedule(async () => {
+    if (!isCurrent("settings", token) || updateManualCheck) return;
+    try {
+      const data = await api("GET", "/api/update/status");
+      if (!isCurrent("settings", token) || updateManualCheck) return;
+      updateStatus = data;
+      const autoCheckEnabled = state.settings?.updateCheckEnabled === true;
+      renderUpdateStatus(initialUpdateStatus(data, autoCheckEnabled));
+      notifyAutomaticUpdate(data, autoCheckEnabled);
+      if (!autoCheckEnabled || data.checked === true) return;
+      updateStartupPollCount++;
+      scheduleStartupUpdateStatusPoll(token);
+    } catch { /* 服务重启或短暂不可用时结束本轮等待 */ }
+  }, 1000, "settings", token);
 }
 
 /** 状态区渲染：当前版本 / 渠道 / 最新版本与 release note（截断）/ 进度 / 按钮流。 */
@@ -158,16 +193,7 @@ function renderUpdateStatus(data) {
   const state = data.state || "idle";
   const current = data.current || "—";
   const channelText = data.channel === "stable" ? "稳定版" : "预发布（Pre-release）";
-  let actions = state === "recoverypending" ? "" : `<button type="button" data-action="update-check" data-testid="update-check">检查更新</button>`;
-  if (data.available && state === "idle") {
-    actions += ` <button type="button" class="primary" data-action="update-download" data-testid="update-download">下载更新 v${esc(data.latest)}</button>`;
-  }
-  if (state === "downloading") {
-    actions += ` <button type="button" class="ghost" data-action="update-cancel" data-testid="update-cancel">取消下载</button>`;
-  }
-  if (state === "ready") {
-    actions += ` <button type="button" class="primary" data-action="update-apply" data-testid="update-apply">立即更新</button> <button type="button" class="ghost" data-action="update-defer" data-testid="update-defer">下次启动更新</button>`;
-  }
+  const actions = updateActionsMarkup(data);
   let progress = "";
   if (state === "downloading" && typeof data.progress === "number") {
     progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="下载进度"><div data-progress="${data.progress}"></div></div>`;
@@ -204,6 +230,8 @@ function updateSettingsPayload() {
 async function saveUpdateSettings() {
   const data = await api("PUT", "/api/settings", updateSettingsPayload());
   if (data?.settings) state.settings = data.settings;
+  if (state.settings?.updateCheckEnabled !== true) updateManualCheck = false;
+  else updateStartupPollCount = 0;
   await loadUpdateStatus();
 }
 
@@ -235,6 +263,9 @@ const awaitNetworkSaveSettled = () => networkSaveQueue.settled();
 async function checkUpdate() {
   try {
     const result = await api("POST", "/api/update/check");
+    updateManualCheck = true;
+    updateStartupPollCount = 15;
+    updateStatus = result;
     renderUpdateStatus(result);
     if (result.available) toast(`发现新版本 v${result.latest}`);
     else toast("当前已是最新版本", "info");
