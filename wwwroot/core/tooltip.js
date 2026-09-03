@@ -4,6 +4,22 @@ let anchor = null;
 let timer = null;
 let bound = false;
 let sequence = 0;
+const suppressedFocusTargets = new WeakSet();
+
+/** 聚焦弹窗的初始字段或焦点陷阱目标时，不把程序行为误判为用户聚焦。 */
+export function focusWithoutTooltip(element, options = {}) {
+  if (!element || typeof element.focus !== "function") return;
+  if (typeof document !== "undefined" && document.activeElement === element) {
+    suppressedFocusTargets.delete(element);
+    hideTooltip();
+    return;
+  }
+  suppressedFocusTargets.add(element);
+  element.focus(options);
+  if (typeof document !== "undefined" && document.activeElement !== element) {
+    suppressedFocusTargets.delete(element);
+  }
+}
 
 function helpText(element) {
   return String(element?.dataset?.help || element?.dataset?.tooltip || "").trim();
@@ -142,6 +158,11 @@ export function initTooltips() {
     if (current && current !== related) hideTooltip();
   });
   document.addEventListener("focusin", event => {
+    if (suppressedFocusTargets.has(event.target)) {
+      suppressedFocusTargets.delete(event.target);
+      hideTooltip();
+      return;
+    }
     const context = closestHelpContext(event.target);
     if (!context) {
       hideTooltip();

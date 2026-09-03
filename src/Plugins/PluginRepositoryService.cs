@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,10 +25,16 @@ internal sealed class PluginRepositoryService
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _cacheSync = new();
     private readonly object _readmeSync = new();
-    private readonly Dictionary<string, PluginReadmeResult> _readmeCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PluginReadmeResult> _localReadmeCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PluginReadmeCacheEntry> _officialReadmeCache = new(StringComparer.Ordinal);
 
     private PluginCatalog? _catalog;
     private DateTimeOffset _fetchedAt;
+    private DateTimeOffset _lastCheckedAt;
+    private string _catalogSourceUrl = "";
+    private string _catalogEtag = "";
+    private DateTimeOffset? _catalogLastModified;
+    private string _catalogContentHash = "";
     private string? _lastError;
 
     public PluginRepositoryService(
@@ -47,69 +54,105 @@ internal sealed class PluginRepositoryService
         bool forceRefresh = false,
         CancellationToken cancellationToken = default)
     {
-        PluginCatalog? catalog;
-        DateTimeOffset fetchedAt;
-        string? error;
-        bool stale;
-        lock (_cacheSync)
+        string source = CurrentCatalogSource();
+        CatalogCacheState cached = ReadCatalogCache();
+        if (!NeedsCatalogValidation(cached, source, forceRefresh))
         {
-            catalog = _catalog;
-            fetchedAt = _fetchedAt;
-            error = _lastError;
-            stale = catalog is not null && DateTimeOffset.UtcNow - fetchedAt > MemoryCacheTtl;
-        }
-        if (!forceRefresh && catalog is not null && !stale)
-        {
-            return BuildSnapshot(catalog, stale: false, fetchedAt, error: null);
+            return BuildSnapshot(
+                cached.Catalog!,
+                stale: cached.Error is not null,
+                cached.FetchedAt,
+                cached.Error);
         }
 
         await _refreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            lock (_cacheSync)
+            source = CurrentCatalogSource();
+            cached = ReadCatalogCache();
+            if (!NeedsCatalogValidation(cached, source, forceRefresh))
             {
-                catalog = _catalog;
-                fetchedAt = _fetchedAt;
-                error = _lastError;
-                stale = catalog is not null && DateTimeOffset.UtcNow - fetchedAt > MemoryCacheTtl;
-            }
-            if (!forceRefresh && catalog is not null && !stale)
-            {
-                return BuildSnapshot(catalog, stale: false, fetchedAt, error: null);
+                return BuildSnapshot(
+                    cached.Catalog!,
+                    stale: cached.Error is not null,
+                    cached.FetchedAt,
+                    cached.Error);
             }
 
             try
             {
-                (PluginCatalog fetched, DateTimeOffset timestamp) = await FetchCatalogAsync(cancellationToken).ConfigureAwait(false);
+                CatalogFetchResult fetched = await FetchCatalogAsync(cached, source, cancellationToken).ConfigureAwait(false);
+                PluginCatalog catalog;
+                DateTimeOffset fetchedAt;
+                string contentHash;
+                bool writeCatalog;
+                if (fetched.NotModified)
+                {
+                    catalog = cached.Catalog
+                        ?? throw new PluginRepositoryException("repository_unavailable", "插件 catalog 条件请求返回 304，但本地没有可用缓存");
+                    fetchedAt = cached.FetchedAt;
+                    contentHash = cached.ContentHash;
+                    writeCatalog = false;
+                }
+                else
+                {
+                    catalog = fetched.Catalog
+                        ?? throw new PluginRepositoryException("catalog_invalid", "插件 catalog 响应为空");
+                    contentHash = fetched.ContentHash;
+                    writeCatalog = cached.Catalog is null
+                        || !string.Equals(cached.ContentHash, contentHash, StringComparison.OrdinalIgnoreCase);
+                    fetchedAt = writeCatalog ? fetched.ContentFetchedAt : cached.FetchedAt;
+                }
+
                 lock (_cacheSync)
                 {
-                    _catalog = fetched;
-                    _fetchedAt = timestamp;
+                    _catalog = catalog;
+                    _fetchedAt = fetchedAt;
+                    _lastCheckedAt = fetched.CheckedAt;
+                    _catalogSourceUrl = source;
+                    _catalogEtag = string.IsNullOrWhiteSpace(fetched.ETag)
+                        ? cached.ETag
+                        : fetched.ETag!;
+                    _catalogLastModified = fetched.LastModified ?? cached.LastModified;
+                    _catalogContentHash = contentHash;
                     _lastError = null;
-                    catalog = fetched;
-                    fetchedAt = timestamp;
-                    error = null;
                 }
-                SavePersistentCache(fetched, timestamp);
-                return BuildSnapshot(fetched, stale: false, timestamp, error: null);
+                SavePersistentCache(
+                    catalog,
+                    fetchedAt,
+                    source,
+                    fetched.CheckedAt,
+                    _catalogEtag,
+                    _catalogLastModified,
+                    contentHash,
+                    writeCatalog);
+                return BuildSnapshot(catalog, stale: false, fetchedAt, error: null);
             }
             catch (Exception ex)
             {
                 string message = ex is PluginRepositoryException repository
                     ? repository.Message
                     : $"读取插件仓库失败：{ex.Message}";
+                DateTimeOffset failedAt = DateTimeOffset.UtcNow;
                 lock (_cacheSync)
                 {
                     _lastError = message;
-                    catalog = _catalog;
-                    fetchedAt = _fetchedAt;
-                    error = message;
+                    _lastCheckedAt = failedAt;
+                    cached = new CatalogCacheState(
+                        _catalog,
+                        _fetchedAt,
+                        _lastCheckedAt,
+                        _catalogSourceUrl,
+                        _catalogEtag,
+                        _catalogLastModified,
+                        _catalogContentHash,
+                        message);
                 }
-                if (catalog is null)
+                if (cached.Catalog is null)
                 {
                     return PluginStoreSnapshot.Unavailable(message);
                 }
-                return BuildSnapshot(catalog, stale: true, fetchedAt, error);
+                return BuildSnapshot(cached.Catalog, stale: true, cached.FetchedAt, message);
             }
         }
         finally
@@ -147,10 +190,12 @@ internal sealed class PluginRepositoryService
         {
             throw new PluginRepositoryException("up_to_date", $"插件已是 v{installed.Version}");
         }
-        return await _packages.StageAsync(
+        PluginPendingOperation operation = await _packages.StageAsync(
             entry,
             update ? "update" : "install",
             cancellationToken).ConfigureAwait(false);
+        _plugins().InvalidateManagementSnapshot();
+        return operation;
     }
 
     public Task<PluginPendingOperation> UninstallAsync(
@@ -192,6 +237,7 @@ internal sealed class PluginRepositoryService
             CreatedAt = DateTimeOffset.UtcNow,
         };
         PluginInstallRecovery.AddPending(operation);
+        _plugins().InvalidateManagementSnapshot();
         return Task.FromResult(operation);
     }
 
@@ -326,7 +372,7 @@ internal sealed class PluginRepositoryService
         string key = $"local:{path}:{file.Length}:{file.LastWriteTimeUtc.Ticks}";
         lock (_readmeSync)
         {
-            if (_readmeCache.TryGetValue(key, out PluginReadmeResult? cached))
+            if (_localReadmeCache.TryGetValue(key, out PluginReadmeResult? cached))
             {
                 return cached;
             }
@@ -355,7 +401,7 @@ internal sealed class PluginRepositoryService
         }
         lock (_readmeSync)
         {
-            _readmeCache[key] = result;
+            _localReadmeCache[key] = result;
         }
         return result;
     }
@@ -373,15 +419,20 @@ internal sealed class PluginRepositoryService
             return new PluginReadmeResult(true, "", "插件 artifactName 无效");
         }
         string key = $"store:{item.ArtifactName}:{item.Version}";
+        PluginReadmeCacheEntry? cachedEntry;
         lock (_readmeSync)
         {
-            if (_readmeCache.TryGetValue(key, out PluginReadmeResult? cached))
+            _officialReadmeCache.TryGetValue(key, out cachedEntry);
+            if (cachedEntry is not null
+                && DateTimeOffset.UtcNow - cachedEntry.LastCheckedAt < MemoryCacheTtl)
             {
-                return cached;
+                return cachedEntry.Result;
             }
         }
 
         PluginReadmeResult result;
+        string? responseEtag = null;
+        DateTimeOffset? responseLastModified = null;
         try
         {
             Uri uri = new(OfficialReadmePrefix + Uri.EscapeDataString(item.ArtifactName) + "/README.md");
@@ -391,14 +442,41 @@ internal sealed class PluginRepositoryService
                 uri,
                 manifest: false,
                 "NexusPipeline-plugin-readme/" + item.Name + "/" + item.Version,
-                cancellationToken).ConfigureAwait(false);
+                cancellationToken,
+                request => AddConditionalHeaders(request, cachedEntry?.ETag, cachedEntry?.LastModified)).ConfigureAwait(false);
+            responseEtag = response.Headers.ETag?.ToString();
+            responseLastModified = ReadLastModified(response);
+            if (response.StatusCode == HttpStatusCode.NotModified && cachedEntry is not null)
+            {
+                PluginReadmeCacheEntry refreshed = cachedEntry with
+                {
+                    LastCheckedAt = DateTimeOffset.UtcNow,
+                    ETag = responseEtag ?? cachedEntry.ETag,
+                    LastModified = responseLastModified ?? cachedEntry.LastModified,
+                };
+                lock (_readmeSync)
+                {
+                    _officialReadmeCache[key] = refreshed;
+                }
+                return refreshed.Result;
+            }
             if (!response.IsSuccessStatusCode)
             {
-                result = new PluginReadmeResult(true, "", $"读取 README.md 失败：HTTP {(int)response.StatusCode}");
+                result = cachedEntry is not null
+                    ? cachedEntry.Result with
+                {
+                    Error = $"读取 README.md 失败：HTTP {(int)response.StatusCode}（显示上次缓存）",
+                }
+                    : new PluginReadmeResult(true, "", $"读取 README.md 失败：HTTP {(int)response.StatusCode}");
             }
             else if (response.Content.Headers.ContentLength is long length && length > MaxReadmeBytes)
             {
-                result = new PluginReadmeResult(true, "", "README.md 超过 256 KiB 大小上限");
+                result = cachedEntry is not null
+                    ? cachedEntry.Result with
+                {
+                    Error = "README.md 超过 256 KiB 大小上限（显示上次缓存）",
+                }
+                    : new PluginReadmeResult(true, "", "README.md 超过 256 KiB 大小上限");
             }
             else
             {
@@ -415,11 +493,23 @@ internal sealed class PluginRepositoryService
         }
         catch (Exception ex)
         {
-            result = new PluginReadmeResult(true, "", $"读取 README.md 失败：{ex.Message}");
+            result = cachedEntry is not null
+                ? cachedEntry.Result with
+            {
+                Error = $"读取 README.md 失败：{ex.Message}（显示上次缓存）",
+            }
+                : new PluginReadmeResult(true, "", $"读取 README.md 失败：{ex.Message}");
         }
-        lock (_readmeSync)
+        if (result.Error is null)
         {
-            _readmeCache[key] = result;
+            lock (_readmeSync)
+            {
+                _officialReadmeCache[key] = new PluginReadmeCacheEntry(
+                    result,
+                    DateTimeOffset.UtcNow,
+                    responseEtag,
+                    responseLastModified);
+            }
         }
         return result;
     }
@@ -450,10 +540,11 @@ internal sealed class PluginRepositoryService
             .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task<(PluginCatalog Catalog, DateTimeOffset FetchedAt)> FetchCatalogAsync(
+    private async Task<CatalogFetchResult> FetchCatalogAsync(
+        CatalogCacheState cached,
+        string source,
         CancellationToken cancellationToken)
     {
-        string source = TestHooks.PluginCatalogUrl ?? PluginRepositoryCatalog.CatalogUrl;
         if (!Uri.TryCreate(source, UriKind.Absolute, out Uri? uri)
             || (uri.Scheme != Uri.UriSchemeHttps && !uri.IsLoopback))
         {
@@ -469,7 +560,29 @@ internal sealed class PluginRepositoryService
             uri,
             manifest: true,
             "NexusPipeline-plugin-catalog/" + UpdateService.CurrentVersion,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            request => AddConditionalHeaders(
+                request,
+                string.Equals(cached.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
+                    ? cached.ETag
+                    : "",
+                string.Equals(cached.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
+                    ? cached.LastModified
+                    : null)).ConfigureAwait(false);
+        DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
+        string? etag = response.Headers.ETag?.ToString();
+        DateTimeOffset? lastModified = ReadLastModified(response);
+        if (response.StatusCode == HttpStatusCode.NotModified && cached.Catalog is not null)
+        {
+            return new CatalogFetchResult(
+                null,
+                cached.FetchedAt,
+                checkedAt,
+                etag,
+                lastModified,
+                cached.ContentHash,
+                NotModified: true);
+        }
         if (!response.IsSuccessStatusCode)
         {
             throw new PluginRepositoryException("repository_unavailable", $"插件 catalog 请求失败：HTTP {(int)response.StatusCode}");
@@ -487,7 +600,14 @@ internal sealed class PluginRepositoryService
         {
             throw new PluginRepositoryException("catalog_invalid", error ?? "插件 catalog 无效");
         }
-        return (catalog, DateTimeOffset.UtcNow);
+        return new CatalogFetchResult(
+            catalog,
+            checkedAt,
+            checkedAt,
+            etag,
+            lastModified,
+            ComputeCatalogHash(catalog),
+            NotModified: false);
     }
 
     private PluginStoreSnapshot BuildSnapshot(
@@ -611,17 +731,56 @@ internal sealed class PluginRepositoryService
             }
             JsonNode? node = JsonNode.Parse(File.ReadAllText(AppPaths.PluginCatalogCachePath));
             if (node is not JsonObject root
-                || root["catalog"] is not JsonNode catalogNode
-                || !DateTimeOffset.TryParse(root["fetchedAt"]?.ToString(), out DateTimeOffset fetchedAt)
+                || GetProperty(root, "catalog") is not JsonNode catalogNode
+                || !DateTimeOffset.TryParse(GetProperty(root, "fetchedAt")?.ToString(), out DateTimeOffset fetchedAt)
                 || !PluginRepositoryCatalog.TryParse(catalogNode.ToJsonString(), out PluginCatalog? catalog, out _)
                 || catalog is null)
             {
                 return;
             }
+
+            string source = CurrentCatalogSource();
+            string sourceUrl = "";
+            string etag = "";
+            DateTimeOffset? lastModified = null;
+            DateTimeOffset lastCheckedAt = DateTimeOffset.MinValue;
+            string contentHash = ComputeCatalogHash(catalog);
+            if (File.Exists(AppPaths.PluginCatalogCacheMetaPath))
+            {
+                try
+                {
+                    PluginCatalogCacheMetadata? metadata = JsonSerializer.Deserialize<PluginCatalogCacheMetadata>(
+                        File.ReadAllText(AppPaths.PluginCatalogCacheMetaPath),
+                        JsonOpts.Default);
+                    if (metadata is not null
+                        && metadata.SchemaVersion == 1
+                        && string.Equals(metadata.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
+                        && metadata.LastCheckedAt > DateTimeOffset.MinValue)
+                    {
+                        sourceUrl = metadata.SourceUrl;
+                        etag = metadata.ETag ?? "";
+                        lastModified = metadata.LastModified;
+                        lastCheckedAt = metadata.LastCheckedAt;
+                        if (!string.IsNullOrWhiteSpace(metadata.ContentHash))
+                        {
+                            contentHash = metadata.ContentHash;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[插件] 读取 catalog 缓存元数据失败，将重新验证：{ex.Message}");
+                }
+            }
             lock (_cacheSync)
             {
                 _catalog = catalog;
                 _fetchedAt = fetchedAt;
+                _lastCheckedAt = lastCheckedAt;
+                _catalogSourceUrl = sourceUrl;
+                _catalogEtag = etag;
+                _catalogLastModified = lastModified;
+                _catalogContentHash = contentHash;
             }
         }
         catch (Exception ex)
@@ -630,24 +789,131 @@ internal sealed class PluginRepositoryService
         }
     }
 
-    private static void SavePersistentCache(PluginCatalog catalog, DateTimeOffset fetchedAt)
+    private static void SavePersistentCache(
+        PluginCatalog catalog,
+        DateTimeOffset fetchedAt,
+        string sourceUrl,
+        DateTimeOffset lastCheckedAt,
+        string etag,
+        DateTimeOffset? lastModified,
+        string contentHash,
+        bool writeCatalog)
     {
         try
         {
-            JsonNode? catalogNode = JsonNode.Parse(JsonSerializer.Serialize(catalog, JsonOpts.Web));
-            var root = new JsonObject
-            {
-                ["schemaVersion"] = 1,
-                ["fetchedAt"] = fetchedAt.ToString("O"),
-                ["catalog"] = catalogNode,
-            };
             Directory.CreateDirectory(AppPaths.PluginStateDir);
-            JsonUtil.WriteAtomic(AppPaths.PluginCatalogCachePath, root.ToJsonString(JsonOpts.Indented));
+            if (writeCatalog || !File.Exists(AppPaths.PluginCatalogCachePath))
+            {
+                JsonNode? catalogNode = JsonNode.Parse(JsonSerializer.Serialize(catalog, JsonOpts.Web));
+                var root = new JsonObject
+                {
+                    ["SchemaVersion"] = 1,
+                    ["FetchedAt"] = fetchedAt.ToString("O"),
+                    ["Catalog"] = catalogNode,
+                };
+                JsonUtil.WriteAtomic(AppPaths.PluginCatalogCachePath, root.ToJsonString(JsonOpts.Indented));
+            }
+
+            var metadata = new PluginCatalogCacheMetadata
+            {
+                SchemaVersion = 1,
+                SourceUrl = sourceUrl,
+                ETag = etag,
+                LastModified = lastModified,
+                LastCheckedAt = lastCheckedAt,
+                ContentHash = contentHash,
+            };
+            JsonUtil.WriteAtomic(
+                AppPaths.PluginCatalogCacheMetaPath,
+                JsonSerializer.Serialize(metadata, JsonOpts.Indented));
         }
         catch (Exception ex)
         {
             Logger.Warn($"[插件] 写入 catalog 缓存失败：{ex.Message}");
         }
+    }
+
+    private CatalogCacheState ReadCatalogCache()
+    {
+        lock (_cacheSync)
+        {
+            return new CatalogCacheState(
+                _catalog,
+                _fetchedAt,
+                _lastCheckedAt,
+                _catalogSourceUrl,
+                _catalogEtag,
+                _catalogLastModified,
+                _catalogContentHash,
+                _lastError);
+        }
+    }
+
+    private static bool NeedsCatalogValidation(
+        CatalogCacheState cached,
+        string source,
+        bool forceRefresh)
+    {
+        return forceRefresh
+            || cached.Catalog is null
+            || !string.Equals(cached.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
+            || cached.LastCheckedAt == DateTimeOffset.MinValue
+            || DateTimeOffset.UtcNow - cached.LastCheckedAt >= MemoryCacheTtl;
+    }
+
+    private static string CurrentCatalogSource()
+    {
+        return TestHooks.PluginCatalogUrl ?? PluginRepositoryCatalog.CatalogUrl;
+    }
+
+    private static JsonNode? GetProperty(JsonObject root, string name)
+    {
+        foreach ((string key, JsonNode? value) in root)
+        {
+            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private static void AddConditionalHeaders(
+        HttpRequestMessage request,
+        string? etag,
+        DateTimeOffset? lastModified)
+    {
+        if (!string.IsNullOrWhiteSpace(etag))
+        {
+            request.Headers.TryAddWithoutValidation("If-None-Match", etag);
+        }
+        if (lastModified is not null)
+        {
+            request.Headers.IfModifiedSince = lastModified;
+        }
+    }
+
+    private static DateTimeOffset? ReadLastModified(HttpResponseMessage response)
+    {
+        if (response.Content.Headers.LastModified is DateTimeOffset contentValue)
+        {
+            return contentValue;
+        }
+        if (response.Headers.TryGetValues("Last-Modified", out IEnumerable<string>? values))
+        {
+            string? value = values.FirstOrDefault();
+            if (DateTimeOffset.TryParse(value, out DateTimeOffset parsed))
+            {
+                return parsed;
+            }
+        }
+        return null;
+    }
+
+    private static string ComputeCatalogHash(PluginCatalog catalog)
+    {
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(catalog, JsonOpts.Web);
+        return Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
     }
 
     private static async Task<string> ReadBoundedTextAsync(
@@ -693,6 +959,46 @@ internal sealed class PluginRepositoryService
         }
         return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)
             .GetString(buffer.ToArray());
+    }
+
+    private sealed record CatalogCacheState(
+        PluginCatalog? Catalog,
+        DateTimeOffset FetchedAt,
+        DateTimeOffset LastCheckedAt,
+        string SourceUrl,
+        string ETag,
+        DateTimeOffset? LastModified,
+        string ContentHash,
+        string? Error);
+
+    private sealed record CatalogFetchResult(
+        PluginCatalog? Catalog,
+        DateTimeOffset ContentFetchedAt,
+        DateTimeOffset CheckedAt,
+        string? ETag,
+        DateTimeOffset? LastModified,
+        string ContentHash,
+        bool NotModified);
+
+    private sealed record PluginReadmeCacheEntry(
+        PluginReadmeResult Result,
+        DateTimeOffset LastCheckedAt,
+        string? ETag,
+        DateTimeOffset? LastModified);
+
+    private sealed class PluginCatalogCacheMetadata
+    {
+        public int SchemaVersion { get; set; }
+
+        public string SourceUrl { get; set; } = "";
+
+        public string ETag { get; set; } = "";
+
+        public DateTimeOffset? LastModified { get; set; }
+
+        public DateTimeOffset LastCheckedAt { get; set; }
+
+        public string ContentHash { get; set; } = "";
     }
 }
 

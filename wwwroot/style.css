@@ -1317,13 +1317,42 @@ body[data-wallpaper="on"][data-theme="light"] {
 }
 
 @media (max-width: 480px) {
-  .script-grid .script-card { grid-template-columns: 44px minmax(0, 1fr); }
-  .script-grid .script-card .script-ico { display: none; }
-  .script-grid .script-card .script-main { grid-column: 2; }
-  .script-grid .script-card .script-ops, .script-grid .script-card .queue-ops { grid-column: 2; }
+  .script-grid .script-card { grid-template-columns: 44px 36px minmax(0, 1fr); }
+  .script-grid .script-card .script-ico { display: block; grid-column: 2; grid-row: 1; }
+  .script-grid .script-card .script-main { grid-column: 3; grid-row: 1; }
+  .script-grid .script-card .script-ops, .script-grid .script-card .queue-ops { grid-column: 2 / -1; }
   .script-grid .script-card .meta-line > span:not(.badge) { max-width: 150px; }
   .user-card > .list-item-head > div:first-child, .user-card > .list-item-head > .action-row { grid-column: 2; }
   .timeset-card > .timeset-details { padding-left: 0; }
+
+  .script-grid .global-user-card {
+    grid-template-columns: 44px 40px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+  .script-grid .global-user-card > .global-user-avatar-button {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+  }
+  .script-grid .global-user-card > .global-user-main {
+    grid-column: 3;
+    grid-row: 1;
+    align-self: start;
+    min-width: 0;
+  }
+  .script-grid .global-user-card > .global-user-actions {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+  .script-grid .global-user-card .global-user-meta {
+    align-items: flex-start;
+    row-gap: 4px;
+  }
+  .script-grid .global-user-card .global-user-meta > * {
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 
 /* v0.8.6 acceptance refinements */

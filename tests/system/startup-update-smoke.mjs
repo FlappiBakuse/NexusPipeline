@@ -101,7 +101,13 @@ test("启动自动检查：开启时无需手动调用且只请求一次更新�
   try {
     startRuntime(["web"], { NEXUS_UPDATE_URL: sourceUrl });
     await waitForService();
-    const observed = await waitFor(() => fixture.requestCount > 0, 15000, 100);
+    const observed = await waitFor(async () => {
+      if (fixture.requestCount <= 0) return false;
+      const response = await api("GET", "/api/update/status");
+      if (!response.ok) return false;
+      const status = await response.json();
+      return status.available === true && status.latest === updateVersion;
+    }, 15000, 100);
     assert.equal(observed, true, "宿主启动后应自动请求更新源");
     assert.equal(fixture.requestCount, 1, "启动自动检查不得重复触发");
     const status = await (await api("GET", "/api/update/status")).json();

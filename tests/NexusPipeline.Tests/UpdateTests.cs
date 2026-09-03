@@ -167,6 +167,31 @@ public sealed class UpdateCatalogTests
             CancellationToken.None));
     }
 
+    [Fact]
+    public async Task SourcePolicy_SendsConditionalHeadersAndAcceptsNotModified()
+    {
+        var handler = new ConditionalRequestHandler();
+        using var http = new HttpClient(handler);
+        var policy = new UpdateSourcePolicy("http://127.0.0.1:5899/catalog.json");
+        DateTimeOffset modified = new(2026, 9, 1, 0, 0, 0, TimeSpan.Zero);
+
+        using HttpResponseMessage response = await policy.GetAsync(
+            http,
+            new Uri("http://127.0.0.1:5899/catalog.json"),
+            manifest: true,
+            "test",
+            CancellationToken.None,
+            request =>
+            {
+                request.Headers.TryAddWithoutValidation("If-None-Match", "\"catalog-v1\"");
+                request.Headers.IfModifiedSince = modified;
+            });
+
+        Assert.Equal(HttpStatusCode.NotModified, response.StatusCode);
+        Assert.Equal("\"catalog-v1\"", handler.IfNoneMatch);
+        Assert.Equal(modified, handler.IfModifiedSince);
+    }
+
     private sealed class RedirectEscapeHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -177,6 +202,25 @@ public sealed class UpdateCatalogTests
             };
             response.Headers.Location = new Uri("https://evil.example.com/pkg.zip");
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class ConditionalRequestHandler : HttpMessageHandler
+    {
+        public string? IfNoneMatch { get; private set; }
+
+        public DateTimeOffset? IfModifiedSince { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            IfNoneMatch = request.Headers.TryGetValues("If-None-Match", out IEnumerable<string>? etags)
+                ? etags.SingleOrDefault()
+                : null;
+            IfModifiedSince = request.Headers.IfModifiedSince;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotModified)
+            {
+                RequestMessage = request,
+            });
         }
     }
 }

@@ -114,6 +114,10 @@ internal static class ConfigEditCommands
         }
 
         bool keepGate = false;
+        Process? startedProcess = null;
+        ProcessIdentity? startedIdentity = null;
+        ProcessOwnership? startedOwnership = null;
+        EditSession? pendingSession = null;
         try
         {
             if (!TextRules.IsExecutable(target.Script.MainExe))
@@ -177,14 +181,24 @@ internal static class ConfigEditCommands
             Process? process;
             try
             {
+                startedOwnership = ProcessOwnership.TryCreate("编辑配置");
                 process = SystemActions.StartVisible(
                     target.Script.MainExe,
                     string.IsNullOrWhiteSpace(target.Script.RootPath)
                         ? Path.GetDirectoryName(target.Script.MainExe) ?? ""
-                        : target.Script.RootPath);
+                        : target.Script.RootPath,
+                    startedOwnership);
+                if (process is null)
+                {
+                    throw new InvalidOperationException("主程序没有返回有效进程句柄");
+                }
+                startedProcess = process;
+                startedIdentity = ProcessIdentity.Capture(process);
             }
             catch (Exception ex)
             {
+                startedOwnership?.Dispose();
+                startedOwnership = null;
                 try
                 {
                     UserConfigManager.CancelEdit(
@@ -205,22 +219,61 @@ internal static class ConfigEditCommands
                     "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试");
             }
 
-            SystemActions.BringToFrontFireAndForget(process?.Id ?? 0, "编辑配置");
-            UserConfigManager.EditSessions[target.Script.Id] = new EditSession
+            ProcessOwnership? sessionOwnership = startedOwnership?.HasAssignedProcess == true
+                ? startedOwnership
+                : null;
+            if (sessionOwnership is null)
+            {
+                startedOwnership?.Dispose();
+                startedOwnership = null;
+            }
+            var session = new EditSession
             {
                 Script = target.Script,
                 User = target.User,
                 Process = process,
+                ProcessIdentity = startedIdentity,
+                ProcessOwnership = sessionOwnership,
+                ForegroundCancellation = startedIdentity is null ? null : new CancellationTokenSource(),
                 Mark = editMark,
                 Spec = target.Spec,
             };
+            pendingSession = session;
+            if (startedIdentity is not null && session.ForegroundCancellation is not null)
+            {
+                // 先创建并持有前置任务，再把会话公开给 Complete；避免极短编辑窗口在任务赋值前完成收尾。
+                session.ForegroundTask = SystemActions.BringToFrontAsync(
+                    startedIdentity.Value,
+                    "编辑配置",
+                    session.ForegroundCancellation.Token,
+                    stopAfterFirstAttempt: true);
+                EventHandler processExited = (_, _) => session.CancelForeground();
+                session.ProcessExitedHandler = processExited;
+                try
+                {
+                    process.Exited += processExited;
+                    process.EnableRaisingEvents = true;
+                    if (process.HasExited)
+                    {
+                        session.CancelForeground();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"[配置编辑] 注册进程退出通知失败，将由身份轮询结束前置任务：{ex.Message}");
+                }
+            }
+            UserConfigManager.EditSessions[target.Script.Id] = session;
+            pendingSession = null;
+            startedOwnership = null;
+            startedProcess = null;
             keepGate = true;
             Audit.Log(source, "开始编辑配置", $"{target.Script.Name} / {target.User.UserName}（主程序已启动，方式={editMode}）");
-            return OperationResult<ConfigEditStarted>.Ok(new ConfigEditStarted(process?.Id ?? 0, editMode));
+            return OperationResult<ConfigEditStarted>.Ok(new ConfigEditStarted(process.Id, editMode));
         }
         catch (Exception ex)
         {
-            if (keepGate)
+            if (keepGate || startedProcess is not null)
             {
                 try
                 {
@@ -228,13 +281,15 @@ internal static class ConfigEditCommands
                             target.Script.Id,
                             out EditSession? registered))
                     {
+                        registered.CancelForeground();
                         if (registered.Process is not null)
                         {
-                            SystemActions.KillOwnedProcessTree(
-                                null,
+                            SystemActions.KillEditProcess(
+                                registered.ProcessOwnership,
+                                registered.ProcessIdentity,
                                 registered.Process.Id,
                                 ResolveLaunchTargetExe(target.Script),
-                                "脚本",
+                                "编辑配置",
                                 stableSeconds: 3);
                         }
 
@@ -248,7 +303,33 @@ internal static class ConfigEditCommands
                             target.Script.ConfigPath);
                         UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
                         ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
+                        registered.DisposeProcessResources();
                         editLeaseHeld = false;
+                    }
+                    else if (startedProcess is not null)
+                    {
+                        pendingSession?.CancelForeground();
+                        SystemActions.KillEditProcess(
+                            startedOwnership,
+                            startedIdentity,
+                            startedProcess.Id,
+                            ResolveLaunchTargetExe(target.Script),
+                            "编辑配置",
+                            stableSeconds: 3);
+                        pendingSession?.DisposeProcessResources();
+                        pendingSession = null;
+                        startedOwnership?.Dispose();
+                        startedOwnership = null;
+                        startedProcess.Dispose();
+                        startedProcess = null;
+                        UserConfigManager.CancelEdit(
+                            target.Script.Id,
+                            target.UserKey,
+                            target.Script.ConfigPath);
+                        UserConfigManager.RestoreHiddenConfigs(
+                            target.Script.Id,
+                            target.UserKey,
+                            target.Script.ConfigPath);
                     }
                 }
                 catch (Exception cleanupEx)
@@ -258,6 +339,9 @@ internal static class ConfigEditCommands
 
                 keepGate = false;
             }
+
+            startedOwnership?.Dispose();
+            startedProcess?.Dispose();
 
             return Internal<ConfigEditStarted>(ex);
         }
@@ -314,6 +398,7 @@ internal static class ConfigEditCommands
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool sessionRemoved = false;
+        Stopwatch totalTimer = Stopwatch.StartNew();
         try
         {
             string editMode = NormalizeEditMode(session.Mark?.EditMode ?? "normal") ?? "normal";
@@ -325,18 +410,22 @@ internal static class ConfigEditCommands
                 return Validation<ConfigEditCompleted>("配置文件尚未生成，请先完成配置或取消本次编辑");
             }
 
+            session.CancelForeground();
             string launchExe = ResolveLaunchTargetExe(session.Script);
+            Stopwatch cleanupTimer = Stopwatch.StartNew();
             bool processClean = session.Process is not null
-                ? SystemActions.KillOwnedProcessTree(
-                    null,
+                ? SystemActions.KillEditProcess(
+                    session.ProcessOwnership,
+                    session.ProcessIdentity,
                     session.Process.Id,
                     launchExe,
-                    "脚本",
+                    "编辑配置",
                     stableSeconds: 3)
                 : SystemActions.KillExistingProcessesByIdentity(
                     launchExe,
-                    "脚本",
+                    "编辑配置",
                     stableSeconds: 3);
+            Logger.Info($"[配置编辑] 进程收尾耗时 {cleanupTimer.ElapsedMilliseconds} ms（{target.Script.Id} / {sessionUserKey}）。");
             if (!processClean)
             {
                 return Conflict<ConfigEditCompleted>(
@@ -344,6 +433,7 @@ internal static class ConfigEditCommands
                     "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试");
             }
 
+            Stopwatch swapTimer = Stopwatch.StartNew();
             string? swapError = action == "done"
                 ? UserConfigManager.CommitEdit(
                     session.Script.Id,
@@ -353,6 +443,7 @@ internal static class ConfigEditCommands
                     session.Script.Id,
                     sessionUserKey,
                     session.Script.ConfigPath);
+            Logger.Info($"[配置编辑] 配置交换耗时 {swapTimer.ElapsedMilliseconds} ms（操作={action}）。");
             if (swapError is not null)
             {
                 return Validation<ConfigEditCompleted>(
@@ -365,14 +456,17 @@ internal static class ConfigEditCommands
                 sessionUserKey,
                 session.Script.ConfigPath);
 
+            Stopwatch validatorTimer = Stopwatch.StartNew();
             ConfigValidationResult validation = action == "done"
                 ? RunConfigValidator(session.Script, session.User, sessionUserKey, session.Spec?.ConfigValidator)
                 : ConfigValidationResult.Skipped;
+            Logger.Info($"[配置编辑] validator 耗时 {validatorTimer.ElapsedMilliseconds} ms（操作={action}）。");
 
             sessionRemoved = UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
             if (sessionRemoved)
             {
                 ctx.Center.EndEditSession(session.Script.Id, sessionUserKey);
+                session.DisposeProcessResources();
             }
 
             Audit.Log(
@@ -391,6 +485,7 @@ internal static class ConfigEditCommands
             {
                 gate.Release();
             }
+            Logger.Info($"[配置编辑] {action} 收尾总耗时 {totalTimer.ElapsedMilliseconds} ms（脚本={scriptId}）。");
         }
     }
 

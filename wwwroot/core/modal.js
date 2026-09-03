@@ -2,7 +2,7 @@ import { $, $$ } from "./dom.js";
 import { esc } from "./format.js";
 import { icon } from "./icons.js";
 import { initAutoScroll, syncAllModeToggles, syncAllSwitchControls } from "./ui.js";
-import { initTooltips } from "./tooltip.js";
+import { focusWithoutTooltip, initTooltips } from "./tooltip.js";
 
 let modalReturnFocus = null;
 
@@ -72,10 +72,10 @@ export function showModal(content, wide = false, locked = false, allowClose = fa
     const last = focusable[focusable.length - 1];
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
-      last.focus();
+      focusWithoutTooltip(last);
     } else if (!event.shiftKey && document.activeElement === last) {
       event.preventDefault();
-      first.focus();
+      focusWithoutTooltip(first);
     }
   });
   const lockedEscapeHandler = event => {
@@ -92,7 +92,7 @@ export function showModal(content, wide = false, locked = false, allowClose = fa
     if (!mask.isConnected) return;
     if (modal.contains(event.relatedTarget)) return;
     const first = $("input, select, textarea", modal) || $("button, a[href]", modal);
-    if (first) first.focus({ preventScroll: true });
+    if (first) focusWithoutTooltip(first, { preventScroll: true });
   });
   initAutoScroll(modal);
   syncAllModeToggles(modal);
@@ -108,7 +108,7 @@ export function showModal(content, wide = false, locked = false, allowClose = fa
   requestAnimationFrame(() => {
     if (!modal.contains(document.activeElement)) {
       const first = $("input, select, textarea", modal) || $("button, a[href]", modal);
-      if (first) first.focus({ preventScroll: true });
+      if (first) focusWithoutTooltip(first, { preventScroll: true });
     }
     // 队列拖拽/新增定时会异步重建整个弹窗；在聚焦与布局完成后恢复 body 滚动，避免回到顶部。
     restorePreviousBodyScroll();

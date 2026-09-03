@@ -158,11 +158,25 @@ internal static class SystemActions
     /// </summary>
     public static Process? StartVisible(string exePath, string workingDir)
     {
+        return StartVisible(exePath, workingDir, ownership: null);
+    }
+
+    /// <summary>启动可见编辑进程并立即加入当前编辑会话的 Job Object（不可用时由调用方回退到进程身份清理）。</summary>
+    public static Process? StartVisible(
+        string exePath,
+        string workingDir,
+        ProcessOwnership? ownership)
+    {
         bool commandFile = IsCommandFile(exePath);
         var psi = BuildScriptStartInfo(exePath, workingDir, Array.Empty<string>(), noWindow: commandFile, redirect: true);
         try
         {
-            return StartWithOutputDrain(psi);
+            Process? process = StartWithOutputDrain(psi);
+            if (process is not null)
+            {
+                ownership?.TryAssign(process);
+            }
+            return process;
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
         {
@@ -352,6 +366,56 @@ internal static class SystemActions
             }
         }
         return result;
+    }
+
+    /// <summary>按稳定的 BFS 顺序返回根进程及其后代 PID，根进程优先，兄弟进程按 PID 排序。</summary>
+    private static IReadOnlyList<int> ProcessTreeOrder(
+        int rootPid,
+        IReadOnlyDictionary<int, ProcessNode> nodes)
+    {
+        var childrenByParent = nodes.Values
+            .GroupBy(node => node.Ppid)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(node => node.Pid).OrderBy(pid => pid).ToArray());
+        var result = new List<int>();
+        var visited = new HashSet<int>();
+        var queue = new Queue<int>();
+        queue.Enqueue(rootPid);
+        while (queue.Count > 0)
+        {
+            int pid = queue.Dequeue();
+            if (!visited.Add(pid) || !nodes.ContainsKey(pid))
+            {
+                continue;
+            }
+            result.Add(pid);
+            if (childrenByParent.TryGetValue(pid, out int[]? children))
+            {
+                foreach (int childPid in children)
+                {
+                    queue.Enqueue(childPid);
+                }
+            }
+        }
+        return result;
+    }
+
+    private static ProcessIdentity? CaptureProcessIdentity(int pid)
+    {
+        if (pid <= 0)
+        {
+            return null;
+        }
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            return ProcessIdentity.Capture(process);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool IsSameProcessName(string exeFile, string baseName)
@@ -588,6 +652,178 @@ internal static class SystemActions
             excludeProcessBaseName,
             cleanup,
             stableSeconds);
+    }
+
+    /// <summary>
+    /// 清理编辑配置进程。编辑会话优先只操作自己捕获的 Job/进程身份；只有无法快速确认时才进入稳定退出观察，
+    /// 避免把用户在编辑期间另外打开的同名程序作为目标进程处理。
+    /// </summary>
+    public static bool KillEditProcess(
+        ProcessOwnership? ownership,
+        ProcessIdentity? identity,
+        int rootPid,
+        string exePath,
+        string display,
+        int rounds = 5,
+        int intervalMs = 800,
+        int stableSeconds = 3)
+    {
+        if (rootPid <= 0)
+        {
+            Logger.Warn($"[警告] {display}收到无效 root PID {rootPid}，拒绝执行编辑进程清理。");
+            return false;
+        }
+
+        if (ownership is not null
+            && ownership.IsUsable
+            && ownership.HasAssignedProcess
+            && identity is not null
+            && TryFastKillEditOwnedProcess(ownership, identity.Value, rootPid, exePath))
+        {
+            return true;
+        }
+
+        if (identity is not null)
+        {
+            ProcessCleanupResult initial = KillEditProcessPass(ownership, identity.Value, rootPid);
+            return ConfirmStableExit(
+                exePath,
+                display,
+                () => KillEditProcessPass(ownership, identity.Value, rootPid),
+                () => CaptureEditIdentities(ownership, identity.Value, exePath),
+                rounds,
+                intervalMs,
+                excludeProcessBaseName: null,
+                initial,
+                stableSeconds);
+        }
+
+        // 兼容无法捕获身份的旧会话；该路径保留原有安全稳定窗口。
+        return KillOwnedProcessTree(
+            ownership,
+            rootPid,
+            exePath,
+            display,
+            rounds,
+            intervalMs,
+            excludeProcessBaseName: null,
+            stableSeconds);
+    }
+
+    private static bool TryFastKillEditOwnedProcess(
+        ProcessOwnership ownership,
+        ProcessIdentity identity,
+        int rootPid,
+        string exePath)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(Math.Max(2, TestHooks.ScaledSeconds(5)));
+        KillEditOwnedFromJob(ownership, rootPid);
+        while (DateTime.UtcNow < deadline)
+        {
+            IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
+            if (owned.Count == 0 && !IsIdentityRunning(identity))
+            {
+                IReadOnlyList<ProcessIdentity> unexpected = CaptureExecutableIdentities(
+                    exePath,
+                    excludeProcessBaseName: null,
+                    rootPid: null)
+                    .Where(current => !identity.Matches(current))
+                    .ToArray();
+                if (unexpected.Count == 0)
+                {
+                    Logger.Debug($"[配置编辑] Job Object 已快速清理（PID {rootPid}）。");
+                    return true;
+                }
+
+                // 编辑期间出现了新的同映像身份，交给稳定窗口判断，避免误判为原进程已结束。
+                break;
+            }
+
+            KillEditOwnedFromJob(ownership, rootPid);
+            Thread.Sleep(Math.Max(10, Math.Min(100, TestHooks.ScaledMs(50))));
+        }
+        return false;
+    }
+
+    private static ProcessCleanupResult KillEditIdentityTree(ProcessIdentity identity)
+    {
+        if (!IsIdentityRunning(identity))
+        {
+            return ProcessCleanupResult.Confirmed("编辑进程身份已退出");
+        }
+        ProcessCleanupResult tree = KillTree(identity.Pid);
+        ProcessCleanupResult root = !IsIdentityRunning(identity)
+            || TryKillIdentity(identity, allowWeakImageName: false)
+            ? ProcessCleanupResult.Confirmed("已终止编辑进程身份")
+            : ProcessCleanupResult.Unconfirmed(new[] { identity.Pid }, "编辑进程身份终止未确认");
+        return CombineCleanup(tree, root);
+    }
+
+    private static ProcessCleanupResult KillEditProcessPass(
+        ProcessOwnership? ownership,
+        ProcessIdentity identity,
+        int rootPid)
+    {
+        ProcessCleanupResult owned = ownership is not null
+            && ownership.IsUsable
+            && ownership.HasAssignedProcess
+            ? KillEditOwnedFromJob(ownership, rootPid)
+            : ProcessCleanupResult.Confirmed("编辑会话没有可用 Job Object");
+        return CombineCleanup(owned, KillEditIdentityTree(identity));
+    }
+
+    private static ProcessCleanupResult KillEditOwnedFromJob(ProcessOwnership ownership, int rootPid)
+    {
+        IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
+        int killed = 0;
+        foreach (ProcessIdentity identity in owned)
+        {
+            if (TryKillIdentity(identity, allowWeakImageName: true))
+            {
+                killed++;
+            }
+        }
+        IReadOnlyList<ProcessIdentity> remaining = ownership.Snapshot();
+        return remaining.Count == 0
+            ? ProcessCleanupResult.Confirmed($"编辑 Job Object 已清理 {killed} 个 owned 进程")
+            : ProcessCleanupResult.Unconfirmed(
+                remaining.Select(item => item.Pid),
+                $"编辑 Job Object 中仍有 {remaining.Count} 个 owned 进程存活");
+    }
+
+    private static IReadOnlyList<ProcessIdentity> CaptureEditIdentities(
+        ProcessOwnership? ownership,
+        ProcessIdentity rootIdentity,
+        string exePath)
+    {
+        var identities = new List<ProcessIdentity>();
+        if (ownership is not null && ownership.IsUsable)
+        {
+            identities.AddRange(ownership.Snapshot());
+        }
+        if (IsIdentityRunning(rootIdentity))
+        {
+            identities.Add(rootIdentity);
+        }
+        identities.AddRange(CaptureExecutableIdentities(exePath, null, null));
+        return identities
+            .GroupBy(identity => identity.Pid)
+            .Select(group => group.First())
+            .ToArray();
+    }
+
+    private static bool IsIdentityRunning(ProcessIdentity identity)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(identity.Pid);
+            ProcessIdentity? current = ProcessIdentity.Capture(process);
+            return current is not null && identity.Matches(current.Value);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>没有 root PID 时的显式身份清理入口，供旧进程/编辑会话恢复使用。</summary>
@@ -951,27 +1187,56 @@ internal static class SystemActions
         }
     }
 
-    /// <summary>
-    /// 后台前置进程窗口（，仅启动时一次）：fire-and-forget 但观察异常（宿主为常驻服务进程，P/Invoke 均在后台线程执行）。
-    /// 编辑用户配置（主程序窗口前置）与运行脚本实例/调度队列（游戏窗口前置）共用。
-    /// </summary>
+    /// <summary>后台前置进程窗口；先捕获完整进程身份，避免 PID 复用后触碰其他窗口。</summary>
     public static void BringToFrontFireAndForget(int pid, string what)
     {
         if (pid <= 0)
         {
             return;
         }
-        _ = Task.Run(() =>
+        ProcessIdentity? identity = null;
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            identity = ProcessIdentity.Capture(process);
+        }
+        catch
+        {
+            return;
+        }
+        if (identity is not null)
+        {
+            _ = BringToFrontAsync(identity.Value, what, CancellationToken.None);
+        }
+    }
+
+    /// <summary>按捕获的进程身份异步前置窗口；按本次启动的进程树寻找 GUI 窗口，取消后立即结束轮询。</summary>
+    public static Task<bool> BringToFrontAsync(
+        ProcessIdentity identity,
+        string what,
+        CancellationToken cancellationToken,
+        bool stopAfterFirstAttempt = false)
+    {
+        return Task.Run(() =>
         {
             try
             {
-                BringToFront(pid);
+                return BringToFront(
+                    identity,
+                    timeoutSeconds: 30,
+                    cancellationToken: cancellationToken,
+                    stopAfterFirstAttempt: stopAfterFirstAttempt);
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[警告] 前置{what}窗口失败：{ex.Message}");
+                return false;
             }
-        });
+        }, cancellationToken);
     }
 
     /// <summary>
@@ -998,12 +1263,12 @@ internal static class SystemActions
     }
 
     /// <summary>
-    /// 将指定进程的可见主窗口前置（强化）：轮询进程顶层可见窗口（EnumWindows 按 PID 匹配），
+    /// 将指定进程的 GUI 窗口前置（强化）：轮询本次启动进程树的顶层可见窗口（跳过 ConsoleWindowClass），
     /// 找到后组合前置——还原最小化 + AttachThreadInput 模拟前台线程输入（绕过 Windows 前台锁定，
     /// 后台常驻服务进程直接 SetForegroundWindow 几乎必然失败）+ BringWindowToTop 置顶 Z 序 + SetForegroundWindow 激活；
-    /// 前置失败（前台被其他窗口占据/窗口尚未就绪）每 1 秒重试，直至成功或超时。
+    /// 编辑配置会话可要求首次尝试后立即停止，运行中的游戏窗口保持可重试。
     /// 用于游戏窗口/编辑配置主程序启动后避免被浏览器等前台窗口遮挡（如 BetterGI 截图识别游戏画面需要窗口在最前）。
-    /// 找不到可见窗口（bat/cmd 无窗口、进程无窗口）静默放弃；超时仍失败输出 Warn 日志（可观测）。
+    /// 找不到可见 GUI 窗口（bat/cmd 无窗口、进程无窗口）静默放弃；超时仍失败输出 Warn 日志（可观测）。
     /// </summary>
     public static bool BringToFront(int pid, int timeoutSeconds = 30)
     {
@@ -1011,18 +1276,72 @@ internal static class SystemActions
         {
             return false;
         }
-        DateTime deadline = DateTime.Now.AddSeconds(timeoutSeconds);
-        while (DateTime.Now < deadline)
+        try
         {
-            IntPtr hWnd = FindVisibleWindow(pid);
-            if (hWnd != IntPtr.Zero && TryBringToFront(hWnd))
-            {
-                Logger.Debug($"[前置] 已前置进程窗口（PID {pid}，句柄 {hWnd}）。");
-                return true;
-            }
-            Thread.Sleep(1000);
+            using Process process = Process.GetProcessById(pid);
+            ProcessIdentity? identity = ProcessIdentity.Capture(process);
+            return identity is not null && BringToFront(identity.Value, timeoutSeconds, CancellationToken.None);
         }
-        Logger.Warn($"[警告] 前置进程窗口超时（PID {pid}，{timeoutSeconds} 秒内未能置顶），窗口可能被其他界面遮挡。");
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>按完整进程身份前置窗口，并在真正成为前台窗口后立即停止。</summary>
+    public static bool BringToFront(
+        ProcessIdentity identity,
+        int timeoutSeconds = 30,
+        CancellationToken cancellationToken = default,
+        bool stopAfterFirstAttempt = false)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(Math.Max(0, timeoutSeconds));
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsFrontingProcessAlive(identity))
+            {
+                Logger.Debug($"[前置] 目标进程及其受信任子进程均已退出，停止前置窗口（PID {identity.Pid}）。");
+                return false;
+            }
+
+            FrontWindowCandidate? candidate = FindFrontWindow(identity);
+            if (candidate is not null)
+            {
+                // 编辑配置要求首次发现目标后只执行这一轮；运行时调用方仍可在失败时重新观察。
+                IntPtr targetWindow = candidate.Value.Handle;
+                ProcessIdentity targetIdentity = candidate.Value.Identity;
+                if (!IsWindowOwnedByIdentity(targetWindow, identity, targetIdentity))
+                {
+                    Logger.Debug($"[前置] 目标 GUI 窗口已失效或失去本次启动所有权，停止前置（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
+                    return false;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                bool broughtToFront = TryBringToFront(targetWindow, identity, targetIdentity, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (broughtToFront
+                    && GetForegroundWindow() == targetWindow
+                    && IsWindowOwnedByIdentity(targetWindow, identity, targetIdentity))
+                {
+                    Logger.Debug($"[前置] 已前置进程 GUI 窗口（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
+                    return true;
+                }
+
+                if (stopAfterFirstAttempt)
+                {
+                    Logger.Debug($"[前置] 首次前置尝试未确认成功，停止继续轮询（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
+                    return false;
+                }
+                Logger.Debug($"[前置] 前置尝试未确认成功，继续等待目标进程窗口（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
+            }
+
+            if (cancellationToken.WaitHandle.WaitOne(250))
+            {
+                return false;
+            }
+        }
+        Logger.Warn($"[警告] 前置进程窗口超时（PID {identity.Pid}，{timeoutSeconds} 秒内未能置顶），窗口可能被其他界面遮挡。");
         return false;
     }
 
@@ -1052,27 +1371,135 @@ internal static class SystemActions
         return false;
     }
 
-    /// <summary>组合前置单次尝试：还原最小化 → 附加前台线程输入（绕过前台锁定）→ 置顶 → 激活。返回 SetForegroundWindow 是否成功。</summary>
-    private static bool TryBringToFront(IntPtr hWnd)
+    private readonly record struct FrontWindowCandidate(IntPtr Handle, ProcessIdentity Identity);
+
+    private static bool IsFrontingProcessAlive(ProcessIdentity rootIdentity)
     {
+        return IsIdentityRunning(rootIdentity);
+    }
+
+    private static FrontWindowCandidate? FindFrontWindow(ProcessIdentity rootIdentity)
+    {
+        bool rootRunning = IsIdentityRunning(rootIdentity);
+        var candidates = new List<ProcessIdentity>();
+
+        void AddCandidate(ProcessIdentity candidate)
+        {
+            if (!candidates.Any(existing => existing.Matches(candidate)))
+            {
+                candidates.Add(candidate);
+            }
+        }
+
+        if (rootRunning)
+        {
+            AddCandidate(rootIdentity);
+            try
+            {
+                IReadOnlyDictionary<int, ProcessNode> nodes = SnapshotProcesses();
+                foreach (int pid in ProcessTreeOrder(rootIdentity.Pid, nodes))
+                {
+                    if (pid == rootIdentity.Pid)
+                    {
+                        continue;
+                    }
+                    ProcessIdentity? child = CaptureProcessIdentity(pid);
+                    if (child is not null)
+                    {
+                        AddCandidate(child.Value);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[前置] 进程树快照失败，暂按根进程查找 GUI 窗口（PID {rootIdentity.Pid}）：{ex.Message}");
+            }
+        }
+
+        foreach (ProcessIdentity candidate in candidates)
+        {
+            if (!IsFrontingCandidateAlive(rootIdentity, candidate))
+            {
+                continue;
+            }
+            IntPtr window = FindVisibleWindowForPid(candidate.Pid, skipConsoleWindows: true);
+            if (window != IntPtr.Zero)
+            {
+                return new FrontWindowCandidate(window, candidate);
+            }
+        }
+        return null;
+    }
+
+    private static bool IsFrontingCandidateAlive(
+        ProcessIdentity rootIdentity,
+        ProcessIdentity candidate)
+    {
+        if (!IsIdentityRunning(candidate))
+        {
+            return false;
+        }
+        if (rootIdentity.Matches(candidate))
+        {
+            return true;
+        }
+        return IsIdentityRunning(rootIdentity);
+    }
+
+    /// <summary>组合前置单次尝试：还原最小化 → 附加前台线程输入（绕过前台锁定）→ 置顶 → 激活。返回 SetForegroundWindow 是否成功。</summary>
+    private static bool TryBringToFront(
+        IntPtr hWnd,
+        ProcessIdentity rootIdentity,
+        ProcessIdentity windowIdentity,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsWindowOwnedByIdentity(hWnd, rootIdentity, windowIdentity))
+        {
+            return false;
+        }
         ShowWindow(hWnd, SW_RESTORE);
         ShowWindow(hWnd, SW_SHOW);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!IsWindowOwnedByIdentity(hWnd, rootIdentity, windowIdentity))
+        {
+            return false;
+        }
         IntPtr foreground = GetForegroundWindow();
         uint targetThread = GetWindowThreadProcessId(hWnd, out _);
+        if (targetThread == 0)
+        {
+            return false;
+        }
         bool attached = false;
+        uint attachedFromThread = 0;
         if (foreground != IntPtr.Zero)
         {
             uint fgThread = GetWindowThreadProcessId(foreground, out _);
             if (fgThread != targetThread)
             {
                 attached = AttachThreadInput(fgThread, targetThread, true);
+                if (attached)
+                {
+                    attachedFromThread = fgThread;
+                }
             }
         }
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsWindowOwnedByIdentity(hWnd, rootIdentity, windowIdentity))
+            {
+                return false;
+            }
             BringWindowToTop(hWnd);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!IsWindowOwnedByIdentity(hWnd, rootIdentity, windowIdentity))
+            {
+                return false;
+            }
             bool ok = SetForegroundWindow(hWnd);
-            if (ok)
+            if (ok && IsWindowOwnedByIdentity(hWnd, rootIdentity, windowIdentity))
             {
                 SetFocus(hWnd);
                 SetActiveWindow(hWnd);
@@ -1081,12 +1508,37 @@ internal static class SystemActions
         }
         finally
         {
-            if (attached)
+            if (attached && attachedFromThread != 0)
             {
-                uint fgThread = GetWindowThreadProcessId(foreground, out _);
-                AttachThreadInput(fgThread, targetThread, false);
+                // 使用 AttachThreadInput 成功时的原始线程 ID 解绑定；前台窗口句柄随后可能已销毁或被复用。
+                AttachThreadInput(attachedFromThread, targetThread, false);
             }
         }
+    }
+
+    private static bool IsWindowOwnedByIdentity(
+        IntPtr hWnd,
+        ProcessIdentity rootIdentity,
+        ProcessIdentity windowIdentity)
+    {
+        if (hWnd == IntPtr.Zero || !IsWindow(hWnd))
+        {
+            return false;
+        }
+        GetWindowThreadProcessId(hWnd, out uint windowPid);
+        if (windowPid != (uint)windowIdentity.Pid)
+        {
+            return false;
+        }
+        if (!IsIdentityRunning(windowIdentity))
+        {
+            return false;
+        }
+        if (rootIdentity.Matches(windowIdentity))
+        {
+            return true;
+        }
+        return IsIdentityRunning(rootIdentity);
     }
 
     private const int SW_RESTORE = 9;
@@ -1105,6 +1557,12 @@ internal static class SystemActions
 
     [DllImport("user32.dll")]
     private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -1129,11 +1587,18 @@ internal static class SystemActions
 
     internal static IntPtr FindVisibleWindow(int pid)
     {
+        return FindVisibleWindowForPid(pid, skipConsoleWindows: false);
+    }
+
+    private static IntPtr FindVisibleWindowForPid(int pid, bool skipConsoleWindows)
+    {
         IntPtr found = IntPtr.Zero;
         EnumWindows((hWnd, _) =>
         {
             GetWindowThreadProcessId(hWnd, out uint windowPid);
-            if (windowPid == (uint)pid && IsWindowVisible(hWnd))
+            if (windowPid == (uint)pid
+                && IsWindowVisible(hWnd)
+                && (!skipConsoleWindows || !IsConsoleWindow(hWnd)))
             {
                 found = hWnd;
                 return false;
@@ -1141,6 +1606,14 @@ internal static class SystemActions
             return true;
         }, IntPtr.Zero);
         return found;
+    }
+
+    private static bool IsConsoleWindow(IntPtr hWnd)
+    {
+        var className = new StringBuilder(64);
+        int length = GetClassName(hWnd, className, className.Capacity);
+        return length > 0
+            && string.Equals(className.ToString(), "ConsoleWindowClass", StringComparison.Ordinal);
     }
 
     private static bool Run(string file, string args)

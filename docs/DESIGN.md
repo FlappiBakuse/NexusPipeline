@@ -305,6 +305,8 @@ flowchart LR
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式——`fresh`（全新配置：config 存在则移入 original，脚本在空位置生成新配置，done=复制入库+original 移回，cancel=清生成物+original 移回）或 `reuse`（复用配置：全程无文件动作，done=复制入库，cancel=仅清标记）。运行与编辑经 `ScriptConfigGate` 互斥。
 
+编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份；窗口前置轮询同时校验该身份、目标窗口归属和编辑会话取消令牌。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消轮询，目标进程退出后不会继续争用前台窗口。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
+
 ### 4.3 插队替换配置（replaceConfigs）
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后应用**，避免进程仍持有配置文件时出现文件占用或半写窗口。**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
@@ -436,9 +438,9 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），仓库工具据此生成根目录 `catalog.json`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。catalog 条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），仓库工具据此生成根目录 `catalog.json`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。catalog 条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`，同时写入 `.nxp/state/plugins/catalog-cache.meta.json` 保存源地址、ETag、Last-Modified、最近验证时间和内容 SHA256。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
 
-插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。仓库请求在内存缓存有效期内复用结果；过期请求失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。
+插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。catalog 在最近 5 分钟验证有效期内直接复用内存快照；过期或手动刷新时携带 ETag/Last-Modified 发起条件请求，`304` 只更新时间和验证元数据，`200` 仅在内容 SHA256 变化时替换 catalog 快照；没有 HTTP validator 时仍以校验后的内容哈希判断是否变化。网络失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。README 按官方 artifact/version 记录条件验证缓存，本地 README 按路径、文件大小和 LastWriteTimeUtc 指纹复用。`PluginManager` 的本地插件管理投影使用运行时修订缓存，启停、安装/更新/卸载登记、重载和归属/待处理事务变化会使其失效；前端保留当前列表和详情，在后台验证期间继续展示。
 
 插件安装/更新按以下顺序执行：
 
@@ -448,7 +450,7 @@ flowchart LR
 4. 写入带有机器 ID 和 artifactName 的 `pending.json`，返回“重启后生效”；
 5. 下次启动应用 pending 事务，再由 `PluginManager.LoadAll` 扫描当前插件目录。`PluginInstallRecovery` 使用 artifactName 进行目录交换；交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
 
-插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为目录缓存，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
 
 插件配置、密钥和作用域 JSON 解析失败时保留 `.corrupt-<timestamp>-<guid>` 现场，再以空值继续运行；后续写入不会覆盖原始损坏文件。managed-code 生命周期初始化、启动和停止均有 20 秒截止时间；用户运行事件在插件作用域中跟踪，并在清理时执行有界排空。
 
@@ -760,9 +762,9 @@ views/* 域之间互不引用（跨域数据只经 core/state.js 缓存共享；
 插件仓库与本地运行目录：
 
 - `PluginManager` 只扫描当前安装目录 `plugins/<ArtifactName>/`，schema 2 要求物理目录名与 manifest.artifactName 完全一致；逻辑身份取 manifest.name。它不读取网络，也不决定包下载策略。
-- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟内存缓存，过期时请求网络；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。catalog 由插件自身的 manifest、store 和包生成。
+- `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟验证有效期内的内存快照；过期时以 `catalog-cache.meta.json` 中的 ETag/Last-Modified 发起条件请求，`304` 复用快照，`200` 以内容 SHA256 决定是否更新 catalog 文件；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。catalog 由插件自身的 manifest、store 和包生成。
 - 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录逻辑机器 ID、目标 artifactName 和跨重启事务，启动时应用事务后扫描当前插件目录。
-- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 仅作可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
+- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 与 `catalog-cache.meta.json` 共同构成可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
 - Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；操作完成后提示重启生效。
 - managed-code 用户级设置端点为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`；用户列表徽章使用单次聚合端点 `GET /api/plugin-contributions/user-list-badges`，宿主负责异常隔离、白名单校验和 HTML 展示数据投影。
 - v1.3 通用 UI 贡献使用 `POST /api/plugin-contributions/ui/query`、`PUT /api/plugin-contributions/ui/{plugin}/{contribution}` 和 `POST /api/plugin-contributions/ui/{plugin}/{contribution}/action/{action}`；插件 Web API 使用 `GET|POST|PUT|PATCH|DELETE /api/plugin-api/{plugin}/<route>`。

@@ -55,6 +55,8 @@ internal static class AppPaths
 
     public static readonly string PluginCatalogCachePath = Path.Combine(PluginStateDir, "catalog-cache.json");
 
+    public static readonly string PluginCatalogCacheMetaPath = Path.Combine(PluginStateDir, "catalog-cache.meta.json");
+
     public static readonly string PluginOwnershipPath = Path.Combine(PluginStateDir, "ownership.json");
 
     public static readonly string PluginPendingPath = Path.Combine(PluginStateDir, "pending.json");

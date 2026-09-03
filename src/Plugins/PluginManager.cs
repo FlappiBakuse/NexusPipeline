@@ -86,6 +86,11 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly PluginUiContributionRegistry _uiContributions = new();
     private readonly PluginWebApiRegistry _webApi = new();
     private readonly PluginHistoryContributionRegistry _historyContributions = new();
+    private readonly object _managementSnapshotSync = new();
+    private long _managementRevision;
+    private IReadOnlyList<PluginSummary>? _pluginSummariesCache;
+    private IReadOnlyList<PluginManagementView>? _pluginManagementViewsCache;
+    private string? _managementStateFingerprint;
 
     internal PluginManager(
         Func<AppSettings> settings,
@@ -115,64 +120,96 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     {
         get
         {
-            var list = new List<PluginSummary>();
-            foreach (DataSpecializedPlugin plugin in _dataPlugins)
+            lock (_managementSnapshotSync)
             {
-                PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
-                    plugin.PluginDirectory,
-                    plugin.GameName,
-                    plugin.Version);
-                list.Add(new PluginSummary(
-                    plugin.Name,
-                    plugin.ArtifactName,
-                    plugin.DisplayName,
-                    string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.GameName : metadata.GameName,
-                    plugin.Description,
-                    plugin.Version,
-                    "data-specialized",
-                    "",
-                    plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
-                    plugin.Frontend is not null,
-                    plugin.Frontend?.ApiVersion ?? "")
-                {
-                    Authors = metadata.Authors,
-                    Tags = metadata.Tags,
-                    Homepage = metadata.Homepage,
-                    UpdatedAt = metadata.UpdatedAt,
-                    Changelog = metadata.Changelog,
-                    HasReadme = metadata.HasReadme,
-                });
+                return _pluginSummariesCache ??= BuildPluginSummaries();
             }
-            foreach (ManagedPluginDescriptor plugin in _managedPlugins)
-            {
-                string artifactName = plugin.Manifest.ArtifactName;
-                PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
-                    plugin.Directory,
-                    plugin.Manifest.GameName,
-                    plugin.Manifest.Version);
-                list.Add(new PluginSummary(
-                    plugin.Manifest.Name,
-                    artifactName,
-                    plugin.Manifest.DisplayName,
-                    string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.Manifest.GameName : metadata.GameName,
-                    plugin.Manifest.Description,
-                    plugin.Manifest.Version,
-                    "managed-code",
-                    plugin.Manifest.ApiVersion,
-                    plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
-                    plugin.Manifest.Frontend is not null,
-                    plugin.Manifest.Frontend?.ApiVersion ?? "")
-                {
-                    Authors = metadata.Authors,
-                    Tags = metadata.Tags,
-                    Homepage = metadata.Homepage,
-                    UpdatedAt = metadata.UpdatedAt,
-                    Changelog = metadata.Changelog,
-                    HasReadme = metadata.HasReadme,
-                });
-            }
-            return list;
         }
+    }
+
+    /// <summary>插件管理投影的当前内存修订号，供宿主缓存和调试观测使用。</summary>
+    internal long PluginManagementRevision
+    {
+        get
+        {
+            lock (_managementSnapshotSync)
+            {
+                return _managementRevision;
+            }
+        }
+    }
+
+    /// <summary>插件文件状态或运行时配置发生变化时清除本地投影缓存。</summary>
+    internal void InvalidateManagementSnapshot()
+    {
+        lock (_managementSnapshotSync)
+        {
+            _managementRevision++;
+            _pluginSummariesCache = null;
+            _pluginManagementViewsCache = null;
+            _managementStateFingerprint = null;
+        }
+    }
+
+    private IReadOnlyList<PluginSummary> BuildPluginSummaries()
+    {
+        var list = new List<PluginSummary>();
+        foreach (DataSpecializedPlugin plugin in _dataPlugins)
+        {
+            PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
+                plugin.PluginDirectory,
+                plugin.GameName,
+                plugin.Version);
+            list.Add(new PluginSummary(
+                plugin.Name,
+                plugin.ArtifactName,
+                plugin.DisplayName,
+                string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.GameName : metadata.GameName,
+                plugin.Description,
+                plugin.Version,
+                "data-specialized",
+                "",
+                plugin.CapabilityKeys.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+                plugin.Frontend is not null,
+                plugin.Frontend?.ApiVersion ?? "")
+            {
+                Authors = metadata.Authors,
+                Tags = metadata.Tags,
+                Homepage = metadata.Homepage,
+                UpdatedAt = metadata.UpdatedAt,
+                Changelog = metadata.Changelog,
+                HasReadme = metadata.HasReadme,
+            });
+        }
+        foreach (ManagedPluginDescriptor plugin in _managedPlugins)
+        {
+            string artifactName = plugin.Manifest.ArtifactName;
+            PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(
+                plugin.Directory,
+                plugin.Manifest.GameName,
+                plugin.Manifest.Version);
+            list.Add(new PluginSummary(
+                plugin.Manifest.Name,
+                artifactName,
+                plugin.Manifest.DisplayName,
+                string.IsNullOrWhiteSpace(metadata.GameName) ? plugin.Manifest.GameName : metadata.GameName,
+                plugin.Manifest.Description,
+                plugin.Manifest.Version,
+                "managed-code",
+                plugin.Manifest.ApiVersion,
+                plugin.Manifest.Capabilities.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+                plugin.Manifest.Frontend is not null,
+                plugin.Manifest.Frontend?.ApiVersion ?? "")
+            {
+                Authors = metadata.Authors,
+                Tags = metadata.Tags,
+                Homepage = metadata.Homepage,
+                UpdatedAt = metadata.UpdatedAt,
+                Changelog = metadata.Changelog,
+                HasReadme = metadata.HasReadme,
+            });
+        }
+        return list;
     }
 
     /// <summary>插件管理控制面共享投影；ownership/pending 由同一份快照合并，避免各适配器自行拼装。</summary>
@@ -180,11 +217,53 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     {
         get
         {
-            IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
-            IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
-            return PluginSummaries
-                .Select(summary => PluginManagementView.Create(summary, this, ownership, pending))
-                .ToArray();
+            string fingerprint = ReadManagementStateFingerprint();
+            lock (_managementSnapshotSync)
+            {
+                if (!string.Equals(_managementStateFingerprint, fingerprint, StringComparison.Ordinal))
+                {
+                    _managementRevision++;
+                    _pluginSummariesCache = null;
+                    _pluginManagementViewsCache = null;
+                    _managementStateFingerprint = fingerprint;
+                }
+                if (_pluginManagementViewsCache is not null)
+                {
+                    return _pluginManagementViewsCache;
+                }
+
+                IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
+                IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
+                _pluginManagementViewsCache = PluginSummaries
+                    .Select(summary => PluginManagementView.Create(summary, this, ownership, pending))
+                    .ToArray();
+                return _pluginManagementViewsCache;
+            }
+        }
+    }
+
+    private static string ReadManagementStateFingerprint()
+    {
+        return string.Join(
+            "|",
+            DescribeStateFile(AppPaths.PluginOwnershipPath),
+            DescribeStateFile(AppPaths.PluginPendingPath));
+    }
+
+    private static string DescribeStateFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return path + ":missing";
+            }
+            FileInfo file = new(path);
+            return $"{path}:{file.Length}:{file.LastWriteTimeUtc.Ticks}";
+        }
+        catch
+        {
+            return path + ":unavailable";
         }
     }
 
@@ -460,6 +539,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     /// </summary>
     public void LoadAll()
     {
+        InvalidateManagementSnapshot();
         if (_dataPlugins.Count > 0 || _managedPlugins.Count > 0 || _managedRuntimes.Count > 0)
         {
             ShutdownAll();
@@ -543,6 +623,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
         }
+        InvalidateManagementSnapshot();
     }
 
     public bool IsEnabled(string name)
@@ -614,6 +695,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             return false;
         }
         _configuredEnabled[name] = enabled;
+        InvalidateManagementSnapshot();
         Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
         Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
         failureCode = null;

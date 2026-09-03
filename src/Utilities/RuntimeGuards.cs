@@ -18,6 +18,11 @@ internal readonly record struct ProcessIdentity(int Pid, DateTime StartTime, str
     {
         try
         {
+            process.Refresh();
+            if (process.HasExited)
+            {
+                return null;
+            }
             string imageName;
             try
             {
@@ -99,6 +104,9 @@ internal sealed class ProcessOwnership : IDisposable
 
     public bool IsUsable => !_disposed && !_job.IsInvalid;
 
+    /// <summary>至少有一个启动进程成功加入 Job；未成功加入时调用方必须使用身份回退路径。</summary>
+    public bool HasAssignedProcess { get; private set; }
+
     public static ProcessOwnership? TryCreate(string display)
     {
         try
@@ -130,6 +138,10 @@ internal sealed class ProcessOwnership : IDisposable
             if (!assigned)
             {
                 Logger.Warn($"[警告] 进程 PID {process.Id} 未能加入本次 Attempt 的 Job Object（错误码 {Marshal.GetLastWin32Error()}）。");
+            }
+            else
+            {
+                HasAssignedProcess = true;
             }
             return assigned;
         }

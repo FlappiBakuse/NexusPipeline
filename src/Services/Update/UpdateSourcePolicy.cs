@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace NexusPipeline.Services.Update;
 
 /// <summary>
@@ -87,7 +89,8 @@ internal sealed class UpdateSourcePolicy
         Uri uri,
         bool manifest,
         string userAgent,
-        CancellationToken token)
+        CancellationToken token,
+        Action<HttpRequestMessage>? configureRequest = null)
     {
         Uri current = uri;
         for (int redirect = 0; redirect <= 5; redirect++)
@@ -106,8 +109,15 @@ internal sealed class UpdateSourcePolicy
             {
                 request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
             }
+            configureRequest?.Invoke(request);
             HttpResponseMessage response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            if ((int)response.StatusCode is >= 300 and <= 399)
+            if (response.StatusCode is
+                HttpStatusCode.MultipleChoices
+                or HttpStatusCode.MovedPermanently
+                or HttpStatusCode.Found
+                or HttpStatusCode.SeeOther
+                or HttpStatusCode.TemporaryRedirect
+                or HttpStatusCode.PermanentRedirect)
             {
                 Uri? next = response.Headers.Location;
                 response.Dispose();

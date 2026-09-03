@@ -11,16 +11,18 @@ let pluginLoadId = 0;
 let detailLoadId = 0;
 let searchQuery = "";
 let detailVisibleMobile = false;
+const listCacheTtl = 5 * 60 * 1000;
 
 const selectedByTab = { local: "", store: "" };
 const listState = {
-  local: { loading: false, error: "", plugins: [] },
-  store: { loading: false, available: true, stale: false, error: "", fetchedAt: "", plugins: [] },
+  local: { loading: false, loaded: false, dirty: false, lastValidatedAt: 0, signature: "", error: "", plugins: [] },
+  store: { loading: false, loaded: false, dirty: false, lastValidatedAt: 0, signature: "", available: true, stale: false, error: "", fetchedAt: "", plugins: [] },
 };
 const detailState = {
   local: { name: "", loading: false, error: "", data: null },
   store: { name: "", loading: false, error: "", data: null },
 };
+const detailCache = { local: new Map(), store: new Map() };
 
 function pluginKindLabel(plugin) {
   return plugin.kind === "data-specialized" ? "专项插件" : "通用插件";
@@ -119,7 +121,7 @@ function storeWarningMarkup() {
 function pluginListPaneMarkup(tab) {
   const data = listState[tab];
   const testId = tab === "store" ? "plugin-store-list" : "plugin-local-list";
-  if (data.loading) {
+  if (data.loading && !data.loaded) {
     return `<section class="plugin-list-pane" data-testid="${testId}">${pluginLoadingContent(tab === "store" ? "正在加载插件仓库" : "正在加载本地插件", tab === "store" ? "正在获取官方插件目录，请稍候…" : "正在读取本机插件状态，请稍候…", `${tab === "store" ? "plugin-store" : "plugin-local"}-loading`)}</section>`;
   }
   if (tab === "store" && data.available === false) {
@@ -223,7 +225,7 @@ function detailContentMarkup(detail, tab) {
 
 function detailPaneMarkup(tab) {
   const current = detailState[tab];
-  if (current.loading) {
+  if (current.loading && !current.data) {
     return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="plugin-detail-loading" role="status" aria-live="polite"><div class="plugin-loading-progress" role="progressbar" aria-label="正在加载插件详情"><span></span></div><strong>正在加载插件详情</strong><span class="muted">正在读取 README 与更新记录，请稍候…</span></div></section>`;
   }
   if (current.error) {
@@ -290,15 +292,21 @@ function selectDefaultPlugin(tab) {
   return selectedByTab[tab];
 }
 
-async function loadDetail(tab, token) {
+async function loadDetail(tab, token, force = false) {
   const name = selectedByTab[tab];
   if (!name) {
     detailState[tab] = { name: "", loading: false, error: "", data: null };
     if (isCurrent("plugins", token) && activeTab === tab) renderDetailPane();
     return;
   }
+  const cached = detailCache[tab].get(name) || null;
+  if (cached && !force) {
+    detailState[tab] = { name, loading: false, error: "", data: cached };
+    if (isCurrent("plugins", token) && activeTab === tab) renderDetailPane();
+    return;
+  }
   const id = ++detailLoadId;
-  detailState[tab] = { name, loading: true, error: "", data: null };
+  detailState[tab] = { name, loading: true, error: "", data: cached };
   if (isCurrent("plugins", token) && activeTab === tab) renderDetailPane();
   try {
     const path = tab === "store"
@@ -306,12 +314,48 @@ async function loadDetail(tab, token) {
       : `/api/plugins/${encodeURIComponent(name)}/detail`;
     const data = await api("GET", path);
     if (!isCurrent("plugins", token) || id !== detailLoadId || activeTab !== tab || selectedByTab[tab] !== name) return;
+    detailCache[tab].set(name, data);
     detailState[tab] = { name, loading: false, error: "", data };
     renderDetailPane();
   } catch (error) {
     if (!isCurrent("plugins", token) || id !== detailLoadId || activeTab !== tab || selectedByTab[tab] !== name) return;
-    detailState[tab] = { name, loading: false, error: error.message || "详情读取失败", data: null };
+    detailState[tab] = {
+      name,
+      loading: false,
+      error: cached ? "" : (error.message || "详情读取失败"),
+      data: cached,
+    };
     renderDetailPane();
+  }
+}
+
+function listSignature(plugins) {
+  try {
+    return JSON.stringify(Array.isArray(plugins) ? plugins : []);
+  } catch {
+    return "";
+  }
+}
+
+function listCacheIsFresh(tab) {
+  const data = listState[tab];
+  return data.loaded
+    && !data.dirty
+    && data.lastValidatedAt > 0
+    && Date.now() - data.lastValidatedAt < listCacheTtl;
+}
+
+function prepareSelectedDetail(tab) {
+  selectDefaultPlugin(tab);
+  const name = selectedByTab[tab];
+  const cached = name ? detailCache[tab].get(name) || null : null;
+  detailState[tab] = { name, loading: Boolean(name && !cached), error: "", data: cached };
+}
+
+function markPluginCacheDirty(...tabs) {
+  for (const tab of tabs) {
+    if (!listState[tab]) continue;
+    listState[tab] = { ...listState[tab], dirty: true };
   }
 }
 
@@ -321,10 +365,23 @@ export async function pagePlugins(token) {
   const requestedTab = activeTab;
   const loadId = ++pluginLoadId;
   detailVisibleMobile = false;
-  listState[requestedTab] = requestedTab === "store"
-    ? { loading: true, available: true, stale: false, error: "", fetchedAt: "", plugins: [] }
-    : { loading: true, error: "", plugins: [] };
-  detailState[requestedTab] = { name: "", loading: false, error: "", data: null };
+  const cached = listState[requestedTab];
+  if (!cached.loaded) {
+    listState[requestedTab] = requestedTab === "store"
+      ? { ...cached, loading: true, available: true, stale: false, error: "", fetchedAt: "", plugins: [] }
+      : { ...cached, loading: true, error: "", plugins: [] };
+    detailState[requestedTab] = { name: "", loading: false, error: "", data: null };
+  } else {
+    prepareSelectedDetail(requestedTab);
+  }
+  render(pluginPageMarkup(requestedTab));
+  if (listCacheIsFresh(requestedTab)) {
+    if (selectedByTab[requestedTab] && !detailState[requestedTab].data) {
+      await loadDetail(requestedTab, token);
+    }
+    return;
+  }
+  listState[requestedTab] = { ...listState[requestedTab], loading: true };
   render(pluginPageMarkup(requestedTab));
   try {
     const data = requestedTab === "store"
@@ -332,30 +389,59 @@ export async function pagePlugins(token) {
       : await api("GET", "/api/plugins");
     if (!isCurrent("plugins", token) || loadId !== pluginLoadId || activeTab !== requestedTab) return;
     if (requestedTab === "store") {
+      const plugins = Array.isArray(data.plugins) ? data.plugins : [];
+      const signature = listSignature(plugins);
+      if (signature !== listState.store.signature) detailCache.store.clear();
       listState.store = {
         loading: false,
+        loaded: true,
+        dirty: false,
+        lastValidatedAt: Date.now(),
+        signature,
         available: data.available !== false,
         stale: data.stale === true,
         error: data.error || "",
         fetchedAt: data.fetchedAt || "",
-        plugins: Array.isArray(data.plugins) ? data.plugins : [],
+        plugins,
       };
     } else {
       const plugins = Array.isArray(data) ? data : [];
-      listState.local = { loading: false, error: "", plugins };
+      const signature = listSignature(plugins);
+      if (signature !== listState.local.signature) detailCache.local.clear();
+      listState.local = {
+        loading: false,
+        loaded: true,
+        dirty: false,
+        lastValidatedAt: Date.now(),
+        signature,
+        error: "",
+        plugins,
+      };
       state.plugins = plugins;
     }
-    selectDefaultPlugin(requestedTab);
-    const name = selectedByTab[requestedTab];
-    detailState[requestedTab] = { name, loading: Boolean(name), error: "", data: null };
+    prepareSelectedDetail(requestedTab);
     render(pluginPageMarkup(requestedTab));
-    await loadDetail(requestedTab, token);
+    if (selectedByTab[requestedTab] && !detailState[requestedTab].data) {
+      await loadDetail(requestedTab, token);
+    }
   } catch (error) {
     if (!isCurrent("plugins", token) || loadId !== pluginLoadId || activeTab !== requestedTab) return;
-    listState[requestedTab] = requestedTab === "store"
-      ? { loading: false, available: false, stale: false, error: error.message || "加载失败", fetchedAt: "", plugins: [] }
-      : { loading: false, error: error.message || "加载失败", plugins: [] };
-    detailState[requestedTab] = { name: "", loading: false, error: "", data: null };
+    const message = error.message || "加载失败";
+    if (listState[requestedTab].loaded) {
+      listState[requestedTab] = {
+        ...listState[requestedTab],
+        loading: false,
+        dirty: true,
+        stale: requestedTab === "store" ? true : undefined,
+        error: message,
+      };
+      prepareSelectedDetail(requestedTab);
+    } else {
+      listState[requestedTab] = requestedTab === "store"
+        ? { ...listState[requestedTab], loading: false, available: false, stale: false, error: message, plugins: [] }
+        : { ...listState[requestedTab], loading: false, error: message, plugins: [] };
+      detailState[requestedTab] = { name: "", loading: false, error: "", data: null };
+    }
     render(pluginPageMarkup(requestedTab));
   }
 }
@@ -363,6 +449,7 @@ export async function pagePlugins(token) {
 export async function togglePlugin(name, enabled) {
   try {
     await api("POST", `/api/plugins/${encodeURIComponent(name)}/${enabled ? "enable" : "disable"}`);
+    markPluginCacheDirty("local", "store");
     markRestartRequired();
     toast("已更新（重启生效）");
     await pagePlugins(state.routeToken);
@@ -374,6 +461,7 @@ export async function togglePlugin(name, enabled) {
 async function runStoreAction(name, action) {
   try {
     await api("POST", `/api/plugins/store/${encodeURIComponent(name)}/${action}`);
+    markPluginCacheDirty("local", "store");
     markRestartRequired();
     toast(action === "uninstall" ? "已登记卸载（重启生效）" : "已登记操作（重启生效）");
     await pagePlugins(state.routeToken);
@@ -417,6 +505,7 @@ export const actions = {
   "store-refresh": target => withBusy(target, async () => {
     try {
       await api("POST", "/api/plugins/store/refresh");
+      markPluginCacheDirty("store");
       toast("插件仓库已刷新");
       await pagePlugins(state.routeToken);
     } catch (error) {

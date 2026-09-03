@@ -175,6 +175,28 @@ public class GovernanceUnitTests
     }
 
     [Fact]
+    public void PluginManager_CachesManagementProjectionUntilInvalidated()
+    {
+        PluginManager manager = RuntimeContext.Instance.Plugins;
+        manager.LoadAll();
+
+        IReadOnlyList<PluginManagementView> first = manager.PluginManagementViews;
+        IReadOnlyList<PluginManagementView> second = manager.PluginManagementViews;
+
+        Assert.Same(first, second);
+        long revision = manager.PluginManagementRevision;
+        manager.InvalidateManagementSnapshot();
+
+        Assert.True(manager.PluginManagementRevision > revision);
+        IReadOnlyList<PluginManagementView> refreshed = manager.PluginManagementViews;
+        Assert.Equal(first, refreshed);
+        if (first.Count > 0)
+        {
+            Assert.NotSame(first, refreshed);
+        }
+    }
+
+    [Fact]
     public void ExecutionStateStore_PreservesRegistrationGuardsAndLifecycleHistory()
     {
         var store = new ExecutionStateStore();
