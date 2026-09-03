@@ -22,40 +22,45 @@ internal static class QueueCommands
         {
             NormalizeQueue(candidate);
             string? error = null;
+            bool duplicateName = false;
             ctx.Center.WithAdmissionCoordination(() =>
             {
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    error = Limits.CheckQueueCount(ctx.Queues.Count)
-                        ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
-                        ?? (EntityNameRules.HasConflict(ctx.Queues, candidate.Name, queue => queue.Name)
-                            ? "队列名称重复：调度队列已存在同名队列"
-                            : null)
-                        ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
+                    error = Limits.CheckQueueCount(state.Queues.Count)
+                        ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称");
+                    if (error is null && EntityNameRules.HasConflict(state.Queues, candidate.Name, queue => queue.Name))
+                    {
+                        duplicateName = true;
+                        error = "队列名称重复：调度队列已存在同名队列";
+                    }
+                    error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
-                        ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
-                        ?? CheckQueuePluginAvailability(ctx, candidate)
-                        ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), candidate);
+                        ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(state.Scripts, state.Users, candidate))
+                        ?? CheckQueuePluginAvailability(ctx, state.Scripts, candidate)
+                        ?? Limits.CheckQueueMix(state.Scripts, candidate);
                     if (error is null)
                     {
                         candidate.Id = Guid.NewGuid().ToString("N");
-                        candidate.Index = ctx.Queues.Count == 0 ? 0 : ctx.Queues.Max(item => item.Index) + 1;
-                        ctx.Queues.Add(candidate);
+                        candidate.Index = state.Queues.Count == 0 ? 0 : state.Queues.Max(item => item.Index) + 1;
+                        state.Queues.Add(candidate);
                         try
                         {
-                            DataStore.SaveQueues(ctx.Queues);
+                            DataStore.SaveQueues(state.Queues);
                         }
                         catch
                         {
-                            ctx.Queues.Remove(candidate);
+                            state.Queues.Remove(candidate);
                             throw;
                         }
                     }
-                }
+                });
             });
             if (error is not null)
             {
-                return Validation<DispatchQueue>(error);
+                return duplicateName
+                    ? Conflict<DispatchQueue>("duplicate_name", error)
+                    : Validation<DispatchQueue>(error);
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "添加调度队列", $"{candidate.Name}（id={candidate.Id}，任务 {candidate.Tasks.Count} 项）");
@@ -73,7 +78,7 @@ internal static class QueueCommands
         string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        DispatchQueue? existing = ctx.FindQueue(queueId);
+        DispatchQueue? existing = ctx.EntityState.FindQueue(queueId);
         if (existing is null)
         {
             return NotFound<DispatchQueue>($"未找到调度队列：{queueId}");
@@ -82,13 +87,15 @@ internal static class QueueCommands
         try
         {
             string? error = null;
+            bool duplicateName = false;
             bool changed = ctx.Center.TryExecuteQueueLeaseMutation(
                 queueId,
                 () =>
                 {
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        existing = ctx.FindQueue(queueId);
+                        existing = state.Queues.FirstOrDefault(queue =>
+                            string.Equals(queue.Id, queueId, StringComparison.OrdinalIgnoreCase));
                         if (existing is null)
                         {
                             error = null;
@@ -97,30 +104,44 @@ internal static class QueueCommands
                         {
                             RemoveDuplicateTasks(candidate);
                             NormalizeTimeSets(candidate);
-                            error = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称")
-                                ?? (EntityNameRules.HasConflict(
-                                        ctx.Queues,
-                                        candidate.Name,
-                                        queue => queue.Name,
-                                        queue => string.Equals(queue.Id, existing.Id, StringComparison.OrdinalIgnoreCase))
-                                    ? "队列名称重复：调度队列已存在同名队列"
-                                    : null)
-                                ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
+                            error = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称");
+                            if (error is null && EntityNameRules.HasConflict(
+                                    state.Queues,
+                                    candidate.Name,
+                                    queue => queue.Name,
+                                    queue => string.Equals(queue.Id, existing.Id, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                duplicateName = true;
+                                error = "队列名称重复：调度队列已存在同名队列";
+                            }
+                            error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
-                                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(ctx, candidate))
-                                ?? CheckQueuePluginAvailability(ctx, candidate)
-                                ?? Limits.CheckQueueMix(ctx.SnapshotScripts(), candidate);
+                                ?? Limits.CheckQueueTotalUsers(Limits.QueueTotalUsers(state.Scripts, state.Users, candidate))
+                                ?? CheckQueuePluginAvailability(ctx, state.Scripts, candidate)
+                                ?? Limits.CheckQueueMix(state.Scripts, candidate);
                         }
                         if (existing is not null && error is null)
                         {
                             candidate.Id = existing.Id;
                             candidate.Index = existing.Index;
                             NormalizeQueue(candidate);
-                            int index = ctx.Queues.IndexOf(existing);
-                            ctx.Queues[index] = candidate;
-                            DataStore.SaveQueues(ctx.Queues);
+                            int index = state.Queues.FindIndex(queue =>
+                                string.Equals(queue.Id, existing.Id, StringComparison.OrdinalIgnoreCase));
+                            if (index >= 0)
+                            {
+                                state.Queues[index] = candidate.Clone();
+                                try
+                                {
+                                    DataStore.SaveQueues(state.Queues);
+                                }
+                                catch
+                                {
+                                    state.Queues[index] = existing;
+                                    throw;
+                                }
+                            }
                         }
-                    }
+                    });
                 },
                 out IReadOnlyList<ExecutionLeaseReference> leases,
                 out string? failureCode);
@@ -134,7 +155,9 @@ internal static class QueueCommands
             }
             if (error is not null)
             {
-                return Validation<DispatchQueue>(error);
+                return duplicateName
+                    ? Conflict<DispatchQueue>("duplicate_name", error)
+                    : Validation<DispatchQueue>(error);
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "修改调度队列", $"{candidate.Name}（id={candidate.Id}，任务 {candidate.Tasks.Count} 项）");
@@ -151,18 +174,31 @@ internal static class QueueCommands
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         DispatchQueue? removed = null;
+        int removedIndex = -1;
         try
         {
             bool changed = ctx.Center.TryExecuteQueueLeaseMutation(
                 queueId,
                 () =>
                 {
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        removed = ctx.Queues.FirstOrDefault(queue => queue.Id == queueId);
-                        ctx.Queues.RemoveAll(queue => queue.Id == queueId);
-                        DataStore.SaveQueues(ctx.Queues);
-                    }
+                        removedIndex = state.Queues.FindIndex(queue => queue.Id == queueId);
+                        removed = removedIndex >= 0 ? state.Queues[removedIndex].Clone() : null;
+                        state.Queues.RemoveAll(queue => queue.Id == queueId);
+                        try
+                        {
+                            DataStore.SaveQueues(state.Queues);
+                        }
+                        catch
+                        {
+                            if (removed is not null && removedIndex >= 0)
+                            {
+                                state.Queues.Insert(Math.Min(removedIndex, state.Queues.Count), removed);
+                            }
+                            throw;
+                        }
+                    });
                     if (removed is not null)
                     {
                         ctx.Plugins.DeleteQueueData(queueId);
@@ -193,9 +229,9 @@ internal static class QueueCommands
             bool changed = ctx.Center.TryExecuteAnyQueueLeaseMutation(
                 () =>
                 {
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        if (ids is null || ids.Count != ctx.Queues.Count
+                        if (ids is null || ids.Count != state.Queues.Count
                             || ids.Any(string.IsNullOrWhiteSpace)
                             || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
                         {
@@ -203,22 +239,22 @@ internal static class QueueCommands
                         }
                         else
                         {
-                            HashSet<string> existing = new(ctx.Queues.Select(queue => queue.Id), StringComparer.Ordinal);
+                            HashSet<string> existing = new(state.Queues.Select(queue => queue.Id), StringComparer.Ordinal);
                             if (ids.Any(id => !existing.Contains(id)))
                             {
                                 error = "队列顺序名单与当前队列列表不一致";
                             }
                             else
                             {
-                                Dictionary<string, DispatchQueue> byId = ctx.Queues.ToDictionary(queue => queue.Id, StringComparer.Ordinal);
+                                Dictionary<string, DispatchQueue> byId = state.Queues.ToDictionary(queue => queue.Id, StringComparer.Ordinal);
                                 for (int i = 0; i < ids.Count; i++)
                                 {
                                     byId[ids[i]].Index = i;
                                 }
-                                DataStore.SaveQueues(ctx.Queues);
+                                DataStore.SaveQueues(state.Queues);
                             }
                         }
-                    }
+                    });
                 },
                 out IReadOnlyList<ExecutionLeaseReference> leases,
                 out string? failureCode);
@@ -257,12 +293,15 @@ internal static class QueueCommands
         return null;
     }
 
-    private static string? CheckQueuePluginAvailability(RuntimeContext ctx, DispatchQueue queue)
+    private static string? CheckQueuePluginAvailability(
+        RuntimeContext ctx,
+        IReadOnlyList<ScriptInstance> scripts,
+        DispatchQueue queue)
     {
         IPluginAvailability plugins = ctx.Resolve<IPluginAvailability>();
         foreach (QueueTask task in queue.Tasks.OrderBy(item => item.Index))
         {
-            ScriptInstance? script = ctx.Scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId);
+            ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId);
             if (script is null)
             {
                 continue;
@@ -361,6 +400,9 @@ internal static class QueueCommands
 
     private static OperationResult<T> NotFound<T>(string message) =>
         OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
+
+    private static OperationResult<T> Conflict<T>(string code, string message) =>
+        OperationResult<T>.Failure(code, message, OperationErrorKind.Conflict);
 
     private static OperationResult<T> LeaseConflict<T>(
         IReadOnlyList<ExecutionLeaseReference> leases,

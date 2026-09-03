@@ -408,16 +408,19 @@ internal static class Limits
     }
 
     /// <summary>队列任务的启用绑定总数：各任务引用脚本的启用绑定数之和，每个任务至少计 1。</summary>
-    public static int QueueTotalUsers(RuntimeContext ctx, DispatchQueue queue)
+    public static int QueueTotalUsers(
+        IReadOnlyList<ScriptInstance> scripts,
+        IReadOnlyList<NexusUser> users,
+        DispatchQueue queue)
     {
         return queue.Tasks.Sum(task =>
         {
-            ScriptInstance? script = ctx.FindScript(task.ScriptInstanceId);
+            ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId);
             if (script is null)
             {
                 return 1;
             }
-            int enabled = ctx.Users.Sum(user => user.Bindings.Count(binding =>
+            int enabled = users.Sum(user => user.Bindings.Count(binding =>
                 UserBindingOverrideResolver.Resolve(user, binding).Participates
                 && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
             return enabled < 1 ? 1 : enabled;

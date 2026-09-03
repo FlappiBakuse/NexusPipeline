@@ -1,5 +1,6 @@
 using NexusPipeline.App.Repositories;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.App.State;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using Xunit;
@@ -66,7 +67,9 @@ public sealed class UserBindingOverrideTests
                 new UserScriptBinding { ScriptInstanceId = script.Id, Enabled = false, RunDays = 5 },
             },
         };
-        var repository = new RuntimeUserRepository(() => new List<NexusUser> { user });
+        var state = new RuntimeEntityState();
+        state.Mutate(mutation => mutation.Users.Add(user));
+        var repository = new RuntimeUserRepository(state);
 
         ResolvedScriptUser? resolved = repository.ResolveEnabledBinding(script, user.Name);
 
@@ -93,8 +96,10 @@ public sealed class UserBindingOverrideTests
                 Bindings = { new UserScriptBinding { ScriptInstanceId = "s1", RunDays = 7 } },
             },
         };
+        var state = new RuntimeEntityState();
+        state.Mutate(mutation => mutation.Users.AddRange(users));
         int saves = 0;
-        var writer = new RuntimeUserRunDaysWriter(action => action(), () => users, _ => saves++);
+        var writer = new RuntimeUserRunDaysWriter(state, _ => saves++);
 
         Assert.True(writer.DecrementDaily());
         Assert.Equal(1, users[0].BindingOverrides.General.RunDays);

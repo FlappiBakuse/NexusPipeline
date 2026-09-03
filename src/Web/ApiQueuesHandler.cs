@@ -2,6 +2,7 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 
@@ -13,19 +14,19 @@ internal static class ApiQueuesHandler
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
+        QueueQueries queries = ctx.Resolve<QueueQueries>();
         if (method == "GET" && seg.Length == 1)
         {
-            Audit.Log(Audit.Web, "查询调度队列列表", $"{ctx.Queues.Count} 条");
-            // 深拷贝快照后序列化——避免枚举/序列化与并发修改冲突。
-            List<DispatchQueue> snapshot = ctx.SnapshotQueues();
-            var result = snapshot.OrderBy(queue => queue.Index).Select(ProjectQueue).ToList();
+            IReadOnlyList<QueueReadModel> snapshot = queries.List();
+            Audit.Log(Audit.Web, "查询调度队列列表", $"{snapshot.Count} 条");
+            var result = snapshot.Select(ProjectQueue).ToList();
             await HttpHelper.WriteJsonAsync(context, result).ConfigureAwait(false);
             return;
         }
         if (method == "GET" && seg.Length == 2
             && !seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
         {
-            DispatchQueue? queue = ctx.FindQueue(Uri.UnescapeDataString(seg[1]));
+            QueueReadModel? queue = queries.Find(Uri.UnescapeDataString(seg[1]));
             if (queue is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -103,8 +104,9 @@ internal static class ApiQueuesHandler
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
-    private static object ProjectQueue(DispatchQueue queue)
+    private static object ProjectQueue(QueueReadModel model)
     {
+        DispatchQueue queue = model.Queue;
         return new
         {
             queue.Id,
@@ -114,7 +116,7 @@ internal static class ApiQueuesHandler
             queue.TimeSets,
             queue.Tasks,
             queue.NotifyEnabled,
-            nextTrigger = RuntimeContext.Instance.Scheduler.NextTriggerFor(queue),
+            nextTrigger = model.NextTrigger,
         };
     }
 }

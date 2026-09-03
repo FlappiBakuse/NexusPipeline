@@ -6,18 +6,18 @@ internal static class Logger
 {
     private static readonly object Sync = new();
 
-    /// <summary>日志阈值缓存：避免每次日志调用访问 RuntimeContext 提前构造 DI 容器；设置加载/保存后经 <see cref="RefreshLevel"/> 失效重解析）。</summary>
-    private static LogLevel? _levelCache;
+    /// <summary>日志阈值由宿主初始化显式配置；设置加载前使用 Info。</summary>
+    private static LogLevel _currentThreshold = LogLevel.Info;
 
     /// <summary>CLI machine mode 下将诊断输出转到 stderr，保证 stdout 只承载协议 JSON。</summary>
     internal static bool ConsoleOutputToError { get; set; }
 
-    /// <summary>设置加载/保存后调用：清空阈值缓存，下次日志调用按最新配置解析（保持「阈值即时生效」契约）。</summary>
-    public static void RefreshLevel()
+    /// <summary>显式设置日志阈值；调用方应在设置成功加载或保存后调用。</summary>
+    public static void ConfigureLevel(string? level)
     {
         lock (Sync)
         {
-            _levelCache = null;
+            _currentThreshold = LogLevelUtil.Parse(level);
         }
     }
 
@@ -25,20 +25,10 @@ internal static class Logger
     {
         get
         {
-            LogLevel? cached = _levelCache;
-            if (cached is null)
+            lock (Sync)
             {
-                lock (Sync)
-                {
-                    cached = _levelCache;
-                    if (cached is null)
-                    {
-                        cached = LogLevelUtil.Parse(RuntimeContext.Instance.Settings.LogLevel);
-                        _levelCache = cached;
-                    }
-                }
+                return _currentThreshold;
             }
-            return cached.Value;
         }
     }
 
@@ -51,6 +41,8 @@ internal static class Logger
     public static void Error(string message) => Log(LogLevel.Error, message);
 
     public static void Fatal(string message) => Log(LogLevel.Fatal, message);
+
+    internal static bool IsEnabled(LogLevel level) => level >= Threshold;
 
     public static void Log(LogLevel level, string message)
     {

@@ -73,6 +73,7 @@ public sealed class CliControlContractTests
         Assert.Equal(2, CliExitCodes.For("validation_error"));
         Assert.Equal(3, CliExitCodes.For("ambiguous_target"));
         Assert.Equal(4, CliExitCodes.For("resource_busy"));
+        Assert.Equal(4, CliExitCodes.For("duplicate_name"));
         Assert.Equal(5, CliExitCodes.For("service_unavailable"));
         Assert.Equal(6, CliExitCodes.For("operation_forbidden"));
         Assert.Equal(7, CliExitCodes.For("execution_failed"));

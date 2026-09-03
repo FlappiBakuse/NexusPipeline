@@ -37,14 +37,18 @@ internal sealed class McpReadOnlyTools
     public CallToolResult ListUsers()
     {
         IReadOnlyList<DispatchQueue> queues = _context.Queues;
-        return McpToolResult.Success(_context.Users.Select(user => McpViews.User(user, queues)).ToList());
+        return McpToolResult.Success(_context.Users
+            .Select(user => McpViews.User(user, queues, _context.Runtime.Scheduler))
+            .ToList());
     }
 
     [McpServerTool(Name = "list_queues", Title = "列出调度队列", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("列出调度队列、任务顺序、时间表、通知开关和下一次触发时间。")]
     public CallToolResult ListQueues()
     {
-        return McpToolResult.Success(_context.Queues.Select(McpViews.Queue).ToList());
+        return McpToolResult.Success(_context.Queues
+            .Select(queue => McpViews.Queue(queue, _context.Runtime.Scheduler))
+            .ToList());
     }
 
     [McpServerTool(Name = "list_runs", Title = "列出运行任务", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]

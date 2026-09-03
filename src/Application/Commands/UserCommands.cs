@@ -31,17 +31,20 @@ internal static class UserCommands
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? created = null;
         string? error = null;
+        bool duplicateName = false;
         try
         {
             ctx.Center.WithAdmissionCoordination(() =>
             {
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
                     string normalizedName = name!.Trim();
-                    error = Limits.CheckGlobalUserCount(ctx.Users.Count)
-                        ?? (EntityNameRules.HasConflict(ctx.Users, normalizedName, user => user.Name)
-                            ? "用户名重复：全局用户已存在同名用户"
-                            : null);
+                    error = Limits.CheckGlobalUserCount(state.Users.Count);
+                    if (error is null && EntityNameRules.HasConflict(state.Users, normalizedName, user => user.Name))
+                    {
+                        duplicateName = true;
+                        error = "用户名重复：全局用户已存在同名用户";
+                    }
                     if (error is not null)
                     {
                         return;
@@ -49,28 +52,30 @@ internal static class UserCommands
                     created = new NexusUser
                     {
                         Id = Guid.NewGuid().ToString("N"),
-                        Index = ctx.Users.Count == 0 ? 0 : ctx.Users.Max(user => user.Index) + 1,
+                        Index = state.Users.Count == 0 ? 0 : state.Users.Max(user => user.Index) + 1,
                         Name = normalizedName,
                         Remark = remark?.Trim() ?? "",
                     };
-                    ctx.Users.Add(created);
+                    state.Users.Add(created);
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
                     }
                     catch
                     {
-                        ctx.Users.Remove(created);
+                        state.Users.Remove(created);
                         throw;
                     }
-                }
+                });
             });
             if (error is not null)
             {
-                return Validation<NexusUser>(error);
+                return duplicateName
+                    ? Conflict<NexusUser>("duplicate_name", error)
+                    : Validation<NexusUser>(error);
             }
             Audit.Log(source, "添加全局用户", $"{created!.Name}（id={created.Id}）");
-            return OperationResult<NexusUser>.Ok(created!);
+            return OperationResult<NexusUser>.Ok(created!.Clone());
         }
         catch (Exception ex)
         {
@@ -94,12 +99,13 @@ internal static class UserCommands
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? target = ctx.FindUser(userId);
+        NexusUser? target = ctx.EntityState.FindUser(userId);
         if (target is null)
         {
             return NotFound<NexusUser>($"未找到用户：{userId}");
         }
         string? error = null;
+        bool duplicateName = false;
         try
         {
             ctx.Center.WithAdmissionCoordination(() =>
@@ -109,37 +115,48 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
+                    NexusUser? current = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, target.Id, StringComparison.OrdinalIgnoreCase));
+                    if (current is null)
+                    {
+                        error = "用户不存在";
+                        return;
+                    }
                     string normalizedName = name!.Trim();
                     if (EntityNameRules.HasConflict(
-                            ctx.Users,
+                            state.Users,
                             normalizedName,
                             user => user.Name,
-                            user => string.Equals(user.Id, target.Id, StringComparison.OrdinalIgnoreCase)))
+                            user => string.Equals(user.Id, current.Id, StringComparison.OrdinalIgnoreCase)))
                     {
+                        duplicateName = true;
                         error = "用户名重复：全局用户已存在同名用户";
                         return;
                     }
-                    string oldName = target.Name;
-                    string oldRemark = target.Remark;
-                    target.Name = normalizedName;
-                    target.Remark = remark?.Trim() ?? "";
+                    string oldName = current.Name;
+                    string oldRemark = current.Remark;
+                    current.Name = normalizedName;
+                    current.Remark = remark?.Trim() ?? "";
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
+                        target = current.Clone();
                     }
                     catch
                     {
-                        target.Name = oldName;
-                        target.Remark = oldRemark;
+                        current.Name = oldName;
+                        current.Remark = oldRemark;
                         throw;
                     }
-                }
+                });
             });
             if (error is not null)
             {
-                return IsBusy(error)
+                return duplicateName
+                    ? Conflict<NexusUser>("duplicate_name", error)
+                    : IsBusy(error)
                     ? Conflict<NexusUser>("resource_busy", error)
                     : Validation<NexusUser>(error);
             }
@@ -172,7 +189,7 @@ internal static class UserCommands
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? target = ctx.FindUser(userId);
+        NexusUser? target = ctx.EntityState.FindUser(userId);
         if (target is null)
         {
             return NotFound<UserBindingOverrides>($"未找到用户：{userId}");
@@ -188,20 +205,28 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    UserBindingOverrides previous = target.BindingOverrides?.Clone() ?? new UserBindingOverrides();
-                    target.BindingOverrides = normalized.Clone();
+                    NexusUser? current = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, target.Id, StringComparison.OrdinalIgnoreCase));
+                    if (current is null)
+                    {
+                        error = "用户不存在";
+                        return;
+                    }
+                    UserBindingOverrides previous = current.BindingOverrides?.Clone() ?? new UserBindingOverrides();
+                    current.BindingOverrides = normalized.Clone();
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
+                        target = current.Clone();
                     }
                     catch
                     {
-                        target.BindingOverrides = previous;
+                        current.BindingOverrides = previous;
                         throw;
                     }
-                }
+                });
             });
             if (error is not null)
             {
@@ -209,7 +234,8 @@ internal static class UserCommands
             }
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "调整用户全局绑定设置", $"{target.Name}（id={target.Id}）");
-            return OperationResult<UserBindingOverrides>.Ok(target.BindingOverrides.Clone());
+            return OperationResult<UserBindingOverrides>.Ok(
+                (target.BindingOverrides ?? new UserBindingOverrides()).Clone());
         }
         catch (Exception ex)
         {
@@ -224,7 +250,7 @@ internal static class UserCommands
         string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? target = ctx.FindUser(userId);
+        NexusUser? target = ctx.EntityState.FindUser(userId);
         if (target is null)
         {
             return NotFound<bool>($"未找到用户：{userId}");
@@ -245,25 +271,27 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    int index = ctx.Users.IndexOf(target);
+                    NexusUser? current = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, target.Id, StringComparison.OrdinalIgnoreCase));
+                    int index = current is null ? -1 : state.Users.IndexOf(current);
                     if (index < 0)
                     {
                         error = "用户不存在";
                         return;
                     }
-                    ctx.Users.RemoveAt(index);
+                    state.Users.RemoveAt(index);
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
                     }
                     catch
                     {
-                        ctx.Users.Insert(index, target);
+                        state.Users.Insert(index, current!);
                         throw;
                     }
-                }
+                });
                 foreach (UserScriptBinding binding in bindings)
                 {
                     UserConfigManager.RemoveUserData(binding.ScriptInstanceId, target.Id);
@@ -294,28 +322,28 @@ internal static class UserCommands
             string? error = null;
             ctx.Center.WithAdmissionCoordination(() =>
             {
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    if (ids is null || ids.Count != ctx.Users.Count
+                    if (ids is null || ids.Count != state.Users.Count
                         || ids.Any(string.IsNullOrWhiteSpace)
                         || ids.Distinct(StringComparer.OrdinalIgnoreCase).Count() != ids.Count)
                     {
                         error = "用户顺序名单缺失或与当前全局用户列表不一致";
                         return;
                     }
-                    HashSet<string> existing = new(ctx.Users.Select(user => user.Id), StringComparer.OrdinalIgnoreCase);
+                    HashSet<string> existing = new(state.Users.Select(user => user.Id), StringComparer.OrdinalIgnoreCase);
                     if (ids.Any(id => !existing.Contains(id)))
                     {
                         error = "用户顺序名单与当前全局用户列表不一致";
                         return;
                     }
-                    Dictionary<string, NexusUser> byId = ctx.Users.ToDictionary(user => user.Id, StringComparer.OrdinalIgnoreCase);
+                    Dictionary<string, NexusUser> byId = state.Users.ToDictionary(user => user.Id, StringComparer.OrdinalIgnoreCase);
                     for (int i = 0; i < ids.Count; i++)
                     {
                         byId[ids[i]].Index = i;
                     }
-                    DataStore.SaveUsers(ctx.Users);
-                }
+                    DataStore.SaveUsers(state.Users);
+                });
             });
             if (error is not null)
             {
@@ -337,7 +365,7 @@ internal static class UserCommands
         string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
+        NexusUser? user = ctx.EntityState.FindUser(userId);
         if (user is null)
         {
             return NotFound<bool>("未找到用户");
@@ -353,9 +381,16 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    List<UserScriptBinding> current = user.Bindings.ToList();
+                    NexusUser? currentUser = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, user.Id, StringComparison.OrdinalIgnoreCase));
+                    if (currentUser is null)
+                    {
+                        error = "用户不存在";
+                        return;
+                    }
+                    List<UserScriptBinding> current = currentUser.Bindings.Select(binding => binding.Clone()).ToList();
                     if (ids is null || ids.Count != current.Count
                         || ids.Any(string.IsNullOrWhiteSpace)
                         || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
@@ -375,19 +410,20 @@ internal static class UserCommands
                         binding => binding.ScriptInstanceId,
                         StringComparer.Ordinal);
                     List<UserScriptBinding> ordered = ids.Select(id => byId[id]).ToList();
-                    user.Bindings.Clear();
-                    user.Bindings.AddRange(ordered);
+                    currentUser.Bindings.Clear();
+                    currentUser.Bindings.AddRange(ordered);
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
+                        user = currentUser.Clone();
                     }
                     catch
                     {
-                        user.Bindings.Clear();
-                        user.Bindings.AddRange(current);
+                        currentUser.Bindings.Clear();
+                        currentUser.Bindings.AddRange(current);
                         throw;
                     }
-                }
+                });
             });
             if (error is not null)
             {
@@ -427,8 +463,8 @@ internal static class UserCommands
             return Validation<UserScriptBinding>(maxSuccessfulRunsError);
         }
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
-        ScriptInstance? script = ctx.FindScript(candidate.ScriptInstanceId);
+        NexusUser? user = ctx.EntityState.FindUser(userId);
+        ScriptInstance? script = ctx.EntityState.FindScript(candidate.ScriptInstanceId);
         if (user is null || script is null)
         {
             return NotFound<UserScriptBinding>("用户或脚本实例不存在");
@@ -469,43 +505,57 @@ internal static class UserCommands
                         return;
                     }
 
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                        NexusUser? currentUser = state.Users.FirstOrDefault(item =>
+                            string.Equals(item.Id, user.Id, StringComparison.OrdinalIgnoreCase));
+                        if (currentUser is null)
+                        {
+                            error = "用户不存在";
+                            return;
+                        }
+                        if (currentUser.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
                         {
                             error = "该用户已绑定此脚本实例";
                             return;
                         }
-                        int current = ctx.Users.Sum(item => item.Bindings.Count(binding =>
+                        int current = state.Users.Sum(item => item.Bindings.Count(binding =>
                             string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
                         error = Limits.CheckUserCount(current);
                         if (error is not null)
                         {
                             return;
                         }
-                    }
+                    });
 
                     // v0.12.8：绑定不再建立配置快照、不做任何文件动作；初始快照延迟到首次编辑配置或首次运行时建立。
 
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        if (user.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
+                        NexusUser? currentUser = state.Users.FirstOrDefault(item =>
+                            string.Equals(item.Id, user.Id, StringComparison.OrdinalIgnoreCase));
+                        if (currentUser is null)
+                        {
+                            error = "用户不存在";
+                            return;
+                        }
+                        if (currentUser.Bindings.Any(item => string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal)))
                         {
                             error = "该用户已绑定此脚本实例";
                             return;
                         }
-                        candidate = NormalizeBindingForUser(user, candidate);
-                        user.Bindings.Add(candidate);
+                        candidate = NormalizeBindingForUser(currentUser, candidate);
+                        currentUser.Bindings.Add(candidate);
                         try
                         {
-                            DataStore.SaveUsers(ctx.Users);
+                            DataStore.SaveUsers(state.Users);
                         }
                         catch
                         {
-                            user.Bindings.Remove(candidate);
+                            currentUser.Bindings.Remove(candidate);
                             throw;
                         }
-                    }
+                    });
                 }
                 finally
                 {
@@ -558,13 +608,13 @@ internal static class UserCommands
             return Validation<UserScriptBinding>(maxSuccessfulRunsError);
         }
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
+        NexusUser? user = ctx.EntityState.FindUser(userId);
         UserScriptBinding? existing = user?.Bindings.FirstOrDefault(binding => binding.ScriptInstanceId == scriptId);
         if (user is null || existing is null)
         {
             return NotFound<UserScriptBinding>("用户绑定不存在");
         }
-        ScriptInstance? script = ctx.FindScript(scriptId);
+        ScriptInstance? script = ctx.EntityState.FindScript(scriptId);
         if (script is not null && CheckScriptPluginAvailability(ctx, script) is string pluginError)
         {
             return Validation<UserScriptBinding>(pluginError);
@@ -580,29 +630,38 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    UserScriptBinding old = existing.Clone();
+                    NexusUser? currentUser = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, user.Id, StringComparison.OrdinalIgnoreCase));
+                    UserScriptBinding? currentBinding = currentUser?.Bindings.FirstOrDefault(binding =>
+                        string.Equals(binding.ScriptInstanceId, scriptId, StringComparison.Ordinal));
+                    if (currentUser is null || currentBinding is null)
+                    {
+                        error = "用户绑定不存在";
+                        return;
+                    }
+                    UserScriptBinding old = currentBinding.Clone();
                     UserScriptBinding replacement = NormalizeBinding(candidate, scriptId);
-                    if (CheckLockedBindingUpdate(user, old, replacement) is string overrideError)
+                    if (CheckLockedBindingUpdate(currentUser, old, replacement) is string overrideError)
                     {
                         error = overrideError;
                         globalOverrideConflict = true;
                         return;
                     }
-                    int index = user.Bindings.IndexOf(existing);
-                    user.Bindings[index] = replacement;
+                    int index = currentUser.Bindings.IndexOf(currentBinding);
+                    currentUser.Bindings[index] = replacement;
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
+                        DataStore.SaveUsers(state.Users);
                     }
                     catch
                     {
-                        user.Bindings[index] = old;
+                        currentUser.Bindings[index] = old;
                         throw;
                     }
                     existing = replacement;
-                }
+                });
             });
             if (error is not null)
             {
@@ -625,7 +684,7 @@ internal static class UserCommands
         string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
+        NexusUser? user = ctx.EntityState.FindUser(userId);
         UserScriptBinding? binding = user?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == scriptId);
         if (user is null || binding is null)
         {
@@ -641,28 +700,34 @@ internal static class UserCommands
                 {
                     return;
                 }
-                lock (ctx.DataLock)
+                ctx.EntityState.Mutate(state =>
                 {
-                    int index = user.Bindings.IndexOf(binding);
-                    if (index < 0)
+                    NexusUser? currentUser = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, user.Id, StringComparison.OrdinalIgnoreCase));
+                    UserScriptBinding? currentBinding = currentUser?.Bindings.FirstOrDefault(item =>
+                        string.Equals(item.ScriptInstanceId, scriptId, StringComparison.Ordinal));
+                    int index = currentUser is null || currentBinding is null
+                        ? -1
+                        : currentUser.Bindings.IndexOf(currentBinding);
+                    if (currentUser is null || currentBinding is null || index < 0)
                     {
                         error = "绑定不存在";
                         return;
                     }
-                    user.Bindings.RemoveAt(index);
+                    currentUser.Bindings.RemoveAt(index);
                     try
                     {
-                        DataStore.SaveUsers(ctx.Users);
-                        UserConfigManager.RemoveUserData(scriptId, user.Id);
-                        ctx.Plugins.DeleteUserScriptData(user.Id, scriptId);
+                        DataStore.SaveUsers(state.Users);
+                        UserConfigManager.RemoveUserData(scriptId, currentUser.Id);
+                        ctx.Plugins.DeleteUserScriptData(currentUser.Id, scriptId);
                     }
                     catch
                     {
-                        user.Bindings.Insert(index, binding);
-                        try { DataStore.SaveUsers(ctx.Users); } catch { }
+                        currentUser.Bindings.Insert(index, currentBinding);
+                        try { DataStore.SaveUsers(state.Users); } catch { }
                         throw;
                     }
-                }
+                });
             });
             if (error is not null)
             {
@@ -680,7 +745,7 @@ internal static class UserCommands
 
     public static OperationResult<bool> SetAvatar(string userId, string? mimeType, byte[]? data)
     {
-        if (RuntimeContext.Instance.FindUser(userId) is null)
+        if (RuntimeContext.Instance.EntityState.FindUser(userId) is null)
         {
             return NotFound<bool>($"未找到用户：{userId}");
         }
@@ -720,7 +785,7 @@ internal static class UserCommands
 
     public static OperationResult<bool> RemoveAvatar(string userId)
     {
-        if (RuntimeContext.Instance.FindUser(userId) is null)
+        if (RuntimeContext.Instance.EntityState.FindUser(userId) is null)
         {
             return NotFound<bool>($"未找到用户：{userId}");
         }

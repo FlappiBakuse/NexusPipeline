@@ -1,5 +1,6 @@
 using System.Net;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Extensibility;
@@ -23,17 +24,14 @@ internal static class ApiStatusHandler
 
     private static object BuildStatus()
     {
-        AppSettings settings = RuntimeContext.Instance.Settings;
-        var next = RuntimeContext.Instance.Scheduler.NextTrigger();
-        PendingSystemAction? pending = RuntimeContext.Instance.Center.CurrentSystemAction;
-        // 锁内读取计数，避免与并发修改冲突（「集合已修改」）。
-        int scriptCount, queueCount, enabledQueues;
-        lock (RuntimeContext.Instance.DataLock)
-        {
-            scriptCount = RuntimeContext.Instance.Scripts.Count;
-            queueCount = RuntimeContext.Instance.Queues.Count;
-            enabledQueues = RuntimeContext.Instance.Queues.Count(queue => queue.NotifyEnabled);
-        }
+        RuntimeContext ctx = RuntimeContext.Instance;
+        AppSettings settings = ctx.Settings;
+        var next = ctx.Scheduler.NextTrigger();
+        PendingSystemAction? pending = ctx.Center.CurrentSystemAction;
+        int scriptCount = ctx.Resolve<ScriptQueries>().ListEffective().Count;
+        IReadOnlyList<QueueReadModel> queues = ctx.Resolve<QueueQueries>().List();
+        int queueCount = queues.Count;
+        int enabledQueues = queues.Count(queue => queue.Queue.NotifyEnabled);
         return new
         {
             service = ControlApiContract.ServiceName,
@@ -52,7 +50,7 @@ internal static class ApiStatusHandler
             {
                 enabledQueues,
             },
-            running = RuntimeContext.Instance.Center.Active.Select(exec =>
+            running = ctx.Center.Active.Select(exec =>
             {
                 RunningExecutionSnapshot snapshot = exec.Snapshot();
                 return new
@@ -77,7 +75,7 @@ internal static class ApiStatusHandler
                     logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };
             }),
-            plugins = RuntimeContext.Instance.Plugins.PluginManagementViews,
+            plugins = ctx.Plugins.PluginManagementViews,
         };
     }
 

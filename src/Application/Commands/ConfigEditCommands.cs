@@ -435,44 +435,27 @@ internal static class ConfigEditCommands
         string scriptId,
         string userReference)
     {
-        ScriptInstance? declaration = ctx.FindScript(scriptId);
+        ScriptInstance? declaration = ctx.EntityState.FindScript(scriptId);
         if (declaration is null)
         {
             return NotFound<ConfigEditTarget>($"未找到脚本实例：{scriptId}");
         }
-        ResolvedScriptSpec spec = ctx.ResolveScriptSpec(declaration);
+        ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(declaration);
         if (!spec.Succeeded)
         {
             return Validation<ConfigEditTarget>(spec.Error ?? "脚本有效配置解析失败");
         }
         ScriptInstance script = spec.Script;
 
-        NexusUser? globalUser = ctx.FindUser(userReference);
-        ResolvedScriptUser? user = null;
-        lock (ctx.DataLock)
-        {
-            globalUser ??= ctx.Users.FirstOrDefault(item =>
-                string.Equals(item.Name, userReference, StringComparison.OrdinalIgnoreCase));
-            if (globalUser is not null)
-            {
-                UserScriptBinding? binding = globalUser.Bindings.FirstOrDefault(item =>
-                    string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
-                user = binding is null
-                    ? null
-                    : new ResolvedScriptUser(
-                        globalUser.Id,
-                        globalUser.Name,
-                        binding.Clone());
-            }
-        }
-
-        if (globalUser is null || user is null)
+        ResolvedScriptUser? user = ctx.Resolve<IUserRepository>()
+            .ResolveBinding(script, userReference);
+        if (user is null)
         {
             return NotFound<ConfigEditTarget>("用户绑定不存在");
         }
 
         return OperationResult<ConfigEditTarget>.Ok(
-            new ConfigEditTarget(script, user, globalUser.Id, spec));
+            new ConfigEditTarget(script, user, user.UserId, spec));
     }
 
     private static string ResolveLaunchTargetExe(ScriptInstance script)

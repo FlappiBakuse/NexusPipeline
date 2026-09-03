@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
@@ -40,7 +41,7 @@ internal static class ApiPluginContributionsHandler
             return;
         }
 
-        if (RuntimeContext.Instance.FindUser(userId) is null)
+        if (RuntimeContext.Instance.Resolve<UserQueries>().Find(userId) is null)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
@@ -475,11 +476,9 @@ internal static class ApiPluginContributionsHandler
     {
         PluginManager plugins = RuntimeContext.Instance.Plugins;
         IReadOnlyList<PluginUserListBadgeRegistration> contributions = plugins.UserListBadgeContributions;
-        List<NexusUser> users = RuntimeContext.Instance.SnapshotUsers()
-            .OrderBy(user => user.Index)
-            .ToList();
+        IReadOnlyList<UserReadModel> users = RuntimeContext.Instance.Resolve<UserQueries>().List();
         var result = new List<object>(users.Count);
-        foreach (NexusUser user in users)
+        foreach (UserReadModel user in users)
         {
             var badges = new List<object>();
             foreach (PluginUserListBadgeRegistration registration in contributions)

@@ -1,4 +1,5 @@
 using NexusPipeline.App.Repositories;
+using NexusPipeline.App.State;
 using NexusPipeline.Models;
 using Xunit;
 
@@ -39,10 +40,11 @@ public class RunDaysTests
                 Bindings = { Binding(3), Binding(1), Binding(0), Binding(-1) },
             },
         };
+        var state = new RuntimeEntityState();
+        state.Mutate(mutation => mutation.Users.AddRange(users));
         int saves = 0;
         var writer = new RuntimeUserRunDaysWriter(
-            action => action(),
-            () => users,
+            state,
             _ => saves++);
 
         bool changed = writer.DecrementDaily();
@@ -67,10 +69,11 @@ public class RunDaysTests
                 Bindings = { Binding(0), Binding(-1) },
             },
         };
+        var state = new RuntimeEntityState();
+        state.Mutate(mutation => mutation.Users.AddRange(users));
         int saves = 0;
         var writer = new RuntimeUserRunDaysWriter(
-            action => action(),
-            () => users,
+            state,
             _ => saves++);
 
         bool changed = writer.DecrementDaily();
@@ -91,9 +94,10 @@ public class RunDaysTests
                 Bindings = { Binding(2) },
             },
         };
+        var state = new RuntimeEntityState();
+        state.Mutate(mutation => mutation.Users.AddRange(users));
         var writer = new RuntimeUserRunDaysWriter(
-            action => action(),
-            () => users,
+            state,
             _ => { });
 
         writer.DecrementDaily();

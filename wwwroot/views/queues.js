@@ -7,7 +7,8 @@ import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, registerInterval, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
-import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { hasEntityNameConflict } from "../core/entity-name.js";
+import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { durationClock } from "../core/duration.js";
@@ -307,6 +308,7 @@ export async function saveQueue() {
   const l = state.limits || {};
   const nameBytes = new TextEncoder().encode(draft.name).length;
   if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", `队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`); toast(`队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error"); return; }
+  if (hasEntityNameConflict(state.queues, draft.name, draft.id)) { setFieldInvalid("qm-name"); toast("队列名称已存在，请使用其他名称", "error"); return; }
   if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(`定时列表已达上限（${draft.timeSets.length}/${l.maxTimeSetsPerQueue}）`, "error"); return; }
   const totalUsers = queueTotalUsers();
   if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(`任务列表的启用用户总数已达上限（${totalUsers}/${l.maxQueueTotalUsers}）`, "error"); return; }
@@ -398,7 +400,14 @@ async function doSaveQueue(merged, duplicateMerged) {
     queuePendingMerged = false;
     queuePendingDuplicateMerged = false;
     await pageQueues(state.routeToken);
-  } catch (error) { toast(error.message, "error"); }
+  } catch (error) {
+    if (error?.code === "duplicate_name") {
+      setFieldInvalid("qm-name");
+      toast("队列名称已存在，请使用其他名称", "error");
+      return;
+    }
+    toast(error.message, "error");
+  }
 }
 
 export function deleteQueue(id, name) {

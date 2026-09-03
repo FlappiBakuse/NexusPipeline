@@ -377,6 +377,28 @@ export function setFieldError(id, message) {
   visual.focus({ preventScroll: true });
 }
 
+/** 字段无文案错误：只保留红色输入框与无障碍状态，不占用额外错误文案。 */
+export function setFieldInvalid(id) {
+  const element = $(`#${id}`);
+  if (!element) return;
+  const visual = eachFieldElement(element, item => {
+    item.classList.add("field-error");
+    item.setAttribute("aria-invalid", "true");
+  });
+  const slot = document.getElementById(`${id}-error`);
+  if (slot) {
+    slot.hidden = true;
+    slot.textContent = "";
+    const describedBy = (visual.getAttribute("aria-describedby") || "")
+      .split(/\s+/)
+      .filter(Boolean)
+      .filter(value => value !== slot.id);
+    if (describedBy.length) visual.setAttribute("aria-describedby", describedBy.join(" "));
+    else visual.removeAttribute("aria-describedby");
+  }
+  visual.focus({ preventScroll: true });
+}
+
 /** 必填空值错误：保留红色边框与可访问性状态，不在字段下方显示红色文案。 */
 export function setRequiredFieldError(id) {
   const element = $(`#${id}`);

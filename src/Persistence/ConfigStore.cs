@@ -6,7 +6,7 @@ namespace NexusPipeline.Persistence;
 
 internal static class ConfigStore
 {
-    public static AppSettings Load()
+    public static AppSettings Load(ConfigLoadMode mode = ConfigLoadMode.Repair)
     {
         var settings = new AppSettings();
         if (File.Exists(AppPaths.ConfigPath))
@@ -22,13 +22,19 @@ internal static class ConfigStore
             }
             catch (Exception ex)
             {
-                string backup = JsonStore.PreserveCorruptFile(AppPaths.ConfigPath);
-                Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}（可手动恢复，不再被后续保存覆盖）");
+                if (mode == ConfigLoadMode.Repair)
+                {
+                    string backup = JsonStore.PreserveCorruptFile(AppPaths.ConfigPath);
+                    Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}（可手动恢复，不再被后续保存覆盖）");
+                }
+                else
+                {
+                    Logger.Warn($"[警告] 解析 settings.json 失败，使用默认设置：{ex.Message}（只读启动不修改原文件）");
+                }
             }
         }
         Normalize(settings);
-        // 加载后刷新日志阈值缓存（即时生效）。
-        Logger.RefreshLevel();
+        Logger.ConfigureLevel(settings.LogLevel);
         return settings;
     }
 
@@ -37,8 +43,8 @@ internal static class ConfigStore
         Normalize(settings);
         Directory.CreateDirectory(AppPaths.ConfigDir);
         JsonUtil.WriteAtomic(AppPaths.ConfigPath, JsonSerializer.Serialize(settings, JsonOpts.Indented));
-        // 保存后刷新日志阈值缓存（即时生效）。
-        Logger.RefreshLevel();
+        // 原子保存成功后才更新日志阈值，失败时保留旧阈值。
+        Logger.ConfigureLevel(settings.LogLevel);
     }
 
     private static void Normalize(AppSettings settings)

@@ -55,12 +55,12 @@ public sealed class UserDataPrunerTests
         string scriptId = "regression-prune-" + Guid.NewGuid().ToString("N");
         string legacyKey = "Legacy-" + Guid.NewGuid().ToString("N");
         string dir = ConfigSwapPaths.UserDir(scriptId, legacyKey);
-        List<NexusUser> previousUsers;
-        lock (context.DataLock)
+        List<NexusUser> previousUsers = new();
+        context.EntityState.Mutate(state =>
         {
-            previousUsers = context.Users.Select(user => user.Clone()).ToList();
-            context.Users.Clear();
-        }
+            previousUsers = state.Users.Select(user => user.Clone()).ToList();
+            state.Users.Clear();
+        });
         try
         {
             Directory.CreateDirectory(dir);
@@ -103,11 +103,11 @@ public sealed class UserDataPrunerTests
             {
                 Directory.Delete(dir, recursive: true);
             }
-            lock (context.DataLock)
+            context.EntityState.Mutate(state =>
             {
-                context.Users.Clear();
-                context.Users.AddRange(previousUsers);
-            }
+                state.Users.Clear();
+                state.Users.AddRange(previousUsers);
+            });
         }
     }
 
@@ -117,18 +117,18 @@ public sealed class UserDataPrunerTests
         RuntimeContext context = RuntimeContext.Instance;
         string scriptId = "regression-prune-bound-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");
-        List<NexusUser> previousUsers;
-        lock (context.DataLock)
+        List<NexusUser> previousUsers = new();
+        context.EntityState.Mutate(state =>
         {
-            previousUsers = context.Users.Select(user => user.Clone()).ToList();
-            context.Users.Clear();
-            context.Users.Add(new NexusUser
+            previousUsers = state.Users.Select(user => user.Clone()).ToList();
+            state.Users.Clear();
+            state.Users.Add(new NexusUser
             {
                 Id = userId,
                 Name = "prune-bound",
                 Bindings = new List<UserScriptBinding> { new() { ScriptInstanceId = scriptId } },
             });
-        }
+        });
         try
         {
             string dir = ConfigSwapPaths.UserDir(scriptId, userId);
@@ -155,11 +155,11 @@ public sealed class UserDataPrunerTests
             {
                 Directory.Delete(dir, recursive: true);
             }
-            lock (context.DataLock)
+            context.EntityState.Mutate(state =>
             {
-                context.Users.Clear();
-                context.Users.AddRange(previousUsers);
-            }
+                state.Users.Clear();
+                state.Users.AddRange(previousUsers);
+            });
         }
     }
 }

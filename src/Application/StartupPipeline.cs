@@ -25,11 +25,11 @@ internal static class StartupPipeline
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;
-        ctx.ReloadSettings();
-        ctx.ReloadData();
-        // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底），避免多进程并发恢复竞争文件。
-        UserConfigManager.RecoverInterrupted(ctx.SnapshotUsers());
-        TaskRegistration.SyncWithSettings(ctx.Settings);
+        if (!HostedRuntimeInitializer.Initialize(ctx))
+        {
+            ClearServicePid();
+            return;
+        }
         Bootstrap.StartServices();
 
         WebServerOptions webOptions = WebServerOptions.FromSettings(
@@ -172,8 +172,11 @@ internal static class StartupPipeline
         }
         ApplicationHost.IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
-        // 崩溃恢复仅服务类进程执行（service/web 均含调度与配置交换能力；manage/status/CLI 由运行时自愈兜底）。
-        UserConfigManager.RecoverInterrupted(ctx.SnapshotUsers());
+        if (!HostedRuntimeInitializer.Initialize(ctx))
+        {
+            ClearServicePid();
+            return 1;
+        }
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(
             ctx.Settings.WebPort,

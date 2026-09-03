@@ -14,6 +14,26 @@ internal abstract class CurrentModelUserRepository : IUserRepository
         _users = users;
     }
 
+    public ResolvedScriptUser? ResolveBinding(
+        ScriptInstance script,
+        string? userReference,
+        IReadOnlyList<NexusUser>? users = null)
+    {
+        if (string.IsNullOrWhiteSpace(userReference))
+        {
+            return null;
+        }
+        NexusUser? user = Source(users)
+            .FirstOrDefault(item => string.Equals(item.Id, userReference, StringComparison.OrdinalIgnoreCase))
+            ?? Source(users)
+                .FirstOrDefault(item => string.Equals(item.Name, userReference, StringComparison.OrdinalIgnoreCase));
+        UserScriptBinding? binding = user?.Bindings.FirstOrDefault(item =>
+            string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+        return user is null || binding is null
+            ? null
+            : new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
+    }
+
     public ResolvedScriptUser? ResolveEnabledBinding(
         ScriptInstance script,
         string? userName,

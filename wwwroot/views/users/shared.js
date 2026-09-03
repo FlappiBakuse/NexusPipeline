@@ -5,7 +5,8 @@ import { pageHeader, valueField } from "../../core/forms.js";
 import { icon } from "../../core/icons.js";
 import { isCurrent, registerInterval, schedule, state } from "../../core/state.js";
 import { closeModal, modalShell, showModal } from "../../core/modal.js";
-import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../../core/ui.js";
+import { hasEntityNameConflict } from "../../core/entity-name.js";
+import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
@@ -227,6 +228,11 @@ export async function saveGlobalUser() {
     toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
     return;
   }
+  if (hasEntityNameConflict(state.users, name)) {
+    setFieldInvalid("gu-name");
+    toast("用户名已存在，请使用其他名称", "error");
+    return;
+  }
   clearFieldError("gu-name");
   try {
     await api("POST", "/api/users", { name });
@@ -234,6 +240,11 @@ export async function saveGlobalUser() {
     toast("用户已创建");
     await reloadUsers();
   } catch (error) {
+    if (error?.code === "duplicate_name") {
+      setFieldInvalid("gu-name");
+      toast("用户名已存在，请使用其他名称", "error");
+      return;
+    }
     toast(error.message, "error");
   }
 }

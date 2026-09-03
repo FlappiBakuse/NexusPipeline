@@ -1,14 +1,12 @@
-using NexusPipeline.App.Repositories;
-using NexusPipeline.Persistence;
-using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 
 /// <summary>
-/// 应用运行时初始化：权限契约、约束加载以及共享数据加载。
-/// 该阶段只负责建立可运行的组合根，不启动服务或处理具体命令。
+/// 应用公共初始化：权限契约、约束加载以及只读设置快照。
+/// 该阶段不加载、不修复 Scripts / Queues / Users，也不启动服务。
 /// </summary>
 internal static class RuntimeInitializer
 {
@@ -33,15 +31,7 @@ internal static class RuntimeInitializer
         // 先加载约束，再加载设置（Normalize 使用固定的历史保留天数上限）。
         Limits.Load();
         RuntimeContext ctx = RuntimeContext.Instance;
-        ctx.ReloadSettings();
-        ctx.ReloadData();
-        // 配置交换恢复的数据源由组合根装配（恢复路径不再反向依赖 RuntimeContext；
-        // 所有进程模式共用，service/web 的 StartupPipeline 启动恢复与 CLI 运行时自愈均由此覆盖）。
-        ConfigSwapSession.ConfigureRecovery(ctx.FindScript, ctx.SnapshotUsers);
-        // v0.13.2 布局迁移：先解释旧散落事务目录，再进入增量快照恢复。
-        ConfigWorkDirMaintenance.MigrateLegacyWorkDirs();
-        // runtime/staging 属可重建暂存区，启动时清掉上次进程的残留临时文件。
-        ConfigWorkDirMaintenance.SweepRuntimeStaging();
+        ctx.ReloadSettings(Persistence.ConfigLoadMode.ReadOnly);
         if (Limits.Fatals.Count > 0)
         {
             foreach (string fatal in Limits.Fatals)

@@ -5,7 +5,8 @@ import { pathField, switchControl, textareaField, valueField } from "../../core/
 import { icon } from "../../core/icons.js";
 import { state } from "../../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../../core/modal.js";
-import { setFieldError, setRequiredFieldError, clearFieldError, toast, withBusy } from "../../core/ui.js";
+import { hasEntityNameConflict } from "../../core/entity-name.js";
+import { setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, toast, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
@@ -306,6 +307,11 @@ export async function saveUserManagement() {
     toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
     return;
   }
+  if (hasEntityNameConflict(state.users, name, draft.userId)) {
+    setFieldInvalid("um-name");
+    toast("用户名已存在，请使用其他名称", "error");
+    return;
+  }
   clearFieldError("um-name");
   const remark = $("#um-remark")?.value.trim() || "";
   if (new TextEncoder().encode(remark).length > MAX_USER_REMARK_BYTES) {
@@ -326,6 +332,11 @@ export async function saveUserManagement() {
     toast("用户设置已保存");
     await reloadUsers();
   } catch (error) {
+    if (error?.code === "duplicate_name") {
+      setFieldInvalid("um-name");
+      toast("用户名已存在，请使用其他名称", "error");
+      return;
+    }
     toast(error.message, "error");
   }
 }

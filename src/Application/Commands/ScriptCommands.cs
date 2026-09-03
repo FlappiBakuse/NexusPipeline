@@ -47,38 +47,44 @@ internal static class ScriptCommands
             }
 
             string? limitError = null;
-            lock (ctx.DataLock)
+            bool duplicateName = false;
+            ctx.EntityState.Mutate(state =>
             {
-                limitError = Limits.CheckScriptCount(ctx.Scripts.Count)
-                    ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称")
-                    ?? (EntityNameRules.HasConflict(ctx.Scripts, candidate.Name, script => script.Name)
-                        ? "脚本名称重复：脚本实例已存在同名脚本"
-                        : null)
-                    ?? Limits.CheckAttempts(candidate.MaxAttempts)
+                limitError = Limits.CheckScriptCount(state.Scripts.Count)
+                    ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称");
+                if (limitError is null && EntityNameRules.HasConflict(state.Scripts, candidate.Name, script => script.Name))
+                {
+                    duplicateName = true;
+                    limitError = "脚本名称重复：脚本实例已存在同名脚本";
+                }
+                limitError ??= Limits.CheckAttempts(candidate.MaxAttempts)
                     ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
                 if (limitError is null)
                 {
-                    candidate.Index = ctx.Scripts.Count == 0 ? 0 : ctx.Scripts.Max(item => item.Index) + 1;
-                    ctx.Scripts.Add(candidate);
+                    candidate.Index = state.Scripts.Count == 0 ? 0 : state.Scripts.Max(item => item.Index) + 1;
+                    state.Scripts.Add(candidate);
                     try
                     {
-                        DataStore.SaveScripts(ctx.Scripts);
+                        DataStore.SaveScripts(state.Scripts);
                     }
                     catch
                     {
-                        ctx.Scripts.Remove(candidate);
+                        state.Scripts.Remove(candidate);
                         throw;
                     }
                 }
-            }
+            });
             if (limitError is not null)
             {
-                return Validation<ScriptInstance>(limitError);
+                return duplicateName
+                    ? Conflict<ScriptInstance>("duplicate_name", limitError)
+                    : Validation<ScriptInstance>(limitError);
             }
 
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "添加脚本实例", $"{candidate.Name}（id={candidate.Id}）");
-            return OperationResult<ScriptInstance>.Ok(ctx.ResolveEffectiveScript(candidate));
+            return OperationResult<ScriptInstance>.Ok(
+                ctx.Resolve<ScriptSpecResolver>().ResolveScript(candidate));
         }
         catch (Exception ex)
         {
@@ -92,7 +98,7 @@ internal static class ScriptCommands
         string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? existing = ctx.FindScript(scriptId);
+        ScriptInstance? existing = ctx.EntityState.FindScript(scriptId);
         if (existing is null)
         {
             return NotFound<ScriptInstance>($"未找到脚本实例：{scriptId}");
@@ -148,44 +154,48 @@ internal static class ScriptCommands
             ScriptInstance? previous = null;
             int previousIndex = -1;
             string? mutationError = null;
+            bool duplicateName = false;
             bool changed = ctx.Center.TryExecuteLeaseMutation(
                 existing.Id,
                 null,
                 () =>
                 {
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        int index = ctx.Scripts.IndexOf(existing);
+                        int index = state.Scripts.FindIndex(script =>
+                            string.Equals(script.Id, existing.Id, StringComparison.OrdinalIgnoreCase));
                         if (index < 0)
                         {
+                            mutationError = $"未找到脚本实例：{scriptId}";
                             return;
                         }
                         if (EntityNameRules.HasConflict(
-                                ctx.Scripts,
+                                state.Scripts,
                                 candidate.Name,
                                 script => script.Name,
                                 script => string.Equals(script.Id, existing.Id, StringComparison.OrdinalIgnoreCase)))
                         {
+                            duplicateName = true;
                             mutationError = "脚本名称重复：脚本实例已存在同名脚本";
                             return;
                         }
                         previousIndex = index;
-                        previous = ctx.Scripts[index];
-                        ctx.Scripts[index] = candidate;
+                        previous = state.Scripts[index].Clone();
+                        state.Scripts[index] = candidate.Clone();
                         try
                         {
-                            DataStore.SaveScripts(ctx.Scripts);
+                            DataStore.SaveScripts(state.Scripts);
                         }
                         catch
                         {
                             // 保存失败时撤销内存替换，避免运行态已经切换到未落盘的候选配置。
-                            if (previous is not null && previousIndex >= 0 && previousIndex < ctx.Scripts.Count)
+                            if (previous is not null && previousIndex >= 0 && previousIndex < state.Scripts.Count)
                             {
-                                ctx.Scripts[previousIndex] = previous;
+                                state.Scripts[previousIndex] = previous;
                             }
                             throw;
                         }
-                    }
+                    });
                 },
                 out leases,
                 out string? failureCode);
@@ -195,12 +205,15 @@ internal static class ScriptCommands
             }
             if (mutationError is not null)
             {
-                return Validation<ScriptInstance>(mutationError);
+                return duplicateName
+                    ? Conflict<ScriptInstance>("duplicate_name", mutationError)
+                    : Validation<ScriptInstance>(mutationError);
             }
 
             ctx.Scheduler.RevalidatePendingPlans();
             Audit.Log(source, "修改脚本实例", $"{candidate.Name}（id={candidate.Id}）");
-            return OperationResult<ScriptInstance>.Ok(ctx.ResolveEffectiveScript(candidate));
+            return OperationResult<ScriptInstance>.Ok(
+                ctx.Resolve<ScriptSpecResolver>().ResolveScript(candidate));
         }
         catch (Exception ex)
         {
@@ -216,7 +229,7 @@ internal static class ScriptCommands
     public static OperationResult<ScriptInstance?> Delete(string scriptId, string source = Audit.Web)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        ScriptInstance? removed = ctx.FindScript(scriptId);
+        ScriptInstance? removed = ctx.EntityState.FindScript(scriptId);
         SemaphoreSlim? gate = null;
         if (removed is not null)
         {
@@ -239,10 +252,10 @@ internal static class ScriptCommands
                 null,
                 () =>
                 {
-                    lock (ctx.DataLock)
+                    ctx.EntityState.Mutate(state =>
                     {
-                        int index = ctx.Scripts.FindIndex(script => script.Id == scriptId);
-                        bool hasBindings = ctx.Users.Any(user => user.Bindings.Any(binding =>
+                        int index = state.Scripts.FindIndex(script => script.Id == scriptId);
+                        bool hasBindings = state.Users.Any(user => user.Bindings.Any(binding =>
                             string.Equals(binding.ScriptInstanceId, scriptId, StringComparison.Ordinal)));
                         ScriptInstance? removedEntry = null;
                         if (index >= 0 || hasBindings)
@@ -252,26 +265,26 @@ internal static class ScriptCommands
                         }
                         if (index >= 0)
                         {
-                            removedEntry = ctx.Scripts[index];
-                            ctx.Scripts.RemoveAt(index);
+                            removedEntry = state.Scripts[index].Clone();
+                            state.Scripts.RemoveAt(index);
                         }
-                        removedBindings = ScriptBindingCleanup.RemoveForScript(ctx.Users, scriptId);
+                        removedBindings = ScriptBindingCleanup.RemoveForScript(state.Users, scriptId);
                         try
                         {
                             if (removedBindings.Count > 0)
                             {
-                                DataStore.SaveUsers(ctx.Users);
+                                DataStore.SaveUsers(state.Users);
                             }
                             if (index >= 0)
                             {
-                                DataStore.SaveScripts(ctx.Scripts);
+                                DataStore.SaveScripts(state.Scripts);
                             }
                         }
                         catch
                         {
                             if (removedEntry is not null && index >= 0)
                             {
-                                ctx.Scripts.Insert(index, removedEntry);
+                                state.Scripts.Insert(index, removedEntry);
                             }
                             ScriptBindingCleanup.Restore(removedBindings);
                             if (scriptsFile is not null)
@@ -284,7 +297,7 @@ internal static class ScriptCommands
                             }
                             throw;
                         }
-                    }
+                    });
                     if (removed is not null)
                     {
                         UserConfigManager.RemoveScriptData(scriptId);
@@ -319,9 +332,9 @@ internal static class ScriptCommands
         try
         {
             string? error = null;
-            lock (ctx.DataLock)
+            ctx.EntityState.Mutate(state =>
             {
-                if (ids is null || ids.Count != ctx.Scripts.Count
+                if (ids is null || ids.Count != state.Scripts.Count
                     || ids.Any(string.IsNullOrWhiteSpace)
                     || ids.Distinct(StringComparer.Ordinal).Count() != ids.Count)
                 {
@@ -329,15 +342,15 @@ internal static class ScriptCommands
                 }
                 else
                 {
-                    HashSet<string> existing = new(ctx.Scripts.Select(script => script.Id), StringComparer.Ordinal);
+                    HashSet<string> existing = new(state.Scripts.Select(script => script.Id), StringComparer.Ordinal);
                     if (ids.Any(id => !existing.Contains(id)))
                     {
                         error = "脚本顺序名单与当前脚本列表不一致";
                     }
                     else
                     {
-                        Dictionary<string, ScriptInstance> byId = ctx.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
-                        Dictionary<string, int> oldIndexes = ctx.Scripts.ToDictionary(
+                        Dictionary<string, ScriptInstance> byId = state.Scripts.ToDictionary(script => script.Id, StringComparer.Ordinal);
+                        Dictionary<string, int> oldIndexes = state.Scripts.ToDictionary(
                             script => script.Id,
                             script => script.Index,
                             StringComparer.Ordinal);
@@ -347,11 +360,11 @@ internal static class ScriptCommands
                         }
                         try
                         {
-                            DataStore.SaveScripts(ctx.Scripts);
+                            DataStore.SaveScripts(state.Scripts);
                         }
                         catch
                         {
-                            foreach (ScriptInstance script in ctx.Scripts)
+                            foreach (ScriptInstance script in state.Scripts)
                             {
                                 script.Index = oldIndexes[script.Id];
                             }
@@ -359,7 +372,7 @@ internal static class ScriptCommands
                         }
                     }
                 }
-            }
+            });
             if (error is not null)
             {
                 return Validation<bool>(error);
@@ -401,7 +414,7 @@ internal static class ScriptCommands
         out string? error)
     {
         error = null;
-        ResolvedScriptSpec resolved = ctx.ResolveScriptCandidateSpec(candidate);
+        ResolvedScriptSpec resolved = ctx.Resolve<ScriptSpecResolver>().ResolveCandidate(candidate);
         if (!resolved.Succeeded)
         {
             error = resolved.Error ?? (string.IsNullOrWhiteSpace(candidate.PluginType)

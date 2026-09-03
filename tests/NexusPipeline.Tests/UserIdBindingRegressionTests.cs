@@ -53,18 +53,18 @@ public sealed class UserIdRecoveryTests
     {
         RuntimeContext context = RuntimeContext.Instance;
         // v0.10.0（B2）：恢复数据源由组合根装配；测试直接构造等价适配器。
-        ConfigSwapSession.ConfigureRecovery(context.FindScript, context.SnapshotUsers);
+        ConfigSwapSession.ConfigureRecovery(context.EntityState.FindScript, context.EntityState.SnapshotUsers);
         string scriptId = "regression-recovery-" + Guid.NewGuid().ToString("N");
         string legacyName = "LegacyName-" + Guid.NewGuid().ToString("N");
         string configPath = Path.Combine(Path.GetTempPath(), "np-regression-recovery-" + Guid.NewGuid().ToString("N"), "config.json");
         string cache = ConfigSwapPaths.CacheDir(scriptId, legacyName);
-        List<NexusUser> previousUsers;
+        List<NexusUser> previousUsers = new();
 
-        lock (context.DataLock)
+        context.EntityState.Mutate(state =>
         {
-            previousUsers = context.Users.Select(user => user.Clone()).ToList();
-            context.Users.Clear();
-        }
+            previousUsers = state.Users.Select(user => user.Clone()).ToList();
+            state.Users.Clear();
+        });
 
         try
         {
@@ -88,11 +88,11 @@ public sealed class UserIdRecoveryTests
         }
         finally
         {
-            lock (context.DataLock)
+            context.EntityState.Mutate(state =>
             {
-                context.Users.Clear();
-                context.Users.AddRange(previousUsers);
-            }
+                state.Users.Clear();
+                state.Users.AddRange(previousUsers);
+            });
             DeleteExactDirectory(Path.Combine(AppPaths.DataDir, scriptId));
             DeleteExactDirectory(Path.GetDirectoryName(configPath)!);
         }
@@ -119,21 +119,21 @@ public sealed class BindingAndSchedulerTests
         var script = new ScriptInstance { Id = scriptId, Name = "regression running script" };
         var target = new NexusUser { Id = targetUserId, Name = "target" };
         var running = new NexusUser { Id = runningUserId, Name = "running" };
-        List<ScriptInstance> previousScripts;
-        List<NexusUser> previousUsers;
+        List<ScriptInstance> previousScripts = new();
+        List<NexusUser> previousUsers = new();
         bool previousUsersFileExists = File.Exists(AppPaths.UsersPath);
         byte[]? previousUsersFile = previousUsersFileExists ? File.ReadAllBytes(AppPaths.UsersPath) : null;
 
-        lock (context.DataLock)
+        context.EntityState.Mutate(state =>
         {
-            previousScripts = context.Scripts.Select(item => item.Clone()).ToList();
-            previousUsers = context.Users.Select(item => item.Clone()).ToList();
-            context.Scripts.Clear();
-            context.Scripts.Add(script);
-            context.Users.Clear();
-            context.Users.Add(target);
-            context.Users.Add(running);
-        }
+            previousScripts = state.Scripts.Select(item => item.Clone()).ToList();
+            previousUsers = state.Users.Select(item => item.Clone()).ToList();
+            state.Scripts.Clear();
+            state.Scripts.Add(script);
+            state.Users.Clear();
+            state.Users.Add(target);
+            state.Users.Add(running);
+        });
 
         ExecutionStateStore state = context.Resolve<ExecutionStateStore>();
         var execution = new RunningExecution
@@ -167,13 +167,13 @@ public sealed class BindingAndSchedulerTests
         finally
         {
             state.Unregister(execution);
-            lock (context.DataLock)
+            context.EntityState.Mutate(state =>
             {
-                context.Scripts.Clear();
-                context.Scripts.AddRange(previousScripts);
-                context.Users.Clear();
-                context.Users.AddRange(previousUsers);
-            }
+                state.Scripts.Clear();
+                state.Scripts.AddRange(previousScripts);
+                state.Users.Clear();
+                state.Users.AddRange(previousUsers);
+            });
             RestoreFile(usersPathBackup, previousUsersFileExists, previousUsersFile);
         }
     }
@@ -193,20 +193,20 @@ public sealed class BindingAndSchedulerTests
             ConfigPath = Path.Combine(Path.GetTempPath(), "np-regression-missing-" + Guid.NewGuid().ToString("N"), "config.json"),
         };
         var user = new NexusUser { Id = userId, Name = "snapshot-target" };
-        List<ScriptInstance> previousScripts;
-        List<NexusUser> previousUsers;
+        List<ScriptInstance> previousScripts = new();
+        List<NexusUser> previousUsers = new();
         bool previousUsersFileExists = File.Exists(AppPaths.UsersPath);
         byte[]? previousUsersFile = previousUsersFileExists ? File.ReadAllBytes(AppPaths.UsersPath) : null;
 
-        lock (context.DataLock)
+        context.EntityState.Mutate(state =>
         {
-            previousScripts = context.Scripts.Select(item => item.Clone()).ToList();
-            previousUsers = context.Users.Select(item => item.Clone()).ToList();
-            context.Scripts.Clear();
-            context.Scripts.Add(script);
-            context.Users.Clear();
-            context.Users.Add(user);
-        }
+            previousScripts = state.Scripts.Select(item => item.Clone()).ToList();
+            previousUsers = state.Users.Select(item => item.Clone()).ToList();
+            state.Scripts.Clear();
+            state.Scripts.Add(script);
+            state.Users.Clear();
+            state.Users.Add(user);
+        });
 
         string usersPathBackup = AppPaths.UsersPath;
         try
@@ -222,13 +222,13 @@ public sealed class BindingAndSchedulerTests
         }
         finally
         {
-            lock (context.DataLock)
+            context.EntityState.Mutate(state =>
             {
-                context.Scripts.Clear();
-                context.Scripts.AddRange(previousScripts);
-                context.Users.Clear();
-                context.Users.AddRange(previousUsers);
-            }
+                state.Scripts.Clear();
+                state.Scripts.AddRange(previousScripts);
+                state.Users.Clear();
+                state.Users.AddRange(previousUsers);
+            });
             RestoreFile(usersPathBackup, previousUsersFileExists, previousUsersFile);
             DeleteExactDirectory(Path.Combine(AppPaths.DataDir, scriptId));
         }

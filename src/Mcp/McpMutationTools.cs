@@ -211,7 +211,11 @@ internal sealed class McpMutationTools
             input.Name,
             input.Remark,
             Audit.Mcp);
-        return McpToolResult.From(result, value => value is null ? null : McpViews.User(value, _context.Queues));
+        return McpToolResult.From(
+            result,
+            value => value is null
+                ? null
+                : McpViews.User(value, _context.Queues, _context.Runtime.Scheduler));
     }
 
     [McpServerTool(Name = "add_binding", Title = "添加用户脚本绑定", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]

@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 
 namespace NexusPipeline.Web;
@@ -70,7 +71,7 @@ internal static class ApiFsHandler
             return false;
         }
         // 快照后遍历，避免与并发修改冲突。
-        foreach (ScriptInstance script in RuntimeContext.Instance.SnapshotEffectiveScripts())
+        foreach (ScriptInstance script in RuntimeContext.Instance.Resolve<ScriptQueries>().ListEffective())
         {
             foreach (string prefix in AllowedPrefixes(script))
             {

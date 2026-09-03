@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -72,25 +73,21 @@ internal static class ApiUsersHandler
     private static async Task WriteUsersAsync(HttpListenerContext context)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        List<NexusUser> users = ctx.SnapshotUsers().OrderBy(user => user.Index).ToList();
-        List<ScriptInstance> scripts = ctx.SnapshotEffectiveScripts();
-        List<DispatchQueue> queues = ctx.SnapshotQueues();
+        IReadOnlyList<UserReadModel> users = ctx.Resolve<UserQueries>().List();
         Audit.Log(Audit.Web, "查询全局用户列表", $"{users.Count} 个");
-        await HttpHelper.WriteJsonAsync(context, users.Select(user => ProjectUser(user, scripts, queues))).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, users.Select(ProjectUser)).ConfigureAwait(false);
     }
 
     private static async Task GetUserAsync(HttpListenerContext context, string userId)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
+        UserReadModel? user = ctx.Resolve<UserQueries>().Find(userId);
         if (user is null)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectUser(user, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, ProjectUser(user)).ConfigureAwait(false);
     }
 
     private static async Task CreateUserAsync(HttpListenerContext context, string body)
@@ -110,9 +107,8 @@ internal static class ApiUsersHandler
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectUser(result.Value!, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+        UserReadModel? user = ctx.Resolve<UserQueries>().Find(result.Value!.Id);
+        await HttpHelper.WriteJsonAsync(context, ProjectUser(user!)).ConfigureAwait(false);
     }
 
     private static async Task UpdateUserAsync(HttpListenerContext context, string userId, string body)
@@ -133,9 +129,8 @@ internal static class ApiUsersHandler
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectUser(result.Value!, ctx.SnapshotEffectiveScripts(), ctx.SnapshotQueues())).ConfigureAwait(false);
+        UserReadModel? user = ctx.Resolve<UserQueries>().Find(result.Value!.Id);
+        await HttpHelper.WriteJsonAsync(context, ProjectUser(user!)).ConfigureAwait(false);
     }
 
     private static async Task DeleteUserAsync(HttpListenerContext context, string userId, string body)
@@ -176,14 +171,13 @@ internal static class ApiUsersHandler
         if (method == "GET" && seg.Length == 3)
         {
             RuntimeContext ctx = RuntimeContext.Instance;
-            NexusUser? user = ctx.FindUser(userId);
-            if (user is null)
+            IReadOnlyList<UserBindingReadModel>? bindings = ctx.Resolve<UserQueries>().ListBindings(userId);
+            if (bindings is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            List<ScriptInstance> scripts = ctx.SnapshotEffectiveScripts();
-            await HttpHelper.WriteJsonAsync(context, user.Bindings.Select(binding => ProjectBinding(user, binding, scripts))).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, bindings).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 4 && seg[3].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -214,7 +208,7 @@ internal static class ApiUsersHandler
             }
             if (method == "POST")
             {
-                await ApiScriptsHandler.HandleEditConfigByUserIdAsync(
+                await ConfigEditHttpAdapter.HandleByUserIdAsync(
                     context,
                     Uri.UnescapeDataString(seg[3]),
                     userId,
@@ -255,9 +249,10 @@ internal static class ApiUsersHandler
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotEffectiveScripts())).ConfigureAwait(false);
+        UserReadModel? user = ctx.Resolve<UserQueries>().Find(userId);
+        UserBindingReadModel? binding = user?.Bindings.FirstOrDefault(item =>
+            string.Equals(item.ScriptInstanceId, result.Value!.ScriptInstanceId, StringComparison.Ordinal));
+        await HttpHelper.WriteJsonAsync(context, binding!).ConfigureAwait(false);
     }
 
     private static async Task UpdateBindingAsync(HttpListenerContext context, string userId, string scriptId, string body)
@@ -278,9 +273,10 @@ internal static class ApiUsersHandler
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
-            ProjectBinding(ctx.FindUser(userId) ?? new NexusUser { Id = userId }, result.Value!, ctx.SnapshotEffectiveScripts())).ConfigureAwait(false);
+        UserReadModel? user = ctx.Resolve<UserQueries>().Find(userId);
+        UserBindingReadModel? binding = user?.Bindings.FirstOrDefault(item =>
+            string.Equals(item.ScriptInstanceId, result.Value!.ScriptInstanceId, StringComparison.Ordinal));
+        await HttpHelper.WriteJsonAsync(context, binding!).ConfigureAwait(false);
     }
 
     private static async Task DeleteBindingAsync(HttpListenerContext context, string userId, string scriptId)
@@ -301,7 +297,8 @@ internal static class ApiUsersHandler
         string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        NexusUser? user = ctx.FindUser(userId);
+        UserQueries queries = ctx.Resolve<UserQueries>();
+        UserReadModel? user = queries.Find(userId);
         if (user is null)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -311,7 +308,7 @@ internal static class ApiUsersHandler
         {
             await HttpHelper.WriteJsonAsync(
                 context,
-                (user.BindingOverrides ?? new UserBindingOverrides()).Clone()).ConfigureAwait(false);
+                queries.FindGlobalSettings(userId) ?? new UserBindingOverrides()).ConfigureAwait(false);
             return;
         }
         if (method != "PUT")
@@ -337,7 +334,7 @@ internal static class ApiUsersHandler
     private static async Task HandleAvatarAsync(HttpListenerContext context, string method, string userId, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        if (ctx.FindUser(userId) is null)
+        if (ctx.Resolve<UserQueries>().Find(userId) is null)
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
@@ -432,9 +429,8 @@ internal static class ApiUsersHandler
         context.Response.OutputStream.Close();
     }
 
-    private static object ProjectUser(NexusUser user, IReadOnlyList<ScriptInstance> scripts, IReadOnlyList<DispatchQueue> queues)
+    private static object ProjectUser(UserReadModel user)
     {
-        (string QueueName, DateTime TriggerTime)? next = RuntimeContext.Instance.Scheduler.NextTriggerForUser(user, queues);
         return new
         {
             user.Id,
@@ -442,53 +438,10 @@ internal static class ApiUsersHandler
             user.Name,
             user.Remark,
             avatarUrl = HasAvatar(user.Id) ? $"/api/users/{Uri.EscapeDataString(user.Id)}/avatar" : null,
-            bindingCount = user.Bindings.Count,
-            nextRunAt = next?.TriggerTime,
-            nextQueueName = next?.QueueName,
-            bindings = user.Bindings.Select(binding => ProjectBinding(user, binding, scripts)),
-        };
-    }
-
-    private static object ProjectBinding(
-        NexusUser user,
-        UserScriptBinding binding,
-        IReadOnlyList<ScriptInstance> scripts)
-    {
-        ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == binding.ScriptInstanceId);
-        UserScriptBinding effective = UserBindingOverrideResolver.Resolve(user, binding);
-        (bool General, bool Notification, bool Advanced) locks = UserBindingOverrideResolver.Locks(user);
-        return new
-        {
-            binding.ScriptInstanceId,
-            scriptName = script?.Name ?? "（脚本实例不存在）",
-            binding.Enabled,
-            binding.PreRunScript,
-            binding.PreRunOnceOnly,
-            binding.PostRunScript,
-            binding.PostRunOnFinalOnly,
-            binding.NotifyEnabled,
-            binding.SmtpTo,
-            binding.RunDays,
-            binding.MaxSuccessfulRunsPerDay,
-            effective = new
-            {
-                effective.Enabled,
-                effective.PreRunScript,
-                effective.PreRunOnceOnly,
-                effective.PostRunScript,
-                effective.PostRunOnFinalOnly,
-                effective.NotifyEnabled,
-                effective.SmtpTo,
-                effective.RunDays,
-                effective.MaxSuccessfulRunsPerDay,
-                effective.Participates,
-            },
-            locks = new
-            {
-                general = locks.General,
-                notification = locks.Notification,
-                advanced = locks.Advanced,
-            },
+            bindingCount = user.BindingCount,
+            nextRunAt = user.NextRunAt,
+            nextQueueName = user.NextQueueName,
+            bindings = user.Bindings,
         };
     }
 

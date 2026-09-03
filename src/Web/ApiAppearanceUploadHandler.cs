@@ -20,18 +20,18 @@ internal static class ApiAppearanceUploadHandler
                 await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "too_large", error = "壁纸文件不能超过 8192 KB" }, 413).ConfigureAwait(false);
                 return;
             }
-            string caller = ApiAppearanceHandler.ResolveCaller(context, null);
+            string caller = AppearanceApiSupport.ResolveCaller(context, null);
             AppearanceAsset asset = await RuntimeContext.Instance.Resolve<AppearanceService>().UploadAsync(
                 context.Request.InputStream,
                 context.Request.ContentType,
                 context.Request.Headers["X-Nexus-Original-Name"] ?? context.Request.QueryString["name"],
                 context.Request.ContentLength64,
                 caller).ConfigureAwait(false);
-            await HttpHelper.WriteJsonAsync(context, new { ok = true, asset = ApiAppearanceHandler.ToAssetDto(asset) }).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, asset = AppearanceApiSupport.ToAssetDto(asset) }).ConfigureAwait(false);
         }
         catch (AppearanceException ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, ApiAppearanceHandler.StatusCode(ex.Code)).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -546,7 +546,7 @@ managed-code 插件可以通过 Plugin API v1.4 注册用户列表徽章、通�
 ```
 NexusPipeline/
 ├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener/Kestrel）
-│   ├── Application/    应用宿主、启动流程与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/Abstractions/Repositories
+│   ├── Application/    应用宿主、启动流程、查询、状态与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/HostedRuntimeInitializer/Queries/State/Abstractions/Repositories
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
 │   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update 分域）
@@ -592,7 +592,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 - **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
 - **Plugins 通过数据化 manifest 或独立 Plugin API v1.4 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **已知偏差（如实记录）**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期数据读取通过 `Application/Abstractions/` 仓储完成；`ConfigSwapRecovery` 的会话恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根。`Utilities/Logger` 读取 `RuntimeContext.Instance.Settings`（Utilities → 根命名空间）是保留的最小例外。新服务不得新增这类依赖。
+- **边界约束**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期实体读取通过 `Application/Queries/` 或 `Application/Abstractions/` 端口完成；实体内存所有权与同步集中在 `Application/State/RuntimeEntityState`，`ConfigSwapRecovery` 的会话恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根。`Utilities/Logger` 由设置加载/保存流程显式配置日志等级，不反向读取 `RuntimeContext`。
 
 ### 10.3 关键类职责
 
@@ -600,13 +600,17 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 |---|---|---|
 | `Program` | src/Application/ProgramEntry.cs | 进程入口，仅转交 `ApplicationHost.Run(args)` |
 | `ApplicationHost` | src/Application/ApplicationHost.cs | 进程级初始化、服务生命周期入口和正式命令分发 |
-| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 生产管理员权限校验、Test Host 编译分支、当前约束/设置/数据加载；不启动服务 |
+| `RuntimeInitializer` | src/Application/RuntimeInitializer.cs | 生产管理员权限校验、Test Host 编译分支、约束加载和只读设置快照；不加载或修复运行时实体、不启动服务 |
+| `HostedRuntimeInitializer` | src/Application/HostedRuntimeInitializer.cs | 取得单实例所有权后的权威设置加载、实体加载、历史数据修复、配置交换恢复、工作目录维护、配置恢复与任务注册 |
+| `RuntimeDataReconciler` | src/Application/RuntimeDataReconciler.cs | 宿主所有权建立后的失效绑定清理、实体名称消歧与修复结果持久化 |
 | `StartupPipeline` | src/Application/StartupPipeline.cs | 常驻服务、网页模式与重启的单实例互斥、共享启动/关闭不变量、Web/托盘生命周期 |
 | `RuntimeStateLayout` | src/Persistence/RuntimeStateLayout.cs | 创建当前 `.nxp` 运行状态目录并提供 service.pid、web.port 和 scheduler-state 路径 |
 | `Bootstrap` | src/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `HostRestartCoordinator` | src/Services/HostRestartCoordinator.cs | 统一 Web/MCP/CLI 间接重启生命周期；原子取得维护租约、延迟拉起子进程、处理失败释放与旧进程退出延迟 |
-| `RuntimeContext` | src/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务和 `Application/Abstractions/` 运行时适配器，外部访问方式不变；`Resolve<T>()` 服务解析出口 |
-| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一数据锁内的执行输入快照；运行时适配器保留现有共享列表、锁和深拷贝快照语义 |
+| `RuntimeContext` | src/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务、查询和运行时适配器；设置生命周期与服务解析出口，不拥有实体集合 |
+| `RuntimeEntityState` | src/Application/State/RuntimeEntityState.cs | Scripts/Queues/Users 的唯一内存所有权、同步边界、查找、深拷贝快照、原子执行输入快照与状态替换；不承载业务规则或持久化 |
+| `ScriptQueries` / `QueueQueries` / `UserQueries` | src/Application/Queries/ | 为控制面提供脚本、队列、用户读取用例与业务读取模型；集中有效脚本、调度时间、绑定覆盖和锁状态计算 |
+| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Application/Abstractions/、src/Application/Repositories/ | 执行/调度域读取脚本、队列、启用用户及同一实体状态同步边界内的执行输入快照；运行时适配器直接依赖 `RuntimeEntityState` |
 | `ISettingsProvider` / `IHistoryStore` | src/Application/Abstractions/、src/Application/Repositories/、src/Services/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
 | `IExecutionService` / `IFrozenQueueExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Application/Abstractions/ | Web、Scheduler、执行域和插件能力消费端口；执行端口由 `DispatchCenter` 直接实现，其他端口由 `NotificationDispatcher`、`PluginManager` 提供 |
 | `ScriptCommands` / `QueueCommands` / `UserCommands` / `SettingsCommands` / `ConfigEditCommands` | src/Application/Commands/ | 脚本、队列、全局用户、绑定、头像、设置和配置编辑生命周期的校验、租约协调、持久化和副作用收尾；Web 只负责请求解析与展示投影 |
@@ -649,7 +653,9 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
 | `WebTransport` | src/Web/WebTransport.cs | Test Host 的普通权限 HTTP 请求解析、响应流和 HttpListener/托管 transport 共用上下文适配 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
-| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册 |
+| `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册；只做协议解析、应用用例调用与 HTTP 响应 |
+| `ConfigEditHttpAdapter` | src/Web/ConfigEditHttpAdapter.cs | 配置编辑请求解析和响应组装；脚本与用户路由共用，不让 handler 横向调用 |
+| `AppearanceApiSupport` | src/Web/AppearanceApiSupport.cs | 外观 API 的调用方解析、快照响应和资产 DTO 适配；多个外观 handler 共用 |
 | `McpHost` | src/Mcp/McpHost.cs | 同进程内嵌的 Kestrel Streamable HTTP MCP 宿主；固定 loopback 监听、启动/停止和工具注册；端口冲突不漂移且不影响 Web/Control API |
 | `McpSecurity` | src/Mcp/McpSecurity.cs | MCP Host、Origin 和请求体边界检查；MCP 端点与 Web 远程访问设置隔离 |
 | `McpToolContext` | src/Mcp/McpToolContext.cs | MCP 适配层组合根；提供快照、ID/唯一名称解析、状态/历史/设置投影，调用 Application Commands 或核心服务 |
@@ -675,7 +681,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ApiAppearanceHandler` / `ApiAppearanceAssetsHandler` / `ApiAppearanceUploadHandler` | src/Web/ | 外观快照、配置、资产读取/删除/配色和原始上传 API；上传路由受独立体积上限保护 |
 | `OutboundHttpClientProvider` | src/Services/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
 | `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
-| `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），阈值过滤，控制台着色 |
+| `Logger` | src/Utilities/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），显式阈值配置，阈值过滤与控制台着色 |
 
 ### 10.4 public / internal 约定
 
@@ -692,7 +698,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 
 ### 10.6 控制面边界
 
-常驻服务持有 `RuntimeContext`、执行状态和持久化写入。Web 与 CLI 都是协议适配层：
+常驻服务持有 `RuntimeContext`、执行状态和持久化写入。公共初始化只读取约束和设置快照；服务与 Web-only 模式取得单实例互斥体后，统一进入 `HostedRuntimeInitializer`，由其完成实体加载、修复和恢复。Web 与 CLI 都是协议适配层：
 
 ```text
 Web 请求      ─┐
@@ -700,7 +706,7 @@ CLI / manage ─┼→ Control API → ApiXxxHandler → Application Command/核
 Scheduler    ─┘                         └→ ExecutionStateStore/ExecutionRunner
 ```
 
-`manage` 的菜单类通过正式 CLI/Control API 查询和变更，不直接读取或修改 `Scripts`、`Queues`、`Users`、`Settings` 集合，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
+`manage` 的菜单类通过正式 CLI/Control API 查询和变更，不直接读取或修改运行时实体状态，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
 
 MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时创建 Kestrel listener，使用 `McpPort` 绑定 loopback；工具类依赖 `McpToolContext`，再调用 Application Commands/核心服务。MCP 不依赖 Web handler、CLI 路由或前端投影；写入对象还会经过 `McpPolicy` 行为校验。
 
@@ -805,13 +811,13 @@ Capability 扩展约束：
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
 | 页面渲染/表单 | `wwwroot/views/` 对应域文件 |
 | 前端交互绑定 | 视图 `actions` 对象 → `app.js` 合并分发 |
-| 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/SecretStore.cs` |
+| 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/ConfigLoadMode.cs`、`src/Persistence/SecretStore.cs`；公共初始化使用 `ReadOnly`，宿主所有权建立后使用 `Repair` |
 | 历史记录格式 | `src/Services/History/HistoryService.cs`、`src/Models/RunRecord.cs` |
 
 ### 10.10 数据流速览
 
 ```
-Web 请求      → WebServer → ApiXxxHandler → DispatchCenter/核心服务 → DataStore/Logger
+Web 请求      → WebServer → ApiXxxHandler → Application Query/Command → RuntimeEntityState/DataStore/Logger
 CLI / manage  → CliApiClient → Control API → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
 MCP 请求      → McpHost → Mcp*Tools/McpToolContext → Application Command/核心服务 → DataStore/Logger
 Scheduler     → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner

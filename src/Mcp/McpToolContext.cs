@@ -1,5 +1,6 @@
 using NexusPipeline.App;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
@@ -26,17 +27,14 @@ internal sealed class McpToolContext
 
     internal PluginUserGlobalSettingsService UserGlobalSettings => Runtime.Resolve<PluginUserGlobalSettingsService>();
 
-    public IReadOnlyList<ScriptInstance> Scripts => Runtime.SnapshotEffectiveScripts()
-        .OrderBy(item => item.Index)
+    public IReadOnlyList<ScriptInstance> Scripts => Runtime.Resolve<ScriptQueries>().ListEffective();
+
+    public IReadOnlyList<DispatchQueue> Queues => Runtime.Resolve<QueueQueries>()
+        .List()
+        .Select(item => item.Queue)
         .ToList();
 
-    public IReadOnlyList<DispatchQueue> Queues => Runtime.SnapshotQueues()
-        .OrderBy(item => item.Index)
-        .ToList();
-
-    public IReadOnlyList<NexusUser> Users => Runtime.SnapshotUsers()
-        .OrderBy(item => item.Index)
-        .ToList();
+    public IReadOnlyList<NexusUser> Users => Runtime.Resolve<UserQueries>().ListEntities();
 
     public OperationResult<ScriptInstance> ResolveScript(string? reference)
     {

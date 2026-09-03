@@ -6,7 +6,8 @@ import { icon } from "../core/icons.js";
 import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
-import { navActive, render, setFieldError, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { hasEntityNameConflict } from "../core/entity-name.js";
+import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
@@ -463,6 +464,12 @@ export async function saveScript() {
     toast(`脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
     return;
   }
+  const name = $dom("#sm-name").value.trim();
+  if (hasEntityNameConflict(state.scripts, name, scriptDraft.id)) {
+    setFieldInvalid("sm-name");
+    toast("脚本名称已存在，请使用其他名称", "error");
+    return;
+  }
   const attempts = parseInt($dom("#sm-attempts")?.value, 10);
   const stall = parseInt($dom("#sm-stall")?.value, 10);
   const total = parseInt($dom("#sm-total")?.value, 10);
@@ -518,7 +525,7 @@ export async function saveScript() {
     return;
   }
   const payload = {
-    id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name: $dom("#sm-name").value.trim(), rootPath: stripQuotes($dom("#sm-root")?.value),
+    id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name, rootPath: stripQuotes($dom("#sm-root")?.value),
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
     launchGame, gameMode, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
@@ -534,7 +541,14 @@ export async function saveScript() {
     toast("脚本实例已保存");
     const token = state.routeToken;
     await pageScripts(token);
-  } catch (error) { toast(error.message, "error"); }
+  } catch (error) {
+    if (error?.code === "duplicate_name") {
+      setFieldInvalid("sm-name");
+      toast("脚本名称已存在，请使用其他名称", "error");
+      return;
+    }
+    toast(error.message, "error");
+  }
 }
 
 export function deleteScript(id, name) {

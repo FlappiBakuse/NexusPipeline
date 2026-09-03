@@ -2,6 +2,14 @@ import { trackController, releaseController } from "./state.js";
 
 const iconUrlCache = new Map();
 
+function apiError(message, status, data) {
+  const error = new Error(message);
+  error.code = data?.code ?? null;
+  error.status = status;
+  error.data = data;
+  return error;
+}
+
 /** 远程访问下图标 API 需要 Bearer 头（`<img>` 无法携带，远程模式图标必 401）——
  * 渲染后经 fetch 取 blob 转 ObjectURL 替换 `[data-icon-id]` 元素的 src；失败保留占位图（data: 前缀）。
  * 图标按脚本 Id 缓存（页面生命周期内不重复请求；ObjectURL 随页面卸载自动释放）。 */
@@ -59,10 +67,10 @@ export async function api(method, path, body, signal) {
       } catch {
       }
       if (typeof window.__showTokenPrompt === "function") window.__showTokenPrompt();
-      throw new Error((data && data.error) || "需要访问令牌");
+      throw apiError((data && data.error) || "需要访问令牌", response.status, data);
     }
     if (!response.ok) {
-      throw new Error((data && data.error) || ("HTTP " + response.status));
+      throw apiError((data && data.error) || ("HTTP " + response.status), response.status, data);
     }
     return data;
   } finally {

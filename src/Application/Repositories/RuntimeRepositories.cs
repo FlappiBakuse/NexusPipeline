@@ -1,60 +1,53 @@
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.App.State;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 
 namespace NexusPipeline.App.Repositories;
 
-/// <summary>运行时脚本仓储适配器：保留现有共享列表和磁盘写入协议，只把读取依赖显式化。</summary>
+/// <summary>运行时脚本仓储适配器：读取只经过运行时实体状态端口。</summary>
 internal sealed class RuntimeScriptRepository : IScriptRepository
 {
-    private readonly Func<string, ScriptInstance?> _find;
-    private readonly Func<List<ScriptInstance>> _snapshot;
+    private readonly RuntimeEntityState _state;
 
-    public RuntimeScriptRepository(Func<string, ScriptInstance?> find, Func<List<ScriptInstance>> snapshot)
+    public RuntimeScriptRepository(RuntimeEntityState state)
     {
-        _find = find;
-        _snapshot = snapshot;
+        _state = state;
     }
 
-    public ScriptInstance? FindById(string id) => _find(id);
+    public ScriptInstance? FindById(string id) => _state.FindScript(id);
 
-    public IReadOnlyList<ScriptInstance> Snapshot() => _snapshot();
+    public IReadOnlyList<ScriptInstance> Snapshot() => _state.SnapshotScripts();
 }
 
-/// <summary>运行时队列仓储适配器：写入行为仍由现有 Web/CLI 事务路径控制。</summary>
+/// <summary>运行时队列仓储适配器：读取只经过运行时实体状态端口。</summary>
 internal sealed class RuntimeQueueRepository : IQueueRepository
 {
-    private readonly Func<string, DispatchQueue?> _find;
-    private readonly Func<List<DispatchQueue>> _snapshot;
+    private readonly RuntimeEntityState _state;
 
-    public RuntimeQueueRepository(Func<string, DispatchQueue?> find, Func<List<DispatchQueue>> snapshot)
+    public RuntimeQueueRepository(RuntimeEntityState state)
     {
-        _find = find;
-        _snapshot = snapshot;
+        _state = state;
     }
 
-    public DispatchQueue? FindById(string id) => _find(id);
+    public DispatchQueue? FindById(string id) => _state.FindQueue(id);
 
-    public IReadOnlyList<DispatchQueue> Snapshot() => _snapshot();
+    public IReadOnlyList<DispatchQueue> Snapshot() => _state.SnapshotQueues();
 }
 
-/// <summary>运行时执行快照适配器：由组合根在一次 DataLock 内复制队列与脚本引用。</summary>
+/// <summary>运行时执行快照适配器：由实体状态在同一同步边界内复制执行输入。</summary>
 internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvider
 {
-    private readonly Func<string, ExecutionScriptSnapshot?> _snapshotScript;
-    private readonly Func<string, ExecutionQueueSnapshot?> _snapshotQueue;
+    private readonly RuntimeEntityState _state;
 
-    public RuntimeExecutionSnapshotProvider(
-        Func<string, ExecutionScriptSnapshot?> snapshotScript,
-        Func<string, ExecutionQueueSnapshot?> snapshotQueue)
+    public RuntimeExecutionSnapshotProvider(RuntimeEntityState state)
     {
-        _snapshotScript = snapshotScript;
-        _snapshotQueue = snapshotQueue;
+        _state = state;
     }
 
-    public ExecutionScriptSnapshot? SnapshotScript(string scriptId) => _snapshotScript(scriptId);
+    public ExecutionScriptSnapshot? SnapshotScript(string scriptId) => _state.SnapshotScriptForExecution(scriptId);
 
-    public ExecutionQueueSnapshot? SnapshotQueue(string queueId) => _snapshotQueue(queueId);
+    public ExecutionQueueSnapshot? SnapshotQueue(string queueId) => _state.SnapshotQueueForExecution(queueId);
 }
 
 /// <summary>
@@ -62,11 +55,38 @@ internal sealed class RuntimeExecutionSnapshotProvider : IExecutionSnapshotProvi
 /// </summary>
 internal sealed class RuntimeUserRepository : IUserRepository
 {
-    private readonly Func<List<NexusUser>> _snapshotUsers;
+    private readonly RuntimeEntityState _state;
 
-    public RuntimeUserRepository(Func<List<NexusUser>> snapshotUsers)
+    public RuntimeUserRepository(RuntimeEntityState state)
     {
-        _snapshotUsers = snapshotUsers;
+        _state = state;
+    }
+
+    public ResolvedScriptUser? ResolveBinding(
+        ScriptInstance script,
+        string? userReference,
+        IReadOnlyList<NexusUser>? users = null)
+    {
+        if (string.IsNullOrWhiteSpace(userReference))
+        {
+            return null;
+        }
+
+        List<NexusUser> source = Source(users).OrderBy(item => item.Index).ToList();
+        NexusUser? user = source.FirstOrDefault(item =>
+                string.Equals(item.Id, userReference, StringComparison.OrdinalIgnoreCase))
+            ?? source.FirstOrDefault(item =>
+                string.Equals(item.Name, userReference, StringComparison.OrdinalIgnoreCase));
+        if (user is null)
+        {
+            return null;
+        }
+
+        UserScriptBinding? binding = user.Bindings.FirstOrDefault(item =>
+            string.Equals(item.ScriptInstanceId, script.Id, StringComparison.Ordinal));
+        return binding is null
+            ? null
+            : new ResolvedScriptUser(user.Id, user.Name, binding.Clone());
     }
 
     public ResolvedScriptUser? ResolveEnabledBinding(
@@ -108,7 +128,7 @@ internal sealed class RuntimeUserRepository : IUserRepository
 
     private List<NexusUser> Source(IReadOnlyList<NexusUser>? users)
     {
-        return users?.Select(user => user.Clone()).ToList() ?? _snapshotUsers();
+        return users?.Select(user => user.Clone()).ToList() ?? _state.SnapshotUsers();
     }
 
     private static UserScriptBinding? ResolveParticipatingBinding(ScriptInstance script, NexusUser user)
@@ -138,27 +158,23 @@ internal sealed class RuntimeSettingsProvider : ISettingsProvider
 /// </summary>
 internal sealed class RuntimeUserRunDaysWriter
 {
-    private readonly Action<Action> _withDataLock;
-    private readonly Func<List<NexusUser>> _snapshotUsers;
+    private readonly RuntimeEntityState _state;
     private readonly Action<List<NexusUser>> _saveUsers;
 
     public RuntimeUserRunDaysWriter(
-        Action<Action> withDataLock,
-        Func<List<NexusUser>> snapshotUsers,
+        RuntimeEntityState state,
         Action<List<NexusUser>> saveUsers)
     {
-        _withDataLock = withDataLock;
-        _snapshotUsers = snapshotUsers;
+        _state = state;
         _saveUsers = saveUsers;
     }
 
     public bool DecrementDaily()
     {
-        bool changed = false;
-        _withDataLock(() =>
+        return _state.Mutate(mutation =>
         {
-            List<NexusUser> users = _snapshotUsers();
-            foreach (NexusUser user in users)
+            bool changed = false;
+            foreach (NexusUser user in mutation.Users)
             {
                 UserBindingOverrides overrides = user.BindingOverrides ?? new UserBindingOverrides();
                 if (overrides.General?.SyncEnabled == true)
@@ -181,9 +197,9 @@ internal sealed class RuntimeUserRunDaysWriter
             }
             if (changed)
             {
-                _saveUsers(users);
+                _saveUsers(mutation.Users);
             }
+            return changed;
         });
-        return changed;
     }
 }

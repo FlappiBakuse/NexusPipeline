@@ -1,5 +1,7 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Repositories;
+using NexusPipeline.App.Queries;
+using NexusPipeline.App.State;
 using Microsoft.Extensions.DependencyInjection;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
@@ -13,33 +15,26 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 
-/// <summary>组合根：持有全局 ServiceProvider（壳式 DI）与共享数据；外部访问方式不变。服务装配见构造。持久化见 <see cref="DataStore"/>。</summary>
+/// <summary>组合根：持有全局 ServiceProvider（壳式 DI）与设置生命周期；运行时实体状态由 <see cref="RuntimeEntityState"/> 唯一持有。服务装配见构造，持久化见 <see cref="DataStore"/>。</summary>
 internal class RuntimeContext
 {
     public static RuntimeContext Instance { get; } = new();
 
     private readonly ServiceProvider _services;
+    private readonly RuntimeEntityState _entityState = new();
 
     private RuntimeContext()
     {
         ServiceCollection collection = new();
+        collection.AddSingleton(_entityState);
         collection.AddSingleton(new HistoryService());
         collection.AddSingleton<NativePathPickerService>();
-        collection.AddSingleton<IScriptRepository>(_ => new RuntimeScriptRepository(FindScript, SnapshotScripts));
-        collection.AddSingleton<IQueueRepository>(_ => new RuntimeQueueRepository(FindQueue, SnapshotQueues));
-        collection.AddSingleton<IExecutionSnapshotProvider>(_ => new RuntimeExecutionSnapshotProvider(
-            SnapshotScriptForExecution,
-            SnapshotQueueForExecution));
-        collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(SnapshotUsers));
+        collection.AddSingleton<IScriptRepository>(_ => new RuntimeScriptRepository(_entityState));
+        collection.AddSingleton<IQueueRepository>(_ => new RuntimeQueueRepository(_entityState));
+        collection.AddSingleton<IExecutionSnapshotProvider>(_ => new RuntimeExecutionSnapshotProvider(_entityState));
+        collection.AddSingleton<IUserRepository>(_ => new RuntimeUserRepository(_entityState));
         collection.AddSingleton<Func<bool>>(new RuntimeUserRunDaysWriter(
-            action =>
-            {
-                lock (DataLock)
-                {
-                    action();
-                }
-            },
-            () => Users,
+            _entityState,
             users => DataStore.SaveUsers(users)).DecrementDaily);
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(() => Settings));
@@ -65,6 +60,9 @@ internal class RuntimeContext
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<ScriptSpecResolver>();
+        collection.AddSingleton<ScriptQueries>();
+        collection.AddSingleton<QueueQueries>();
+        collection.AddSingleton<UserQueries>();
         collection.AddSingleton<IUserRunStartingPublisher>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
@@ -89,7 +87,9 @@ internal class RuntimeContext
         collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
-        collection.AddSingleton<UserDataPruner>(provider => new UserDataPruner(SnapshotUsers, provider.GetRequiredService<ExecutionStateStore>()));
+        collection.AddSingleton<UserDataPruner>(provider => new UserDataPruner(
+            _entityState.SnapshotUsers,
+            provider.GetRequiredService<ExecutionStateStore>()));
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,
@@ -102,20 +102,11 @@ internal class RuntimeContext
 
     public AppSettings Settings { get; private set; } = new();
 
-    /// <summary>脚本/队列共享列表读写锁：Web 请求线程与调度/运行后台线程并发访问时保护枚举与修改；
-    /// 修改侧一律在锁内完成「读-改-写」整段，读取侧经 <see cref="FindScript"/> / <see cref="FindQueue"/> /
-    /// <see cref="SnapshotScripts"/> / <see cref="SnapshotQueues"/> 或在锁内枚举，避免「集合已修改」/越界异常。</summary>
-    internal readonly object DataLock = new();
+    /// <summary>运行时实体的唯一内存所有权与同步边界。</summary>
+    internal RuntimeEntityState EntityState => _entityState;
 
     /// <summary>设置 clone-on-write 事务锁；保存成功前不发布候选引用。</summary>
     internal readonly object SettingsMutationLock = new();
-
-    public List<ScriptInstance> Scripts { get; private set; } = new();
-
-    public List<DispatchQueue> Queues { get; private set; } = new();
-
-    /// <summary>全局用户实体列表；用户/脚本绑定位于 NexusUser.Bindings。</summary>
-    public List<NexusUser> Users { get; private set; } = new();
 
     public DispatchCenter Center => Resolve<DispatchCenter>();
 
@@ -135,11 +126,11 @@ internal class RuntimeContext
         return _services.GetRequiredService<T>();
     }
 
-    public void ReloadSettings()
+    public void ReloadSettings(ConfigLoadMode mode = ConfigLoadMode.Repair)
     {
         lock (SettingsMutationLock)
         {
-            Settings = ConfigStore.Load();
+            Settings = ConfigStore.Load(mode);
         }
     }
 
@@ -148,207 +139,13 @@ internal class RuntimeContext
         Settings = settings;
     }
 
+    /// <summary>只加载并发布实体内存状态；修复、迁移和落盘由 HostedRuntimeInitializer 编排。</summary>
     public void ReloadData()
     {
-        lock (DataLock)
-        {
-            Scripts = DataStore.LoadScripts(out bool scriptsAuthoritative);
-            Queues = DataStore.LoadQueues();
-            Users = DataStore.LoadUsers();
-            if (scriptsAuthoritative)
-            {
-                HashSet<string> scriptIds = Scripts
-                    .Select(script => script.Id)
-                    .ToHashSet(StringComparer.Ordinal);
-                int removedBindings = ScriptBindingCleanup.RemoveMissingScriptBindings(Users, scriptIds);
-                if (removedBindings > 0)
-                {
-                    try
-                    {
-                        DataStore.SaveUsers(Users);
-                        Logger.Info($"启动时清理已删除脚本的用户绑定：{removedBindings} 条");
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[用户绑定] 启动清理落盘失败（保留当前内存清理结果）：{ex.Message}");
-                    }
-                }
-            }
-
-            NormalizeEntityNames();
-        }
+        List<ScriptInstance> scripts = DataStore.LoadScripts(out bool scriptsAuthoritative);
+        List<DispatchQueue> queues = DataStore.LoadQueues();
+        List<NexusUser> users = DataStore.LoadUsers();
+        _entityState.ReplaceLoadedState(scripts, queues, users, scriptsAuthoritative);
     }
 
-    private void NormalizeEntityNames()
-    {
-        List<ScriptInstance> normalizedScripts = Scripts.Select(script => script.Clone()).ToList();
-        IReadOnlyList<NameNormalizationChange> scriptChanges = EntityNameRules.NormalizeDuplicates(
-            normalizedScripts,
-            script => script.Name,
-            (script, name) => script.Name = name,
-            script => script.Id,
-            script => script.Index,
-            AppFixedLimits.MaxEntityNameBytes);
-        if (scriptChanges.Count > 0)
-        {
-            try
-            {
-                DataStore.SaveScripts(normalizedScripts);
-                Scripts = normalizedScripts;
-                Logger.Info($"启动时规范化脚本名称：{scriptChanges.Count} 个");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[脚本名称] 启动消歧落盘失败（保留原名称，下一次启动重试）：{ex.Message}");
-            }
-        }
-
-        List<DispatchQueue> normalizedQueues = Queues.Select(queue => queue.Clone()).ToList();
-        IReadOnlyList<NameNormalizationChange> queueChanges = EntityNameRules.NormalizeDuplicates(
-            normalizedQueues,
-            queue => queue.Name,
-            (queue, name) => queue.Name = name,
-            queue => queue.Id,
-            queue => queue.Index,
-            AppFixedLimits.MaxEntityNameBytes);
-        if (queueChanges.Count > 0)
-        {
-            try
-            {
-                DataStore.SaveQueues(normalizedQueues);
-                Queues = normalizedQueues;
-                Logger.Info($"启动时规范化调度队列名称：{queueChanges.Count} 个");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[调度队列名称] 启动消歧落盘失败（保留原名称，下一次启动重试）：{ex.Message}");
-            }
-        }
-
-        List<NexusUser> normalizedUsers = Users.Select(user => user.Clone()).ToList();
-        IReadOnlyList<NameNormalizationChange> userChanges = EntityNameRules.NormalizeDuplicates(
-            normalizedUsers,
-            user => user.Name,
-            (user, name) => user.Name = name,
-            user => user.Id,
-            user => user.Index,
-            AppFixedLimits.MaxEntityNameBytes);
-        if (userChanges.Count > 0)
-        {
-            try
-            {
-                DataStore.SaveUsers(normalizedUsers);
-                Users = normalizedUsers;
-                Logger.Info($"启动时规范化用户昵称：{userChanges.Count} 个");
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[用户昵称] 启动消歧落盘失败（保留原昵称，下一次启动重试）：{ex.Message}");
-            }
-        }
-    }
-
-    public NexusUser? FindUser(string id)
-    {
-        lock (DataLock)
-        {
-            return Users.FirstOrDefault(user => string.Equals(user.Id, id, StringComparison.OrdinalIgnoreCase));
-        }
-    }
-
-    public ScriptInstance? FindScript(string id)
-    {
-        lock (DataLock)
-        {
-            return Scripts.FirstOrDefault(s => s.Id == id);
-        }
-    }
-
-    public DispatchQueue? FindQueue(string id)
-    {
-        lock (DataLock)
-        {
-            return Queues.FirstOrDefault(q => q.Id == id);
-        }
-    }
-
-    /// <summary>脚本列表深拷贝快照：跨线程读取/序列化用，避免与修改并发抛「集合已修改」。</summary>
-    internal List<ScriptInstance> SnapshotScripts()
-    {
-        lock (DataLock)
-        {
-            return Scripts.Select(script => script.Clone()).ToList();
-        }
-    }
-
-    /// <summary>脚本展示/编辑所需的有效快照；持久化声明仍通过 SnapshotScripts 读取。</summary>
-    internal List<ScriptInstance> SnapshotEffectiveScripts()
-    {
-        List<ScriptInstance> declarations = SnapshotScripts();
-        ScriptSpecResolver resolver = Resolve<ScriptSpecResolver>();
-        return declarations.Select(resolver.ResolveScript).ToList();
-    }
-
-    /// <summary>按当前插件和判断脚本资产解析单个脚本，供配置编辑等即时操作使用。</summary>
-    internal ScriptInstance ResolveEffectiveScript(ScriptInstance declaration)
-    {
-        return Resolve<ScriptSpecResolver>().ResolveScript(declaration);
-    }
-
-    internal ResolvedScriptSpec ResolveScriptSpec(ScriptInstance declaration)
-    {
-        return Resolve<ScriptSpecResolver>().Resolve(declaration);
-    }
-
-    internal ResolvedScriptSpec ResolveScriptCandidateSpec(ScriptInstance candidate)
-    {
-        return Resolve<ScriptSpecResolver>().ResolveCandidate(candidate);
-    }
-
-    /// <summary>队列列表深拷贝快照：跨线程读取/序列化用。</summary>
-    internal List<DispatchQueue> SnapshotQueues()
-    {
-        lock (DataLock)
-        {
-            return Queues.Select(queue => queue.Clone()).ToList();
-        }
-    }
-
-    /// <summary>全局用户深拷贝快照；排序和绑定读取均基于同一份快照。</summary>
-    internal List<NexusUser> SnapshotUsers()
-    {
-        lock (DataLock)
-        {
-            return Users.Select(user => user.Clone()).ToList();
-        }
-    }
-
-    /// <summary>在一次 DataLock 内复制单个脚本，供执行计划建立原子输入。</summary>
-    internal ExecutionScriptSnapshot? SnapshotScriptForExecution(string id)
-    {
-        lock (DataLock)
-        {
-            ScriptInstance? script = Scripts.FirstOrDefault(item => item.Id == id);
-            return script is null
-                ? null
-                : new ExecutionScriptSnapshot(script.Clone(), Users.Select(user => user.Clone()).ToList());
-        }
-    }
-
-    /// <summary>在一次 DataLock 内复制队列及全部脚本，避免计划拼出仓储中不存在的混合时刻。</summary>
-    internal ExecutionQueueSnapshot? SnapshotQueueForExecution(string id)
-    {
-        lock (DataLock)
-        {
-            DispatchQueue? queue = Queues.FirstOrDefault(item => item.Id == id);
-            if (queue is null)
-            {
-                return null;
-            }
-            return new ExecutionQueueSnapshot(
-                queue.Clone(),
-                Scripts.Select(script => script.Clone()).ToList(),
-                Users.Select(user => user.Clone()).ToList());
-        }
-    }
 }

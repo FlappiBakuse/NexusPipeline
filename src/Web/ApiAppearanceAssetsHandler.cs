@@ -26,8 +26,8 @@ internal static class ApiAppearanceAssetsHandler
             }
             if (method == "DELETE" && seg.Length == 2)
             {
-                string caller = ApiAppearanceHandler.ResolveCaller(context, null);
-                await ApiAppearanceHandler.WriteSnapshotAsync(
+                string caller = AppearanceApiSupport.ResolveCaller(context, null);
+                await AppearanceApiSupport.WriteSnapshotAsync(
                     context,
                     service.Delete(caller, Uri.UnescapeDataString(seg[1]))).ConfigureAwait(false);
                 return;
@@ -40,22 +40,22 @@ internal static class ApiAppearanceAssetsHandler
                     await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_palette", error = "壁纸配色请求体无效" }, 400).ConfigureAwait(false);
                     return;
                 }
-                string caller = ApiAppearanceHandler.ResolveCaller(context, palette);
-                await ApiAppearanceHandler.WriteSnapshotAsync(
+                string caller = AppearanceApiSupport.ResolveCaller(context, palette);
+                await AppearanceApiSupport.WriteSnapshotAsync(
                     context,
                     service.SavePalette(caller, Uri.UnescapeDataString(seg[1]), palette)).ConfigureAwait(false);
                 return;
             }
             if (method == "GET" && seg.Length == 1)
             {
-                await ApiAppearanceHandler.WriteSnapshotAsync(context, service.GetSnapshot()).ConfigureAwait(false);
+                await AppearanceApiSupport.WriteSnapshotAsync(context, service.GetSnapshot()).ConfigureAwait(false);
                 return;
             }
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
         }
         catch (AppearanceException ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, ApiAppearanceHandler.StatusCode(ex.Code)).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

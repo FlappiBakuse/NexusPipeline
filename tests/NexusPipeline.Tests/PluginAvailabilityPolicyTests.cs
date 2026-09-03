@@ -329,34 +329,34 @@ public sealed class PluginAvailabilityPolicyTests
 
         public RuntimeDataScope(ScriptInstance script, params NexusUser[] users)
         {
-            _previousScripts = _context.Scripts.Select(item => item.Clone()).ToList();
-            _previousQueues = _context.Queues.Select(item => item.Clone()).ToList();
-            _previousUsers = _context.Users.Select(item => item.Clone()).ToList();
+            _previousScripts = _context.EntityState.SnapshotScripts();
+            _previousQueues = _context.EntityState.SnapshotQueues();
+            _previousUsers = _context.EntityState.SnapshotUsers();
             _usersFileExists = File.Exists(AppPaths.UsersPath);
             _usersFile = _usersFileExists ? File.ReadAllBytes(AppPaths.UsersPath) : null;
             _scriptDataDir = Path.Combine(AppPaths.DataDir, script.Id);
 
-            lock (_context.DataLock)
+            _context.EntityState.Mutate(state =>
             {
-                _context.Scripts.Clear();
-                _context.Scripts.Add(script);
-                _context.Queues.Clear();
-                _context.Users.Clear();
-                _context.Users.AddRange(users);
-            }
+                state.Scripts.Clear();
+                state.Scripts.Add(script);
+                state.Queues.Clear();
+                state.Users.Clear();
+                state.Users.AddRange(users);
+            });
         }
 
         public void Dispose()
         {
-            lock (_context.DataLock)
+            _context.EntityState.Mutate(state =>
             {
-                _context.Scripts.Clear();
-                _context.Scripts.AddRange(_previousScripts);
-                _context.Queues.Clear();
-                _context.Queues.AddRange(_previousQueues);
-                _context.Users.Clear();
-                _context.Users.AddRange(_previousUsers);
-            }
+                state.Scripts.Clear();
+                state.Scripts.AddRange(_previousScripts);
+                state.Queues.Clear();
+                state.Queues.AddRange(_previousQueues);
+                state.Users.Clear();
+                state.Users.AddRange(_previousUsers);
+            });
             RestoreFile(AppPaths.UsersPath, _usersFileExists, _usersFile);
             DeleteExactDirectory(_scriptDataDir);
         }

@@ -97,7 +97,7 @@ internal static class CliExitCodes
             "ok" => 0,
             "invalid_arguments" or "validation_error" => 2,
             "not_found" or "ambiguous_target" => 3,
-            "resource_busy" or "conflict" => 4,
+            "resource_busy" or "conflict" or "duplicate_name" => 4,
             "service_unavailable" => 5,
             "operation_forbidden" => 6,
             "execution_failed" or "notification_test_failed" => 7,

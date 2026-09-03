@@ -7,6 +7,7 @@ using NexusPipeline.Extensibility;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
@@ -62,12 +63,11 @@ internal static class ApiScriptsHandler
     public static async Task Handle(HttpListenerContext context, string method, string[] seg, string body)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
+        ScriptQueries queries = ctx.Resolve<ScriptQueries>();
         if (method == "GET" && seg.Length == 1)
         {
-            Audit.Log(Audit.Web, "查询脚本实例列表", $"{ctx.Scripts.Count} 条");
-            List<ScriptInstance> snapshot = ctx.SnapshotEffectiveScripts()
-                .OrderBy(script => script.Index)
-                .ToList();
+            List<ScriptInstance> snapshot = queries.ListEffective().ToList();
+            Audit.Log(Audit.Web, "查询脚本实例列表", $"{snapshot.Count} 条");
             await HttpHelper.WriteJsonAsync(context, snapshot).ConfigureAwait(false);
             return;
         }
@@ -75,15 +75,13 @@ internal static class ApiScriptsHandler
             && !seg[1].Equals("edit-sessions", StringComparison.OrdinalIgnoreCase))
         {
             string scriptId = Uri.UnescapeDataString(seg[1]);
-            ScriptInstance? declaration = ctx.FindScript(scriptId);
-            if (declaration is null)
+            ScriptInstance? script = queries.FindEffective(scriptId);
+            if (script is null)
             {
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            await HttpHelper.WriteJsonAsync(
-                context,
-                ctx.ResolveEffectiveScript(declaration)).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2 && seg[1].Equals("order", StringComparison.OrdinalIgnoreCase))
@@ -131,7 +129,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                ctx.ResolveEffectiveScript(result.Value!)).ConfigureAwait(false);
+                queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2)
@@ -154,7 +152,7 @@ internal static class ApiScriptsHandler
             }
             await HttpHelper.WriteJsonAsync(
                 context,
-                ctx.ResolveEffectiveScript(result.Value!)).ConfigureAwait(false);
+                queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "DELETE" && seg.Length == 2)
@@ -194,10 +192,7 @@ internal static class ApiScriptsHandler
     /// <summary>脚本主程序图标（提取关联图标转 PNG，内存缓存；无图标/主程序无效返回 404，前端使用占位图）。</summary>
     private static async Task HandleIconAsync(HttpListenerContext context, string scriptId)
     {
-        ScriptInstance? declaration = RuntimeContext.Instance.FindScript(scriptId);
-        ScriptInstance? script = declaration is null
-            ? null
-            : RuntimeContext.Instance.ResolveEffectiveScript(declaration);
+        ScriptInstance? script = RuntimeContext.Instance.Resolve<ScriptQueries>().FindEffective(scriptId);
         if (script is null || string.IsNullOrWhiteSpace(script.MainExe))
         {
             await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -406,61 +401,4 @@ internal static class ApiScriptsHandler
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
-    internal static Task HandleEditConfigByUserIdAsync(
-        HttpListenerContext context,
-        string scriptId,
-        string userId,
-        string body)
-    {
-        return HandleEditConfigAsync(context, scriptId, userId, body);
-    }
-
-    private static async Task HandleEditConfigAsync(
-        HttpListenerContext context,
-        string scriptId,
-        string userReference,
-        string body)
-    {
-        RuntimeContext ctx = RuntimeContext.Instance;
-        var parsed = HttpHelper.ParseBody(body);
-        string action = parsed.Get("action").Str();
-        string mode = parsed.Get("mode").Str();
-
-        if (action == "start")
-        {
-            OperationResult<ConfigEditStarted> result =
-                ConfigEditCommands.Start(ctx, scriptId, userReference, mode);
-            if (!result.Succeeded)
-            {
-                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-                return;
-            }
-
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { ok = true, pid = result.Value!.ProcessId, editMode = result.Value!.EditMode }).ConfigureAwait(false);
-            return;
-        }
-
-        if (action == "done" || action == "cancel")
-        {
-            OperationResult<ConfigEditCompleted> result =
-                ConfigEditCommands.Complete(ctx, scriptId, userReference, action);
-            if (!result.Succeeded)
-            {
-                await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
-                return;
-            }
-
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { ok = result.Value!.Success, validation = result.Value.Validation }).ConfigureAwait(false);
-            return;
-        }
-
-        await HttpHelper.WriteJsonAsync(
-            context,
-            new { error = "未知操作：" + action },
-            400).ConfigureAwait(false);
-    }
 }

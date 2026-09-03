@@ -2,6 +2,24 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.13.3（Pre-release）
+
+### 名称唯一性体验
+- 脚本实例、调度队列和全局用户的新建/编辑表单增加不区分大小写的前端重名校验，编辑时允许保留当前实体名称。
+- 检测到重名时保留弹窗并阻止保存请求，Toast 显示明确提示，名称填写框以红色状态标记，保持表单排列稳定。
+- 提取共享名称规则，供脚本、队列和用户保存入口复用。
+
+### 控制面错误契约
+- 脚本实例、调度队列和全局用户的服务端重名冲突返回稳定 `duplicate_name` 错误码及 HTTP 409。
+- 前端 API 错误保留 `code`、`status` 和原始响应数据，陈旧页面状态下的服务端冲突可回到对应名称填写框。
+
+### 架构与运行时所有权治理
+- 公共启动阶段改为只读加载约束与设置；脚本、队列、用户的加载、历史修复、配置恢复、工作目录维护和计划任务同步统一延迟到取得单实例所有权后的 Hosted 初始化。
+- `ConfigStore` 增加 `ReadOnly` / `Repair` 加载模式，损坏设置在只读启动中保持原文件不变；`Bootstrap` 移除隐式设置刷新，服务与 Web-only 共用 Hosted 初始化。
+- 新增 `RuntimeEntityState` 作为脚本、队列、用户的唯一内存所有权与同步边界；新增 Application Query 读取模型，核心 Web handler 不再直接访问运行时实体集合。
+- 配置编辑与外观 HTTP 适配逻辑抽离为共享 Web support，消除 handler 横向调用；Logger 改为由设置加载/保存流程显式配置日志等级。
+- 增加核心架构边界、启动所有权、日志阈值和运行时实体状态测试；NexusPipeline-Plugins 与 Plugin API 保持不变。
+
 ## v0.13.2（Pre-release）
 
 ### 名称与历史治理

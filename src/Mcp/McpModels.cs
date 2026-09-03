@@ -300,10 +300,11 @@ internal static class McpViews
 
     public static object User(
         NexusUser user,
-        IReadOnlyList<DispatchQueue> queues)
+        IReadOnlyList<DispatchQueue> queues,
+        Scheduler scheduler)
     {
         (string QueueName, DateTime TriggerTime)? next =
-            RuntimeContext.Instance.Scheduler.NextTriggerForUser(user, queues);
+            scheduler.NextTriggerForUser(user, queues);
         return new
         {
             user.Id,
@@ -318,7 +319,7 @@ internal static class McpViews
         };
     }
 
-    public static object Queue(DispatchQueue queue)
+    public static object Queue(DispatchQueue queue, Scheduler scheduler)
     {
         return new
         {
@@ -330,7 +331,7 @@ internal static class McpViews
             queue.TimeSets,
             queue.Tasks,
             queue.NotifyEnabled,
-            nextTrigger = RuntimeContext.Instance.Scheduler.NextTriggerFor(queue),
+            nextTrigger = scheduler.NextTriggerFor(queue),
         };
     }
 
