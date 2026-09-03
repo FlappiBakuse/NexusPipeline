@@ -4,58 +4,6 @@
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 
-## v0.13.4 开发基线
-
-- 项目版本已同步为 `0.13.4`，并建立本地开发基线 `backup/v0.13.4-dev`。
-- 插件 catalog 使用内存快照、条件 HTTP 验证和 `.nxp/state/plugins/catalog-cache.meta.json` 元数据缓存；网络失败时保留已校验的 stale 快照。README 按官方 artifact/version 与本地文件指纹复用。
-- 本地插件管理投影使用运行时修订失效；安装、更新、卸载登记、启停、重载和归属变化会使投影重新生成。
-- 配置编辑进程绑定 Job Object 并保存完整进程身份；窗口前置轮询绑定编辑会话取消令牌，完成/取消优先走拥有进程的快速清理路径。
-- 插件页面保留已加载列表和详情，在后台验证期间维持当前内容；模态自动聚焦抑制首字段延时气泡。
-
-### v0.13.4 验证状态
-
-- [x] 完成项目单元测试与文档一致性测试。
-- [x] 完成应用构建、Web Logic、UI 语法、Codex UI Smoke 和 Codex System Smoke 验证。
-
-## v0.13.3 开发基线
-
-- 项目版本已同步为 `0.13.3`，并建立本地开发基线 `backup/v0.13.3-dev`。
-- 通用启动初始化保持只读：权限、更新清理、Limits 与 Settings 快照在单实例检查前完成；实体加载、历史数据修复、恢复扫描、工作目录维护和任务注册统一在取得单实例所有权后执行。
-- `RuntimeEntityState` 统一持有脚本、队列和用户运行态；仓储通过状态对象读写，Application Queries 为 Web/MCP 提供只读投影。
-- Web 查询路径使用 Application Queries，配置编辑与外观接口使用独立 HTTP 适配支持；处理器之间不互相调用，日志级别通过显式配置入口设置。
-- 前端重名冲突沿用已完成的交互约定：Toast 提示与输入框红色状态，不在输入框下方增加错误文本。
-
-### v0.13.3 验证状态
-
-- [x] 完成项目构建与核心测试门禁。
-- [x] 完成控制面、文档和语法专项验证。
-
-## v0.13.2 版本基线
-
-- 项目版本已同步为 `0.13.2`，并建立本地开发基线 `backup/v0.13.2-dev`。
-- 脚本实例、调度队列、全局用户分别执行 `OrdinalIgnoreCase` 名称唯一校验；启动时按稳定顺序将历史重复项规范为 `名称`、`名称-2`、`名称-3`，保留 ID、Index 与绑定关系。
-- 历史运行目录统一为 `history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/`，旧扁平目录和旧用户/时间目录提供幂等迁移及中断保全。
-- 配置快照改为 `store/` 单一权威快照 + `work/store-txn/` 增量 manifest/stage/rollback/commit 事务；重试复用当前活动配置，不创建完整 `retry-store`，成功后不保留 `store-previous` 或 `store-tmp`。
-- 旧版归档、上一代快照和全量暂存仅作为启动兼容入口；定位变更使用一次性重绑定隔离区，事务现场无法判定时保留并阻断后续写入。
-
-### v0.13.2 验证结果
-
-- [x] 完成项目单元测试与文档一致性测试。
-- [x] 完成应用构建、端到端控制面和 Windows 配置交换专项验证。
-
-## v0.13.1 当前版本基线
-
-- `data/{脚本Id}/{UserId}/` 的会话事务目录归并为 `work/` 工作区（original、script、swap-backup、edit-hidden、retry-store、store-tmp）；持久层与会话标记保持顶层，正常收尾后每用户目录只剩 `store/` 与 `store-meta.json`。
-- v0.13.0 旧布局与 dot 后缀命名（store.previous、store.meta.json、store.tmp）由一次性幂等启动迁移归并/改名，在恢复扫描前执行，旧崩溃现场按原语义恢复；空闲 `work/` 在启动恢复后清扫。
-- `.nxp/state/appearance-staging/` 迁至 `.nxp/runtime/staging/appearance/` 并纳入启动清扫；文件布局治理规范固化于 `DESIGN.md` §7.6。
-
-## v0.13.0 版本基线
-
-- `scripts.json` 保存脚本实例声明；通用判断脚本源码位于 `config/judge-scripts/<scriptId>.js|py`，由文件名和语言确定归属。
-- 数据化专项实例保存 `PluginType`、`RootPath` 及用户可配置运行字段；主程序、参数、配置路径、日志路径和判断脚本在 API、准入、配置编辑与运行时读取当前插件 profile。
-- 已触发的调度 occurrence 冻结本次有效 profile；尚未触发的 occurrence 在触发时重新解析。用户快照通过 `store-meta.json` 记录配置定位指纹，定位或文件/目录形态改变时进入可恢复重绑定流程。
-- v0.12.9 旧脚本清单支持一次性、幂等迁移；迁移备份、判断脚本资产冲突和未引用源码均保留于隔离目录，供人工核查。
-
 ## 后续功能：插件生态扩展
 
 - [ ] 为更多官方 managed-code 插件补充 mock HTTP 与事件回归测试。
