@@ -187,7 +187,7 @@ test("v0.13.0 persistence and plugin-profile contract stays documented", () => {
   const development = read("docs/DEVELOPMENT.md");
 
   assert.match(project, /<Version>0\.13\.4<\/Version>/u);
-  assert.match(status, /v0\.13\.1 当前版本基线/u);
+  assert.match(status, /## 后续功能：插件生态扩展/u);
   assert.doesNotMatch(status, /KN-74[\s\S]*调查中/u);
   assert.match(design, /config\/judge-scripts\/<scriptId>\.js\|py/u);
   assert.match(design, /PluginType \+ RootPath/u);
