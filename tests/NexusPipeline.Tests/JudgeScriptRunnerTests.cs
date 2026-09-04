@@ -165,6 +165,52 @@ public sealed class JudgeScriptRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task JavaScriptCanReturnPartialResult()
+    {
+        var script = new ScriptInstance
+        {
+            JudgeScriptLanguage = "javascript",
+            JudgeScript = "console.log(JSON.stringify({status:'partial', reason:'some tasks incomplete', replaceConfigs:['ignored.txt']}));",
+        };
+        string input = JudgeScriptRunner.BuildInput(script, null, [], _scriptDir, "", false);
+
+        JudgeScriptResult result = await JudgeScriptRunner.ExecuteAsync(
+            script,
+            input,
+            [],
+            _configFile,
+            _scriptDir,
+            CancellationToken.None);
+
+        Assert.Null(result.JudgeError);
+        Assert.Equal("partial", result.Status);
+        Assert.Equal("some tasks incomplete", result.Reason);
+        Assert.Equal(new[] { "ignored.txt" }, result.ReplaceConfigs);
+    }
+
+    [Fact]
+    public async Task PartialWithoutReasonIsNotAValidResult()
+    {
+        var script = new ScriptInstance
+        {
+            JudgeScriptLanguage = "javascript",
+            JudgeScript = "console.log(JSON.stringify({status:'partial'}));",
+        };
+        string input = JudgeScriptRunner.BuildInput(script, null, [], _scriptDir, "", false);
+
+        JudgeScriptResult result = await JudgeScriptRunner.ExecuteAsync(
+            script,
+            input,
+            [],
+            _configFile,
+            _scriptDir,
+            CancellationToken.None);
+
+        Assert.Null(result.JudgeError);
+        Assert.Equal("", result.Status);
+    }
+
+    [Fact]
     public async Task JavaScriptCanCaptureScreenshotAndReturnSelectedId()
     {
         var screenshot = new RunScreenshot(

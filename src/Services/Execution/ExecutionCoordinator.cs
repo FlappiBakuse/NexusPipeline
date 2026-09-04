@@ -239,11 +239,13 @@ internal sealed class ExecutionCoordinator : RunSession
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
                 Results.CompleteAttempt();
 
-                if (result.Status == "success")
+                if (result.Status is "success" or "partial")
                 {
-                    record.Status = "success";
+                    record.Status = result.Status;
                     record.EndTime = DateTime.Now;
-                    record.ResultDetail = attemptNo == 1 ? "一次成功" : $"第 {attemptNo} 次尝试成功";
+                    record.ResultDetail = result.Status == "partial"
+                        ? (string.IsNullOrWhiteSpace(result.Reason) ? "判断脚本判定部分完成" : result.Reason)
+                        : attemptNo == 1 ? "一次成功" : $"第 {attemptNo} 次尝试成功";
                     break;
                 }
                 if (result.IsFatal)
@@ -262,19 +264,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
             }
 
-            if (record.Status == "success")
-            {
-                string full = _scriptFullLog.ToString();
-                bool hasErrorKeyword = full.IndexOf("ERROR", StringComparison.OrdinalIgnoreCase) >= 0
-                    || full.IndexOf("错误", StringComparison.Ordinal) >= 0
-                    || full.IndexOf("异常", StringComparison.Ordinal) >= 0
-                    || full.IndexOf("失败", StringComparison.Ordinal) >= 0;
-                record.FinalStatus = record.Attempts > 1 || hasErrorKeyword ? "partial" : "success";
-            }
-            else
-            {
-                record.FinalStatus = record.Status;
-            }
+            record.FinalStatus = record.Status;
             return record;
         }
         finally
@@ -844,10 +834,8 @@ internal sealed class ExecutionCoordinator : RunSession
                     && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
                     result = KillScriptAndConfirm()
-                        ? RunAttemptResult.Success(judge.Reason ?? "完成标志已出现，等待退出超时后已终止脚本，判定成功")
+                        ? terminator.CreateMarkerResult("完成标志已出现，等待退出超时后已终止脚本，判定成功")
                         : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
-                    result.NotifyText = judge.NotifyText;
-                    result.NotifyScreenshotId = judge.NotifyScreenshotId;
                     break;
                 }
 

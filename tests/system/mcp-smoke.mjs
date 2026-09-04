@@ -15,6 +15,7 @@ import {
   runtimeDir,
   runtimeOutput,
   serviceUrl,
+  systemWebPort,
   startRuntime,
   stopRuntime,
   waitFor,
@@ -54,7 +55,7 @@ function writeSettings({ mcpEnabled, lightweightMode = false }) {
   fs.writeFileSync(
     path.join(configDir, "settings.json"),
     JSON.stringify({
-      WebPort: 58731,
+      WebPort: systemWebPort,
       McpEnabled: mcpEnabled,
       McpPort: mcpPort,
       LightweightMode: lightweightMode,

@@ -47,7 +47,35 @@ public class SessionJudgeTests
 
         Assert.Equal(SessionJudge.JudgeOutcome.Success, judge.ApplyJudgeResult("success", "ok", "", [], _ => { }));
         Assert.True(judge.IsMarker);
+        Assert.Equal(SessionJudge.JudgeOutcome.Success, judge.MarkerOutcome);
         Assert.Contains("ok", judge.Reason ?? "");
+    }
+
+    [Fact]
+    public void ScriptMode_ApplyJudgeResult_PartialIsTerminalAndDoesNotReplaceConfig()
+    {
+        int replaceCalls = 0;
+        var judge = new SessionJudge(MakeScript(s =>
+        {
+            s.JudgeScriptEnabled = true;
+            s.JudgeScriptLanguage = "javascript";
+            s.JudgeScript = "x";
+        }));
+
+        Assert.Equal(
+            SessionJudge.JudgeOutcome.Partial,
+            judge.ApplyJudgeResult("partial", "部分任务未完成", "部分通知", ["cfg.txt"], _ => replaceCalls++, "screenshot-1"));
+
+        Assert.True(judge.IsMarker);
+        Assert.False(judge.IsFailure);
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.MarkerOutcome);
+        Assert.Contains("部分任务未完成", judge.Reason ?? "");
+        Assert.Equal("部分通知", judge.NotifyText);
+        Assert.Equal("screenshot-1", judge.NotifyScreenshotId);
+        Assert.Equal(0, replaceCalls);
+        Assert.Equal(
+            SessionJudge.JudgeOutcome.None,
+            judge.ApplyJudgeResult("partial", "稍后结果", "", [], _ => replaceCalls++));
     }
 
     [Fact]
@@ -216,6 +244,44 @@ public class SessionJudgeTests
         // 失败优先语义：失败先于成功命中 → 失败仍成立（成功不覆盖失败）；marker 同时成立（宿主按失败终止）
         Assert.True(judge.IsFailure);
         Assert.True(judge.IsMarker);
+    }
+
+    [Fact]
+    public void ApplyJudgeResult_PartialThenFailure_PartialMarkerWins()
+    {
+        var judge = new SessionJudge(MakeScript(s => { s.JudgeScriptEnabled = true; s.JudgeScript = "x"; }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.ApplyJudgeResult("partial", "局部完成", "", [], _ => { }));
+        Assert.Equal(SessionJudge.JudgeOutcome.Failure, judge.ApplyJudgeResult("failed", "后续失败文本", "", [], _ => { }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.MarkerOutcome);
+        Assert.True(judge.IsMarker);
+        Assert.False(judge.IsFailure);
+    }
+
+    [Fact]
+    public void ApplyJudgeResult_FailureThenPartial_FailureStillWins()
+    {
+        var judge = new SessionJudge(MakeScript(s => { s.JudgeScriptEnabled = true; s.JudgeScript = "x"; }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Failure, judge.ApplyJudgeResult("failed", "先失败", "", [], _ => { }));
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.ApplyJudgeResult("partial", "后续局部完成", "", [], _ => { }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.MarkerOutcome);
+        Assert.True(judge.IsMarker);
+        Assert.True(judge.IsFailure);
+    }
+
+    [Fact]
+    public void ApplyJudgeResult_PartialThenSuccess_KeepsFirstMarkerState()
+    {
+        var judge = new SessionJudge(MakeScript(s => { s.JudgeScriptEnabled = true; s.JudgeScript = "x"; }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.ApplyJudgeResult("partial", "局部完成", "", [], _ => { }));
+        Assert.Equal(SessionJudge.JudgeOutcome.None, judge.ApplyJudgeResult("success", "后续成功", "", [], _ => { }));
+
+        Assert.Equal(SessionJudge.JudgeOutcome.Partial, judge.MarkerOutcome);
+        Assert.Contains("局部完成", judge.Reason ?? "");
     }
 
     [Fact]

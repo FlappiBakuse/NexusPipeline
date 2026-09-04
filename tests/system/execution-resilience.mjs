@@ -280,7 +280,7 @@ if (text.includes("FAIL")) {
   try {
     const record = await runScript(script.id, undefined, 60000);
     assert.equal(recordAttempts(record), 2);
-    assert.equal(recordStatus(record), "partial");
+    assert.equal(recordStatus(record), "success");
     assert.equal(fs.readFileSync(pathJoin(fixture.cfg, "tasks.txt"), "utf8").trim(), "FAIL");
     assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER04-retry/);
   } finally {
@@ -340,10 +340,102 @@ if (log.includes("ER06-FAIL")) {
   try {
     const record = await runScript(script.id, undefined, 60000);
     assert.equal(recordAttempts(record), 2);
-    assert.equal(recordStatus(record), "partial");
+    assert.equal(recordStatus(record), "success");
     assert.equal(fs.readFileSync(pathJoin(fixture.cfg, "tasks.txt"), "utf8").trim(), "FAIL");
     assert.equal(fs.existsSync(pathJoin(fixture.dir, "logs", "run-old.log")), true);
     assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER06-rotation-success/);
+  } finally {
+    await deleteScript(script.id);
+  }
+});
+
+test("ER11 Judge partial：明确部分完成时终止且不重试", { skip }, async () => {
+  const fixture = makeFixture("er11-judge-partial");
+  writeBatchCode(fixture, [
+    "cd /d \"%~dp0\"",
+    `echo ER11-PARTIAL>>\"${fixture.log}\"`,
+    "ping -n 5 127.0.0.1 >nul",
+  ]);
+  const script = await createScript(fixture, {
+    name: "ER11 Judge Partial",
+    maxAttempts: 2,
+    judgeScriptEnabled: true,
+    judgeScript: `
+const input = JSON.parse(__NEXUS_INPUT__);
+if ((input.log || "").includes("ER11-PARTIAL")) {
+  console.log(JSON.stringify({ status: "partial", reason: "ER11-partial" }));
+}`,
+  });
+  try {
+    const record = await runScript(script.id, undefined, 60000);
+    assert.equal(recordAttempts(record), 1);
+    assert.equal(recordStatus(record), "partial");
+    assert.equal(record.status || record.Status, "partial");
+    assert.match(recordDetails(record).map(item => item.reason || item.Reason || "").join(" | "), /ER11-partial/);
+  } finally {
+    await deleteScript(script.id);
+  }
+});
+
+test("ER12 Judge success：日志中的 ERROR 不改变最终状态", { skip }, async () => {
+  const fixture = makeFixture("er12-judge-success-error-log");
+  writeBatchCode(fixture, [
+    "cd /d \"%~dp0\"",
+    `echo ERROR ER12-SYNTHETIC>>\"${fixture.log}\"`,
+    "ping -n 5 127.0.0.1 >nul",
+  ]);
+  const script = await createScript(fixture, {
+    name: "ER12 Judge Success Error Log",
+    judgeScriptEnabled: true,
+    judgeScript: `
+const input = JSON.parse(__NEXUS_INPUT__);
+if ((input.log || "").includes("ER12-SYNTHETIC")) {
+  console.log(JSON.stringify({ status: "success", reason: "ER12-success" }));
+}`,
+  });
+  try {
+    const record = await runScript(script.id, undefined, 60000);
+    assert.equal(recordAttempts(record), 1);
+    assert.equal(recordStatus(record), "success");
+    assert.equal(record.status || record.Status, "success");
+    assert.equal(record.finalStatus || record.FinalStatus, "success");
+  } finally {
+    await deleteScript(script.id);
+  }
+});
+
+test("ER13 Partial 不消耗每日成功额度", { skip }, async () => {
+  const fixture = makeFixture("er13-partial-daily-cap");
+  const statePath = pathJoin(fixture.dir, "state.txt");
+  fs.writeFileSync(statePath, "0\r\n", "ascii");
+  writeBatchCode(fixture, [
+    "cd /d \"%~dp0\"",
+    `set /p RUN=<\"${statePath}\"`,
+    `if \"%RUN%\"==\"0\" (>\"${statePath}\" echo 1 & echo ER13-PARTIAL>>\"${fixture.log}\") else (echo ER13-SUCCESS>>\"${fixture.log}\")`,
+  ]);
+  const script = await createScript(fixture, {
+    name: "ER13 Partial Daily Cap",
+    maxAttempts: 1,
+    binding: { maxSuccessfulRunsPerDay: 1 },
+    judgeScriptEnabled: true,
+    judgeScript: `
+const input = JSON.parse(__NEXUS_INPUT__);
+const log = input.log || "";
+if (log.includes("ER13-PARTIAL")) {
+  console.log(JSON.stringify({ status: "partial", reason: "ER13-partial" }));
+} else if (log.includes("ER13-SUCCESS")) {
+  console.log(JSON.stringify({ status: "success", reason: "ER13-success" }));
+}`,
+  });
+  try {
+    const partial = await runScript(script.id, undefined, 60000);
+    assert.equal(recordStatus(partial), "partial");
+    const success = await runScript(script.id, undefined, 60000);
+    assert.equal(recordStatus(success), "success");
+    const skipped = await runScript(script.id, undefined, 60000);
+    assert.equal(recordStatus(skipped), "skipped");
+    assert.equal(recordAttempts(skipped), 0);
+    assert.equal(fs.readFileSync(statePath, "utf8").trim(), "1");
   } finally {
     await deleteScript(script.id);
   }

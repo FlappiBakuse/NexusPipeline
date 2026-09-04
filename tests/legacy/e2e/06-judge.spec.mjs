@@ -206,7 +206,7 @@ if (input.log.includes("TASK DONE")) {
   await api("POST", `/api/scripts/${id}/users`, { name: "默认", enabled: true });
   const r = await judgeRunAndHistory(id);
   expect(r.dispatchOk && r.ended, "插队替换脚本运行结束").toBeTruthy();
-  expect(r.rec && r.rec.finalStatus === "partial", "替换配置后重试成功（重试>1，FinalStatus=partial）").toBeTruthy();
+  expect(r.rec && r.rec.finalStatus === "success", "替换配置后重试成功（FinalStatus=success）").toBeTruthy();
   expect(r.rec && r.rec.attempts === 2, "替换后发生重试（attempts=2）").toBeTruthy();
   const modeAfter = fs.readFileSync(path.join(dir, "mode.txt"), "utf8").trim();
   expect(modeAfter === "FAIL", "运行结束后 config 已还原至启动前状态（mode.txt=FAIL，实际 " + modeAfter + "）").toBeTruthy();

@@ -266,6 +266,7 @@ internal sealed class ExecutionRunner
                 exec.CurrentStatus = publishedRecord.Status switch
                 {
                     "success" => "运行成功",
+                    "partial" => "部分完成",
                     "cancelled" => "已取消",
                     "skipped" => "已跳过",
                     _ => "运行失败",

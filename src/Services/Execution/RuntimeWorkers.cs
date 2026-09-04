@@ -165,6 +165,12 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                 Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本判定成功：{judgeResult.Reason}");
                 await CaptureAutoScreenshotAsync("judge-success").ConfigureAwait(false);
             }
+            else if (outcome == SessionJudge.JudgeOutcome.Partial)
+            {
+                _statusChanged?.Invoke("判断脚本判定部分完成，等待脚本退出...");
+                Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本判定部分完成：{judgeResult.Reason}");
+                await CaptureAutoScreenshotAsync("judge-partial").ConfigureAwait(false);
+            }
             else if (outcome == SessionJudge.JudgeOutcome.Failure)
             {
                 _statusChanged?.Invoke("判断脚本判定失败");
@@ -192,7 +198,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            // 截图失败不得改变判断脚本的 success/failed 结果，也不得阻塞最终判定收拢。
+            // 截图失败不得改变判断脚本的 success/partial/failed 结果，也不得阻塞最终判定收拢。
             Logger.Warn($"[{_modeText}运行] 脚本「{_scriptName}」自动截图失败：{ex.Message}");
         }
     }

@@ -30,6 +30,11 @@ export const isCodexMode = executionMode === "codex";
 export const isAdminMode = executionMode === "admin";
 export const testHostDir = resolveTestHostDir(projectRoot);
 export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
+const configuredWebPort = Number(process.env.NEXUS_SYSTEM_WEB_PORT?.trim() || "58731");
+if (!Number.isInteger(configuredWebPort) || configuredWebPort < 1024 || configuredWebPort > 65535) {
+  throw new Error(`非法 NEXUS_SYSTEM_WEB_PORT：${process.env.NEXUS_SYSTEM_WEB_PORT}`);
+}
+export const systemWebPort = configuredWebPort;
 const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
 if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
@@ -42,7 +47,7 @@ export const testHostExitFile = resolveTestHostExitFile(
   path.join(runtimeDir, ".nxp", "test-host.exit"),
 );
 const webPortPath = path.join(runtimeDir, ".nxp", "runtime", "web.port");
-export const baseUrl = "http://127.0.0.1:58731/";
+export const baseUrl = `http://127.0.0.1:${systemWebPort}/`;
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
 export const mumuStub = path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd");
 
@@ -83,6 +88,14 @@ export function prepareRuntime() {
     throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
   }
   copyReleaseArtifacts(releaseDir, runtimeDir);
+  if (process.env.NEXUS_SYSTEM_WEB_PORT?.trim()) {
+    fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, "config", "settings.json"),
+      JSON.stringify({ WebPort: systemWebPort }),
+      "utf8",
+    );
+  }
 
   installEmulatorStubs(runtimeDir, path.join(projectRoot, "tests", "e2e", "tests", "fixtures"));
 }

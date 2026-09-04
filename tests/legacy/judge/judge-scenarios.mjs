@@ -352,7 +352,7 @@ async function testScenarioB() {
   const r = await runScript(created.id);
   assert(r.dispatchOk && r.ended, "场景B运行结束");
   assert(r.rec && r.rec.attempts === 2, "失败后重试成功（attempts=2，实际 " + r.rec?.attempts + "）");
-  assert(r.rec && r.rec.finalStatus === "partial", "重试>1 → FinalStatus=partial（实际 " + r.rec?.finalStatus + "）");
+  assert(r.rec && r.rec.finalStatus === "success", "重试后最终状态保持 success（实际 " + r.rec?.finalStatus + "）");
   const doneDetail = r.rec?.attemptDetails?.some(a => a.status === "success");
   assert(doneDetail, "第二次尝试判定成功");
   await waitFor(() => hookBodies.some(b => b.includes("所有任务已全部完成")), 8000);
@@ -502,7 +502,7 @@ async function testMaaEndJudgeScript() {
   const r1 = await runScript(c1.id);
   assert(r1.dispatchOk && r1.ended, "MaaEnd 失败重试运行结束");
   assert(r1.rec && r1.rec.attempts === 2, "失败后仅重跑失败任务成功（attempts=2，实际 " + r1.rec?.attempts + "）");
-  assert(r1.rec && r1.rec.finalStatus === "partial", "重试>1 → FinalStatus=partial（实际 " + r1.rec?.finalStatus + "）");
+  assert(r1.rec && r1.rec.finalStatus === "success", "重试后最终状态保持 success（实际 " + r1.rec?.finalStatus + "）");
   assert((r1.rec?.attemptDetails || [])[0]?.reason.includes("高阶培养四"), "首次尝试原因含失败任务（已调整为仅重试失败任务，原因：" + (r1.rec?.attemptDetails || [])[0]?.reason + "）");
   assert(fs.readFileSync(s1.cfgPath, "utf8") === s1.cfgBefore, "运行结束后 config/mxu-MaaEnd.json 还原为运行前状态");
   assert(!fs.existsSync(userScriptDir(c1.id)), "script 目录已清空");

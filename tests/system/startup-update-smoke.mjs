@@ -10,6 +10,7 @@ import {
   runtimeDir,
   sleep,
   startRuntime,
+  systemWebPort,
   stopRuntime,
   waitFor,
   waitForService,
@@ -25,7 +26,7 @@ function writeSettings(updateCheckEnabled) {
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
     JSON.stringify({
-      WebPort: 58731,
+      WebPort: systemWebPort,
       UpdateCheckEnabled: updateCheckEnabled,
       AutoOpenBrowser: false,
     }),

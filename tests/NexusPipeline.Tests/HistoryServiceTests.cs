@@ -17,7 +17,7 @@ public sealed class HistoryServiceTests
         var records = new[]
         {
             Record("u1", "Alice", "success", "success", date.AddHours(-2)),
-            Record("u1", "Alice", "success", "partial", date.AddHours(-1)),
+            Record("u1", "Alice", "partial", "partial", date.AddHours(-1)),
             Record("u1", "Alice", "success", "success", date.AddDays(-1)),
             Record("u2", "Bob", "success", "", date.AddHours(-3)),
             Record("u3", "Cara", "failed", "failed", date.AddHours(-4)),

@@ -14,6 +14,7 @@ import {
   runtimeExe,
   sleep,
   startRuntime,
+  systemWebPort,
   stopRuntime,
   waitFor,
   waitForService,
@@ -58,7 +59,11 @@ function prepareStaging() {
 /** 预先制造旧安装现场：config 与 history 内容、旧 wwwroot 标记、用户自加插件目录。 */
 function prepareLegacyInstall() {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
-  fs.writeFileSync(path.join(runtimeDir, "config", "settings.json"), "{\"WebPort\":58731}", "utf8");
+  fs.writeFileSync(
+    path.join(runtimeDir, "config", "settings.json"),
+    JSON.stringify({ WebPort: systemWebPort }),
+    "utf8",
+  );
   fs.mkdirSync(path.join(runtimeDir, "history", "2099-01-01"), { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, "history", "2099-01-01", "00-00-00.json"), "{\"FinalStatus\":\"success\"}", "utf8");
   fs.writeFileSync(path.join(runtimeDir, "wwwroot", "legacy-install-marker.txt"), "legacy-install-marker", "utf8");
@@ -149,7 +154,10 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "candidate-install-marker.txt"), "utf8"), "candidate-install-marker");
   assert.equal(fs.existsSync(path.join(runtimeDir, "wwwroot", "legacy-install-marker.txt")), false);
   assert.equal(fs.existsSync(path.join(runtimeDir, "plugins", "user-custom", "note.txt")), true);
-  assert.equal(fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").includes("58731"), true);
+  assert.equal(
+    fs.readFileSync(path.join(runtimeDir, "config", "settings.json"), "utf8").includes(String(systemWebPort)),
+    true,
+  );
   assert.equal(fs.existsSync(path.join(runtimeDir, "history", "2099-01-01", "00-00-00.json")), true);
 
   // 新实例启动：收尾清理 + 服务可达。

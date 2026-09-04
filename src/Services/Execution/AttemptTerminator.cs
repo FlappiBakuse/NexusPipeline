@@ -27,7 +27,7 @@ internal sealed class AttemptTerminator
     /// <summary>是否已进入终局观察状态（等待最终判断完成的循环内短轮询）。</summary>
     public bool TerminalObservation => _terminalObservation;
 
-    /// <summary>终局判定应用：terminal 观察且最终判断已完成时产生结果（成功/失败/回退失败），否则返回 null。</summary>
+    /// <summary>终局判定应用：terminal 观察且最终判断已完成时产生结果（成功/部分完成/失败），否则返回 null。</summary>
     public RunAttemptResult? TryApplyFinalDecision()
     {
         if (!_terminalObservation || !_workers.FinalJudgeCompleted)
@@ -43,12 +43,20 @@ internal sealed class AttemptTerminator
         }
         if (_judge.IsMarker)
         {
-            RunAttemptResult success = RunAttemptResult.Success(_judge.Reason ?? "判断脚本判定成功");
-            success.NotifyText = _judge.NotifyText;
-            success.NotifyScreenshotId = _judge.NotifyScreenshotId;
-            return success;
+            return CreateMarkerResult("判断脚本判定成功");
         }
         return RunAttemptResult.Failed(_terminalFailureReason);
+    }
+
+    /// <summary>将已接受的完成标志转换为 Attempt 结果，保留判断脚本返回的 success/partial 状态与通知字段。</summary>
+    public RunAttemptResult CreateMarkerResult(string successFallbackReason)
+    {
+        RunAttemptResult result = _judge.MarkerOutcome == SessionJudge.JudgeOutcome.Partial
+            ? RunAttemptResult.Partial(_judge.Reason ?? "判断脚本判定部分完成")
+            : RunAttemptResult.Success(_judge.Reason ?? successFallbackReason);
+        result.NotifyText = _judge.NotifyText;
+        result.NotifyScreenshotId = _judge.NotifyScreenshotId;
+        return result;
     }
 
     /// <summary>进程退出时的终局状态转移；返回 null 表示已进入最终判定等待（宿主继续短轮询）。</summary>
@@ -97,9 +105,7 @@ internal sealed class AttemptTerminator
         }
         else if (_judge.IsMarker)
         {
-            result = RunAttemptResult.Success(_judge.Reason ?? "日志出现完成标志，脚本正常运行结束");
-            result.NotifyText = _judge.NotifyText;
-            result.NotifyScreenshotId = _judge.NotifyScreenshotId;
+            result = CreateMarkerResult("日志出现完成标志，脚本正常运行结束");
         }
         else if (_judge.IsConfigured)
         {

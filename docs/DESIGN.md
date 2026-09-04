@@ -28,8 +28,8 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 - **本地优先、少外部依赖**：所有产品能力内置于单个 exe（.NET 8 WinForms 托盘 + HttpListener + 零构建静态 Web UI）。不依赖云平台、数据库或前端构建环境；发布物为框架依赖的单文件，运行机器需安装 .NET 8 Desktop Runtime。
 - **直接接管脚本进程**：宿主以管理员身份创建进程、捕获输出、监控日志、强制清理进程树，脚本自身无需任何改造；bat 经 `cmd /d /s /c` 包装以规避 ShellExecute 弹窗陷阱。
 - **多用户配置隔离（配置交换）**：全局用户通过脚本绑定参与多个脚本实例；每个绑定各存一份配置快照，运行前把绑定快照交换到 configPath，运行后还原现场。数据保全序：**original（原配置）> config（运行时生效）> store（用户快照，可重建）**。
-- **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由当前 profile 指向的插件脚本驱动），其次成功/失败关键字；未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
-- **日志即真相**：宿主通过监控脚本**日志文件**判定运行状态，不只看进程退出码，因此日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
+- **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由当前 profile 指向的插件脚本驱动），其次成功/失败关键字；判断脚本允许返回 `success / partial / failed`，其中 `partial` 只能由判断脚本主动产生，未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
+- **日志是判定输入**：宿主可靠监控脚本**日志文件**，将新增日志提供给关键字判定和判断脚本；日志文本、退出码、尝试次数及重试本身不拥有覆盖最终业务状态的权力。日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
 - **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 使用宿主通用用户数据、声明式 UI、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知和调度端口；启用且兼容的插件可通过独立 Frontend API 1.2 加载同源 ES module/CSS，扩展页面路由、导航、slot、主题、服务端同步壁纸和运行画面 sidecar；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记。
 - **插件分发与运行解耦**：插件仓库以固定官方 `catalog.json` 提供版本和 SHA256，安装包在本地完成校验后以 pending 事务跨重启交换；宿主更新只替换宿主文件，用户插件目录持续保留。
@@ -107,11 +107,11 @@ sequenceDiagram
             M->>M: 解析路径/FileId 替换/截断检测 → ReadNew 读新增
             S->>J: 逐行 HandleLine（关键字）
             S->>J: 判断脚本批次/周期/最终触发
-            J-->>S: success/failed/replaceConfigs
+            J-->>S: success/partial/failed/replaceConfigs
         end
-        S->>S: 判定成功/失败/超时/取消 → 杀进程树 → 按结果处理游戏
+        S->>S: 判定成功/部分完成/失败/超时/取消 → 杀进程树 → 按结果处理游戏
         S->>S: 后置脚本（用户配置，可选）→ 记录尝试结果
-        alt 成功或达到最大次数
+        alt 成功或部分完成或达到最大次数
             S-->>DC: 返回 RunRecord
         else 失败且未达上限
             S->>S: 进程确认退出后复用当前 config → 应用 replaceConfigs → 下一次尝试
@@ -138,10 +138,10 @@ sequenceDiagram
 6. **判定分支**：
    - 失败关键字命中 → 立即终止本次尝试（杀进程树）；
    - 成功关键字命中 → 等待脚本自行退出（最多 60 秒，超时杀进程仍判成功）；
-   - 判断脚本模式 → 批次触发/周期触发/最终触发（见第 5 节）；
+   - 判断脚本模式 → 批次触发/周期触发/最终触发（见第 5 节），可得到 success 或 partial；
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：`LogStallTimeoutMinutes=-1` 时跳过日志无更新超时检查，其余有效值在启动后无任何日志条目、日志超过该时长无更新或未找到日志文件时判定失败；`RunBudget` 集中计算 `TotalTimeoutMinutes` 的 elapsed/remaining，按**整个运行（含全部重试与前置/后置脚本）**计时，`TotalTimeoutMinutes=-1` 时不设总时长上限，其余有效值到时判定失败且不再重试；判断脚本执行仍保持独立 30 秒上限。
-8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功时按 `ForceCloseGame` 设置决定是否关闭游戏。
+8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功或部分完成时按 `ForceCloseGame` 设置决定是否关闭游戏。
 9. **重试**：失败且未达 `MaxAttempts` → 进程确认退出后继续复用当前活动 `config`，在下一轮开始前应用判断脚本返回的 `replaceConfigs`；不创建 `retry-store`，每尝试仍独立 LogMonitor 与 SessionJudge。
 10. **运行收尾（finally）**：`ConfigRunSession` 固定执行自动更新配置收尾同步（按文件差异写入 store，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）。同步先于插队还原与配置交换还原，确保 store 看到脚本最终态，同时避免恢复动作覆盖用户快照。
 
@@ -178,7 +178,7 @@ flowchart TD
 - 队列任务数大于零、全部引用可解析脚本实例、每个脚本 `GameMode == "emulator"`、ADB 端点格式有效且专项插件声明支持模拟器时归类为 `EmulatorOnly`；任意数量 `EmulatorOnly` 可并行，最多一个 `Standard` 队列。空队列、缺失引用、无效端点和其他无法证明为纯模拟器的情况归类为 `Standard`。
 - 独立脚本不占用 `Standard` 队列名额，但与队列共同申请脚本 ID、用户数据键、解析后的启动目标、进程基名、配置路径、日志路径模式、前/后置脚本可执行文件和模拟器 ADB 端点资源租约；同一资源或配置父子路径冲突时准入失败，无法证明日志模式互不重叠时按冲突处理。
 - 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送；用户级脚本通知由有效绑定的 `binding.NotifyEnabled=true` 决定，SMTP 收件人为空时继承全局设置。
-- 有效绑定的 `MaxSuccessfulRunsPerDay=-1` 表示不限制；达到正数上限后，在脚本级配置门禁内写入 `skipped` 历史，记录 0 次尝试，不发布用户运行开始事件，也不计入成功次数；失败、取消和已跳过记录不计入成功次数。
+- 有效绑定的 `MaxSuccessfulRunsPerDay=-1` 表示不限制；达到正数上限后，在脚本级配置门禁内写入 `skipped` 历史，记录 0 次尝试，不发布用户运行开始事件，也不计入成功次数；只有 `success` 记录计入成功次数，`partial`、失败、取消和已跳过记录均不计入。
 - 脚本实例绑定的数据化专项插件缺失、类型不匹配或运行态不可用时，前端显示状态徽章并收紧脚本编辑、用户配置和队列任务入口；运行入口保留队列生命周期，写入错误日志与失败历史后跳过该脚本实例，继续处理队列中的后续任务。
 - 专项插件可用性门禁在 Application Command 层统一执行：`UserCommands` 的绑定新增/编辑、`ScriptCommands`、配置编辑和队列写入共享同一策略；门禁在配置快照和持久化之前完成。解除绑定、删除脚本和从队列移除任务等清理操作保持可用。
 - `ExecutionValidator` 发现专项插件不可用时保留执行计划创建路径，由 `ExecutionRunner` 记录失败历史、写入可读原因并跳过脚本；队列后续任务继续执行。插件启停和安装更新仍按重启后生效的生命周期约定处理。
@@ -352,7 +352,7 @@ flowchart LR
 
 ### 5.1 判定优先级
 
-判断脚本（启用即优先，忽略关键字）→ 成功/失败关键字（组内逗号 AND——整个尝试日志中分别出现即命中，跨行累积且顺序无关；换行 OR）→ 无任何配置按「进程自行退出」判定成功。
+判断脚本（启用即优先，忽略关键字，输出 `success / partial / failed`）→ 成功/失败关键字（组内逗号 AND——整个尝试日志中分别出现即命中，跨行累积且顺序无关；换行 OR）→ 无任何配置按「进程自行退出」判定成功。`partial` 只能由判断脚本主动返回。
 
 > **专用插件判定**：专项脚本实例在操作开始时从当前插件 profile 读取 manifest 的 `judgeScript` 资产，并将本次操作使用的源码、语言和内容指纹冻结到运行计划；用户不可编辑插件判断脚本，判定走脚本模式，同时强制清空自定义关键字字段。
 
@@ -360,8 +360,8 @@ flowchart LR
 
 - **输入 JSON**：脚本字段 + 用户 + `config`（运行时生效配置，只读）与 `script` 目录（可读写）全递归文件清单 + `scriptDir` + **本次尝试日志段**（按尝试切片，上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 `logTruncated=true`）。
 - **触发时机**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
-- **输出契约**：stdout 尾行 JSON `{"status":"success|failed","reason":"必填","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":[...]}`；无输出/非 JSON/缺字段 = 继续运行；单次执行 30 秒上限；执行错误 = 警告 + 继续运行。
-- **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本成功/失败结果时触发。
+- **输出契约**：stdout 尾行 JSON `{"status":"success|partial|failed","reason":"必填","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":[...]}`；无输出/非 JSON/缺字段 = 继续运行；单次执行 30 秒上限；执行错误 = 警告 + 继续运行。`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。
+- **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本 success/partial/failed 结果时触发。
 - **边界**：JS 内置 Jint 引擎（`nexus.readFile` 限 config/script 范围、单文件 2MB；`nexus.writeFile` 防 `../` 与绝对路径逃逸；无 Node 库）；Python 用系统 `python.exe`（`sys.argv[1]` 输入 JSON 路径），截图 RPC 仅绑定本机回环且随单次调用失效。
 
 ### 5.3 判断脚本信任边界
@@ -374,7 +374,7 @@ flowchart LR
 
 ### 5.4 关键字模式
 
-- 成功/失败关键字：每行一组，组内逗号分隔为 AND、换行之间为 OR；失败命中立即终止本次尝试，成功命中等待退出 60 秒。无任何配置时按「进程自行退出」判定成功。
+- 成功/失败关键字：每行一组，组内逗号分隔为 AND、换行之间为 OR；失败命中立即终止本次尝试，成功命中等待退出 60 秒。关键字模式不能产生 `partial`；无任何配置时按「进程自行退出」判定成功。
 - 专用插件判定：判断脚本由当前插件 profile 提供（用户不可编辑，前端专项弹窗不渲染自定义完成标志区；宿主在解析 profile 时清空关键字字段），判定完全由本次操作冻结的插件脚本驱动。
 
 ## 6. 日志监控机制
@@ -417,8 +417,8 @@ flowchart LR
     D --> C2[宿主 SMTP]
 ```
 
-- **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
-- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/失败（...）/已跳过（...）`，按 record.Status 非 FinalStatus）。
+- **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/部分完成/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
+- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/部分完成（...）/失败（...）/已跳过（...）`，按 record.Status 非 FinalStatus）。
 - 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择最终 Attempt 的脚本级通知附图，单个 Attempt 的截图池最多 8 张且 FIFO 淘汰；队列级汇总不使用运行截图。
 - 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
 - Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书、钉钉和 Slack 使用各自的最小应用级上传凭据，Generic 通过模板图片占位符接入。SMTP 截图作为 JPEG MIME 附件发送。
@@ -431,7 +431,7 @@ flowchart LR
   - `<HH-mm-ss>-<尝试号>-s<序号>.jpg`：按该 Attempt 当前 FIFO 保留顺序编号，序号范围为 1–8。
 - 配置了 `LogPath` 时，业务日志以日志文件监控结果为单一来源；未配置 `LogPath` 时，业务日志来自脚本 stdout/stderr。实时显示和历史详情沿用相同的等级解析。
 - 每个 Attempt 最终保留的截图写入同一运行目录，JSON 保存元数据；通知发送完成后释放运行期内存截图池。
-- `FinalStatus`：success（一次成功且日志无错误关键字）/ partial（重试>1 或日志含 ERROR|错误|异常|失败）/ failed / cancelled / skipped（达到绑定的每日成功运行次数上限）。
+- `FinalStatus`：新记录与 `Status` 保持一致：`success / partial / failed / cancelled / skipped`；其中 `partial` 只能来自判断脚本显式结果，不由重试次数、退出码或日志关键字派生。旧历史中的 `partial` 保持原样兼容读取。
 - `PluginHistory`：运行落盘前由已注册插件生成的纯文本展示快照；单贡献 16 KiB、单次运行总量 64 KiB，插件异常不会影响运行结果，卸载插件后历史仍保留快照。
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。

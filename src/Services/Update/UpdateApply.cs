@@ -97,7 +97,6 @@ internal sealed record UpdateTask(
 internal static class UpdateApply
 {
     private const int MutexWaitSeconds = 120;
-    private const string MutexName = "NexusPipeline.SingleInstance";
     private const string BackupReadyMarker = ".backup-ready";
     private const string WorkerImagePrefix = ".nxp-update-worker-";
     private const int RequiredFileRetryCount = 10;
@@ -321,7 +320,7 @@ internal static class UpdateApply
 
     private static bool WaitForHostExit(TimeSpan timeout)
     {
-        using var probe = new Mutex(false, MutexName);
+        using var probe = new Mutex(false, StartupPipeline.SingleInstanceMutexName);
         DateTime deadline = DateTime.Now + timeout;
         while (DateTime.Now < deadline)
         {

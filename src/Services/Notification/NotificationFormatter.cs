@@ -14,6 +14,7 @@ internal static class NotificationFormatter
         string status = record.Status switch
         {
             "success" => $"运行成功（{record.ResultDetail}）",
+            "partial" => $"运行部分完成（{record.ResultDetail}）",
             "cancelled" => "运行已取消",
             "skipped" => $"运行已跳过（{record.ResultDetail}）",
             _ => $"运行失败（{record.ResultDetail}）",
@@ -50,6 +51,7 @@ internal static class NotificationFormatter
             string status = record.Status switch
             {
                 "success" => $"成功（{record.ResultDetail}）",
+                "partial" => $"部分完成（{record.ResultDetail}）",
                 "cancelled" => "已取消",
                 "skipped" => $"已跳过（{record.ResultDetail}）",
                 _ => $"失败（{record.ResultDetail}）",

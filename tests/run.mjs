@@ -243,6 +243,8 @@ async function runSystem(mode, args) {
   }
   const env = {
     ...modeEnvironment(mode, { system: true }),
+    // 系统测试使用独立 Web 端口，避免复用用户正在运行的 NexusPipeline 服务。
+    NEXUS_SYSTEM_WEB_PORT: process.env.NEXUS_SYSTEM_WEB_PORT || "58831",
   };
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   const suites = [

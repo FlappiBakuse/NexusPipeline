@@ -3,7 +3,7 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>v0.13.4 核心架构边界：防止运行时所有权治理在后续修改中回退。</summary>
+/// <summary>v0.13.5 核心架构边界：防止运行时所有权治理在后续修改中回退。</summary>
 public sealed class ArchitectureBoundaryTests
 {
     [Fact]

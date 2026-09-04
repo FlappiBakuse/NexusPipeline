@@ -737,7 +737,7 @@ async function fixedSeedRound() {
   const STUCK_RE = /未产生日志条目|无更新/;
   const EXPECT = {
     甲: { final: "failed", attempts: 2, reasons: ["进程退出但未检测到完成标志", "判断脚本判定失败：task-failed-gc-1"] },
-    乙: { final: "partial", attempts: 2, reasons: ["判断脚本判定失败：task-failed-gc-1", "判断脚本判定成功：all-tasks-done"] },
+    乙: { final: "success", attempts: 2, reasons: ["判断脚本判定失败：task-failed-gc-1", "判断脚本判定成功：all-tasks-done"] },
     丙: { final: "success", attempts: 1, reasons: ["判断脚本判定成功：all-tasks-done"] },
     丁: { final: "failed", attempts: 2, reasons: ["判断脚本判定失败：task-failed-1", STUCK_RE] },
     戊: { final: "failed", attempts: 2, reasons: [STUCK_RE, "进程退出但未检测到完成标志"] },
@@ -782,7 +782,7 @@ async function fixedSeedRound() {
       const rec = hist.find(h => h.userName === u.name);
       const logHits = (logSeen[u.name] || []).length;
       const archOk = archivedLogWritten(u.name, hist);
-      const fastOk = (u.name === "乙" && rec && rec.finalStatus === "partial" && (logHits > 0 || archOk)) ||
+      const fastOk = (u.name === "乙" && rec && rec.finalStatus === "success" && (logHits > 0 || archOk)) ||
         (u.name === "丙" && rec && rec.finalStatus === "success" && rec.attempts === 1 && (logHits > 0 || archOk));
       assert(fastOk,
         `${u.name} 运行中 config=用户快照 ${expLine}（观测：${JSON.stringify(snapshots)}；历史佐证：${rec ? rec.finalStatus + "/" + rec.attempts : "无"}；日志采样 ${logHits} 条${archOk ? "；归档兜底命中" : ""}）`);
@@ -830,8 +830,8 @@ async function fixedSeedRound() {
   }
   const lines = summaryText.split(/\r?\n/).filter(l => l.startsWith("· "));
   assert(lines.length === 6, `汇总通知含 6 行状态（实际 ${lines.length}）`);
-  const succLines = lines.filter(l => l.includes("成功（"));
-  assert(succLines.length === 2, `汇总通知成功 2 行（乙 partial、丙 success，实际 ${succLines.length}：${JSON.stringify(succLines)}）`);
+  const completedLines = lines.filter(l => l.includes("成功（") || l.includes("部分完成（"));
+  assert(completedLines.length === 2, `汇总通知完成 2 行（乙 success、丙 success，实际 ${completedLines.length}：${JSON.stringify(completedLines)}）`);
 
   // 进程残留
   await assertNoProcessResidue("固定轮");

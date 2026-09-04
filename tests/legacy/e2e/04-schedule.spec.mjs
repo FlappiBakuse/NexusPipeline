@@ -443,7 +443,7 @@ test("调度中心取消运行：确认卡片可取消/确认，确认后弹窗�
   }
 });
 
-test("调度中心：运行中任务实时日志滚动（重试后成功 → 部分失败）", async ({ page }) => {
+test("调度中心：运行中任务实时日志滚动（重试后成功保持成功）", async ({ page }) => {
   const batPath = path.join(runtimeDir, "live.bat");
   const logPath = path.join(runtimeDir, "logs", "live.log");
   const flagPath = path.join(runtimeDir, "logs", "first.done");
@@ -490,7 +490,7 @@ test("调度中心：运行中任务实时日志滚动（重试后成功 → 部
   expect(true, "运行结束后日志框随任务消失").toBeTruthy();
 });
 
-test("历史文件夹：.json 纯状态 + 按尝试分批 .log 标号 + 脚本日志与控制台分离 + partial 判定", async () => {
+test("历史文件夹：.json 纯状态 + 按尝试分批 .log 标号 + 脚本日志与控制台分离 + 重试最终状态", async () => {
   const historyRoot = path.join(runtimeDir, "history");
   const dayDir = path.join(historyRoot, latestHistoryDay());
   await waitFor(() => fs.existsSync(dayDir), 8000);
@@ -506,7 +506,7 @@ test("历史文件夹：.json 纯状态 + 按尝试分批 .log 标号 + 脚本�
   const newestJson = jsons[jsons.length - 1];
   const readText = p => fs.readFileSync(p, "utf8").replace(/^\uFEFF/, "");
   const record = JSON.parse(readText(path.join(dayDir, newestJson)));
-  expect(record.FinalStatus === "partial", "重试后成功判定为部分失败（FinalStatus=" + record.FinalStatus + "）").toBeTruthy();
+  expect(record.FinalStatus === "success", "重试后成功保持完整成功（FinalStatus=" + record.FinalStatus + "）").toBeTruthy();
   expect(record.Attempts === 2, "重试次数记录为 2（Attempts=" + record.Attempts + "）").toBeTruthy();
   expect(record.LogFile === newestJson, "json 记录 LogFile 引用").toBeTruthy();
   expect(record.AttemptDetails && record.AttemptDetails.length === 2, "尝试详情 2 条（AttemptDetails 长度）").toBeTruthy();

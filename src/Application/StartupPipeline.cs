@@ -70,6 +70,22 @@ internal static class StartupPipeline
         ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
     }
 
+    /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
+    internal static string SingleInstanceMutexName
+    {
+        get
+        {
+#if NEXUS_TEST_HOST
+            string scope = Environment.GetEnvironmentVariable("NEXUS_SYSTEM_RUNTIME_NAME")?.Trim() ?? "";
+            return string.IsNullOrWhiteSpace(scope)
+                ? "NexusPipeline.TestHost.SingleInstance"
+                : $"NexusPipeline.TestHost.SingleInstance.{scope}";
+#else
+            return "NexusPipeline.SingleInstance";
+#endif
+        }
+    }
+
     /// <summary>
     /// 创建单实例互斥体并取得所有权：处理「服务被强杀后互斥体被遗弃」——构造函数会抛
     /// AbandonedMutexException（所有权已授予本线程），此时先打开同一互斥体释放遗弃所有权再重试一次，
@@ -77,7 +93,7 @@ internal static class StartupPipeline
     /// </summary>
     internal static Mutex? AcquireSingleInstanceMutex()
     {
-        const string name = "NexusPipeline.SingleInstance";
+        string name = SingleInstanceMutexName;
         for (int attempt = 0; attempt < 2; attempt++)
         {
             try
@@ -115,7 +131,7 @@ internal static class StartupPipeline
         Logger.Info("[重启] 正在等待旧进程退出...");
         try
         {
-            using var probe = new Mutex(false, "NexusPipeline.SingleInstance");
+            using var probe = new Mutex(false, SingleInstanceMutexName);
             DateTime deadline = DateTime.Now.AddSeconds(30);
             while (DateTime.Now < deadline)
             {

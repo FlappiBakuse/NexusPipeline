@@ -2,7 +2,7 @@ using NexusPipeline.Services.Execution;
 
 namespace NexusPipeline.Services;
 
-/// <summary>一次尝试的结果值对象；保留原有状态字符串和致命/取消语义。</summary>
+/// <summary>一次尝试的结果值对象；业务结果支持 success/partial/failed，并保留宿主的致命/取消语义。</summary>
 internal sealed class RunAttemptResult
 {
     public string Status { get; set; } = "";
@@ -12,6 +12,7 @@ internal sealed class RunAttemptResult
     public string NotifyScreenshotId { get; set; } = "";
 
     public static RunAttemptResult Success(string reason) => new() { Status = "success", Reason = reason };
+    public static RunAttemptResult Partial(string reason) => new() { Status = "partial", Reason = reason };
     public static RunAttemptResult Failed(string reason) => new() { Status = "failed", Reason = reason };
     public static RunAttemptResult Fatal(string reason) => new() { Status = "failed", Reason = reason, IsFatal = true };
     public static RunAttemptResult Cancelled(string reason) => new() { Status = "cancelled", Reason = reason, IsFatal = true };

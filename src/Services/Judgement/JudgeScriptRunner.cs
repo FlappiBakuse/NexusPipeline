@@ -14,7 +14,7 @@ namespace NexusPipeline.Services;
 /// <summary>判断脚本一次执行的结果。</summary>
 internal class JudgeScriptResult
 {
-    /// <summary>success / failed；空字符串 = 未返回（继续运行）。</summary>
+    /// <summary>success / partial / failed；空字符串 = 未返回（继续运行）。</summary>
     public string Status { get; set; } = "";
 
     public string Reason { get; set; } = "";
@@ -46,7 +46,7 @@ internal class JudgeScriptInputFile
 /// - 输入：脚本实例字段 + 当前用户 + config（运行时生效配置，只读）与 script（可读写）目录全递归文件清单 + 当前日志全文（超过 4MB 仅提供尾部并置 logTruncated=true）+ timeScale（测试加速因子，生产恒为 1），打包为 JSON；
 /// - JavaScript 用内置 Jint 引擎（无 Node 库，注入 __NEXUS_INPUT__ / nexus.readFile / nexus.writeFile（限 script 目录）/ nexus.listFiles / nexus.captureScreenshot / console.log）；
 /// - Python 用系统 python.exe（sys.argv[1] 为输入 JSON 路径；可读写约定由文档约束，进程权限无法技术限制）；截图 API 通过当前 invocation 的随机 loopback RPC 提供；
-/// - 输出契约：stdout 最后一行 JSON {"status":"success|failed","reason":"...","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":["相对script目录路径"]}，status/reason 必填；
+/// - 输出契约：stdout 最后一行 JSON {"status":"success|partial|failed","reason":"...","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":["相对script目录路径"]}，status/reason 必填；
 /// - 单次执行 30 秒上限（真实墙钟， 不随 NEXUS_TIME_SCALE 缩放——外部进程冷启动（如 Python 首次运行）可达数秒，缩放会把真实执行误判为超时）；任何执行错误均返回 JudgeError（继续运行，不误判失败）。
 /// </summary>
 internal static class JudgeScriptRunner
@@ -573,7 +573,7 @@ internal static class JudgeScriptRunner
         }
     }
 
-    /// <summary>从后向前找第一个合法结果行（对象、status 为 success/failed、reason 非空），其余视为未返回。</summary>
+    /// <summary>从后向前找第一个合法结果行（对象、status 为 success/partial/failed、reason 非空），其余视为未返回。</summary>
     private static void ParseOutput(List<string> lines, JudgeScriptResult result)
     {
         for (int i = lines.Count - 1; i >= 0; i--)
@@ -593,7 +593,7 @@ internal static class JudgeScriptRunner
                 }
                 string status = root.TryGetProperty("status", out JsonElement s) ? s.GetString() ?? "" : "";
                 string reason = root.TryGetProperty("reason", out JsonElement r) ? r.GetString() ?? "" : "";
-                if (status is not ("success" or "failed") || reason.Length == 0)
+                if (status is not ("success" or "partial" or "failed") || reason.Length == 0)
                 {
                     continue;
                 }

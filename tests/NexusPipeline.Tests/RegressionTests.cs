@@ -33,6 +33,23 @@ public sealed class RegressionTests
         Assert.True(AttemptLifecycle.ShouldRunPostRun(finalOnly: true, attemptNumber: 1, policy, RunAttemptResult.Success("提前成功")));
         Assert.True(AttemptLifecycle.ShouldRunPostRun(finalOnly: true, attemptNumber: 1, policy, RunAttemptResult.Fatal("提前致命失败")));
         Assert.True(AttemptLifecycle.ShouldRunPostRun(finalOnly: true, attemptNumber: 3, policy, RunAttemptResult.Failed("达到上限")));
+        Assert.True(AttemptLifecycle.ShouldRunPostRun(finalOnly: true, attemptNumber: 1, policy, RunAttemptResult.Partial("局部完成")));
+    }
+
+    [Fact]
+    public void Partial_IsTerminalAndPostRunKeepsOrReplacesItsStatus()
+    {
+        RetryPolicy policy = new(3);
+        RunAttemptResult main = RunAttemptResult.Partial("主流程部分完成");
+
+        Assert.False(policy.ShouldRetry(1, main));
+        RunAttemptResult postSuccess = RunAttemptResult.MergePostRun(main, RunAttemptResult.Success("后置完成"));
+        Assert.Equal("partial", postSuccess.Status);
+        Assert.False(postSuccess.IsFatal);
+
+        RunAttemptResult postFailure = RunAttemptResult.MergePostRun(main, RunAttemptResult.Failed("后置失败"));
+        Assert.Equal("failed", postFailure.Status);
+        Assert.Contains("后置失败", postFailure.Reason);
     }
 
     [Fact]

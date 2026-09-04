@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.13.5（Pre-release）
+
+### 运行结果判定
+- 判断脚本结果正式支持 `success`、`partial`、`failed` 三种状态；`partial` 适用于所有脚本实例，并且只能由判断脚本显式返回。
+- `partial` 为终局结果，不触发重试，也不计入 `MaxSuccessfulRunsPerDay`；只有 `failed` 进入重试策略，重试后最终成功保持 `success`。
+- 宿主不再依据尝试次数、退出码、标准输出/错误输出或日志中的关键字推导和降级最终状态。
+
+### 执行收尾与展示
+- 三态结果贯通判断脚本、运行收尾、历史记录、通知、队列投影和历史页面；`partial` 保留部分完成语义并执行正常终局收尾。
+- PostRun、配置恢复、截图和插件通知流程支持 `partial` 的显式结果语义。
+
+### 插件兼容
+- NexusPipeline-Plugins 的 ZenlessZoneZeroOneDragon 插件升级至 0.2.1，应用级失败由判断脚本显式报告为 `partial`，并要求宿主版本 `0.13.5`。
+
 ## v0.13.4（Pre-release）
 
 ### 插件缓存与管理投影

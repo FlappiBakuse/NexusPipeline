@@ -241,7 +241,7 @@ settings.sections               shell.nav
 
 ## 判断脚本
 
-- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
+- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|partial|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；`partial` 只能由判断脚本主动返回，属于终局结果且不触发重试、不计入每日成功次数；`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
 
 ### 判断脚本截图
@@ -249,7 +249,7 @@ settings.sections               shell.nav
 一次「脚本实例 × 用户」运行按 Attempt 分别维护内存截图池；每个 Attempt 最多保存 8 张，第 9 张加入时移除该 Attempt 最早的一张。运行收尾时，当前保留截图会写入本轮运行的 history 目录。
 
 - 截图来源为游戏窗口客户区或模拟器画面，保留采集到的原始像素宽高，编码为高质量 JPEG。
-- 关键字模式在首次接受成功/失败关键字判定时自动截图；判断脚本模式在首次接受 `status: "success"` / `"failed"` 时自动截图。
+- 关键字模式在首次接受成功/失败关键字判定时自动截图；判断脚本模式在首次接受 `status: "success"` / `"partial"` / `"failed"` 时自动截图。关键字模式不能产生 `partial`。
 - JavaScript 判断脚本可随时调用 `nexus.captureScreenshot()`，返回截图 ID；Python 判断脚本可使用输入中的 `screenshotApi.endpoint` 和 `screenshotApi.token`，向 endpoint 发送带 `X-Nexus-Screenshot-Token` 请求头的 `POST` 请求来截图。该地址仅绑定本机回环，并随当前判断脚本调用结束失效。
 - 输入中的 `screenshots` 仅包含 ID、序号、时间、尝试次数、尺寸、来源和触发类型等元数据，不包含图片字节。
 - 输出的 `notifyScreenshotId` 指定最终 Attempt 的脚本通知附带截图。留空时选择最终 Attempt 当前仍保留的最新截图；填写已被淘汰、属于其他 Attempt 或不存在的 ID 时不附图，并记录警告。脚本通知发送后截图池释放；队列汇总通知不附图。

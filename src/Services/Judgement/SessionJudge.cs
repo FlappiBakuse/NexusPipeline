@@ -32,6 +32,7 @@ internal sealed class SessionJudge
     {
         None,
         Success,
+        Partial,
         Failure,
     }
 
@@ -44,6 +45,8 @@ internal sealed class SessionJudge
     private readonly List<HashSet<string>> _failurePending;
 
     private DateTime? _markerSeenAt;
+
+    private JudgeOutcome _markerOutcome;
 
     private DateTime? _failureSeenAt;
 
@@ -73,6 +76,9 @@ internal sealed class SessionJudge
     public bool ScriptMode => _mode == JudgeMode.JudgeScript;
 
     public DateTime? MarkerSeenAt => _markerSeenAt;
+
+    /// <summary>首次接受的完成标志业务结果；仅判断脚本可以产生 Partial，关键字完成标志固定为 Success。</summary>
+    public JudgeOutcome MarkerOutcome => _markerOutcome;
 
     public DateTime? FailureSeenAt => _failureSeenAt;
 
@@ -122,6 +128,7 @@ internal sealed class SessionJudge
         if (_markerSeenAt is null)
         {
             _markerSeenAt = DateTime.Now;
+            _markerOutcome = JudgeOutcome.Success;
         }
         return LineHit.SuccessKeyword;
     }
@@ -164,7 +171,7 @@ internal sealed class SessionJudge
         return firstCompletion;
     }
 
-    /// <summary>应用判断脚本结果：success → 成功标记；failed → 失败标记并（首次）执行配置替换回调。返回是否设置了判定。</summary>
+    /// <summary>应用判断脚本结果：success/partial → 完成标记；failed → 失败标记并（首次）执行配置替换回调。返回是否设置了判定。</summary>
     public JudgeOutcome ApplyJudgeResult(
         string status,
         string reason,
@@ -173,13 +180,14 @@ internal sealed class SessionJudge
         Action<List<string>> onReplace,
         string? notifyScreenshotId = null)
     {
-        if (status == "success" && _markerSeenAt is null)
+        if (status is "success" or "partial" && _markerSeenAt is null)
         {
             _markerSeenAt = DateTime.Now;
-            _judgeReason = "判断脚本判定成功：" + reason;
+            _markerOutcome = status == "partial" ? JudgeOutcome.Partial : JudgeOutcome.Success;
+            _judgeReason = (status == "partial" ? "判断脚本判定部分完成：" : "判断脚本判定成功：") + reason;
             _judgeNotifyText = notifyText;
             _judgeNotifyScreenshotId = notifyScreenshotId?.Trim() ?? "";
-            return JudgeOutcome.Success;
+            return _markerOutcome;
         }
         if (status == "failed" && _failureSeenAt is null)
         {

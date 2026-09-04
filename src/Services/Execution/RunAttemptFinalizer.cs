@@ -66,7 +66,7 @@ internal sealed class RunAttemptFinalizer
                             Logger.Warn($"[{_modeText}运行] 关闭模拟器目标应用失败：{stop.Output.Trim()}");
                         }
                     }
-                    bool runEnded = resultStatus is "success" or "cancelled"
+                    bool runEnded = resultStatus is "success" or "partial" or "cancelled"
                         || result.IsFatal
                         || attemptNumber >= Math.Max(1, maxAttempts);
                     if (_script.ForceCloseGame && runEnded && !string.IsNullOrWhiteSpace(_script.GameExe))
