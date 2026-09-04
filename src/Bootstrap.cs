@@ -59,12 +59,12 @@ internal static class Bootstrap
         return null;
     }
 
-    /// <summary>Web 服务启动成功后的收尾：远程访问模式确保防火墙入站规则存在。</summary>
+    /// <summary>Web 服务启动成功后的收尾：远程访问模式确保实际监听端口的 TCP 入站规则存在。</summary>
     public static void AfterWebStarted(WebServer web)
     {
         if (web.AllowsRemoteAccess)
         {
-            FirewallRule.EnsureAllowInbound();
+            FirewallRule.EnsureAllowInbound(web.Port);
         }
     }
 

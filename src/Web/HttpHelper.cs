@@ -9,6 +9,12 @@ namespace NexusPipeline.Web;
 
 internal static class HttpHelper
 {
+    public static bool IsLoopback(HttpListenerContext context)
+    {
+        IPAddress? address = context.Request.RemoteEndPoint?.Address;
+        return address is not null && IPAddress.IsLoopback(address);
+    }
+
     public static void ServeFile(HttpListenerContext context, string filePath)
     {
         if (!File.Exists(filePath))

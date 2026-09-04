@@ -24,6 +24,15 @@ internal static class ConfigEditHttpAdapter
         string userReference,
         string body)
     {
+        if (!HttpHelper.IsLoopback(context))
+        {
+            await HttpHelper.WriteJsonAsync(
+                context,
+                new { ok = false, code = "local_only", error = "编辑配置仅支持本机请求" },
+                403).ConfigureAwait(false);
+            return;
+        }
+
         RuntimeContext ctx = RuntimeContext.Instance;
         var parsed = HttpHelper.ParseBody(body);
         string action = parsed.Get("action").Str();

@@ -197,6 +197,14 @@ internal static class ApiUsersHandler
         }
         if (seg.Length == 5 && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
         {
+            if (!HttpHelper.IsLoopback(context))
+            {
+                await HttpHelper.WriteJsonAsync(
+                    context,
+                    new { ok = false, code = "local_only", error = "编辑配置仅支持本机请求" },
+                    403).ConfigureAwait(false);
+                return;
+            }
             if (method == "GET")
             {
                 // v0.12.8：编辑配置前置状态——该用户在脚本实例上是否已有配置快照（首次编辑需选择配置方式）。

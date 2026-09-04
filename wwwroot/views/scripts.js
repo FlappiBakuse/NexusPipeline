@@ -77,6 +77,17 @@ function scriptCardMarkup(script) {
     : pluginStatus.missing
       ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">未知专项</span>`
       : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(pluginStatus.displayName)}专项</span>`;
+  const judgeBadge = script.judgeScriptEnabled === true && String(script.judgeScript || "").trim()
+    ? '<span class="badge muted" data-testid="script-judge-badge">判断脚本</span>'
+    : String(script.successKeywords || "").trim() || String(script.failureKeywords || "").trim()
+      ? '<span class="badge muted" data-testid="script-judge-badge">关键字判断</span>'
+      : "";
+  const gameModeBadge = script.launchGame === true
+    ? `<span class="badge muted" data-testid="script-game-mode-badge">${String(script.gameMode || "").trim().toLowerCase() === "emulator" ? "安卓模拟器" : "PC 客户端"}</span>`
+    : "";
+  const longBadge = script.logStallTimeoutMinutes === -1
+    ? '<span class="badge warn" data-testid="script-long-badge">长时策略</span>'
+    : "";
   const entityState = unavailable
     ? ` class="entity-link is-unavailable" disabled aria-disabled="true" title="${esc(unavailableMessage)}"`
     : ' class="entity-link"';
@@ -85,7 +96,7 @@ function scriptCardMarkup(script) {
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
       <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
-    <div class="meta-line script-meta">${pluginBadge}${script.logStallTimeoutMinutes === -1 ? `<span class="badge warn" data-testid="script-long-badge">长时策略</span>` : ""}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
+    <div class="meta-line script-meta">${pluginBadge}${gameModeBadge}${judgeBadge}${longBadge}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
       <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>

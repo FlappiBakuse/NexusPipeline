@@ -11,6 +11,7 @@
 | 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
 | 用户写入 | 用户 CRUD API | `user create/update/delete` | `create_user`（改名/删除走 CLI） |
 | 用户绑定 | `/api/users/{id}/bindings` | `user bindings ...` | `add_binding` / `update_binding`（删除走 CLI） |
+| 用户绑定配置编辑 | `/api/users/{id}/bindings/{scriptId}/edit-config`（仅回环请求） | `user binding config ...` | 由 CLI/Web 承担 |
 | 用户全局设置 | `/api/users/{id}/global-settings` | `user global-settings get/update` | 由 CLI/Web 承担 |
 | 队列读取 | `GET /api/queues` | `queue list/get` | `list_queues` |
 | 队列写入 | 队列 CRUD API | `queue create/update/delete` | 由 CLI 承担 |
@@ -37,6 +38,7 @@
 - 用户绑定的通用设置包含 `RunDays` 与 `MaxSuccessfulRunsPerDay`；后者使用 `-1` 表示不限制，达到正数上限后生成 `skipped` 历史记录。
 - 历史页面按日期、用户、运行记录分层查询；`/api/history/users` 与带 `userKey` 的记录查询都在宿主侧完成过滤，避免把整日记录一次性返回前端。
 - 本机路径选择器只接受回环请求，由 Windows 原生选择器返回路径；返回值写入可继续手动编辑的文本框，不提供远程文件系统浏览能力。
+- 已绑定脚本实例的配置编辑预检查与操作请求均只接受回环请求，远程请求直接返回 `403 local_only`。
 - 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 
 ## 维护规则

@@ -105,7 +105,7 @@ internal static class SettingsCommands
             AppSettings current = ctx.Settings;
             if (current.AllowRemoteAccess && !current.LightweightMode)
             {
-                FirewallRule.EnsureAllowInbound();
+                FirewallRule.EnsureAllowInbound(current.WebPort);
             }
             TaskRegistration.SyncWithSettings(current);
             Audit.Log(

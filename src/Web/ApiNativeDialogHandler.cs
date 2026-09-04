@@ -1,4 +1,3 @@
-using System.Net;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
@@ -15,7 +14,7 @@ internal static class ApiNativeDialogHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        if (!IsLoopback(context))
+        if (!HttpHelper.IsLoopback(context))
         {
             await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "local_only", error = "路径选择器仅支持本机请求" }, 403).ConfigureAwait(false);
             return;
@@ -67,12 +66,6 @@ internal static class ApiNativeDialogHandler
             Logger.Warn($"[路径选择器] 打开原生选择器失败：{ex.Message}");
             await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "dialog_failed", error = "无法打开路径选择器" }, 500).ConfigureAwait(false);
         }
-    }
-
-    internal static bool IsLoopback(HttpListenerContext context)
-    {
-        IPAddress? address = context.Request.RemoteEndPoint?.Address;
-        return address is not null && IPAddress.IsLoopback(address);
     }
 
     internal sealed class NativePathPickerPayload
