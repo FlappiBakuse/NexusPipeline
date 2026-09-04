@@ -255,6 +255,86 @@ public class ConfigEditModesTests
         }
     }
 
+    /* ---------------- normal（编辑既有快照） ---------------- */
+
+    [Fact]
+    public void NormalStart_MaterializesSnapshot_AndCommitWritesDiffBack()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        try
+        {
+            // 先建立权威快照（运行隐式建快照语义），再进入 normal 编辑
+            File.WriteAllText(configPath, "user-current");
+            Assert.True(UserConfigManager.PrepareForRun(scriptId, userName, configPath, out string? runError), runError);
+            Assert.True(UserConfigManager.HasSnapshot(scriptId, userName));
+
+            Assert.Null(UserConfigManager.PrepareForEdit(scriptId, userName, configPath));
+            File.WriteAllText(configPath, "edited-in-target");
+
+            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, configPath));
+            Assert.Equal("edited-in-target", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "config.json")));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void NormalCommit_WhenConfigRenamedAway_FailsWithMissingLocation()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        try
+        {
+            File.WriteAllText(configPath, "user-current");
+            Assert.True(UserConfigManager.PrepareForRun(scriptId, userName, configPath, out string? runError), runError);
+            Assert.Null(UserConfigManager.PrepareForEdit(scriptId, userName, configPath));
+
+            // 模拟目标软件中改名：编辑目标文件消失（内容随新名字出现在别处）
+            File.Delete(configPath);
+
+            string? commitError = UserConfigManager.CommitEdit(scriptId, userName, configPath);
+            Assert.NotNull(commitError);
+            Assert.Contains("配置位置不存在", commitError);
+            // 提交被拒绝后现场保留（上层保留会话供用户恢复文件或取消），store 快照未被污染
+            Assert.True(UserConfigManager.HasSnapshot(scriptId, userName));
+            Assert.NotNull(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void NormalCancel_WhenConfigRenamedAway_RestoresOriginal()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        try
+        {
+            File.WriteAllText(configPath, "user-current");
+            Assert.True(UserConfigManager.PrepareForRun(scriptId, userName, configPath, out string? runError), runError);
+            Assert.Null(UserConfigManager.PrepareForEdit(scriptId, userName, configPath));
+            File.Delete(configPath);
+
+            // 目标文件被改名后取消编辑：编辑前原文件必须还原回原位置，会话干净结束
+            Assert.Null(UserConfigManager.CancelEdit(scriptId, userName, configPath));
+            Assert.Equal("user-current", ReadFile(configPath));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
     /* ---------------- 会话标记格式与恢复 ---------------- */
 
     [Fact]

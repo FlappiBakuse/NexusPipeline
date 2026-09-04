@@ -12,6 +12,9 @@ public class ScriptInstance
     /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由当前插件在运行时解析。</summary>
     public string PluginType { get; set; } = "";
 
+    /// <summary>专用插件用户输入值（resolve.json inputs 声明的 name → 用户填写值；通用脚本恒为空）。键大小写以声明为准。</summary>
+    public Dictionary<string, string> PluginInputs { get; set; } = new();
+
     public string RootPath { get; set; } = "";
 
     public string MainExe { get; set; } = "";

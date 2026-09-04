@@ -25,6 +25,10 @@ public class ConfigSwapSyncTests
     {
         return new ConfigSwapSession.ToggleRestore { Type = "map", Path = path, Initial = initial };
     }
+    private static ConfigSwapSession.ToggleRestore BoolArrayToggle(string path, List<bool> initial)
+    {
+        return new ConfigSwapSession.ToggleRestore { Type = "boolArray", Path = path, InitialList = initial };
+    }
 
     /* ---------------- 首次检测时机（ShouldRunFirstSync） ---------------- */
 
@@ -142,6 +146,32 @@ public class ConfigSwapSyncTests
         Assert.False(ConfigSwapSession.ApplyToggle(ref bad, ArrayToggle("tasks", new Dictionary<string, bool> { ["t1"] = true })));
     }
 
+    [Fact]
+    public void ApplyToggle_BoolArray_RestoresByIndex_AndKeepsExtras()
+    {
+        string content = "{\"TASK_ORDER_GROUP\":{\"ALL_PIPELINES\":[{\"TASK_PIPELINE\":[\"A\",\"B\",\"C\"],\"TASK_ONOFF\":[false,false,false]}]}}";
+        bool ok = ConfigSwapSession.ApplyToggle(ref content, BoolArrayToggle("TASK_ORDER_GROUP.ALL_PIPELINES[0].TASK_ONOFF", new List<bool> { true, false, true }));
+        Assert.True(ok);
+        JsonArray onoff = (JsonArray)JsonNode.Parse(content)!["TASK_ORDER_GROUP"]!["ALL_PIPELINES"]![0]!["TASK_ONOFF"]!;
+        Assert.True((bool)onoff[0]!);
+        Assert.False((bool)onoff[1]!);
+        Assert.True((bool)onoff[2]!);
+    }
+
+    [Fact]
+    public void ApplyToggle_BoolArray_ShortTargetFails_LongTargetKeepsExtras()
+    {
+        string shortContent = "{\"onoff\":[false]}";
+        Assert.False(ConfigSwapSession.ApplyToggle(ref shortContent, BoolArrayToggle("onoff", new List<bool> { true, true })));
+
+        string longContent = "{\"onoff\":[false,false,false]}";
+        Assert.True(ConfigSwapSession.ApplyToggle(ref longContent, BoolArrayToggle("onoff", new List<bool> { true })));
+        JsonArray onoff = (JsonArray)JsonNode.Parse(longContent)!["onoff"]!;
+        Assert.True((bool)onoff[0]!);
+        Assert.False((bool)onoff[1]!);
+        Assert.False((bool)onoff[2]!);
+    }
+
     /* ---------------- 还原描述解析（ReadRestoreDescriptor） ---------------- */
 
     [Fact]
@@ -168,6 +198,26 @@ public class ConfigSwapSyncTests
         string badDir = MakeTempDir();
         File.WriteAllText(Path.Combine(badDir, "config-restore.json"), "not-json");
         Assert.Null(ConfigSwapSession.ReadRestoreDescriptor(badDir));
+    }
+
+    [Fact]
+    public void ReadRestoreDescriptor_BoolArray_ParsesInitialList_AndDropsEmpty()
+    {
+        string dir = MakeTempDir();
+        File.WriteAllText(Path.Combine(dir, "config-restore.json"),
+            "{\"files\":[{\"file\":\"task.json\",\"toggles\":[{\"type\":\"boolArray\",\"path\":\"TASK_ORDER_GROUP.ALL_PIPELINES[0].TASK_ONOFF\",\"initial\":[true,false,true]}]}]}");
+        ConfigSwapSession.ConfigRestoreDescriptor? descriptor = ConfigSwapSession.ReadRestoreDescriptor(dir);
+        Assert.NotNull(descriptor);
+        Assert.Single(descriptor!.Files);
+        Assert.Equal("task.json", descriptor.Files[0].File);
+        Assert.Single(descriptor.Files[0].Toggles);
+        Assert.Equal("boolArray", descriptor.Files[0].Toggles[0].Type);
+        Assert.Equal(new List<bool> { true, false, true }, descriptor.Files[0].Toggles[0].InitialList);
+
+        string emptyDir = MakeTempDir();
+        File.WriteAllText(Path.Combine(emptyDir, "config-restore.json"),
+            "{\"files\":[{\"file\":\"task.json\",\"toggles\":[{\"type\":\"boolArray\",\"path\":\"a.b\",\"initial\":[]}]}]}");
+        Assert.Null(ConfigSwapSession.ReadRestoreDescriptor(emptyDir));
     }
 
     /* ---------------- 有效性校验（ValidForSync） ---------------- */

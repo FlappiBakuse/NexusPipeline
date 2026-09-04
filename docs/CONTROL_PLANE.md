@@ -8,6 +8,7 @@
 |---|---|---|---|
 | 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` |
 | 脚本写入 | 脚本 CRUD API | `script create/update/delete` | `create_script` / `update_script`（删除走 CLI） |
+| 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | 由 Web 承担 | 由 CLI/Web 承担 |
 | 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
 | 用户写入 | 用户 CRUD API | `user create/update/delete` | `create_user`（改名/删除走 CLI） |
 | 用户绑定 | `/api/users/{id}/bindings` | `user bindings ...` | `add_binding` / `update_binding`（删除走 CLI） |

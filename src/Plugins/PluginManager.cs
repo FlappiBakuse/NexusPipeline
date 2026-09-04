@@ -38,6 +38,9 @@ internal sealed record PluginSummary(
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
 
     public bool HasReadme { get; init; }
+
+    /// <summary>数据化专项插件 resolve.json 声明的用户输入变量（managed-code 恒为空）。</summary>
+    public IReadOnlyList<PluginInputDeclaration> Inputs { get; init; } = Array.Empty<PluginInputDeclaration>();
 }
 
 internal sealed record PluginFrontendRuntimeDescriptor(
@@ -179,6 +182,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 UpdatedAt = metadata.UpdatedAt,
                 Changelog = metadata.Changelog,
                 HasReadme = metadata.HasReadme,
+                Inputs = ReadInputDeclarations(plugin),
             });
         }
         foreach (ManagedPluginDescriptor plugin in _managedPlugins)
@@ -210,6 +214,20 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             });
         }
         return list;
+    }
+
+    /// <summary>读取专项插件 resolve.json 的用户输入声明；声明无效时投影为空表并记警告（推导期会再次校验并拒绝）。</summary>
+    private static IReadOnlyList<PluginInputDeclaration> ReadInputDeclarations(DataSpecializedPlugin plugin)
+    {
+        if (!plugin.TryReadInputDeclarations(out IReadOnlyList<PluginInputDeclaration>? declarations, out string? error))
+        {
+            if (error is not null)
+            {
+                Logger.Warn($"[插件] 插件「{plugin.Name}」resolve.json inputs 声明无效：{error}");
+            }
+            return Array.Empty<PluginInputDeclaration>();
+        }
+        return declarations;
     }
 
     /// <summary>插件管理控制面共享投影；ownership/pending 由同一份快照合并，避免各适配器自行拼装。</summary>
@@ -498,7 +516,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     }
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；代码插件只有声明能力，不直接暴露宿主领域模型。</summary>
-    public ScriptProfile? ResolveProfile(string pluginName, string rootPath)
+    public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null)
     {
         if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
         {
@@ -511,13 +529,29 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         }
         try
         {
-            return resolver.Resolve(rootPath.Trim());
+            return resolver.Resolve(rootPath.Trim(), inputs);
         }
         catch (Exception ex)
         {
             Logger.Warn($"[插件] 插件「{pluginName}」解析「{rootPath}」失败：{ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>复用配置候选：数据化专项插件 configPath 模板引用单个输入且目标缺失时，枚举静态目录中可绑定的输入值。</summary>
+    public IReadOnlyList<string> GetMissingConfigCandidates(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs)
+    {
+        if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
+        {
+            return Array.Empty<string>();
+        }
+        IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsRuntimeEnabled);
+        if (resolver is not DataSpecializedPlugin plugin
+            || !plugin.TryDiscoverConfigInputValues(rootPath.Trim(), out IReadOnlyList<string>? values))
+        {
+            return Array.Empty<string>();
+        }
+        return values;
     }
 
     /// <summary>返回已发现、已启用且有效的数据化插件配置校验脚本；普通脚本和 managed-code 插件不参与。</summary>

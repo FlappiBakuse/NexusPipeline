@@ -69,7 +69,7 @@ internal sealed class ScriptSpecResolver
             return Failed(script, unavailable, "");
         }
 
-        ScriptProfile? profile = _capabilities.ResolveProfile(script.PluginType.Trim(), script.RootPath.Trim());
+        ScriptProfile? profile = _capabilities.ResolveProfile(script.PluginType.Trim(), script.RootPath.Trim(), script.PluginInputs);
         if (profile is null)
         {
             return Failed(

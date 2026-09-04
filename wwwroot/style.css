@@ -900,14 +900,17 @@ button.switch-control[data-state="on"] .switch-thumb { transform: translateX(22p
 .history-detail-meta-wide { grid-column: 1 / -1; }
 .history-detail-meta-wide > :last-child { white-space: normal; }
 .history-attempt-list { display: grid; gap: var(--space-4); padding-top: var(--space-5); }
-.history-attempt-list > .history-attempt-detail { margin: 0; padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }
+/* min-width:0 锁死卡片宽度：grid item 默认最小尺寸为内容最宽不可断行片段，超长日志行会把卡片顶宽（grid blowout） */
+.history-attempt-list > .history-attempt-detail { min-width: 0; max-width: 100%; margin: 0; padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); overflow-x: hidden; }
 .history-attempt-detail > .section-heading { margin-bottom: 0; }
 .history-attempt-detail > .section-heading h3 { margin: 0; font-size: 14px; }
 .history-attempt-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; margin-top: var(--space-3); border-top: 1px solid var(--content-card-border); }
 .history-attempt-meta > div { display: flex; min-width: 0; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--content-card-border); color: var(--text); font-size: 12px; }
 .history-attempt-meta .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .history-attempt-meta > div > :last-child { min-width: 0; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.history-attempt-detail .history-log { margin-top: var(--space-3); }
+.history-attempt-detail .history-log { min-width: 0; max-width: 100%; margin-top: var(--space-3); }
+/* 日志不折行：超长行在固定宽度卡片内用横向滚动条翻阅 */
+.history-attempt-detail pre.logbox { white-space: pre; }
 .history-attempt-screenshots { min-width: 0; margin-top: var(--space-3); }
 .history-screenshot-strip { display: flex; min-width: 0; gap: 10px; overflow-x: auto; overflow-y: hidden; padding: 8px 2px 10px; scrollbar-width: thin; }
 .history-screenshot-thumb { position: relative; flex: 0 0 112px; width: 112px; height: 76px; min-height: 0; padding: 0; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: 7px; background: var(--content-control); box-shadow: none; }

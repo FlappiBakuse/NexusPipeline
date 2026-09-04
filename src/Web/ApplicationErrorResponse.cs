@@ -24,7 +24,7 @@ internal static class ApplicationErrorResponse
                 ok = false,
                 error = error.Message,
                 code = error.Code,
-                runIds = error.Candidates,
+                candidates = error.Candidates,
             }
             : new
             {

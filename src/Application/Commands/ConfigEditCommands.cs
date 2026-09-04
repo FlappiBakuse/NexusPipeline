@@ -63,6 +63,19 @@ internal static class ConfigEditCommands
             // 快照已存在（前端状态过期或并发编辑后）：按既有快照交换流程执行，保持数据一致。
             editMode = "normal";
         }
+        if (editMode == "reuse" && PathKindUtil.KindOf(target.Script.ConfigPath) == PathKind.Missing)
+        {
+            // 复用编辑把现场配置文件绑定为用户快照起点：声明位置缺失（常见于文件型配置的配置名输入
+            // 与现场实际文件名不一致）必须在启动会话前解决，否则编辑完成后无法入库、甚至把同名默认
+            // 文件静默错绑。候选为静态目录中的实际配置，交给用户显式选择后更新脚本实例配置名。
+            IReadOnlyList<string> candidates = ctx.Resolve<IPluginCapabilityResolver>()
+                .GetMissingConfigCandidates(target.Script.PluginType, target.Script.RootPath, target.Script.PluginInputs);
+            string message = candidates.Count > 0
+                ? "配置文件不存在：" + target.Script.ConfigPath + "。请选择要复用的现场配置文件，或先在脚本实例中更新配置名设置"
+                : "配置文件不存在：" + target.Script.ConfigPath + "。请检查脚本根目录与配置名设置（可能已在目标软件中改名或删除）";
+            return OperationResult<ConfigEditStarted>.Failure(
+                new OperationError("config_input_mismatch", message, OperationErrorKind.Validation, candidates));
+        }
 
         ConfigSessionRuntimeMetadata metadata = ConfigSessionMark.FromScript(
             target.Script,
@@ -405,6 +418,15 @@ internal static class ConfigEditCommands
             {
                 // fresh/reuse 提交时 config 位置为空（脚本未生成或配置被删）：不杀进程，保留会话供用户继续配置或取消。
                 return Validation<ConfigEditCompleted>("配置文件尚未生成，请先完成配置或取消本次编辑");
+            }
+            if (action == "done"
+                && editMode == "normal"
+                && PathKindUtil.KindOf(session.Script.ConfigPath) == PathKind.Missing)
+            {
+                // normal 提交时 config 位置缺失（文件型配置常因目标软件中改名/移动而消失，目录型同理）：
+                // 无法安全计算编辑差异，不杀进程，保留会话供用户恢复原文件后重试；取消会把编辑前原文件还原回该位置。
+                return Validation<ConfigEditCompleted>(
+                    "配置文件不存在（可能已在目标软件中被改名或删除）。可在目标软件中恢复原文件名后重试保存，或取消本次编辑，再在脚本实例中更新配置名设置");
             }
 
             session.CancelForeground();

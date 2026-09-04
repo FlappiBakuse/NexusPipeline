@@ -387,7 +387,7 @@ internal static class ScriptCommands
         }
     }
 
-    public static OperationResult<ScriptProfile> Probe(string pluginType, string rootPath)
+    public static OperationResult<ScriptProfile> Probe(string pluginType, string rootPath, IReadOnlyDictionary<string, string>? inputs = null)
     {
         if (string.IsNullOrWhiteSpace(pluginType))
         {
@@ -402,9 +402,9 @@ internal static class ScriptCommands
             return Validation<ScriptProfile>(availabilityError);
         }
         ScriptProfile? profile = ctx.Resolve<IPluginCapabilityResolver>()
-            .ResolveProfile(pluginType, StripPathQuotes(rootPath));
+            .ResolveProfile(pluginType, StripPathQuotes(rootPath), inputs);
         return profile is null
-            ? Validation<ScriptProfile>("无法从脚本根目录推导专用插件配置（请检查根目录，并确认专用插件已启用）")
+            ? Validation<ScriptProfile>("无法从脚本根目录推导专用插件配置（请检查根目录、插件输入与专用插件启用状态）")
             : OperationResult<ScriptProfile>.Ok(profile);
     }
 

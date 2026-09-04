@@ -337,7 +337,7 @@ flowchart LR
 
 - **增量事务**：先扫描 config 与 store 建立 O(N) 差异清单，只把新增/变更文件写入 `stage/`，把将被替换/删除的旧文件写入 `rollback/`，再写入 manifest；逐文件提交后写 `commit.json`，最后更新 generation 元数据。未变化文件始终保留在原 store 中。
 - **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时从旧 store 保留原文件，不写入插队编排产物。
-- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `PLUGIN_API.md`「配置还原描述」。
+- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}|{"type":"boolArray","path":"TASK_ORDER_GROUP.ALL_PIPELINES[0].TASK_ONOFF","initial":[...]}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）、boolArray 按下标还原布尔数组（短于 initial 视为失败）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 `PLUGIN_API.md`「配置还原描述」。
 
 **守护机制**（防止坏态写入并污染快照）：
 
@@ -777,7 +777,7 @@ views/* 域之间互不引用（跨域数据只经 core/state.js 缓存共享；
 | 类别 | 形态 | 职责 | 启用语义 |
 |---|---|---|---|
 | managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1.4 + manifest | 通过通用用户数据、声明式设置、作用域数据、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP 和通知端口实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
-| 数据化专项插件 | `plugins/<ArtifactName>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本 | 默认启用；偏好以机器 ID 为 key 写入 `AppSettings.PluginPreferences`，重启后应用 |
+| 数据化专项插件 | `plugins/<ArtifactName>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath, inputs)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本，`inputs` 为实例保存的用户输入值（`{input:名称}` 内联替换）；`logPath` 可为空 = 判定日志走进程 stdout | 默认启用；偏好以机器 ID 为 key 写入 `AppSettings.PluginPreferences`，重启后应用 |
 
 > **通知通道**：Webhook/SMTP 由宿主 `NotificationDispatcher` 并行发送；代码插件通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，不能访问宿主设置或 sender。单个通道异常仅记警告，不影响其余通道。
 

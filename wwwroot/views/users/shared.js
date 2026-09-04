@@ -352,10 +352,64 @@ function openFirstEditConfigChooser(userId, scriptId) {
 }
 
 async function startEditConfig(userId, scriptId, mode) {
-  await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start", mode });
+  try {
+    await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start", mode });
+  } catch (error) {
+    if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
+      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates);
+      return;
+    }
+    throw error;
+  }
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
   showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || "脚本实例", mode);
+}
+
+/** 复用编辑绑定修正：实例配置名与现场文件不一致时，列出实际存在的配置文件供用户显式采用。 */
+function openConfigCandidateChooser(userId, scriptId, mode, candidates) {
+  const cards = candidates.map(candidate =>
+    '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '">' +
+    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">采用后按此配置继续复用编辑</span></button>').join("");
+  const body = '<p class="modal-copy">当前脚本实例存在多个配置文件。请选择要复用的配置文件：采用后配置将更新为它，并继续本次复用编辑。</p>' +
+    '<div class="first-edit-chooser">' + cards + '</div>';
+  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
+  showModal(modalShell("选择要复用的配置文件", body, footer), false, true, true);
+}
+
+/** 专项插件声明的配置名输入：唯一必填输入优先，其余取唯一输入；无法确定返回空。 */
+function configInputName(pluginType) {
+  const meta = (state.plugins || []).find(item => item.name === pluginType);
+  const inputs = Array.isArray(meta?.inputs) ? meta.inputs : [];
+  if (inputs.length === 1) return String(inputs[0].name || "");
+  return String(inputs.find(item => item.required)?.name || "");
+}
+
+async function adoptConfigCandidate(target) {
+  const userId = target.dataset.userId;
+  const scriptId = target.dataset.scriptId;
+  const mode = target.dataset.mode;
+  const candidate = target.dataset.candidate;
+  try {
+    const script = await api("GET", "/api/scripts/" + encodeURIComponent(scriptId));
+    const inputName = configInputName(script?.pluginType || "");
+    if (!inputName) {
+      toast("无法确定配置名输入项，请在脚本编辑中手动更新配置名后重试", "error");
+      return;
+    }
+    const pluginInputs = script?.pluginInputs && typeof script.pluginInputs === "object" ? { ...script.pluginInputs } : {};
+    pluginInputs[inputName] = candidate;
+    await api("PUT", "/api/scripts/" + encodeURIComponent(scriptId), { ...script, pluginInputs });
+    closeModal();
+    toast("配置名已更新为「" + candidate + "」");
+    await startEditConfig(userId, scriptId, mode);
+  } catch (error) {
+    if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
+      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates);
+      return;
+    }
+    toast(error.message, "error");
+  }
 }
 
 export async function chooseFirstEditConfigMode(target) {
@@ -425,4 +479,5 @@ export const actions = {
   "global-edit-config-cancel": target => withBusy(target, () => globalEditConfigAction(target.dataset.userId, target.dataset.scriptId, "cancel", target.dataset.mode)),
   "first-edit-config-fresh": target => chooseFirstEditConfigMode(target),
   "first-edit-config-reuse": target => chooseFirstEditConfigMode(target),
+  "adopt-config-candidate": target => withBusy(target, () => adoptConfigCandidate(target)),
 };

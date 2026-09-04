@@ -174,13 +174,25 @@ internal static class ApiScriptsHandler
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
-    /// <summary>专用插件配置探测：前端简化弹窗在根目录填写后即时校验能否推导。</summary>
+    /// <summary>专用插件配置探测：前端简化弹窗在根目录填写后即时校验能否推导；inputs 为插件声明的用户输入值。</summary>
     private static async Task HandleProbeAsync(HttpListenerContext context, string body)
     {
         JsonNode? node = HttpHelper.ParseBody(body);
         string rootPath = node?["rootPath"]?.ToString() ?? "";
         string pluginType = node?["pluginType"]?.ToString() ?? "";
-        OperationResult<ScriptProfile> result = ScriptCommands.Probe(pluginType, rootPath);
+        Dictionary<string, string>? inputs = null;
+        if (node?["inputs"] is JsonObject inputObject)
+        {
+            inputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (KeyValuePair<string, JsonNode?> item in inputObject)
+            {
+                if (item.Value is not null)
+                {
+                    inputs[item.Key] = item.Value.ToString();
+                }
+            }
+        }
+        OperationResult<ScriptProfile> result = ScriptCommands.Probe(pluginType, rootPath, inputs);
         if (!result.Succeeded)
         {
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);

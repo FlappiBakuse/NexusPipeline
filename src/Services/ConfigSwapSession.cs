@@ -534,6 +534,9 @@ internal static class ConfigSwapSession
         public string EnabledField { get; set; } = "";
 
         public Dictionary<string, bool> Initial { get; set; } = new();
+
+        /// <summary>boolArray 型：与目标布尔数组按下标对应的初始值（BAAH 平行数组 TASK_ONOFF 等场景）。</summary>
+        public List<bool> InitialList { get; set; } = new();
     }
 
     internal static ConfigRestoreDescriptor? ReadRestoreDescriptor(string scriptDir)
@@ -581,7 +584,18 @@ internal static class ConfigSwapSession
                                     }
                                 }
                             }
-                            if (!string.IsNullOrWhiteSpace(tr.Type) && !string.IsNullOrWhiteSpace(tr.Path) && tr.Initial.Count > 0)
+                            if (t["initial"] is JsonArray initialList)
+                            {
+                                foreach (JsonNode? entry in initialList)
+                                {
+                                    if (entry is not null && bool.TryParse(entry.ToString(), out bool b))
+                                    {
+                                        tr.InitialList.Add(b);
+                                    }
+                                }
+                            }
+                            bool hasPayload = tr.Type == "boolArray" ? tr.InitialList.Count > 0 : tr.Initial.Count > 0;
+                            if (!string.IsNullOrWhiteSpace(tr.Type) && !string.IsNullOrWhiteSpace(tr.Path) && hasPayload)
                             {
                                 fr.Toggles.Add(tr);
                             }
@@ -639,7 +653,8 @@ internal static class ConfigSwapSession
         return ConfigStoreDiff.NormalizeRelative(value);
     }
 
-    /// <summary>应用单个还原描述 toggle：array 型按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）；map 型逐键设布尔（未覆盖键不动）。</summary>
+    /// <summary>应用单个还原描述 toggle：array 型按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）；map 型逐键设布尔（未覆盖键不动）；
+    /// boolArray 型按下标还原布尔数组（短于 initial 视为失败）。</summary>
     internal static bool ApplyToggle(ref string content, ToggleRestore toggle)
     {
         try
@@ -680,6 +695,23 @@ internal static class ConfigSwapSession
                 foreach (KeyValuePair<string, bool> kv in toggle.Initial)
                 {
                     obj[kv.Key] = kv.Value;
+                }
+            }
+            else if (toggle.Type == "boolArray")
+            {
+                JsonNode? node = LocateNode(root, toggle.Path);
+                if (node is not JsonArray array)
+                {
+                    return false;
+                }
+                // 按下标还原布尔数组；目标数组短于 initial 说明配置结构与首次触发时不同，视为应用失败（该文件不入快照）。
+                if (array.Count < toggle.InitialList.Count)
+                {
+                    return false;
+                }
+                for (int index = 0; index < toggle.InitialList.Count; index++)
+                {
+                    array[index] = toggle.InitialList[index];
                 }
             }
             else

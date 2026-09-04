@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Utilities;
@@ -9,7 +10,8 @@ namespace NexusPipeline.Plugins;
 /// 数据化专项插件：纯目录形态 plugins/&lt;artifactName&gt;/——
 /// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）。
 /// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
-/// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）。
+/// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）；
+/// 可选 inputs 声明用户输入变量，模板中以 {input:名称} 内联替换（可与相对路径文本自由组合，不与绑定占位符混用）。
 /// </summary>
 internal sealed record ConfigValidatorDescriptor(
     string PluginName,
@@ -147,8 +149,8 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         }
     }
 
-    /// <summary>按脚本根目录推导配置快照：require 全部满足才成功；解析失败返回 null。</summary>
-    public ScriptProfile? Resolve(string rootPath)
+    /// <summary>按脚本根目录与用户输入值推导配置快照：require 全部满足才成功；解析失败返回 null。</summary>
+    public ScriptProfile? Resolve(string rootPath, IReadOnlyDictionary<string, string>? inputs)
     {
         if (string.IsNullOrWhiteSpace(rootPath))
         {
@@ -166,17 +168,38 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             Logger.Warn($"专项插件解析规则读取失败（{_resolvePath}）：{ex.Message}");
             return null;
         }
-        JsonNode? resolve;
+        JsonNode? parsed;
         try
         {
-            resolve = JsonNode.Parse(resolveText);
+            parsed = JsonNode.Parse(resolveText);
         }
         catch
         {
             return null;
         }
-        var bindings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (resolve?["require"] is JsonArray requireList)
+        if (parsed is null)
+        {
+            return null;
+        }
+        JsonNode resolve = parsed;
+        List<PluginInputDeclaration> inputDeclarations = ParseInputDeclarations(resolve["inputs"], out string? declarationError);
+        if (declarationError is not null)
+        {
+            Logger.Warn($"[插件] resolve.json inputs 声明无效（{declarationError}），推导失败：{Name}");
+            return null;
+        }
+        JsonNode? paths = resolve["paths"];
+        if (paths is null)
+        {
+            return null;
+        }
+        // require.file 与 paths 四字段都支持 {input:} 内联替换；绑定占位符语义保持整体替换、不可混用。
+        string mainExeTemplate = paths["mainExe"]?.ToString() ?? "";
+        string argsTemplate = paths["args"]?.ToString() ?? "";
+        string configPathTemplate = paths["configPath"]?.ToString() ?? "";
+        string logPathTemplate = paths["logPath"]?.ToString() ?? "";
+        List<string> requireTemplates = new();
+        if (resolve["require"] is JsonArray requireList)
         {
             foreach (JsonNode? item in requireList)
             {
@@ -185,7 +208,43 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 {
                     return null;
                 }
-                string? found = FindFile(rootPath, file, item?["searchUpward"]?.GetValue<bool>() == true);
+                requireTemplates.Add(file);
+            }
+        }
+        if (!ValidateTemplatePlaceholders(requireTemplates.Concat(new[] { mainExeTemplate, argsTemplate, configPathTemplate, logPathTemplate }).ToArray(), out string? templateError, out HashSet<string> referencedInputs))
+        {
+            Logger.Warn($"[插件] resolve.json 模板占位符无效（{templateError}），推导失败：{Name}");
+            return null;
+        }
+        // 配置目录内只有一个配置文件时自动绑定该文件：输入未提供或指向的目标不存在时，以唯一候选覆盖输入值，
+        // args/configPath 等模板统一生效（配置改名后自动跟随）；零个或多个候选不猜测，交由复用编辑启动时处理。
+        IReadOnlyDictionary<string, string>? effectiveInputs = AdoptSingleConfigCandidate(
+            configPathTemplate,
+            rootPath,
+            inputDeclarations,
+            inputs,
+            referencedInputs) ?? inputs;
+        Dictionary<string, string>? inputValues = ResolveInputValues(
+            inputDeclarations,
+            effectiveInputs,
+            referencedInputs,
+            out string? inputError);
+        if (inputValues is null)
+        {
+            Logger.Warn($"[插件] 用户输入无效（{inputError}），推导失败：{Name}");
+            return null;
+        }
+        var bindings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (resolve["require"] is JsonArray requireItems)
+        {
+            foreach (JsonNode? item in requireItems)
+            {
+                string file = item?["file"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(file))
+                {
+                    return null;
+                }
+                string? found = FindFile(rootPath, SubstituteInputs(file, inputValues), item?["searchUpward"]?.GetValue<bool>() == true);
                 if (found is null)
                 {
                     return null;
@@ -197,35 +256,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 }
             }
         }
-        JsonNode? paths = resolve?["paths"];
-        if (paths is null)
-        {
-            return null;
-        }
-        // ：多占位符模板（如 `{launcher} --config {assistant}`）解析只替换第一个占位符、
-        // 其余内容静默丢弃——显式校验并整体推导失败（Warn 可观测），禁止静默截断。
-        string[] pathFields = { "mainExe", "configPath", "logPath" };
-        string argsTemplate = paths["args"]?.ToString() ?? "";
-        foreach (string field in pathFields)
-        {
-            string template = paths[field]?.ToString() ?? "";
-            if (CountPlaceholders(template) > 1)
-            {
-                Logger.Warn($"[插件] resolve.json 路径字段「{field}」包含多个占位符（仅支持单个占位符整体替换），推导失败：{Name}");
-                return null;
-            }
-        }
-        if (CountPlaceholders(argsTemplate) > 1)
-        {
-            Logger.Warn($"[插件] resolve.json 参数模板「args」包含多个占位符（仅支持单个占位符整体替换），推导失败：{Name}");
-            return null;
-        }
         var profile = new ScriptProfile
         {
-            MainExe = ResolvePath(paths["mainExe"]?.ToString(), rootPath, bindings),
-            Args = ResolveArgs(paths["args"]?.ToString(), rootPath, bindings),
-            ConfigPath = ResolvePath(paths["configPath"]?.ToString(), rootPath, bindings),
-            LogPath = ResolvePath(paths["logPath"]?.ToString(), rootPath, bindings),
+            MainExe = ResolvePath(SubstituteInputs(mainExeTemplate, inputValues), rootPath, bindings),
+            Args = ResolveArgs(SubstituteInputs(argsTemplate, inputValues), rootPath, bindings),
+            ConfigPath = ResolvePath(SubstituteInputs(configPathTemplate, inputValues), rootPath, bindings),
+            LogPath = ResolvePath(SubstituteInputs(logPathTemplate, inputValues), rootPath, bindings),
             JudgeScriptLanguage = JudgeScriptLanguage,
             JudgeScriptPath = _judgeScriptPath,
             PluginName = Name,
@@ -238,6 +274,361 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         profile.JudgeScript = ReadJudgeScript();
         return profile;
     }
+
+    /// <summary>读取当前版本 resolve.json 的用户输入声明（插件页与前端表单投影用）。</summary>
+    internal bool TryReadInputDeclarations(out IReadOnlyList<PluginInputDeclaration> declarations, out string? error)
+    {
+        declarations = Array.Empty<PluginInputDeclaration>();
+        error = null;
+        string resolveText;
+        try
+        {
+            resolveText = File.ReadAllText(_resolvePath);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        JsonNode? resolve;
+        try
+        {
+            resolve = JsonNode.Parse(resolveText);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        List<PluginInputDeclaration> parsed = ParseInputDeclarations(resolve?["inputs"], out error);
+        if (error is not null)
+        {
+            return false;
+        }
+        declarations = parsed;
+        return true;
+    }
+
+    /// <summary>复用配置候选推导：configPath 模板恰好引用一个输入（{input:名称}，且无绑定占位符）时，
+    /// 枚举模板静态目录中匹配「静态前缀 + * + 静态后缀」的文件，返回剥离静态部分后的候选输入值。
+    /// 用于复用编辑启动时声明的配置文件不存在、需绑定到现场实际配置的场景；结构不符或目录缺失返回空。</summary>
+    internal bool TryDiscoverConfigInputValues(string rootPath, out IReadOnlyList<string> values)
+    {
+        values = Array.Empty<string>();
+        if (string.IsNullOrWhiteSpace(rootPath))
+        {
+            return false;
+        }
+        JsonNode? resolve;
+        try
+        {
+            resolve = JsonNode.Parse(File.ReadAllText(_resolvePath));
+        }
+        catch
+        {
+            return false;
+        }
+        if (resolve is null)
+        {
+            return false;
+        }
+        // require 全部满足才推导候选：根目录不是目标软件时列出文件只会误导
+        if (resolve["require"] is JsonArray requireList)
+        {
+            string normalizedRoot = NormalizePathSeparators(rootPath.Trim());
+            foreach (JsonNode? item in requireList)
+            {
+                string file = item?["file"]?.ToString() ?? "";
+                if (string.IsNullOrWhiteSpace(file)
+                    || FindFile(normalizedRoot, SubstituteInputs(file, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), item?["searchUpward"]?.GetValue<bool>() == true) is null)
+                {
+                    return false;
+                }
+            }
+        }
+        string configTemplate = resolve["paths"]?["configPath"]?.ToString() ?? "";
+        if (!TryLocateConfigInputTemplate(configTemplate, out string _, out string relativeDir, out string namePrefix, out string staticTail))
+        {
+            return false;
+        }
+        string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
+        List<string> discovered = EnumerateConfigValues(searchDirectory, namePrefix, staticTail);
+        if (discovered.Count == 0)
+        {
+            return false;
+        }
+        discovered.Sort(StringComparer.OrdinalIgnoreCase);
+        values = discovered;
+        return true;
+    }
+
+    /// <summary>自动绑定唯一配置：configPath 模板恰好引用一个输入时，若当前输入值指向的目标不存在而
+    /// 静态目录中恰好有一个配置文件，则以该文件覆盖输入值（发现优先于 default）；否则原样返回 null。</summary>
+    private Dictionary<string, string>? AdoptSingleConfigCandidate(
+        string configPathTemplate,
+        string rootPath,
+        List<PluginInputDeclaration> declarations,
+        IReadOnlyDictionary<string, string>? provided,
+        HashSet<string> referencedInputs)
+    {
+        if (!TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
+        {
+            return null;
+        }
+        PluginInputDeclaration? declaration = declarations.FirstOrDefault(item => item.Name.Equals(inputName, StringComparison.OrdinalIgnoreCase));
+        if (declaration is null || !referencedInputs.Contains(declaration.Name))
+        {
+            return null;
+        }
+        string current = provided is not null && provided.TryGetValue(declaration.Name, out string? raw) && raw.Trim().Length > 0
+            ? raw.Trim()
+            : declaration.Default;
+        string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
+        if (current.Length > 0 && File.Exists(Path.Combine(searchDirectory, namePrefix + current + staticTail)))
+        {
+            return null;
+        }
+        List<string> candidates = EnumerateConfigValues(searchDirectory, namePrefix, staticTail);
+        if (candidates.Count != 1)
+        {
+            // 零个或多个候选不猜测：多个候选由复用编辑启动时列出，交由用户显式选择
+            return null;
+        }
+        var adopted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (provided is not null)
+        {
+            foreach (KeyValuePair<string, string> item in provided)
+            {
+                adopted[item.Key] = item.Value;
+            }
+        }
+        adopted[declaration.Name] = candidates[0];
+        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{declaration.Name}」= {candidates[0]}：{Name}");
+        return adopted;
+    }
+
+    /// <summary>定位 configPath 模板中的唯一输入引用：返回输入名与其前后的静态目录/前缀/后缀；结构不符返回 false。</summary>
+    private static bool TryLocateConfigInputTemplate(string configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail)
+    {
+        inputName = "";
+        relativeDir = "";
+        namePrefix = "";
+        staticTail = "";
+        var matches = InputPlaceholderRegex.Matches(configTemplate);
+        if (matches.Count != 1 || BindingPlaceholderRegex.IsMatch(configTemplate))
+        {
+            return false;
+        }
+        inputName = matches[0].Groups[1].Value;
+        string head = configTemplate[..matches[0].Index].Replace('/', Path.DirectorySeparatorChar);
+        staticTail = configTemplate[(matches[0].Index + matches[0].Length)..];
+        int lastSeparator = head.LastIndexOf(Path.DirectorySeparatorChar);
+        relativeDir = lastSeparator >= 0 ? head[..(lastSeparator + 1)] : "";
+        namePrefix = lastSeparator >= 0 ? head[(lastSeparator + 1)..] : head;
+        return !namePrefix.Contains('{') && !staticTail.Contains('{');
+    }
+
+    /// <summary>枚举静态目录中匹配「静态前缀 + * + 静态后缀」的文件，剥离静态部分后的候选输入值。</summary>
+    private static List<string> EnumerateConfigValues(string searchDirectory, string namePrefix, string staticTail)
+    {
+        var values = new List<string>();
+        if (!Directory.Exists(searchDirectory))
+        {
+            return values;
+        }
+        try
+        {
+            foreach (string file in Directory.GetFiles(searchDirectory, namePrefix + "*" + staticTail))
+            {
+                string fileName = Path.GetFileName(file);
+                if (fileName.Length > namePrefix.Length + staticTail.Length)
+                {
+                    values.Add(fileName[namePrefix.Length..^staticTail.Length]);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[插件] 配置候选枚举失败（{searchDirectory}）：{ex.Message}");
+        }
+        return values;
+    }
+
+    /// <summary>解析 resolve.json 的 inputs 声明；可选段，声明无效时返回错误原因。</summary>
+    private static List<PluginInputDeclaration> ParseInputDeclarations(JsonNode? node, out string? error)
+    {
+        error = null;
+        var list = new List<PluginInputDeclaration>();
+        if (node is not JsonArray items)
+        {
+            return list;
+        }
+        foreach (JsonNode? item in items)
+        {
+            string name = item?["name"]?.ToString()?.Trim() ?? "";
+            if (!Regex.IsMatch(name, @"^[A-Za-z][A-Za-z0-9_]*$"))
+            {
+                error = $"inputs 声明的 name「{name}」无效（须为字母开头的字母/数字/下划线）";
+                return list;
+            }
+            string pattern = item?["pattern"]?.ToString() ?? "";
+            if (pattern.Length > 0)
+            {
+                try
+                {
+                    _ = new Regex(pattern);
+                }
+                catch (ArgumentException ex)
+                {
+                    error = $"inputs「{name}」的 pattern 不是有效的正则表达式：{ex.Message}";
+                    return list;
+                }
+            }
+            list.Add(new PluginInputDeclaration
+            {
+                Name = name,
+                Label = item?["label"]?.ToString()?.Trim() ?? "",
+                Description = item?["description"]?.ToString()?.Trim() ?? "",
+                Default = item?["default"]?.ToString() ?? "",
+                Required = item?["required"]?.GetValue<bool>() ?? false,
+                Pattern = pattern,
+            });
+        }
+        if (list.GroupBy(declaration => declaration.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+        {
+            error = "inputs 存在重复的 name";
+            return new List<PluginInputDeclaration>();
+        }
+        return list;
+    }
+
+    /// <summary>模板占位符组合校验：绑定占位符（{var}/{rel:var}）每项最多 1 个且不可与输入占位符混用；
+    /// 输入占位符引用必须已声明（声明清单由调用方传入前先解析）。返回全部被引用的输入名。</summary>
+    private static bool ValidateTemplatePlaceholders(string[] templates, out string? error, out HashSet<string> referencedInputs)
+    {
+        error = null;
+        referencedInputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string template in templates)
+        {
+            int bindingCount = BindingPlaceholderRegex.Matches(template).Count;
+            var inputRefs = InputPlaceholderRegex.Matches(template).Select(match => match.Groups[1].Value).ToList();
+            if (bindingCount > 1 || (bindingCount > 0 && inputRefs.Count > 0))
+            {
+                error = "绑定占位符（{var}/{rel:var}）每项最多 1 个，且不可与输入占位符（{input:名称}）混用";
+                return false;
+            }
+            foreach (string name in inputRefs)
+            {
+                referencedInputs.Add(name);
+            }
+        }
+        return true;
+    }
+
+    /// <summary>按声明解析用户输入值：仅处理被模板引用或用户显式提供的声明；缺失回退 default，必填缺失或校验失败返回错误。</summary>
+    private static Dictionary<string, string>? ResolveInputValues(
+        List<PluginInputDeclaration> declarations,
+        IReadOnlyDictionary<string, string>? provided,
+        HashSet<string> referencedInputs,
+        out string? error)
+    {
+        error = null;
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // 用户提供的键做大小写不敏感归一，避免实例存储与声明的键大小写差异导致取值落空。
+        var providedNormalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (provided is not null)
+        {
+            foreach (KeyValuePair<string, string> item in provided)
+            {
+                providedNormalized[item.Key] = item.Value;
+            }
+        }
+        foreach (PluginInputDeclaration declaration in declarations)
+        {
+            bool providedValue = providedNormalized.TryGetValue(declaration.Name, out string? raw);
+            if (!referencedInputs.Contains(declaration.Name) && !providedValue)
+            {
+                continue;
+            }
+            string value = providedValue ? raw!.Trim() : "";
+            if (value.Length == 0)
+            {
+                value = declaration.Default.Trim();
+            }
+            if (value.Length == 0)
+            {
+                if (declaration.Required && referencedInputs.Contains(declaration.Name))
+                {
+                    error = $"缺少必填输入「{(declaration.Label.Length > 0 ? declaration.Label : declaration.Name)}」";
+                    return null;
+                }
+                values[declaration.Name] = "";
+                continue;
+            }
+            string? invalidReason = ValidateInputValue(declaration, value);
+            if (invalidReason is not null)
+            {
+                error = $"输入「{(declaration.Label.Length > 0 ? declaration.Label : declaration.Name)}」{invalidReason}";
+                return null;
+            }
+            values[declaration.Name] = value;
+        }
+        foreach (string name in referencedInputs)
+        {
+            if (!values.ContainsKey(name))
+            {
+                error = $"输入「{name}」未在 resolve.json 的 inputs 中声明";
+                return null;
+            }
+        }
+        return values;
+    }
+
+    /// <summary>用户输入值基线净化：禁止路径分隔符、冒号、相对路径段、通配符与花括号，防止拼接越界或注入占位符；pattern 为插件自定义的整串正则。</summary>
+    private static string? ValidateInputValue(PluginInputDeclaration declaration, string value)
+    {
+        if (value.Any(char.IsControl))
+        {
+            return "包含控制字符";
+        }
+        if (value.Contains('/') || value.Contains('\\'))
+        {
+            return "不允许包含路径分隔符";
+        }
+        if (value.Contains(':'))
+        {
+            return "不允许包含冒号";
+        }
+        if (value.Contains(".."))
+        {
+            return "不允许包含相对路径段";
+        }
+        if (value.Any(c => "*?\"<>|{}".Contains(c)))
+        {
+            return "包含非法字符";
+        }
+        if (declaration.Pattern.Length > 0 && !Regex.IsMatch(value, declaration.Pattern))
+        {
+            return "不符合插件声明的格式要求";
+        }
+        return null;
+    }
+
+    /// <summary>内联替换模板中的 {input:名称} 占位符（仅替换已解析的输入值）。</summary>
+    private static string SubstituteInputs(string template, Dictionary<string, string> values)
+    {
+        if (template.Length == 0 || values.Count == 0 || !template.Contains("{input:", StringComparison.Ordinal))
+        {
+            return template;
+        }
+        return InputPlaceholderRegex.Replace(
+            template,
+            match => values.TryGetValue(match.Groups[1].Value, out string? value) ? value : match.Value);
+    }
+
+    private static readonly Regex InputPlaceholderRegex = new(@"\{input:([A-Za-z][A-Za-z0-9_]*)\}", RegexOptions.Compiled);
+
+    private static readonly Regex BindingPlaceholderRegex = new(@"\{(rel:)?[A-Za-z][A-Za-z0-9_]*\}", RegexOptions.Compiled);
 
     private string ReadJudgeScript()
     {
@@ -362,31 +753,5 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         string from = fromDir.EndsWith("\\", StringComparison.Ordinal) ? fromDir : fromDir + "\\";
         string rel = Uri.UnescapeDataString(new Uri(from).MakeRelativeUri(new Uri(toFile)).ToString()).Replace('/', '\\');
         return rel.StartsWith(".\\", StringComparison.Ordinal) || rel.StartsWith("..\\", StringComparison.Ordinal) ? rel : ".\\" + rel;
-    }
-
-    /// <summary>统计模板中的占位符数量（{var} / {rel:var} 形式； 多占位符显式校验用）。</summary>
-    private static int CountPlaceholders(string template)
-    {
-        int count = 0;
-        int index = 0;
-        while (index < template.Length)
-        {
-            int start = template.IndexOf('{', index);
-            if (start < 0)
-            {
-                break;
-            }
-            int end = template.IndexOf('}', start);
-            if (end < 0)
-            {
-                break;
-            }
-            if (end > start + 1)
-            {
-                count++;
-            }
-            index = end + 1;
-        }
-        return count;
     }
 }

@@ -96,7 +96,7 @@ public class ExtensibilityCharacterizationTests
         File.WriteAllText(Path.Combine(pluginDir, "data", "judge.js"), "// judge");
 
         DataSpecializedPlugin plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
-        ScriptProfile profile = Assert.IsType<ScriptProfile>(plugin.Resolve(scriptRoot));
+        ScriptProfile profile = Assert.IsType<ScriptProfile>(plugin.Resolve(scriptRoot, null));
 
         Assert.Contains("probe", plugin.CapabilityKeys);
         Assert.Contains(PluginCapabilityKeys.Emulator, plugin.CapabilityKeys);

@@ -100,6 +100,9 @@ export async function waitForService(timeoutMs = 30000) {
   while (Date.now() < deadline) {
     try {
       const response = await fetch(baseUrl + "api/status");
+      // 必须消费响应体：不消费会让 keep-alive 连接挂起未读完的数据，
+      // Node 24 的 undici 在该连接关闭时会触发内部断言崩溃，宿主侧写响应也会因连接中断失败。
+      await response.arrayBuffer();
       if (response.ok) return;
     } catch {
       // 启动窗口内端口尚未监听。

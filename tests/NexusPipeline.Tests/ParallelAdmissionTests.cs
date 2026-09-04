@@ -513,6 +513,8 @@ public class ParallelAdmissionTests
     {
         public bool SupportsEmulator(string pluginName) => false;
 
-        public ScriptProfile? ResolveProfile(string pluginName, string rootPath) => null;
+        public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null) => null;
+
+        public IReadOnlyList<string> GetMissingConfigCandidates(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs) => Array.Empty<string>();
     }
 }

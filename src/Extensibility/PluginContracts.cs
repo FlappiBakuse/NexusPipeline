@@ -7,10 +7,27 @@ internal interface IPluginCapability
 {
 }
 
+/// <summary>resolve.json 声明的用户输入变量：脚本实例按声明提供值，推导时以 {"{"}input:名称{"}"} 内联替换。</summary>
+internal sealed class PluginInputDeclaration
+{
+    public string Name { get; init; } = "";
+
+    public string Label { get; init; } = "";
+
+    public string Description { get; init; } = "";
+
+    public string Default { get; init; } = "";
+
+    public bool Required { get; init; }
+
+    public string Pattern { get; init; } = "";
+}
+
 /// <summary>数据化或 C# 插件提供的脚本 profile 推导能力。</summary>
 internal interface IProfileResolver : IPluginCapability
 {
-    ScriptProfile? Resolve(string rootPath);
+    /// <summary>inputs 为脚本实例保存的用户输入值（key 为声明 name）；null 表示未提供。</summary>
+    ScriptProfile? Resolve(string rootPath, IReadOnlyDictionary<string, string>? inputs);
 }
 
 internal static class PluginCapabilityKeys

@@ -652,7 +652,9 @@ public sealed class ScriptPersistenceTests
 
         public bool SupportsEmulator(string pluginName) => false;
 
-        public ScriptProfile? ResolveProfile(string pluginName, string rootPath) => Profile;
+        public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null) => Profile;
+
+        public IReadOnlyList<string> GetMissingConfigCandidates(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs) => Array.Empty<string>();
     }
 
     private sealed class TestPluginAvailability : IPluginAvailability

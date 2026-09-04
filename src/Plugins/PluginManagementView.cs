@@ -38,6 +38,9 @@ internal sealed record PluginManagementView(
 
     public bool HasReadme { get; init; }
 
+    /// <summary>数据化专项插件 resolve.json 声明的用户输入变量（前端专项弹窗表单据此渲染）。</summary>
+    public IReadOnlyList<Extensibility.PluginInputDeclaration> Inputs { get; init; } = Array.Empty<Extensibility.PluginInputDeclaration>();
+
     public static PluginManagementView Create(
         PluginSummary summary,
         PluginManager manager,
@@ -80,6 +83,7 @@ internal sealed record PluginManagementView(
             UpdatedAt = summary.UpdatedAt,
             Changelog = summary.Changelog,
             HasReadme = summary.HasReadme,
+            Inputs = summary.Inputs,
         };
     }
 }

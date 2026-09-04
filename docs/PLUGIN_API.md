@@ -220,6 +220,10 @@ settings.sections               shell.nav
 
 ```json
 {
+  "inputs": [
+    { "name": "config", "label": "BAAH 配置文件名", "description": "BAAH_CONFIGS 下的配置文件名（含 .json）",
+      "default": "config.json", "required": true, "pattern": "^[A-Za-z0-9_\\-]+\\.json$" }
+  ],
   "require": [
     { "var": "launcher", "file": "March7th Launcher.exe" },
     { "var": "assistant", "file": "March7th Assistant.exe", "searchUpward": true }
@@ -233,10 +237,12 @@ settings.sections               shell.nav
 }
 ```
 
+- **inputs（可选）**：用户输入变量声明，脚本实例保存用户填写值，供 paths/require 模板内联引用。`name` 必须是字母开头的字母/数字/下划线且不重复；`label`/`description` 为前端表单展示；`default` 为缺省值；`required` 表示缺失（且无 default 可回退）时推导失败；`pattern` 为可选的整串正则校验。仅声明未被模板引用的输入不参与推导。宿主对所有输入值做基线净化（禁止路径分隔符、冒号、相对路径段、通配符、花括号与控制字符），防止路径拼接越界。
 - **require**：全部满足才推导成功（替代 DLL 时代的 `File.Exists` 校验）。`file` 相对脚本根目录；`var` 将匹配到的绝对路径绑定为变量；`searchUpward: true` 时根目录找不到则逐级向上搜索（最多 4 层，March7th 管理端/执行端分离场景）。
 - **paths**：`mainExe` / `args` / `configPath` / `logPath` 四项。
-  - 占位符 `{var}` = 绑定文件绝对路径；`{rel:var}` = 相对脚本根目录的相对路径（运行时启动目标语义，同目录结果带 `.\` 前缀）。**占位符仅整体替换**：整项命中即替换为该路径，不支持路径文本内嵌入拼接（如 `C:\dir\{var}` 的模板会丢弃前缀只保留 `{var}` 解析值）；需要组合路径时请用无占位符的相对拼接。
-  - 无占位符：路径字段按相对脚本根目录拼接；`args` 原样返回（参数文本）。
+  - 占位符 `{var}` = 绑定文件绝对路径；`{rel:var}` = 相对脚本根目录的相对路径（运行时启动目标语义，同目录结果带 `.\` 前缀）。**占位符仅整体替换**：整项命中即替换为该路径，不支持路径文本内嵌入拼接（如 `C:\dir\{var}` 的模板会丢弃前缀只保留 `{var}` 解析值）；需要组合路径时请用无占位符的相对拼接。绑定占位符每项最多 1 个，且不可与 `{input:名称}` 混用。
+  - 占位符 `{input:名称}` = 用户输入值**内联替换**，可与相对路径文本自由组合（如 `BAAH_CONFIGS/{input:config}`、`--config {input:config}`）；引用未声明的输入、必填输入缺失且无 default、或值未通过 pattern 校验时整体推导失败。
+  - 无占位符：路径字段按相对脚本根目录拼接；`args` 原样返回（参数文本）。`logPath` 允许为空：为空表示专项脚本无专用日志文件，判定日志改由进程标准输出提供。
   - `mainExe` 推导后必须存在（require 覆盖或文件真实存在），否则推导失败（前端保存被拒）。
 
 ## 判断脚本
@@ -290,8 +296,9 @@ settings.sections               shell.nav
 - `file`：相对 config 的路径（目录型 ConfigPath 相对路径；文件型 = 文件名，须与 `replaceConfigs` 项一致）。
 - array 型：按 `path` 定位 JSON 数组（DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符` 链），元素取 `keyField` 查 `initial`，命中则设 `enabledField` 为对应布尔；**未覆盖元素保持当前值**（脚本更新新增的任务不被误改）。优先使用稳定 ID 选择实例，避免实例数组重排导致还原错误。
 - map 型：`path` 为 JSON 对象键，遍历 `initial` 逐键设布尔；**未覆盖键保持当前值**。
+- boolArray 型：`path` 定位布尔数组（如 BAAH 平行数组 `TASK_ORDER_GROUP.ALL_PIPELINES[0].TASK_ONOFF`），`initial` 为布尔数组，按下标逐位还原；**超出 initial 的尾部元素保持当前值**；目标数组短于 `initial` 时视为应用失败（该文件不入快照）。
 - 仅作用于插队文件（`replaceConfigs` 清单内）；还原描述缺失/解析失败/应用失败时，该文件按「无还原描述」处理（不写入快照）。
-- 现有专项实现参考：`maaend/data/judge.js`（array 型，`instances[id=...].tasks`）、`bettergi/data/judge.js`（map 型，`TaskEnabledList`）。
+- 现有专项实现参考：`maaend/data/judge.js`（array 型，`instances[id=...].tasks`）、`bettergi/data/judge.js`（map 型，`TaskEnabledList`）、`baah/data/judge.js`（boolArray 型，平行数组 `TASK_ONOFF`）。
 
 插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。发布后应保持两者稳定；变更身份时按新插件重新配置用户绑定和插件设置。
 
