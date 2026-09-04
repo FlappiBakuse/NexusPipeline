@@ -79,8 +79,6 @@ public class RunRecord
 
     public string Status { get; set; } = "running";
 
-    public string FinalStatus { get; set; } = "";
-
     public string ResultDetail { get; set; } = "";
 
     /// <summary>相对于当天 history 目录的运行目录，例如「张三\\每日脚本-14-58-21」。</summary>
@@ -98,7 +96,7 @@ public class RunRecord
 
     public List<RunAttempt> AttemptDetails { get; set; } = new();
 
-    /// <summary>运行落盘前由插件生成的展示快照；不影响 Status、FinalStatus 或执行流程。</summary>
+    /// <summary>运行落盘前由插件生成的展示快照；不影响 Status 或执行流程。</summary>
     public List<PluginHistoryRecord> PluginHistory { get; set; } = new();
 
     private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()

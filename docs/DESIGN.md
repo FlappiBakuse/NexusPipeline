@@ -142,7 +142,7 @@ sequenceDiagram
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：`LogStallTimeoutMinutes=-1` 时跳过日志无更新超时检查，其余有效值在启动后无任何日志条目、日志超过该时长无更新或未找到日志文件时判定失败；`RunBudget` 集中计算 `TotalTimeoutMinutes` 的 elapsed/remaining，按**整个运行（含全部重试与前置/后置脚本）**计时，`TotalTimeoutMinutes=-1` 时不设总时长上限，其余有效值到时判定失败且不再重试；判断脚本执行仍保持独立 30 秒上限。
 8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功或部分完成时按 `ForceCloseGame` 设置决定是否关闭游戏。
-9. **重试**：失败且未达 `MaxAttempts` → 进程确认退出后继续复用当前活动 `config`，在下一轮开始前应用判断脚本返回的 `replaceConfigs`；不创建 `retry-store`，每尝试仍独立 LogMonitor 与 SessionJudge。
+9. **重试**：失败且未达 `MaxAttempts` → 进程确认退出后继续复用当前活动 `config`，在下一轮开始前应用判断脚本返回的 `replaceConfigs`；每次尝试仍独立 LogMonitor 与 SessionJudge。
 10. **运行收尾（finally）**：`ConfigRunSession` 固定执行自动更新配置收尾同步（按文件差异写入 store，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）。同步先于插队还原与配置交换还原，确保 store 看到脚本最终态，同时避免恢复动作覆盖用户快照。
 
 ### 3.2 队列执行链路
@@ -198,7 +198,7 @@ flowchart TD
 
 正式 CLI 的协议边界如下：
 
-- 命令采用 `status`、`script`、`user`、`queue`、`run`、`history`、`settings`、`plugin`、`update`、`maintenance` 和 `system-action` 等 noun/subcommand；运行控制统一使用 `run script`、`run queue` 和 `run cancel`。
+- 命令采用 `status`、`script`、`user`、`queue`、`run`、`history`、`settings`、`plugin`、`update` 和 `system-action` 等 noun/subcommand；运行控制统一使用 `run script`、`run queue` 和 `run cancel`。
 - 复杂 payload 统一使用 `--file <json 文件>` 或 `--file -`（标准输入），避免把领域对象拆成大量命令行开关。
 - `user global-settings` 管理用户的 General、Notification、Advanced BindingOverrides；`plugin store` 管理官方插件仓库事务；`plugin user-settings` 管理通用插件用户设置贡献，命令均通过 Control API 复用宿主服务。
 - `--json` 输出稳定 envelope；标准输出只承载协议数据，连接诊断和运行进度转到标准错误。退出码按参数/校验、找不到或歧义、资源冲突、服务不可用、禁止、执行失败、取消/超时和内部错误分层。
@@ -222,7 +222,7 @@ MCP 的启动条件和运行语义如下：
 - `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
-MCP 只保留面向 Agent 的核心子集（19 个工具）：只读工具覆盖状态、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启、更新应用和遗留数据清理等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+MCP 只保留面向 Agent 的核心子集（19 个工具）：只读工具覆盖状态、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
 v0.10.6 对 MCP 控制面采用以下行为契约：
 
@@ -268,7 +268,7 @@ data/{脚本Id}/{UserId}/
     └── store-txn/      增量快照事务（manifest、stage、rollback、commit）
 ```
 
-`store/` 是空闲态唯一的完整持久快照；运行期间由于外部 `configPath` 可能位于不同磁盘，允许同时存在 `store/` 与实际被脚本使用的 `configPath`。增量事务只在 `work/store-txn/` 暂存本轮新增/变更文件及被替换/删除文件的 rollback 副本，成功提交后清理，不创建完整 `retry-store`、`store-previous` 或 `store-tmp`。旧版 `store-archive` 仅在启动发现当前 `store` 缺失时尝试恢复，旧版残留在一次成功的新协议操作后清理。v0.13.0 及更早版本散落的顶层事务目录与 dot 后缀命名（store.previous、store.meta.json、store.tmp）由启动时的一次性迁移（`ConfigWorkDirMaintenance`，幂等）归并进 `work/` 并改为 kebab-case 规范名，保证旧版本崩溃现场仍按原语义恢复；无用户交互的脚本级兜底目录同样收敛为 `data/{脚本Id}/work/{script,swap-backup}`。
+`store/` 是空闲态唯一的完整持久快照；运行期间由于外部 `configPath` 可能位于不同磁盘，允许同时存在 `store/` 与实际被脚本使用的 `configPath`。增量事务只在 `work/store-txn/` 暂存本轮新增/变更文件及被替换/删除文件的 rollback 副本，成功提交后清理。启动维护只清理当前协议产生的空闲工作目录和运行时 staging；遇到当前协议之外的目录、字段或事务现场时保留现场并记录告警，不猜测其含义。升级前请备份整个 NexusPipeline 数据目录，尤其是配置、历史、用户数据和自定义插件。
 
 通用判断脚本属于宿主配置资产，路径为 `config/judge-scripts/<scriptId>.js|py`。源码通过临时文件原子替换；脚本实例删除、语言切换和未引用资产会进入 `orphaned/` 隔离目录。专项判断脚本保留在插件目录，由 `PluginType + RootPath` 解析当前 profile。
 
@@ -282,7 +282,7 @@ history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/
 └── HH-mm-ss-2-s1.jpg
 ```
 
-`NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 用于展示和当前用户查找。配置交换会话使用当前全局用户绑定的 ID 目录，磁盘 `.session` 的 `UserName` 字段记录会话所属用户。
+`NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 用于展示和当前用户查找。配置交换会话使用当前全局用户绑定的 ID 目录，磁盘 `.session` 的 `UserId` 字段记录会话所属用户。
 
 ### 4.2 运行前（PrepareForRun）与运行后（RestoreAfterRun）
 
@@ -301,7 +301,7 @@ flowchart LR
     end
 ```
 
-1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照（v0.12.8：绑定阶段保持现场，复用语义延迟建立）→ `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置存在则执行一次性重绑定：旧 store 移入 `work/store-rebind/`，新位置成功物化为唯一 store 后清理隔离区；新位置缺失则阻断本次运行并保留旧快照。
+1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照 → `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置存在则执行一次性重绑定：旧 store 移入 `work/store-rebind/`，新位置成功物化为唯一 store 后清理隔离区；新位置缺失则阻断本次运行并保留旧快照。
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式——`fresh`（全新配置：config 存在则移入 original，脚本在空位置生成新配置，done=复制入库+original 移回，cancel=清生成物+original 移回）或 `reuse`（复用配置：全程无文件动作，done=复制入库，cancel=仅清标记）。运行与编辑经 `ScriptConfigGate` 互斥。
 
@@ -311,12 +311,12 @@ flowchart LR
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后应用**，避免进程仍持有配置文件时出现文件占用或半写窗口。**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
-- 本次尝试失败后，进程确认退出即可直接复用当前活动 config；`replaceConfigs` 在下一次尝试开始前继续应用，不创建完整 retry-store。
+- 本次尝试失败后，进程确认退出即可直接复用当前活动 config；`replaceConfigs` 在下一次尝试开始前继续应用。
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
 
-- **启动恢复（RecoverInterrupted）**：扫描全部残留 `.session` 标记与 swap-backup，自动还原；原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。
+- **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
 - 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 original 完整还原现场。
 - **Missing 形态还原**：`DoRestore` 在 original 为空且原形态为 Missing（运行/编辑前 config 位置不存在）时，删除会话期间在 config 位置产生的文件/目录，恢复为“不存在”；删除失败则保留标记交由自愈/后台重试。
@@ -418,7 +418,7 @@ flowchart LR
 ```
 
 - **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/部分完成/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
-- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/部分完成（...）/失败（...）/已跳过（...）`，按 record.Status 非 FinalStatus）。
+- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/部分完成（...）/失败（...）/已跳过（...）`，按 `record.Status`）。
 - 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择最终 Attempt 的脚本级通知附图，单个 Attempt 的截图池最多 8 张且 FIFO 淘汰；队列级汇总不使用运行截图。
 - 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
 - Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书、钉钉和 Slack 使用各自的最小应用级上传凭据，Generic 通过模板图片占位符接入。SMTP 截图作为 JPEG MIME 附件发送。
@@ -426,12 +426,12 @@ flowchart LR
 ### 7.2 历史与日志落盘
 
 - 每次「脚本实例 × 全局用户绑定」运行结束保存到 `history/YYYY-MM-DD/<用户昵称>/<本轮运行任务>/`：
-  - `<HH-mm-ss>.json`：**纯运行状态**（PascalCase，包含 `HistoryDirectory`、Attempts/FinalStatus、各 Attempt 的 `LogFile` 与截图元数据，不含日志正文和图片字节）；同一用户同一秒的运行目录追加 `-2`、`-3` 等后缀；
+  - `<HH-mm-ss>.json`：**纯运行状态**（PascalCase，包含 `HistoryDirectory`、`Status`、Attempts、各 Attempt 的 `LogFile` 与截图元数据，不含日志正文和图片字节）；同一用户同一秒的运行目录追加 `-2`、`-3` 等后缀；
   - `<HH-mm-ss>-<尝试号>.log`：**每个 Attempt 一个独立日志文件**，保存脚本日志全文（20MB 截断；空日志写「（未配置日志路径或未监控到脚本日志）」兜底）；
   - `<HH-mm-ss>-<尝试号>-s<序号>.jpg`：按该 Attempt 当前 FIFO 保留顺序编号，序号范围为 1–8。
 - 配置了 `LogPath` 时，业务日志以日志文件监控结果为单一来源；未配置 `LogPath` 时，业务日志来自脚本 stdout/stderr。实时显示和历史详情沿用相同的等级解析。
 - 每个 Attempt 最终保留的截图写入同一运行目录，JSON 保存元数据；通知发送完成后释放运行期内存截图池。
-- `FinalStatus`：新记录与 `Status` 保持一致：`success / partial / failed / cancelled / skipped`；其中 `partial` 只能来自判断脚本显式结果，不由重试次数、退出码或日志关键字派生。旧历史中的 `partial` 保持原样兼容读取。
+- `Status` 是一次运行唯一的最终状态：`success / partial / failed / cancelled / skipped`；其中 `partial` 只能来自判断脚本显式结果，不由重试次数、退出码或日志关键字派生。
 - `PluginHistory`：运行落盘前由已注册插件生成的纯文本展示快照；单贡献 16 KiB、单次运行总量 64 KiB，插件异常不会影响运行结果，卸载插件后历史仍保留快照。
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
@@ -499,7 +499,7 @@ managed-code 插件可以通过 Plugin API v1.4 注册用户列表徽章、通�
 2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/、store-rebind/ 的中断现场）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认新快照提交前保留。
 3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-rebind`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
 4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。
-5. **一次性迁移模式**：改变既有布局时提供幂等的一次性启动迁移（旧路径存在且新路径不存在才移动，冲突保留现场并告警），在启动恢复扫描之前执行，保证旧版本崩溃现场按原语义恢复；迁移完成后旧路径消失，不保留双路径读取。
+5. **持久化格式变更**：改变既有 API、字段或目录布局时，先明确当前协议和升级前备份要求；运行时只处理当前协议，未知现场保留并告警，版本发布说明提供用户可执行的备份提示。
 6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是 v0.12.1 的既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为 v0.13.2 布局。
 
 ## 8. 已知行为与边界
@@ -644,10 +644,10 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、fresh 生成物/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的委托 |
 | `ConfigStoreDiff` | src/Services/Configuration/ConfigStoreDiff.cs | 扫描外部 config 与权威 store，按文件内容生成 added/changed/deleted/preserved 差异计划；避免按完整快照重复复制 |
 | `ConfigStoreTransaction` / `ConfigStoreTransactionRecovery` | src/Services/Configuration/ConfigStoreTransaction.cs | manifest/stage/rollback/commit 增量事务、generation 元数据提交与崩溃回滚；无法确认事务状态时隔离现场并阻断后续写入 |
-| `ConfigStoreMetadata` | src/Services/ConfigStoreMetadata.cs | store 归属、定位/形态指纹与 generation 管理；兼容旧 archive/previous/temp 残留的安全恢复和一次性清理 |
+| `ConfigStoreMetadata` | src/Services/ConfigStoreMetadata.cs | store 归属、定位/形态指纹与 generation 管理；严格读取当前元数据协议 |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位与清理（持久层在用户目录顶层，会话事务目录收敛于 work/） |
-| `ConfigWorkDirMaintenance` | src/Services/ConfigWorkDirMaintenance.cs | work/ 布局维护：v0.13.0 旧布局一次性幂等迁移、空闲 work/ 清扫、runtime/staging 启动清扫 |
+| `ConfigWorkDirMaintenance` | src/Services/ConfigWorkDirMaintenance.cs | 当前 work/ 空闲目录、runtime 和 staging 启动清扫 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
 | `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |

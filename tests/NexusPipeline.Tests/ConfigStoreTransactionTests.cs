@@ -60,9 +60,6 @@ public sealed class ConfigStoreTransactionTests
             Assert.Equal("{\"value\":\"changed-3\"}", File.ReadAllText(Path.Combine(store, "f-00003.json")));
             Assert.False(File.Exists(Path.Combine(store, "f-00004.json")));
             Assert.False(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
-            Assert.False(Directory.Exists(ConfigSwapPaths.StorePreviousDir(scriptId, userKey)));
-            Assert.False(Directory.Exists(ConfigSwapPaths.StoreTempDir(scriptId, userKey)));
-            Assert.False(Directory.Exists(ConfigSwapPaths.RetryStoreDir(scriptId, userKey)));
             Assert.Equal(2, ConfigStoreMetadata.Load(scriptId, userKey)!.Generation);
         }
         finally
@@ -229,12 +226,9 @@ public sealed class ConfigStoreTransactionTests
     private static ConfigSessionMark Mark(string scriptId, string userKey, string config) => new()
     {
         ScriptId = scriptId,
-        UserName = userKey,
         UserId = userKey,
         ConfigPath = config,
-        OriginalKind = "dir",
         ConfigKind = "dir",
-        Phase = "run",
         SessionPhase = "run",
     };
 

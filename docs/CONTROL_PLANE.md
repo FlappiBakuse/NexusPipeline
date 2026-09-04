@@ -1,6 +1,6 @@
 # 控制面能力现状（Control Plane）
 
-本文件记录可管理能力在 Web、CLI 和 MCP 三个控制面的入口现状，供开发与排障参考。MCP 只保留面向 Agent 的核心子集；删除、密钥、插件安装/开关、商店、服务重启、更新应用和遗留数据清理等高风险或低频运维操作由本地 CLI 与管理页面承担。
+本文件记录可管理能力在 Web、CLI 和 MCP 三个控制面的入口现状，供开发与排障参考。MCP 只保留面向 Agent 的核心子集；删除、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作由本地 CLI 与管理页面承担。
 
 ## 能力现状
 
@@ -26,7 +26,6 @@
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
-| 遗留数据清理 | 维护 API | `maintenance prune` | 由 CLI 承担 |
 
 ## 行为护栏
 

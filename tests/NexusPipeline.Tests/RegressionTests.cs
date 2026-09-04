@@ -222,7 +222,6 @@ public sealed class RegressionTests
             new InvalidOperationException("协调器异常"));
 
         Assert.Equal("failed", record.Status);
-        Assert.Equal("failed", record.FinalStatus);
         Assert.Equal("script", record.ScriptInstanceId);
         Assert.Equal("user", record.UserName);
         Assert.Contains("协调器异常", record.ResultDetail);

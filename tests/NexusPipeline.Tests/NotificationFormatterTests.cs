@@ -14,7 +14,6 @@ public sealed class NotificationFormatterTests
         {
             ScriptName = script.Name,
             Status = "partial",
-            FinalStatus = "partial",
             ResultDetail = "部分任务未完成",
         };
         var queue = new DispatchQueue { Name = "示例队列" };

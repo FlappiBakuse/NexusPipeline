@@ -41,7 +41,8 @@ const stagingRoot = path.join(updateDir, "staging", updateVersion);
 
 function writeTask(mode, stagedDir = stagingRoot) {
   fs.mkdirSync(updateDir, { recursive: true });
-  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: updateVersion, StagedDir: stagedDir }), "utf8");
+  const phase = mode === "defer" ? "Deferred" : mode === "apply" ? "ApplyRequested" : "Committed";
+  fs.writeFileSync(taskFile, JSON.stringify({ Mode: mode, Version: updateVersion, StagedDir: stagedDir, Phase: phase }), "utf8");
 }
 
 /** 从发布构建构造「新版本」staging：exe + wwwroot（release 干净源，无旧安装标记）+ plugins（验证更新器不接管该目录）。 */
@@ -65,7 +66,7 @@ function prepareLegacyInstall() {
     "utf8",
   );
   fs.mkdirSync(path.join(runtimeDir, "history", "2099-01-01"), { recursive: true });
-  fs.writeFileSync(path.join(runtimeDir, "history", "2099-01-01", "00-00-00.json"), "{\"FinalStatus\":\"success\"}", "utf8");
+  fs.writeFileSync(path.join(runtimeDir, "history", "2099-01-01", "00-00-00.json"), "{\"Status\":\"success\"}", "utf8");
   fs.writeFileSync(path.join(runtimeDir, "wwwroot", "legacy-install-marker.txt"), "legacy-install-marker", "utf8");
   fs.mkdirSync(path.join(runtimeDir, "plugins", "user-custom"), { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, "plugins", "user-custom", "note.txt"), "keep-me", "utf8");

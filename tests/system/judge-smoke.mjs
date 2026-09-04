@@ -63,7 +63,7 @@ async function runJudge(language, code, label) {
     assert.equal(await waitNoRunning(), true);
     const record = await waitForHistory(script.id);
     assert.ok(record);
-    assert.equal((record.finalStatus || record.FinalStatus), "success");
+    assert.equal(record.status, "success");
   } finally {
     await deleteScript(script.id);
   }

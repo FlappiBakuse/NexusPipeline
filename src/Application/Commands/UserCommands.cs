@@ -903,7 +903,7 @@ internal static class UserCommands
         }
         if (UserConfigManager.EditSessions.Values.Any(session =>
             session.Script.Id == scriptId
-            && string.Equals(session.Mark.UserName, userId, StringComparison.OrdinalIgnoreCase)))
+            && string.Equals(session.Mark.UserId, userId, StringComparison.OrdinalIgnoreCase)))
         {
             return "用户绑定正在编辑配置，无法修改";
         }

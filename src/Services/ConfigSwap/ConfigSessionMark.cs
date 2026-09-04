@@ -20,21 +20,12 @@ internal sealed class ConfigSessionMark
 {
     public string ScriptId { get; set; } = "";
 
-    public string UserName { get; set; } = "";
-
-    /// <summary>用户 ID。UserName 保留为历史字段名；新标记同时写入，恢复时优先使用 UserId。</summary>
     public string UserId { get; set; } = "";
 
     public string ConfigPath { get; set; } = "";
 
-    public string OriginalKind { get; set; } = "missing";
-
-    public string Phase { get; set; } = "run";
-
-    /// <summary>显式会话阶段，供恢复诊断与未来版本读取；与旧 Phase 字段保持双向兼容。</summary>
     public string SessionPhase { get; set; } = "";
 
-    /// <summary>配置位置在会话开始时的形态；与 OriginalKind 同义，便于恢复元数据自描述。</summary>
     public string ConfigKind { get; set; } = "";
 
     public string WorkingDirectory { get; set; } = "";
@@ -49,34 +40,51 @@ internal sealed class ConfigSessionMark
 
     public string PluginVersion { get; set; } = "";
 
-    /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置，无文件动作）。
-    /// 旧版本标记无此字段，反序列化后保持默认 normal，收尾与恢复行为与旧版一致。</summary>
+    /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置，无文件动作）。</summary>
     public string EditMode { get; set; } = "normal";
 
-    /// <summary>全新配置编辑会话且原配置形态为 Missing：缓存区为空时 config 位置的脚本生成物仍需还原清理。
-    /// （对应旧版 GeneratedTemplate 模板会话的恢复语义。）</summary>
+    /// <summary>全新配置编辑会话且原配置形态为 Missing：缓存区为空时 config 位置的脚本生成物仍需还原清理。</summary>
     public bool NeedsFreshRestore =>
         string.Equals(EditMode, "fresh", StringComparison.OrdinalIgnoreCase)
-        && PathKindUtil.Parse(OriginalKind) == PathKind.Missing;
+        && PathKindUtil.Parse(ConfigKind) == PathKind.Missing;
 
     public DateTime StartedAt { get; set; } = DateTime.Now;
 
     private static readonly JsonSerializerOptions Options = new()
     {
-        // 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；PropertyNameCaseInsensitive
-        // 兼容读取旧版 camelCase 标记（旧版本崩溃现场仍可完整恢复，无需迁移）。
-        PropertyNameCaseInsensitive = true,
+        // 会话标记属于当前磁盘协议；旧版本字段和 camelCase 现场不再参与恢复。
+        PropertyNameCaseInsensitive = false,
         WriteIndented = true,
     };
 
-    public static string MarkFile(string scriptId, string userName)
+    private static readonly string[] RequiredProperties =
+    [
+        nameof(ScriptId),
+        nameof(UserId),
+        nameof(ConfigPath),
+        nameof(SessionPhase),
+        nameof(ConfigKind),
+        nameof(WorkingDirectory),
+        nameof(LaunchExe),
+        nameof(ProcessIdentity),
+        nameof(ProfileHash),
+        nameof(PluginName),
+        nameof(PluginVersion),
+        nameof(EditMode),
+        nameof(StartedAt),
+    ];
+
+    private static readonly HashSet<string> AllowedProperties =
+        RequiredProperties.Append(nameof(NeedsFreshRestore)).ToHashSet(StringComparer.Ordinal);
+
+    public static string MarkFile(string scriptId, string userId)
     {
-        return Path.Combine(AppPaths.DataDir, scriptId, userName, ".session");
+        return Path.Combine(AppPaths.DataDir, scriptId, userId, ".session");
     }
 
-    public static string BackupMarkFile(string scriptId, string userName)
+    public static string BackupMarkFile(string scriptId, string userId)
     {
-        return MarkFile(scriptId, userName) + ".bak";
+        return MarkFile(scriptId, userId) + ".bak";
     }
 
     internal static ConfigSessionRuntimeMetadata FromScript(
@@ -102,22 +110,18 @@ internal sealed class ConfigSessionMark
 
     public void Write()
     {
-        UserId = string.IsNullOrWhiteSpace(UserId) ? UserName : UserId;
-        SessionPhase = string.IsNullOrWhiteSpace(SessionPhase) ? Phase : SessionPhase;
-        Phase = string.IsNullOrWhiteSpace(Phase) ? SessionPhase : Phase;
-        ConfigKind = string.IsNullOrWhiteSpace(ConfigKind) ? OriginalKind : ConfigKind;
-        OriginalKind = string.IsNullOrWhiteSpace(OriginalKind) ? ConfigKind : OriginalKind;
-        Directory.CreateDirectory(Path.GetDirectoryName(MarkFile(ScriptId, UserName))!);
+        ValidateCurrent();
+        Directory.CreateDirectory(Path.GetDirectoryName(MarkFile(ScriptId, UserId))!);
         string json = JsonSerializer.Serialize(this, Options);
         // 先写冗余现场，再替换主标记；任一写入中断都至少保留一份可解析元数据。
-        JsonUtil.WriteAtomic(BackupMarkFile(ScriptId, UserName), json);
-        JsonUtil.WriteAtomic(MarkFile(ScriptId, UserName), json);
+        JsonUtil.WriteAtomic(BackupMarkFile(ScriptId, UserId), json);
+        JsonUtil.WriteAtomic(MarkFile(ScriptId, UserId), json);
     }
 
-    public static ConfigSessionMark? TryRead(string scriptId, string userName)
+    public static ConfigSessionMark? TryRead(string scriptId, string userId)
     {
-        string primary = MarkFile(scriptId, userName);
-        string backup = BackupMarkFile(scriptId, userName);
+        string primary = MarkFile(scriptId, userId);
+        string backup = BackupMarkFile(scriptId, userId);
         if (!File.Exists(primary) && !File.Exists(backup))
         {
             return null;
@@ -131,16 +135,19 @@ internal sealed class ConfigSessionMark
             }
             try
             {
-                ConfigSessionMark? mark = JsonSerializer.Deserialize<ConfigSessionMark>(File.ReadAllText(file), Options);
-                if (mark is null)
+                string json = File.ReadAllText(file);
+                using JsonDocument document = JsonDocument.Parse(json);
+                if (!IsCurrentDocument(document))
                 {
+                    Logger.Warn($"[警告] 配置会话标记不是当前格式，保留现场：{file}");
                     continue;
                 }
-                mark.UserId = string.IsNullOrWhiteSpace(mark.UserId) ? mark.UserName : mark.UserId;
-                mark.Phase = string.IsNullOrWhiteSpace(mark.Phase) ? mark.SessionPhase : mark.Phase;
-                mark.SessionPhase = string.IsNullOrWhiteSpace(mark.SessionPhase) ? mark.Phase : mark.SessionPhase;
-                mark.OriginalKind = string.IsNullOrWhiteSpace(mark.OriginalKind) ? mark.ConfigKind : mark.OriginalKind;
-                mark.ConfigKind = string.IsNullOrWhiteSpace(mark.ConfigKind) ? mark.OriginalKind : mark.ConfigKind;
+                ConfigSessionMark? mark = JsonSerializer.Deserialize<ConfigSessionMark>(json, Options);
+                if (mark is null || !mark.IsValidCurrent())
+                {
+                    Logger.Warn($"[警告] 配置会话标记字段无效，保留现场：{file}");
+                    continue;
+                }
                 return mark;
             }
             catch (Exception ex)
@@ -149,6 +156,39 @@ internal sealed class ConfigSessionMark
             }
         }
         return null;
+    }
+
+    private bool IsValidCurrent() =>
+        !string.IsNullOrWhiteSpace(ScriptId)
+        && !string.IsNullOrWhiteSpace(UserId)
+        && !string.IsNullOrWhiteSpace(ConfigPath)
+        && SessionPhase is "run" or "edit"
+        && (ConfigKind is "missing" or "file" or "dir")
+        && (EditMode is "normal" or "fresh" or "reuse");
+
+    private void ValidateCurrent()
+    {
+        if (!IsValidCurrent())
+        {
+            throw new InvalidDataException("配置会话标记字段无效");
+        }
+    }
+
+    private static bool IsCurrentDocument(JsonDocument document)
+    {
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+        var properties = document.RootElement.EnumerateObject()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (RequiredProperties.Any(property => !properties.Contains(property)))
+        {
+            return false;
+        }
+        // 只接受当前协议的完整字段集合；任何旧别名或未知字段都保留现场并交由人工处理。
+        return properties.All(AllowedProperties.Contains);
     }
 
     public static void Clear(string scriptId, string userName)

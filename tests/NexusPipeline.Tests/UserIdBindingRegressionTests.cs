@@ -49,15 +49,15 @@ public sealed class UserIdRecoveryTests
     }
 
     [Fact]
-    public void Recovery_IgnoresUnboundUsernameResidue()
+    public void Recovery_IgnoresUnboundUserIdResidue()
     {
         RuntimeContext context = RuntimeContext.Instance;
         // v0.10.0（B2）：恢复数据源由组合根装配；测试直接构造等价适配器。
         ConfigSwapSession.ConfigureRecovery(context.EntityState.FindScript, context.EntityState.SnapshotUsers);
         string scriptId = "regression-recovery-" + Guid.NewGuid().ToString("N");
-        string legacyName = "LegacyName-" + Guid.NewGuid().ToString("N");
+        string unboundUserId = "unbound-user-" + Guid.NewGuid().ToString("N");
         string configPath = Path.Combine(Path.GetTempPath(), "np-regression-recovery-" + Guid.NewGuid().ToString("N"), "config.json");
-        string cache = ConfigSwapPaths.CacheDir(scriptId, legacyName);
+        string cache = ConfigSwapPaths.CacheDir(scriptId, unboundUserId);
         List<NexusUser> previousUsers = new();
 
         context.EntityState.Mutate(state =>
@@ -74,15 +74,16 @@ public sealed class UserIdRecoveryTests
             new ConfigSessionMark
             {
                 ScriptId = scriptId,
-                UserName = legacyName,
+                UserId = unboundUserId,
                 ConfigPath = configPath,
-                OriginalKind = "file",
-                Phase = "run",
+                ConfigKind = "file",
+                SessionPhase = "run",
+                EditMode = "normal",
             }.Write();
 
             UserConfigManager.RecoverInterrupted();
 
-            Assert.True(File.Exists(ConfigSessionMark.MarkFile(scriptId, legacyName)));
+            Assert.True(File.Exists(ConfigSessionMark.MarkFile(scriptId, unboundUserId)));
             Assert.True(File.Exists(Path.Combine(cache, "state.json")));
             Assert.False(File.Exists(configPath));
         }

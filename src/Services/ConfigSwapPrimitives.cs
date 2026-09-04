@@ -319,7 +319,7 @@ internal static class ConfigSwapPrimitives
     /// 同时支持专项单文件与目录型配置首次会话。</summary>
     public static PathKind RestoreKind(ConfigSessionMark mark)
     {
-        PathKind original = PathKindUtil.Parse(mark.OriginalKind);
+        PathKind original = PathKindUtil.Parse(mark.ConfigKind);
         if (original == PathKind.Dir)
         {
             return PathKind.Dir;

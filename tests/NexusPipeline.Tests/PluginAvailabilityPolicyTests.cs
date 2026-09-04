@@ -301,7 +301,7 @@ public sealed class PluginAvailabilityPolicyTests
                 .Where(record => record.StartTime.Date == date.Date
                     && record.ScriptInstanceId == scriptInstanceId
                     && record.UserId.Length > 0
-                    && (record.FinalStatus.Length > 0 ? record.FinalStatus : record.Status) == "success")
+                    && record.Status == "success")
                 .GroupBy(record => record.UserId, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
 

@@ -15,9 +15,6 @@ internal static class AppPaths
     /// <summary>用户拥有的通用判断脚本源码目录；文件名由脚本实例 ID 和语言确定。</summary>
     public static readonly string JudgeScriptsDir = Path.Combine(ConfigDir, "judge-scripts");
 
-    /// <summary>脚本持久化模型迁移现场与幂等标记目录。</summary>
-    public static readonly string ScriptMigrationsDir = Path.Combine(ConfigDir, "migrations", "v0.13.0");
-
     public static readonly string QueuesPath = Path.Combine(ConfigDir, "queues.json");
 
     public static readonly string UsersPath = Path.Combine(ConfigDir, "users.json");

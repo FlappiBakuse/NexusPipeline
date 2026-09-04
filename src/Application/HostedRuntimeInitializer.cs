@@ -19,7 +19,6 @@ internal static class HostedRuntimeInitializer
 
             // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底）。
             ConfigSwapSession.ConfigureRecovery(ctx.EntityState.FindScript, ctx.EntityState.SnapshotUsers);
-            ConfigWorkDirMaintenance.MigrateLegacyWorkDirs();
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
             UserConfigManager.RecoverInterrupted(ctx.EntityState.SnapshotUsers());
             TaskRegistration.SyncWithSettings(ctx.Settings);

@@ -87,9 +87,6 @@ internal class RuntimeContext
         collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
-        collection.AddSingleton<UserDataPruner>(provider => new UserDataPruner(
-            _entityState.SnapshotUsers,
-            provider.GetRequiredService<ExecutionStateStore>()));
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,

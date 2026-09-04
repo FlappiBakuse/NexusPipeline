@@ -48,7 +48,6 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
           endTime: `${requestDate}T08:00:01`,
           mode: "manual",
           status: "skipped",
-          finalStatus: "skipped",
           attempts: 0,
           maxAttempts: 1,
           resultDetail: "达到每日成功运行次数上限",

@@ -74,7 +74,6 @@ internal static class ConfigStoreTransaction
         if (!plan.HasChanges)
         {
             ConfigStoreMetadata.Save(scriptId, userKey, ConfigStoreMetadata.FromMark(mark, previousMetadata));
-            ConfigStoreMetadata.CleanupLegacyArtifacts(scriptId, userKey);
             return new ConfigStoreTransactionResult(0, 0, 0, plan.Preserved.Count);
         }
 
@@ -165,7 +164,6 @@ internal static class ConfigStoreTransaction
             commitWritten = true;
             ConfigStoreMetadata.Save(scriptId, userKey, nextMetadata);
             ConfigSwapPrimitives.TryDeleteDir(transactionDir);
-            ConfigStoreMetadata.CleanupLegacyArtifacts(scriptId, userKey);
             return new ConfigStoreTransactionResult(
                 plan.Added.Count,
                 plan.Changed.Count,
@@ -420,7 +418,6 @@ internal static class ConfigStoreTransactionRecovery
             }
             ConfigStoreMetadata.Save(scriptId, userKey, manifest.NextMetadata);
             ConfigSwapPrimitives.TryDeleteDir(transactionDir);
-            ConfigStoreMetadata.CleanupLegacyArtifacts(scriptId, userKey);
             Logger.Info($"[配置事务] 已完成中断后的提交收尾：脚本 {scriptId} / 用户 {userKey}");
             return;
         }

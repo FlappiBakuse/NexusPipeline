@@ -100,7 +100,7 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>恢复增量快照事务，并兼容旧版 store-previous/store-tmp 残留；旧残留仅在新快照成功后清理。</summary>
+    /// <summary>恢复当前格式的增量快照事务。</summary>
     private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
         IEnumerable<NexusUser> source = users ?? _snapshotUsers();
@@ -153,27 +153,6 @@ internal sealed class ConfigSwapRecovery
                 {
                     ConfigStoreMetadata.RecoverRebind(scriptId, userKey);
                     ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
-                    ConfigStoreMetadata.TryRestoreLegacyArchive(scriptId, userKey);
-                    string temp = ConfigSwapPaths.StoreTempDir(scriptId, userKey);
-                    string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
-                    string previous = ConfigSwapPaths.StorePreviousDir(scriptId, userKey);
-                    if (!Directory.Exists(store) && Directory.Exists(previous))
-                    {
-                        Directory.Move(previous, store);
-                        Logger.Warn($"[恢复] 自动更新配置事务中断，已恢复用户快照：{store}");
-                    }
-                    if (Directory.Exists(temp))
-                    {
-                        if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
-                        {
-                            ConfigSwapPrimitives.TryDeleteDir(temp);
-                            Logger.Warn($"[恢复] 已丢弃未提交的旧版全量快照暂存：{temp}");
-                        }
-                        else
-                        {
-                            Logger.Warn($"[恢复] 检测到旧版全量快照暂存，暂不接管：{temp}");
-                        }
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -466,7 +445,7 @@ internal sealed class ConfigSwapRecovery
     }
 
     /// <summary>执行还原：清 config（当前形态），original → config 还原原配置，随后清除标记。
-    /// original 为空（首次会话）时：OriginalKind 为 Missing（运行前 config 位置不存在）则清理会话期间在
+    /// original 为空（首次会话）时：ConfigKind 为 Missing（运行前 config 位置不存在）则清理会话期间在
     /// config 位置产生的文件/目录，还原为编辑前状态——运行生效的 store 快照为会话产物，必须删除，
     /// 否则残留污染 config 位置与后续快照；其余情况（如 reuse 编辑会话）现场未动，仅清标记。</summary>
     public void DoRestore(string scriptId, string userName, ConfigSessionMark mark)
@@ -474,7 +453,7 @@ internal sealed class ConfigSwapRecovery
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
         if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
         {
-            if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Missing)
+            if (PathKindUtil.Parse(mark.ConfigKind) == PathKind.Missing)
             {
                 PathKind current = PathKindUtil.KindOf(mark.ConfigPath);
                 if (current != PathKind.Missing)

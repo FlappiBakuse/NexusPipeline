@@ -104,31 +104,31 @@ public sealed class ScriptPersistenceTests
     }
 
     [Fact]
-    public void LegacyScriptsFile_MigratesInlineJudgeAndSpecializedSnapshotIdempotently()
+    public void UnsupportedScriptsFile_IsPreservedAndInlineJudgeIsIgnored()
     {
         string root = MakeTempDir();
         try
         {
             var storage = new ScriptStorage(root);
-            string legacyUser = "legacy-user";
-            string legacyStore = Path.Combine(root, "data", "legacy-special", legacyUser, "store");
-            Directory.CreateDirectory(legacyStore);
-            File.WriteAllText(Path.Combine(legacyStore, "config.json"), "{\"legacy\":true}");
+            string unsupportedUser = "unsupported-user";
+            string unsupportedStore = Path.Combine(root, "data", "unsupported-special", unsupportedUser, "store");
+            Directory.CreateDirectory(unsupportedStore);
+            File.WriteAllText(Path.Combine(unsupportedStore, "config.json"), "{\"unsupported\":true}");
             Directory.CreateDirectory(Path.GetDirectoryName(storage.ScriptsPath)!);
-            var legacy = new JsonArray
+            var unsupported = new JsonArray
             {
                 new JsonObject
                 {
-                    ["Id"] = "legacy-generic",
-                    ["Name"] = "旧通用",
+                    ["Id"] = "unsupported-generic",
+                    ["Name"] = "不支持的通用记录",
                     ["JudgeScriptEnabled"] = true,
                     ["JudgeScriptLanguage"] = "python",
                     ["JudgeScript"] = "print('{\"status\":\"success\"}')",
                 },
                 new JsonObject
                 {
-                    ["Id"] = "legacy-special",
-                    ["Name"] = "旧专项",
+                    ["Id"] = "unsupported-special",
+                    ["Name"] = "不支持的专项记录",
                     ["PluginType"] = "fixture-plugin",
                     ["RootPath"] = root,
                     ["MainExe"] = "stale.exe",
@@ -137,30 +137,24 @@ public sealed class ScriptPersistenceTests
                     ["JudgeScript"] = "stale plugin judge",
                 },
             };
-            File.WriteAllText(storage.ScriptsPath, legacy.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            string originalJson = unsupported.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(storage.ScriptsPath, originalJson);
 
             List<ScriptInstance> first = storage.LoadScripts();
             Assert.Equal(2, first.Count);
-            Assert.Equal("print('{\"status\":\"success\"}')", first[0].JudgeScript);
+            Assert.Empty(first[0].JudgeScript);
             Assert.Equal("python", first[0].JudgeScriptLanguage);
             Assert.Empty(first[1].MainExe);
             Assert.Empty(first[1].JudgeScript);
-            JsonArray migratedRecords = JsonNode.Parse(File.ReadAllText(storage.ScriptsPath))!.AsArray();
-            JsonObject migratedGeneric = Assert.IsType<JsonObject>(migratedRecords[0]);
-            Assert.Null(migratedGeneric.FirstOrDefault(pair =>
-                string.Equals(pair.Key, "JudgeScript", StringComparison.OrdinalIgnoreCase)).Value);
-            Assert.True(File.Exists(storage.JudgeScripts.GetPath("legacy-generic", "python")));
-            Assert.NotEmpty(Directory.GetFiles(Path.Combine(root, "config", "migrations", "v0.13.0"), "scripts.json", SearchOption.AllDirectories));
-            ConfigStoreMetadata? legacyMetadata = JsonSerializer.Deserialize<ConfigStoreMetadata>(
-                File.ReadAllText(Path.Combine(root, "data", "legacy-special", legacyUser, "store-meta.json")),
-                JsonOpts.Default);
-            Assert.NotNull(legacyMetadata);
-            Assert.Equal(ConfigStoreMetadata.HashLocator("stale.json"), legacyMetadata!.ConfigLocatorHash);
+            Assert.Equal(originalJson, File.ReadAllText(storage.ScriptsPath));
+            Assert.False(File.Exists(storage.JudgeScripts.GetPath("unsupported-generic", "python")));
+            Assert.True(File.Exists(Path.Combine(unsupportedStore, "config.json")));
+            Assert.False(File.Exists(Path.Combine(root, "data", "unsupported-special", unsupportedUser, "store-meta.json")));
 
             List<ScriptInstance> second = storage.LoadScripts();
             Assert.Equal(first[0].JudgeScript, second[0].JudgeScript);
             Assert.Equal(first[1].PluginType, second[1].PluginType);
-            Assert.Single(Directory.GetFiles(Path.Combine(root, "config", "migrations", "v0.13.0"), "scripts.json", SearchOption.AllDirectories));
+            Assert.Equal(originalJson, File.ReadAllText(storage.ScriptsPath));
         }
         finally
         {
@@ -296,20 +290,20 @@ public sealed class ScriptPersistenceTests
     }
 
     [Fact]
-    public void LegacyMigration_PreservesConflictingJudgeAsset()
+    public void UnsupportedInlineJudge_IsIgnoredAndCurrentAssetRemains()
     {
         string root = MakeTempDir();
         try
         {
             var storage = new ScriptStorage(root);
-            storage.JudgeScripts.SaveAtomic("legacy-conflict", "javascript", "asset source");
+            storage.JudgeScripts.SaveAtomic("unsupported-conflict", "javascript", "asset source");
             Directory.CreateDirectory(Path.GetDirectoryName(storage.ScriptsPath)!);
             var legacy = new JsonArray
             {
                 new JsonObject
                 {
-                    ["Id"] = "legacy-conflict",
-                    ["Name"] = "冲突迁移",
+                    ["Id"] = "unsupported-conflict",
+                    ["Name"] = "不支持的内嵌判断脚本",
                     ["JudgeScriptEnabled"] = true,
                     ["JudgeScriptLanguage"] = "javascript",
                     ["JudgeScript"] = "inline source",
@@ -319,12 +313,9 @@ public sealed class ScriptPersistenceTests
 
             List<ScriptInstance> loaded = storage.LoadScripts();
 
-            Assert.Equal("inline source", Assert.Single(loaded).JudgeScript);
-            Assert.Equal("inline source", File.ReadAllText(storage.JudgeScripts.GetPath("legacy-conflict", "javascript")));
-            Assert.NotEmpty(Directory.GetFiles(
-                Path.Combine(root, "config", "judge-scripts", "orphaned"),
-                "legacy-conflict.js",
-                SearchOption.AllDirectories));
+            Assert.Equal("asset source", Assert.Single(loaded).JudgeScript);
+            Assert.Equal("asset source", File.ReadAllText(storage.JudgeScripts.GetPath("unsupported-conflict", "javascript")));
+            Assert.False(Directory.Exists(Path.Combine(root, "config", "judge-scripts", "orphaned")));
         }
         finally
         {
@@ -364,8 +355,6 @@ public sealed class ScriptPersistenceTests
             Assert.Contains("不存在", changedPathError, StringComparison.Ordinal);
             Assert.Equal("{\"state\":\"old\"}", File.ReadAllText(Path.Combine(
                 ConfigSwapPaths.StoreDir(scriptId, userId), "old.json")));
-            Assert.False(Directory.Exists(ConfigSwapPaths.StoreArchiveDir(scriptId, userId)));
-
             File.WriteAllText(newConfig, "{\"state\":\"new\"}");
             bool rebound = UserConfigManager.PrepareForRun(
                 scriptId,
@@ -529,11 +518,11 @@ public sealed class ScriptPersistenceTests
             var mark = new ConfigSessionMark
             {
                 ScriptId = scriptId,
-                UserName = userId,
                 UserId = userId,
                 ConfigPath = Path.Combine(Path.GetTempPath(), "fixture-config.json"),
-                OriginalKind = "file",
-                Phase = "run",
+                ConfigKind = "file",
+                SessionPhase = "run",
+                EditMode = "normal",
                 LaunchExe = "fixture.exe",
                 PluginName = "fixture-plugin",
                 PluginVersion = "1.2.3",

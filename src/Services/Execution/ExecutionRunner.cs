@@ -212,10 +212,6 @@ internal sealed class ExecutionRunner
                     {
                         throw new InvalidOperationException($"脚本「{displayName}」未生成运行记录");
                     }
-                    if (string.IsNullOrWhiteSpace(record.FinalStatus))
-                    {
-                        record.FinalStatus = record.Status == "success" ? "success" : record.Status;
-                    }
                     publishedRecord = PersistRecord(
                         exec,
                         record,
@@ -223,7 +219,7 @@ internal sealed class ExecutionRunner
                         session?.ScreenshotStore.SnapshotForHistory() ?? Array.Empty<RunScreenshot>(),
                         displayName);
                     if (successfulRunsByUser is not null
-                        && string.Equals(publishedRecord.FinalStatus, "success", StringComparison.OrdinalIgnoreCase))
+                        && string.Equals(publishedRecord.Status, "success", StringComparison.OrdinalIgnoreCase))
                     {
                         successfulRunsByUser[runUser.UserId] = successfulRunsByUser.GetValueOrDefault(runUser.UserId) + 1;
                     }
@@ -341,7 +337,6 @@ internal sealed class ExecutionRunner
             Attempts = 0,
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "skipped",
-            FinalStatus = "skipped",
             ResultDetail = detail,
         };
     }
@@ -398,7 +393,6 @@ internal sealed class ExecutionRunner
             Attempts = 1,
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "failed",
-            FinalStatus = "failed",
             ResultDetail = reason,
             AttemptDetails = new List<RunAttempt>
             {
@@ -447,7 +441,6 @@ internal sealed class ExecutionRunner
                         StartTime = DateTime.Now,
                         EndTime = DateTime.Now,
                         Status = "failed",
-                        FinalStatus = "failed",
                         ResultDetail = "脚本实例不存在或已被删除",
                     };
                     RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
@@ -494,7 +487,6 @@ internal sealed class ExecutionRunner
                         StartTime = DateTime.Now,
                         EndTime = DateTime.Now,
                         Status = "failed",
-                        FinalStatus = "failed",
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
                     };
                     RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
@@ -616,7 +608,6 @@ internal sealed class ExecutionRunner
             Attempts = 1,
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "failed",
-            FinalStatus = "failed",
             ResultDetail = detail,
             AttemptDetails = new List<RunAttempt>
             {

@@ -13,15 +13,13 @@ internal static class UpdatePhase
     public const string BackupReady = "BackupReady";
     public const string SwapInProgress = "SwapInProgress";
     public const string SwapReady = "SwapReady";
-    // 兼容读取旧版本 journal；v0.10.8 不再有插件保留阶段。
-    public const string PreserveComplete = "PreserveComplete";
     public const string Committed = "Committed";
     public const string RollbackPending = "RollbackPending";
     public const string RollbackConfirmed = "RollbackConfirmed";
 }
 
 /// <summary>
-/// 更新事务 journal。旧版只有 Mode/Version/StagedDir 时按兼容规则推导 Phase；新事务每个关键阶段原子写入。
+/// 更新事务 journal。当前格式每个关键阶段原子写入；缺少 Phase 的旧现场保持原样并停止自动接管。
 /// </summary>
 internal sealed record UpdateTask(
     string Mode,
@@ -40,20 +38,22 @@ internal sealed record UpdateTask(
                 return null;
             }
             string text = File.ReadAllText(file).Replace("\uFEFF", "");
-            UpdateTask? task = JsonSerializer.Deserialize<UpdateTask>(text, JsonOpts.Default);
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.EnumerateObject().Any(property => property.Name == nameof(Phase)))
+            {
+                throw new InvalidDataException("更新 journal 缺少当前格式 Phase");
+            }
+            UpdateTask? task = JsonSerializer.Deserialize<UpdateTask>(text, CurrentOptions);
             if (task is null)
             {
                 return null;
             }
-            string phase = string.IsNullOrWhiteSpace(task.Phase)
-                ? task.Mode switch
-                {
-                    "apply" => UpdatePhase.ApplyRequested,
-                    "completed" => UpdatePhase.Committed,
-                    _ => UpdatePhase.Deferred,
-                }
-                : task.Phase;
-            return task with { Phase = phase };
+            if (string.IsNullOrWhiteSpace(task.Phase))
+            {
+                throw new InvalidDataException("更新 journal 的 Phase 为空");
+            }
+            return task;
         }
         catch (Exception ex)
         {
@@ -61,6 +61,11 @@ internal sealed record UpdateTask(
             return null;
         }
     }
+
+    private static readonly JsonSerializerOptions CurrentOptions = new()
+    {
+        PropertyNameCaseInsensitive = false,
+    };
 
     public void Write(string? path = null)
     {
@@ -408,9 +413,6 @@ internal static class UpdateApply
         string installDir = AppPaths.AppRoot;
         RestoreFromBackup(Path.Combine(backup, "nexus-pipeline.exe"), Path.Combine(installDir, "nexus-pipeline.exe"));
         RestoreFromBackup(Path.Combine(backup, "wwwroot"), Path.Combine(installDir, "wwwroot"));
-        // 兼容 v0.10.7 更新 journal：旧 updater 会把 plugins 放入 backup，
-        // v0.10.8 自身的 backup 不包含该目录，因此仅在旧现场实际存在时恢复。
-        RestoreFromBackup(Path.Combine(backup, "plugins"), Path.Combine(installDir, "plugins"));
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
         Audit.Log(Audit.System, "更新回滚完成", "旧版本文件已从 immutable backup 还原");

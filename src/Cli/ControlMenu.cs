@@ -21,8 +21,7 @@ internal static class ControlMenu
                 "6. 设置与通知",
                 "7. 插件",
                 "8. 更新",
-                "9. 维护",
-                "10. 查看状态",
+                "9. 查看状态",
                 "0. 返回",
                 "==============================",
             });
@@ -58,9 +57,6 @@ internal static class ControlMenu
                     ShowUpdate();
                     break;
                 case "9":
-                    ShowMaintenance();
-                    break;
-                case "10":
                     RunCommand("status");
                     PauseOrReturn();
                     break;
@@ -434,40 +430,6 @@ internal static class ControlMenu
             else
             {
                 RunCommand("update", sub);
-            }
-            if (!PauseOrReturn())
-            {
-                return;
-            }
-        }
-    }
-
-    private static void ShowMaintenance()
-    {
-        while (true)
-        {
-            Ui.ClearScreen();
-            RunCommand("maintenance", "list");
-            Console.WriteLine();
-            Console.WriteLine("1. 清理遗留用户目录");
-            Console.WriteLine("0. 返回");
-            string? choice = Ui.Prompt("请选择：");
-            if (choice is null || choice.Trim() == "0")
-            {
-                return;
-            }
-            if (choice.Trim() == "1")
-            {
-                string? scriptId = Ui.Prompt("脚本 ID：");
-                string? userKey = Ui.Prompt("遗留用户键：");
-                if (!string.IsNullOrWhiteSpace(scriptId) && !string.IsNullOrWhiteSpace(userKey))
-                {
-                    RunCommand("maintenance", "prune", "--script-id", scriptId.Trim(), "--user-key", userKey.Trim());
-                }
-            }
-            else
-            {
-                InvalidChoice();
             }
             if (!PauseOrReturn())
             {

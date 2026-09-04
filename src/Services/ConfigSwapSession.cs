@@ -82,7 +82,7 @@ internal static class ConfigSwapSession
         if (newFiles.Count > 0 || (Directory.Exists(backupDir) && Directory.EnumerateFileSystemEntries(backupDir).Any()))
         {
             Directory.CreateDirectory(backupDir);
-            // .meta 写盘改 PascalCase（与「磁盘 JSON = PascalCase」约定一致）；读取侧兼容旧版 camelCase。
+            // .meta 使用当前磁盘协议的 PascalCase 字段。
             JsonUtil.WriteAtomic(metaPath, JsonSerializer.Serialize(new { ConfigPath = configPath, NewFiles = newFiles }));
         }
         return null;
@@ -98,24 +98,28 @@ internal static class ConfigSwapSession
         }
         try
         {
-            JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-            // 兼容旧版 camelCase 键（旧版本崩溃现场）。
-            JsonArray? files = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
-            if (files is not null)
+            JsonObject node = JsonNode.Parse(File.ReadAllText(metaPath)) as JsonObject
+                ?? throw new InvalidDataException(".meta 根节点必须是对象");
+            string configPath = node["ConfigPath"]?.ToString() ?? "";
+            JsonArray files = node["NewFiles"] as JsonArray
+                ?? throw new InvalidDataException(".meta 缺少当前格式 NewFiles");
+            if (string.IsNullOrWhiteSpace(configPath))
             {
-                foreach (JsonNode? item in files)
+                throw new InvalidDataException(".meta 缺少当前格式 ConfigPath");
+            }
+            foreach (JsonNode? item in files)
+            {
+                string? text = item?.ToString();
+                if (!string.IsNullOrWhiteSpace(text))
                 {
-                    string? text = item?.ToString();
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        list.Add(text);
-                    }
+                    list.Add(text);
                 }
             }
         }
         catch (Exception ex)
         {
-            Logger.Warn($".meta 替换清单解析失败（{metaPath}），新增文件可能无法清理：{ex.Message}");
+            Logger.Error($"[错误] .meta 替换清单不是当前格式（{metaPath}）：{ex.Message}");
+            throw new InvalidDataException($"配置替换备份清单不是当前格式：{metaPath}", ex);
         }
         return list;
     }
@@ -135,19 +139,21 @@ internal static class ConfigSwapSession
         {
             try
             {
-                JsonNode? node = JsonNode.Parse(File.ReadAllText(metaPath));
-                // 兼容旧版 camelCase 键（旧版本崩溃现场）。
-                configPath = node?["ConfigPath"]?.ToString() ?? node?["configPath"]?.ToString();
-                JsonArray? metaFiles = node?["NewFiles"] as JsonArray ?? node?["newFiles"] as JsonArray;
-                if (metaFiles is not null)
+                JsonObject node = JsonNode.Parse(File.ReadAllText(metaPath)) as JsonObject
+                    ?? throw new InvalidDataException(".meta 根节点必须是对象");
+                configPath = node["ConfigPath"]?.ToString();
+                JsonArray metaFiles = node["NewFiles"] as JsonArray
+                    ?? throw new InvalidDataException(".meta 缺少当前格式 NewFiles");
+                if (string.IsNullOrWhiteSpace(configPath))
                 {
-                    foreach (JsonNode? item in metaFiles)
+                    throw new InvalidDataException(".meta 缺少当前格式 ConfigPath");
+                }
+                foreach (JsonNode? item in metaFiles)
+                {
+                    string? text = item?.ToString();
+                    if (!string.IsNullOrWhiteSpace(text))
                     {
-                        string? text = item?.ToString();
-                        if (!string.IsNullOrWhiteSpace(text))
-                        {
-                            newFiles.Add(text);
-                        }
+                        newFiles.Add(text);
                     }
                 }
             }
@@ -160,8 +166,8 @@ internal static class ConfigSwapSession
         }
         if (string.IsNullOrWhiteSpace(configPath))
         {
-            Logger.Error($"[错误] 配置替换备份清单缺少 configPath（{metaPath}）。");
-            QuarantineInvalidBackup(backupDir, "缺少 configPath");
+            Logger.Error($"[错误] 配置替换备份清单缺少当前格式 ConfigPath（{metaPath}）。");
+            QuarantineInvalidBackup(backupDir, "缺少当前格式 ConfigPath");
             return false;
         }
         bool restored = true;
@@ -260,7 +266,7 @@ internal static class ConfigSwapSession
             {
                 // 1. 会话有效性：同步仅当运行交换会话仍处于活动状态（防 15s 首次检测与收尾还原的时序异常）。
                 ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
-                if (mark is null || !string.Equals(mark.Phase, "run", StringComparison.OrdinalIgnoreCase))
+                if (mark is null || !string.Equals(mark.SessionPhase, "run", StringComparison.OrdinalIgnoreCase))
                 {
                     Logger.Warn($"[配置同步] 跳过：脚本「{scriptId}」用户「{userName}」无进行中的运行会话（{SyncPhaseText(firstCheck)}）。");
                     return;
@@ -299,8 +305,7 @@ internal static class ConfigSwapSession
     }
 
     /// <summary>
-    /// 失败重试前复用当前活动配置。进程确认退出后不再复制 retry-store，也不重新搬运 original；
-    /// original 继续保存运行前现场，当前 config 直接作为下一轮输入。
+    /// 失败重试前复用当前活动配置；original 继续保存运行前现场，当前 config 直接作为下一轮输入。
     /// </summary>
     public static string? PrepareForRetry(string scriptId, string userName, string configPath)
     {
@@ -310,7 +315,7 @@ internal static class ConfigSwapSession
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
-                if (mark is null || !string.Equals(mark.Phase, "run", StringComparison.OrdinalIgnoreCase))
+                if (mark is null || !string.Equals(mark.SessionPhase, "run", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new IOException("未找到有效的运行配置交换会话");
                 }
@@ -597,177 +602,6 @@ internal static class ConfigSwapSession
         }
     }
 
-    /// <summary>全量镜像（copy-then-prune）：先复制 config → store（插队文件分类处理），全部成功后再删除 store 中 config 已无的文件，
-    /// 避免「先清后拷」中途失败留下空 store。</summary>
-    internal static (int Written, int Deleted) MirrorToStore(string configPath, string store, HashSet<string> swapFiles, ConfigRestoreDescriptor? descriptor)
-    {
-        Directory.CreateDirectory(store);
-        int written = 0;
-        int deleted = 0;
-        PathKind kind = PathKindUtil.KindOf(configPath);
-        var configRels = new List<string>();
-        if (kind == PathKind.File)
-        {
-            string rel = Path.GetFileName(configPath);
-            configRels.Add(rel);
-            if (CopyMirrorFile(configPath, Path.Combine(store, rel), rel, swapFiles, descriptor))
-            {
-                written++;
-            }
-        }
-        else if (kind == PathKind.Dir)
-        {
-            foreach (string file in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories))
-            {
-                string rel = Path.GetRelativePath(configPath, file);
-                configRels.Add(rel);
-                if (CopyMirrorFile(file, Path.Combine(store, rel), rel, swapFiles, descriptor))
-                {
-                    written++;
-                }
-            }
-        }
-        foreach (string file in Directory.GetFiles(store, "*", SearchOption.AllDirectories))
-        {
-            string rel = Path.GetRelativePath(store, file);
-            if (configRels.Contains(rel, StringComparer.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-            try
-            {
-                File.Delete(file);
-                deleted++;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[配置同步] 删除 store 多余文件失败（{file}）：{ex.Message}");
-            }
-        }
-        return (written, deleted);
-    }
-
-    /// <summary>
-    /// 事务化全量镜像：先写暂存目录 temp，复制期间源配置发生变化则放弃；成功后将旧 store 保留为
-    /// previous，再把临时目录移动为 store。previous 用于进程崩溃后的恢复。
-    /// 无还原描述的插队文件从旧 store 保留，不参与本轮内容覆盖或清理。
-    /// </summary>
-    internal static (int Written, int Preserved) MirrorToStoreAtomic(
-        string configPath,
-        string store,
-        string temp,
-        string previous,
-        HashSet<string> swapFiles,
-        ConfigRestoreDescriptor? descriptor,
-        string expectedSample)
-    {
-        int written = 0;
-        int preserved = 0;
-        try
-        {
-            if (Directory.Exists(temp))
-            {
-                Directory.Delete(temp, recursive: true);
-            }
-            if (File.Exists(temp))
-            {
-                File.Delete(temp);
-            }
-            Directory.CreateDirectory(temp);
-
-            PathKind kind = PathKindUtil.KindOf(configPath);
-            if (kind == PathKind.Missing)
-            {
-                throw new IOException("配置位置在镜像期间消失");
-            }
-            var configRels = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (kind == PathKind.File)
-            {
-                string rel = Path.GetFileName(configPath);
-                configRels.Add(rel);
-                    written += StageMirrorFile(configPath, Path.Combine(temp, rel), rel, store, temp, swapFiles, descriptor, ref preserved);
-            }
-            else
-            {
-                foreach (string source in Directory.GetFiles(configPath, "*", SearchOption.AllDirectories))
-                {
-                    string rel = NormalizeRelative(Path.GetRelativePath(configPath, source));
-                    configRels.Add(rel);
-                    written += StageMirrorFile(source, Path.Combine(temp, rel), rel, store, temp, swapFiles, descriptor, ref preserved);
-                }
-                if (configRels.Count == 0)
-                {
-                    throw new IOException("配置目录在镜像期间变为空");
-                }
-            }
-
-            foreach (string rel in swapFiles)
-            {
-                string normalized = NormalizeRelative(rel);
-                if (configRels.Contains(normalized))
-                {
-                    continue;
-                }
-                if (CopyExistingStoreFile(store, temp, normalized))
-                {
-                    preserved++;
-                }
-            }
-
-            if (!string.Equals(expectedSample, SampleConfig(configPath), StringComparison.Ordinal))
-            {
-                throw new IOException("配置在镜像期间发生变化，保留旧快照");
-            }
-            CommitStagedStore(temp, store, previous);
-            return (written, preserved);
-        }
-        catch
-        {
-            ConfigSwapPrimitives.TryDeleteDir(temp);
-            throw;
-        }
-    }
-
-    private static int StageMirrorFile(
-        string source,
-        string dest,
-        string rel,
-        string store,
-        string stageRoot,
-        HashSet<string> swapFiles,
-        ConfigRestoreDescriptor? descriptor,
-        ref int preserved)
-    {
-        if (swapFiles.Contains(rel))
-        {
-            FileRestore? restore = FindRestoreFile(descriptor, rel);
-            if (restore is null)
-            {
-                Logger.Info($"[配置同步] 插队文件无还原描述，保留旧快照：{rel}");
-                if (CopyExistingStoreFile(store, stageRoot, rel))
-                {
-                    preserved++;
-                }
-                return 0;
-            }
-            (string content, Encoding encoding) = ReadTextPreservingEncoding(source);
-            foreach (ToggleRestore toggle in restore.Toggles)
-            {
-                if (!ApplyToggle(ref content, toggle))
-                {
-                    throw new IOException($"插队文件还原描述应用失败：{rel} / {toggle.Path}");
-                }
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            File.WriteAllText(dest, content, encoding);
-            return 1;
-        }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-        File.Copy(source, dest, overwrite: true);
-        return 1;
-    }
-
     internal static (string Content, Encoding Encoding) ReadTextPreservingEncoding(string path)
     {
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -794,72 +628,6 @@ internal static class ConfigSwapSession
         return (content, output);
     }
 
-    private static bool CopyExistingStoreFile(string store, string targetRoot, string rel)
-    {
-        string? source = JudgeScriptRunner.ResolveWithin(store, rel);
-        if (source is null || !File.Exists(source))
-        {
-            return false;
-        }
-        string dest = Path.Combine(targetRoot, rel);
-        Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-        File.Copy(source, dest, overwrite: true);
-        return true;
-    }
-
-    private static void CommitStagedStore(string temp, string store, string previous)
-    {
-        if (File.Exists(store) || File.Exists(previous))
-        {
-            throw new IOException("用户快照路径形态不正确");
-        }
-        if (Directory.Exists(previous))
-        {
-            Directory.Delete(previous, recursive: true);
-        }
-        bool oldMoved = false;
-        try
-        {
-            if (Directory.Exists(store))
-            {
-                Directory.Move(store, previous);
-                oldMoved = true;
-            }
-            Directory.Move(temp, store);
-        }
-        catch
-        {
-            if (oldMoved && !Directory.Exists(store) && Directory.Exists(previous))
-            {
-                Directory.Move(previous, store);
-            }
-            throw;
-        }
-    }
-
-    /// <summary>将编辑后的配置先完整复制到临时快照，再以目录事务替换用户 store。</summary>
-    public static void CommitStoreSnapshot(string configPath, string store, string temp, string previous)
-    {
-        try
-        {
-            if (Directory.Exists(temp))
-            {
-                Directory.Delete(temp, recursive: true);
-            }
-            if (File.Exists(temp))
-            {
-                File.Delete(temp);
-            }
-            ConfigSwapPrimitives.CopyAs(configPath, temp, PathKind.Dir);
-            CommitStagedStore(temp, store, previous);
-        }
-        catch
-        {
-            ConfigSwapPrimitives.TryDeleteDir(temp);
-            throw;
-        }
-    }
-
     internal static FileRestore? FindRestoreFile(ConfigRestoreDescriptor? descriptor, string rel)
     {
         return descriptor?.Files.FirstOrDefault(file =>
@@ -869,44 +637,6 @@ internal static class ConfigSwapSession
     internal static string NormalizeRelative(string value)
     {
         return ConfigStoreDiff.NormalizeRelative(value);
-    }
-
-    /// <summary>镜像单个文件到 store：插队文件有还原描述 → 还原启停后写入；无还原描述 → 跳过（store 保留原样）；其余复制覆盖。</summary>
-    internal static bool CopyMirrorFile(string source, string dest, string rel, HashSet<string> swapFiles, ConfigRestoreDescriptor? descriptor)
-    {
-        try
-        {
-            if (swapFiles.Contains(rel))
-            {
-                FileRestore? fr = descriptor?.Files.FirstOrDefault(f => string.Equals(f.File, rel, StringComparison.OrdinalIgnoreCase));
-                if (fr is null)
-                {
-                    Logger.Info($"[配置同步] 插队文件无还原描述，跳过镜像：{rel}（store 保持原样）");
-                    return false;
-                }
-                string content = File.ReadAllText(source);
-                foreach (ToggleRestore toggle in fr.Toggles)
-                {
-                    if (!ApplyToggle(ref content, toggle))
-                    {
-                        Logger.Warn($"[配置同步] 还原描述应用失败（{rel}），该文件按无还原描述处理：{toggle.Path}");
-                        return false;
-                    }
-                }
-                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                File.WriteAllText(dest, content);
-                Logger.Info($"[配置同步] 插队文件已还原启停并镜像：{rel}");
-                return true;
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            File.Copy(source, dest, overwrite: true);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[配置同步] 镜像文件失败（{rel}）：{ex.Message}");
-            return false;
-        }
     }
 
     /// <summary>应用单个还原描述 toggle：array 型按 keyField 匹配 initial 设 enabledField（未覆盖元素不动）；map 型逐键设布尔（未覆盖键不动）。</summary>

@@ -1,5 +1,5 @@
 import { api } from "../core/api.js";
-import { esc, finalStatusOf, fmtTime, statusBadge } from "../core/format.js";
+import { esc, fmtTime, statusBadge } from "../core/format.js";
 import { pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { isCurrent, state } from "../core/state.js";
@@ -53,7 +53,7 @@ function fmtDateTimeCN(value) {
 
 /** 记录条状态徽章（参考图2）：成功=✓ 完成、失败=✕ 失败：原因、部分完成/已取消=警示色。 */
 function entryBadge(record) {
-  const status = finalStatusOf(record);
+  const status = record.status;
   if (status === "success") return '<span class="badge ok">✓ 完成</span>';
   if (status === "partial") return '<span class="badge warn">⚠ 部分完成</span>';
   if (status === "cancelled") return '<span class="badge warn">已取消</span>';
@@ -285,7 +285,7 @@ function entryMarkup(record) {
   const queue = record.queueName ? ` · ${esc(record.queueName)}` : "";
   const pathParts = [historyDir, historySelectedDate, record.historyDirectory, record.logFile].filter(Boolean);
   const filePath = pathParts.length ? esc(pathParts.join("\\")) : "";
-  return `<button class="history-entry history-status-${esc(finalStatusOf(record))}" type="button" data-action="history-detail" data-id="${esc(record.id)}" data-testid="history-entry">
+  return `<button class="history-entry history-status-${esc(record.status)}" type="button" data-action="history-detail" data-id="${esc(record.id)}" data-testid="history-entry">
     <span class="history-entry-bar" aria-hidden="true"></span>
     <span class="history-entry-main">
       <span class="history-entry-title"><strong>${fmtDateTimeCN(record.startTime)} · ${esc(record.scriptName)}${queue}</strong>${entryBadge(record)}${pluginHistoryBadges(record)}${pluginSlotMarkup("history.list.badges", `history-${record.id}`, "history-plugin-slot", { mode: "list", primaryId: record.id })}</span>
@@ -587,7 +587,7 @@ function historyDetailMetaMarkup(record) {
   const user = record.userName || "未指定用户";
   const mode = record.mode === "auto" ? "自动运行" : "手动运行";
   return `<div class="history-detail-meta" data-testid="history-detail-meta">
-    <div class="history-detail-meta-item"><span class="k">结果</span><span>${statusBadge(finalStatusOf(record))}</span></div>
+    <div class="history-detail-meta-item"><span class="k">结果</span><span>${statusBadge(record.status)}</span></div>
     <div class="history-detail-meta-item"><span class="k">运行模式</span><span>${mode}</span></div>
     <div class="history-detail-meta-item"><span class="k">运行用户</span><span>${esc(user)}</span></div>
     <div class="history-detail-meta-item"><span class="k">尝试次数</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div>

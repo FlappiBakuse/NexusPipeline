@@ -68,7 +68,7 @@ async function runEmulator(endpoint, label) {
     assert.equal((await api("POST", "/api/dispatch/script", { scriptId: script.id })).status, 200);
     assert.equal(await waitNoRunning(), true);
     const record = await waitForHistory(script.id);
-    assert.equal(record.finalStatus || record.FinalStatus, "success");
+    assert.equal(record.status, "success");
   } finally {
     await deleteScript(script.id);
   }

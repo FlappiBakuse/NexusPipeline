@@ -615,7 +615,6 @@ internal sealed class Scheduler : IDisposable
                 StartTime = DateTime.Now,
                 EndTime = DateTime.Now,
                 Status = "failed",
-                FinalStatus = "failed",
                 ResultDetail = reason,
             };
             _history.Save(skipped, new List<string>(), Array.Empty<RunScreenshot>());

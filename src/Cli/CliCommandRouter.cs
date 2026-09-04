@@ -35,7 +35,6 @@ internal static class CliCommandRouter
                 "settings" or "setting" => ExecuteSettings(parsed),
                 "plugin" or "plugins" => ExecutePlugin(parsed),
                 "update" => ExecuteUpdate(parsed),
-                "maintenance" => ExecuteMaintenance(parsed),
                 "system-action" => ExecuteSystemAction(parsed),
                 "help" => WriteUsage(),
                 _ => CliOutput.WriteFailure("invalid_arguments", $"未知命令：{parsed.Positionals[0]}")
@@ -648,17 +647,11 @@ internal static class CliCommandRouter
             }
             if (!status.Equals("running", StringComparison.OrdinalIgnoreCase))
             {
-                static string FinalStatus(JsonNode? record)
-                {
-                    string finalStatus = record?["finalStatus"]?.ToString() ?? "";
-                    return string.IsNullOrWhiteSpace(finalStatus)
-                        ? record?["status"]?.ToString() ?? ""
-                        : finalStatus;
-                }
+                static string Status(JsonNode? record) => record?["status"]?.ToString() ?? "";
                 bool cancelled = body?["records"] is JsonArray records
-                    && records.Any(record => FinalStatus(record).Equals("cancelled", StringComparison.OrdinalIgnoreCase));
+                    && records.Any(record => Status(record).Equals("cancelled", StringComparison.OrdinalIgnoreCase));
                 bool failed = body?["records"] is JsonArray failedRecords
-                    && failedRecords.Any(record => FinalStatus(record) is not ("success" or "skipped"));
+                    && failedRecords.Any(record => Status(record) is not ("success" or "skipped"));
                 if (cancelled)
                 {
                     return CliOutput.WriteFailure("cancelled", "运行已取消", body);
@@ -1025,40 +1018,6 @@ internal static class CliCommandRouter
         };
     }
 
-    private static int ExecuteMaintenance(CliArguments args)
-    {
-        string? rawSub = Positional(args, 1);
-        string sub = (rawSub ?? "legacy-users").ToLowerInvariant();
-        if (!EnsurePositionals(args, rawSub is null ? 1 : 2, "maintenance 只接受一个子命令"))
-        {
-            return CliExitCodes.For("invalid_arguments");
-        }
-        var client = new CliApiClient();
-        if (sub is "legacy-users" or "list")
-        {
-            if (!EnsureOptions(args))
-            {
-                return CliExitCodes.For("invalid_arguments");
-            }
-            return ReturnApi(client.Get("/api/maintenance/legacy-users"));
-        }
-        if (sub is not ("prune" or "prune-legacy-user-data"))
-        {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 maintenance 子命令：{sub}");
-        }
-        if (!EnsureOptions(args, "script-id", "user-key"))
-        {
-            return CliExitCodes.For("invalid_arguments");
-        }
-        if (!TryRequireOption(args, "script-id", "脚本 ID", out string scriptId, out int error)
-            || !TryRequireOption(args, "user-key", "遗留用户键", out string userKey, out error))
-        {
-            return error;
-        }
-        string path = "/api/maintenance/legacy-users" + Query(("scriptId", scriptId), ("userKey", userKey));
-        return ReturnApi(client.Delete(path), "遗留用户目录已清理");
-    }
-
     private static int ExecuteSystemAction(CliArguments args)
     {
         if (!EnsurePositionals(args, 2, "system-action 需要一个子命令") || !EnsureOptions(args))
@@ -1370,7 +1329,7 @@ internal static class CliCommandRouter
             "用法：nexus-pipeline.exe <命令> [子命令] [参数]\n"
             + "\n"
             + "基础：status\n"
-            + "资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、maintenance、system-action\n"
+            + "资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n"
             + "\n"
             + "机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n"
             + "目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n"

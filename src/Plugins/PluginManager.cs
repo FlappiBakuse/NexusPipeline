@@ -321,7 +321,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             record.Mode,
             new DateTimeOffset(record.StartTime),
             record.EndTime.HasValue ? new DateTimeOffset(record.EndTime.Value) : null,
-            string.IsNullOrWhiteSpace(record.FinalStatus) ? record.Status : record.FinalStatus);
+            record.Status);
         var snapshots = new List<PluginHistoryRecord>();
         int totalBytes = 0;
         foreach (PluginHistoryContributionRegistration registration in HistoryContributions)

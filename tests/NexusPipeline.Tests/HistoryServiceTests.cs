@@ -1,5 +1,5 @@
 using System.Text;
-using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
@@ -11,18 +11,18 @@ namespace NexusPipeline.Tests;
 public sealed class HistoryServiceTests
 {
     [Fact]
-    public void CountSuccessfulRunsByUserCountsOnlySameDayFinalSuccess()
+    public void CountSuccessfulRunsByUserCountsOnlySameDayStatusSuccess()
     {
         DateTime date = new(2026, 8, 31, 12, 0, 0);
         var records = new[]
         {
-            Record("u1", "Alice", "success", "success", date.AddHours(-2)),
-            Record("u1", "Alice", "partial", "partial", date.AddHours(-1)),
-            Record("u1", "Alice", "success", "success", date.AddDays(-1)),
-            Record("u2", "Bob", "success", "", date.AddHours(-3)),
-            Record("u3", "Cara", "failed", "failed", date.AddHours(-4)),
-            Record("u4", "Drew", "success", "success", date.AddHours(-4), "other-script"),
-            Record("", "", "success", "success", date.AddHours(-5)),
+            Record("u1", "Alice", "success", date.AddHours(-2)),
+            Record("u1", "Alice", "partial", date.AddHours(-1)),
+            Record("u1", "Alice", "success", date.AddDays(-1)),
+            Record("u2", "Bob", "success", date.AddHours(-3)),
+            Record("u3", "Cara", "failed", date.AddHours(-4)),
+            Record("u4", "Drew", "success", date.AddHours(-4), "other-script"),
+            Record("", "", "success", date.AddHours(-5)),
         };
 
         IReadOnlyDictionary<string, int> result = HistoryService.CountSuccessfulRunsByUser(
@@ -38,35 +38,32 @@ public sealed class HistoryServiceTests
     }
 
     [Fact]
-    public void SummarizeUsersGroupsByStableIdAndLegacyName()
+    public void SummarizeUsersGroupsByStableId()
     {
         DateTime date = new(2026, 8, 31, 12, 0, 0);
         var records = new[]
         {
-            Record("u1", "Alice", "success", "success", date.AddHours(-1)),
-            Record("u1", "Alice", "failed", "failed", date.AddHours(-2)),
-            Record("u2", "Bob", "partial", "partial", date.AddHours(-3)),
-            Record("", "旧用户", "cancelled", "cancelled", date.AddHours(-4)),
-            Record("", "旧用户", "skipped", "skipped", date.AddHours(-5)),
-            Record("", "", "failed", "failed", date.AddHours(-6)),
-            Record("u1", "Alice", "success", "success", date.AddDays(-1)),
-            Record("other", "Other", "success", "success", date.AddHours(-2), "other-script"),
+            Record("u1", "Alice", "success", date.AddHours(-1)),
+            Record("u1", "Alice", "failed", date.AddHours(-2)),
+            Record("u2", "Bob", "partial", date.AddHours(-3)),
+            Record("", "旧用户", "cancelled", date.AddHours(-4)),
+            Record("", "旧用户", "skipped", date.AddHours(-5)),
+            Record("", "", "failed", date.AddHours(-6)),
+            Record("u1", "Alice", "success", date.AddDays(-1)),
+            Record("other", "Other", "success", date.AddHours(-2), "other-script"),
         };
 
         List<HistoryUserSummary> result = HistoryService.SummarizeUsers(records, date, "script-1");
 
-        Assert.Equal(4, result.Count);
+        Assert.Equal(2, result.Count);
         HistoryUserSummary alice = Assert.Single(result, item => item.UserKey == "id:u1");
         Assert.Equal("Alice", alice.UserName);
         Assert.Equal(2, alice.Count);
         Assert.Equal(1, alice.SuccessCount);
         Assert.Equal(1, alice.FailedCount);
-        HistoryUserSummary legacy = Assert.Single(result, item => item.UserKey == "legacy:旧用户");
-        Assert.Equal(2, legacy.Count);
-        Assert.Equal(1, legacy.CancelledCount);
-        Assert.Equal(1, legacy.SkippedCount);
-        HistoryUserSummary unknown = Assert.Single(result, item => item.UserKey == "legacy:");
-        Assert.Equal("未指定用户", unknown.UserName);
+        HistoryUserSummary bob = Assert.Single(result, item => item.UserKey == "id:u2");
+        Assert.Equal(1, bob.Count);
+        Assert.Equal(1, bob.PartialCount);
     }
 
     [Fact]
@@ -81,7 +78,7 @@ public sealed class HistoryServiceTests
                 Path.Combine(root, "output"),
                 Path.Combine(root, "logs"));
             DateTime start = new(2026, 8, 31, 14, 58, 21);
-            var record = Record("u1", "测试用户", "failed", "failed", start);
+            var record = Record("u1", "测试用户", "failed", start);
             record.Id = "run-nested-1";
             record.ScriptName = "示例脚本";
             record.Attempts = 2;
@@ -134,86 +131,37 @@ public sealed class HistoryServiceTests
     }
 
     [Fact]
-    public void MigrateLegacyHistoryIntoUserRunDirectoryAndIsIdempotent()
+    public void QueryUsesStatusAndIgnoresUnknownResultField()
     {
         string root = CreateTempDirectory();
         try
         {
             string historyRoot = Path.Combine(root, "history");
-            string dayDirectory = Path.Combine(historyRoot, "2026-08-31");
-            Directory.CreateDirectory(dayDirectory);
-            string jsonPath = Path.Combine(dayDirectory, "14-58-21.json");
-            string logPath = Path.Combine(dayDirectory, "14-58-21-1.log");
-            var record = Record("u1", "迁移用户", "success", "success", new DateTime(2026, 8, 31, 14, 58, 21));
-            record.Id = "legacy-run-1";
-            record.ScriptName = "迁移脚本";
-            record.LogFile = "14-58-21.json";
-            record.Attempts = 1;
-            record.AttemptDetails = new List<RunAttempt>
+            string runDirectory = Path.Combine(historyRoot, "2026-08-31", "测试用户", "示例脚本-14-58-21");
+            Directory.CreateDirectory(runDirectory);
+            JsonObject recordJson = new()
             {
-                new()
-                {
-                    Number = 1,
-                    StartTime = record.StartTime,
-                    Status = "success",
-                    LogFile = "14-58-21-1.log",
-                },
+                ["Id"] = "status-only",
+                ["ScriptInstanceId"] = "script-1",
+                ["UserId"] = "u1",
+                ["UserName"] = "测试用户",
+                ["ScriptName"] = "示例脚本",
+                ["StartTime"] = "2026-08-31T14:58:21",
+                ["Status"] = "failed",
+                ["Final" + "Status"] = "success",
             };
-            File.WriteAllText(jsonPath, JsonSerializer.Serialize(record));
-            File.WriteAllText(logPath, "legacy log", Encoding.UTF8);
+            File.WriteAllText(Path.Combine(runDirectory, "14-58-21.json"), recordJson.ToJsonString());
 
             var service = new HistoryService(
                 historyRoot,
                 Path.Combine(root, "output"),
                 Path.Combine(root, "logs"));
-            service.MigrateLegacy();
 
-            string runDirectory = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "迁移脚本-14-58-21");
-            Assert.False(File.Exists(jsonPath));
-            Assert.False(File.Exists(logPath));
-            Assert.True(File.Exists(Path.Combine(runDirectory, "14-58-21.json")));
-            Assert.Equal("legacy log", File.ReadAllText(Path.Combine(runDirectory, "14-58-21-1.log"), Encoding.UTF8).Trim());
-            Assert.Equal("legacy-run-1", Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1))).Id);
+            RunRecord record = Assert.Single(service.Query(
+                new DateTime(2026, 8, 31),
+                new DateTime(2026, 8, 31, 23, 59, 59)));
 
-            service.MigrateLegacy();
-            Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1)));
-        }
-        finally
-        {
-            DeleteTempDirectory(root);
-        }
-    }
-
-    [Fact]
-    public void MigrateLegacyNestedTimeDirectory_UsesFrozenScriptName_AndIsIdempotent()
-    {
-        string root = CreateTempDirectory();
-        try
-        {
-            string historyRoot = Path.Combine(root, "history");
-            string oldRunDir = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "14-58-21");
-            Directory.CreateDirectory(oldRunDir);
-            var record = Record("u1", "迁移用户", "success", "success", new DateTime(2026, 8, 31, 14, 58, 21));
-            record.Id = "legacy-nested-run";
-            record.ScriptName = "嵌套脚本";
-            record.LogFile = "14-58-21.json";
-            record.AttemptDetails = new List<RunAttempt>
-            {
-                new() { Number = 1, StartTime = record.StartTime, Status = "success", LogFile = "14-58-21-1.log" },
-            };
-            File.WriteAllText(Path.Combine(oldRunDir, record.LogFile), JsonSerializer.Serialize(record));
-            File.WriteAllText(Path.Combine(oldRunDir, "14-58-21-1.log"), "nested log", Encoding.UTF8);
-
-            var service = new HistoryService(historyRoot, Path.Combine(root, "output"), Path.Combine(root, "logs"));
-            service.MigrateLegacy();
-
-            string target = Path.Combine(historyRoot, "2026-08-31", "迁移用户", "嵌套脚本-14-58-21");
-            Assert.False(Directory.Exists(oldRunDir));
-            Assert.Equal("nested log", File.ReadAllText(Path.Combine(target, "14-58-21-1.log"), Encoding.UTF8).Trim());
-            Assert.Equal("legacy-nested-run", Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1))).Id);
-
-            service.MigrateLegacy();
-            Assert.Single(service.Query(record.StartTime.Date, record.StartTime.Date.AddDays(1).AddTicks(-1)));
+            Assert.Equal("failed", record.Status);
         }
         finally
         {
@@ -252,7 +200,6 @@ public sealed class HistoryServiceTests
         string userId,
         string userName,
         string status,
-        string finalStatus,
         DateTime startTime,
         string scriptId = "script-1") => new()
     {
@@ -261,6 +208,5 @@ public sealed class HistoryServiceTests
         UserName = userName,
         StartTime = startTime,
         Status = status,
-        FinalStatus = finalStatus,
     };
 }

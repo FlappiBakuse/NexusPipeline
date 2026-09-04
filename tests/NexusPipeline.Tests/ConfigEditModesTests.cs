@@ -5,10 +5,10 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>v0.12.8 配置快照时机改造：
+/// <summary>配置快照时机与编辑模式：
 /// 运行隐式建快照（store 空 + config 存在 → 复制现场配置为初始快照）；
 /// 首次编辑配置 fresh/reuse 模式的文件动作矩阵（done=复制入库、fresh cancel=先清生成物再移回原配置、
-/// reuse=无文件动作）；会话标记 EditMode 兼容（旧标记无字段按 normal）。</summary>
+/// reuse=无文件动作）；当前格式会话标记的恢复。</summary>
 public class ConfigEditModesTests
 {
     public ConfigEditModesTests()
@@ -115,7 +115,7 @@ public class ConfigEditModesTests
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
             Assert.NotNull(mark);
             Assert.Equal("fresh", mark!.EditMode);
-            Assert.Equal("edit", mark.Phase);
+            Assert.Equal("edit", mark.SessionPhase);
             Assert.False(UserConfigManager.HasSnapshot(scriptId, userName));
 
             // done：新配置复制入库 + 原配置移回 config 位置
@@ -255,10 +255,10 @@ public class ConfigEditModesTests
         }
     }
 
-    /* ---------------- 会话标记兼容与恢复 ---------------- */
+    /* ---------------- 会话标记格式与恢复 ---------------- */
 
     [Fact]
-    public void LegacyMark_WithoutEditMode_BehavesAsNormal()
+    public void UnsupportedLegacyMark_IsPreservedWithoutGuessing()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
         var (scriptId, userName, configPath) = MakeTarget(tempRoot);
@@ -266,34 +266,35 @@ public class ConfigEditModesTests
         File.WriteAllText(configPath, "new-value");
         try
         {
-            // 手工构造旧版会话现场：config 移入缓存区 + 旧格式标记（无 EditMode，含已废弃字段）
+            // 手工构造旧版会话现场：旧格式标记不再参与恢复，现场保持原样供人工处理。
             string cache = UserConfigManager.CacheDir(scriptId, userName);
             Directory.CreateDirectory(cache);
             File.WriteAllText(Path.Combine(cache, "config.json"), "original");
             string markJson = """
                 {
                   "ScriptId": "%SCRIPT%",
-                  "UserName": "user",
+                  "UserId": "user",
                   "ConfigPath": "%CONFIG%",
-                  "OriginalKind": "file",
-                  "Phase": "edit",
+                  "SessionPhase": "edit",
+                  "ConfigKind": "file",
+                  "WorkingDirectory": "",
+                  "LaunchExe": "",
+                  "ProcessIdentity": "",
+                  "ProfileHash": "",
+                  "PluginName": "",
+                  "PluginVersion": "",
+                  "EditMode": "normal",
                   "StartedAt": "2026-09-01T08:00:00",
-                  "GeneratedTemplate": false,
-                  "TemplateFiles": []
+                  "UnsupportedField": true
                 }
                 """.Replace("%SCRIPT%", scriptId).Replace("%CONFIG%", configPath.Replace("\\", "\\\\"));
             File.WriteAllText(ConfigSessionMark.MarkFile(scriptId, userName), markJson);
 
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
-            Assert.NotNull(mark);
-            Assert.Equal("normal", mark!.EditMode);
-            Assert.False(mark.NeedsFreshRestore);
-
-            // normal 语义：提交入库并还原原配置
-            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, configPath));
-            Assert.Equal("new-value", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "config.json")));
-            Assert.Equal("original", ReadFile(configPath));
-            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+            Assert.Null(mark);
+            Assert.True(File.Exists(ConfigSessionMark.MarkFile(scriptId, userName)));
+            Assert.True(File.Exists(Path.Combine(cache, "config.json")));
+            Assert.Equal("new-value", ReadFile(configPath));
         }
         finally
         {
@@ -302,7 +303,7 @@ public class ConfigEditModesTests
     }
 
     [Fact]
-    public void LegacyFreshMissingMark_RecoveryClearsGeneratedConfig()
+    public void CurrentFreshMissingMark_RecoveryClearsGeneratedConfig()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
         var (scriptId, userName, configPath) = MakeTarget(tempRoot);
@@ -314,10 +315,10 @@ public class ConfigEditModesTests
             var mark = new ConfigSessionMark
             {
                 ScriptId = scriptId,
-                UserName = userName,
+                UserId = userName,
                 ConfigPath = configPath,
-                OriginalKind = "missing",
-                Phase = "edit",
+                ConfigKind = "missing",
+                SessionPhase = "edit",
                 EditMode = "fresh",
             };
             mark.Write();
@@ -343,11 +344,10 @@ public class ConfigEditModesTests
     [Fact]
     public void NeedsFreshRestore_TrueOnlyForFreshWithMissingOriginal()
     {
-        Assert.True(new ConfigSessionMark { EditMode = "fresh", OriginalKind = "missing" }.NeedsFreshRestore);
-        Assert.False(new ConfigSessionMark { EditMode = "fresh", OriginalKind = "file" }.NeedsFreshRestore);
-        Assert.False(new ConfigSessionMark { EditMode = "reuse", OriginalKind = "missing" }.NeedsFreshRestore);
-        // 旧标记（无 EditMode）保持 normal 语义
-        Assert.False(new ConfigSessionMark { OriginalKind = "missing" }.NeedsFreshRestore);
+        Assert.True(new ConfigSessionMark { EditMode = "fresh", ConfigKind = "missing" }.NeedsFreshRestore);
+        Assert.False(new ConfigSessionMark { EditMode = "fresh", ConfigKind = "file" }.NeedsFreshRestore);
+        Assert.False(new ConfigSessionMark { EditMode = "reuse", ConfigKind = "missing" }.NeedsFreshRestore);
+        Assert.False(new ConfigSessionMark { ConfigKind = "missing" }.NeedsFreshRestore);
     }
 
     [Fact]

@@ -126,7 +126,7 @@ async function runScript(scriptId, userName, timeoutMs = 60000) {
 }
 
 function recordStatus(record) {
-  return record.finalStatus || record.FinalStatus || record.status || record.Status;
+  return record.status || record.Status;
 }
 
 function recordAttempts(record) {
@@ -398,7 +398,7 @@ if ((input.log || "").includes("ER12-SYNTHETIC")) {
     assert.equal(recordAttempts(record), 1);
     assert.equal(recordStatus(record), "success");
     assert.equal(record.status || record.Status, "success");
-    assert.equal(record.finalStatus || record.FinalStatus, "success");
+    assert.equal(record.status || record.Status, "success");
   } finally {
     await deleteScript(script.id);
   }

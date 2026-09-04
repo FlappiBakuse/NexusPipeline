@@ -35,11 +35,6 @@ internal static class UserConfigManager
         return ConfigSwapPaths.CacheDir(scriptId, userName);
     }
 
-    public static string RetryStoreDir(string scriptId, string userName)
-    {
-        return ConfigSwapPaths.RetryStoreDir(scriptId, userName);
-    }
-
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
     public static string ScriptDir(string scriptId, string? userName)
     {
@@ -95,24 +90,15 @@ internal static class UserConfigManager
                 }
                 string store = StoreDir(scriptId, userName);
                 ConfigStoreMetadata.RecoverRebind(scriptId, userName);
-                ConfigStoreMetadata.TryRestoreLegacyArchive(scriptId, userName);
                 PathKind currentConfigKind = PathKindUtil.KindOf(configPath);
                 ConfigStoreMetadata expectedMetadata = ConfigStoreMetadata.For(configPath, metadata);
                 bool hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
-                bool metadataFileExists = File.Exists(ConfigSwapPaths.StoreMetadataPath(scriptId, userName));
                 ConfigStoreMetadata? existingMetadata = hasStore
                     ? ConfigStoreMetadata.Load(scriptId, userName)
                     : null;
-                if (hasStore && metadataFileExists && existingMetadata is null)
+                if (hasStore && existingMetadata is null)
                 {
-                    throw new IOException($"配置快照元数据损坏，已保留原快照：{store}");
-                }
-                if (hasStore
-                    && existingMetadata is null
-                    && !string.IsNullOrWhiteSpace(metadata?.PluginName))
-                {
-                    // 专项旧快照的归属必须由 v0.13.0 迁移建立；元数据缺失或损坏时拒绝静默复用，保留完整现场。
-                    throw new IOException($"专项配置快照缺少归属元数据，已保留原快照：{store}");
+                    throw new IOException($"配置快照缺少或无法读取当前格式元数据，已保留原快照：{store}");
                 }
                 if (hasStore
                     && existingMetadata is not null
@@ -137,16 +123,12 @@ internal static class UserConfigManager
                 {
                     ConfigStoreMetadata.Save(scriptId, userName, expectedMetadata);
                     ConfigStoreMetadata.CleanupRebindIfMatches(scriptId, userName, expectedMetadata);
-                    ConfigStoreMetadata.CleanupLegacyArtifacts(scriptId, userName);
                 }
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
-                    UserName = userName,
                     UserId = userName,
                     ConfigPath = configPath,
-                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
-                    Phase = "run",
                     SessionPhase = "run",
                     ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     WorkingDirectory = metadata?.WorkingDirectory ?? "",
@@ -165,7 +147,7 @@ internal static class UserConfigManager
                 {
                     ConfigSwapPrimitives.CopyAs(store, configPath, ConfigSwapPrimitives.RestoreKind(mark));
                 }
-                else if (PathKindUtil.Parse(mark.OriginalKind) == PathKind.Dir)
+                else if (PathKindUtil.Parse(mark.ConfigKind) == PathKind.Dir)
                 {
                     Directory.CreateDirectory(configPath);
                 }
@@ -193,9 +175,10 @@ internal static class UserConfigManager
                         ConfigSwapSession.DoRestore(scriptId, userName, ConfigSessionMark.TryRead(scriptId, userName) ?? new ConfigSessionMark
                         {
                             ScriptId = scriptId,
-                            UserName = userName,
+                            UserId = userName,
                             ConfigPath = configPath,
-                            OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
+                            SessionPhase = "run",
+                            ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                         });
                     }
                     else
@@ -237,9 +220,10 @@ internal static class UserConfigManager
                     mark = new ConfigSessionMark
                     {
                         ScriptId = scriptId,
-                        UserName = userName,
+                        UserId = userName,
                         ConfigPath = configPath,
-                        OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
+                        SessionPhase = "run",
+                        ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     };
                 }
                 ConfigSwapSession.DoRestore(scriptId, userName, mark);
@@ -281,12 +265,9 @@ internal static class UserConfigManager
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
-                    UserName = userName,
-                    ConfigPath = configPath,
-                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
-                    Phase = "edit",
-                    SessionPhase = "edit",
                     UserId = userName,
+                    ConfigPath = configPath,
+                    SessionPhase = "edit",
                     ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     EditMode = "fresh",
                     WorkingDirectory = metadata?.WorkingDirectory ?? "",
@@ -345,12 +326,9 @@ internal static class UserConfigManager
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
-                    UserName = userName,
-                    ConfigPath = configPath,
-                    OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
-                    Phase = "edit",
-                    SessionPhase = "edit",
                     UserId = userName,
+                    ConfigPath = configPath,
+                    SessionPhase = "edit",
                     ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
                     EditMode = "reuse",
                     WorkingDirectory = metadata?.WorkingDirectory ?? "",

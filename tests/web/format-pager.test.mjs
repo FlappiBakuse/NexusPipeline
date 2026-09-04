@@ -2,7 +2,6 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   esc,
-  finalStatusOf,
   fmtTime,
   statusBadge,
 } from "../../wwwroot/core/format.js";
@@ -23,11 +22,6 @@ test("statusBadge maps public status values and has a failure fallback", () => {
   assert.match(statusBadge("cancelled"), /已取消/);
   assert.match(statusBadge("skipped"), /已跳过/);
   assert.match(statusBadge("unknown"), /失败/);
-});
-
-test("finalStatusOf prefers immutable finalStatus and falls back to status", () => {
-  assert.equal(finalStatusOf({ finalStatus: "partial", status: "success" }), "partial");
-  assert.equal(finalStatusOf({ status: "running" }), "running");
 });
 
 test("fmtTime handles empty values without consulting the browser", () => {

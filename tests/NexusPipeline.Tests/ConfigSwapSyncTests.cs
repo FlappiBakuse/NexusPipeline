@@ -5,8 +5,8 @@ using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>自动更新配置（v0.7.6）：还原描述执行器（array/map/路径无效/未覆盖键保持）、
-/// 全量镜像同步（新增/删除/插队跳过/启停还原）、有效性校验（空/骤降跳过）、首次检测时机判定。</summary>
+/// <summary>自动更新配置：还原描述执行器（array/map/路径无效/未覆盖键保持）、
+/// 增量事务有效性校验（空/骤降跳过）、首次检测时机判定。</summary>
 public class ConfigSwapSyncTests
 {
     private static string MakeTempDir()
@@ -41,8 +41,8 @@ public class ConfigSwapSyncTests
     [Fact]
     public void RestoreKind_MissingInfersFileOrDirectoryFromConfigPath()
     {
-        Assert.Equal(PathKind.File, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\state.json", OriginalKind = "missing" }));
-        Assert.Equal(PathKind.Dir, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\config", OriginalKind = "missing" }));
+        Assert.Equal(PathKind.File, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\state.json", ConfigKind = "missing" }));
+        Assert.Equal(PathKind.Dir, ConfigSwapPrimitives.RestoreKind(new ConfigSessionMark { ConfigPath = "C:\\cfg\\config", ConfigKind = "missing" }));
     }
 
     [Fact]
@@ -168,140 +168,6 @@ public class ConfigSwapSyncTests
         string badDir = MakeTempDir();
         File.WriteAllText(Path.Combine(badDir, "config-restore.json"), "not-json");
         Assert.Null(ConfigSwapSession.ReadRestoreDescriptor(badDir));
-    }
-
-    /* ---------------- 全量镜像（MirrorToStore） ---------------- */
-
-    [Fact]
-    public void MirrorToStore_CopyAndPrune()
-    {
-        string cfg = MakeTempDir();
-        string store = MakeTempDir();
-        Directory.CreateDirectory(Path.Combine(cfg, "sub"));
-        File.WriteAllText(Path.Combine(cfg, "a.txt"), "A");
-        File.WriteAllText(Path.Combine(cfg, "sub", "b.txt"), "B");
-        File.WriteAllText(Path.Combine(store, "a.txt"), "OLD-A");
-        File.WriteAllText(Path.Combine(store, "stale.txt"), "STALE");
-
-        (int written, int deleted) = ConfigSwapSession.MirrorToStore(cfg, store, new HashSet<string>(), null);
-
-        Assert.Equal(2, written);
-        Assert.Equal(1, deleted);
-        Assert.Equal("A", File.ReadAllText(Path.Combine(store, "a.txt")));
-        Assert.Equal("B", File.ReadAllText(Path.Combine(store, "sub", "b.txt")));
-        Assert.False(File.Exists(Path.Combine(store, "stale.txt")));
-    }
-
-    [Fact]
-    public void MirrorToStoreAtomic_CommitsAndKeepsPreviousSnapshot()
-    {
-        string cfg = MakeTempDir();
-        string baseDir = MakeTempDir();
-        string store = Path.Combine(baseDir, "store");
-        string temp = Path.Combine(baseDir, "store-tmp");
-        string previous = Path.Combine(baseDir, "store-previous");
-        Directory.CreateDirectory(store);
-        File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
-        File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
-
-        (int written, int preserved) = ConfigSwapSession.MirrorToStoreAtomic(
-            cfg,
-            store,
-            temp,
-            previous,
-            new HashSet<string>(),
-            null,
-            ConfigSwapSession.SampleConfig(cfg));
-
-        Assert.Equal(1, written);
-        Assert.Equal(0, preserved);
-        Assert.Equal("NEW", File.ReadAllText(Path.Combine(store, "state.txt")));
-        Assert.Equal("OLD", File.ReadAllText(Path.Combine(previous, "state.txt")));
-        Assert.False(Directory.Exists(temp));
-    }
-
-    [Fact]
-    public void MirrorToStoreAtomic_SourceChangedAbortsAndKeepsOldStore()
-    {
-        string cfg = MakeTempDir();
-        string baseDir = MakeTempDir();
-        string store = Path.Combine(baseDir, "store");
-        string temp = Path.Combine(baseDir, "store-tmp");
-        string previous = Path.Combine(baseDir, "store-previous");
-        Directory.CreateDirectory(store);
-        File.WriteAllText(Path.Combine(cfg, "state.txt"), "NEW");
-        File.WriteAllText(Path.Combine(store, "state.txt"), "OLD");
-
-        Assert.Throws<IOException>(() => ConfigSwapSession.MirrorToStoreAtomic(
-            cfg,
-            store,
-            temp,
-            previous,
-            new HashSet<string>(),
-            null,
-            "stale-sample"));
-
-        Assert.Equal("OLD", File.ReadAllText(Path.Combine(store, "state.txt")));
-        Assert.False(Directory.Exists(temp));
-    }
-
-    [Fact]
-    public void MirrorToStore_SwapFileWithoutDescriptor_Skipped()
-    {
-        string cfg = MakeTempDir();
-        string store = MakeTempDir();
-        File.WriteAllText(Path.Combine(cfg, "swap.json"), "{\"enabled\":false}");
-        File.WriteAllText(Path.Combine(store, "swap.json"), "{\"enabled\":true}");
-
-        (int written, int _) = ConfigSwapSession.MirrorToStore(cfg, store, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "swap.json" }, null);
-
-        Assert.Equal(0, written);
-        Assert.Equal("{\"enabled\":true}", File.ReadAllText(Path.Combine(store, "swap.json")));
-    }
-
-    [Fact]
-    public void MirrorToStore_SwapFileWithDescriptor_RestoresToggleThenWrites()
-    {
-        string cfg = MakeTempDir();
-        string store = MakeTempDir();
-        File.WriteAllText(Path.Combine(cfg, "mxu-MaaEnd.json"), "{\"instances\":[{\"tasks\":[{\"id\":\"t1\",\"enabled\":false,\"count\":5},{\"id\":\"t2\",\"enabled\":true}]}]}");
-        File.WriteAllText(Path.Combine(store, "mxu-MaaEnd.json"), "{\"instances\":[{\"tasks\":[{\"id\":\"t1\",\"enabled\":true},{\"id\":\"t2\",\"enabled\":true}]}]}");
-
-        var descriptor = new ConfigSwapSession.ConfigRestoreDescriptor();
-        descriptor.Files.Add(new ConfigSwapSession.FileRestore
-        {
-            File = "mxu-MaaEnd.json",
-            Toggles = new List<ConfigSwapSession.ToggleRestore> { ArrayToggle("instances[0].tasks", new Dictionary<string, bool> { ["t1"] = true, ["t2"] = true }) },
-        });
-        (int written, int _) = ConfigSwapSession.MirrorToStore(cfg, store, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "mxu-MaaEnd.json" }, descriptor);
-
-        Assert.Equal(1, written);
-        JsonObject stored = (JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(store, "mxu-MaaEnd.json")))!;
-        JsonArray tasks = (JsonArray)stored["instances"]![0]!["tasks"]!;
-        Assert.True((bool)tasks[0]!["enabled"]!);
-        Assert.Equal(5, (int)tasks[0]!["count"]!);
-        Assert.True((bool)tasks[1]!["enabled"]!);
-    }
-
-    [Fact]
-    public void MirrorToStore_NonSwapFileWithDescriptorEntry_Ignored()
-    {
-        string cfg = MakeTempDir();
-        string store = MakeTempDir();
-        File.WriteAllText(Path.Combine(cfg, "a.txt"), "NEW");
-        File.WriteAllText(Path.Combine(store, "a.txt"), "OLD");
-
-        var descriptor = new ConfigSwapSession.ConfigRestoreDescriptor();
-        descriptor.Files.Add(new ConfigSwapSession.FileRestore
-        {
-            File = "a.txt",
-            Toggles = new List<ConfigSwapSession.ToggleRestore> { MapToggle("TaskEnabledList", new Dictionary<string, bool> { ["g1"] = true }) },
-        });
-        // 描述存在但 a.txt 不在插队清单 → 全量镜像直接复制（还原描述仅作用于插队文件）。
-        (int written, int _) = ConfigSwapSession.MirrorToStore(cfg, store, new HashSet<string>(), descriptor);
-
-        Assert.Equal(1, written);
-        Assert.Equal("NEW", File.ReadAllText(Path.Combine(store, "a.txt")));
     }
 
     /* ---------------- 有效性校验（ValidForSync） ---------------- */

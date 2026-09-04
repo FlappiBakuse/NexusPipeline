@@ -151,16 +151,13 @@ internal static class ConfigEditCommands
                 return Validation<ConfigEditStarted>("配置交换失败：" + prepError);
             }
 
-            // 交换/准备动作已在服务层写入会话标记；此处统一把 Phase 收敛为 edit 并记录实际编辑模式。
+            // 交换/准备动作已在服务层写入会话标记；此处统一记录实际编辑模式。
+            ConfigSessionMark? preparedMark = ConfigSessionMark.TryRead(target.Script.Id, target.UserKey);
             var editMark = new ConfigSessionMark
             {
                 ScriptId = target.Script.Id,
-                UserName = target.UserKey,
                 UserId = target.UserKey,
                 ConfigPath = target.Script.ConfigPath,
-                OriginalKind = ConfigSessionMark.TryRead(target.Script.Id, target.UserKey)?.OriginalKind
-                    ?? PathKindUtil.Text(PathKindUtil.KindOf(target.Script.ConfigPath)),
-                Phase = "edit",
                 SessionPhase = "edit",
                 EditMode = editMode,
             };
@@ -170,7 +167,7 @@ internal static class ConfigEditCommands
             editMark.ProfileHash = metadata.ProfileHash;
             editMark.PluginName = metadata.PluginName;
             editMark.PluginVersion = metadata.PluginVersion;
-            editMark.ConfigKind = metadata.ConfigKind;
+            editMark.ConfigKind = preparedMark?.ConfigKind ?? metadata.ConfigKind;
             editMark.Write();
             if (editMode != "reuse")
             {
@@ -578,7 +575,7 @@ internal static class ConfigEditCommands
         {
             return session.User.UserId;
         }
-        return session.Mark.UserName;
+        return "";
     }
 
     /// <summary>归一化编辑方式：空值视为 normal；非法值返回 null。</summary>

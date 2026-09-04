@@ -927,7 +927,14 @@ public sealed class UpdateApplyFinalizationTests
     private void WriteTask(string mode, string version, string stagedDir)
     {
         // 直接写 AppRoot 任务标记（UpdateApply 收尾固定读 AppPaths）。
-        new UpdateTask(mode, version, stagedDir).Write();
+        string phase = mode switch
+        {
+            "completed" => UpdatePhase.Committed,
+            "defer" => UpdatePhase.Deferred,
+            "apply" => UpdatePhase.ApplyRequested,
+            _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "测试只写入当前更新阶段"),
+        };
+        new UpdateTask(mode, version, stagedDir, phase).Write();
     }
 
     private void WriteVersion(string version)
@@ -1034,11 +1041,11 @@ public sealed class UpdateApplyFinalizationTests
     }
 
     [Fact]
-    public void Finalization_LegacyBackupRestoresPluginsDuringRollback()
+    public void Finalization_RollbackLeavesPluginDirectoryUntouched()
     {
         try
         {
-            // v0.10.7 updater 将 plugins 纳入 backup；若交换后中断，v0.10.8 仍需还原旧目录。
+            // 更新事务只负责程序文件与 wwwroot；插件目录中的用户内容保持原样。
             string backupWww = Path.Combine(AppPaths.UpdateBackupDir, "wwwroot");
             string backupPlugins = Path.Combine(AppPaths.UpdateBackupDir, "plugins", "bettergi");
             Directory.CreateDirectory(backupWww);
@@ -1049,8 +1056,10 @@ public sealed class UpdateApplyFinalizationTests
             string installWww = Path.Combine(AppPaths.AppRoot, "wwwroot");
             string installPlugins = Path.Combine(AppPaths.AppRoot, "plugins");
             Directory.CreateDirectory(installWww);
-            Directory.CreateDirectory(installPlugins);
+            string installedPluginMarker = Path.Combine(installPlugins, "bettergi", "marker.txt");
+            Directory.CreateDirectory(Path.GetDirectoryName(installedPluginMarker)!);
             File.WriteAllText(Path.Combine(installWww, "marker.txt"), "new-partial-www");
+            File.WriteAllText(installedPluginMarker, "user-plugin");
 
             string staging = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
             Directory.CreateDirectory(staging);
@@ -1060,7 +1069,7 @@ public sealed class UpdateApplyFinalizationTests
 
             Assert.False(exit);
             Assert.Equal("old-www", File.ReadAllText(Path.Combine(installWww, "marker.txt")));
-            Assert.Equal("old-plugin", File.ReadAllText(Path.Combine(installPlugins, "bettergi", "marker.txt")));
+            Assert.Equal("user-plugin", File.ReadAllText(installedPluginMarker));
             Assert.False(File.Exists(AppPaths.UpdateTaskFile));
             Assert.False(Directory.Exists(AppPaths.UpdateBackupDir));
         }

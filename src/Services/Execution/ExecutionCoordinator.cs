@@ -89,7 +89,6 @@ internal sealed class ExecutionCoordinator : RunSession
         if (!string.IsNullOrWhiteSpace(_userName) && user is null)
         {
             record.Status = "failed";
-            record.FinalStatus = "failed";
             record.EndTime = DateTime.Now;
             record.ResultDetail = $"用户「{_userName}」不存在或已禁用";
             return record;
@@ -136,7 +135,6 @@ internal sealed class ExecutionCoordinator : RunSession
                 if (!_configRun.Prepare(out string? prepError))
                 {
                     record.Status = "failed";
-                    record.FinalStatus = "failed";
                     record.EndTime = DateTime.Now;
                     record.ResultDetail = $"用户配置加载失败：{prepError}";
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.UserName}」配置加载失败：{prepError}");
@@ -167,7 +165,6 @@ internal sealed class ExecutionCoordinator : RunSession
                         Results.CompleteAttempt();
                         record.Attempts = attemptNo;
                         record.Status = "failed";
-                        record.FinalStatus = "failed";
                         record.EndTime = retryAttempt.EndTime;
                         record.ResultDetail = retryAttempt.Reason;
                         break;
@@ -264,7 +261,6 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
             }
 
-            record.FinalStatus = record.Status;
             return record;
         }
         finally

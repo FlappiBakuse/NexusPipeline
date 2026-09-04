@@ -19,10 +19,6 @@ export function statusBadge(status) {
   return '<span class="badge bad">失败</span>';
 }
 
-export function finalStatusOf(record) {
-  return record.finalStatus || record.status;
-}
-
 // 插件未安装或运行时元数据尚未返回时，使用插件目录中的正式展示名。
 export const knownPluginDisplayNames = Object.freeze({
   bettergi: "BetterGI",

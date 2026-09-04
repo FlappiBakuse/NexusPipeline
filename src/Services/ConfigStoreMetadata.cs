@@ -32,6 +32,27 @@ internal sealed class ConfigStoreMetadata
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    private static readonly JsonSerializerOptions CurrentOptions = new()
+    {
+        PropertyNameCaseInsensitive = false,
+    };
+
+    private static readonly string[] RequiredProperties =
+    [
+        nameof(SchemaVersion),
+        nameof(Generation),
+        nameof(LastCommittedTransactionId),
+        nameof(PluginName),
+        nameof(PluginVersion),
+        nameof(ProfileHash),
+        nameof(ConfigLocatorHash),
+        nameof(ConfigKind),
+        nameof(UpdatedAt),
+    ];
+
+    private static readonly HashSet<string> AllowedProperties =
+        RequiredProperties.ToHashSet(StringComparer.Ordinal);
+
     public static ConfigStoreMetadata For(
         string configPath,
         ConfigSessionRuntimeMetadata? runtime = null)
@@ -58,7 +79,7 @@ internal sealed class ConfigStoreMetadata
         }
         try
         {
-            return JsonSerializer.Deserialize<ConfigStoreMetadata>(File.ReadAllText(path), JsonOpts.Default);
+            return DeserializeCurrent(File.ReadAllText(path), path);
         }
         catch (Exception ex)
         {
@@ -70,59 +91,6 @@ internal sealed class ConfigStoreMetadata
     public static void Save(string scriptId, string userKey, ConfigStoreMetadata metadata)
     {
         SaveAt(ConfigSwapPaths.StoreMetadataPath(scriptId, userKey), metadata);
-    }
-
-    /// <summary>
-    /// 为 v0.12.x 已存在的用户快照建立一次性归属基线。
-    /// 迁移阶段仍可读取旧脚本中的 ConfigPath，因此能识别后续首次运行时的定位变化。
-    /// </summary>
-    public static void SeedLegacyStoreMetadata(
-        string dataRoot,
-        string scriptId,
-        string configPath,
-        string pluginName)
-    {
-        string scriptRoot = Path.Combine(Path.GetFullPath(dataRoot), scriptId);
-        if (!Directory.Exists(scriptRoot))
-        {
-            return;
-        }
-
-        foreach (string userDir in Directory.GetDirectories(scriptRoot))
-        {
-            string store = Path.Combine(userDir, "store");
-            if (!Directory.Exists(store) && !File.Exists(store))
-            {
-                continue;
-            }
-            if (Directory.Exists(store) && !Directory.EnumerateFileSystemEntries(store).Any())
-            {
-                continue;
-            }
-            string metadataPath = Path.Combine(userDir, "store-meta.json");
-            if (File.Exists(metadataPath)
-                || File.Exists(Path.Combine(userDir, "store.meta.json")))
-            {
-                continue;
-            }
-            try
-            {
-                var metadata = new ConfigStoreMetadata
-                {
-                    PluginName = pluginName ?? "",
-                    PluginVersion = "",
-                    ProfileHash = "legacy-v0.12.9",
-                    ConfigLocatorHash = HashLocator(configPath),
-                    ConfigKind = PathKindUtil.Text(PathKindUtil.KindOf(configPath)),
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                };
-                SaveAt(metadataPath, metadata);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[配置快照] 迁移旧快照元数据失败（{metadataPath}）：{ex.Message}");
-            }
-        }
     }
 
     private static void SaveAt(string path, ConfigStoreMetadata metadata)
@@ -139,13 +107,38 @@ internal sealed class ConfigStoreMetadata
         }
         try
         {
-            return JsonSerializer.Deserialize<ConfigStoreMetadata>(File.ReadAllText(path), JsonOpts.Default);
+            return DeserializeCurrent(File.ReadAllText(path), path);
         }
         catch (Exception ex)
         {
             Logger.Warn($"[配置快照] 元数据读取失败：{path}：{ex.Message}");
             return null;
         }
+    }
+
+    private static ConfigStoreMetadata? DeserializeCurrent(string json, string path)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("配置快照元数据根节点必须是对象");
+        }
+        var properties = document.RootElement.EnumerateObject()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (RequiredProperties.Any(property => !properties.Contains(property))
+            || properties.Any(property => !AllowedProperties.Contains(property)))
+        {
+            throw new InvalidDataException("配置快照元数据不是当前格式");
+        }
+        ConfigStoreMetadata? metadata = JsonSerializer.Deserialize<ConfigStoreMetadata>(json, CurrentOptions);
+        if (metadata is null
+            || metadata.SchemaVersion != CurrentSchemaVersion
+            || metadata.ConfigKind is not ("missing" or "file" or "dir"))
+        {
+            throw new InvalidDataException($"配置快照元数据版本或字段无效：{path}");
+        }
+        return metadata;
     }
 
     public static ConfigStoreMetadata FromMark(ConfigSessionMark mark, ConfigStoreMetadata? existing = null)
@@ -157,12 +150,12 @@ internal sealed class ConfigStoreMetadata
             mark.ProfileHash,
             mark.PluginName,
             mark.PluginVersion,
-            string.IsNullOrWhiteSpace(mark.ConfigKind) ? mark.OriginalKind : mark.ConfigKind));
+            mark.ConfigKind));
         if (existing is not null)
         {
             expected.Generation = existing.Generation;
             expected.LastCommittedTransactionId = existing.LastCommittedTransactionId;
-            expected.SchemaVersion = Math.Max(existing.SchemaVersion, CurrentSchemaVersion);
+            expected.SchemaVersion = CurrentSchemaVersion;
         }
         return expected;
     }
@@ -212,61 +205,6 @@ internal sealed class ConfigStoreMetadata
             normalized = configPath.Trim();
         }
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant();
-    }
-
-    /// <summary>启动时从旧版 store-archive 恢复最近一份可用快照；成功后由新协议首次写入时清理旧归档。</summary>
-    public static bool TryRestoreLegacyArchive(string scriptId, string userKey)
-    {
-        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
-        if (File.Exists(store)
-            || (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any()))
-        {
-            return false;
-        }
-        // 仅有一个空 store 目录时，它没有可恢复内容；先移除这个明确的空占位，
-        // 让旧归档可以安全提升为当前快照。
-        if (Directory.Exists(store))
-        {
-            Directory.Delete(store);
-        }
-        string archiveRoot = ConfigSwapPaths.StoreArchiveDir(scriptId, userKey);
-        if (!Directory.Exists(archiveRoot))
-        {
-            return false;
-        }
-
-        foreach (string archive in Directory.GetDirectories(archiveRoot).OrderByDescending(path => Path.GetFileName(path), StringComparer.Ordinal))
-        {
-            string archivedStore = Path.Combine(archive, "store");
-            if ((!Directory.Exists(archivedStore) && !File.Exists(archivedStore))
-                || (Directory.Exists(archivedStore) && !Directory.EnumerateFileSystemEntries(archivedStore).Any()))
-            {
-                continue;
-            }
-            try
-            {
-                if (Directory.Exists(archivedStore))
-                {
-                    Directory.Move(archivedStore, store);
-                }
-                else
-                {
-                    File.Move(archivedStore, store);
-                }
-                string archivedMetadata = Path.Combine(archive, "store-meta.json");
-                if (File.Exists(archivedMetadata) && !File.Exists(ConfigSwapPaths.StoreMetadataPath(scriptId, userKey)))
-                {
-                    File.Move(archivedMetadata, ConfigSwapPaths.StoreMetadataPath(scriptId, userKey));
-                }
-                Logger.Info($"[配置快照] 已从旧归档恢复：{archive} → {store}");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[配置快照] 旧归档恢复失败，继续检查其他归档（{archive}）：{ex.Message}");
-            }
-        }
-        return false;
     }
 
     /// <summary>恢复定位重绑定在移动旧快照后中断的现场；新快照已存在时保留隔离区，等待匹配校验后清理。</summary>
@@ -352,26 +290,6 @@ internal sealed class ConfigStoreMetadata
         if (current is not null && current.Matches(expected))
         {
             ConfigSwapPrimitives.TryDeleteDir(ConfigSwapPaths.StoreRebindDir(scriptId, userKey));
-        }
-    }
-
-    /// <summary>新快照已验证并成功写入后，清理旧版完整副本与旧全量事务残留。</summary>
-    public static void CleanupLegacyArtifacts(string scriptId, string userKey)
-    {
-        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
-        if (!Directory.Exists(store) || !Directory.EnumerateFileSystemEntries(store).Any())
-        {
-            return;
-        }
-        foreach (string path in new[]
-        {
-            ConfigSwapPaths.StoreArchiveDir(scriptId, userKey),
-            ConfigSwapPaths.StorePreviousDir(scriptId, userKey),
-            ConfigSwapPaths.StoreTempDir(scriptId, userKey),
-            ConfigSwapPaths.RetryStoreDir(scriptId, userKey),
-        })
-        {
-            ConfigSwapPrimitives.TryDeleteDir(path);
         }
     }
 
@@ -465,32 +383,4 @@ internal sealed class ConfigStoreMetadata
         Logger.Info($"[配置快照] 已按新配置位置重建快照：{configPath} → {store}");
     }
 
-    [Obsolete("v0.13.2 不再创建完整归档；仅保留旧调用的兼容入口")]
-    public static string ArchiveStore(string scriptId, string userKey)
-    {
-        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
-        if (!Directory.Exists(store) && !File.Exists(store))
-        {
-            return "";
-        }
-        string archiveRoot = ConfigSwapPaths.StoreArchiveDir(scriptId, userKey);
-        string destination = Path.Combine(archiveRoot, $"{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(archiveRoot);
-        Directory.CreateDirectory(destination);
-        if (Directory.Exists(store))
-        {
-            Directory.Move(store, Path.Combine(destination, "store"));
-        }
-        else
-        {
-            File.Move(store, Path.Combine(destination, "store"));
-        }
-        string metadata = ConfigSwapPaths.StoreMetadataPath(scriptId, userKey);
-        if (File.Exists(metadata))
-        {
-            File.Move(metadata, Path.Combine(destination, "store-meta.json"));
-        }
-        Logger.Info($"配置快照已归档：{store} → {destination}");
-        return destination;
-    }
 }

@@ -213,7 +213,10 @@ function renderUpdateStatus(data) {
   else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">发现新版本 v${esc(data.latest)}${data.prerelease ? "（Pre-release）" : ""}。</p>`;
   else if (state === "idle" && !data.available && data.error) stateText = `<p class="callout callout-warning">检查失败：${esc(data.error)}</p>`;
   else if (state === "idle") stateText = '<p class="muted update-state-copy">当前已是最新版本。</p>';
-  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">当前版本</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">更新渠道</span><span>${channelText}</span></div></div>${notes}${stateText}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  const backupWarning = state === "ready"
+    ? '<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">应用更新前请先备份 config、data、history、logs、plugins 和 .nxp 等运行时数据。</p>'
+    : "";
+  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">当前版本</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">更新渠道</span><span>${channelText}</span></div></div>${notes}${stateText}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
   box.querySelectorAll("[data-progress]").forEach(element => {
     element.style.width = `${Math.max(0, Math.min(100, Number(element.dataset.progress) || 0))}%`;
   });
@@ -297,6 +300,17 @@ async function cancelUpdateDownload() {
     toast("下载已取消");
     await loadUpdateStatus();
   } catch (error) { toast(error.message, "error"); }
+}
+
+function confirmUpdateApply(defer) {
+  const version = updateStatus?.latest ? ` v${esc(updateStatus.latest)}` : "";
+  const actionText = defer ? "下次启动服务时应用更新" : "现在应用更新并重启服务";
+  confirmModal(
+    defer ? "登记下次启动更新" : "立即更新",
+    `请确认已备份运行时数据。${actionText}${version}？更新备份只包含程序文件和 wwwroot。`,
+    "update-apply-confirm",
+    { defer: defer ? "true" : "false" },
+  );
 }
 
 async function applyUpdate(defer) {
@@ -671,8 +685,12 @@ export const actions = {
   "update-check": target => withBusy(target, () => checkUpdate()),
   "update-download": target => withBusy(target, () => startUpdateDownload()),
   "update-cancel": () => cancelUpdateDownload(),
-  "update-apply": target => withBusy(target, () => applyUpdate(false)),
-  "update-defer": () => applyUpdate(true),
+  "update-apply": () => confirmUpdateApply(false),
+  "update-defer": () => confirmUpdateApply(true),
+  "update-apply-confirm": target => {
+    closeModal();
+    return withBusy(target, () => applyUpdate(target.dataset.defer === "true"));
+  },
   "toggle-update-flag": target => {
     const btn = $("#" + target.dataset.flag);
     if (btn) {

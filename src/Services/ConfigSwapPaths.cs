@@ -5,32 +5,13 @@ namespace NexusPipeline.Services;
 
 /// <summary>
 /// 数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。
-/// v0.13.2 空闲态只保留一份权威快照 store 与小型 store-meta.json；
+/// 当前格式空闲态只保留一份权威快照 store 与小型 store-meta.json；
 /// work/ 下保留运行现场与增量 store-txn，提交完成后事务目录清理。
-/// store-archive、store-previous、store-tmp、retry-store 仅作为旧版本迁移入口识别，禁止新流程创建。
 /// </summary>
 internal static class ConfigSwapPaths
 {
-    /// <summary>会话事务工作区目录名（v0.13.2 起归并宿主；v0.13.0 及更早为散落的顶层子目录）。</summary>
+    /// <summary>会话事务工作区目录名。</summary>
     public const string WorkDirName = "work";
-
-    /// <summary>v0.13.0 及更早版本散落在用户/脚本目录顶层的事务目录名 → work/ 内规范名（dot 后缀一并改为 kebab-case）。</summary>
-    public static readonly IReadOnlyDictionary<string, string> LegacyWorkItemMap = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["original"] = "original",
-        ["script"] = "script",
-        ["swap-backup"] = "swap-backup",
-        ["edit-hidden"] = "edit-hidden",
-        ["retry-store"] = "retry-store",
-        ["store.tmp"] = "store-tmp",
-    };
-
-    /// <summary>v0.13.0 及更早版本用户目录顶层的 dot 后缀命名 → kebab-case 规范名（原地改名）。</summary>
-    public static readonly IReadOnlyDictionary<string, string> LegacyDotSuffixRenames = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["store.previous"] = "store-previous",
-        ["store.meta.json"] = "store-meta.json",
-    };
 
     public static string UserDir(string scriptId, string userKey)
     {
@@ -56,33 +37,9 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userKey), "store-meta.json");
     }
 
-    /// <summary>旧版持久快照归档目录；v0.13.2 不再创建，仅用于安全迁移。</summary>
-    public static string StoreArchiveDir(string scriptId, string userKey)
-    {
-        return Path.Combine(UserDir(scriptId, userKey), "store-archive");
-    }
-
-    /// <summary>旧版完整上一代快照；v0.13.2 不再创建，仅用于启动恢复与安全迁移。</summary>
-    public static string StorePreviousDir(string scriptId, string userKey)
-    {
-        return Path.Combine(UserDir(scriptId, userKey), "store-previous");
-    }
-
-    /// <summary>旧版全量镜像暂存目录；v0.13.2 不再创建，仅用于启动恢复与安全迁移。</summary>
-    public static string StoreTempDir(string scriptId, string userKey)
-    {
-        return Path.Combine(WorkDir(scriptId, userKey), "store-tmp");
-    }
-
     public static string CacheDir(string scriptId, string userKey)
     {
         return Path.Combine(WorkDir(scriptId, userKey), "original");
-    }
-
-    /// <summary>旧版重试完整快照；v0.13.2 重试直接复用当前活动配置，不再创建。</summary>
-    public static string RetryStoreDir(string scriptId, string userKey)
-    {
-        return Path.Combine(WorkDir(scriptId, userKey), "retry-store");
     }
 
     /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
