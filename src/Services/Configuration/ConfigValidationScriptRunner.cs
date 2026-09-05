@@ -34,6 +34,9 @@ internal sealed record ConfigValidationResult(
 /// <summary>配置快照文件清单 DTO；只向 validator 暴露逻辑相对路径和大小。</summary>
 internal sealed record ConfigValidationFile(string Path, long Size);
 
+/// <summary>附加配置路径的只读快照视图：声明路径 + 该用户的 store-extra 快照目录。</summary>
+internal sealed record ConfigValidationExtraSnapshot(string Path, string StoreDir);
+
 /// <summary>
 /// data-specialized 插件配置校验器。它与运行期 JudgeScriptRunner 分离，固定以用户 store 为唯一文件根，
 /// 只提供受限的 UTF-8 文件 API 与当前请求内的 UI feedback 队列。
@@ -52,20 +55,24 @@ internal static class ConfigValidationScriptRunner
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    /// <summary>执行一次 JS validator；任何异常都转为结果错误并保留已经完成的文件写入。</summary>
+    /// <summary>执行一次 JS validator；任何异常都转为结果错误并保留已经完成的文件写入。
+    /// trigger 标识触发语境（config-edit/script-save）；extraSnapshots 提供附加配置路径的只读快照（@extra&lt;i&gt;/ 前缀访问）。</summary>
     internal static async Task<ConfigValidationResult> ExecuteAsync(
         ConfigValidatorDescriptor descriptor,
         ScriptInstance script,
         ResolvedScriptUser? user,
         string storeRoot,
+        string trigger = "config-edit",
+        IReadOnlyList<ConfigValidationExtraSnapshot>? extraSnapshots = null,
         CancellationToken token = default)
     {
         var changedFiles = new List<string>();
         var toasts = new List<ConfigValidationToast>();
         var notifications = new List<ConfigValidationNotification>();
+        extraSnapshots ??= Array.Empty<ConfigValidationExtraSnapshot>();
         try
         {
-            string inputJson = BuildInput(script, user, ListFiles(storeRoot));
+            string inputJson = BuildInput(script, user, ListFiles(storeRoot), trigger, extraSnapshots);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(MaxExecutionSeconds));
             await Task.Run(() =>
@@ -80,13 +87,27 @@ internal static class ConfigValidationScriptRunner
                 engine.SetValue("__nexusListFiles", new Func<object>(() =>
                     ListFiles(storeRoot)
                         .Select(file => file.Path)
+                        .Concat(extraSnapshots.SelectMany((extra, index) =>
+                            ListFiles(extra.StoreDir).Select(file => ExtraPrefix(index) + file.Path)))
                         .ToArray()));
                 engine.SetValue("__nexusReadFile", new Func<object, object?>(path =>
-                    ReadFile(storeRoot, path?.ToString() ?? "")));
+                    ResolvePathRoot(storeRoot, path?.ToString() ?? "", extraSnapshots, out string? root, out string? relative)
+                        ? ReadFile(root!, relative!)
+                        : null));
                 engine.SetValue("__nexusWriteFile", new Func<object, object, object>((path, content) =>
-                    WriteFile(storeRoot, path?.ToString() ?? "", content?.ToString() ?? "", changedFiles)));
+                {
+                    string candidate = path?.ToString() ?? "";
+                    if (IsExtraRef(candidate, out _, out _))
+                    {
+                        Logger.Warn($"[警告] 专项配置校验写入被拒绝（附加配置快照本版本只读）：{candidate}");
+                        return false;
+                    }
+                    return WriteFile(storeRoot, candidate, content?.ToString() ?? "", changedFiles);
+                }));
                 engine.SetValue("__nexusExists", new Func<object, object>(path =>
-                    Exists(storeRoot, path?.ToString() ?? "")));
+                    ResolvePathRoot(storeRoot, path?.ToString() ?? "", extraSnapshots, out string? root, out string? relative)
+                        ? Exists(root!, relative!)
+                        : false));
                 engine.SetValue("__nexusToast", new Func<object, object, object>((message, kind) =>
                     QueueToast(message?.ToString() ?? "", kind?.ToString() ?? "", toasts)));
                 engine.SetValue("__nexusNotify", new Func<object, object, object, object>((title, body, kind) =>
@@ -112,14 +133,18 @@ internal static class ConfigValidationScriptRunner
         }
     }
 
-    /// <summary>构建稳定输入 DTO；不把宿主对象或应用数据目录路径交给 Jint。</summary>
+    /// <summary>构建稳定输入 DTO；不把宿主对象或应用数据目录路径交给 Jint。
+    /// trigger 标识触发语境；extras 只暴露附加配置的声明路径与快照文件清单（路径+大小）。</summary>
     internal static string BuildInput(
         ScriptInstance script,
         ResolvedScriptUser? user,
-        IReadOnlyList<ConfigValidationFile> files)
+        IReadOnlyList<ConfigValidationFile> files,
+        string trigger = "config-edit",
+        IReadOnlyList<ConfigValidationExtraSnapshot>? extraSnapshots = null)
     {
         return JsonSerializer.Serialize(new
         {
+            trigger,
             script = new
             {
                 script.Id,
@@ -152,7 +177,67 @@ internal static class ConfigValidationScriptRunner
             {
                 files = files.Select(file => new { file.Path, file.Size }).ToArray(),
             },
+            extras = (extraSnapshots ?? Array.Empty<ConfigValidationExtraSnapshot>())
+                .Select(extra => new
+                {
+                    extra.Path,
+                    files = ListFiles(extra.StoreDir)
+                        .Select(file => new { file.Path, file.Size })
+                        .ToArray(),
+                })
+                .ToArray(),
         }, JsonOpts.Web);
+    }
+
+    /// <summary>@extra&lt;i&gt;/ 逻辑前缀：附加配置快照区在 validator 文件 API 中的命名空间。</summary>
+    private static string ExtraPrefix(int index) => $"@extra{index}/";
+
+    private static bool IsExtraRef(string candidate, out int index, out string relative)
+    {
+        index = -1;
+        relative = "";
+        string normalized = candidate.Replace('\\', '/');
+        const string prefix = "@extra";
+        if (!normalized.StartsWith(prefix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+        int separator = normalized.IndexOf('/', prefix.Length);
+        if (separator <= prefix.Length
+            || !int.TryParse(normalized[prefix.Length..separator], out index)
+            || index < 0)
+        {
+            return false;
+        }
+        relative = normalized[(separator + 1)..];
+        return relative.Length > 0;
+    }
+
+    /// <summary>把 validator 的逻辑路径解析为文件根与相对路径：@extra&lt;i&gt;/ 前缀指向附加配置快照（只读），
+    /// 其余指向主配置 store；越界索引或非法前缀返回 false。</summary>
+    private static bool ResolvePathRoot(
+        string storeRoot,
+        string candidate,
+        IReadOnlyList<ConfigValidationExtraSnapshot> extraSnapshots,
+        out string? root,
+        out string? relative)
+    {
+        root = null;
+        relative = null;
+        if (IsExtraRef(candidate, out int index, out string extraRelative))
+        {
+            if (index >= extraSnapshots.Count)
+            {
+                Logger.Warn($"[警告] 专项配置校验路径索引超出附加配置清单：{candidate}");
+                return false;
+            }
+            root = extraSnapshots[index].StoreDir;
+            relative = extraRelative;
+            return true;
+        }
+        root = storeRoot;
+        relative = candidate;
+        return candidate.Length > 0;
     }
 
     /// <summary>列出 store 内当前存在的文件，返回规范化相对路径；枚举失败只记录日志并返回已收集部分。</summary>

@@ -29,6 +29,9 @@ internal sealed record ResolvedScriptSpec(
     string? Error = null,
     ConfigValidatorDescriptor? ConfigValidator = null)
 {
+    /// <summary>专项插件的附加配置路径（extraConfigPaths）；通用脚本为空。仅参与按用户快照交换与校验器只读。</summary>
+    public IReadOnlyList<string> ExtraConfigPaths { get; init; } = Array.Empty<string>();
+
     public bool Succeeded => string.IsNullOrWhiteSpace(Error);
 }
 
@@ -100,7 +103,10 @@ internal sealed class ScriptSpecResolver
             profile.PluginVersion ?? "",
             judge,
             ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge),
-            ConfigValidator: ResolveConfigValidator(script.PluginType));
+            ConfigValidator: ResolveConfigValidator(script.PluginType))
+        {
+            ExtraConfigPaths = profile.ExtraConfigPaths,
+        };
     }
 
     /// <summary>

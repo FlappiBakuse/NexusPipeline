@@ -152,12 +152,13 @@ internal static class ConfigEditCommands
                 target.Script.ConfigPath);
             string? prepError = editMode switch
             {
+                // fresh/reuse 模式的「全新/复用」只针对主配置；附加配置路径保持现场，提交时差异入库。
                 "fresh" => UserConfigManager.PrepareForEditFresh(
                     target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
                 "reuse" => UserConfigManager.PrepareForEditReuse(
                     target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
                 _ => UserConfigManager.PrepareForEdit(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
+                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata, target.Spec?.ExtraConfigPaths),
             };
             if (prepError is not null)
             {
@@ -214,7 +215,8 @@ internal static class ConfigEditCommands
                     UserConfigManager.CancelEdit(
                         target.Script.Id,
                         target.UserKey,
-                        target.Script.ConfigPath);
+                        target.Script.ConfigPath,
+                        target.Spec?.ExtraConfigPaths);
                 }
                 finally
                 {
@@ -306,7 +308,8 @@ internal static class ConfigEditCommands
                         UserConfigManager.CancelEdit(
                             target.Script.Id,
                             target.UserKey,
-                            target.Script.ConfigPath);
+                            target.Script.ConfigPath,
+                            target.Spec?.ExtraConfigPaths);
                         UserConfigManager.RestoreHiddenConfigs(
                             target.Script.Id,
                             target.UserKey,
@@ -335,7 +338,8 @@ internal static class ConfigEditCommands
                         UserConfigManager.CancelEdit(
                             target.Script.Id,
                             target.UserKey,
-                            target.Script.ConfigPath);
+                            target.Script.ConfigPath,
+                            target.Spec?.ExtraConfigPaths);
                         UserConfigManager.RestoreHiddenConfigs(
                             target.Script.Id,
                             target.UserKey,
@@ -457,11 +461,13 @@ internal static class ConfigEditCommands
                 ? UserConfigManager.CommitEdit(
                     session.Script.Id,
                     sessionUserKey,
-                    session.Script.ConfigPath)
+                    session.Script.ConfigPath,
+                    session.Spec?.ExtraConfigPaths)
                 : UserConfigManager.CancelEdit(
                     session.Script.Id,
                     sessionUserKey,
-                    session.Script.ConfigPath);
+                    session.Script.ConfigPath,
+                    session.Spec?.ExtraConfigPaths);
             Logger.Info($"[配置编辑] 配置交换耗时 {swapTimer.ElapsedMilliseconds} ms（操作={action}）。");
             if (swapError is not null)
             {
@@ -477,7 +483,7 @@ internal static class ConfigEditCommands
 
             Stopwatch validatorTimer = Stopwatch.StartNew();
             ConfigValidationResult validation = action == "done"
-                ? RunConfigValidator(session.Script, session.User, sessionUserKey, session.Spec?.ConfigValidator)
+                ? RunConfigValidator(session.Script, session.User, sessionUserKey, session.Spec)
                 : ConfigValidationResult.Skipped;
             Logger.Info($"[配置编辑] validator 耗时 {validatorTimer.ElapsedMilliseconds} ms（操作={action}）。");
 
@@ -512,9 +518,9 @@ internal static class ConfigEditCommands
         ScriptInstance script,
         ResolvedScriptUser user,
         string userKey,
-        ConfigValidatorDescriptor? resolvedDescriptor)
+        ResolvedScriptSpec? spec)
     {
-        if (string.IsNullOrWhiteSpace(script.PluginType) || resolvedDescriptor is null)
+        if (string.IsNullOrWhiteSpace(script.PluginType) || spec?.ConfigValidator is null)
         {
             return ConfigValidationResult.Skipped;
         }
@@ -523,10 +529,12 @@ internal static class ConfigEditCommands
         try
         {
             return ConfigValidationScriptRunner.ExecuteAsync(
-                    resolvedDescriptor,
+                    spec.ConfigValidator,
                     script,
                     user,
-                    storeRoot)
+                    storeRoot,
+                    "config-edit",
+                    ScriptSaveValidation.BuildExtraSnapshots(script.Id, userKey, spec.ExtraConfigPaths))
                 .GetAwaiter()
                 .GetResult();
         }

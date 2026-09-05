@@ -1,4 +1,5 @@
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Models;
 
@@ -23,6 +24,7 @@ internal sealed class ConfigRunSession
     private readonly string _configPath;
     private readonly bool _hasJudgeScript;
     private readonly ConfigSessionRuntimeMetadata? _metadata;
+    private readonly IReadOnlyList<string> _extraConfigPaths;
     private readonly object _finalizationGate = new();
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
@@ -40,6 +42,7 @@ internal sealed class ConfigRunSession
         _configPath = configPath;
         _hasJudgeScript = hasJudgeScript;
         _metadata = resolvedSpec is null ? null : BuildMetadata(resolvedSpec);
+        _extraConfigPaths = resolvedSpec?.ExtraConfigPaths ?? Array.Empty<string>();
     }
 
     public bool IsPrepared { get; private set; }
@@ -58,7 +61,7 @@ internal sealed class ConfigRunSession
         {
             return true;
         }
-        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error, _metadata);
+        IsPrepared = UserConfigManager.PrepareForRun(_scriptId, _userKey, _configPath, out error, _metadata, _extraConfigPaths);
         return IsPrepared;
     }
 
@@ -81,8 +84,14 @@ internal sealed class ConfigRunSession
         if (IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
         {
             ConfigSwapSession.SyncConfigToStore(_scriptId, _userKey, _configPath, firstCheck);
+            if (_extraConfigPaths.Count > 0)
+            {
+                ExtraConfigSync.SyncAllFromSite(_scriptId, _userKey, _extraConfigPaths, SyncPhaseText(firstCheck));
+            }
         }
     }
+
+    private static string SyncPhaseText(bool firstCheck) => firstCheck ? "首次检测" : "运行收尾";
 
     public void ApplyReplacements(List<string> replacements)
     {
@@ -181,6 +190,6 @@ internal sealed class ConfigRunSession
         {
             return null;
         }
-        return UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath);
+        return UserConfigManager.RestoreAfterRun(_scriptId, _userKey, _configPath, _extraConfigPaths);
     }
 }

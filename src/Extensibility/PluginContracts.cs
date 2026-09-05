@@ -35,6 +35,9 @@ internal static class PluginCapabilityKeys
     public const string Emulator = "emulator";
 
     public const string ExecutionPreviewClient = "execution-preview-client";
+
+    /// <summary>PC 客户端启动由脚本自身（含其启动器）管理：外部不代填游戏路径/启动参数/等待秒数。</summary>
+    public const string SelfManagedPcLaunch = "self-managed-pc-launch";
 }
 
 /// <summary>专项插件按当前插件文件推导出的运行时配置快照。</summary>
@@ -45,6 +48,10 @@ internal sealed class ScriptProfile
     public string Args { get; set; } = "";
 
     public string ConfigPath { get; set; } = "";
+
+    /// <summary>附加配置路径（resolve.json paths.extraConfigPaths，绝对路径）：仅参与按用户快照交换，
+    /// 判定脚本不可见；校验器只读。缺失宽容，不参与存在性校验。</summary>
+    public IReadOnlyList<string> ExtraConfigPaths { get; set; } = Array.Empty<string>();
 
     public string LogPath { get; set; } = "";
 

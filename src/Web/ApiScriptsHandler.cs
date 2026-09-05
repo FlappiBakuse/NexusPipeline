@@ -11,6 +11,7 @@ using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
 
@@ -127,9 +128,7 @@ internal static class ApiScriptsHandler
                 await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
                 return;
             }
-            await HttpHelper.WriteJsonAsync(
-                context,
-                queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
+            await WriteScriptWithValidationAsync(context, queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "PUT" && seg.Length == 2)
@@ -150,9 +149,7 @@ internal static class ApiScriptsHandler
             {
                 IconCache.Remove(result.Value!.Id);
             }
-            await HttpHelper.WriteJsonAsync(
-                context,
-                queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
+            await WriteScriptWithValidationAsync(context, queries.ResolveEffective(result.Value!)).ConfigureAwait(false);
             return;
         }
         if (method == "DELETE" && seg.Length == 2)
@@ -199,6 +196,21 @@ internal static class ApiScriptsHandler
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { ok = true, profile = result.Value }).ConfigureAwait(false);
+    }
+
+    /// <summary>保存（新建/更新）脚本实例的响应：顶层保留完整 ScriptInstance 字段，专项脚本额外附带
+    /// script-save 校验结果（validation；含角落通知），前端据此提醒而不改变既有字段读取。</summary>
+    private static async Task WriteScriptWithValidationAsync(HttpListenerContext context, ScriptInstance script)
+    {
+        ConfigValidationResult? validation = await ScriptSaveValidation.RunForScriptAsync(script).ConfigureAwait(false);
+        if (validation is null)
+        {
+            await HttpHelper.WriteJsonAsync(context, script).ConfigureAwait(false);
+            return;
+        }
+        var node = System.Text.Json.JsonSerializer.SerializeToNode(script, JsonOpts.Web) as JsonObject ?? new JsonObject();
+        node["validation"] = System.Text.Json.JsonSerializer.SerializeToNode(validation, JsonOpts.Web);
+        await HttpHelper.WriteJsonAsync(context, node).ConfigureAwait(false);
     }
 
     /// <summary>脚本主程序图标（提取关联图标转 PNG，内存缓存；无图标/主程序无效返回 404，前端使用占位图）。</summary>

@@ -69,13 +69,15 @@ internal static class UserConfigManager
     }
 
     /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。
-    /// v0.12.8 起绑定不再建立快照：快照为空且现场配置存在时，先把现场配置复制为初始快照（复用语义），再执行交换。</summary>
+    /// v0.12.8 起绑定不再建立快照：快照为空且现场配置存在时，先把现场配置复制为初始快照（复用语义），再执行交换。
+    /// extraConfigPaths 非空时附加配置路径在主配置之前完成对称的 adopt/备份/快照覆盖（失败不阻断主流程）。</summary>
     public static bool PrepareForRun(
         string scriptId,
         string userName,
         string configPath,
         out string? error,
-        ConfigSessionRuntimeMetadata? metadata = null)
+        ConfigSessionRuntimeMetadata? metadata = null,
+        IReadOnlyList<string>? extraConfigPaths = null)
     {
         error = null;
         bool prepared = false;
@@ -87,6 +89,10 @@ internal static class UserConfigManager
                 if (File.Exists(ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)))
                 {
                     throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)}");
+                }
+                if (extraConfigPaths is { Count: > 0 })
+                {
+                    ExtraConfigSync.PrepareAll(scriptId, userName, extraConfigPaths);
                 }
                 string store = StoreDir(scriptId, userName);
                 ConfigStoreMetadata.RecoverRebind(scriptId, userName);
@@ -207,7 +213,7 @@ internal static class UserConfigManager
     }
 
     /// <summary>运行结束后还原：清 config（运行产物），original → config 还原原配置。失败保留标记与缓存，交由自愈。</summary>
-    public static string? RestoreAfterRun(string scriptId, string userName, string configPath)
+    public static string? RestoreAfterRun(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
         string? error = null;
         try
@@ -227,6 +233,10 @@ internal static class UserConfigManager
                     };
                 }
                 ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                if (extraConfigPaths is { Count: > 0 })
+                {
+                    ExtraConfigSync.RestoreAll(scriptId, userName, extraConfigPaths);
+                }
             });
         }
         catch (Exception ex)
@@ -242,9 +252,10 @@ internal static class UserConfigManager
         string scriptId,
         string userName,
         string configPath,
-        ConfigSessionRuntimeMetadata? metadata = null)
+        ConfigSessionRuntimeMetadata? metadata = null,
+        IReadOnlyList<string>? extraConfigPaths = null)
     {
-        return PrepareForRun(scriptId, userName, configPath, out string? error, metadata) ? null : (error ?? "配置交换失败");
+        return PrepareForRun(scriptId, userName, configPath, out string? error, metadata, extraConfigPaths) ? null : (error ?? "配置交换失败");
     }
 
     /// <summary>全新配置编辑开始（无快照首选）：标记先行（EditMode=fresh）→ config 存在则移入 original 缓存区，
@@ -435,8 +446,9 @@ internal static class UserConfigManager
         return true;
     }
 
-    /// <summary>编辑配置提交：按文件差异增量写入 store；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。</summary>
-    public static string? CommitEdit(string scriptId, string userName, string configPath)
+    /// <summary>编辑配置提交：按文件差异增量写入 store；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。
+    /// extraConfigPaths 非空时附加配置现场差异同步入各自快照（幂等，失败不阻断）。</summary>
+    public static string? CommitEdit(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
         string? error = null;
         try
@@ -456,6 +468,10 @@ internal static class UserConfigManager
                     null,
                     null,
                     mark);
+                if (extraConfigPaths is { Count: > 0 })
+                {
+                    ExtraConfigSync.SyncAllFromSite(scriptId, userName, extraConfigPaths, "编辑提交");
+                }
                 if (!IsReuseEdit(mark))
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
@@ -471,7 +487,7 @@ internal static class UserConfigManager
     }
 
     /// <summary>编辑配置取消：normal/fresh 模式清 config（编辑/生成产物）后 original → config 还原原配置；reuse 模式无文件动作。</summary>
-    public static string? CancelEdit(string scriptId, string userName, string configPath)
+    public static string? CancelEdit(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
         string? error = null;
         try
@@ -486,6 +502,10 @@ internal static class UserConfigManager
                 if (!IsReuseEdit(mark))
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                    if (extraConfigPaths is { Count: > 0 })
+                    {
+                        ExtraConfigSync.RestoreAll(scriptId, userName, extraConfigPaths);
+                    }
                 }
                 ConfigSessionMark.Clear(scriptId, userName);
             });

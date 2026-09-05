@@ -7,7 +7,7 @@
 | Capability | Web | CLI | MCP |
 |---|---|---|---|
 | 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` |
-| 脚本写入 | 脚本 CRUD API | `script create/update/delete` | `create_script` / `update_script`（删除走 CLI） |
+| 脚本写入 | 脚本 CRUD API（新建/更新专项脚本实例的响应顶层附带 `validation`：script-save 语境的配置校验结果，含角落通知；通用脚本或插件无校验器时缺省） | `script create/update/delete`（不附带校验） | `create_script` / `update_script`（删除走 CLI） |
 | 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | 由 Web 承担 | 由 CLI/Web 承担 |
 | 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
 | 用户写入 | 用户 CRUD API | `user create/update/delete` | `create_user`（改名/删除走 CLI） |

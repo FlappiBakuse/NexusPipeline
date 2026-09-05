@@ -410,4 +410,92 @@ public class DataSpecializedPluginInputsTests
         Assert.Equal("--start", profile!.Args.Trim());
         Assert.Equal(Path.Combine(scriptRoot, "User", "OneDragon", ".json"), profile.ConfigPath);
     }
+
+    /// <summary>创建 OneDragon 形态的最小插件：configPath 绑定实例子目录（目录候选），pattern 过滤共享目录。</summary>
+    private static (string PluginDir, string ScriptRoot) MakeOneDragonLikePlugin()
+    {
+        string root = MakeTempDir();
+        string pluginDir = Path.Combine(root, "plugin");
+        string scriptRoot = Path.Combine(root, "OneDragon");
+        Directory.CreateDirectory(Path.Combine(pluginDir, "data"));
+        Directory.CreateDirectory(scriptRoot);
+        File.WriteAllText(Path.Combine(scriptRoot, "OneDragon-Launcher.exe"), "placeholder");
+        Directory.CreateDirectory(Path.Combine(scriptRoot, "config", "01"));
+        File.WriteAllText(Path.Combine(scriptRoot, "config", "one_dragon.yml"), "instance_list: []");
+        Directory.CreateDirectory(Path.Combine(scriptRoot, "config", "auto_battle"));
+        File.WriteAllText(Path.Combine(pluginDir, "plugin.json"), JsonSerializer.Serialize(new
+        {
+            schemaVersion = 2,
+            name = "inputs-test",
+            artifactName = "InputsTest",
+            displayName = "InputsTest",
+            version = "0.1.0",
+            kind = "data-specialized",
+            resolve = "data/resolve.json",
+            judgeScript = "data/judge.js",
+        }));
+        File.WriteAllText(Path.Combine(pluginDir, "data", "resolve.json"), """
+            {
+              "inputs": [
+                { "name": "instance", "label": "实例序号", "description": "config 下的实例目录名",
+                  "required": false, "pattern": "^\\d{2}$" }
+              ],
+              "require": [ { "var": "main", "file": "OneDragon-Launcher.exe" } ],
+              "paths": {
+                "mainExe": "{main}",
+                "args": "-o -c -i {input:instance}",
+                "configPath": "config/{input:instance}",
+                "logPath": ".log/log.txt"
+              }
+            }
+            """);
+        File.WriteAllText(Path.Combine(pluginDir, "data", "judge.js"), "// judge");
+        return (pluginDir, scriptRoot);
+    }
+
+    [Fact]
+    public void Resolve_EmptyInput_SingleInstanceDirectory_AutoBindsDirectoryCandidate()
+    {
+        // 目录候选：config 下只有一个两位序号实例目录时自动绑定，全局文件与共享目录被 pattern 过滤
+        (string pluginDir, string scriptRoot) = MakeOneDragonLikePlugin();
+        var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+
+        ScriptProfile? profile = plugin.Resolve(scriptRoot, null);
+
+        Assert.NotNull(profile);
+        Assert.Equal("-o -c -i 01", profile!.Args);
+        Assert.Equal(Path.Combine(scriptRoot, "config", "01"), profile.ConfigPath);
+    }
+
+    [Fact]
+    public void Resolve_MultipleInstanceDirectories_BindsProvidedInput()
+    {
+        (string pluginDir, string scriptRoot) = MakeOneDragonLikePlugin();
+        Directory.CreateDirectory(Path.Combine(scriptRoot, "config", "02"));
+        var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+
+        ScriptProfile? profile = plugin.Resolve(scriptRoot, new Dictionary<string, string> { ["instance"] = "02" });
+
+        Assert.NotNull(profile);
+        Assert.Equal("-o -c -i 02", profile!.Args);
+        Assert.Equal(Path.Combine(scriptRoot, "config", "02"), profile.ConfigPath);
+    }
+
+    [Fact]
+    public void Resolve_DirectoryCandidatePattern_FiltersNonInstanceEntries()
+    {
+        // 多个目录但只有 01/02 匹配 pattern：auto_battle 等共享目录不进入候选，多实例不猜测
+        (string pluginDir, string scriptRoot) = MakeOneDragonLikePlugin();
+        Directory.CreateDirectory(Path.Combine(scriptRoot, "config", "02"));
+        var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+
+        ScriptProfile? unbound = plugin.Resolve(scriptRoot, null);
+        Assert.NotNull(unbound);
+        // 未绑定时输入值为空、占位符替换为空串（与文件型未绑定语义一致：静态目录 + 空输入 + 空 staticTail）
+        Assert.Equal(Path.Combine(scriptRoot, "config", "").TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, unbound!.ConfigPath);
+
+        // 候选发现（复用编辑启动的选择清单）：只包含两位序号目录
+        Assert.True(plugin.TryDiscoverConfigInputValues(scriptRoot, out IReadOnlyList<string> values));
+        Assert.Equal(new[] { "01", "02" }, values.OrderBy(value => value, StringComparer.Ordinal).ToArray());
+    }
 }

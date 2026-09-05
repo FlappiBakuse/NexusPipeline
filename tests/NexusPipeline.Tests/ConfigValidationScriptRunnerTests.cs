@@ -194,6 +194,66 @@ public sealed class ConfigValidationScriptRunnerTests
         }
     }
 
+    [Fact]
+    public void BuildInputIncludesTriggerAndExtraSnapshots()
+    {
+        ScriptInstance script = MakeScript();
+        var extras = new List<ConfigValidationExtraSnapshot>();
+        string json = ConfigValidationScriptRunner.BuildInput(
+            script,
+            null,
+            [new ConfigValidationFile("config.json", 12)],
+            "script-save",
+            extras);
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        Assert.Equal("script-save", root.GetProperty("trigger").GetString());
+        Assert.Empty(root.GetProperty("extras").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ExtraSnapshotIsReadableButWriteProtected()
+    {
+        string root = MakeTempDir();
+        string extraStore = MakeTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "config.json"), "主配置");
+            File.WriteAllText(Path.Combine(extraStore, "software_config.json"), "{\"SAVE_LOG_TO_FILE\":false}");
+            string code = """
+                if (!nexus.listFiles().includes('@extra0/software_config.json')) throw new Error('list');
+                if (nexus.readFile('@extra0/software_config.json') === null) throw new Error('read');
+                if (!nexus.exists('@extra0/software_config.json')) throw new Error('exists');
+                if (nexus.readFile('@extra9/anything.json') !== null) throw new Error('index');
+                if (nexus.writeFile('@extra0/software_config.json', 'blocked')) throw new Error('extra-write');
+                nexus.writeFile('config.json', '主配置新值');
+                """;
+            var extras = new List<ConfigValidationExtraSnapshot>
+            {
+                new("D:/games/DATA/CONFIGS/software_config.json", extraStore),
+            };
+
+            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor(code, root),
+                MakeScript(),
+                null,
+                root,
+                "script-save",
+                extras);
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.Equal("{\"SAVE_LOG_TO_FILE\":false}", File.ReadAllText(Path.Combine(extraStore, "software_config.json")));
+            Assert.Equal("主配置新值", File.ReadAllText(Path.Combine(root, "config.json")));
+        }
+        finally
+        {
+            DeleteExact(root);
+            DeleteExact(extraStore);
+        }
+    }
+
     private static void DeleteExact(string path)
     {
         try

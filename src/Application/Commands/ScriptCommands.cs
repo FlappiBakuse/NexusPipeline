@@ -28,6 +28,7 @@ internal static class ScriptCommands
             // 候选脚本在解析判断脚本资产前必须拥有最终实例 ID；新建请求中的空 ID 不能参与文件名生成。
             candidate.Id = Guid.NewGuid().ToString("N");
             RuntimeContext ctx = RuntimeContext.Instance;
+            NormalizeSelfManagedPcLaunch(candidate, ctx);
             ResolvedScriptSpec? resolvedCandidate = ResolveCandidate(candidate, ctx, out string? pluginError);
             if (pluginError is not null || resolvedCandidate is null)
             {
@@ -132,6 +133,7 @@ internal static class ScriptCommands
             candidate.Id = existing.Id;
             candidate.Index = existing.Index;
             NormalizePaths(candidate);
+            NormalizeSelfManagedPcLaunch(candidate, ctx);
             ResolvedScriptSpec? resolvedCandidate = ResolveCandidate(candidate, ctx, out string? pluginError);
             if (pluginError is not null || resolvedCandidate is null)
             {
@@ -431,6 +433,21 @@ internal static class ScriptCommands
         script.ConfigPath = StripPathQuotes(script.ConfigPath);
         script.LogPath = StripPathQuotes(script.LogPath);
         script.GameExe = StripPathQuotes(script.GameExe);
+    }
+
+    /// <summary>声明 self-managed-pc-launch 能力的插件（如 BAAH）：PC 客户端启动由脚本自身（含其启动器）管理——
+    /// 关闭「运行前启动游戏」并清空启动参数/等待秒数；游戏路径保留填写，用于任务失败时的强制关闭游戏。</summary>
+    private static void NormalizeSelfManagedPcLaunch(ScriptInstance script, RuntimeContext ctx)
+    {
+        if (string.IsNullOrWhiteSpace(script.PluginType)
+            || string.Equals(script.GameMode, "emulator", StringComparison.OrdinalIgnoreCase)
+            || !ctx.Plugins.HasCapability(script.PluginType, PluginCapabilityKeys.SelfManagedPcLaunch))
+        {
+            return;
+        }
+        script.LaunchGame = false;
+        script.GameArgs = "";
+        script.GameWaitSeconds = 30;
     }
 
     private static string StripPathQuotes(string value)

@@ -31,6 +31,25 @@ internal static class ConfigSwapPaths
         return Path.Combine(UserDir(scriptId, userKey), "store");
     }
 
+    /// <summary>附加配置路径的按用户快照目录：store-extra/&lt;x+声明路径短哈希&gt;。目录名与声明顺序无关，
+    /// 声明路径变化即视为新快照（首次自动采用现场），旧目录保留不自动删除。</summary>
+    public static string StoreExtraDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store-extra", ExtraKey(declaredPath));
+    }
+
+    /// <summary>附加配置路径的运行/编辑前现场备份目录（对称于主配置 work/original）；Prepare 时移入，Restore 时还原。</summary>
+    public static string OriginalExtraDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "original-extra", ExtraKey(declaredPath));
+    }
+
+    /// <summary>附加配置路径的稳定短键：x + 规范化路径的 SHA256 前 12 位。</summary>
+    public static string ExtraKey(string declaredPath)
+    {
+        return ConfigStoreMetadata.HashLocator(declaredPath)[..12].Insert(0, "x");
+    }
+
     /// <summary>用户快照元数据；记录 profile/配置定位指纹，不保存插件 profile 内容。</summary>
     public static string StoreMetadataPath(string scriptId, string userKey)
     {

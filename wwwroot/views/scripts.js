@@ -7,7 +7,7 @@ import { pagerMarkup, registerPager, replacePageOrder } from "../core/pager.js";
 import { isCurrent, state } from "../core/state.js";
 import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { hasEntityNameConflict } from "../core/entity-name.js";
-import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, withBusy } from "../core/ui.js";
+import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
@@ -26,6 +26,14 @@ function emulatorAllowed(pluginType) {
   const normalized = String(pluginType).trim().toLowerCase();
   const meta = (state.plugins || []).find(p => String(p.name || "").trim().toLowerCase() === normalized);
   return !!meta && meta.kind === "data-specialized" && meta.configuredEnabled && meta.runtimeEnabled && meta.state === "Active" && !!meta.supportsEmulator;
+}
+
+/** 声明 self-managed-pc-launch 能力的插件：PC 客户端启动由脚本自身（含启动器）完成，外部不代填启动项。 */
+function selfManagedPcLaunch(pluginType) {
+  if (!pluginType) return false;
+  const normalized = String(pluginType).trim().toLowerCase();
+  const meta = (state.plugins || []).find(p => String(p.name || "").trim().toLowerCase() === normalized);
+  return !!meta && meta.selfManagedPcLaunch === true;
 }
 
 /** 游戏配置卡：启动方式选择器（仅支持时渲染）+ ADB 地址/游戏路径按模式切换 + 启动参数 + 等待秒数。 */
@@ -47,10 +55,13 @@ function gameBoxHtml(d, emulatorOk) {
   const argsField = isEmu
     ? valueField("sm-game-args", "启动参数", d.gameArgs, "text", 'placeholder="am start 参数"', "模拟器模式下，该内容会作为 adb shell am start 参数传递。")
     : valueField("sm-game-args", "启动参数", d.gameArgs);
-  return `<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
+  const selfManagedHint = !isEmu && selfManagedPcLaunch(d.pluginType)
+    ? '<p id="sm-self-managed-hint" class="muted">PC 客户端由脚本自身启动；启动参数与等待秒数不可配置，游戏路径用于失败时强制关闭游戏。</p>'
+    : '<p id="sm-self-managed-hint" class="muted" hidden>PC 客户端由脚本自身启动；启动参数与等待秒数不可配置，游戏路径用于失败时强制关闭游戏。</p>';
+  return `${selfManagedHint}<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
 }
 
-/** 启动方式切换：更新游戏路径/ADB 地址字段的标签与提示。 */
+/** 启动方式切换：更新游戏路径/ADB 地址字段的标签与提示；self-managed-pc-launch 插件的 PC 模式禁用游戏启动项。 */
 export function changeGameMode() {
   const isEmu = $dom("#sm-mode")?.value === "emulator";
   const exe = $dom("#sm-game-exe");
@@ -66,6 +77,46 @@ export function changeGameMode() {
     pathTrigger.disabled = isEmu;
     pathTrigger.dataset.pathTitle = isEmu ? "模拟器ADB地址" : "游戏路径";
   }
+  const lockPcFields = selfManagedPcLaunch(scriptDraft?.pluginType || "") && !isEmu;
+  // self-managed-pc-launch：PC 模式下启动参数与等待秒数禁用（保留显示值）；
+  // 游戏路径保留可填写，用于任务失败时的强制关闭游戏；「启动游戏」开关先关闭再禁用。
+  // 禁用元件不再派发指针/聚焦事件，禁用提示气泡挂在外层容器上，覆盖字段原有帮助气泡。
+  const lockedHelp = "使用 PC 客户端时，禁用该选项。";
+  const argsField = $dom("#sm-game-args");
+  const waitField = $dom("#sm-game-wait");
+  const exeField = $dom("#sm-game-exe");
+  if (argsField) argsField.disabled = lockPcFields;
+  if (waitField) waitField.disabled = lockPcFields;
+  if (exeField) exeField.disabled = false;
+  setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? "模拟器模式下，该内容会作为 adb shell am start 参数传递。" : ""));
+  setFieldBubble(waitField, lockPcFields ? lockedHelp : "启动游戏后等待指定秒数，再运行脚本。");
+  const launch = $dom("#sm-launch");
+  if (launch) {
+    if (lockPcFields) {
+      // 先关闭（状态同步与 toggleSmFlag 一致），再禁用
+      launch.setAttribute("aria-pressed", "false");
+      launch.dataset.state = "off";
+      const stateText = launch.querySelector("[data-switch-state]");
+      if (stateText) stateText.textContent = "已停用";
+    }
+    launch.disabled = lockPcFields;
+    launch.setAttribute("aria-disabled", lockPcFields ? "true" : "false");
+    const launchRow = launch.closest(".switch-row");
+    if (launchRow) {
+      if (lockPcFields) launchRow.dataset.tooltip = lockedHelp;
+      else delete launchRow.dataset.tooltip;
+    }
+  }
+  const hint = $dom("#sm-self-managed-hint");
+  if (hint) hint.hidden = !lockPcFields;
+}
+
+/** 设置字段容器（.field）的帮助气泡：文本为空时移除；disabled 字段的气泡由容器承载。 */
+function setFieldBubble(field, text) {
+  const container = field?.closest(".field");
+  if (!container) return;
+  if (text) container.dataset.help = text;
+  else delete container.dataset.help;
 }
 
 function scriptCardMarkup(script) {
@@ -220,7 +271,8 @@ export async function openScriptModal(id = "", plugin = "") {
     pluginInputs: value.pluginInputs && typeof value.pluginInputs === "object" ? value.pluginInputs : {},
     mainExe: value.mainExe || "", args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
     launchGame: !!value.launchGame, gameMode: value.gameMode === "emulator" ? "emulator" : "pc", gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
-    gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: !!value.forceCloseGame,
+    // 专项脚本实例的「强制关闭」默认打开（通用脚本默认关闭）；编辑时保留用户已有设置。
+    gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: isSpecial ? (value.forceCloseGame ?? true) : !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
     totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
     successKeywords: value.successKeywords || "", failureKeywords: value.failureKeywords || "",
@@ -557,6 +609,7 @@ export async function saveScript() {
   }
   const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
   const gameMode = $dom("#sm-mode")?.value === "emulator" ? "emulator" : "pc";
+  const selfManagedPc = selfManagedPcLaunch(scriptDraft.pluginType) && gameMode !== "emulator";
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     setRequiredFieldError("sm-game-exe");
@@ -581,17 +634,18 @@ export async function saveScript() {
     pluginInputs: isSpecial ? collectPluginInputs(scriptDraft.pluginType) : {},
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
-    launchGame, gameMode, gameExe, gameArgs: $dom("#sm-game-args")?.value.trim() || "", gameWaitSeconds: +($dom("#sm-game-wait")?.value || 0) || 0,
-    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
+    launchGame: selfManagedPc ? false : launchGame, gameMode, gameExe, gameArgs: selfManagedPc ? "" : ($dom("#sm-game-args")?.value.trim() || ""), gameWaitSeconds: selfManagedPc ? 30 : (+($dom("#sm-game-wait")?.value || 0) || 0),    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
     autoUpdateConfig: isSpecial ? true : ($dom("#sm-autoupdate")?.getAttribute("aria-pressed") === "true"),
   };
   try {
-    if (payload.id) await api("PUT", "/api/scripts/" + payload.id, payload);
-    else await api("POST", "/api/scripts", payload);
+    let saved;
+    if (payload.id) saved = await api("PUT", "/api/scripts/" + payload.id, payload);
+    else saved = await api("POST", "/api/scripts", payload);
     closeModal();
     toast("脚本实例已保存");
+    applySaveValidation(saved?.validation);
     const token = state.routeToken;
     await pageScripts(token);
   } catch (error) {
@@ -601,6 +655,20 @@ export async function saveScript() {
       return;
     }
     toast(error.message, "error");
+  }
+}
+
+/** 保存脚本实例响应中的专项校验结果：角落通知提醒配置差异（通知为提醒性质，配置不被修改）。 */
+function applySaveValidation(validation) {
+  if (!validation) return;
+  if (validation.error) {
+    toast("专项插件配置校验执行失败。", "error");
+  }
+  for (const item of validation.notifications || []) {
+    pushNotice(item.title || "", item.body || "", item.kind || "info");
+  }
+  for (const item of validation.toasts || []) {
+    toast(item.message || "", item.kind || "info");
   }
 }
 

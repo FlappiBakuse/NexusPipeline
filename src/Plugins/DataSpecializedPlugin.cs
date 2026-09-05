@@ -198,6 +198,20 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         string argsTemplate = paths["args"]?.ToString() ?? "";
         string configPathTemplate = paths["configPath"]?.ToString() ?? "";
         string logPathTemplate = paths["logPath"]?.ToString() ?? "";
+        List<string> extraTemplates = new();
+        if (paths["extraConfigPaths"] is JsonArray extraList)
+        {
+            foreach (JsonNode? item in extraList)
+            {
+                string template = item?.ToString()?.Trim() ?? "";
+                if (template.Length == 0)
+                {
+                    Logger.Warn($"[插件] resolve.json extraConfigPaths 存在空条目，已跳过：{Name}");
+                    continue;
+                }
+                extraTemplates.Add(template);
+            }
+        }
         List<string> requireTemplates = new();
         if (resolve["require"] is JsonArray requireList)
         {
@@ -211,7 +225,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 requireTemplates.Add(file);
             }
         }
-        if (!ValidateTemplatePlaceholders(requireTemplates.Concat(new[] { mainExeTemplate, argsTemplate, configPathTemplate, logPathTemplate }).ToArray(), out string? templateError, out HashSet<string> referencedInputs))
+        if (!ValidateTemplatePlaceholders(requireTemplates.Concat(new[] { mainExeTemplate, argsTemplate, configPathTemplate, logPathTemplate }).Concat(extraTemplates).ToArray(), out string? templateError, out HashSet<string> referencedInputs))
         {
             Logger.Warn($"[插件] resolve.json 模板占位符无效（{templateError}），推导失败：{Name}");
             return null;
@@ -262,6 +276,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             Args = ResolveArgs(SubstituteInputs(argsTemplate, inputValues), rootPath, bindings),
             ConfigPath = ResolvePath(SubstituteInputs(configPathTemplate, inputValues), rootPath, bindings),
             LogPath = ResolvePath(SubstituteInputs(logPathTemplate, inputValues), rootPath, bindings),
+            ExtraConfigPaths = extraTemplates
+                .Select(template => ResolvePath(SubstituteInputs(template, inputValues), rootPath, bindings))
+                .ToList(),
             JudgeScriptLanguage = JudgeScriptLanguage,
             JudgeScriptPath = _judgeScriptPath,
             PluginName = Name,
@@ -347,12 +364,16 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             }
         }
         string configTemplate = resolve["paths"]?["configPath"]?.ToString() ?? "";
-        if (!TryLocateConfigInputTemplate(configTemplate, out string _, out string relativeDir, out string namePrefix, out string staticTail))
+        if (!TryLocateConfigInputTemplate(configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
             return false;
         }
+        List<PluginInputDeclaration> declarations = ParseInputDeclarations(resolve["inputs"], out _);
+        string pattern = declarations
+            .FirstOrDefault(declaration => declaration.Name.Equals(inputName, StringComparison.OrdinalIgnoreCase))
+            ?.Pattern ?? "";
         string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
-        List<string> discovered = EnumerateConfigValues(searchDirectory, namePrefix, staticTail);
+        List<string> discovered = EnumerateConfigValues(searchDirectory, namePrefix, staticTail, pattern);
         if (discovered.Count == 0)
         {
             return false;
@@ -384,11 +405,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             ? raw.Trim()
             : declaration.Default;
         string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
-        if (current.Length > 0 && File.Exists(Path.Combine(searchDirectory, namePrefix + current + staticTail)))
+        string currentTarget = Path.Combine(searchDirectory, namePrefix + current + staticTail);
+        if (current.Length > 0 && (File.Exists(currentTarget) || Directory.Exists(currentTarget)))
         {
             return null;
         }
-        List<string> candidates = EnumerateConfigValues(searchDirectory, namePrefix, staticTail);
+        List<string> candidates = EnumerateConfigValues(searchDirectory, namePrefix, staticTail, declaration.Pattern);
         if (candidates.Count != 1)
         {
             // 零个或多个候选不猜测：多个候选由复用编辑启动时列出，交由用户显式选择
@@ -428,8 +450,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         return !namePrefix.Contains('{') && !staticTail.Contains('{');
     }
 
-    /// <summary>枚举静态目录中匹配「静态前缀 + * + 静态后缀」的文件，剥离静态部分后的候选输入值。</summary>
-    private static List<string> EnumerateConfigValues(string searchDirectory, string namePrefix, string staticTail)
+    /// <summary>枚举静态目录中匹配「静态前缀 + * + 静态后缀」的文件与子目录（目录候选服务于实例目录型配置，
+    /// 如 OneDragon config/{input:instance}），剥离静态部分后的候选输入值；pattern 非空时按插件声明整串过滤。</summary>
+    private static List<string> EnumerateConfigValues(string searchDirectory, string namePrefix, string staticTail, string pattern = "")
     {
         var values = new List<string>();
         if (!Directory.Exists(searchDirectory))
@@ -440,11 +463,11 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         {
             foreach (string file in Directory.GetFiles(searchDirectory, namePrefix + "*" + staticTail))
             {
-                string fileName = Path.GetFileName(file);
-                if (fileName.Length > namePrefix.Length + staticTail.Length)
-                {
-                    values.Add(fileName[namePrefix.Length..^staticTail.Length]);
-                }
+                AddConfigCandidate(values, Path.GetFileName(file), namePrefix, staticTail, pattern);
+            }
+            foreach (string directory in Directory.GetDirectories(searchDirectory, namePrefix + "*" + staticTail))
+            {
+                AddConfigCandidate(values, Path.GetFileName(directory), namePrefix, staticTail, pattern);
             }
         }
         catch (Exception ex)
@@ -452,6 +475,24 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             Logger.Warn($"[插件] 配置候选枚举失败（{searchDirectory}）：{ex.Message}");
         }
         return values;
+    }
+
+    private static void AddConfigCandidate(List<string> values, string name, string namePrefix, string staticTail, string pattern)
+    {
+        if (name.Length <= namePrefix.Length + staticTail.Length)
+        {
+            return;
+        }
+        string candidate = name[namePrefix.Length..^staticTail.Length];
+        if (candidate.Length == 0)
+        {
+            return;
+        }
+        if (pattern.Length > 0 && !Regex.IsMatch(candidate, pattern))
+        {
+            return;
+        }
+        values.Add(candidate);
     }
 
     /// <summary>解析 resolve.json 的 inputs 声明；可选段，声明无效时返回错误原因。</summary>

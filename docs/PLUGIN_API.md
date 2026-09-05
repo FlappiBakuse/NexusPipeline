@@ -193,15 +193,17 @@ settings.sections               shell.nav
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configValidator` | 配置编辑完成后运行的可选配置校验/自修复脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
+| `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏，保存时后端同步归一化）、`execution-preview-client` |
 
 ### 配置校验脚本
 
-`configValidator` 在用户完成配置编辑并保存后执行。宿主先提交编辑结果，再以当前脚本实例用户的配置 store 作为唯一工作根目录运行脚本；取消编辑不会触发执行。脚本错误或超时会记录并通过结果反馈，已提交的配置及脚本此前写入的文件保持不变。
+`configValidator` 在两个时机执行：用户完成配置编辑并保存（trigger=`config-edit`），以及保存专项脚本实例（新建/编辑）后按绑定用户逐个执行（trigger=`script-save`）。宿主先提交编辑/保存结果，再以用户配置 store 作为主工作根目录运行脚本；取消编辑不会触发执行。脚本错误或超时会记录并通过结果反馈，已提交的配置及脚本此前写入的文件保持不变。校验结论通过 `nexus.notify` / `nexus.toast` 传回前端角落通知，当前版本的校验器只做比较与提醒，不修改配置。
 
 脚本入口可使用稳定输入 DTO `nexus.input`：
 
 ```json
 {
+  "trigger": "config-edit",
   "script": {
     "id": "...", "name": "...", "pluginType": "...", "rootPath": "...",
     "mainExe": "...", "args": "...", "configPath": "...", "logPath": "...",
@@ -210,11 +212,12 @@ settings.sections               shell.nav
     "logStallTimeoutMinutes": 0, "totalTimeoutMinutes": 0, "autoUpdateConfig": true
   },
   "user": { "userId": "...", "userName": "..." },
-  "snapshot": { "files": [{ "path": "config.json", "size": 123 }] }
+  "snapshot": { "files": [{ "path": "config.json", "size": 123 }] },
+  "extras": [{ "path": "DATA/CONFIGS/software_config.json", "files": [{ "path": "software_config.json", "size": 45 }] }]
 }
 ```
 
-可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是 store 内的相对路径；读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
+可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是 store 内的相对路径；附加配置路径的快照以 `@extra<序号>/` 前缀访问且**只读**（`writeFile` 会拒绝），对应 `input.extras[序号].path` 的用户快照。读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
 
 ## resolve.json（推导配置）
 
@@ -237,12 +240,13 @@ settings.sections               shell.nav
 }
 ```
 
-- **inputs（可选）**：用户输入变量声明，脚本实例保存用户填写值，供 paths/require 模板内联引用。`name` 必须是字母开头的字母/数字/下划线且不重复；`label`/`description` 为前端表单展示；`default` 为缺省值；`required` 表示缺失（且无 default 可回退）时推导失败；`pattern` 为可选的整串正则校验。仅声明未被模板引用的输入不参与推导。宿主对所有输入值做基线净化（禁止路径分隔符、冒号、相对路径段、通配符、花括号与控制字符），防止路径拼接越界。
+- **inputs（可选）**：用户输入变量声明，脚本实例保存用户填写值，供 paths/require 模板内联引用。`name` 必须是字母开头的字母/数字/下划线且不重复；`label`/`description` 为前端表单展示；`default` 为缺省值；`required` 表示缺失（且无 default 可回退）时推导失败；`pattern` 为可选的整串正则校验。仅声明未被模板引用的输入不参与推导。宿主对所有输入值做基线净化（禁止路径分隔符、冒号、相对路径段、通配符、花括号与控制字符），防止路径拼接越界。`configPath` 模板恰好引用一个输入且输入未提供/指向的目标不存在时，宿主枚举静态目录中匹配「静态前缀 + * + 静态后缀」的**文件与子目录**作为候选（目录候选服务于实例目录型配置），目录内唯一候选时自动绑定并跟随改名，多候选不猜测；`pattern` 同时用于枚举过滤（如实例目录名 `^\d{2}$` 可排除共享数据目录）。
 - **require**：全部满足才推导成功（替代 DLL 时代的 `File.Exists` 校验）。`file` 相对脚本根目录；`var` 将匹配到的绝对路径绑定为变量；`searchUpward: true` 时根目录找不到则逐级向上搜索（最多 4 层，March7th 管理端/执行端分离场景）。
-- **paths**：`mainExe` / `args` / `configPath` / `logPath` 四项。
+- **paths**：`mainExe` / `args` / `configPath` / `logPath` 四项，另有可选 `extraConfigPaths` 数组。
   - 占位符 `{var}` = 绑定文件绝对路径；`{rel:var}` = 相对脚本根目录的相对路径（运行时启动目标语义，同目录结果带 `.\` 前缀）。**占位符仅整体替换**：整项命中即替换为该路径，不支持路径文本内嵌入拼接（如 `C:\dir\{var}` 的模板会丢弃前缀只保留 `{var}` 解析值）；需要组合路径时请用无占位符的相对拼接。绑定占位符每项最多 1 个，且不可与 `{input:名称}` 混用。
   - 占位符 `{input:名称}` = 用户输入值**内联替换**，可与相对路径文本自由组合（如 `BAAH_CONFIGS/{input:config}`、`--config {input:config}`）；引用未声明的输入、必填输入缺失且无 default、或值未通过 pattern 校验时整体推导失败。
   - 无占位符：路径字段按相对脚本根目录拼接；`args` 原样返回（参数文本）。`logPath` 允许为空：为空表示专项脚本无专用日志文件，判定日志改由进程标准输出提供。
+  - `extraConfigPaths`（可选，宿主 v0.14.1+）：附加配置文件/文件夹路径数组（相对脚本根目录，支持 `{input:名称}`）。附加路径与主配置路径一样按用户快照隔离交换（运行前快照覆盖现场、运行后与编辑提交差异入库），但**判定脚本始终不可见**——`input.files`、`replaceConfigs` 与 config-restore 只作用于主 `configPath`。适用对象是软件级配置（如 BAAH 的 `DATA/CONFIGS/software_config.json`、BetterGI 的 `User/config.json`）。快照缺失宽容：现场也不存在时保持为空，等现场生成后自动采用。
   - `mainExe` 推导后必须存在（require 覆盖或文件真实存在），否则推导失败（前端保存被拒）。
 
 ## 判断脚本
