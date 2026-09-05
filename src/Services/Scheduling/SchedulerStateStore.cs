@@ -87,6 +87,10 @@ internal sealed class FrozenResolvedScriptSpecData
 
     public FrozenJudgeScriptData JudgeScript { get; set; } = new();
 
+    public List<string> ExtraConfigPaths { get; set; } = new();
+
+    public List<string> ConfigInputCandidates { get; set; } = new();
+
     public static FrozenResolvedScriptSpecData From(ResolvedScriptSpec spec)
     {
         return new FrozenResolvedScriptSpecData
@@ -102,6 +106,8 @@ internal sealed class FrozenResolvedScriptSpecData
                 SourcePath = spec.JudgeScript.SourcePath,
                 ContentHash = spec.JudgeScript.ContentHash,
             },
+            ExtraConfigPaths = spec.ExtraConfigPaths.ToList(),
+            ConfigInputCandidates = spec.ConfigInputCandidates.ToList(),
         };
     }
 
@@ -117,7 +123,11 @@ internal sealed class FrozenResolvedScriptSpecData
                 JudgeScript.SourcePath,
                 JudgeScript.ContentHash),
             ProfileHash,
-            Error);
+            Error)
+        {
+            ExtraConfigPaths = ExtraConfigPaths,
+            ConfigInputCandidates = ConfigInputCandidates,
+        };
     }
 }
 
@@ -141,6 +151,9 @@ internal sealed class FrozenResolvedUserData
     public string UserName { get; set; } = "";
 
     public Models.UserScriptBinding Binding { get; set; } = new();
+
+    /// <summary>按该用户 ConfigInputs 解析的专项快照；未设置输入值时为空（沿用共享 ResolvedSpec）。</summary>
+    public FrozenResolvedScriptSpecData? Spec { get; set; }
 }
 
 internal sealed class FrozenAdmissionProfileData

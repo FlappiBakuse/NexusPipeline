@@ -170,8 +170,11 @@ internal sealed class ExecutionRunner
                     {
                         Logger.Warn($"[插件] 用户运行事件发布异常：{ex.Message}");
                     }
+                    // 按用户绑定输入实例化的专项快照成功时，以其 Script（实例化后的配置路径与启动参数）运行；
+                    // 失败快照由 coordinator 的用户级检查生成失败记录。
+                    ScriptInstance userScript = runUser.Spec is { Succeeded: true } userSpec ? userSpec.Script : script;
                     session = new ExecutionCoordinator(
-                        script, exec.Mode, queueId, queueName, runUser.UserName,
+                        userScript, exec.Mode, queueId, queueName, runUser.UserName,
                         exec.Cts.Token,
                         (attempt, max) =>
                         {
@@ -183,7 +186,7 @@ internal sealed class ExecutionRunner
                         target => exec.SetPreviewTarget(target),
                         _users,
                         runUser,
-                        resolvedSpec);
+                        runUser.Spec ?? resolvedSpec);
 
                     try
                     {

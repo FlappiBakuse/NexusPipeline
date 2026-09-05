@@ -93,6 +93,24 @@ internal sealed class ExecutionCoordinator : RunSession
             record.ResultDetail = $"用户「{_userName}」不存在或已禁用";
             return record;
         }
+        if (_resolvedUser?.Spec is { Succeeded: false } userSpec)
+        {
+            // 按用户绑定输入解析的专项快照失败（如绑定的配置文件已被改名或删除）：只影响该用户，
+            // 在编辑配置中重新选择接管配置即可恢复。
+            record.Status = "failed";
+            record.EndTime = DateTime.Now;
+            record.ResultDetail = userSpec.Error ?? "脚本配置解析失败";
+            return record;
+        }
+        if (_resolvedSpec is { ConfigInputCandidates.Count: >= 2 })
+        {
+            // 接管的配置文件/实例目录尚未选定：目录型 configPath 在未定时会解析为存在的目录，
+            // 继续运行会把整个目录采用为用户快照，必须先在编辑配置中选择。
+            record.Status = "failed";
+            record.EndTime = DateTime.Now;
+            record.ResultDetail = "当前脚本目录存在多个配置，请先编辑配置选择要接管的配置";
+            return record;
+        }
         if (user is not null)
         {
             record.UserName = user.UserName;
@@ -411,6 +429,8 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         // Attempt 起点日志环境：一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
         var logEnv = new AttemptLogEnvironment(_script, modeText);
+        // 「日志无新内容」提示的展示标志：日志恢复更新后复位状态文案，避免调度卡片长期显示误导信息。
+        bool stallStatusShown = false;
 
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
@@ -731,6 +751,12 @@ internal sealed class ExecutionCoordinator : RunSession
                 if (newContent.Length > 0)
                 {
                     firstEntryAt ??= DateTime.Now;
+                    if (stallStatusShown)
+                    {
+                        // 日志恢复更新后立即清除「日志无新内容」提示，避免调度卡片误导到判定/退出才复原。
+                        stallStatusShown = false;
+                        _statusChanged?.Invoke("任务运行中");
+                    }
                     foreach (string line in newContent.Split('\n').Select(l => l.TrimEnd('\r')))
                     {
                         if (line.Trim().Length == 0)
@@ -780,6 +806,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 else if (scriptMode && newContent.Length == 0 && result is null
                     && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
                 {
+                    stallStatusShown = true;
                     _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
                     skipFinalJudge = true;
                     workers.QueueJudge(final: false);

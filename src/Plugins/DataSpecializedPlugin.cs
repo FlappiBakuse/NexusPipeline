@@ -56,6 +56,10 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     private readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>自动绑定输入的去重台账（脚本 id + 输入名 → 当前绑定值）：解析链随状态轮询高频执行，
+    /// 绑定值不变时静默，值变化（首次绑定/配置改名/增删）才记录日志。</summary>
+    private readonly Dictionary<string, string> _lastAutoBoundValues = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
     public static DataSpecializedPlugin? Load(string pluginDir)
     {
@@ -238,6 +242,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             inputDeclarations,
             inputs,
             referencedInputs) ?? inputs;
+        IReadOnlyList<string> unresolvedCandidates = DetectUnresolvedConfigCandidates(
+            configPathTemplate,
+            rootPath,
+            inputDeclarations,
+            inputs,
+            referencedInputs);
         Dictionary<string, string>? inputValues = ResolveInputValues(
             inputDeclarations,
             effectiveInputs,
@@ -283,6 +293,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             JudgeScriptPath = _judgeScriptPath,
             PluginName = Name,
             PluginVersion = Version,
+            ConfigInputCandidates = unresolvedCandidates,
         };
         if (string.IsNullOrWhiteSpace(profile.MainExe) || !File.Exists(profile.MainExe))
         {
@@ -425,14 +436,70 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             }
         }
         adopted[declaration.Name] = candidates[0];
-        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{declaration.Name}」= {candidates[0]}：{Name}");
+        LogAutoBoundOnce(rootPath, declaration.Name, candidates[0]);
         return adopted;
+    }
+
+    /// <summary>自动绑定日志按「绑定值是否变化」去重：同一脚本同一输入反复解析出相同值时不重复记录。</summary>
+    private void LogAutoBoundOnce(string rootPath, string inputName, string value)
+    {
+        string key = $"{rootPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}|{inputName}";
+        lock (_sync)
+        {
+            if (_lastAutoBoundValues.TryGetValue(key, out string? previous)
+                && string.Equals(previous, value, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            _lastAutoBoundValues[key] = value;
+        }
+        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{inputName}」= {value}：{Name}");
+    }
+
+    /// <summary>检测 configPath 模板的绑定输入是否处于「未定」状态：输入值缺失或指向的目标不存在，
+    /// 且静态目录中存在两个及以上候选。返回候选清单（已定、单候选自动绑定或零候选时为空），
+    /// 供宿主在编辑启动时要求用户选择、在运行前拒绝启动——目录型 configPath 在未定时会解析为
+    /// 存在的目录，若不做此检测会被整目录采用为用户快照。</summary>
+    private IReadOnlyList<string> DetectUnresolvedConfigCandidates(
+        string configPathTemplate,
+        string rootPath,
+        List<PluginInputDeclaration> declarations,
+        IReadOnlyDictionary<string, string>? provided,
+        HashSet<string> referencedInputs)
+    {
+        if (!TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
+        {
+            return Array.Empty<string>();
+        }
+        PluginInputDeclaration? declaration = declarations.FirstOrDefault(item => item.Name.Equals(inputName, StringComparison.OrdinalIgnoreCase));
+        if (declaration is null || !referencedInputs.Contains(declaration.Name))
+        {
+            return Array.Empty<string>();
+        }
+        string current = provided is not null && provided.TryGetValue(declaration.Name, out string? raw) && raw.Trim().Length > 0
+            ? raw.Trim()
+            : declaration.Default;
+        if (current.Length > 0)
+        {
+            string currentTarget = Path.Combine(
+                Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir),
+                namePrefix + current + staticTail);
+            if (File.Exists(currentTarget) || Directory.Exists(currentTarget))
+            {
+                return Array.Empty<string>();
+            }
+        }
+        List<string> candidates = EnumerateConfigValues(
+            Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir),
+            namePrefix,
+            staticTail,
+            declaration.Pattern);
+        return candidates.Count >= 2 ? candidates : Array.Empty<string>();
     }
 
     /// <summary>定位 configPath 模板中的唯一输入引用：返回输入名与其前后的静态目录/前缀/后缀；结构不符返回 false。</summary>
     private static bool TryLocateConfigInputTemplate(string configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail)
-    {
-        inputName = "";
+    {        inputName = "";
         relativeDir = "";
         namePrefix = "";
         staticTail = "";

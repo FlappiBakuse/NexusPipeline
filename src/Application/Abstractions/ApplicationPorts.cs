@@ -40,11 +40,12 @@ internal sealed record ExecutionQueueSnapshot(
     IReadOnlyList<ScriptInstance> Scripts,
     IReadOnlyList<NexusUser>? Users = null);
 
-/// <summary>一次执行计划中冻结的用户身份和绑定设置。</summary>
+/// <summary>一次执行计划中冻结的用户身份和绑定设置。Spec 为按该用户绑定输入解析的专项快照（通用脚本为 null）。</summary>
 internal sealed record ResolvedScriptUser(
     string UserId,
     string UserName,
-    UserScriptBinding Binding)
+    UserScriptBinding Binding,
+    ResolvedScriptSpec? Spec = null)
 {
     public string UserKey => UserId;
 }

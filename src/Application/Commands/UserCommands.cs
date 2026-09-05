@@ -863,6 +863,7 @@ internal static class UserCommands
         {
             ScriptInstanceId = scriptId.Trim(),
             Enabled = candidate.Enabled,
+            ConfigInputs = new Dictionary<string, string>(candidate.ConfigInputs ?? new(), StringComparer.OrdinalIgnoreCase),
             PreRunScript = candidate.PreRunScript.Trim(),
             PreRunOnceOnly = candidate.PreRunOnceOnly,
             PostRunScript = candidate.PostRunScript.Trim(),

@@ -53,6 +53,13 @@ internal static class ConfigEditCommands
         {
             return Validation<ConfigEditStarted>("未知的编辑方式：" + mode + "（支持 fresh / reuse / normal）");
         }
+        if (editMode == "fresh"
+            && !string.IsNullOrWhiteSpace(target.Script.PluginType)
+            && ctx.Resolve<PluginManager>().HasCapability(target.Script.PluginType, Extensibility.PluginCapabilityKeys.NoFreshConfig))
+        {
+            // 插件声明脚本没有生成全新配置文件的能力（配置由目标软件自建），全新编辑入口不可用。
+            return Validation<ConfigEditStarted>("因脚本配置限制，无法生成全新配置。请使用「复用配置文件」编辑现有配置");
+        }
         bool hasSnapshot = UserConfigManager.HasSnapshot(target.Script.Id, target.UserKey);
         if (editMode == "normal" && !hasSnapshot)
         {
@@ -62,6 +69,17 @@ internal static class ConfigEditCommands
         {
             // 快照已存在（前端状态过期或并发编辑后）：按既有快照交换流程执行，保持数据一致。
             editMode = "normal";
+        }
+        if (target.Spec is { } specForCandidates && specForCandidates.ConfigInputCandidates.Count >= 2)
+        {
+            // configPath 模板的绑定输入未定且存在多个候选（含目录型 configPath——残缺时解析为存在的
+            // 目录，直接准备会把整个目录采用为用户快照）：先让用户选定接管目标，仅选中项进入快照。
+            return OperationResult<ConfigEditStarted>.Failure(
+                new OperationError(
+                    "config_input_mismatch",
+                    "当前脚本目录存在多个配置，请先选择要接管的配置",
+                    OperationErrorKind.Validation,
+                    specForCandidates.ConfigInputCandidates.ToList()));
         }
         if (editMode == "reuse" && PathKindUtil.KindOf(target.Script.ConfigPath) == PathKind.Missing)
         {
@@ -562,22 +580,22 @@ internal static class ConfigEditCommands
         {
             return NotFound<ConfigEditTarget>($"未找到脚本实例：{scriptId}");
         }
-        ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(declaration);
+        ResolvedScriptUser? binding = ctx.Resolve<IUserRepository>()
+            .ResolveBinding(declaration, userReference);
+        if (binding is null)
+        {
+            return NotFound<ConfigEditTarget>("用户绑定不存在");
+        }
+        // 专项快照按用户绑定输入实例化：接管哪个配置文件/实例目录是用户级选择
+        ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(declaration, binding.Binding.ConfigInputs);
         if (!spec.Succeeded)
         {
             return Validation<ConfigEditTarget>(spec.Error ?? "脚本有效配置解析失败");
         }
         ScriptInstance script = spec.Script;
 
-        ResolvedScriptUser? user = ctx.Resolve<IUserRepository>()
-            .ResolveBinding(script, userReference);
-        if (user is null)
-        {
-            return NotFound<ConfigEditTarget>("用户绑定不存在");
-        }
-
         return OperationResult<ConfigEditTarget>.Ok(
-            new ConfigEditTarget(script, user, user.UserId, spec));
+            new ConfigEditTarget(script, binding, binding.UserId, spec));
     }
 
     private static string ResolveLaunchTargetExe(ScriptInstance script)

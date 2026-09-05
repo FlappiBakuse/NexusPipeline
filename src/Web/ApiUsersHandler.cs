@@ -488,12 +488,16 @@ internal static class ApiUsersHandler
 
         public int MaxSuccessfulRunsPerDay { get; set; } = -1;
 
+        /// <summary>用户级专项插件输入值（如 BetterGI 一条龙配置名、ZZZ 实例序号）；解析时优先于脚本实例的 pluginInputs。</summary>
+        public Dictionary<string, string>? ConfigInputs { get; set; }
+
         public UserScriptBinding ToBinding()
         {
             return new UserScriptBinding
             {
                 ScriptInstanceId = ScriptInstanceId.Trim(),
                 Enabled = Enabled,
+                ConfigInputs = new Dictionary<string, string>(ConfigInputs ?? new(), StringComparer.OrdinalIgnoreCase),
                 PreRunScript = PreRunScript.Trim(),
                 PreRunOnceOnly = PreRunOnceOnly,
                 PostRunScript = PostRunScript.Trim(),

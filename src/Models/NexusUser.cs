@@ -36,6 +36,13 @@ public class UserScriptBinding
 {
     public string ScriptInstanceId { get; set; } = "";
 
+    /// <summary>
+    /// 用户级专项插件输入值（输入名 → 值，如 BetterGI 的「一条龙配置名」、ZZZ 的「实例序号」）。
+    /// 接管的配置文件/实例目录属于用户选择，保存在绑定上而非脚本实例：多用户共享同一脚本实例时
+    /// 各自接管各自选定的配置，快照交换按用户隔离。解析时优先于脚本实例的 pluginInputs。
+    /// </summary>
+    public Dictionary<string, string> ConfigInputs { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>是否参与该脚本的运行。</summary>
     public bool Enabled { get; set; } = true;
 
@@ -71,6 +78,7 @@ public class UserScriptBinding
         {
             ScriptInstanceId = ScriptInstanceId,
             Enabled = Enabled,
+            ConfigInputs = new Dictionary<string, string>(ConfigInputs, StringComparer.OrdinalIgnoreCase),
             PreRunScript = PreRunScript,
             PreRunOnceOnly = PreRunOnceOnly,
             PostRunScript = PostRunScript,

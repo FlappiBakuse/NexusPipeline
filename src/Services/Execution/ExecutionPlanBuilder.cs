@@ -78,7 +78,7 @@ internal sealed class ExecutionPlanBuilder
         }
 
         _validator.ValidateScriptStart(script, userName);
-        IReadOnlyList<ResolvedScriptUser> resolvedUsers = _users.ResolveEnabledBindings(script, executionSnapshot?.Users);
+        IReadOnlyList<ResolvedScriptUser> resolvedUsers = ResolveUsersWithSpecs(script, _users.ResolveEnabledBindings(script, executionSnapshot?.Users));
         ResolvedScriptUser? resolvedSingle = string.IsNullOrWhiteSpace(userName)
             ? null
             : _users.ResolveEnabledBinding(script, userName, executionSnapshot?.Users);
@@ -86,7 +86,7 @@ internal sealed class ExecutionPlanBuilder
         {
             resolvedUsers = resolvedSingle is null
                 ? Array.Empty<ResolvedScriptUser>()
-                : new[] { resolvedSingle };
+                : new[] { ResolveUsersWithSpecs(script, new[] { resolvedSingle })[0] };
         }
         List<string> users = string.IsNullOrWhiteSpace(userName)
             ? resolvedUsers.Select(item => item.UserName).ToList()
@@ -125,7 +125,10 @@ internal sealed class ExecutionPlanBuilder
                 item.ResolvedUsers.Select(user => new ResolvedScriptUser(
                     user.UserId,
                     user.UserName,
-                    user.Binding.Clone())).ToList(),
+                    user.Binding.Clone(),
+                    user.Spec is null || item.Script is null
+                        ? null
+                        : user.Spec.ToRuntime(item.Script.Clone()))).ToList(),
                 item.Script is null || item.ResolvedSpec is null
                     ? null
                     : item.ResolvedSpec.ToRuntime(item.Script.Clone())))
@@ -154,6 +157,7 @@ internal sealed class ExecutionPlanBuilder
                     UserId = user.UserId,
                     UserName = user.UserName,
                     Binding = user.Binding.Clone(),
+                    Spec = user.Spec is null ? null : FrozenResolvedScriptSpecData.From(user.Spec),
                 }).ToList() ?? new List<FrozenResolvedUserData>(),
                 ResolvedSpec = task.ResolvedSpec is null
                     ? null
@@ -262,7 +266,7 @@ internal sealed class ExecutionPlanBuilder
                 ScriptInstance? script = scripts.FirstOrDefault(item => item.Id == task.ScriptInstanceId)?.Clone();
                 IReadOnlyList<ResolvedScriptUser> resolvedUsers = script is null
                     ? Array.Empty<ResolvedScriptUser>()
-                    : _users.ResolveEnabledBindings(script, executionSnapshot?.Users);
+                    : ResolveUsersWithSpecs(script, _users.ResolveEnabledBindings(script, executionSnapshot?.Users));
                 resolvedSpecs.TryGetValue(task.ScriptInstanceId, out ResolvedScriptSpec? resolvedSpec);
                 return new PlannedQueueTask(
                     CloneTask(task),
@@ -313,6 +317,32 @@ internal sealed class ExecutionPlanBuilder
             }
         }
         return resolved;
+    }
+
+    /// <summary>
+    /// 为绑定用户附加按其 ConfigInputs 解析的专项快照：接管哪个配置文件/实例目录属于用户选择，
+    /// 同一脚本实例的不同用户可指向不同配置位置。绑定未设置输入值时保持 null，沿用共享快照。
+    /// 解析失败保留为失败快照（coordinator 生成该用户的失败记录），不影响计划内其他用户。
+    /// </summary>
+    private ResolvedScriptUser ResolveUserWithSpec(ScriptInstance script, ResolvedScriptUser user)
+    {
+        if (_specs is null
+            || string.IsNullOrWhiteSpace(script.PluginType)
+            || user.Binding.ConfigInputs.Count == 0)
+        {
+            return user;
+        }
+        // 解析失败保留为失败快照（coordinator 生成该用户的失败记录），不影响计划内其他用户
+        return user with { Spec = _specs.Resolve(script, user.Binding.ConfigInputs) };
+    }
+
+    private IReadOnlyList<ResolvedScriptUser> ResolveUsersWithSpecs(ScriptInstance script, IReadOnlyList<ResolvedScriptUser> users)
+    {
+        if (_specs is null || string.IsNullOrWhiteSpace(script.PluginType) || users.Count == 0)
+        {
+            return users;
+        }
+        return users.Select(user => ResolveUserWithSpec(script, user)).ToList();
     }
 
     private static QueueTask CloneTask(QueueTask task)

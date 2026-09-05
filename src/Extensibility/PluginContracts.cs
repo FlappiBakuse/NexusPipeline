@@ -38,6 +38,10 @@ internal static class PluginCapabilityKeys
 
     /// <summary>PC 客户端启动由脚本自身（含其启动器）管理：外部不代填游戏路径/启动参数/等待秒数。</summary>
     public const string SelfManagedPcLaunch = "self-managed-pc-launch";
+
+    /// <summary>声明 no-fresh-config 能力：脚本没有生成全新配置文件的能力（配置由目标软件自建），
+    /// 首次编辑配置时禁用「全新配置文件」入口，仅允许复用现有配置。</summary>
+    public const string NoFreshConfig = "no-fresh-config";
 }
 
 /// <summary>专项插件按当前插件文件推导出的运行时配置快照。</summary>
@@ -65,4 +69,11 @@ internal sealed class ScriptProfile
     public string PluginName { get; set; } = "";
 
     public string PluginVersion { get; set; } = "";
+
+    /// <summary>
+    /// configPath 模板引用的输入未定时可绑定的候选清单（输入值缺失或指向的目标不存在，且目录内存在
+    /// 两个及以上候选；单候选已被自动绑定，零候选保持空）：宿主据此在配置编辑启动时要求用户选择、
+    /// 在运行前拒绝启动，避免把残缺的目录型 configPath 整目录采用为快照。
+    /// </summary>
+    public IReadOnlyList<string> ConfigInputCandidates { get; set; } = Array.Empty<string>();
 }

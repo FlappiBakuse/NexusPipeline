@@ -504,6 +504,8 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .first-edit-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .chooser-card { display: block; width: 100%; min-height: 64px; margin-left: 0; padding: 14px 16px; border: 1px solid var(--content-card-border); border-radius: 8px; background: var(--content-card-soft); color: var(--text); text-align: left; box-shadow: none; }
 .chooser-card:hover { background: var(--content-card-hover); }
+.chooser-card:disabled { opacity: .5; cursor: not-allowed; }
+.chooser-card:disabled:hover { background: var(--content-card-soft); }
 .chooser-card strong { display: block; font-size: 14px; line-height: 1.4; }
 .chooser-card .muted { display: block; margin-top: 5px; font-size: 12px; line-height: 1.45; }
 .script-grid { display: flex; flex-direction: column; gap: 0; }

@@ -287,8 +287,7 @@ export async function openScriptModal(id = "", plugin = "") {
   const body = isSpecial
     ? `<div class="form-grid">
       ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"', "", "", `由专用插件「${pluginDisplayName(pluginType, state.plugins || [])}」自动适配脚本主程序、自启动参数、配置文件与日志路径。`)}
-      ${pluginInputFields(pluginType, d)}
+      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"', "", "", `由专用插件「${pluginDisplayName(pluginType, state.plugins || [])}」自动适配脚本主程序、自启动参数、配置文件与日志路径。接管哪个配置文件/实例目录由各用户在「编辑配置」时选择。`)}
     </div>
     <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
       <div class="toggle-grid switch-grid">
@@ -365,53 +364,20 @@ export async function openScriptModal(id = "", plugin = "") {
     if (isSpecial && event.target.value.trim()) probeSpecialRoot(event.target.value.trim(), pluginType);
   });
   rootInput?.addEventListener("keyup", syncScriptGhostState);
-  // 插件输入变化时（已填根目录的前提下）重新推导，及时暴露输入校验错误
-  for (const item of pluginInputsMeta(pluginType)) {
-    const element = item?.name ? $dom("#sm-input-" + CSS.escape(item.name)) : null;
-    element?.addEventListener("change", () => {
-      const root = $dom("#sm-root")?.value.trim();
-      if (isSpecial && root) probeSpecialRoot(root, pluginType);
-    });
-  }
 }
 
 async function probeSpecialRoot(rootPath, pluginType) {
   try {
-    await api("POST", "/api/scripts/probe", { rootPath, pluginType, inputs: collectPluginInputs(pluginType) });
+    await api("POST", "/api/scripts/probe", { rootPath, pluginType, inputs: {} });
   } catch (error) {
     toast("无法从该根目录推导专项配置：" + error.message, "error");
   }
 }
 
-/** 专项插件 resolve.json 声明的用户输入变量清单（managed-code 与旧版插件为空数组）。 */
-function pluginInputsMeta(pluginType) {
-  const meta = (state.plugins || []).find(p => p.name === pluginType);
-  return Array.isArray(meta?.inputs) ? meta.inputs : [];
-}
-
-/** 按插件声明渲染用户输入字段；已有值优先于声明 default。 */
-function pluginInputFields(pluginType, draft) {
-  const inputs = pluginInputsMeta(pluginType);
-  if (inputs.length === 0) return "";
-  return inputs.map(item => {
-    const name = String(item.name || "");
-    if (!name) return "";
-    const label = `${esc(item.label || name)}${item.required ? " <span class='req'>*</span>" : ""}`;
-    const value = draft.pluginInputs?.[name] ?? item.default ?? "";
-    return valueField("sm-input-" + name, label, value, "text", `placeholder="${esc(item.label || name)}"`, esc(item.description || ""));
-  }).join("");
-}
-
-/** 收集专项弹窗内全部用户输入字段的当前值（name → value；空值省略，交由插件 default 回退）。 */
-function collectPluginInputs(pluginType) {
-  const values = {};
-  for (const item of pluginInputsMeta(pluginType)) {
-    const name = String(item.name || "");
-    if (!name) continue;
-    const raw = $dom("#sm-input-" + CSS.escape(name))?.value?.trim() ?? "";
-    if (raw) values[name] = raw;
-  }
-  return values;
+/** 收集编辑弹窗携带的既有输入值：用户级接管配置（configInputs）落地后，实例表单不再渲染输入字段，
+ *  编辑既有实例时原样回传持久化值，避免整表替换丢失。 */
+function collectPluginInputs() {
+  return scriptDraft.pluginInputs && typeof scriptDraft.pluginInputs === "object" ? { ...scriptDraft.pluginInputs } : {};
 }
 
 export function syncScriptGhostState() {
@@ -631,7 +597,7 @@ export async function saveScript() {
   }
   const payload = {
     id: scriptDraft.id, pluginType: scriptDraft.pluginType || "", name, rootPath: stripQuotes($dom("#sm-root")?.value),
-    pluginInputs: isSpecial ? collectPluginInputs(scriptDraft.pluginType) : {},
+    pluginInputs: isSpecial ? collectPluginInputs() : {},
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
     launchGame: selfManagedPc ? false : launchGame, gameMode, gameExe, gameArgs: selfManagedPc ? "" : ($dom("#sm-game-args")?.value.trim() || ""), gameWaitSeconds: selfManagedPc ? 30 : (+($dom("#sm-game-wait")?.value || 0) || 0),    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,

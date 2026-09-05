@@ -339,11 +339,23 @@ export async function editGlobalUserConfig(userId, scriptId) {
   }
 }
 
+/** 专项插件是否声明脚本没有生成全新配置文件的能力（no-fresh-config）。 */
+function pluginLacksFreshConfig(scriptId) {
+  const script = (state.scripts || []).find(item => item.id === scriptId);
+  const meta = (state.plugins || []).find(item => item.name === script?.pluginType);
+  return !!meta?.noFreshConfig;
+}
+
 function openFirstEditConfigChooser(userId, scriptId) {
+  const freshDisabled = pluginLacksFreshConfig(scriptId);
+  const freshCard = freshDisabled
+    ? '<button type="button" class="chooser-card" disabled>' +
+      '<strong>全新配置文件</strong><span class="muted">因脚本配置限制，无法生成全新配置。</span></button>'
+    : '<button type="button" class="chooser-card" data-action="first-edit-config-fresh" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
+      '<strong>全新配置文件</strong><span class="muted">由脚本生成全新配置</span></button>';
   const body = '<p class="modal-copy">这是你第一次编辑该脚本实例的配置文件，请选择编辑方式：</p>' +
     '<div class="first-edit-chooser">' +
-    '<button type="button" class="chooser-card" data-action="first-edit-config-fresh" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
-    '<strong>全新配置文件</strong><span class="muted">由脚本生成全新配置</span></button>' +
+    freshCard +
     '<button type="button" class="chooser-card" data-action="first-edit-config-reuse" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
     '<strong>复用配置文件</strong><span class="muted">直接编辑现有配置文件</span></button>' +
     '</div>';
@@ -366,15 +378,15 @@ async function startEditConfig(userId, scriptId, mode) {
   showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || "脚本实例", mode);
 }
 
-/** 复用编辑绑定修正：实例配置名与现场文件不一致时，列出实际存在的配置文件供用户显式采用。 */
+/** 复用编辑绑定修正：现场存在多个配置文件时，列出实际存在的配置供用户选定接管目标（写入用户绑定）。 */
 function openConfigCandidateChooser(userId, scriptId, mode, candidates) {
   const cards = candidates.map(candidate =>
     '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '">' +
-    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">采用后按此配置继续复用编辑</span></button>').join("");
-  const body = '<p class="modal-copy">当前脚本实例存在多个配置文件。请选择要复用的配置文件：采用后配置将更新为它，并继续本次复用编辑。</p>' +
+    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">采用后仅该配置写入快照并继续编辑</span></button>').join("");
+  const body = '<p class="modal-copy">当前脚本目录存在多个配置文件。请选择要接管的配置文件：仅选中的配置写入你的快照，其他文件保持原样。</p>' +
     '<div class="first-edit-chooser">' + cards + '</div>';
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("选择要复用的配置文件", body, footer), false, true, true);
+  showModal(modalShell("选择要接管的配置文件", body, footer), false, true, true);
 }
 
 /** 专项插件声明的配置名输入：唯一必填输入优先，其余取唯一输入；无法确定返回空。 */
@@ -391,17 +403,19 @@ async function adoptConfigCandidate(target) {
   const mode = target.dataset.mode;
   const candidate = target.dataset.candidate;
   try {
+    const user = userById(userId);
+    const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
     const script = await api("GET", "/api/scripts/" + encodeURIComponent(scriptId));
     const inputName = configInputName(script?.pluginType || "");
     if (!inputName) {
-      toast("无法确定配置名输入项，请在脚本编辑中手动更新配置名后重试", "error");
+      toast("无法确定配置名输入项，请检查插件声明后重试", "error");
       return;
     }
-    const pluginInputs = script?.pluginInputs && typeof script.pluginInputs === "object" ? { ...script.pluginInputs } : {};
-    pluginInputs[inputName] = candidate;
-    await api("PUT", "/api/scripts/" + encodeURIComponent(scriptId), { ...script, pluginInputs });
+    const configInputs = binding?.configInputs && typeof binding.configInputs === "object" ? { ...binding.configInputs } : {};
+    configInputs[inputName] = candidate;
+    await api("PUT", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId), { ...binding, configInputs });
     closeModal();
-    toast("配置名已更新为「" + candidate + "」");
+    toast("已选择接管配置「" + candidate + "」");
     await startEditConfig(userId, scriptId, mode);
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {

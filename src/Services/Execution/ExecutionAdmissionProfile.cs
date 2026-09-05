@@ -362,6 +362,16 @@ internal static class ExecutionResourceSetBuilder
                         foreach (ResolvedScriptUser user in resolvedUsers)
                         {
                             userDataKeys.Add($"user:{normalizedScriptId}:{user.UserKey}");
+                            // 用户级接管配置路径并入资源锁：不同用户可绑定不同配置文件/实例目录
+                            if (user.Spec is { Succeeded: true } userSpec
+                                && !string.IsNullOrWhiteSpace(userSpec.Script.ConfigPath))
+                            {
+                                string userConfigPath = NormalizePath(userSpec.Script.ConfigPath);
+                                if (userConfigPath.Length > 0)
+                                {
+                                    configPaths.Add(userConfigPath);
+                                }
+                            }
                         }
                     }
                     else if (item.UserNames is not null)

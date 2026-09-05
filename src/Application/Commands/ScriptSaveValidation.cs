@@ -24,8 +24,8 @@ internal static class ScriptSaveValidation
             {
                 return null;
             }
-            ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(script);
-            if (!spec.Succeeded || spec.ConfigValidator is null)
+            ResolvedScriptSpec sharedSpec = ctx.Resolve<ScriptSpecResolver>().Resolve(script);
+            if (!sharedSpec.Succeeded || sharedSpec.ConfigValidator is null)
             {
                 return null;
             }
@@ -46,8 +46,17 @@ internal static class ScriptSaveValidation
             HashSet<string> notificationKeys = new(StringComparer.Ordinal);
             string? error = null;
             bool ran = false;
+            ScriptSpecResolver resolver = ctx.Resolve<ScriptSpecResolver>();
             foreach (ResolvedScriptUser user in targets)
             {
+                // 按用户绑定输入实例化校验语境：接管配置是用户级选择
+                ResolvedScriptSpec spec = user.Binding.ConfigInputs.Count == 0
+                    ? sharedSpec
+                    : resolver.Resolve(script, user.Binding.ConfigInputs);
+                if (!spec.Succeeded || spec.ConfigValidator is null)
+                {
+                    continue;
+                }
                 // 主配置快照尚未初始化（从未运行/编辑）时无可比较内容，跳过该用户避免误报。
                 if (!UserConfigManager.HasSnapshot(script.Id, user.UserId))
                 {
@@ -55,7 +64,7 @@ internal static class ScriptSaveValidation
                 }
                 ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
                     spec.ConfigValidator,
-                    script,
+                    spec.Script,
                     user,
                     UserConfigManager.StoreDir(script.Id, user.UserId),
                     "script-save",

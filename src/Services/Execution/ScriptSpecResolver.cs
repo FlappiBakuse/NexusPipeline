@@ -32,6 +32,9 @@ internal sealed record ResolvedScriptSpec(
     /// <summary>专项插件的附加配置路径（extraConfigPaths）；通用脚本为空。仅参与按用户快照交换与校验器只读。</summary>
     public IReadOnlyList<string> ExtraConfigPaths { get; init; } = Array.Empty<string>();
 
+    /// <summary>configPath 模板的绑定输入处于未定状态时的候选清单：编辑启动要求用户选择、运行前拒绝启动。</summary>
+    public IReadOnlyList<string> ConfigInputCandidates { get; init; } = Array.Empty<string>();
+
     public bool Succeeded => string.IsNullOrWhiteSpace(Error);
 }
 
@@ -58,7 +61,11 @@ internal sealed class ScriptSpecResolver
         _plugins = plugins;
     }
 
-    public ResolvedScriptSpec Resolve(ScriptInstance declaration)
+    /// <summary>
+    /// 解析脚本声明。inputOverrides 为用户级输入值（UserScriptBinding.ConfigInputs），
+    /// 优先于脚本实例持久化的 PluginInputs；通用脚本忽略该参数。
+    /// </summary>
+    public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null)
     {
         ScriptInstance script = declaration.Clone();
         if (string.IsNullOrWhiteSpace(script.PluginType))
@@ -72,7 +79,24 @@ internal sealed class ScriptSpecResolver
             return Failed(script, unavailable, "");
         }
 
-        ScriptProfile? profile = _capabilities.ResolveProfile(script.PluginType.Trim(), script.RootPath.Trim(), script.PluginInputs);
+        var inputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (script.PluginInputs is not null)
+        {
+            foreach (KeyValuePair<string, string> item in script.PluginInputs)
+            {
+                inputs[item.Key] = item.Value;
+            }
+        }
+        if (inputOverrides is not null)
+        {
+            foreach (KeyValuePair<string, string> item in inputOverrides)
+            {
+                inputs[item.Key] = item.Value;
+            }
+        }
+        script.PluginInputs = inputs;
+
+        ScriptProfile? profile = _capabilities.ResolveProfile(script.PluginType.Trim(), script.RootPath.Trim(), inputs);
         if (profile is null)
         {
             return Failed(
@@ -106,6 +130,7 @@ internal sealed class ScriptSpecResolver
             ConfigValidator: ResolveConfigValidator(script.PluginType))
         {
             ExtraConfigPaths = profile.ExtraConfigPaths,
+            ConfigInputCandidates = profile.ConfigInputCandidates,
         };
     }
 
