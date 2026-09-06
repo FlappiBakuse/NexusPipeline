@@ -698,7 +698,7 @@ internal static class SystemActions
                 stableSeconds);
         }
 
-        // 兼容无法捕获身份的旧会话；该路径保留原有安全稳定窗口。
+        // 无法建立或捕获进程所有权时的保守身份回退路径；该路径保留稳定退出窗口。
         return KillOwnedProcessTree(
             ownership,
             rootPid,

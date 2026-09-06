@@ -183,7 +183,7 @@ internal sealed class ScriptStorage
 
     private void LoadGenericJudgeScript(ScriptInstance script)
     {
-        // JudgeScript 不再作为 scripts.json 的内嵌旧格式来源；仅加载当前独立资产。
+        // 判断脚本正文使用独立资产文件；scripts.json 只保留当前记录。
         script.JudgeScript = "";
         string language = JudgeScriptStore.NormalizeLanguage(script.JudgeScriptLanguage);
         string? source = JudgeScripts.Load(script.Id, language);

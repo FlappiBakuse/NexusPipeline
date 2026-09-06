@@ -214,6 +214,8 @@ public sealed class ConfigInputsPerUserTests
     {
         public bool SupportsEmulator(string pluginName) => false;
 
+        public bool HasCapability(string pluginName, string capabilityKey) => false;
+
         public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null)
         {
             return string.Equals(pluginName, plugin.Name, StringComparison.OrdinalIgnoreCase)

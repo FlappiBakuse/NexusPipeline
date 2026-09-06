@@ -32,7 +32,6 @@ internal sealed class ConfigSwapRecovery
     /// <summary>操作前自愈：若存在未完成的交换标记且缓存区有内容，先完成还原（安全优先：原配置必还原）。失败交由后台重试。</summary>
     public void RecoverIfNeeded(string scriptId, string userName, string configPath)
     {
-        ConfigStoreMetadata.RecoverRebind(scriptId, userName);
         ConfigStoreTransactionRecovery.Recover(scriptId, userName);
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark is null)
@@ -46,6 +45,10 @@ internal sealed class ConfigSwapRecovery
             if (EditConfigIsolation.HasResidue(scriptId, userName))
             {
                 throw new IOException($"配置编辑隔离区缺少可验证会话标记，已保留现场，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            }
+            if (ExtraConfigSync.HasResidue(scriptId, userName))
+            {
+                throw new IOException($"附加配置恢复现场缺少可验证会话标记，已保留现场，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
             }
             return;
         }
@@ -99,7 +102,6 @@ internal sealed class ConfigSwapRecovery
         try
         {
             Dictionary<string, HashSet<string>> userKeysByScript = BuildRecoveryUserKeys(users);
-            RecoverStoreTransactions(userKeysByScript);
             if (!Directory.Exists(AppPaths.DataDir))
             {
                 return;
@@ -125,7 +127,6 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>恢复当前格式的增量快照事务。</summary>
     private Dictionary<string, HashSet<string>> BuildRecoveryUserKeys(IReadOnlyList<NexusUser>? users)
     {
         IEnumerable<NexusUser> source = users ?? _snapshotUsers();
@@ -153,41 +154,6 @@ internal sealed class ConfigSwapRecovery
         return result;
     }
 
-    private void RecoverStoreTransactions(IReadOnlyDictionary<string, HashSet<string>> userKeysByScript)
-    {
-        if (!Directory.Exists(AppPaths.DataDir))
-        {
-            return;
-        }
-        foreach (string scriptDir in Directory.GetDirectories(AppPaths.DataDir))
-        {
-            string scriptId = Path.GetFileName(scriptDir);
-            var allowedDirectories = new List<string> { scriptDir };
-            if (userKeysByScript.TryGetValue(scriptId, out HashSet<string>? userKeys))
-            {
-                allowedDirectories.AddRange(userKeys.Select(userKey => Path.Combine(scriptDir, userKey)));
-            }
-            foreach (string allowedDirectory in allowedDirectories.Where(Directory.Exists))
-            {
-                if (string.Equals(allowedDirectory, scriptDir, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                string userKey = Path.GetFileName(allowedDirectory);
-                try
-                {
-                    ConfigStoreMetadata.RecoverRebind(scriptId, userKey);
-                    ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
-                    ExtraConfigStoreTransaction.RecoverAll(scriptId, userKey);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"[警告] 恢复用户配置快照事务失败（{allowedDirectory}）：{ex.Message}");
-                }
-            }
-        }
-    }
-
     /* ---------------- 延迟恢复重试（崩溃后脚本孤儿进程退出后自动还原） ---------------- */
 
     private readonly List<(string ScriptId, string? UserName)> _pendingRecovers = new();
@@ -201,17 +167,12 @@ internal sealed class ConfigSwapRecovery
     {
         // 脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
-        bool hasUntrackedExtraResidue = !string.IsNullOrWhiteSpace(userName)
-            && ExtraConfigSync.HasUntrackedResidue(scriptId, userName);
-        if (hasUntrackedExtraResidue && !HasSessionMarkFiles(scriptId, userName!))
-        {
-            // 旧版本只保存 extra hash，没有足够信息证明现场归属；保留目录并明确告警，不能猜测恢复。
-            Logger.Warn($"[恢复] 检测到没有当前会话清单可解释的附加配置现场，保留等待人工核查：脚本 {scriptId} / 用户 {userName}");
-        }
+        bool hasExtraResidue = !string.IsNullOrWhiteSpace(userName)
+            && ExtraConfigSync.HasResidue(scriptId, userName);
         bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
             || (!string.IsNullOrWhiteSpace(userName)
                 && (HasSessionMarkFiles(scriptId, userName)
-                    || hasUntrackedExtraResidue
+                    || hasExtraResidue
                     || EditConfigIsolation.HasResidue(scriptId, userName)
                     || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName)));
         if (!string.IsNullOrWhiteSpace(userName)
@@ -225,10 +186,10 @@ internal sealed class ConfigSwapRecovery
         }
         if (!string.IsNullOrWhiteSpace(userName)
             && !HasSessionMarkFiles(scriptId, userName)
-            && EditConfigIsolation.HasResidue(scriptId, userName))
+            && (EditConfigIsolation.HasResidue(scriptId, userName) || hasExtraResidue))
         {
-            // edit-isolation 的项目名只由会话标记解释；无标记时不能把它猜作当前 config 的兄弟项。
-            Logger.Error($"[错误] 配置编辑隔离区缺少会话清单，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            // 事务现场只能由当前会话清单解释；无标记时不能猜测其原始配置路径或形态。
+            Logger.Error($"[错误] 配置编辑现场缺少会话清单，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
             EnqueuePendingRecover(scriptId, userName);
             return false;
         }
@@ -248,7 +209,6 @@ internal sealed class ConfigSwapRecovery
             ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
             if (mark is not null)
             {
-                RestoreHiddenQuiet(scriptId, userName, mark.ConfigPath);
                 string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
                 if (!Directory.Exists(cache) || !Directory.EnumerateFileSystemEntries(cache).Any())
                 {
@@ -362,65 +322,6 @@ internal sealed class ConfigSwapRecovery
         {
             Audit.Log(Audit.System, "启动恢复配置替换失败", $"脚本 {scriptId}：{ex.Message}");
             return false;
-        }
-    }
-
-    /// <summary>恢复 v0.14.3 编辑现场（幂等）：把 edit-hidden 中的文件或目录移回配置父目录。</summary>
-    private void RestoreHiddenQuiet(string scriptId, string userName, string configPath)
-    {
-        string hideDir = ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
-        if (!Directory.Exists(hideDir) || !Directory.EnumerateFileSystemEntries(hideDir).Any())
-        {
-            return;
-        }
-        string? dir = Path.GetDirectoryName(configPath);
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Logger.Warn($"[恢复] 重建配置目录失败：配置路径没有父目录（{configPath}），隐藏文件保持原样");
-            return;
-        }
-        try
-        {
-            Directory.CreateDirectory(dir);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[恢复] 重建配置目录失败（{dir}）：{ex.Message}");
-            return;
-        }
-        foreach (string file in Directory.GetFileSystemEntries(hideDir))
-        {
-            try
-            {
-                string destination = Path.Combine(dir, Path.GetFileName(file));
-                if (File.Exists(destination) || Directory.Exists(destination))
-                {
-                    Logger.Warn($"[恢复] 隐藏配置与现有文件冲突，保留隐藏副本：{destination}");
-                    continue;
-                }
-                if (File.Exists(file))
-                {
-                    File.Move(file, destination);
-                }
-                else if (Directory.Exists(file))
-                {
-                    Directory.Move(file, destination);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[恢复] 恢复隐藏配置失败（保持原样）：{file}（{ex.Message}）");
-            }
-        }
-        try
-        {
-            if (Directory.Exists(hideDir) && !Directory.EnumerateFileSystemEntries(hideDir).Any())
-            {
-                Directory.Delete(hideDir);
-            }
-        }
-        catch (Exception)
-        {
         }
     }
 

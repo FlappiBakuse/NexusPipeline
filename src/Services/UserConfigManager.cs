@@ -96,7 +96,6 @@ internal static class UserConfigManager
                     throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)}");
                 }
                 string store = StoreDir(scriptId, userName);
-                ConfigStoreMetadata.RecoverRebind(scriptId, userName);
                 PathKind currentConfigKind = PathKindUtil.KindOf(configPath);
                 ConfigStoreMetadata expectedMetadata = ConfigStoreMetadata.For(configPath, metadata);
                 bool hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
@@ -115,9 +114,11 @@ internal static class UserConfigManager
                     {
                         throw new IOException($"配置路径已变更但新位置不存在：{configPath}；旧配置快照已保留，未自动复用");
                     }
-                    // 配置定位发生变化：旧快照先进入一次性重绑定隔离区，新位置成功物化后才清理。
-                    ConfigStoreMetadata.RebindStore(scriptId, userName, configPath, expectedMetadata);
-                    hasStore = true;
+                    // 配置定位或形态发生变化时按当前现场重新建立快照；当前 pre-release 数据协议不跨契约搬运旧快照。
+                    ConfigSwapPrimitives.ClearPath(store, PathKindUtil.KindOf(store));
+                    ConfigSwapPrimitives.CopyAs(configPath, store, PathKind.Dir);
+                    hasStore = Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any();
+                    Audit.Log(Audit.System, "按当前配置重新建立快照", $"脚本 {scriptId} / 用户 {userName}：{configPath} → {store}");
                 }
                 if (!hasStore && currentConfigKind != PathKind.Missing)
                 {
@@ -129,7 +130,6 @@ internal static class UserConfigManager
                 if (hasStore)
                 {
                     ConfigStoreMetadata.Save(scriptId, userName, expectedMetadata);
-                    ConfigStoreMetadata.CleanupRebindIfMatches(scriptId, userName, expectedMetadata);
                 }
                 List<string> declaredExtraPaths = metadata?.ExtraConfigPaths?
                     .Select(item => item.Path)
@@ -139,17 +139,11 @@ internal static class UserConfigManager
                 {
                     declaredExtraPaths = extraConfigPaths.ToList();
                 }
-                if (declaredExtraPaths.Count > 0)
+                if (ExtraConfigSync.HasResidue(scriptId, userName))
                 {
-                    // 旧版本没有 .session 时，仅按形态 sidecar 恢复 legacy original-extra；
-                    // 没有可靠证明的现场由新会话标记捕获为阻断状态，不参与猜测。
-                    ExtraConfigSync.RestoreAll(scriptId, userName, declaredExtraPaths);
-                    if (ExtraConfigSync.HasUntrackedResidue(scriptId, userName))
-                    {
-                        throw new IOException($"附加配置存在无法由当前会话解释的恢复现场，已保留并阻断运行：{ConfigSwapPaths.OriginalExtraRoot(scriptId, userName)}");
-                    }
+                    throw new IOException($"附加配置存在无法由当前会话解释的恢复现场，已保留并阻断运行：{ConfigSwapPaths.OriginalExtraRoot(scriptId, userName)}");
                 }
-                // 在所有 legacy 恢复完成后捕获形态，确保 .session 冻结的是本次会话真正要移动的现场。
+                // 在当前恢复流程完成后捕获形态，确保 .session 冻结的是本次会话真正要移动的现场。
                 List<ConfigSessionExtraPath> frozenExtraPaths = ConfigSessionMark.FromExtraPaths(declaredExtraPaths);
                 var mark = new ConfigSessionMark
                 {
@@ -265,7 +259,10 @@ internal static class UserConfigManager
                 ConfigSwapSession.DoRestore(scriptId, userName, mark);
                 if (extraConfigPaths is { Count: > 0 })
                 {
-                    ExtraConfigSync.RestoreAll(scriptId, userName, extraConfigPaths);
+                    ExtraConfigSync.RestoreAll(
+                        scriptId,
+                        userName,
+                        ConfigSessionMark.FromExtraPaths(extraConfigPaths));
                 }
             });
         }
@@ -489,100 +486,6 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>编辑会话隐藏目录：暂存 config 同目录的其他配置文件（如 BetterGI 自带配置），使编辑目标成为唯一可选配置。</summary>
-    public static string HiddenConfigDir(string scriptId, string userName)
-    {
-        return ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
-    }
-
-    /// <summary>恢复隐藏配置（幂等：隐藏目录为空则无操作）；编辑会话开始前调用可自愈崩溃残留。</summary>
-    public static void RestoreHiddenConfigs(string scriptId, string userName, string configPath)
-    {
-        string hideDir = HiddenConfigDir(scriptId, userName);
-        if (!Directory.Exists(hideDir) || !Directory.EnumerateFileSystemEntries(hideDir).Any())
-        {
-            return;
-        }
-        string? dir = Path.GetDirectoryName(configPath);
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            Logger.Warn($"[警告] 恢复隐藏配置失败：配置路径没有父目录（{configPath}），隐藏文件保持原样");
-            return;
-        }
-        Directory.CreateDirectory(dir);
-        foreach (string file in Directory.GetFileSystemEntries(hideDir))
-        {
-            try
-            {
-                string destination = Path.Combine(dir, Path.GetFileName(file));
-                if (File.Exists(destination) || Directory.Exists(destination))
-                {
-                    // 目标已被用户或程序重新生成时保留隐藏副本，绝不覆盖现有配置。
-                    Logger.Warn($"[警告] 恢复隐藏配置跳过冲突文件（保留隐藏副本）：{destination}");
-                    continue;
-                }
-                if (File.Exists(file))
-                {
-                    File.Move(file, destination);
-                }
-                else if (Directory.Exists(file))
-                {
-                    Directory.Move(file, destination);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 恢复隐藏配置失败（保持原样）：{file}（{ex.Message}）");
-            }
-        }
-        try
-        {
-            if (Directory.Exists(hideDir) && !Directory.EnumerateFileSystemEntries(hideDir).Any())
-            {
-                Directory.Delete(hideDir);
-            }
-        }
-        catch (Exception)
-        {
-        }
-    }
-
-    /// <summary>编辑会话隐藏 config 同目录下其他配置文件（仅专项脚本 + config 为单文件；排除 ConfigPath 文件本身，忽略大小写）。</summary>
-    public static bool HideOtherConfigs(ScriptInstance script, string scriptId, string userName)
-    {
-        if (string.IsNullOrWhiteSpace(script.PluginType) || !File.Exists(script.ConfigPath))
-        {
-            return false;
-        }
-        string? dir = Path.GetDirectoryName(script.ConfigPath);
-        if (string.IsNullOrWhiteSpace(dir))
-        {
-            return false;
-        }
-        string targetName = Path.GetFileName(script.ConfigPath);
-        string[] others = Directory.GetFiles(dir, "*.json")
-            .Where(file => !Path.GetFileName(file).Equals(targetName, StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-        if (others.Length == 0)
-        {
-            return false;
-        }
-        string hideDir = HiddenConfigDir(scriptId, userName);
-        Directory.CreateDirectory(hideDir);
-        foreach (string file in others)
-        {
-            try
-            {
-                File.Move(file, Path.Combine(hideDir, Path.GetFileName(file)));
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[警告] 隐藏配置失败（保持原样）：{file}（{ex.Message}）");
-            }
-        }
-        return true;
-    }
-
     /// <summary>编辑配置提交：主配置与附加配置按各自事务入库，再还原所有编辑现场。</summary>
     public static string? CommitEdit(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
@@ -659,7 +562,10 @@ internal static class UserConfigManager
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
                     if (mark.ExtraConfigPaths.Count == 0 && extraConfigPaths is { Count: > 0 })
                     {
-                        ExtraConfigSync.RestoreAll(scriptId, userName, extraConfigPaths);
+                        ExtraConfigSync.RestoreAll(
+                            scriptId,
+                            userName,
+                            ConfigSessionMark.FromExtraPaths(extraConfigPaths));
                     }
                 }
                 ConfigSessionMark.Clear(scriptId, userName);

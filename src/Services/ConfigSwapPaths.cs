@@ -82,12 +82,6 @@ internal static class ConfigSwapPaths
         return Path.Combine(WorkDir(scriptId, userKey), "original");
     }
 
-    /// <summary>v0.14.3 旧编辑现场目录；v0.14.4 只用于兼容恢复。</summary>
-    public static string HiddenConfigDir(string scriptId, string userKey)
-    {
-        return Path.Combine(WorkDir(scriptId, userKey), "edit-hidden");
-    }
-
     /// <summary>配置编辑事务隔离区：保存被隔离候选的原始文件或目录。</summary>
     public static string EditIsolationDir(string scriptId, string userKey)
     {
@@ -133,16 +127,6 @@ internal static class ConfigSwapPaths
     /// <summary>损坏事务的人工处理阻断标记；存在时禁止继续写入该用户快照。</summary>
     public static string StoreTransactionBlockedPath(string scriptId, string userKey) =>
         Path.Combine(UserDir(scriptId, userKey), ".store-txn-blocked.json");
-
-    /// <summary>配置定位变更时的一次性旧快照隔离区；成功重建新快照后删除。</summary>
-    public static string StoreRebindDir(string scriptId, string userKey) =>
-        Path.Combine(WorkDir(scriptId, userKey), "store-rebind");
-
-    public static string StoreRebindOldDir(string scriptId, string userKey) =>
-        Path.Combine(StoreRebindDir(scriptId, userKey), "old");
-
-    public static string StoreRebindNewMetadataPath(string scriptId, string userKey) =>
-        Path.Combine(StoreRebindDir(scriptId, userKey), "new-store-meta.json");
 
     /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>
     public static void PrepareScriptDir(string scriptId, string? userName)

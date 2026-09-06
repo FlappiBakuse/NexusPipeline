@@ -16,30 +16,30 @@ namespace NexusPipeline.Tests;
 public sealed class UserIdRecoveryTests
 {
     [Fact]
-    public void ConfigRunSession_UsesUserIdDirectory_AndLeavesLegacyNameResidue()
+    public void ConfigRunSession_UsesUserIdDirectory_AndKeepsDisplayNamePathSeparate()
     {
         string scriptId = "regression-userid-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");
-        string userName = "LegacyName-" + Guid.NewGuid().ToString("N");
+        string userName = "DisplayName-" + Guid.NewGuid().ToString("N");
         string configPath = Path.Combine(Path.GetTempPath(), "np-regression-config-" + Guid.NewGuid().ToString("N"), "config.json");
         string canonicalStore = ConfigSwapPaths.StoreDir(scriptId, userId);
-        string legacyStore = ConfigSwapPaths.StoreDir(scriptId, userName);
+        string displayNameStore = ConfigSwapPaths.StoreDir(scriptId, userName);
         string canonicalState = Path.Combine(canonicalStore, "state.json");
-        string legacyState = Path.Combine(legacyStore, "state.json");
+        string displayNameState = Path.Combine(displayNameStore, "state.json");
 
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
             Directory.CreateDirectory(canonicalStore);
-            Directory.CreateDirectory(legacyStore);
+            Directory.CreateDirectory(displayNameStore);
             File.WriteAllText(canonicalState, "canonical-user-id");
-            File.WriteAllText(legacyState, "legacy-display-name");
+            File.WriteAllText(displayNameState, "display-name-state");
 
             var session = new ConfigRunSession(scriptId, userId, configPath, hasJudgeScript: true);
             session.PrepareScriptArea();
 
             Assert.Equal("canonical-user-id", File.ReadAllText(canonicalState));
-            Assert.Equal("legacy-display-name", File.ReadAllText(legacyState));
+            Assert.Equal("display-name-state", File.ReadAllText(displayNameState));
         }
         finally
         {
@@ -70,7 +70,7 @@ public sealed class UserIdRecoveryTests
         {
             Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
             Directory.CreateDirectory(cache);
-            File.WriteAllText(Path.Combine(cache, "state.json"), "legacy-recovery现场");
+            File.WriteAllText(Path.Combine(cache, "state.json"), "unbound-recovery现场");
             new ConfigSessionMark
             {
                 ScriptId = scriptId,

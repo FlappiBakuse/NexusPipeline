@@ -88,7 +88,7 @@ internal sealed class ConfigSessionMark
 
     public string PluginVersion { get; set; } = "";
 
-    /// <summary>本次会话已冻结的 extraConfigPaths；字段缺失代表旧版本主配置会话。</summary>
+    /// <summary>本次会话已冻结的 extraConfigPaths。</summary>
     public List<ConfigSessionExtraPath> ExtraConfigPaths { get; set; } = new();
 
     /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置）。</summary>
@@ -127,6 +127,7 @@ internal sealed class ConfigSessionMark
         nameof(ProfileHash),
         nameof(PluginName),
         nameof(PluginVersion),
+        nameof(ExtraConfigPaths),
         nameof(EditMode),
         nameof(StartedAt),
     ];
@@ -134,7 +135,6 @@ internal sealed class ConfigSessionMark
     private static readonly HashSet<string> AllowedProperties =
         RequiredProperties
             .Append(nameof(NeedsFreshRestore))
-            .Append(nameof(ExtraConfigPaths))
             .Append(nameof(EditIsolationPaths))
             .Append(nameof(PendingConfigInput))
             .ToHashSet(StringComparer.Ordinal);

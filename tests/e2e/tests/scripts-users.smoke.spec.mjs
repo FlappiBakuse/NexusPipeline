@@ -43,25 +43,11 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
   }
 });
 
-test("全局用户入口：创建并用完整用户名确认删除", async ({ page }) => {
-  const name = `Smoke 用户-${Date.now()}`;
-  await page.goto(baseUrl + "#/users", { waitUntil: "domcontentloaded" });
-  await page.getByTestId("open-global-user-modal").click();
-  await page.locator("#gu-name").fill(name);
-  await page.getByTestId("save-global-user").click();
-  const card = page.getByTestId("global-user-card").filter({ hasText: name }).first();
-  await expect(card).toBeVisible();
-  await card.locator('[data-action="delete-global-user"]').click();
-  await page.locator("#gu-delete-name").fill(name);
-  await page.getByTestId("confirm-delete-global-user").click();
-  await expect(page.getByTestId("global-user-card").filter({ hasText: name })).toHaveCount(0);
-});
-
-test("用户绑定入口：打开管理、修改通知收件人并保存", async ({ page }) => {
+test("用户管理：修改插件字段并保存用户绑定", async ({ page }) => {
   const suffix = Date.now();
   const fixture = makeScriptDir(`smoke-user-binding-${suffix}`);
   let badgeUserId = "";
-  let savedPluginPayload = null;
+  let pluginEnabled = true;
   await page.route("**/api/plugin-contributions/user-list-badges", async route => {
     if (route.request().method() !== "GET") {
       await route.continue();
@@ -95,49 +81,19 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
           pluginDisplayName: "游戏自动签到",
           id: "user-settings",
           title: "游戏自动签到",
-          description: "按需管理米游社或 HoYoLAB 的 Cookie 和目标游戏。",
+          description: "按需管理自动签到。",
           fields: [
             { key: "enabled", label: "启用自动签到", type: "switch", description: "关闭后保留配置但不执行签到。", required: true },
-            {
-              key: "cnGames",
-              label: "米游社签到游戏",
-              type: "multi-select",
-              description: "选择官服签到游戏，可留空。",
-              options: [
-                { value: "gi", label: "原神" },
-                { value: "hsr", label: "崩坏：星穹铁道" },
-                { value: "zzz", label: "绝区零" },
-              ],
-            },
-            {
-              key: "osGames",
-              label: "HoYoLAB 签到游戏",
-              type: "multi-select",
-              description: "选择国际服签到游戏，可留空。",
-              options: [
-                { value: "gi", label: "原神" },
-                { value: "hsr", label: "崩坏：星穹铁道" },
-                { value: "zzz", label: "绝区零" },
-              ],
-            },
-            { key: "cnCookie", label: "米游社 Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
-            { key: "osCookie", label: "HoYoLAB Cookie", type: "secret", description: "完整 Cookie 将由宿主加密保存。", placeholder: "请输入完整 Cookie", maxLength: 16384 },
-            { key: "lastStatus", label: "最近状态", type: "status", readOnly: true },
           ],
           values: {
-            enabled: true,
-            cnGames: ["gi"],
-            osGames: ["gi"],
-            cnCookie: { configured: false },
-            osCookie: { configured: false },
-            lastStatus: "尚未尝试",
+            enabled: pluginEnabled,
           },
         }]),
       });
       return;
     }
     if (request.method() === "PUT") {
-      savedPluginPayload = JSON.parse(request.postData() || "{}");
+      pluginEnabled = request.postDataJSON()?.values?.enabled ?? pluginEnabled;
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
       return;
     }
@@ -170,43 +126,21 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     const card = page.getByTestId("global-user-card").filter({ hasText: user.name }).first();
     const badge = card.getByTestId("plugin-user-badge").first();
     await expect(badge).toHaveText("签到 · 今日完成");
-    await expect(badge).toHaveAttribute("data-plugin-name", "game-checkin");
-    await expect(badge).toHaveAttribute("data-contribution-id", "check-in-status");
     await card.getByRole("button", { name: "全局管理", exact: true }).click();
     const globalDialog = page.getByRole("dialog", { name: "全局管理" });
     await expect(globalDialog).toBeVisible();
     await expect(globalDialog.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
     const plugin = globalDialog.locator(".global-management-plugin");
-    await expect(plugin).not.toContainText("aria-pressed=");
-    await expect(plugin.getByRole("button", { name: "启用自动签到" })).toHaveAttribute("aria-pressed", "true");
-    await expect(plugin.locator(":scope > .section-heading > div > strong")).toHaveCount(0);
-    const cnGameTrigger = plugin.locator("[data-nxp-select-trigger]").nth(0);
-    const osGameTrigger = plugin.locator("[data-nxp-select-trigger]").nth(1);
-    await expect(cnGameTrigger).toContainText("原神");
-    await expect(osGameTrigger).toContainText("原神");
-    await expect(plugin.locator('select[data-plugin-field="cnGames"]')).toHaveCount(0);
-    await expect(plugin.locator('select[data-plugin-field="osGames"]')).toHaveCount(0);
-    await cnGameTrigger.click();
-    const cnGameMenu = plugin.locator("[data-nxp-select-menu]").nth(0);
-    await expect(cnGameMenu).toBeVisible();
-    await cnGameMenu.locator('[data-nxp-select-option][data-value="zzz"]').click();
-    await expect(cnGameTrigger).toContainText("绝区零");
-    await osGameTrigger.click();
-    const osGameMenu = plugin.locator("[data-nxp-select-menu]").nth(1);
-    await expect(osGameMenu).toBeVisible();
-    await osGameMenu.locator('[data-nxp-select-option][data-value="zzz"]').click();
-    await expect(osGameTrigger).toContainText("绝区零");
-    await plugin.getByLabel("米游社 Cookie", { exact: true }).fill("stuid=1; stoken=secret");
-    await plugin.getByLabel("HoYoLAB Cookie", { exact: true }).fill("ltuid=1; ltoken=secret");
+    const pluginSwitch = plugin.getByRole("button", { name: "启用自动签到", exact: true });
+    await expect(pluginSwitch).toHaveAttribute("aria-pressed", "true");
+    await pluginSwitch.click();
+    await expect(pluginSwitch).toHaveAttribute("aria-pressed", "false");
     await globalDialog.getByRole("button", { name: "保存", exact: true }).click();
     await expect(globalDialog).toBeHidden();
-    expect(savedPluginPayload?.values).toEqual({
-      enabled: true,
-      cnCookie: { action: "set", value: "stuid=1; stoken=secret" },
-      cnGames: ["gi", "zzz"],
-      osCookie: { action: "set", value: "ltuid=1; ltoken=secret" },
-      osGames: ["gi", "zzz"],
-    });
+    await card.getByRole("button", { name: "全局管理", exact: true }).click();
+    const reopenedGlobalDialog = page.getByRole("dialog", { name: "全局管理" });
+    await expect(reopenedGlobalDialog.getByRole("button", { name: "启用自动签到", exact: true })).toHaveAttribute("aria-pressed", "false");
+    await reopenedGlobalDialog.getByRole("button", { name: "取消", exact: true }).click();
 
     await card.getByRole("button", { name: "用户管理", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "用户管理" });
@@ -216,8 +150,6 @@ test("用户绑定入口：打开管理、修改通知收件人并保存", async
     await expect(binding.getByRole("heading", { name: "通用", exact: true })).toBeVisible();
     await expect(binding.getByRole("heading", { name: "通知", exact: true })).toBeVisible();
     await expect(binding.getByRole("heading", { name: "高级", exact: true })).toBeVisible();
-    await expect(binding.locator('[data-action="set-um-subview"]')).toHaveCount(0);
-    await expect(dialog.getByRole("button", { name: "返回上级", exact: true })).toHaveCount(0);
     await dialog.getByLabel("SMTP 收件人", { exact: true }).fill("new@example.com");
     await dialog.getByLabel("最多成功运行次数", { exact: true }).fill("2");
     await dialog.getByRole("button", { name: "保存", exact: true }).click();

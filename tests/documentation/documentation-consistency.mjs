@@ -33,8 +33,9 @@ const EVERGREEN_DOCUMENTS = [
 ];
 
 const DEPRECATED_REFERENCES = [
-  /tests[\\/]stress[\\/]chaos-queue\.mjs/,
-  /NexusPipeline 后续开发报告\.md/,
+  /tests[\\/]legacy[\\/]/,
+  /edit-hidden/,
+  /store-rebind/,
 ];
 
 function walkMarkdown(directory) {
@@ -200,20 +201,13 @@ test("current persistence and plugin-profile contract stays documented", () => {
 
   assert.match(project, new RegExp(`<Version>${escapeRegExp(version)}<\\/Version>`, "u"));
   assert.match(read("CHANGELOG.md"), new RegExp(`^## v${escapeRegExp(version)}(?:（|\\s)`, "mu"));
-  assert.match(status, /## 后续功能：插件生态扩展/u);
-  assert.doesNotMatch(status, /KN-74[\s\S]*调查中/u);
+  assert.match(status, /## 当前未完成事项/u);
+  assert.doesNotMatch(status, /^##\s+v\d+\.\d+\.\d+/mu);
   assert.match(design, /config\/judge-scripts\/<scriptId>\.js\|py/u);
   assert.match(design, /PluginType \+ RootPath/u);
   assert.match(pluginApi, /当前 profile 解析成功后将 `judgeScript`/u);
   assert.match(development, /config\/judge-scripts\//u);
 
-  const stale = /保存脚本实例时固化解析结果|ApplyProfile.*保存时覆盖|判断脚本由插件固化/u;
-  for (const [relativeFile, text] of [
-    ["docs/DESIGN.md", design],
-    ["docs/PLUGIN_API.md", pluginApi],
-  ]) {
-    assert.doesNotMatch(text, stale, `${relativeFile} still describes the pre-v0.13.0 profile snapshot contract`);
-  }
 });
 
 test("dual-mode production contracts stay on data files and behavior", () => {

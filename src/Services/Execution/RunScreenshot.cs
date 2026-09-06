@@ -245,17 +245,6 @@ internal sealed class RunScreenshotStore : IDisposable
         }
     }
 
-    /// <summary>兼容内部旧调用的全局选择；新通知流程必须传入最终尝试号。</summary>
-    public RunScreenshot? SelectForNotification(string? requestedId)
-    {
-        int attempt;
-        lock (_sync)
-        {
-            attempt = _screenshotsByAttempt.Keys.DefaultIfEmpty(0).Max();
-        }
-        return attempt > 0 ? SelectForNotification(attempt, requestedId) : null;
-    }
-
     public void Dispose()
     {
         lock (_sync)

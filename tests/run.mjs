@@ -136,7 +136,7 @@ function printModeBanner(mode, suite) {
 }
 
 async function runUnit() {
-  return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo"]);
+  return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo", "-m:1"]);
 }
 
 async function runWeb() {

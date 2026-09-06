@@ -45,7 +45,7 @@ public sealed class AppearanceServiceTests
     }
 
     [Fact]
-    public void LegacyConfig_DefaultsSecondarySurfaceTransparencyToEnabled()
+    public void MissingSecondarySurfaceTransparency_DefaultsToEnabled()
     {
         string root = NewTempDir();
         try

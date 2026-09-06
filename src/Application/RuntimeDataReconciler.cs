@@ -8,7 +8,7 @@ namespace NexusPipeline;
 
 /// <summary>
 /// 宿主取得运行时所有权后的实体数据修复协调器。
-/// 读取由 RuntimeContext.ReloadData 完成；本类负责历史兼容清理、名称消歧和必要落盘。
+/// 读取由 RuntimeContext.ReloadData 完成；本类负责当前数据完整性修复、名称消歧和必要落盘。
 /// </summary>
 internal static class RuntimeDataReconciler
 {

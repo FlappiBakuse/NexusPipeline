@@ -575,7 +575,7 @@ public class ConfigEditModesTests
     /* ---------------- 会话标记格式与恢复 ---------------- */
 
     [Fact]
-    public void UnsupportedLegacyMark_IsPreservedWithoutGuessing()
+    public void SessionMarkMissingRequiredExtraPaths_IsPreservedWithoutGuessing()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
         var (scriptId, userName, configPath) = MakeTarget(tempRoot);
@@ -583,7 +583,7 @@ public class ConfigEditModesTests
         File.WriteAllText(configPath, "new-value");
         try
         {
-            // 手工构造旧版会话现场：旧格式标记不再参与恢复，现场保持原样供人工处理。
+            // 手工构造缺少当前必需字段的会话现场：不参与恢复，现场保持原样供人工处理。
             string cache = UserConfigManager.CacheDir(scriptId, userName);
             Directory.CreateDirectory(cache);
             File.WriteAllText(Path.Combine(cache, "config.json"), "original");

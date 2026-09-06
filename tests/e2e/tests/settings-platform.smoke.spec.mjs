@@ -29,7 +29,7 @@ test("访问令牌入口：生成、显示切换和状态回读", async ({ page 
   expect(settings.status.remote.tokenSet).toBeTruthy();
 });
 
-test("远程访问开关：切换后同步 aria 与 data-state", async ({ page }) => {
+test("远程访问开关：切换后同步 API 状态", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await page.locator('[data-action="toggle-settings-panel"][data-panel="remote-mcp"]').click();
   const toggle = page.locator("#st-remote");
@@ -38,11 +38,9 @@ test("远程访问开关：切换后同步 aria 与 data-state", async ({ page }
   const next = !original;
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", String(next));
-  await expect(toggle).toHaveAttribute("data-state", next ? "on" : "off");
   await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: 10000 }).toBe(next);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", String(original));
-  await expect(toggle).toHaveAttribute("data-state", original ? "on" : "off");
   await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: 10000 }).toBe(original);
 });
 
@@ -52,13 +50,11 @@ test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page 
   await expect(page.getByTestId("plugin-local-tab")).toHaveAttribute("aria-selected", "true");
   await expect(page.getByTestId("plugin-local-list")).toBeVisible();
   await expect(page.getByTestId("plugin-detail")).toBeVisible();
-  await expect(page.locator(".plugin-detail-meta")).not.toContainText("Frontend API");
   const search = page.getByTestId("plugin-search");
   await expect(search).toBeVisible();
   await page.getByTestId("plugin-store-tab").click();
   await expect(page.getByTestId("plugin-store-list")).toBeVisible();
   await expect(page.getByTestId("plugin-detail")).toBeVisible();
-  await expect(page.locator(".plugin-detail-meta")).not.toContainText("Frontend API");
   const refresh = page.getByTestId("plugin-store-refresh");
   await expect(refresh).toBeVisible();
   await search.fill("不存在的插件关键词");

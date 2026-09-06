@@ -38,10 +38,8 @@ public sealed class RunScreenshotStoreTests
         Assert.Equal(11, store.MetadataForAttempt(2)[^1].Ordinal);
         Assert.Equal("screenshot-0000000009", store.SelectForNotification(1, null)?.Id);
         Assert.Equal("screenshot-0000000011", store.SelectForNotification(2, null)?.Id);
-        Assert.Null(store.SelectForNotification("screenshot-0000000001"));
         Assert.Null(store.SelectForNotification(1, "screenshot-0000000010"));
         Assert.Equal("screenshot-0000000002", store.SelectForNotification(1, "screenshot-0000000002")?.Id);
-        Assert.Equal("screenshot-0000000011", store.SelectForNotification(null)?.Id);
         Assert.Equal(RunScreenshotStore.Capacity + 3, calls);
     }
 
@@ -64,7 +62,7 @@ public sealed class RunScreenshotStoreTests
 
         store.Dispose();
         Assert.Empty(store.Metadata);
-        Assert.Null(store.SelectForNotification(null));
+        Assert.Null(store.SelectForNotification(1, null));
     }
 
     [Fact]

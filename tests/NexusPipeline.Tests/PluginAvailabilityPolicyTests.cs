@@ -184,11 +184,13 @@ public sealed class PluginAvailabilityPolicyTests
         OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
             user.Id,
             script.Id,
-            new UserScriptBinding
-            {
-                ScriptInstanceId = script.Id,
-                PreRunScript = "修改后的前置脚本",
-            });
+            new UserBindingUpdateRequest(
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = script.Id,
+                    PreRunScript = "修改后的前置脚本",
+                },
+                ConfigInputsSpecified: true));
 
         Assert.False(result.Succeeded);
         Assert.Equal("validation_error", result.ErrorCode);

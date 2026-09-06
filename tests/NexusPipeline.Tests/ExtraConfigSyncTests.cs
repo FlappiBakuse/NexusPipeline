@@ -18,6 +18,12 @@ public class ExtraConfigSyncTests
         return "extra-" + Guid.NewGuid().ToString("N");
     }
 
+    private static ConfigSessionExtraPath Entry(string path) => new()
+    {
+        Path = path,
+        OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(path)),
+    };
+
     [Fact]
     public void PrepareAdoptsSiteIntoEmptyStoreThenCoversSiteFromStore()
     {
@@ -29,7 +35,7 @@ public class ExtraConfigSyncTests
             Directory.CreateDirectory(Path.GetDirectoryName(site)!);
             File.WriteAllText(site, "原软件配置");
 
-            ExtraConfigSync.PrepareAll(scriptId, userKey, [site]);
+            ExtraConfigSync.PrepareAll(scriptId, userKey, [Entry(site)]);
 
             string storeExtra = ConfigSwapPaths.StoreExtraDir(scriptId, userKey, site);
             // 首次 adopt：快照等于现场
@@ -41,7 +47,7 @@ public class ExtraConfigSyncTests
 
             // 快照先行变更 → 再次 Prepare 时快照覆盖现场
             File.WriteAllText(Path.Combine(storeExtra, "software_config.json"), "快照新值");
-            ExtraConfigSync.PrepareAll(scriptId, userKey, [site]);
+            ExtraConfigSync.PrepareAll(scriptId, userKey, [Entry(site)]);
             Assert.Equal("快照新值", File.ReadAllText(site));
         }
         finally
@@ -61,62 +67,13 @@ public class ExtraConfigSyncTests
             Directory.CreateDirectory(Path.GetDirectoryName(site)!);
             File.WriteAllText(site, "运行前现场");
 
-            ExtraConfigSync.PrepareAll(scriptId, userKey, [site]);
+            ExtraConfigSync.PrepareAll(scriptId, userKey, [Entry(site)]);
             // 模拟脚本运行期间改写了现场
             File.WriteAllText(site, "运行产物");
-            ExtraConfigSync.RestoreAll(scriptId, userKey, [site]);
+            ExtraConfigSync.RestoreAll(scriptId, userKey, [Entry(site)]);
 
             Assert.Equal("运行前现场", File.ReadAllText(site));
             Assert.False(Directory.Exists(ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site)));
-        }
-        finally
-        {
-            Cleanup(scriptId);
-        }
-    }
-
-    [Fact]
-    public void LegacyRestoreWithoutKindProof_PreservesOriginalExtra()
-    {
-        string scriptId = MakeScriptId();
-        string userKey = "user-a";
-        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "software_config.json");
-        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site);
-        try
-        {
-            Directory.CreateDirectory(originalExtra);
-            File.WriteAllText(Path.Combine(originalExtra, "software_config.json"), "待核查现场");
-
-            ExtraConfigSync.RestoreAll(scriptId, userKey, [site]);
-
-            Assert.False(File.Exists(site));
-            Assert.True(Directory.Exists(originalExtra));
-            Assert.True(ExtraConfigSync.HasUntrackedResidue(scriptId, userKey));
-        }
-        finally
-        {
-            Cleanup(scriptId);
-        }
-    }
-
-    [Fact]
-    public void LegacyRestoreWithInvalidKindProof_PreservesOriginalExtra()
-    {
-        string scriptId = MakeScriptId();
-        string userKey = "user-a";
-        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "software_config.json");
-        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site);
-        try
-        {
-            Directory.CreateDirectory(originalExtra);
-            File.WriteAllText(Path.Combine(originalExtra, "software_config.json"), "待核查现场");
-            File.WriteAllText(originalExtra + ".kind", "unknown");
-
-            ExtraConfigSync.RestoreAll(scriptId, userKey, [site]);
-
-            Assert.False(File.Exists(site));
-            Assert.True(Directory.Exists(originalExtra));
-            Assert.True(ExtraConfigSync.HasUntrackedResidue(scriptId, userKey));
         }
         finally
         {
@@ -212,7 +169,7 @@ public class ExtraConfigSyncTests
             Directory.CreateDirectory(siteDir);
             File.WriteAllText(Path.Combine(siteDir, "a.json"), "{\"v\":1}");
 
-            ExtraConfigSync.PrepareAll(scriptId, userKey, [siteDir]);
+            ExtraConfigSync.PrepareAll(scriptId, userKey, [Entry(siteDir)]);
             string storeExtra = ConfigSwapPaths.StoreExtraDir(scriptId, userKey, siteDir);
             Assert.True(File.Exists(Path.Combine(storeExtra, "a.json")));
 

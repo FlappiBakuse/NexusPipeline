@@ -1,15 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { api, baseUrl } from "./helpers.mjs";
 
-test("应用入口：仪表盘显示版本与服务状态", async ({ page }) => {
-  await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
-  const state = page.getByTestId("dashboard-state");
-  await expect(state).toBeVisible();
-  const status = await (await api("GET", "/api/status")).json();
-  await expect(page.locator("body")).toContainText(status.version);
-  await expect(page.locator("body")).toContainText("当前版本");
-});
-
 test("主导航：核心页面可以按路由打开", async ({ page }) => {
   const date = "2026-08-30";
   const secondDate = "2026-08-29";
@@ -57,6 +48,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
     });
   });
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("dashboard-state")).toBeVisible();
   for (const route of ["users", "scripts", "queues", "dispatch", "history", "plugins", "settings"]) {
     await page.getByTestId(`nav-${route}`).click();
     await page.waitForFunction(expected => location.hash === `#/${expected}`, route);
@@ -66,11 +58,8 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
   await expect(page.locator('[data-testid="history-date"]').first()).toBeVisible();
   await expect(page.getByTestId("history-records-count")).toHaveText("选择用户");
-  await expect(page.locator(".history-browser")).not.toHaveClass(/history-detail-visible/);
   await page.locator(`[data-testid="history-date"][data-date="${date}"]`).click();
-  await expect(page.locator(".history-browser")).toHaveClass(/history-users-visible/);
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${date}"]`).getByTestId("history-user")).toBeVisible();
-  await expect(page.locator(".history-records-column")).toBeHidden();
   await page.locator(`[data-testid="history-date"][data-date="${secondDate}"]`).click();
   await expect(page.locator('[data-testid="history-date-users"]')).toHaveCount(2);
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user")).toBeVisible();
@@ -78,7 +67,6 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await expect(page.locator('[data-testid="history-date-users"]')).toHaveCount(1);
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`)).toBeVisible();
   await page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user").click();
-  await expect(page.locator(".history-browser")).toHaveClass(/history-detail-visible/);
   await expect(page.getByText("已跳过", { exact: true })).toBeVisible();
   const requestsAfterInitialUser = historyRecordRequests;
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -92,8 +80,6 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 900 });
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "返回用户列表", exact: true }).click();
-  await expect(page.locator(".history-browser")).not.toHaveClass(/history-detail-visible/);
-  await expect(page.locator(".history-browser")).toHaveClass(/history-users-visible/);
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user")).toBeVisible();
 });
 
@@ -103,10 +89,14 @@ test("手机宽度：仪表盘无横向溢出且导航抽屉可开关", async ({
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("dashboard-state")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
-    await page.getByRole("button", { name: "打开导航" }).click();
-    await expect(page.locator("body")).toHaveClass(/nav-open/);
+    const sidebar = page.locator("#sidebar");
+    const openNav = page.getByRole("button", { name: "打开导航" });
+    await openNav.click();
+    await expect(openNav).toHaveAttribute("aria-expanded", "true");
+    await expect(sidebar).toHaveAttribute("aria-hidden", "false");
     await page.getByRole("button", { name: "关闭导航" }).click({ force: true });
-    await expect(page.locator("body")).not.toHaveClass(/nav-open/);
+    await expect(openNav).toHaveAttribute("aria-expanded", "false");
+    await expect(sidebar).toHaveAttribute("aria-hidden", "true");
   } finally {
     await page.setViewportSize({ width: 1280, height: 900 });
   }

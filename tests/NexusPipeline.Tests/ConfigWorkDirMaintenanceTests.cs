@@ -39,7 +39,6 @@ public class ConfigWorkDirMaintenanceTests
         Assert.Equal(Path.Combine(userRoot, "store"), ConfigSwapPaths.StoreDir(scriptId, userName));
         Assert.Equal(Path.Combine(userRoot, "store-meta.json"), ConfigSwapPaths.StoreMetadataPath(scriptId, userName));
         Assert.Equal(Path.Combine(work, "original"), ConfigSwapPaths.CacheDir(scriptId, userName));
-        Assert.Equal(Path.Combine(work, "edit-hidden"), ConfigSwapPaths.HiddenConfigDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "edit-isolation"), ConfigSwapPaths.EditIsolationDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "script"), ConfigSwapPaths.ScriptDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "swap-backup"), ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
@@ -61,7 +60,6 @@ public class ConfigWorkDirMaintenanceTests
             Directory.CreateDirectory(Path.Combine(idle, "work", "script"));
             File.WriteAllText(Path.Combine(idle, "work", "script", "probe.js"), "1");
             Directory.CreateDirectory(Path.Combine(idle, "work", "unknown-residue"));
-            Directory.CreateDirectory(Path.Combine(idle, "work", "edit-hidden"));
 
             // 残留现场：swap-backup 有内容 → 保留
             string residue = UserRoot(scriptId, "residue");
@@ -123,6 +121,33 @@ public class ConfigWorkDirMaintenanceTests
             ]);
 
             Assert.True(File.Exists(Path.Combine(isolationRoot, "orphan")));
+        }
+        finally
+        {
+            CleanupScript(scriptId);
+        }
+    }
+
+    [Fact]
+    public void UntrackedExtraConfigResidue_IsPreservedWithoutGuessing()
+    {
+        string scriptId = "sweep-extra-untracked-" + Guid.NewGuid().ToString("N");
+        const string userName = "user-a";
+        string originalExtraRoot = ConfigSwapPaths.OriginalExtraRoot(scriptId, userName);
+        try
+        {
+            Directory.CreateDirectory(originalExtraRoot);
+            File.WriteAllText(Path.Combine(originalExtraRoot, "orphan"), "保留附加配置现场");
+            UserConfigManager.RecoverInterrupted(
+            [
+                new NexusUser
+                {
+                    Id = userName,
+                    Bindings = [new UserScriptBinding { ScriptInstanceId = scriptId }],
+                },
+            ]);
+
+            Assert.True(File.Exists(Path.Combine(originalExtraRoot, "orphan")));
         }
         finally
         {

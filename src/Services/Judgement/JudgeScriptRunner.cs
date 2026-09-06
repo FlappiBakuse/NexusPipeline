@@ -487,7 +487,8 @@ internal static class JudgeScriptRunner
                 StandardErrorEncoding = Encoding.UTF8,
             };
             psi.Environment["PYTHONIOENCODING"] = "utf-8";
-            using Process? process = Process.Start(psi);
+            using ProcessOwnership? ownership = ProcessOwnership.TryCreate("判断脚本");
+            using Process? process = SystemActions.StartOwnedProcess(psi, ownership);
             if (process is null)
             {
                 result.JudgeError = "无法启动 python.exe（未安装或不在 PATH）";
@@ -512,7 +513,7 @@ internal static class JudgeScriptRunner
             }
             catch (OperationCanceledException)
             {
-                SystemActions.KillOwnedProcessTree(null, process.Id, pythonExe, "判断脚本", rounds: 1, intervalMs: 100);
+                SystemActions.KillOwnedProcessTree(ownership, process.Id, pythonExe, "判断脚本", rounds: 1, intervalMs: 100);
                 result.JudgeError = $"判断脚本执行超时（{ScriptTimeoutSeconds} 秒）或被取消";
                 return result;
             }

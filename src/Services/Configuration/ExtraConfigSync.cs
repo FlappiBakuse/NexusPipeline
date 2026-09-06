@@ -9,12 +9,6 @@ namespace NexusPipeline.Services.Configuration;
 /// </summary>
 internal static class ExtraConfigSync
 {
-    /// <summary>兼容测试与旧调用：从当前现场建立恢复描述后执行批量准备。</summary>
-    public static void PrepareAll(string scriptId, string userKey, IReadOnlyList<string> sitePaths)
-    {
-        PrepareAll(scriptId, userKey, ConfigSessionMark.FromExtraPaths(sitePaths));
-    }
-
     /// <summary>
     /// 使用已写入会话标记的恢复描述批量准备。任一条路径失败都会反向还原已尝试路径并抛出，
     /// 调用方据此阻断外部脚本启动。
@@ -116,22 +110,6 @@ internal static class ExtraConfigSync
         }
     }
 
-    /// <summary>兼容无会话标记的旧现场还原；失败保留 original-extra 并记录警告。</summary>
-    public static void RestoreAll(string scriptId, string userKey, IReadOnlyList<string> sitePaths)
-    {
-        foreach (string sitePath in sitePaths)
-        {
-            try
-            {
-                RestoreLegacy(scriptId, userKey, sitePath);
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[附加配置] 现场还原失败（脚本 {scriptId} / 用户 {userKey}）：{sitePath}：{ex.Message}");
-            }
-        }
-    }
-
     /// <summary>按会话标记恢复冻结的附加现场；任何失败都会抛出以保留 durable marker 并触发重试。</summary>
     public static void RestoreAll(
         string scriptId,
@@ -145,8 +123,8 @@ internal static class ExtraConfigSync
         }
     }
 
-    /// <summary>检测没有会话 manifest 可解释的旧 original-extra 现场；只报告，不猜测恢复路径。</summary>
-    internal static bool HasUntrackedResidue(string scriptId, string userKey)
+    /// <summary>检测没有当前会话标记可解释的附加配置现场。</summary>
+    internal static bool HasResidue(string scriptId, string userKey)
     {
         string root = ConfigSwapPaths.OriginalExtraRoot(scriptId, userKey);
         return Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any();
@@ -185,10 +163,7 @@ internal static class ExtraConfigSync
         }
 
         ConfigSwapPrimitives.ClearPath(originalExtra, PathKindUtil.KindOf(originalExtra));
-        DeleteKindMark(scriptId, userKey, sitePath);
         ConfigSwapPrimitives.MoveAs(sitePath, originalExtra, PathKind.Dir);
-        // sidecar 继续服务于 v0.14.1/v0.14.2 遗留恢复；新会话同时由 .session 的 OriginalKind 保护。
-        WriteKindMark(scriptId, userKey, sitePath, siteKind);
         if (hasStore)
         {
             CopyStoreToSite(storeExtra, sitePath, siteKind);
@@ -213,9 +188,7 @@ internal static class ExtraConfigSync
 
         string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, sitePath);
         ConfigSwapPrimitives.ClearPath(originalExtra, PathKindUtil.KindOf(originalExtra));
-        DeleteKindMark(scriptId, userKey, sitePath);
         ConfigSwapPrimitives.MoveAs(sitePath, originalExtra, PathKind.Dir);
-        WriteKindMark(scriptId, userKey, sitePath, siteKind);
         ConfigSwapPrimitives.CopyAs(originalExtra, sitePath, siteKind);
     }
 
@@ -271,7 +244,6 @@ internal static class ExtraConfigSync
             ConfigSwapPrimitives.ClearPath(sitePath, PathKindUtil.KindOf(sitePath));
             ConfigSwapPrimitives.CopyAs(originalExtra, sitePath, originalKind);
             ConfigSwapPrimitives.ClearPath(originalExtra, PathKind.Dir);
-            DeleteKindMark(scriptId, userKey, sitePath);
             return;
         }
 
@@ -279,29 +251,7 @@ internal static class ExtraConfigSync
         if (originalKind == PathKind.Missing)
         {
             ConfigSwapPrimitives.ClearPath(sitePath, PathKindUtil.KindOf(sitePath));
-            DeleteKindMark(scriptId, userKey, sitePath);
         }
-    }
-
-    private static void RestoreLegacy(string scriptId, string userKey, string sitePath)
-    {
-        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, sitePath);
-        if (!Directory.Exists(originalExtra))
-        {
-            return;
-        }
-        PathKind? markedKind = ReadKindMark(scriptId, userKey, sitePath);
-        if (markedKind is null)
-        {
-            // 旧现场缺少形态 sidecar 时，扩展名推断不足以证明原配置归属，保留现场等待人工核查。
-            Logger.Warn($"[附加配置] 旧现场缺少可靠形态标记，保留 original-extra：{originalExtra}");
-            return;
-        }
-        PathKind kind = markedKind.Value;
-        ConfigSwapPrimitives.ClearPath(sitePath, PathKindUtil.KindOf(sitePath));
-        ConfigSwapPrimitives.CopyAs(originalExtra, sitePath, kind);
-        ConfigSwapPrimitives.ClearPath(originalExtra, PathKind.Dir);
-        DeleteKindMark(scriptId, userKey, sitePath);
     }
 
     private static void CopyStoreToSite(string storeExtra, string sitePath, PathKind kind)
@@ -314,42 +264,6 @@ internal static class ExtraConfigSync
     private static PathKind InferKind(string sitePath)
     {
         return string.IsNullOrWhiteSpace(Path.GetExtension(sitePath)) ? PathKind.Dir : PathKind.File;
-    }
-
-    private static string KindMarkPath(string scriptId, string userKey, string sitePath)
-    {
-        return ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, sitePath) + ".kind";
-    }
-
-    private static void WriteKindMark(string scriptId, string userKey, string sitePath, PathKind kind)
-    {
-        string path = KindMarkPath(scriptId, userKey, sitePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, PathKindUtil.Text(kind));
-    }
-
-    private static PathKind? ReadKindMark(string scriptId, string userKey, string sitePath)
-    {
-        string path = KindMarkPath(scriptId, userKey, sitePath);
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-        return File.ReadAllText(path).Trim() switch
-        {
-            "file" => PathKind.File,
-            "dir" => PathKind.Dir,
-            _ => null,
-        };
-    }
-
-    private static void DeleteKindMark(string scriptId, string userKey, string sitePath)
-    {
-        string path = KindMarkPath(scriptId, userKey, sitePath);
-        if (File.Exists(path))
-        {
-            File.Delete(path);
-        }
     }
 
     private static void ValidateEntries(IReadOnlyList<ConfigSessionExtraPath> entries)

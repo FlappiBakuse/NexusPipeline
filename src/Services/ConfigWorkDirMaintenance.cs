@@ -73,7 +73,7 @@ internal static class ConfigWorkDirMaintenance
         }
         // 判断脚本目录每轮清空重建、无恢复价值，可直接删除。
         ConfigSwapPrimitives.TryDeleteDir(Path.Combine(workDir, "script"));
-        // 其余子项可能承载恢复现场（swap-backup/original/original-extra/edit-isolation/edit-hidden/store-txn）：
+        // 其余子项可能承载恢复现场（swap-backup/original/original-extra/edit-isolation/store-txn）：
         // 只清掉空目录，存在任何内容时整体保留 work/，交由恢复逻辑或人工处理。
         foreach (string entry in Directory.GetFileSystemEntries(workDir))
         {

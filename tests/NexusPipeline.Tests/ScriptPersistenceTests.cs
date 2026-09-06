@@ -298,7 +298,7 @@ public sealed class ScriptPersistenceTests
             var storage = new ScriptStorage(root);
             storage.JudgeScripts.SaveAtomic("unsupported-conflict", "javascript", "asset source");
             Directory.CreateDirectory(Path.GetDirectoryName(storage.ScriptsPath)!);
-            var legacy = new JsonArray
+            var unsupportedRecords = new JsonArray
             {
                 new JsonObject
                 {
@@ -309,7 +309,7 @@ public sealed class ScriptPersistenceTests
                     ["JudgeScript"] = "inline source",
                 },
             };
-            File.WriteAllText(storage.ScriptsPath, legacy.ToJsonString());
+            File.WriteAllText(storage.ScriptsPath, unsupportedRecords.ToJsonString());
 
             List<ScriptInstance> loaded = storage.LoadScripts();
 
@@ -324,7 +324,7 @@ public sealed class ScriptPersistenceTests
     }
 
     [Fact]
-    public void ConfigPathChange_KeepsOldStoreUntilNewLocationExists()
+    public void ConfigPathChange_RebuildsStoreFromCurrentLocation()
     {
         string root = MakeTempDir();
         string scriptId = "metadata-path-" + Guid.NewGuid().ToString("N");
@@ -366,87 +366,16 @@ public sealed class ScriptPersistenceTests
             Assert.Null(UserConfigManager.RestoreAfterRun(scriptId, userId, newConfig));
             Assert.Equal("{\"state\":\"new\"}", File.ReadAllText(Path.Combine(
                 ConfigSwapPaths.StoreDir(scriptId, userId), "new.json")));
-            Assert.False(Directory.Exists(ConfigSwapPaths.StoreRebindDir(scriptId, userId)));
+            Assert.False(File.Exists(Path.Combine(
+                ConfigSwapPaths.StoreDir(scriptId, userId), "old.json")));
+            Assert.Equal(
+                ConfigStoreMetadata.HashLocator(newConfig),
+                ConfigStoreMetadata.Load(scriptId, userId)!.ConfigLocatorHash);
         }
         finally
         {
             DeleteExact(root);
             ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
-        }
-    }
-
-    [Fact]
-    public void RebindRecovery_PartialNewStoreRestoresOldSnapshot()
-    {
-        string scriptId = "metadata-rebind-recovery-" + Guid.NewGuid().ToString("N");
-        string userId = "user-" + Guid.NewGuid().ToString("N");
-        string oldConfig = Path.Combine(Path.GetTempPath(), "old-" + Guid.NewGuid().ToString("N") + ".json");
-        string newConfig = Path.Combine(Path.GetTempPath(), "new-" + Guid.NewGuid().ToString("N") + ".json");
-        try
-        {
-            File.WriteAllText(oldConfig, "{\"state\":\"old\"}");
-            ConfigStoreMetadata oldMetadata = ConfigStoreMetadata.For(oldConfig);
-            ConfigStoreMetadata newMetadata = ConfigStoreMetadata.For(newConfig);
-            string store = ConfigSwapPaths.StoreDir(scriptId, userId);
-            string rebindDir = ConfigSwapPaths.StoreRebindDir(scriptId, userId);
-            Directory.CreateDirectory(store);
-            File.WriteAllText(Path.Combine(store, "old.json"), "old");
-            ConfigStoreMetadata.Save(scriptId, userId, oldMetadata);
-            Directory.CreateDirectory(rebindDir);
-            Directory.Move(store, ConfigSwapPaths.StoreRebindOldDir(scriptId, userId));
-            File.Move(
-                ConfigSwapPaths.StoreMetadataPath(scriptId, userId),
-                Path.Combine(rebindDir, "old-store-meta.json"));
-            Directory.CreateDirectory(store);
-            File.WriteAllText(Path.Combine(store, "partial.json"), "partial");
-            JsonUtil.WriteAtomic(
-                ConfigSwapPaths.StoreRebindNewMetadataPath(scriptId, userId),
-                JsonSerializer.Serialize(newMetadata, JsonOpts.Indented));
-
-            ConfigStoreMetadata.RecoverRebind(scriptId, userId);
-
-            Assert.Equal("old", File.ReadAllText(Path.Combine(store, "old.json")));
-            Assert.False(File.Exists(Path.Combine(store, "partial.json")));
-            Assert.NotNull(ConfigStoreMetadata.Load(scriptId, userId));
-            Assert.False(Directory.Exists(rebindDir));
-        }
-        finally
-        {
-            ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
-            TryDeleteFile(oldConfig);
-            TryDeleteFile(newConfig);
-        }
-    }
-
-    [Fact]
-    public void RebindRecovery_CommittedNewStoreCleansIsolation()
-    {
-        string scriptId = "metadata-rebind-commit-" + Guid.NewGuid().ToString("N");
-        string userId = "user-" + Guid.NewGuid().ToString("N");
-        string newConfig = Path.Combine(Path.GetTempPath(), "new-" + Guid.NewGuid().ToString("N") + ".json");
-        try
-        {
-            ConfigStoreMetadata expected = ConfigStoreMetadata.For(newConfig);
-            string store = ConfigSwapPaths.StoreDir(scriptId, userId);
-            string rebindDir = ConfigSwapPaths.StoreRebindDir(scriptId, userId);
-            Directory.CreateDirectory(store);
-            File.WriteAllText(Path.Combine(store, "new.json"), "new");
-            ConfigStoreMetadata.Save(scriptId, userId, expected);
-            Directory.CreateDirectory(ConfigSwapPaths.StoreRebindOldDir(scriptId, userId));
-            File.WriteAllText(Path.Combine(ConfigSwapPaths.StoreRebindOldDir(scriptId, userId), "old.json"), "old");
-            JsonUtil.WriteAtomic(
-                ConfigSwapPaths.StoreRebindNewMetadataPath(scriptId, userId),
-                JsonSerializer.Serialize(expected, JsonOpts.Indented));
-
-            ConfigStoreMetadata.RecoverRebind(scriptId, userId);
-
-            Assert.Equal("new", File.ReadAllText(Path.Combine(store, "new.json")));
-            Assert.False(Directory.Exists(rebindDir));
-        }
-        finally
-        {
-            ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
-            TryDeleteFile(newConfig);
         }
     }
 
@@ -582,35 +511,6 @@ public sealed class ScriptPersistenceTests
         }
     }
 
-    [Fact]
-    public void RestoreHiddenConfigs_PreservesDestinationConflict()
-    {
-        string root = MakeTempDir();
-        string scriptId = "hidden-conflict-" + Guid.NewGuid().ToString("N");
-        string userId = "user-" + Guid.NewGuid().ToString("N");
-        string configPath = Path.Combine(root, "config", "main.json");
-        try
-        {
-            string hidden = ConfigSwapPaths.HiddenConfigDir(scriptId, userId);
-            Directory.CreateDirectory(hidden);
-            Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-            string hiddenFile = Path.Combine(hidden, "other.json");
-            string destination = Path.Combine(Path.GetDirectoryName(configPath)!, "other.json");
-            File.WriteAllText(hiddenFile, "hidden copy");
-            File.WriteAllText(destination, "current copy");
-
-            UserConfigManager.RestoreHiddenConfigs(scriptId, userId, configPath);
-
-            Assert.Equal("current copy", File.ReadAllText(destination));
-            Assert.Equal("hidden copy", File.ReadAllText(hiddenFile));
-        }
-        finally
-        {
-            DeleteExact(root);
-            ConfigSwapPrimitives.TryDeleteDir(Path.Combine(AppPaths.DataDir, scriptId));
-        }
-    }
-
     private static string MakeTempDir()
     {
         string root = Path.Combine(Path.GetTempPath(), "np-script-storage-" + Guid.NewGuid().ToString("N"));
@@ -651,6 +551,8 @@ public sealed class ScriptPersistenceTests
         public ScriptProfile Profile { get; set; } = new();
 
         public bool SupportsEmulator(string pluginName) => false;
+
+        public bool HasCapability(string pluginName, string capabilityKey) => false;
 
         public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null) => Profile;
 

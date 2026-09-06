@@ -257,11 +257,6 @@ internal static class ConfigEditCommands
                     "检测到已打开的脚本，退出脚本后才能编辑配置。");
             }
 
-            // 旧版本 edit-hidden 现场先恢复；新事务由 edit-isolation 记录和恢复。
-            UserConfigManager.RestoreHiddenConfigs(
-                target.Script.Id,
-                target.UserKey,
-                target.Script.ConfigPath);
             string? prepError = editMode switch
             {
                 "fresh" => UserConfigManager.PrepareForEditFresh(
@@ -302,12 +297,6 @@ internal static class ConfigEditCommands
             preparedMark.EditMode = editMode;
             preparedMark.Write();
             ConfigSessionMark editMark = preparedMark;
-            if (editMode != "reuse"
-                && preparationOptions?.IsolateSiblingCandidates != true)
-            {
-                UserConfigManager.HideOtherConfigs(target.Script, target.Script.Id, target.UserKey);
-            }
-
             if (target.Spec?.ConfigEditor is ConfigEditorDescriptor editor)
             {
                 ConfigValidationResult editorResult = ConfigEditPreparationScriptRunner.Execute(
@@ -325,10 +314,6 @@ internal static class ConfigEditCommands
                         target.UserKey,
                         target.Script.ConfigPath,
                         target.Spec?.ExtraConfigPaths);
-                    UserConfigManager.RestoreHiddenConfigs(
-                        target.Script.Id,
-                        target.UserKey,
-                        target.Script.ConfigPath);
                     ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                     return Validation<ConfigEditStarted>(
                         "execution_failed",
@@ -368,11 +353,6 @@ internal static class ConfigEditCommands
                 }
                 finally
                 {
-                    // 主程序启动失败时 CancelEdit 只负责配置交换回滚；同目录隐藏配置也必须立即恢复。
-                    UserConfigManager.RestoreHiddenConfigs(
-                        target.Script.Id,
-                        target.UserKey,
-                        target.Script.ConfigPath);
                     ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                 }
                 return Validation<ConfigEditStarted>(
@@ -459,10 +439,6 @@ internal static class ConfigEditCommands
                             target.UserKey,
                             target.Script.ConfigPath,
                             target.Spec?.ExtraConfigPaths);
-                        UserConfigManager.RestoreHiddenConfigs(
-                            target.Script.Id,
-                            target.UserKey,
-                            target.Script.ConfigPath);
                         ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                         UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
                         ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
@@ -490,10 +466,6 @@ internal static class ConfigEditCommands
                             target.UserKey,
                             target.Script.ConfigPath,
                             target.Spec?.ExtraConfigPaths);
-                        UserConfigManager.RestoreHiddenConfigs(
-                            target.Script.Id,
-                            target.UserKey,
-                            target.Script.ConfigPath);
                         ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                     }
                 }
@@ -642,11 +614,6 @@ internal static class ConfigEditCommands
                 }
                 ConfigSessionMark.Clear(session.Script.Id, sessionUserKey);
             }
-
-            UserConfigManager.RestoreHiddenConfigs(
-                session.Script.Id,
-                sessionUserKey,
-                session.Script.ConfigPath);
 
             Stopwatch validatorTimer = Stopwatch.StartNew();
             ConfigValidationResult validation = action == "done"

@@ -136,7 +136,7 @@ internal class RuntimeContext
         Settings = settings;
     }
 
-    /// <summary>只加载并发布实体内存状态；修复、迁移和落盘由 HostedRuntimeInitializer 编排。</summary>
+    /// <summary>只加载并发布实体内存状态；修复、规范化和落盘由 HostedRuntimeInitializer 编排。</summary>
     public void ReloadData()
     {
         List<ScriptInstance> scripts = DataStore.LoadScripts(out bool scriptsAuthoritative);

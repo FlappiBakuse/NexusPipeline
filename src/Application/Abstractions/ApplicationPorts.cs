@@ -136,8 +136,8 @@ internal interface IPluginCapabilityResolver
 {
     bool SupportsEmulator(string pluginName);
 
-    /// <summary>查询插件声明的通用能力；默认实现供旧测试替身和旧适配器保持兼容。</summary>
-    bool HasCapability(string pluginName, string capabilityKey) => false;
+    /// <summary>查询插件声明的通用能力。</summary>
+    bool HasCapability(string pluginName, string capabilityKey);
 
     ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null);
 

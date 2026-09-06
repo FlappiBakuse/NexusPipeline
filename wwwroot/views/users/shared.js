@@ -10,6 +10,7 @@ import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldErro
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
+import { buildConfigEditRequest } from "./config-edit.js";
 
 export const MAX_ENTITY_NAME_BYTES = 64;
 export const MAX_USER_REMARK_BYTES = 512;
@@ -365,11 +366,7 @@ function openFirstEditConfigChooser(userId, scriptId) {
 
 async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
   try {
-    const request = { action: "start", mode };
-    if (inputOverride) {
-      request.configInputName = inputOverride.name;
-      request.configInputValue = inputOverride.value;
-    }
+    const request = buildConfigEditRequest(mode, inputOverride);
     await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", request);
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {

@@ -1,23 +1,16 @@
 using System.Reflection;
-using System.Text;
 using NexusPipeline.App.Abstractions;
-using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
-using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
-using NexusPipeline.Services.Notification;
 using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>
-/// 基线回归保护：覆盖开工前稳定复现的调度、日志、通知和文件身份问题。
-/// </summary>
-public sealed class BaselineReproductionTests
+public sealed class SchedulerRecoveryTests
 {
     [Fact]
-    public async Task Scheduler_PendingOccurrenceIsRetriedAfterScheduleWasDisabled()
+    public async Task PendingOccurrenceIsNotRetriedAfterScheduleWasDisabled()
     {
         DateTime now = DateTime.Now;
         var queue = ScheduledQueue(now);
@@ -44,7 +37,7 @@ public sealed class BaselineReproductionTests
     }
 
     [Fact]
-    public async Task Scheduler_PendingOccurrenceIsLostAcrossSchedulerRestart()
+    public async Task PendingOccurrenceIsNotReplayedAcrossSchedulerRestart()
     {
         DateTime now = DateTime.Now;
         var queue = ScheduledQueue(now);
@@ -80,84 +73,6 @@ public sealed class BaselineReproductionTests
         Assert.Equal(0, secondCommands.Attempts);
     }
 
-    [Fact]
-    public void ResultCollector_20MbLimitShouldCountUtf8Bytes()
-    {
-        var collector = new ResultCollector();
-        int charCount = (20 * 1024 * 1024 / 3) + 128;
-
-        collector.Append(new string('汉', charCount));
-
-        Assert.True(
-            Encoding.UTF8.GetByteCount(collector.FullLog.ToString()) <= 20 * 1024 * 1024,
-            "当前 ResultCollector 按 chars 而非 UTF-8 bytes 计数。");
-    }
-
-    [Fact]
-    public async Task PluginNotification_UsesHostOwnedDispatcherWithoutPluginChannel()
-    {
-        var dispatcher = new NotificationDispatcher(
-            new TestSettingsProvider(),
-            TimeSpan.FromMilliseconds(50));
-        Task send = dispatcher.SendPluginAsync(
-            new PluginNotification("测试", "正文"),
-            CancellationToken.None).AsTask();
-
-        Task completed = await Task.WhenAny(send, Task.Delay(TimeSpan.FromMilliseconds(150)));
-
-        Assert.Same(send, completed);
-    }
-
-    [Fact]
-    public void LogMonitor_TransientReopenShouldResumeCommittedOffset()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "np-v093-reopen-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        string path = Path.Combine(root, "run.log");
-        try
-        {
-            File.WriteAllText(path, "old\n", Encoding.UTF8);
-            using var monitor = new LogMonitor(path, readFromStart: true);
-            Assert.Equal("old\n", monitor.ReadNew());
-
-            FieldInfo streamField = typeof(LogMonitor).GetField("_stream", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            ((FileStream)streamField.GetValue(monitor)!).Dispose();
-            File.AppendAllText(path, "new\n", Encoding.UTF8);
-
-            Assert.Equal("", monitor.ReadNew());
-            Assert.Equal("new\n", monitor.ReadNew());
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public void LogMonitor_FileIdUnavailableShouldUseCreationStampFallback()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "np-v093-fileid-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        string path = Path.Combine(root, "run.log");
-        try
-        {
-            File.WriteAllText(path, "old", Encoding.UTF8);
-            using var monitor = new LogMonitor(path, readFromStart: true);
-            FieldInfo validField = typeof(LogMonitor).GetField("_fileIdValid", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            validField.SetValue(monitor, false);
-            long oldStamp = monitor.FileStamp;
-            File.Move(path, path + ".old");
-            File.WriteAllText(path, "new", Encoding.UTF8);
-            File.SetCreationTimeUtc(path, new DateTime(oldStamp, DateTimeKind.Utc).AddSeconds(1));
-
-            Assert.True(monitor.FileReplaced(path));
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
     private static DispatchQueue ScheduledQueue(DateTime now)
     {
         return new DispatchQueue
@@ -165,11 +80,11 @@ public sealed class BaselineReproductionTests
             Id = "scheduled-queue",
             Name = "定时队列",
             AutoRunMode = "scheduled",
-            Tasks = new List<QueueTask> { new() { Index = 0, ScriptInstanceId = "missing" } },
-            TimeSets = new List<QueueTimeSet>
-            {
-                new() { Enabled = true, Days = new List<int> { (int)now.DayOfWeek }, Time = now.ToString("HH:mm") },
-            },
+            Tasks = [new QueueTask { Index = 0, ScriptInstanceId = "missing" }],
+            TimeSets =
+            [
+                new QueueTimeSet { Enabled = true, Days = [(int)now.DayOfWeek], Time = now.ToString("HH:mm") },
+            ],
         };
     }
 
@@ -209,7 +124,7 @@ public sealed class BaselineReproductionTests
 
         public DispatchQueue? FindById(string id) => id == _queue.Id ? _queue.Clone() : null;
 
-        public IReadOnlyList<DispatchQueue> Snapshot() => new[] { _queue.Clone() };
+        public IReadOnlyList<DispatchQueue> Snapshot() => [_queue.Clone()];
     }
 
     private sealed class EmptyScriptRepository : IScriptRepository

@@ -264,8 +264,6 @@ data/{脚本Id}/{UserId}/
     ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
     ├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
     ├── edit-isolation/ 编辑事务候选隔离区（文件/目录候选原现场与会话清单按条目保存）
-    ├── edit-hidden/    v0.14.3 遗留编辑现场恢复入口
-    ├── store-rebind/   配置定位变更时的一次性旧快照隔离区
     └── store-txn/      增量快照事务（manifest、stage、rollback、commit）
 ```
 
@@ -304,7 +302,7 @@ flowchart LR
     end
 ```
 
-1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照 → `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置存在则执行一次性重绑定：旧 store 移入 `work/store-rebind/`，新位置成功物化为唯一 store 后清理隔离区；新位置缺失则阻断本次运行并保留旧快照。
+1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照 → `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置缺失会阻断本次运行并保留旧快照；新位置存在时按当前配置重新建立唯一 store、更新当前元数据，不跨配置定位复用旧快照内容。
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
 3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式。`fresh` 按插件声明确定新配置输入，候选原现场进入 `work/edit-isolation`，目标软件在空目标上生成配置；`reuse` 将全部候选原现场进入隔离区，再把选中候选复制为工作副本。编辑期间的附加配置进入 `original-extra` 并复制为工作副本，保存时写入 `store-extra`。done、cancel 和崩溃恢复都会按 `.session` 清单还原主配置、兄弟候选和附加现场；fresh 输入及首次 reuse 选中的候选输入均在主快照成功提交后写入用户绑定，取消或失败不会锁定候选。运行与编辑经 `ScriptConfigGate` 互斥。
 
@@ -325,7 +323,7 @@ flowchart LR
 
 - 附加快照事务在启动恢复和运行收尾前先处理未提交的 manifest；已提交事务只清理残留，未提交事务恢复旧 store。manifest 缺失、身份不匹配或现场状态无法判定时保留事务目录并阻断后续写入，等待人工处理。
 
-- **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记、edit-isolation、旧 edit-hidden 与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。fresh 输入提交阶段使用 `edit-commit-pending` 标记，快照与现场恢复完成后再写入用户绑定。
+- **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记、edit-isolation 与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。fresh 输入提交阶段使用 `edit-commit-pending` 标记，快照与现场恢复完成后再写入用户绑定。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
 - 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 original 完整还原现场。
 - **Missing 形态还原**：`DoRestore` 在 original 为空且原形态为 Missing（运行/编辑前 config 位置不存在）时，删除会话期间在 config 位置产生的文件/目录，恢复为“不存在”；删除失败则保留标记交由自愈/后台重试。
@@ -505,8 +503,8 @@ managed-code 插件可以通过 Plugin API v1.4 注册用户列表徽章、通�
 运行时文件系统的统一约定（新增或调整持久化路径时必须遵循，并同步更新本节与 §4.1/§7.5 布局树）：
 
 1. **单一事实源**：全部路径常量集中在 `src/Persistence/AppPaths.cs` 与 `src/Services/ConfigSwapPaths.cs`，业务代码不得自行拼接安装根相对路径。
-2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/、store-rebind/ 的中断现场）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认新快照提交前保留。
-3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-rebind`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
+2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认提交前保留。
+3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
 4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。
 5. **持久化格式变更**：改变既有 API、字段或目录布局时，先明确当前协议和升级前备份要求；运行时只处理当前协议，未知现场保留并告警，版本发布说明提供用户可执行的备份提示。
 6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是 v0.12.1 的既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为 v0.13.2 布局。
@@ -581,7 +579,7 @@ NexusPipeline/
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
 │   ├── documentation/        Node 内建模块文档一致性检查
 │   ├── support/              Windows 进程、版本解析、测试运行时公共设施
-│   └── legacy/               历史考据与专项诊断资产（不进入 CI/发布门禁）
+│   └── stress/               压力与专项诊断资产（不进入默认 CI/发布门禁）
 ├── tools/source-hash.mjs      Node 源码指纹计算（排除 bin/obj）
 └── tests/run.mjs              统一测试调度入口
 ```

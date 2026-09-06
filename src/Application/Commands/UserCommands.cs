@@ -592,21 +592,6 @@ internal static class UserCommands
     public static OperationResult<UserScriptBinding> UpdateBinding(
         string userId,
         string scriptId,
-        UserScriptBinding candidate,
-        string source = Audit.Web)
-    {
-        // 旧的应用层调用约定把 candidate 视为完整替换对象；Web/MCP 等可感知字段存在性的适配层
-        // 使用下面的显式请求重载，从而兼容 v0.14.2 以前未携带 ConfigInputs 的客户端。
-        return UpdateBinding(
-            userId,
-            scriptId,
-            new UserBindingUpdateRequest(candidate, ConfigInputsSpecified: true),
-            source);
-    }
-
-    public static OperationResult<UserScriptBinding> UpdateBinding(
-        string userId,
-        string scriptId,
         UserBindingUpdateRequest request,
         string source = Audit.Web)
     {

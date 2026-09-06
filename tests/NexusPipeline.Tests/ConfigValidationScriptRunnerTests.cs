@@ -88,7 +88,7 @@ public sealed class ConfigValidationScriptRunnerTests
                 if (!nexus.listFiles().includes('config.json')) throw new Error('list');
                 nexus.writeFile('profiles/user.json', '新配置✓');
                 nexus.toast('已自动修复配置', 'success');
-                nexus.notify('配置检查', '发现旧字段并已自动迁移。', 'warning');
+                nexus.notify('配置检查', '发现未使用字段，保留当前配置。', 'warning');
                 """;
 
             ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
