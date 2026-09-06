@@ -27,7 +27,8 @@ internal sealed record ResolvedScriptSpec(
     ResolvedJudgeScript JudgeScript,
     string ProfileHash,
     string? Error = null,
-    ConfigValidatorDescriptor? ConfigValidator = null)
+    ConfigValidatorDescriptor? ConfigValidator = null,
+    ConfigEditorDescriptor? ConfigEditor = null)
 {
     /// <summary>专项插件的附加配置路径（extraConfigPaths）；通用脚本为空。仅参与按用户快照交换与校验器只读。</summary>
     public IReadOnlyList<string> ExtraConfigPaths { get; init; } = Array.Empty<string>();
@@ -37,6 +38,15 @@ internal sealed record ResolvedScriptSpec(
 
     /// <summary>候选清单对应的真实插件输入名。</summary>
     public string ConfigInputName { get; init; } = "";
+
+    /// <summary>当前 profile 实际使用的配置输入值。</summary>
+    public string ConfigInputValue { get; init; } = "";
+
+    /// <summary>配置编辑事务声明。</summary>
+    public ConfigEditOptions? ConfigEdit { get; init; }
+
+    /// <summary>configPath 模板展开后的实际候选路径。</summary>
+    public IReadOnlyList<string> ConfigInputCandidatePaths { get; init; } = Array.Empty<string>();
 
     /// <summary>插件声明 PC 启动由自身管理；仅在 PC 运行期屏蔽宿主启动，不修改持久脚本。</summary>
     public bool SelfManagedPcLaunch { get; init; }
@@ -133,11 +143,15 @@ internal sealed class ScriptSpecResolver
             profile.PluginVersion ?? "",
             judge,
             ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge),
-            ConfigValidator: ResolveConfigValidator(script.PluginType))
+            ConfigValidator: ResolveConfigValidator(script.PluginType),
+            ConfigEditor: profile.ConfigEditor)
         {
             ExtraConfigPaths = profile.ExtraConfigPaths,
             ConfigInputCandidates = profile.ConfigInputCandidates,
             ConfigInputName = profile.ConfigInputName,
+            ConfigInputValue = profile.ConfigInputValue,
+            ConfigInputCandidatePaths = profile.ConfigInputCandidatePaths,
+            ConfigEdit = profile.ConfigEdit,
             SelfManagedPcLaunch = _capabilities.HasCapability(
                 script.PluginType,
                 PluginCapabilityKeys.SelfManagedPcLaunch),

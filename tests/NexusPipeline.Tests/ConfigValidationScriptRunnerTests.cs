@@ -2,6 +2,7 @@ using System.Text.Json;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
+using NexusPipeline.Services;
 using NexusPipeline.Services.Configuration;
 using Xunit;
 
@@ -251,6 +252,72 @@ public sealed class ConfigValidationScriptRunnerTests
         {
             DeleteExact(root);
             DeleteExact(extraStore);
+        }
+    }
+
+    [Fact]
+    public void EditPreparationScriptCanWriteExtraWorkingCopy_ButCannotWriteMainConfig()
+    {
+        string root = MakeTempDir();
+        string extraFile = Path.Combine(root, "User", "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(extraFile)!);
+        File.WriteAllText(extraFile, "{\"selected\":\"old\"}");
+        try
+        {
+            var mark = new ConfigSessionMark
+            {
+                ScriptId = "script-validator",
+                UserId = "user-1",
+                ConfigPath = Path.Combine(root, "main.json"),
+                ConfigKind = "missing",
+                SessionPhase = "edit",
+                EditMode = "fresh",
+                ExtraConfigPaths =
+                [
+                    new ConfigSessionExtraPath
+                    {
+                        Path = extraFile,
+                        OriginalKind = "file",
+                    },
+                ],
+                PendingConfigInput = new ConfigEditPendingInput
+                {
+                    Name = "config",
+                    Value = "NexusPipeline",
+                },
+            };
+            string code = """
+                if (nexus.input.mode !== 'fresh') throw new Error('mode');
+                if (nexus.input.configInputName !== 'config') throw new Error('input-name');
+                if (nexus.input.configInputValue !== 'NexusPipeline') throw new Error('input-value');
+                if (nexus.writeFile('main.json', 'blocked')) throw new Error('main-write');
+                if (!nexus.writeFile('@extra0/config.json', '{\"selected\":\"NexusPipeline\"}')) throw new Error('extra-write');
+                """;
+            var descriptor = new ConfigEditorDescriptor(
+                "fixture-validator",
+                root,
+                Path.Combine(root, "config-editor.js"),
+                code);
+
+            ConfigValidationResult result = ConfigEditPreparationScriptRunner.Execute(
+                descriptor,
+                MakeScript(),
+                new ResolvedScriptUser(
+                    "user-1",
+                    "用户甲",
+                    new UserScriptBinding { ScriptInstanceId = "script-validator" }),
+                mark,
+                "fresh");
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.False(File.Exists(Path.Combine(root, "main.json")));
+            Assert.Equal("{\"selected\":\"NexusPipeline\"}", File.ReadAllText(extraFile));
+            Assert.Contains("@extra0/config.json", result.ChangedFiles);
+        }
+        finally
+        {
+            DeleteExact(root);
         }
     }
 

@@ -179,6 +179,77 @@ public class ConfigEditModesTests
         }
     }
 
+    [Fact]
+    public void FreshWithExtra_FirstEditCommitCreatesExtraSnapshot_AndRestoresOriginalSite()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        string extraPath = Path.Combine(tempRoot, scriptId, "User", "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(extraPath)!);
+        File.WriteAllText(configPath, "main-original");
+        File.WriteAllText(extraPath, "{\"value\":\"extra-original\"}");
+        try
+        {
+            Assert.Null(UserConfigManager.PrepareForEditFresh(
+                scriptId,
+                userName,
+                configPath,
+                extraConfigPaths: [extraPath]));
+
+            string extraStore = ConfigSwapPaths.StoreExtraDir(scriptId, userName, extraPath);
+            Assert.False(Directory.Exists(extraStore));
+            Assert.Equal("{\"value\":\"extra-original\"}", ReadFile(extraPath));
+
+            File.WriteAllText(configPath, "main-generated");
+            File.WriteAllText(extraPath, "{\"value\":\"extra-edited\"}");
+            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, configPath));
+
+            Assert.Equal("main-generated", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "config.json")));
+            Assert.Equal("{\"value\":\"extra-edited\"}", ReadFile(Path.Combine(extraStore, "config.json")));
+            Assert.Equal("main-original", ReadFile(configPath));
+            Assert.Equal("{\"value\":\"extra-original\"}", ReadFile(extraPath));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void FreshWithExtra_CancelDoesNotCreateExtraSnapshot()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        string extraPath = Path.Combine(tempRoot, scriptId, "User", "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(extraPath)!);
+        File.WriteAllText(configPath, "main-original");
+        File.WriteAllText(extraPath, "{\"value\":\"extra-original\"}");
+        try
+        {
+            Assert.Null(UserConfigManager.PrepareForEditFresh(
+                scriptId,
+                userName,
+                configPath,
+                extraConfigPaths: [extraPath]));
+            File.WriteAllText(configPath, "main-generated");
+            File.WriteAllText(extraPath, "{\"value\":\"extra-edited\"}");
+
+            Assert.Null(UserConfigManager.CancelEdit(scriptId, userName, configPath));
+
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreExtraDir(scriptId, userName, extraPath)));
+            Assert.Equal("main-original", ReadFile(configPath));
+            Assert.Equal("{\"value\":\"extra-original\"}", ReadFile(extraPath));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
     /* ---------------- reuse（复用配置） ---------------- */
 
     [Fact]
@@ -255,6 +326,77 @@ public class ConfigEditModesTests
         }
     }
 
+    [Fact]
+    public void ReuseCancel_ClearsPendingInputWithoutCreatingSnapshot()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(configPath, "user-content");
+        var options = new ConfigEditPreparationOptions(
+            false,
+            Array.Empty<string>(),
+            new ConfigEditPendingInput { Name = "instance", Value = "02" });
+        try
+        {
+            Assert.Null(UserConfigManager.PrepareForEditReuse(
+                scriptId,
+                userName,
+                configPath,
+                options: options));
+
+            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+            Assert.NotNull(mark);
+            Assert.Equal("instance", mark!.PendingConfigInput!.Name);
+            Assert.Equal("02", mark.PendingConfigInput.Value);
+
+            Assert.Null(UserConfigManager.CancelEdit(scriptId, userName, configPath));
+
+            Assert.False(UserConfigManager.HasSnapshot(scriptId, userName));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void ReuseCommit_WithPendingInputKeepsCommitMarkerUntilBindingCommit()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(configPath, "user-content");
+        var options = new ConfigEditPreparationOptions(
+            false,
+            Array.Empty<string>(),
+            new ConfigEditPendingInput { Name = "instance", Value = "02" });
+        try
+        {
+            Assert.Null(UserConfigManager.PrepareForEditReuse(
+                scriptId,
+                userName,
+                configPath,
+                options: options));
+            File.WriteAllText(configPath, "edited");
+
+            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, configPath));
+
+            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+            Assert.NotNull(mark);
+            Assert.Equal("edit-commit-pending", mark!.SessionPhase);
+            Assert.Equal("instance", mark.PendingConfigInput!.Name);
+            Assert.Equal("02", mark.PendingConfigInput.Value);
+            Assert.Equal("edited", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "config.json")));
+        }
+        finally
+        {
+            ConfigSessionMark.Clear(scriptId, userName);
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
     /* ---------------- normal（编辑既有快照） ---------------- */
 
     [Fact]
@@ -327,6 +469,101 @@ public class ConfigEditModesTests
             // 目标文件被改名后取消编辑：编辑前原文件必须还原回原位置，会话干净结束
             Assert.Null(UserConfigManager.CancelEdit(scriptId, userName, configPath));
             Assert.Equal("user-current", ReadFile(configPath));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void NormalMultiCandidateIsolation_MovesSiblings_AndRestoresThemOnCommit()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        var (scriptId, userName, configPath) = MakeTarget(tempRoot);
+        string configDir = Path.GetDirectoryName(configPath)!;
+        string siblingA = Path.Combine(configDir, "A.json");
+        string siblingC = Path.Combine(configDir, "C.json");
+        Directory.CreateDirectory(configDir);
+        File.WriteAllText(configPath, "target-original");
+        File.WriteAllText(siblingA, "a-original");
+        File.WriteAllText(siblingC, "c-original");
+        try
+        {
+            Assert.True(UserConfigManager.PrepareForRun(scriptId, userName, configPath, out string? runError), runError);
+            Assert.Null(UserConfigManager.RestoreAfterRun(scriptId, userName, configPath));
+
+            var options = new ConfigEditPreparationOptions(true, [siblingA, configPath, siblingC]);
+            Assert.Null(UserConfigManager.PrepareForEdit(
+                scriptId,
+                userName,
+                configPath,
+                extraConfigPaths: null,
+                options: options));
+
+            Assert.Equal("target-original", ReadFile(configPath));
+            Assert.False(File.Exists(siblingA));
+            Assert.False(File.Exists(siblingC));
+            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+            Assert.NotNull(mark);
+            Assert.Equal(2, mark!.EditIsolationPaths.Count);
+            Assert.True(Directory.Exists(UserConfigManager.EditIsolationDir(scriptId, userName)));
+
+            File.WriteAllText(configPath, "target-edited");
+            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, configPath));
+
+            Assert.Equal("target-edited", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "config.json")));
+            Assert.Equal("target-original", ReadFile(configPath));
+            Assert.Equal("a-original", ReadFile(siblingA));
+            Assert.Equal("c-original", ReadFile(siblingC));
+            Assert.False(Directory.Exists(UserConfigManager.EditIsolationDir(scriptId, userName)));
+            Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
+        }
+        finally
+        {
+            Cleanup(scriptId, tempRoot);
+        }
+    }
+
+    [Fact]
+    public void ReuseMultiDirectoryIsolation_CopiesSelectedWorking_AndRestoresAllDirectories()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "np-editmode-" + Guid.NewGuid().ToString("N"));
+        string scriptId = "editmode-" + Guid.NewGuid().ToString("N");
+        const string userName = "user";
+        string configDir = Path.Combine(tempRoot, scriptId, "config");
+        string selected = Path.Combine(configDir, "02");
+        string first = Path.Combine(configDir, "01");
+        string third = Path.Combine(configDir, "03");
+        Directory.CreateDirectory(first);
+        Directory.CreateDirectory(selected);
+        Directory.CreateDirectory(third);
+        File.WriteAllText(Path.Combine(first, "value.txt"), "one-original");
+        File.WriteAllText(Path.Combine(selected, "value.txt"), "two-original");
+        File.WriteAllText(Path.Combine(third, "value.txt"), "three-original");
+        try
+        {
+            var options = new ConfigEditPreparationOptions(true, [first, selected, third]);
+            Assert.Null(UserConfigManager.PrepareForEditReuse(
+                scriptId,
+                userName,
+                selected,
+                options: options));
+
+            Assert.False(Directory.Exists(first));
+            Assert.Equal("two-original", ReadFile(Path.Combine(selected, "value.txt")));
+            Assert.False(Directory.Exists(third));
+            Assert.Equal(3, ConfigSessionMark.TryRead(scriptId, userName)!.EditIsolationPaths.Count);
+
+            File.WriteAllText(Path.Combine(selected, "value.txt"), "two-edited");
+            Assert.Null(UserConfigManager.CommitEdit(scriptId, userName, selected));
+
+            Assert.Equal("two-edited", ReadFile(Path.Combine(UserConfigManager.StoreDir(scriptId, userName), "value.txt")));
+            Assert.Equal("one-original", ReadFile(Path.Combine(first, "value.txt")));
+            Assert.Equal("two-original", ReadFile(Path.Combine(selected, "value.txt")));
+            Assert.Equal("three-original", ReadFile(Path.Combine(third, "value.txt")));
+            Assert.False(Directory.Exists(UserConfigManager.EditIsolationDir(scriptId, userName)));
             Assert.Null(ConfigSessionMark.TryRead(scriptId, userName));
         }
         finally

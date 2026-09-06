@@ -35,6 +35,11 @@ internal static class UserConfigManager
         return ConfigSwapPaths.CacheDir(scriptId, userName);
     }
 
+    public static string EditIsolationDir(string scriptId, string userName)
+    {
+        return ConfigSwapPaths.EditIsolationDir(scriptId, userName);
+    }
+
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/script。</summary>
     public static string ScriptDir(string scriptId, string? userName)
     {
@@ -278,18 +283,73 @@ internal static class UserConfigManager
         string userName,
         string configPath,
         ConfigSessionRuntimeMetadata? metadata = null,
-        IReadOnlyList<string>? extraConfigPaths = null)
+        IReadOnlyList<string>? extraConfigPaths = null,
+        ConfigEditPreparationOptions? options = null)
     {
-        return PrepareForRun(scriptId, userName, configPath, out string? error, metadata, extraConfigPaths) ? null : (error ?? "配置交换失败");
+        if (!PrepareForRun(scriptId, userName, configPath, out string? error, metadata, extraConfigPaths))
+        {
+            return error ?? "配置交换失败";
+        }
+        if (options?.IsolateSiblingCandidates != true)
+        {
+            return null;
+        }
+
+        try
+        {
+            ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+            {
+                ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                if (mark is null)
+                {
+                    throw new IOException("配置交换已准备但缺少会话标记");
+                }
+                mark.SessionPhase = "edit";
+                mark.EditMode = "normal";
+                mark.EditIsolationPaths = EditConfigIsolation.BuildEntries(
+                    options.CandidatePaths,
+                    configPath,
+                    includeConfigPath: false);
+                mark.PendingConfigInput = null;
+                mark.Write();
+                if (mark.EditIsolationPaths.Count > 0)
+                {
+                    // normal 已由 PrepareForRun 把 store 工作副本放回 config；此处只迁出兄弟候选。
+                    EditConfigIsolation.Prepare(scriptId, userName, mark, copySelectedWorking: false);
+                }
+            });
+            return null;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            try
+            {
+                ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+                {
+                    ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                    if (mark is not null)
+                    {
+                        ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                    }
+                });
+            }
+            catch (Exception rollback)
+            {
+                Logger.Error($"[错误] 普通配置编辑隔离失败且回滚异常：{rollback.Message}");
+            }
+            return error;
+        }
     }
 
-    /// <summary>全新配置编辑开始（无快照首选）：标记先行（EditMode=fresh）→ config 存在则移入 original 缓存区，
-    /// 让脚本主程序在空配置位置生成全新配置。失败自动回滚还原现场。</summary>
+    /// <summary>全新配置编辑开始：标记先行，按编辑声明隔离候选并准备附加配置工作副本。</summary>
     public static string? PrepareForEditFresh(
         string scriptId,
         string userName,
         string configPath,
-        ConfigSessionRuntimeMetadata? metadata = null)
+        ConfigSessionRuntimeMetadata? metadata = null,
+        IReadOnlyList<string>? extraConfigPaths = null,
+        ConfigEditPreparationOptions? options = null)
     {
         string? error = null;
         try
@@ -312,13 +372,29 @@ internal static class UserConfigManager
                     ProfileHash = metadata?.ProfileHash ?? "",
                     PluginName = metadata?.PluginName ?? "",
                     PluginVersion = metadata?.PluginVersion ?? "",
+                    ExtraConfigPaths = FreezeExtraPaths(metadata, extraConfigPaths),
+                    EditIsolationPaths = options?.IsolateSiblingCandidates == true
+                        ? EditConfigIsolation.BuildEntries(options.CandidatePaths, configPath)
+                        : new List<ConfigSessionIsolationPath>(),
+                    PendingConfigInput = options?.PendingConfigInput?.Clone(),
                 };
                 mark.Write();
-                string cache = CacheDir(scriptId, userName);
-                ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
-                if (PathKindUtil.KindOf(configPath) != PathKind.Missing)
+                if (mark.EditIsolationPaths.Count > 0)
                 {
-                    ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
+                    EditConfigIsolation.Prepare(scriptId, userName, mark, copySelectedWorking: false);
+                }
+                else
+                {
+                    string cache = CacheDir(scriptId, userName);
+                    ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
+                    if (PathKindUtil.KindOf(configPath) != PathKind.Missing)
+                    {
+                        ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
+                    }
+                }
+                if (mark.ExtraConfigPaths.Count > 0)
+                {
+                    ExtraConfigSync.PrepareFirstEditAll(scriptId, userName, mark.ExtraConfigPaths);
                 }
             });
         }
@@ -344,13 +420,14 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>复用配置编辑开始（无快照）：仅写会话标记（EditMode=reuse）记录会话，无任何文件动作，
-    /// 脚本主程序直接编辑现场配置文件。</summary>
+    /// <summary>复用配置编辑开始：可将兄弟候选隔离，并复制选中候选作为工作副本。</summary>
     public static string? PrepareForEditReuse(
         string scriptId,
         string userName,
         string configPath,
-        ConfigSessionRuntimeMetadata? metadata = null)
+        ConfigSessionRuntimeMetadata? metadata = null,
+        IReadOnlyList<string>? extraConfigPaths = null,
+        ConfigEditPreparationOptions? options = null)
     {
         string? error = null;
         try
@@ -373,13 +450,41 @@ internal static class UserConfigManager
                     ProfileHash = metadata?.ProfileHash ?? "",
                     PluginName = metadata?.PluginName ?? "",
                     PluginVersion = metadata?.PluginVersion ?? "",
+                    ExtraConfigPaths = FreezeExtraPaths(metadata, extraConfigPaths),
+                    EditIsolationPaths = options?.IsolateSiblingCandidates == true
+                        ? EditConfigIsolation.BuildEntries(options.CandidatePaths, configPath)
+                        : new List<ConfigSessionIsolationPath>(),
+                    PendingConfigInput = options?.PendingConfigInput?.Clone(),
                 };
                 mark.Write();
+                if (mark.EditIsolationPaths.Count > 0)
+                {
+                    EditConfigIsolation.Prepare(scriptId, userName, mark, copySelectedWorking: true);
+                }
+                if (mark.ExtraConfigPaths.Count > 0)
+                {
+                    ExtraConfigSync.PrepareFirstEditAll(scriptId, userName, mark.ExtraConfigPaths);
+                }
             });
         }
         catch (Exception ex)
         {
             error = ex.Message;
+            try
+            {
+                ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
+                {
+                    ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                    if (mark is not null)
+                    {
+                        ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                    }
+                });
+            }
+            catch (Exception rollback)
+            {
+                Logger.Error($"[错误] 复用配置编辑准备失败且回滚异常：{rollback.Message}");
+            }
         }
         return error;
     }
@@ -405,7 +510,7 @@ internal static class UserConfigManager
             return;
         }
         Directory.CreateDirectory(dir);
-        foreach (string file in Directory.GetFiles(hideDir))
+        foreach (string file in Directory.GetFileSystemEntries(hideDir))
         {
             try
             {
@@ -416,7 +521,14 @@ internal static class UserConfigManager
                     Logger.Warn($"[警告] 恢复隐藏配置跳过冲突文件（保留隐藏副本）：{destination}");
                     continue;
                 }
-                File.Move(file, destination);
+                if (File.Exists(file))
+                {
+                    File.Move(file, destination);
+                }
+                else if (Directory.Exists(file))
+                {
+                    Directory.Move(file, destination);
+                }
             }
             catch (Exception ex)
             {
@@ -471,8 +583,7 @@ internal static class UserConfigManager
         return true;
     }
 
-    /// <summary>编辑配置提交：按文件差异增量写入 store；normal/fresh 模式随后 original → config 还原原配置，reuse 模式无回移动作。
-    /// extraConfigPaths 非空时附加配置现场差异同步入各自快照（幂等，失败不阻断）。</summary>
+    /// <summary>编辑配置提交：主配置与附加配置按各自事务入库，再还原所有编辑现场。</summary>
     public static string? CommitEdit(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
         string? error = null;
@@ -485,6 +596,11 @@ internal static class UserConfigManager
                 {
                     throw new IOException("未找到配置编辑会话");
                 }
+                if (mark.PendingConfigInput is not null)
+                {
+                    mark.SessionPhase = "edit-commit-pending";
+                    mark.Write();
+                }
                 ConfigStoreTransaction.Apply(
                     scriptId,
                     userName,
@@ -493,15 +609,27 @@ internal static class UserConfigManager
                     null,
                     null,
                     mark);
-                if (extraConfigPaths is { Count: > 0 })
+                IReadOnlyList<string> frozenExtraPaths = mark.ExtraConfigPaths
+                    .Select(item => item.Path)
+                    .ToArray();
+                if (frozenExtraPaths.Count == 0 && extraConfigPaths is { Count: > 0 })
                 {
-                    ExtraConfigSync.SyncAllFromSite(scriptId, userName, extraConfigPaths, "编辑提交");
+                    frozenExtraPaths = extraConfigPaths;
                 }
-                if (!IsReuseEdit(mark))
+                if (frozenExtraPaths.Count > 0)
+                {
+                    ExtraConfigSync.SyncAllFromSite(scriptId, userName, frozenExtraPaths, "编辑提交");
+                }
+                if (!IsReuseEdit(mark)
+                    || mark.EditIsolationPaths.Count > 0
+                    || mark.ExtraConfigPaths.Count > 0)
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
                 }
-                ConfigSessionMark.Clear(scriptId, userName);
+                if (mark.PendingConfigInput is null)
+                {
+                    ConfigSessionMark.Clear(scriptId, userName);
+                }
             });
         }
         catch (Exception ex)
@@ -511,7 +639,7 @@ internal static class UserConfigManager
         return error;
     }
 
-    /// <summary>编辑配置取消：normal/fresh 模式清 config（编辑/生成产物）后 original → config 还原原配置；reuse 模式无文件动作。</summary>
+    /// <summary>编辑配置取消：清理工作副本并还原主配置、兄弟候选和附加配置现场。</summary>
     public static string? CancelEdit(string scriptId, string userName, string configPath, IReadOnlyList<string>? extraConfigPaths = null)
     {
         string? error = null;
@@ -524,10 +652,12 @@ internal static class UserConfigManager
                 {
                     throw new IOException("未找到配置编辑会话");
                 }
-                if (!IsReuseEdit(mark))
+                if (!IsReuseEdit(mark)
+                    || mark.EditIsolationPaths.Count > 0
+                    || mark.ExtraConfigPaths.Count > 0)
                 {
                     ConfigSwapSession.DoRestore(scriptId, userName, mark);
-                    if (extraConfigPaths is { Count: > 0 })
+                    if (mark.ExtraConfigPaths.Count == 0 && extraConfigPaths is { Count: > 0 })
                     {
                         ExtraConfigSync.RestoreAll(scriptId, userName, extraConfigPaths);
                     }
@@ -546,6 +676,17 @@ internal static class UserConfigManager
     private static bool IsReuseEdit(ConfigSessionMark? mark)
     {
         return string.Equals(mark?.EditMode, "reuse", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<ConfigSessionExtraPath> FreezeExtraPaths(
+        ConfigSessionRuntimeMetadata? metadata,
+        IReadOnlyList<string>? extraConfigPaths)
+    {
+        if (metadata?.ExtraConfigPaths is { Count: > 0 } frozen)
+        {
+            return frozen.Select(item => item.Clone()).ToList();
+        }
+        return ConfigSessionMark.FromExtraPaths(extraConfigPaths);
     }
 
     private static void ThrowIfStoreTransactionBlocked(string scriptId, string userName)

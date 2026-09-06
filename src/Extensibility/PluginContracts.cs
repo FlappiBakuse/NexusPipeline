@@ -1,4 +1,5 @@
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline.Extensibility;
 
@@ -27,6 +28,13 @@ internal sealed class PluginInputDeclaration
 internal sealed record ConfigInputCandidateSet(
     string InputName,
     IReadOnlyList<string> Values);
+
+/// <summary>配置编辑期间可选的专项编辑器声明。</summary>
+internal sealed record ConfigEditFreshInput(string Name, string Value);
+
+internal sealed record ConfigEditOptions(
+    bool IsolateSiblingCandidates,
+    ConfigEditFreshInput? FreshInput = null);
 
 /// <summary>数据化或 C# 插件提供的脚本 profile 推导能力。</summary>
 internal interface IProfileResolver : IPluginCapability
@@ -84,4 +92,16 @@ internal sealed class ScriptProfile
     /// 在运行前拒绝启动，避免把残缺的目录型 configPath 整目录采用为快照。
     /// </summary>
     public IReadOnlyList<string> ConfigInputCandidates { get; set; } = Array.Empty<string>();
+
+    /// <summary>当前 profile 使用的配置输入值。</summary>
+    public string ConfigInputValue { get; set; } = "";
+
+    /// <summary>可参与编辑隔离的实际候选路径。</summary>
+    public IReadOnlyList<string> ConfigInputCandidatePaths { get; set; } = Array.Empty<string>();
+
+    /// <summary>配置编辑事务声明；缺失时沿用宿主通用编辑语义。</summary>
+    public ConfigEditOptions? ConfigEdit { get; set; }
+
+    /// <summary>专项配置编辑脚本；脚本由宿主在准备工作副本后执行。</summary>
+    public ConfigEditorDescriptor? ConfigEditor { get; set; }
 }

@@ -2,6 +2,17 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.14.4（Pre-release）
+
+### 配置编辑事务
+- 新增 `work/edit-isolation` 配置编辑事务隔离区，按 durable 会话清单保存文件和目录候选的原始现场；保存、取消、启动失败和崩溃恢复统一还原。
+- fresh/reuse 首次编辑支持多候选隔离、选中配置工作副本、附加配置工作副本和 fresh 输入延迟绑定。
+- 复用配置选择的输入值仅在编辑成功保存后写入用户绑定；取消、启动失败或恢复不会锁定未保存的候选，下一次编辑可重新选择。
+- 新增数据化专项插件 `configEditor`/`configEdit` 契约，准备脚本在目标程序启动前以受限权限调整附加工作副本；执行失败会阻断启动并回滚准备。
+
+### 官方插件
+- BetterGI 与 ZenlessZoneZeroOneDragon 升级到 0.2.5，补充多配置编辑隔离和伴随配置选择同步。
+
 ## v0.14.3（Pre-release）
 
 ### 配置与恢复稳定性

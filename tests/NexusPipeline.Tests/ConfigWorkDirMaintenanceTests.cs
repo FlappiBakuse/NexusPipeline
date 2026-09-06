@@ -40,6 +40,7 @@ public class ConfigWorkDirMaintenanceTests
         Assert.Equal(Path.Combine(userRoot, "store-meta.json"), ConfigSwapPaths.StoreMetadataPath(scriptId, userName));
         Assert.Equal(Path.Combine(work, "original"), ConfigSwapPaths.CacheDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "edit-hidden"), ConfigSwapPaths.HiddenConfigDir(scriptId, userName));
+        Assert.Equal(Path.Combine(work, "edit-isolation"), ConfigSwapPaths.EditIsolationDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "script"), ConfigSwapPaths.ScriptDir(scriptId, userName));
         Assert.Equal(Path.Combine(work, "swap-backup"), ConfigSwapPaths.ReplaceBackupDir(scriptId, userName));
         // 无用户兜底同样收敛到 work/
@@ -100,5 +101,32 @@ public class ConfigWorkDirMaintenanceTests
         ConfigWorkDirMaintenance.SweepRuntimeStaging();
 
         Assert.False(Directory.Exists(AppPaths.AppearanceStagingDir));
+    }
+
+    [Fact]
+    public void UntrackedEditIsolationResidue_IsPreservedWithoutGuessing()
+    {
+        string scriptId = "sweep-untracked-" + Guid.NewGuid().ToString("N");
+        const string userName = "user-a";
+        string isolationRoot = ConfigSwapPaths.EditIsolationDir(scriptId, userName);
+        try
+        {
+            Directory.CreateDirectory(isolationRoot);
+            File.WriteAllText(Path.Combine(isolationRoot, "orphan"), "保留现场");
+            UserConfigManager.RecoverInterrupted(
+            [
+                new NexusUser
+                {
+                    Id = userName,
+                    Bindings = [new UserScriptBinding { ScriptInstanceId = scriptId }],
+                },
+            ]);
+
+            Assert.True(File.Exists(Path.Combine(isolationRoot, "orphan")));
+        }
+        finally
+        {
+            CleanupScript(scriptId);
+        }
     }
 }

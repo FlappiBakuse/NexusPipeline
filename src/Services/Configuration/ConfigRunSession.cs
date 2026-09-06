@@ -182,6 +182,10 @@ internal sealed class ConfigRunSession
             }
 
             _finalizationError = restoreError;
+            if (restoreError is null)
+            {
+                ConfigWorkDirMaintenance.SweepIdleWorkDir(_scriptId, _userKey);
+            }
             _finalizationCompleted = true;
             return _finalizationError;
         }

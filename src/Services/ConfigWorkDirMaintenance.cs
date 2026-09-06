@@ -32,6 +32,22 @@ internal static class ConfigWorkDirMaintenance
         }
     }
 
+    /// <summary>单次运行或编辑完成后的定向清理；仅在交换锁空闲且现场无恢复标记时生效。</summary>
+    public static void SweepIdleWorkDir(string scriptId, string? userKey)
+    {
+        if (string.IsNullOrWhiteSpace(scriptId) || !ConfigSwapPrimitives.TryProbeSwapLock(scriptId))
+        {
+            return;
+        }
+        string ownerDir = string.IsNullOrWhiteSpace(userKey)
+            ? Path.Combine(AppPaths.DataDir, scriptId)
+            : ConfigSwapPaths.UserDir(scriptId, userKey);
+        bool hasSessionMark = !string.IsNullOrWhiteSpace(userKey)
+            && (File.Exists(ConfigSessionMark.MarkFile(scriptId, userKey))
+                || File.Exists(ConfigSessionMark.BackupMarkFile(scriptId, userKey)));
+        SweepOne(ownerDir, hasSessionMark);
+    }
+
     /// <summary>清空 .nxp/runtime/staging（可重建暂存区）：删除上次进程残留的上传/解压临时文件。</summary>
     public static void SweepRuntimeStaging()
     {
@@ -57,7 +73,7 @@ internal static class ConfigWorkDirMaintenance
         }
         // 判断脚本目录每轮清空重建、无恢复价值，可直接删除。
         ConfigSwapPrimitives.TryDeleteDir(Path.Combine(workDir, "script"));
-        // 其余子项可能承载恢复现场（swap-backup/original/edit-hidden/store-txn）：
+        // 其余子项可能承载恢复现场（swap-backup/original/original-extra/edit-isolation/edit-hidden/store-txn）：
         // 只清掉空目录，存在任何内容时整体保留 work/，交由恢复逻辑或人工处理。
         foreach (string entry in Directory.GetFileSystemEntries(workDir))
         {

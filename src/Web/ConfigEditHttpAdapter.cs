@@ -37,11 +37,26 @@ internal static class ConfigEditHttpAdapter
         var parsed = HttpHelper.ParseBody(body);
         string action = parsed.Get("action").Str();
         string mode = parsed.Get("mode").Str();
+        string inputName = parsed.Get("configInputName").Str().Trim();
+        string inputValue = parsed.Get("configInputValue").Str();
+        IReadOnlyDictionary<string, string>? inputOverrides = null;
+        if (inputName.Length > 0 || inputValue.Length > 0)
+        {
+            inputOverrides = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [inputName] = inputValue,
+            };
+        }
 
         if (action == "start")
         {
             OperationResult<ConfigEditStarted> result =
-                ConfigEditCommands.Start(ctx, scriptId, userReference, mode);
+                ConfigEditCommands.Start(
+                    ctx,
+                    scriptId,
+                    userReference,
+                    mode,
+                    inputOverrides: inputOverrides);
             if (!result.Succeeded)
             {
                 await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);

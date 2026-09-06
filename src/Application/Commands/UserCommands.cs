@@ -697,6 +697,71 @@ internal static class UserCommands
         }
     }
 
+    /// <summary>编辑事务提交后的输入绑定写入；编辑会话自身持有对应准入租约。</summary>
+    internal static OperationResult<UserScriptBinding> CommitPendingConfigInput(
+        string userId,
+        string scriptId,
+        ConfigEditPendingInput pending)
+    {
+        if (string.IsNullOrWhiteSpace(pending.Name)
+            || string.IsNullOrWhiteSpace(pending.Value)
+            || pending.Name.Length > 128
+            || pending.Value.Length > 512
+            || pending.Name.Any(character => !char.IsLetterOrDigit(character) && character != '_')
+            || pending.Value.Any(char.IsControl))
+        {
+            return Validation<UserScriptBinding>("配置输入值格式无效");
+        }
+        RuntimeContext ctx = RuntimeContext.Instance;
+        try
+        {
+            UserScriptBinding? result = null;
+            string? error = null;
+            ctx.Center.WithAdmissionCoordination(() =>
+            {
+                ctx.EntityState.Mutate(state =>
+                {
+                    NexusUser? user = state.Users.FirstOrDefault(item =>
+                        string.Equals(item.Id, userId, StringComparison.OrdinalIgnoreCase));
+                    UserScriptBinding? binding = user?.Bindings.FirstOrDefault(item =>
+                        string.Equals(item.ScriptInstanceId, scriptId, StringComparison.Ordinal));
+                    if (user is null || binding is null)
+                    {
+                        error = "用户绑定不存在";
+                        return;
+                    }
+                    Dictionary<string, string> oldInputs = new(binding.ConfigInputs, StringComparer.OrdinalIgnoreCase);
+                    binding.ConfigInputs[pending.Name] = pending.Value;
+                    try
+                    {
+                        DataStore.SaveUsers(state.Users);
+                        result = binding.Clone();
+                    }
+                    catch
+                    {
+                        binding.ConfigInputs = oldInputs;
+                        throw;
+                    }
+                });
+            });
+            return error is not null
+                ? NotFound<UserScriptBinding>(error)
+                : result is null
+                    ? Internal<UserScriptBinding>(new InvalidOperationException("配置输入绑定提交未产生结果"))
+                    : OperationResult<UserScriptBinding>.Ok(result);
+        }
+        catch (Exception ex)
+        {
+            return Internal<UserScriptBinding>(ex);
+        }
+    }
+
+    internal static bool TryCommitPendingConfigInput(ConfigSessionMark mark)
+    {
+        return mark.PendingConfigInput is not null
+            && CommitPendingConfigInput(mark.UserId, mark.ScriptId, mark.PendingConfigInput).Succeeded;
+    }
+
     public static OperationResult<bool> DeleteBinding(
         string userId,
         string scriptId,

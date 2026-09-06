@@ -55,6 +55,46 @@ internal static class ExtraConfigSync
         }
     }
 
+    /// <summary>
+    /// 首次编辑的附加配置准备：原现场进入 original-extra，再复制回现场作为工作副本。
+    /// 该阶段保持 store-extra 未创建，保存操作才会建立用户快照。
+    /// </summary>
+    public static void PrepareFirstEditAll(
+        string scriptId,
+        string userKey,
+        IReadOnlyList<ConfigSessionExtraPath> entries)
+    {
+        if (entries.Count == 0)
+        {
+            return;
+        }
+        ValidateEntries(entries);
+        var attempted = new List<ConfigSessionExtraPath>(entries.Count);
+        try
+        {
+            foreach (ConfigSessionExtraPath entry in entries)
+            {
+                attempted.Add(entry);
+                PrepareFirstEdit(scriptId, userKey, entry);
+            }
+        }
+        catch
+        {
+            foreach (ConfigSessionExtraPath entry in attempted.AsEnumerable().Reverse())
+            {
+                try
+                {
+                    Restore(scriptId, userKey, entry);
+                }
+                catch (Exception rollback)
+                {
+                    Logger.Error($"[附加配置] 首次编辑准备回滚失败，保留恢复现场（脚本 {scriptId} / 用户 {userKey} / {entry.Path}）：{rollback.Message}");
+                }
+            }
+            throw;
+        }
+    }
+
     /// <summary>现场内容差异同步入快照；每条附加路径的快照替换由独立事务提交。</summary>
     public static void SyncAllFromSite(
         string scriptId,
@@ -153,6 +193,30 @@ internal static class ExtraConfigSync
         {
             CopyStoreToSite(storeExtra, sitePath, siteKind);
         }
+    }
+
+    private static void PrepareFirstEdit(string scriptId, string userKey, ConfigSessionExtraPath entry)
+    {
+        string sitePath = entry.Path;
+        PathKind expectedKind = PathKindUtil.Parse(entry.OriginalKind);
+        PathKind siteKind = PathKindUtil.KindOf(sitePath);
+        Restore(scriptId, userKey, entry);
+        siteKind = PathKindUtil.KindOf(sitePath);
+        if (siteKind != expectedKind)
+        {
+            throw new IOException($"首次编辑附加配置现场形态已变化，拒绝覆盖：{sitePath}（标记={entry.OriginalKind}，当前={PathKindUtil.Text(siteKind)}）");
+        }
+        if (siteKind == PathKind.Missing)
+        {
+            return;
+        }
+
+        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, sitePath);
+        ConfigSwapPrimitives.ClearPath(originalExtra, PathKindUtil.KindOf(originalExtra));
+        DeleteKindMark(scriptId, userKey, sitePath);
+        ConfigSwapPrimitives.MoveAs(sitePath, originalExtra, PathKind.Dir);
+        WriteKindMark(scriptId, userKey, sitePath, siteKind);
+        ConfigSwapPrimitives.CopyAs(originalExtra, sitePath, siteKind);
     }
 
     private static void SyncFromSite(string scriptId, string userKey, string sitePath, string phase)

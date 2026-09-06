@@ -574,6 +574,20 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         return descriptor is not null;
     }
 
+    /// <summary>返回已发现、已启用且有效的数据化插件配置编辑脚本。</summary>
+    internal bool TryGetConfigEditor(string pluginName, out ConfigEditorDescriptor? descriptor)
+    {
+        descriptor = null;
+        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
+            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        if (plugin is null || !IsRuntimeEnabled(plugin.Name) || !plugin.HasConfigEditor)
+        {
+            return false;
+        }
+        descriptor = plugin.ReadConfigEditor();
+        return descriptor is not null;
+    }
+
     /// <summary>
     /// 扫描 manifest 后按配置启动插件。managed-code 插件在完成 API 兼容性和启用检查前不会加载程序集。
     /// </summary>

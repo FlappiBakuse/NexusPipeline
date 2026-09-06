@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Jint;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
@@ -35,7 +36,12 @@ internal sealed record ConfigValidationResult(
 internal sealed record ConfigValidationFile(string Path, long Size);
 
 /// <summary>附加配置路径的只读快照视图：声明路径 + 该用户的 store-extra 快照目录。</summary>
-internal sealed record ConfigValidationExtraSnapshot(string Path, string StoreDir);
+internal sealed record ConfigValidationExtraSnapshot(string Path, string StoreDir)
+{
+    public string? SingleFilePath { get; init; }
+
+    public bool AllowWrite { get; init; }
+}
 
 /// <summary>
 /// data-specialized 插件配置校验器。它与运行期 JudgeScriptRunner 分离，固定以用户 store 为唯一文件根，
@@ -64,7 +70,10 @@ internal static class ConfigValidationScriptRunner
         string storeRoot,
         string trigger = "config-edit",
         IReadOnlyList<ConfigValidationExtraSnapshot>? extraSnapshots = null,
-        CancellationToken token = default)
+        CancellationToken token = default,
+        bool allowMainWrites = true,
+        bool allowExtraWrites = false,
+        IReadOnlyDictionary<string, string>? inputFields = null)
     {
         var changedFiles = new List<string>();
         var toasts = new List<ConfigValidationToast>();
@@ -72,7 +81,7 @@ internal static class ConfigValidationScriptRunner
         extraSnapshots ??= Array.Empty<ConfigValidationExtraSnapshot>();
         try
         {
-            string inputJson = BuildInput(script, user, ListFiles(storeRoot), trigger, extraSnapshots);
+            string inputJson = BuildInput(script, user, ListFiles(storeRoot), trigger, extraSnapshots, inputFields);
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
             timeout.CancelAfter(TimeSpan.FromSeconds(MaxExecutionSeconds));
             await Task.Run(() =>
@@ -88,7 +97,7 @@ internal static class ConfigValidationScriptRunner
                     ListFiles(storeRoot)
                         .Select(file => file.Path)
                         .Concat(extraSnapshots.SelectMany((extra, index) =>
-                            ListFiles(extra.StoreDir).Select(file => ExtraPrefix(index) + file.Path)))
+                            ListSnapshotFiles(extra).Select(file => ExtraPrefix(index) + file.Path)))
                         .ToArray()));
                 engine.SetValue("__nexusReadFile", new Func<object, object?>(path =>
                     ResolvePathRoot(storeRoot, path?.ToString() ?? "", extraSnapshots, out string? root, out string? relative)
@@ -97,9 +106,21 @@ internal static class ConfigValidationScriptRunner
                 engine.SetValue("__nexusWriteFile", new Func<object, object, object>((path, content) =>
                 {
                     string candidate = path?.ToString() ?? "";
-                    if (IsExtraRef(candidate, out _, out _))
+                    if (IsExtraRef(candidate, out int extraIndex, out _))
                     {
-                        Logger.Warn($"[警告] 专项配置校验写入被拒绝（附加配置快照本版本只读）：{candidate}");
+                        if (!allowExtraWrites
+                            || extraIndex >= extraSnapshots.Count
+                            || !extraSnapshots[extraIndex].AllowWrite)
+                        {
+                            Logger.Warn($"[警告] 专项配置脚本写入附加配置被拒绝：{candidate}");
+                            return false;
+                        }
+                        return ResolvePathRoot(storeRoot, candidate, extraSnapshots, out string? extraRoot, out string? extraRelative)
+                            && WriteFile(extraRoot!, extraRelative!, content?.ToString() ?? "", changedFiles, ExtraPrefix(extraIndex));
+                    }
+                    if (!allowMainWrites)
+                    {
+                        Logger.Warn($"[警告] 专项配置编辑脚本写入主配置被拒绝：{candidate}");
                         return false;
                     }
                     return WriteFile(storeRoot, candidate, content?.ToString() ?? "", changedFiles);
@@ -140,9 +161,10 @@ internal static class ConfigValidationScriptRunner
         ResolvedScriptUser? user,
         IReadOnlyList<ConfigValidationFile> files,
         string trigger = "config-edit",
-        IReadOnlyList<ConfigValidationExtraSnapshot>? extraSnapshots = null)
+        IReadOnlyList<ConfigValidationExtraSnapshot>? extraSnapshots = null,
+        IReadOnlyDictionary<string, string>? inputFields = null)
     {
-        return JsonSerializer.Serialize(new
+        JsonObject root = JsonNode.Parse(JsonSerializer.Serialize(new
         {
             trigger,
             script = new
@@ -181,12 +203,20 @@ internal static class ConfigValidationScriptRunner
                 .Select(extra => new
                 {
                     extra.Path,
-                    files = ListFiles(extra.StoreDir)
+                    files = ListSnapshotFiles(extra)
                         .Select(file => new { file.Path, file.Size })
                         .ToArray(),
                 })
                 .ToArray(),
-        }, JsonOpts.Web);
+        }, JsonOpts.Web))!.AsObject();
+        if (inputFields is not null)
+        {
+            foreach (KeyValuePair<string, string> field in inputFields)
+            {
+                root[field.Key] = field.Value;
+            }
+        }
+        return root.ToJsonString(JsonOpts.Web);
     }
 
     /// <summary>@extra&lt;i&gt;/ 逻辑前缀：附加配置快照区在 validator 文件 API 中的命名空间。</summary>
@@ -233,6 +263,21 @@ internal static class ConfigValidationScriptRunner
             }
             root = extraSnapshots[index].StoreDir;
             relative = extraRelative;
+            if (extraSnapshots[index].SingleFilePath is string singleFile)
+            {
+                string fileName = Path.GetFileName(singleFile);
+                if (!string.Equals(
+                        fileName,
+                        extraRelative.Replace('/', Path.DirectorySeparatorChar),
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Warn($"[警告] 专项配置校验路径超出附加文件工作副本：{candidate}");
+                    root = null;
+                    relative = null;
+                    return false;
+                }
+                root = Path.GetDirectoryName(singleFile);
+            }
             return true;
         }
         root = storeRoot;
@@ -285,6 +330,25 @@ internal static class ConfigValidationScriptRunner
         return result;
     }
 
+    private static IReadOnlyList<ConfigValidationFile> ListSnapshotFiles(ConfigValidationExtraSnapshot snapshot)
+    {
+        if (snapshot.SingleFilePath is string file)
+        {
+            try
+            {
+                return File.Exists(file)
+                    ? [new ConfigValidationFile(Path.GetFileName(file), new FileInfo(file).Length)]
+                    : Array.Empty<ConfigValidationFile>();
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[专项配置校验] 附加文件清单读取失败（{file}）：{ex.Message}");
+                return Array.Empty<ConfigValidationFile>();
+            }
+        }
+        return ListFiles(snapshot.StoreDir);
+    }
+
     private static string? ReadFile(string storeRoot, string relativePath)
     {
         if (!TryResolveFilePath(storeRoot, relativePath, "读取", out string? target)
@@ -313,7 +377,8 @@ internal static class ConfigValidationScriptRunner
         string storeRoot,
         string relativePath,
         string content,
-        ICollection<string> changedFiles)
+        ICollection<string> changedFiles,
+        string changedPrefix = "")
     {
         if (!TryResolveFilePath(storeRoot, relativePath, "写入", out string? target)
             || target is null)
@@ -377,7 +442,7 @@ internal static class ConfigValidationScriptRunner
             {
                 File.Move(temp, target);
             }
-            changedFiles.Add(NormalizeRelativePath(Path.GetRelativePath(storeRoot, target)));
+            changedFiles.Add(changedPrefix + NormalizeRelativePath(Path.GetRelativePath(storeRoot, target)));
             return true;
         }
         catch (Exception ex)

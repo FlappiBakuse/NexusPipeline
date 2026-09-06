@@ -38,6 +38,9 @@ internal sealed class PluginManifest
     /// <summary>数据化插件可选的配置校验脚本，相对插件目录且仅允许 JavaScript。</summary>
     public string? ConfigValidatorPath { get; private init; }
 
+    /// <summary>数据化插件可选的配置编辑准备脚本，相对插件目录且仅允许 JavaScript。</summary>
+    public string? ConfigEditorPath { get; private init; }
+
     public IReadOnlySet<string> Capabilities => _capabilities;
 
     public PluginFrontendManifest? Frontend { get; private set; }
@@ -113,6 +116,11 @@ internal sealed class PluginManifest
                 error = "configValidator 仅支持 data-specialized 插件";
                 return false;
             }
+            if (root.ContainsKey("configEditor") && kind != "data-specialized")
+            {
+                error = "configEditor 仅支持 data-specialized 插件";
+                return false;
+            }
 
             string? configValidatorPath = null;
             if (root.ContainsKey("configValidator"))
@@ -128,6 +136,24 @@ internal sealed class PluginManifest
                 if (!IsWithin(pluginRoot, validatorPath) || !File.Exists(validatorPath))
                 {
                     error = "configValidator 文件不存在或超出插件目录";
+                    return false;
+                }
+            }
+
+            string? configEditorPath = null;
+            if (root.ContainsKey("configEditor"))
+            {
+                configEditorPath = root["configEditor"]?.ToString()?.Trim();
+                if (!IsSafeRelativeScriptPath(configEditorPath, ".js"))
+                {
+                    error = "configEditor 必须是插件目录内的安全相对 .js 路径";
+                    return false;
+                }
+                string editorPath = Path.GetFullPath(Path.Combine(pluginDir, configEditorPath!));
+                string pluginRoot = Path.GetFullPath(pluginDir);
+                if (!IsWithin(pluginRoot, editorPath) || !File.Exists(editorPath))
+                {
+                    error = "configEditor 文件不存在或超出插件目录";
                     return false;
                 }
             }
@@ -149,6 +175,7 @@ internal sealed class PluginManifest
                 ResolvePath = root["resolve"]?.ToString()?.Trim() ?? "",
                 JudgeScriptPath = root["judgeScript"]?.ToString()?.Trim() ?? "",
                 ConfigValidatorPath = configValidatorPath,
+                ConfigEditorPath = configEditorPath,
             };
             if (root["capabilities"] is JsonArray capabilities)
             {

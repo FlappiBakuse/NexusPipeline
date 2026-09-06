@@ -1,4 +1,5 @@
 using NexusPipeline.Persistence;
+using NexusPipeline.App.Commands;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
@@ -18,7 +19,10 @@ internal static class HostedRuntimeInitializer
             RuntimeDataReconciler.Reconcile(ctx);
 
             // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底）。
-            ConfigSwapSession.ConfigureRecovery(ctx.EntityState.FindScript, ctx.EntityState.SnapshotUsers);
+            ConfigSwapSession.ConfigureRecovery(
+                ctx.EntityState.FindScript,
+                ctx.EntityState.SnapshotUsers,
+                UserCommands.TryCommitPendingConfigInput);
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
             UserConfigManager.RecoverInterrupted(ctx.EntityState.SnapshotUsers());
             TaskRegistration.SyncWithSettings(ctx.Settings);

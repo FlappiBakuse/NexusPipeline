@@ -15,11 +15,16 @@ internal sealed class ConfigSwapRecovery
 {
     private readonly Func<string, ScriptInstance?> _findScript;
     private readonly Func<IReadOnlyList<NexusUser>> _snapshotUsers;
+    private readonly Func<ConfigSessionMark, bool>? _commitPendingInput;
 
-    public ConfigSwapRecovery(Func<string, ScriptInstance?> findScript, Func<IReadOnlyList<NexusUser>> snapshotUsers)
+    public ConfigSwapRecovery(
+        Func<string, ScriptInstance?> findScript,
+        Func<IReadOnlyList<NexusUser>> snapshotUsers,
+        Func<ConfigSessionMark, bool>? commitPendingInput = null)
     {
         _findScript = findScript;
         _snapshotUsers = snapshotUsers;
+        _commitPendingInput = commitPendingInput;
     }
 
     /* ---------------- 会话与恢复 ---------------- */
@@ -38,6 +43,10 @@ internal sealed class ConfigSwapRecovery
                 // 当前启动阶段可能尚未加载插件；主/备标记均损坏时禁止使用声明中的旧路径猜测恢复。
                 throw new IOException($"配置会话主标记与冗余标记均损坏，已保留现场，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
             }
+            if (EditConfigIsolation.HasResidue(scriptId, userName))
+            {
+                throw new IOException($"配置编辑隔离区缺少可验证会话标记，已保留现场，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            }
             return;
         }
         string cache = ConfigSwapPaths.CacheDir(scriptId, userName);
@@ -48,9 +57,17 @@ internal sealed class ConfigSwapRecovery
             // （避免窄窗口误删用户新写入的 config）。
             if (mark.NeedsFreshRestore
                 || mark.ExtraConfigPaths.Count > 0
+                || mark.EditIsolationPaths.Count > 0
+                || string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal)
+                || EditConfigIsolation.HasResidue(scriptId, userName)
                 || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName))
             {
                 DoRestore(scriptId, userName, mark);
+                if (!TryFinalizePendingInput(scriptId, userName, mark))
+                {
+                    EnqueuePendingRecover(scriptId, userName);
+                    throw new IOException($"配置编辑输入绑定仍待提交：脚本 {scriptId} / 用户 {userName}");
+                }
             }
             else
             {
@@ -62,6 +79,11 @@ internal sealed class ConfigSwapRecovery
         try
         {
             DoRestore(scriptId, userName, mark);
+            if (!TryFinalizePendingInput(scriptId, userName, mark))
+            {
+                EnqueuePendingRecover(scriptId, userName);
+                throw new IOException($"配置编辑输入绑定仍待提交：脚本 {scriptId} / 用户 {userName}");
+            }
             Audit.Log(Audit.System, "恢复配置交换", $"{mark.ConfigPath}（用户 {userName}）");
         }
         catch (Exception ex)
@@ -190,6 +212,7 @@ internal sealed class ConfigSwapRecovery
             || (!string.IsNullOrWhiteSpace(userName)
                 && (HasSessionMarkFiles(scriptId, userName)
                     || hasUntrackedExtraResidue
+                    || EditConfigIsolation.HasResidue(scriptId, userName)
                     || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName)));
         if (!string.IsNullOrWhiteSpace(userName)
             && HasSessionMarkFiles(scriptId, userName)
@@ -197,6 +220,15 @@ internal sealed class ConfigSwapRecovery
         {
             // 主/冗余标记均不可解析时，当前插件可能已经改写 ConfigPath；保留 original/config 现场，等待人工或更高层恢复。
             Logger.Error($"[错误] 配置会话主标记与冗余标记均损坏，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
+            EnqueuePendingRecover(scriptId, userName);
+            return false;
+        }
+        if (!string.IsNullOrWhiteSpace(userName)
+            && !HasSessionMarkFiles(scriptId, userName)
+            && EditConfigIsolation.HasResidue(scriptId, userName))
+        {
+            // edit-isolation 的项目名只由会话标记解释；无标记时不能把它猜作当前 config 的兄弟项。
+            Logger.Error($"[错误] 配置编辑隔离区缺少会话清单，拒绝猜测恢复路径：脚本 {scriptId} / 用户 {userName}");
             EnqueuePendingRecover(scriptId, userName);
             return false;
         }
@@ -226,9 +258,13 @@ internal sealed class ConfigSwapRecovery
                     // 删除 config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
                     if (mark.NeedsFreshRestore
                         || mark.ExtraConfigPaths.Count > 0
+                        || mark.EditIsolationPaths.Count > 0
+                        || string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal)
+                        || EditConfigIsolation.HasResidue(scriptId, userName)
                         || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName))
                     {
-                        if (!RecoverSwapQuiet(scriptId, userName, mark))
+                        if (!RecoverSwapQuiet(scriptId, userName, mark)
+                            || !TryFinalizePendingInput(scriptId, userName, mark))
                         {
                             ok = false;
                         }
@@ -238,7 +274,8 @@ internal sealed class ConfigSwapRecovery
                         ConfigSessionMark.Clear(scriptId, userName);
                     }
                 }
-                else if (!RecoverSwapQuiet(scriptId, userName, mark))
+                else if (!RecoverSwapQuiet(scriptId, userName, mark)
+                    || !TryFinalizePendingInput(scriptId, userName, mark))
                 {
                     ok = false;
                 }
@@ -328,7 +365,7 @@ internal sealed class ConfigSwapRecovery
         }
     }
 
-    /// <summary>恢复编辑会话隐藏的配置（幂等）：编辑会话崩溃/重启后，把暂存在 edit-hidden 的配置移回 config 目录并清理目录。</summary>
+    /// <summary>恢复 v0.14.3 编辑现场（幂等）：把 edit-hidden 中的文件或目录移回配置父目录。</summary>
     private void RestoreHiddenQuiet(string scriptId, string userName, string configPath)
     {
         string hideDir = ConfigSwapPaths.HiddenConfigDir(scriptId, userName);
@@ -351,7 +388,7 @@ internal sealed class ConfigSwapRecovery
             Logger.Warn($"[恢复] 重建配置目录失败（{dir}）：{ex.Message}");
             return;
         }
-        foreach (string file in Directory.GetFiles(hideDir))
+        foreach (string file in Directory.GetFileSystemEntries(hideDir))
         {
             try
             {
@@ -361,7 +398,14 @@ internal sealed class ConfigSwapRecovery
                     Logger.Warn($"[恢复] 隐藏配置与现有文件冲突，保留隐藏副本：{destination}");
                     continue;
                 }
-                File.Move(file, destination);
+                if (File.Exists(file))
+                {
+                    File.Move(file, destination);
+                }
+                else if (Directory.Exists(file))
+                {
+                    Directory.Move(file, destination);
+                }
             }
             catch (Exception ex)
             {
@@ -392,6 +436,40 @@ internal sealed class ConfigSwapRecovery
         catch (Exception ex)
         {
             Audit.Log(Audit.System, "启动恢复配置交换失败", $"脚本 {scriptId} / 用户 {userName}：{ex.Message}");
+            return false;
+        }
+    }
+
+    private bool TryFinalizePendingInput(string scriptId, string userName, ConfigSessionMark mark)
+    {
+        if (!string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        ConfigStoreMetadata? metadata = ConfigStoreMetadata.Load(scriptId, userName);
+        if (mark.PendingConfigInput is null
+            || _commitPendingInput is null
+            || !Directory.Exists(ConfigSwapPaths.StoreDir(scriptId, userName))
+            || !Directory.EnumerateFileSystemEntries(ConfigSwapPaths.StoreDir(scriptId, userName)).Any()
+            || metadata is null
+            || !metadata.Matches(ConfigStoreMetadata.FromMark(mark)))
+        {
+            Logger.Warn($"[恢复] 配置编辑输入绑定尚未满足提交条件，保留会话标记：脚本 {scriptId} / 用户 {userName}");
+            return false;
+        }
+        try
+        {
+            if (!_commitPendingInput(mark))
+            {
+                Logger.Warn($"[恢复] 配置编辑输入绑定写入失败，保留会话标记：脚本 {scriptId} / 用户 {userName}");
+                return false;
+            }
+            ConfigSessionMark.Clear(scriptId, userName);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[恢复] 配置编辑输入绑定写入异常，保留会话标记：脚本 {scriptId} / 用户 {userName}：{ex.Message}");
             return false;
         }
     }
@@ -496,18 +574,32 @@ internal sealed class ConfigSwapRecovery
                     Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");
                 }
             }
+            if (mark.EditIsolationPaths.Count > 0 || EditConfigIsolation.HasResidue(scriptId, userName))
+            {
+                EditConfigIsolation.Restore(scriptId, userName, mark);
+            }
             // 先恢复主配置；附加快照事务异常时保留会话标记，等待后续重试。
             ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
             ExtraConfigSync.RestoreAll(scriptId, userName, mark.ExtraConfigPaths);
-            ConfigSessionMark.Clear(scriptId, userName);
+            if (!string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal))
+            {
+                ConfigSessionMark.Clear(scriptId, userName);
+            }
             return;
         }
         PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
         ConfigSwapPrimitives.ClearPath(mark.ConfigPath, currentState);
         ConfigSwapPrimitives.MoveAs(cache, mark.ConfigPath, ConfigSwapPrimitives.RestoreKind(mark));
+        if (mark.EditIsolationPaths.Count > 0 || EditConfigIsolation.HasResidue(scriptId, userName))
+        {
+            EditConfigIsolation.Restore(scriptId, userName, mark);
+        }
         // 先恢复主配置；附加快照事务异常时保留会话标记，等待后续重试。
         ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
         ExtraConfigSync.RestoreAll(scriptId, userName, mark.ExtraConfigPaths);
-        ConfigSessionMark.Clear(scriptId, userName);
+        if (!string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal))
+        {
+            ConfigSessionMark.Clear(scriptId, userName);
+        }
     }
 }

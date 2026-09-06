@@ -3,6 +3,7 @@ using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
+using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
@@ -27,7 +28,8 @@ internal static class ConfigEditCommands
         string scriptId,
         string userReference,
         string mode = "normal",
-        string source = Audit.Web)
+        string source = Audit.Web,
+        IReadOnlyDictionary<string, string>? inputOverrides = null)
     {
         OperationResult<ConfigEditTarget> targetResult = ResolveTarget(ctx, scriptId, userReference);
         if (!targetResult.Succeeded)
@@ -53,6 +55,57 @@ internal static class ConfigEditCommands
         {
             return Validation<ConfigEditStarted>("未知的编辑方式：" + mode + "（支持 fresh / reuse / normal）");
         }
+        bool hasSnapshot = UserConfigManager.HasSnapshot(target.Script.Id, target.UserKey);
+        if (editMode != "normal" && hasSnapshot)
+        {
+            // 快照已存在（前端状态过期或并发编辑后）：按既有快照交换流程执行，保持数据一致。
+            editMode = "normal";
+        }
+        ConfigEditPendingInput? pendingInput = null;
+        if (inputOverrides is not null)
+        {
+            if (editMode != "reuse")
+            {
+                return Validation<ConfigEditStarted>("配置候选覆盖仅支持复用配置编辑");
+            }
+            if (!TryCreatePendingInput(inputOverrides, out pendingInput, out string? inputError))
+            {
+                return Validation<ConfigEditStarted>(inputError ?? "配置输入值格式无效");
+            }
+            ConfigEditPendingInput selectedInput = pendingInput!;
+
+            // 候选配置只在编辑会话内覆盖解析结果；用户绑定要等编辑成功保存后再提交。
+            var overrides = new Dictionary<string, string>(
+                target.User.Binding.ConfigInputs,
+                StringComparer.OrdinalIgnoreCase)
+            {
+                [selectedInput.Name] = selectedInput.Value,
+            };
+            targetResult = ResolveTarget(ctx, scriptId, userReference, overrides);
+            if (!targetResult.Succeeded)
+            {
+                return OperationResult<ConfigEditStarted>.Failure(targetResult.Error!);
+            }
+            target = targetResult.Value!;
+        }
+        if (editMode == "fresh" && target.Spec?.ConfigEdit?.FreshInput is ConfigEditFreshInput freshInput)
+        {
+            // freshInput 是插件声明的稳定目标；输入绑定在提交成功后才落盘。
+            // 只有首次编辑仍处于 fresh 时才覆盖用户旧绑定，避免过期入口把已有快照重绑定到新目标。
+            var overrides = new Dictionary<string, string>(
+                target.User.Binding.ConfigInputs,
+                StringComparer.OrdinalIgnoreCase)
+            {
+                [freshInput.Name] = freshInput.Value,
+            };
+            targetResult = ResolveTarget(ctx, scriptId, userReference, overrides);
+            if (!targetResult.Succeeded)
+            {
+                return OperationResult<ConfigEditStarted>.Failure(targetResult.Error!);
+            }
+            target = targetResult.Value!;
+            pendingInput = new ConfigEditPendingInput { Name = freshInput.Name, Value = freshInput.Value };
+        }
         if (editMode == "fresh"
             && !string.IsNullOrWhiteSpace(target.Script.PluginType)
             && ctx.Resolve<IPluginCapabilityResolver>().HasCapability(target.Script.PluginType, PluginCapabilityKeys.NoFreshConfig))
@@ -60,17 +113,13 @@ internal static class ConfigEditCommands
             // 插件声明脚本没有生成全新配置文件的能力（配置由目标软件自建），全新编辑入口不可用。
             return Validation<ConfigEditStarted>("因脚本配置限制，无法生成全新配置。请使用「复用配置文件」编辑现有配置");
         }
-        bool hasSnapshot = UserConfigManager.HasSnapshot(target.Script.Id, target.UserKey);
         if (editMode == "normal" && !hasSnapshot)
         {
             return Validation<ConfigEditStarted>("首次编辑请先选择配置方式：全新配置文件或复用配置文件");
         }
-        if (editMode != "normal" && hasSnapshot)
-        {
-            // 快照已存在（前端状态过期或并发编辑后）：按既有快照交换流程执行，保持数据一致。
-            editMode = "normal";
-        }
-        if (target.Spec is { } specForCandidates && specForCandidates.ConfigInputCandidates.Count >= 2)
+        if (editMode != "fresh"
+            && target.Spec is { } specForCandidates
+            && specForCandidates.ConfigInputCandidates.Count >= 2)
         {
             // configPath 模板的绑定输入未定且存在多个候选（含目录型 configPath——残缺时解析为存在的
             // 目录，直接准备会把整个目录采用为用户快照）：先让用户选定接管目标，仅选中项进入快照。
@@ -86,7 +135,7 @@ internal static class ConfigEditCommands
         {
             // 复用编辑把现场配置文件绑定为用户快照起点：声明位置缺失（常见于文件型配置的配置名输入
             // 与现场实际文件名不一致）必须在启动会话前解决，否则编辑完成后无法入库、甚至把同名默认
-            // 文件静默错绑。候选为静态目录中的实际配置，交给用户显式选择后更新脚本实例配置名。
+            // 文件静默错绑。候选为静态目录中的实际配置，交给用户显式选择后更新用户绑定输入。
             IPluginCapabilityResolver capabilities = ctx.Resolve<IPluginCapabilityResolver>();
             ConfigInputCandidateSet? candidateSet = capabilities.GetMissingConfigCandidateSet(
                 target.Script.PluginType,
@@ -98,7 +147,7 @@ internal static class ConfigEditCommands
                     target.Script.RootPath,
                     target.Script.PluginInputs);
             string message = candidates.Count > 0
-                ? "配置文件不存在：" + target.Script.ConfigPath + "。请选择要复用的现场配置文件，或先在脚本实例中更新配置名设置"
+                ? "配置文件不存在：" + target.Script.ConfigPath + "。请选择要复用的现场配置文件，或先在用户绑定中更新配置输入"
                 : "配置文件不存在：" + target.Script.ConfigPath + "。请检查脚本根目录与配置名设置（可能已在目标软件中改名或删除）";
             return OperationResult<ConfigEditStarted>.Failure(
                 new OperationError(
@@ -114,6 +163,35 @@ internal static class ConfigEditCommands
             target.Spec?.ProfileHash ?? "",
             target.Spec?.PluginVersion ?? "",
             target.Spec?.ExtraConfigPaths);
+        ConfigEditPreparationOptions? preparationOptions = null;
+        bool isolateCandidates = target.Spec?.ConfigEdit?.IsolateSiblingCandidates == true;
+        if (editMode == "reuse"
+            && (target.Spec?.ConfigInputCandidatePaths.Count ?? 0) < 2)
+        {
+            // 单候选 reuse 保持旧版原位编辑；只有多候选 reuse 才需要把选中项复制成工作副本。
+            isolateCandidates = false;
+        }
+        if (pendingInput is null
+            && editMode == "reuse"
+            && !hasSnapshot
+            && target.Spec is { ConfigInputName: { Length: > 0 } inputName, ConfigInputValue: { Length: > 0 } inputValue }
+            && (!target.User.Binding.ConfigInputs.TryGetValue(inputName, out string? boundValue)
+                || !string.Equals(boundValue.Trim(), inputValue, StringComparison.OrdinalIgnoreCase)))
+        {
+            // 单候选会由插件自动采用；同样延迟到成功保存后再把自动采用的输入写入用户绑定。
+            pendingInput = new ConfigEditPendingInput { Name = inputName, Value = inputValue };
+        }
+        if ((isolateCandidates || pendingInput is not null) && target.Spec is { } specForEdit)
+        {
+            preparationOptions = new ConfigEditPreparationOptions(
+                isolateCandidates,
+                isolateCandidates
+                    ? specForEdit.ConfigInputCandidatePaths
+                        .Append(target.Script.ConfigPath)
+                        .ToArray()
+                    : Array.Empty<string>(),
+                pendingInput);
+        }
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
@@ -179,51 +257,84 @@ internal static class ConfigEditCommands
                     "检测到已打开的脚本，退出脚本后才能编辑配置。");
             }
 
+            // 旧版本 edit-hidden 现场先恢复；新事务由 edit-isolation 记录和恢复。
             UserConfigManager.RestoreHiddenConfigs(
                 target.Script.Id,
                 target.UserKey,
                 target.Script.ConfigPath);
             string? prepError = editMode switch
             {
-                // fresh/reuse 模式的「全新/复用」只针对主配置；附加配置路径保持现场，提交时差异入库。
                 "fresh" => UserConfigManager.PrepareForEditFresh(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
+                    target.Script.Id,
+                    target.UserKey,
+                    target.Script.ConfigPath,
+                    metadata,
+                    target.Spec?.ExtraConfigPaths,
+                    preparationOptions),
                 "reuse" => UserConfigManager.PrepareForEditReuse(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata),
+                    target.Script.Id,
+                    target.UserKey,
+                    target.Script.ConfigPath,
+                    metadata,
+                    target.Spec?.ExtraConfigPaths,
+                    preparationOptions),
                 _ => UserConfigManager.PrepareForEdit(
-                    target.Script.Id, target.UserKey, target.Script.ConfigPath, metadata, target.Spec?.ExtraConfigPaths),
+                    target.Script.Id,
+                    target.UserKey,
+                    target.Script.ConfigPath,
+                    metadata,
+                    target.Spec?.ExtraConfigPaths,
+                    preparationOptions),
             };
             if (prepError is not null)
             {
+                ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                 return Validation<ConfigEditStarted>("配置交换失败：" + prepError);
             }
 
-            // 交换/准备动作已在服务层写入会话标记；此处统一记录实际编辑模式。
+            // 交换/准备动作已在服务层写入会话标记；此处只把正常运行标记转换成编辑标记。
             ConfigSessionMark? preparedMark = ConfigSessionMark.TryRead(target.Script.Id, target.UserKey);
-            var editMark = new ConfigSessionMark
+            if (preparedMark is null)
             {
-                ScriptId = target.Script.Id,
-                UserId = target.UserKey,
-                ConfigPath = target.Script.ConfigPath,
-                SessionPhase = "edit",
-                EditMode = editMode,
-            };
-            editMark.WorkingDirectory = metadata.WorkingDirectory;
-            editMark.LaunchExe = metadata.LaunchExe;
-            editMark.ProcessIdentity = metadata.ProcessIdentity;
-            editMark.ProfileHash = metadata.ProfileHash;
-            editMark.PluginName = metadata.PluginName;
-            editMark.PluginVersion = metadata.PluginVersion;
-            editMark.ConfigKind = preparedMark?.ConfigKind ?? metadata.ConfigKind;
-            editMark.ExtraConfigPaths = editMode == "normal"
-                ? (preparedMark?.ExtraConfigPaths?.Select(item => item.Clone()).ToList()
-                    ?? metadata.ExtraConfigPaths.Select(item => item.Clone()).ToList())
-                : new List<ConfigSessionExtraPath>();
-            editMark.Write();
-            if (editMode != "reuse")
+                return Validation<ConfigEditStarted>("配置交换已准备但缺少会话标记");
+            }
+            preparedMark.SessionPhase = "edit";
+            preparedMark.EditMode = editMode;
+            preparedMark.Write();
+            ConfigSessionMark editMark = preparedMark;
+            if (editMode != "reuse"
+                && preparationOptions?.IsolateSiblingCandidates != true)
             {
-                // reuse 语义为「无任何文件动作」：不隐藏 config 同目录的其他配置文件。
                 UserConfigManager.HideOtherConfigs(target.Script, target.Script.Id, target.UserKey);
+            }
+
+            if (target.Spec?.ConfigEditor is ConfigEditorDescriptor editor)
+            {
+                ConfigValidationResult editorResult = ConfigEditPreparationScriptRunner.Execute(
+                    editor,
+                    target.Script,
+                    target.User,
+                    editMark,
+                    editMode,
+                    target.Spec?.ConfigInputName ?? "",
+                    target.Spec?.ConfigInputValue ?? "");
+                if (!string.IsNullOrWhiteSpace(editorResult.Error))
+                {
+                    string? rollbackError = UserConfigManager.CancelEdit(
+                        target.Script.Id,
+                        target.UserKey,
+                        target.Script.ConfigPath,
+                        target.Spec?.ExtraConfigPaths);
+                    UserConfigManager.RestoreHiddenConfigs(
+                        target.Script.Id,
+                        target.UserKey,
+                        target.Script.ConfigPath);
+                    ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
+                    return Validation<ConfigEditStarted>(
+                        "execution_failed",
+                        "配置编辑准备脚本失败：" + editorResult.Error
+                        + (rollbackError is null ? "，配置已还原" : "，配置还原失败：" + rollbackError));
+                }
             }
 
             Process? process;
@@ -262,6 +373,7 @@ internal static class ConfigEditCommands
                         target.Script.Id,
                         target.UserKey,
                         target.Script.ConfigPath);
+                    ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                 }
                 return Validation<ConfigEditStarted>(
                     "execution_failed",
@@ -351,6 +463,7 @@ internal static class ConfigEditCommands
                             target.Script.Id,
                             target.UserKey,
                             target.Script.ConfigPath);
+                        ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                         UserConfigManager.EditSessions.TryRemove(target.Script.Id, out _);
                         ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
                         registered.DisposeProcessResources();
@@ -381,6 +494,7 @@ internal static class ConfigEditCommands
                             target.Script.Id,
                             target.UserKey,
                             target.Script.ConfigPath);
+                        ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                     }
                 }
                 catch (Exception cleanupEx)
@@ -513,6 +627,22 @@ internal static class ConfigEditCommands
                     (action == "done" ? "提交" : "取消") + "失败：" + swapError);
             }
 
+            EditSession activeSession = session ?? throw new InvalidOperationException("编辑会话已在收尾期间消失");
+            if (action == "done" && activeSession.Mark.PendingConfigInput is ConfigEditPendingInput pendingInput)
+            {
+                OperationResult<UserScriptBinding> bindingResult = UserCommands.CommitPendingConfigInput(
+                    sessionUserKey,
+                    session.Script.Id,
+                    pendingInput);
+                if (!bindingResult.Succeeded)
+                {
+                    return Validation<ConfigEditCompleted>(
+                        "execution_failed",
+                        "配置输入绑定提交失败：" + (bindingResult.ErrorMessage ?? "未知错误"));
+                }
+                ConfigSessionMark.Clear(session.Script.Id, sessionUserKey);
+            }
+
             UserConfigManager.RestoreHiddenConfigs(
                 session.Script.Id,
                 sessionUserKey,
@@ -529,6 +659,7 @@ internal static class ConfigEditCommands
             {
                 ctx.Center.EndEditSession(session.Script.Id, sessionUserKey);
                 session.DisposeProcessResources();
+                ConfigWorkDirMaintenance.SweepIdleWorkDir(session.Script.Id, sessionUserKey);
             }
 
             Audit.Log(
@@ -592,7 +723,8 @@ internal static class ConfigEditCommands
     private static OperationResult<ConfigEditTarget> ResolveTarget(
         RuntimeContext ctx,
         string scriptId,
-        string userReference)
+        string userReference,
+        IReadOnlyDictionary<string, string>? inputOverrides = null)
     {
         ScriptInstance? declaration = ctx.EntityState.FindScript(scriptId);
         if (declaration is null)
@@ -606,7 +738,9 @@ internal static class ConfigEditCommands
             return NotFound<ConfigEditTarget>("用户绑定不存在");
         }
         // 专项快照按用户绑定输入实例化：接管哪个配置文件/实例目录是用户级选择
-        ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(declaration, binding.Binding.ConfigInputs);
+        ResolvedScriptSpec spec = ctx.Resolve<ScriptSpecResolver>().Resolve(
+            declaration,
+            inputOverrides ?? binding.Binding.ConfigInputs);
         if (!spec.Succeeded)
         {
             return Validation<ConfigEditTarget>(spec.Error ?? "脚本有效配置解析失败");
@@ -623,6 +757,38 @@ internal static class ConfigEditCommands
             ? Path.GetDirectoryName(script.MainExe) ?? ""
             : script.RootPath;
         return SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args).ExePath;
+    }
+
+    private static bool TryCreatePendingInput(
+        IReadOnlyDictionary<string, string> inputOverrides,
+        out ConfigEditPendingInput? pendingInput,
+        out string? error)
+    {
+        pendingInput = null;
+        error = null;
+        if (inputOverrides.Count != 1)
+        {
+            error = "一次只能覆盖一个配置输入";
+            return false;
+        }
+
+        KeyValuePair<string, string> item = inputOverrides.Single();
+        string name = item.Key.Trim();
+        string value = item.Value;
+        if (string.IsNullOrWhiteSpace(name)
+            || string.IsNullOrWhiteSpace(value)
+            || name.Length > 128
+            || value.Length > 512
+            || !char.IsLetter(name[0])
+            || name.Any(character => !char.IsLetterOrDigit(character) && character != '_')
+            || value.Any(char.IsControl))
+        {
+            error = "配置输入值格式无效";
+            return false;
+        }
+
+        pendingInput = new ConfigEditPendingInput { Name = name, Value = value };
+        return true;
     }
 
     private static bool IsSessionUser(ResolvedScriptUser user, string userReference)

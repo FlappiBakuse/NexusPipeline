@@ -363,9 +363,14 @@ function openFirstEditConfigChooser(userId, scriptId) {
   showModal(modalShell("首次编辑配置", body, footer), false, true, true);
 }
 
-async function startEditConfig(userId, scriptId, mode) {
+async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
   try {
-    await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start", mode });
+    const request = { action: "start", mode };
+    if (inputOverride) {
+      request.configInputName = inputOverride.name;
+      request.configInputValue = inputOverride.value;
+    }
+    await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", request);
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const inputName = String(error.data.inputName || "");
@@ -383,12 +388,12 @@ async function startEditConfig(userId, scriptId, mode) {
   showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || "脚本实例", mode);
 }
 
-/** 复用编辑绑定修正：现场存在多个配置文件时，列出实际存在的配置供用户选定接管目标（写入用户绑定）。 */
+/** 复用编辑候选选择：现场存在多个配置时，把候选作为编辑会话临时输入；成功保存后才写入用户绑定。 */
 function openConfigCandidateChooser(userId, scriptId, mode, candidates, inputName) {
   const cards = candidates.map(candidate =>
     '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '" data-input-name="' + esc(inputName) + '">' +
-    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">采用后仅该配置写入快照并继续编辑</span></button>').join("");
-  const body = '<p class="modal-copy">当前脚本目录存在多个配置文件。请选择要接管的配置文件：仅选中的配置写入你的快照，其他文件保持原样。</p>' +
+    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">本次编辑使用该配置，保存后写入快照</span></button>').join("");
+  const body = '<p class="modal-copy">当前脚本目录存在多个配置文件。请选择要编辑的配置：保存后仅选中的配置写入你的快照，取消后可重新选择。</p>' +
     '<div class="first-edit-chooser">' + cards + '</div>';
   const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
   showModal(modalShell("选择要接管的配置文件", body, footer), false, true, true);
@@ -401,18 +406,13 @@ async function adoptConfigCandidate(target) {
   const candidate = target.dataset.candidate;
   const inputName = target.dataset.inputName || "";
   try {
-    const user = userById(userId);
-    const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
     if (!inputName) {
       toast("缺少配置输入名，无法接管配置文件", "error");
       return;
     }
-    const configInputs = binding?.configInputs && typeof binding.configInputs === "object" ? { ...binding.configInputs } : {};
-    configInputs[inputName] = candidate;
-    await api("PUT", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId), { ...binding, configInputs });
     closeModal();
-    toast("已选择接管配置「" + candidate + "」");
-    await startEditConfig(userId, scriptId, mode);
+    toast("本次编辑使用配置「" + candidate + "」");
+    await startEditConfig(userId, scriptId, mode, { name: inputName, value: candidate });
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const nextInputName = String(error.data.inputName || inputName || "");

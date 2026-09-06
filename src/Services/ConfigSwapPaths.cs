@@ -82,10 +82,22 @@ internal static class ConfigSwapPaths
         return Path.Combine(WorkDir(scriptId, userKey), "original");
     }
 
-    /// <summary>编辑会话隐藏配置暂存目录（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）。</summary>
+    /// <summary>v0.14.3 旧编辑现场目录；v0.14.4 只用于兼容恢复。</summary>
     public static string HiddenConfigDir(string scriptId, string userKey)
     {
         return Path.Combine(WorkDir(scriptId, userKey), "edit-hidden");
+    }
+
+    /// <summary>配置编辑事务隔离区：保存被隔离候选的原始文件或目录。</summary>
+    public static string EditIsolationDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "edit-isolation");
+    }
+
+    /// <summary>配置编辑事务隔离区的稳定候选项目录。</summary>
+    public static string EditIsolationEntryDir(string scriptId, string userKey, string candidatePath)
+    {
+        return Path.Combine(EditIsolationDir(scriptId, userKey), ExtraKey(candidatePath));
     }
 
     /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/work/script。</summary>

@@ -33,6 +33,36 @@ internal sealed class ConfigSessionExtraPath
     };
 }
 
+/// <summary>编辑事务隔离项目的原始路径与原始形态。</summary>
+internal sealed class ConfigSessionIsolationPath
+{
+    public string Path { get; set; } = "";
+
+    public string OriginalKind { get; set; } = "missing";
+
+    public ConfigSessionIsolationPath Clone() => new()
+    {
+        Path = Path,
+        OriginalKind = OriginalKind,
+    };
+}
+
+/// <summary>fresh 编辑完成后待写入用户绑定的输入值。</summary>
+internal sealed class ConfigEditPendingInput
+{
+    public string Name { get; set; } = "";
+
+    public string Value { get; set; } = "";
+
+    public ConfigEditPendingInput Clone() => new() { Name = Name, Value = Value };
+}
+
+/// <summary>编辑准备阶段的隔离候选与待提交输入。</summary>
+internal sealed record ConfigEditPreparationOptions(
+    bool IsolateSiblingCandidates,
+    IReadOnlyList<string> CandidatePaths,
+    ConfigEditPendingInput? PendingConfigInput = null);
+
 /// <summary>配置交换会话标记：交换开始写入、完成删除；崩溃后可据此恢复（安全优先：原配置必还原）。</summary>
 internal sealed class ConfigSessionMark
 {
@@ -61,8 +91,14 @@ internal sealed class ConfigSessionMark
     /// <summary>本次会话已冻结的 extraConfigPaths；字段缺失代表旧版本主配置会话。</summary>
     public List<ConfigSessionExtraPath> ExtraConfigPaths { get; set; } = new();
 
-    /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置，无文件动作）。</summary>
+    /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置）。</summary>
     public string EditMode { get; set; } = "normal";
+
+    /// <summary>编辑期间隔离的兄弟配置原始路径清单。</summary>
+    public List<ConfigSessionIsolationPath> EditIsolationPaths { get; set; } = new();
+
+    /// <summary>主快照提交后等待写入用户绑定的输入值。</summary>
+    public ConfigEditPendingInput? PendingConfigInput { get; set; }
 
     /// <summary>全新配置编辑会话且原配置形态为 Missing：缓存区为空时 config 位置的脚本生成物仍需还原清理。</summary>
     public bool NeedsFreshRestore =>
@@ -99,6 +135,8 @@ internal sealed class ConfigSessionMark
         RequiredProperties
             .Append(nameof(NeedsFreshRestore))
             .Append(nameof(ExtraConfigPaths))
+            .Append(nameof(EditIsolationPaths))
+            .Append(nameof(PendingConfigInput))
             .ToHashSet(StringComparer.Ordinal);
 
     public static string MarkFile(string scriptId, string userId)
@@ -217,11 +255,14 @@ internal sealed class ConfigSessionMark
         !string.IsNullOrWhiteSpace(ScriptId)
         && !string.IsNullOrWhiteSpace(UserId)
         && !string.IsNullOrWhiteSpace(ConfigPath)
-        && SessionPhase is "run" or "edit"
+        && SessionPhase is "run" or "edit" or "edit-commit-pending"
         && (ConfigKind is "missing" or "file" or "dir")
         && (EditMode is "normal" or "fresh" or "reuse")
         && ExtraConfigPaths is not null
-        && ExtraConfigPaths.All(IsValidExtraPath);
+        && ExtraConfigPaths.All(IsValidExtraPath)
+        && EditIsolationPaths is not null
+        && EditIsolationPaths.All(IsValidIsolationPath)
+        && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput));
 
     private static bool IsValidExtraPath(ConfigSessionExtraPath entry)
     {
@@ -229,6 +270,24 @@ internal sealed class ConfigSessionMark
             && !string.IsNullOrWhiteSpace(entry.Path)
             && Path.IsPathRooted(entry.Path)
             && entry.OriginalKind is "missing" or "file" or "dir";
+    }
+
+    private static bool IsValidIsolationPath(ConfigSessionIsolationPath entry)
+    {
+        return entry is not null
+            && !string.IsNullOrWhiteSpace(entry.Path)
+            && Path.IsPathRooted(entry.Path)
+            && entry.OriginalKind is "missing" or "file" or "dir";
+    }
+
+    private static bool IsValidPendingInput(ConfigEditPendingInput input)
+    {
+        return !string.IsNullOrWhiteSpace(input.Name)
+            && !string.IsNullOrWhiteSpace(input.Value)
+            && input.Name.Length <= 128
+            && input.Value.Length <= 512
+            && char.IsLetter(input.Name[0])
+            && input.Name.All(character => char.IsLetterOrDigit(character) || character == '_');
     }
 
     private void ValidateCurrent()

@@ -263,7 +263,8 @@ data/{脚本Id}/{UserId}/
     ├── original/       运行前 configPath 原内容（移动进来，运行后移回；崩溃恢复保底）
     ├── script/         判断脚本工作目录（运行期间可读写，结束后清空）
     ├── swap-backup/    配置替换备份（首次替换前复制原文件 + .meta 清单）
-    ├── edit-hidden/    编辑会话隐藏配置暂存（编辑期间 config 同目录其他配置暂移至此，会话结束/重启恢复时移回）
+    ├── edit-isolation/ 编辑事务候选隔离区（文件/目录候选原现场与会话清单按条目保存）
+    ├── edit-hidden/    v0.14.3 遗留编辑现场恢复入口
     ├── store-rebind/   配置定位变更时的一次性旧快照隔离区
     └── store-txn/      增量快照事务（manifest、stage、rollback、commit）
 ```
@@ -305,7 +306,9 @@ flowchart LR
 
 1. **运行前**：store 快照为空且 configPath 存在时，先把现场配置**复制**为初始快照 → `.session` 主/备标记先行写入 → configPath 内容整体**移动**到 original → store 快照**复制**回 configPath（运行生效配置）。当前 profile 的配置定位或文件/目录形态与 `store-meta.json` 不一致时，新位置存在则执行一次性重绑定：旧 store 移入 `work/store-rebind/`，新位置成功物化为唯一 store 后清理隔离区；新位置缺失则阻断本次运行并保留旧快照。
 2. **运行后**：清空 configPath（删除运行产物）→ original **移动**还原 → 清除标记。
-3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式——`fresh`（全新配置：config 存在则移入 original，脚本在空位置生成新配置，done=复制入库+original 移回，cancel=清生成物+original 移回）或 `reuse`（复用配置：全程无文件动作，done=复制入库，cancel=仅清标记）。运行与编辑经 `ScriptConfigGate` 互斥。
+3. **编辑配置**：有快照时复用交换机制（PrepareForEdit/CommitEdit/CancelEdit）；无快照的首次编辑须显式选择方式。`fresh` 按插件声明确定新配置输入，候选原现场进入 `work/edit-isolation`，目标软件在空目标上生成配置；`reuse` 将全部候选原现场进入隔离区，再把选中候选复制为工作副本。编辑期间的附加配置进入 `original-extra` 并复制为工作副本，保存时写入 `store-extra`。done、cancel 和崩溃恢复都会按 `.session` 清单还原主配置、兄弟候选和附加现场；fresh 输入及首次 reuse 选中的候选输入均在主快照成功提交后写入用户绑定，取消或失败不会锁定候选。运行与编辑经 `ScriptConfigGate` 互斥。
+
+数据化专项插件可声明 `configEdit` 与 `configEditor`。编辑器脚本在目标软件启动前执行，读取 `nexus.input.mode`、`configInputName`、`configInputValue` 和附加工作副本；主配置根保持受限只读，脚本异常或超时会使准备失败并触发回滚。
 
 编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份；窗口前置轮询同时校验该身份、目标窗口归属和编辑会话取消令牌。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消轮询，目标进程退出后不会继续争用前台窗口。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
 
@@ -322,7 +325,7 @@ flowchart LR
 
 - 附加快照事务在启动恢复和运行收尾前先处理未提交的 manifest；已提交事务只清理残留，未提交事务恢复旧 store。manifest 缺失、身份不匹配或现场状态无法判定时保留事务目录并阻断后续写入，等待人工处理。
 
-- **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。
+- **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记、edit-isolation、旧 edit-hidden 与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。fresh 输入提交阶段使用 `edit-commit-pending` 标记，快照与现场恢复完成后再写入用户绑定。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
 - 数据保全序保证：任何时刻崩溃（含移动配置前后）都可从 original 完整还原现场。
 - **Missing 形态还原**：`DoRestore` 在 original 为空且原形态为 Missing（运行/编辑前 config 位置不存在）时，删除会话期间在 config 位置产生的文件/目录，恢复为“不存在”；删除失败则保留标记交由自愈/后台重试。

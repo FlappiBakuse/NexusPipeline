@@ -19,6 +19,12 @@ internal sealed record ConfigValidatorDescriptor(
     string ValidatorPath,
     string Script);
 
+internal sealed record ConfigEditorDescriptor(
+    string PluginName,
+    string PluginDirectory,
+    string EditorPath,
+    string Script);
+
 internal sealed class DataSpecializedPlugin : IProfileResolver
 {
     public string Name { get; private set; } = "";
@@ -51,6 +57,10 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     private string? _configValidatorPath;
 
     private string? _configValidator;
+
+    private string? _configEditorPath;
+
+    private string? _configEditor;
 
     private readonly object _sync = new();
 
@@ -91,6 +101,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 _resolvePath = manifest.ResolvePath,
                 _judgeScriptPath = manifest.JudgeScriptPath,
                 _configValidatorPath = manifest.ConfigValidatorPath,
+                _configEditorPath = manifest.ConfigEditorPath,
             };
             foreach (string capability in manifest.Capabilities)
             {
@@ -119,6 +130,19 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 }
                 plugin._configValidatorPath = Path.Combine(pluginDir, plugin._configValidatorPath);
                 if (!File.Exists(plugin._configValidatorPath))
+                {
+                    return null;
+                }
+            }
+            if (plugin._configEditorPath is not null)
+            {
+                if (!IsSafeRelativePath(plugin._configEditorPath)
+                    || !plugin._configEditorPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+                plugin._configEditorPath = Path.Combine(pluginDir, plugin._configEditorPath);
+                if (!File.Exists(plugin._configEditorPath))
                 {
                     return null;
                 }
@@ -216,6 +240,15 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 extraTemplates.Add(template);
             }
         }
+        ConfigEditOptions? configEdit = ParseConfigEditOptions(
+            resolve["configEdit"],
+            inputDeclarations,
+            out string? configEditError);
+        if (configEditError is not null)
+        {
+            Logger.Warn($"[插件] resolve.json configEdit 声明无效（{configEditError}），推导失败：{Name}");
+            return null;
+        }
         List<string> requireTemplates = new();
         if (resolve["require"] is JsonArray requireList)
         {
@@ -293,9 +326,48 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             JudgeScriptPath = _judgeScriptPath,
             PluginName = Name,
             PluginVersion = Version,
-            ConfigInputName = unresolvedCandidates?.InputName ?? "",
+            ConfigInputName = TryLocateConfigInputTemplate(
+                configPathTemplate,
+                out string resolvedInputName,
+                out _,
+                out _,
+                out _)
+                ? resolvedInputName
+                : "",
+            ConfigInputValue = TryLocateConfigInputTemplate(
+                configPathTemplate,
+                out string resolvedValueInputName,
+                out _,
+                out _,
+                out _)
+                && inputValues.TryGetValue(resolvedValueInputName, out string? resolvedValue)
+                ? resolvedValue
+                : "",
             ConfigInputCandidates = unresolvedCandidates?.Values ?? Array.Empty<string>(),
+            ConfigEdit = configEdit,
+            ConfigEditor = ReadConfigEditor(),
         };
+        if (configEdit?.IsolateSiblingCandidates == true
+            && TryLocateConfigInputTemplate(
+                configPathTemplate,
+                out _,
+                out string candidateRelativeDir,
+                out string candidatePrefix,
+                out string candidateTail))
+        {
+            string candidateDirectory = Path.Combine(rootPath, candidateRelativeDir);
+            string candidatePattern = inputDeclarations
+                .FirstOrDefault(item => item.Name.Equals(profile.ConfigInputName, StringComparison.OrdinalIgnoreCase))
+                ?.Pattern ?? "";
+            profile.ConfigInputCandidatePaths = EnumerateConfigValues(
+                    candidateDirectory,
+                    candidatePrefix,
+                    candidateTail,
+                    candidatePattern)
+                .Select(value => Path.GetFullPath(Path.Combine(candidateDirectory, candidatePrefix + value + candidateTail)))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
         if (string.IsNullOrWhiteSpace(profile.MainExe) || !File.Exists(profile.MainExe))
         {
             return null;
@@ -792,6 +864,87 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             }
             return new ConfigValidatorDescriptor(Name, PluginDirectory, _configValidatorPath!, _configValidator);
         }
+    }
+
+    internal bool HasConfigEditor => _configEditorPath is not null;
+
+    internal ConfigEditorDescriptor? ReadConfigEditor()
+    {
+        if (_configEditorPath is null)
+        {
+            return null;
+        }
+        lock (_sync)
+        {
+            if (_configEditor is null)
+            {
+                try
+                {
+                    _configEditor = File.ReadAllText(_configEditorPath);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"专项配置编辑脚本读取失败（{_configEditorPath}）：{ex.Message}");
+                    _configEditor = "";
+                }
+            }
+            return new ConfigEditorDescriptor(Name, PluginDirectory, _configEditorPath, _configEditor);
+        }
+    }
+
+    private static ConfigEditOptions? ParseConfigEditOptions(
+        JsonNode? node,
+        IReadOnlyList<PluginInputDeclaration> declarations,
+        out string? error)
+    {
+        error = null;
+        if (node is null)
+        {
+            return null;
+        }
+        if (node is not JsonObject configEdit)
+        {
+            error = "configEdit 必须是对象";
+            return null;
+        }
+        bool isolate = false;
+        if (configEdit["isolateSiblingCandidates"] is not null)
+        {
+            try
+            {
+                isolate = configEdit["isolateSiblingCandidates"]!.GetValue<bool>();
+            }
+            catch
+            {
+                error = "isolateSiblingCandidates 必须是布尔值";
+                return null;
+            }
+        }
+        ConfigEditFreshInput? freshInput = null;
+        if (configEdit["freshInput"] is not null)
+        {
+            if (configEdit["freshInput"] is not JsonObject fresh)
+            {
+                error = "freshInput 必须是对象";
+                return null;
+            }
+            string name = fresh["name"]?.ToString()?.Trim() ?? "";
+            string value = fresh["value"]?.ToString()?.Trim() ?? "";
+            PluginInputDeclaration? declaration = declarations.FirstOrDefault(item =>
+                item.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (declaration is null || string.IsNullOrWhiteSpace(value))
+            {
+                error = "freshInput 必须引用已声明的输入并提供非空 value";
+                return null;
+            }
+            if (ValidateInputValue(declaration, value) is string invalid)
+            {
+                error = $"freshInput.value {invalid}";
+                return null;
+            }
+            freshInput = new ConfigEditFreshInput(declaration.Name, value);
+        }
+        return new ConfigEditOptions(isolate, freshInput);
     }
 
     /// <summary>在根目录查找文件；searchUpward 时逐级向上（最多 4 层）。</summary>

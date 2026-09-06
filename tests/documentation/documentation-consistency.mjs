@@ -57,6 +57,17 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
+function currentProjectVersion() {
+  const project = read("src/NexusPipeline.csproj");
+  const match = project.match(/<Version>(\d+\.\d+\.\d+)<\/Version>/u);
+  assert.ok(match, "NexusPipeline.csproj 缺少可解析的 Version");
+  return match[1];
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
 function lineNumber(text, index) {
   return text.slice(0, index).split(/\r?\n/).length;
 }
@@ -179,14 +190,16 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
-test("v0.13.0 persistence and plugin-profile contract stays documented", () => {
+test("current persistence and plugin-profile contract stays documented", () => {
   const project = read("src/NexusPipeline.csproj");
+  const version = currentProjectVersion();
   const status = read("docs/STATUS.md");
   const design = read("docs/DESIGN.md");
   const pluginApi = read("docs/PLUGIN_API.md");
   const development = read("docs/DEVELOPMENT.md");
 
-  assert.match(project, /<Version>0\.14\.3<\/Version>/u);
+  assert.match(project, new RegExp(`<Version>${escapeRegExp(version)}<\\/Version>`, "u"));
+  assert.match(read("CHANGELOG.md"), new RegExp(`^## v${escapeRegExp(version)}(?:（|\\s)`, "mu"));
   assert.match(status, /## 后续功能：插件生态扩展/u);
   assert.doesNotMatch(status, /KN-74[\s\S]*调查中/u);
   assert.match(design, /config\/judge-scripts\/<scriptId>\.js\|py/u);
