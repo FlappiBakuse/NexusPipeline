@@ -70,7 +70,7 @@ internal static class UserConfigManager
 
     /// <summary>运行前准备：config → original（移动），store → config（复制）。失败自动回滚并还原现场。
     /// v0.12.8 起绑定不再建立快照：快照为空且现场配置存在时，先把现场配置复制为初始快照（复用语义），再执行交换。
-    /// extraConfigPaths 非空时附加配置路径在主配置之前完成对称的 adopt/备份/快照覆盖（失败不阻断主流程）。</summary>
+    /// extraConfigPaths 非空时附加配置路径在主配置之前完成对称的 adopt/备份/快照覆盖；任一条路径失败都阻断主流程并回滚已准备现场。</summary>
     public static bool PrepareForRun(
         string scriptId,
         string userName,
@@ -89,10 +89,6 @@ internal static class UserConfigManager
                 if (File.Exists(ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)))
                 {
                     throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{ConfigSwapPaths.StoreTransactionBlockedPath(scriptId, userName)}");
-                }
-                if (extraConfigPaths is { Count: > 0 })
-                {
-                    ExtraConfigSync.PrepareAll(scriptId, userName, extraConfigPaths);
                 }
                 string store = StoreDir(scriptId, userName);
                 ConfigStoreMetadata.RecoverRebind(scriptId, userName);
@@ -130,6 +126,26 @@ internal static class UserConfigManager
                     ConfigStoreMetadata.Save(scriptId, userName, expectedMetadata);
                     ConfigStoreMetadata.CleanupRebindIfMatches(scriptId, userName, expectedMetadata);
                 }
+                List<string> declaredExtraPaths = metadata?.ExtraConfigPaths?
+                    .Select(item => item.Path)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .ToList() ?? new List<string>();
+                if (declaredExtraPaths.Count == 0 && extraConfigPaths is { Count: > 0 })
+                {
+                    declaredExtraPaths = extraConfigPaths.ToList();
+                }
+                if (declaredExtraPaths.Count > 0)
+                {
+                    // 旧版本没有 .session 时，仅按形态 sidecar 恢复 legacy original-extra；
+                    // 没有可靠证明的现场由新会话标记捕获为阻断状态，不参与猜测。
+                    ExtraConfigSync.RestoreAll(scriptId, userName, declaredExtraPaths);
+                    if (ExtraConfigSync.HasUntrackedResidue(scriptId, userName))
+                    {
+                        throw new IOException($"附加配置存在无法由当前会话解释的恢复现场，已保留并阻断运行：{ConfigSwapPaths.OriginalExtraRoot(scriptId, userName)}");
+                    }
+                }
+                // 在所有 legacy 恢复完成后捕获形态，确保 .session 冻结的是本次会话真正要移动的现场。
+                List<ConfigSessionExtraPath> frozenExtraPaths = ConfigSessionMark.FromExtraPaths(declaredExtraPaths);
                 var mark = new ConfigSessionMark
                 {
                     ScriptId = scriptId,
@@ -143,10 +159,15 @@ internal static class UserConfigManager
                     ProfileHash = metadata?.ProfileHash ?? "",
                     PluginName = metadata?.PluginName ?? "",
                     PluginVersion = metadata?.PluginVersion ?? "",
+                    ExtraConfigPaths = frozenExtraPaths,
                 };
-                string cache = CacheDir(scriptId, userName);
-                // 标记先行：任何时刻崩溃（含移动配置前后）都可恢复——original 空时恢复仅清标记（现场未动），original 有内容时完整还原。
+                // 标记先行：任何时刻崩溃（含 extra/main 配置移动前后）都可恢复。
                 mark.Write();
+                if (mark.ExtraConfigPaths.Count > 0)
+                {
+                    ExtraConfigSync.PrepareAll(scriptId, userName, mark.ExtraConfigPaths);
+                }
+                string cache = CacheDir(scriptId, userName);
                 ConfigSwapPrimitives.ClearPath(cache, PathKindUtil.KindOf(cache));
                 ConfigSwapPrimitives.MoveAs(configPath, cache, PathKind.Dir);
                 if (Directory.Exists(store) && Directory.EnumerateFileSystemEntries(store).Any())
@@ -190,15 +211,19 @@ internal static class UserConfigManager
                     else
                     {
                         string cache = CacheDir(scriptId, userName);
-                        if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
+                        ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+                        if (mark is not null)
+                        {
+                            // extra/main 任一准备阶段失败时，统一按会话标记回滚，确保已准备的附加现场
+                            // 与主配置一起恢复；不能只处理 original cache 后清除标记。
+                            ConfigSwapSession.DoRestore(scriptId, userName, mark);
+                        }
+                        else if (Directory.Exists(cache) && Directory.EnumerateFileSystemEntries(cache).Any())
                         {
                             PathKind current = PathKindUtil.KindOf(configPath);
-                            ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
                             ConfigSwapPrimitives.ClearPath(configPath, current);
                             ConfigSwapPrimitives.MoveAs(cache, configPath,
-                                mark is null
-                                    ? (string.IsNullOrWhiteSpace(Path.GetExtension(configPath)) ? PathKind.Dir : PathKind.File)
-                                    : ConfigSwapPrimitives.RestoreKind(mark));
+                                string.IsNullOrWhiteSpace(Path.GetExtension(configPath)) ? PathKind.Dir : PathKind.File);
                             ConfigSessionMark.Clear(scriptId, userName);
                         }
                     }

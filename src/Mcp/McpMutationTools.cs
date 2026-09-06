@@ -274,7 +274,9 @@ internal sealed class McpMutationTools
         OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
             user.Value!.Id,
             script.Value!.Id,
-            input.ToModel(script.Value.Id),
+            new UserBindingUpdateRequest(
+                input.ToModel(script.Value.Id),
+                ConfigInputsSpecified: input.ConfigInputs is not null),
             Audit.Mcp);
         return McpToolResult.From(result, value => value is null ? null : McpViews.Binding(value));
     }

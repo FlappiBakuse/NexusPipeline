@@ -67,6 +67,26 @@ public sealed class RunScreenshotStoreTests
         Assert.Null(store.SelectForNotification(null));
     }
 
+    [Fact]
+    public async Task CachedCaptureKeepsOriginalCaptureTimeAndReportsCacheUsage()
+    {
+        byte[] jpeg = MakeJpeg(160, 90);
+        DateTimeOffset capturedAt = new(2026, 9, 6, 12, 0, 0, TimeSpan.Zero);
+        using var store = new RunScreenshotStore((_, _, _) =>
+            Task.FromResult(RunScreenshotCaptureResult.Success(
+                jpeg,
+                "pc",
+                capturedAt,
+                fromCache: true,
+                cacheAge: TimeSpan.FromMilliseconds(850))));
+
+        RunScreenshot? screenshot = await store.CaptureAsync(1, "judge-success", CancellationToken.None);
+
+        Assert.NotNull(screenshot);
+        Assert.Equal(capturedAt, screenshot!.CapturedAt);
+        Assert.Equal("pc", screenshot.Source);
+    }
+
     private static byte[] MakeJpeg(int width, int height)
     {
         using var bitmap = new Bitmap(width, height);

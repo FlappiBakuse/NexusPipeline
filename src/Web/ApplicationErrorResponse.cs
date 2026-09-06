@@ -18,13 +18,14 @@ internal static class ApplicationErrorResponse
             OperationErrorKind.Internal => 500,
             _ => 400,
         };
-        object payload = error.Candidates is { Count: > 0 }
+        object payload = error.Candidates is { Count: > 0 } || !string.IsNullOrWhiteSpace(error.CandidateInputName)
             ? new
             {
                 ok = false,
                 error = error.Message,
                 code = error.Code,
                 candidates = error.Candidates,
+                inputName = error.CandidateInputName,
             }
             : new
             {

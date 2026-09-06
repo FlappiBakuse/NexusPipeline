@@ -116,8 +116,27 @@ export function showModal(content, wide = false, locked = false, allowClose = fa
   });
 }
 
+/** 为当前弹窗注册资源清理回调；弹窗重建或关闭时都会执行。 */
+export function registerModalCleanup(cleanup) {
+  const mask = $(".modal-mask");
+  if (!mask || typeof cleanup !== "function") return () => {};
+  if (!mask._cleanupCallbacks) mask._cleanupCallbacks = new Set();
+  mask._cleanupCallbacks.add(cleanup);
+  return () => mask._cleanupCallbacks?.delete(cleanup);
+}
+
 export function closeModal(restoreFocus = true) {
   const mask = $(".modal-mask");
+  if (mask?._cleanupCallbacks) {
+    for (const cleanup of mask._cleanupCallbacks) {
+      try {
+        cleanup();
+      } catch (error) {
+        console.error("弹窗资源清理失败", error);
+      }
+    }
+    mask._cleanupCallbacks.clear();
+  }
   if (mask) mask.remove();
   if (mask?._lockedEscapeHandler) window.removeEventListener("keydown", mask._lockedEscapeHandler, true);
   if (restoreFocus && modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus();

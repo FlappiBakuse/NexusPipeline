@@ -242,7 +242,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             inputDeclarations,
             inputs,
             referencedInputs) ?? inputs;
-        IReadOnlyList<string> unresolvedCandidates = DetectUnresolvedConfigCandidates(
+        ConfigInputCandidateSet? unresolvedCandidates = DetectUnresolvedConfigCandidates(
             configPathTemplate,
             rootPath,
             inputDeclarations,
@@ -293,7 +293,8 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             JudgeScriptPath = _judgeScriptPath,
             PluginName = Name,
             PluginVersion = Version,
-            ConfigInputCandidates = unresolvedCandidates,
+            ConfigInputName = unresolvedCandidates?.InputName ?? "",
+            ConfigInputCandidates = unresolvedCandidates?.Values ?? Array.Empty<string>(),
         };
         if (string.IsNullOrWhiteSpace(profile.MainExe) || !File.Exists(profile.MainExe))
         {
@@ -343,6 +344,19 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     internal bool TryDiscoverConfigInputValues(string rootPath, out IReadOnlyList<string> values)
     {
         values = Array.Empty<string>();
+        if (!TryDiscoverConfigInputCandidates(rootPath, out ConfigInputCandidateSet? candidates)
+            || candidates is null)
+        {
+            return false;
+        }
+        values = candidates.Values;
+        return true;
+    }
+
+    /// <summary>复用配置候选推导，并保留 configPath 模板实际引用的 input 名称。</summary>
+    internal bool TryDiscoverConfigInputCandidates(string rootPath, out ConfigInputCandidateSet? candidates)
+    {
+        candidates = null;
         if (string.IsNullOrWhiteSpace(rootPath))
         {
             return false;
@@ -390,7 +404,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             return false;
         }
         discovered.Sort(StringComparer.OrdinalIgnoreCase);
-        values = discovered;
+        candidates = new ConfigInputCandidateSet(inputName, discovered);
         return true;
     }
 
@@ -460,7 +474,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// 且静态目录中存在两个及以上候选。返回候选清单（已定、单候选自动绑定或零候选时为空），
     /// 供宿主在编辑启动时要求用户选择、在运行前拒绝启动——目录型 configPath 在未定时会解析为
     /// 存在的目录，若不做此检测会被整目录采用为用户快照。</summary>
-    private IReadOnlyList<string> DetectUnresolvedConfigCandidates(
+    private ConfigInputCandidateSet? DetectUnresolvedConfigCandidates(
         string configPathTemplate,
         string rootPath,
         List<PluginInputDeclaration> declarations,
@@ -469,12 +483,12 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     {
         if (!TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
-            return Array.Empty<string>();
+            return null;
         }
         PluginInputDeclaration? declaration = declarations.FirstOrDefault(item => item.Name.Equals(inputName, StringComparison.OrdinalIgnoreCase));
         if (declaration is null || !referencedInputs.Contains(declaration.Name))
         {
-            return Array.Empty<string>();
+            return null;
         }
         string current = provided is not null && provided.TryGetValue(declaration.Name, out string? raw) && raw.Trim().Length > 0
             ? raw.Trim()
@@ -486,7 +500,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 namePrefix + current + staticTail);
             if (File.Exists(currentTarget) || Directory.Exists(currentTarget))
             {
-                return Array.Empty<string>();
+                return null;
             }
         }
         List<string> candidates = EnumerateConfigValues(
@@ -494,7 +508,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             namePrefix,
             staticTail,
             declaration.Pattern);
-        return candidates.Count >= 2 ? candidates : Array.Empty<string>();
+        return candidates.Count >= 2
+            ? new ConfigInputCandidateSet(inputName, candidates)
+            : null;
     }
 
     /// <summary>定位 configPath 模板中的唯一输入引用：返回输入名与其前后的静态目录/前缀/后缀；结构不符返回 false。</summary>

@@ -91,6 +91,10 @@ internal sealed class FrozenResolvedScriptSpecData
 
     public List<string> ConfigInputCandidates { get; set; } = new();
 
+    public string ConfigInputName { get; set; } = "";
+
+    public bool SelfManagedPcLaunch { get; set; }
+
     public static FrozenResolvedScriptSpecData From(ResolvedScriptSpec spec)
     {
         return new FrozenResolvedScriptSpecData
@@ -108,6 +112,8 @@ internal sealed class FrozenResolvedScriptSpecData
             },
             ExtraConfigPaths = spec.ExtraConfigPaths.ToList(),
             ConfigInputCandidates = spec.ConfigInputCandidates.ToList(),
+            ConfigInputName = spec.ConfigInputName,
+            SelfManagedPcLaunch = spec.SelfManagedPcLaunch,
         };
     }
 
@@ -127,6 +133,8 @@ internal sealed class FrozenResolvedScriptSpecData
         {
             ExtraConfigPaths = ExtraConfigPaths,
             ConfigInputCandidates = ConfigInputCandidates,
+            ConfigInputName = ConfigInputName,
+            SelfManagedPcLaunch = SelfManagedPcLaunch,
         };
     }
 }

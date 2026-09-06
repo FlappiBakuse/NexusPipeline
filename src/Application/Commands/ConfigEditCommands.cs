@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.Extensibility;
 using NexusPipeline.Models;
-using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Configuration;
 using NexusPipeline.Services.Execution;
@@ -55,7 +55,7 @@ internal static class ConfigEditCommands
         }
         if (editMode == "fresh"
             && !string.IsNullOrWhiteSpace(target.Script.PluginType)
-            && ctx.Resolve<PluginManager>().HasCapability(target.Script.PluginType, Extensibility.PluginCapabilityKeys.NoFreshConfig))
+            && ctx.Resolve<IPluginCapabilityResolver>().HasCapability(target.Script.PluginType, PluginCapabilityKeys.NoFreshConfig))
         {
             // 插件声明脚本没有生成全新配置文件的能力（配置由目标软件自建），全新编辑入口不可用。
             return Validation<ConfigEditStarted>("因脚本配置限制，无法生成全新配置。请使用「复用配置文件」编辑现有配置");
@@ -79,26 +79,41 @@ internal static class ConfigEditCommands
                     "config_input_mismatch",
                     "当前脚本目录存在多个配置，请先选择要接管的配置",
                     OperationErrorKind.Validation,
-                    specForCandidates.ConfigInputCandidates.ToList()));
+                    specForCandidates.ConfigInputCandidates.ToList(),
+                    specForCandidates.ConfigInputName));
         }
         if (editMode == "reuse" && PathKindUtil.KindOf(target.Script.ConfigPath) == PathKind.Missing)
         {
             // 复用编辑把现场配置文件绑定为用户快照起点：声明位置缺失（常见于文件型配置的配置名输入
             // 与现场实际文件名不一致）必须在启动会话前解决，否则编辑完成后无法入库、甚至把同名默认
             // 文件静默错绑。候选为静态目录中的实际配置，交给用户显式选择后更新脚本实例配置名。
-            IReadOnlyList<string> candidates = ctx.Resolve<IPluginCapabilityResolver>()
-                .GetMissingConfigCandidates(target.Script.PluginType, target.Script.RootPath, target.Script.PluginInputs);
+            IPluginCapabilityResolver capabilities = ctx.Resolve<IPluginCapabilityResolver>();
+            ConfigInputCandidateSet? candidateSet = capabilities.GetMissingConfigCandidateSet(
+                target.Script.PluginType,
+                target.Script.RootPath,
+                target.Script.PluginInputs);
+            IReadOnlyList<string> candidates = candidateSet?.Values
+                ?? capabilities.GetMissingConfigCandidates(
+                    target.Script.PluginType,
+                    target.Script.RootPath,
+                    target.Script.PluginInputs);
             string message = candidates.Count > 0
                 ? "配置文件不存在：" + target.Script.ConfigPath + "。请选择要复用的现场配置文件，或先在脚本实例中更新配置名设置"
                 : "配置文件不存在：" + target.Script.ConfigPath + "。请检查脚本根目录与配置名设置（可能已在目标软件中改名或删除）";
             return OperationResult<ConfigEditStarted>.Failure(
-                new OperationError("config_input_mismatch", message, OperationErrorKind.Validation, candidates));
+                new OperationError(
+                    "config_input_mismatch",
+                    message,
+                    OperationErrorKind.Validation,
+                    candidates,
+                    candidateSet?.InputName));
         }
 
         ConfigSessionRuntimeMetadata metadata = ConfigSessionMark.FromScript(
             target.Script,
             target.Spec?.ProfileHash ?? "",
-            target.Spec?.PluginVersion ?? "");
+            target.Spec?.PluginVersion ?? "",
+            target.Spec?.ExtraConfigPaths);
 
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
@@ -200,6 +215,10 @@ internal static class ConfigEditCommands
             editMark.PluginName = metadata.PluginName;
             editMark.PluginVersion = metadata.PluginVersion;
             editMark.ConfigKind = preparedMark?.ConfigKind ?? metadata.ConfigKind;
+            editMark.ExtraConfigPaths = editMode == "normal"
+                ? (preparedMark?.ExtraConfigPaths?.Select(item => item.Clone()).ToList()
+                    ?? metadata.ExtraConfigPaths.Select(item => item.Clone()).ToList())
+                : new List<ConfigSessionExtraPath>();
             editMark.Write();
             if (editMode != "reuse")
             {

@@ -35,6 +35,8 @@
 - 调度计算、执行准入、资源冲突、重试和完成状态机；
 - Judge 关键字、判断脚本输出、历史计算和通知选择；
 - 配置交换、快照同步、插件 capability 和模拟器路由；
+- v0.14.3 的用户绑定字段保留、self-managed PC 启动参数保留、附加配置事务回滚/恢复和候选 `inputName` 契约；
+- v0.14.3 的 PC 最近截图缓存按 Attempt 隔离、1 秒节流、单飞、过期拒绝和游戏窗口消失后的有效缓存回退；
 - 插件 catalog schema 2、artifact/版本/官方 raw URL/changelog 校验、插件包安全边界、三档代理映射、缓存状态和跨重启安装恢复；
 - 插件管理控制面投影、插件商店安装/更新/卸载事务、用户全局绑定覆盖和插件用户设置的脱敏/secret 风险策略；
 - API payload 转换中可以独立出的业务规则。
@@ -81,6 +83,8 @@ node tests\run.mjs docs
 node tests\run.mjs syntax
 node tests\run.mjs build
 ```
+
+v0.14.3 的低层回归重点包括：缺失 `configInputs` 的用户更新保留既有选择，显式空对象清空选择；`self-managed-pc-launch` 只收紧 PC 宿主启动计划；附加配置准备失败回滚先前路径，并在未提交快照交换后恢复旧 store；候选响应携带实际输入名。Web Logic 还覆盖远程历史图片请求的 Bearer 认证、`cache: no-store` 和 Blob 返回。
 
 `unit`、`web`、`docs`、`syntax` 和 `build` 可在受限 Codex 终端中运行。`default`、`ui`、`system`、`all` 属于组合入口，必须显式选择执行模式：
 

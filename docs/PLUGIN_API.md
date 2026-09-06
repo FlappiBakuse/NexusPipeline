@@ -193,7 +193,9 @@ settings.sections               shell.nav
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configValidator` | 配置编辑完成后运行的可选配置校验/自修复脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
-| `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏，保存时后端同步归一化）、`execution-preview-client` |
+| `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏；持久化启动开关、参数和等待时间保留，仅在运行时生成宿主启动计划约束）、`execution-preview-client` |
+
+`self-managed-pc-launch` 的持久化启动开关、参数和等待时间保持用户设置；能力只在 PC 模式生成运行时宿主启动计划约束，切换到模拟器模式时可恢复原设置。
 
 ### 配置校验脚本
 
@@ -218,6 +220,8 @@ settings.sections               shell.nav
 ```
 
 可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是 store 内的相对路径；附加配置路径的快照以 `@extra<序号>/` 前缀访问且**只读**（`writeFile` 会拒绝），对应 `input.extras[序号].path` 的用户快照。读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
+
+候选响应同时返回实际使用的 `inputName`，调用方按该名称提交用户绑定，避免在多输入 profile 中凭字段顺序推测输入。
 
 ## resolve.json（推导配置）
 
@@ -249,6 +253,8 @@ settings.sections               shell.nav
   - `extraConfigPaths`（可选，宿主 v0.14.1+）：附加配置文件/文件夹路径数组（相对脚本根目录，支持 `{input:名称}`）。附加路径与主配置路径一样按用户快照隔离交换（运行前快照覆盖现场、运行后与编辑提交差异入库），但**判定脚本始终不可见**——`input.files`、`replaceConfigs` 与 config-restore 只作用于主 `configPath`。适用对象是软件级配置（如 BAAH 的 `DATA/CONFIGS/software_config.json`、BetterGI 的 `User/config.json`）。快照缺失宽容：现场也不存在时保持为空，等现场生成后自动采用。
   - `mainExe` 推导后必须存在（require 覆盖或文件真实存在），否则推导失败（前端保存被拒）。
 
+附加配置路径的运行准备与快照同步采用带 manifest 的 stage/backup/commit 事务；准备失败会回滚已处理路径并阻断本次运行，启动恢复和运行收尾会处理未提交现场，无法确认的现场保留并告警。
+
 ## 判断脚本
 
 - 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|partial|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；`partial` 只能由判断脚本主动返回，属于终局结果且不触发重试、不计入每日成功次数；`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
@@ -256,11 +262,14 @@ settings.sections               shell.nav
 
 ### 判断脚本截图
 
+历史详情中的受保护图片由宿主前端通过带 Bearer 认证的 Blob 请求加载，再以弹窗生命周期管理 Object URL；插件无需获得历史文件鉴权令牌。
+
 一次「脚本实例 × 用户」运行按 Attempt 分别维护内存截图池；每个 Attempt 最多保存 8 张，第 9 张加入时移除该 Attempt 最早的一张。运行收尾时，当前保留截图会写入本轮运行的 history 目录。
 
 - 截图来源为游戏窗口客户区或模拟器画面，保留采集到的原始像素宽高，编码为高质量 JPEG。
 - 关键字模式在首次接受成功/失败关键字判定时自动截图；判断脚本模式在首次接受 `status: "success"` / `"partial"` / `"failed"` 时自动截图。关键字模式不能产生 `partial`。
 - JavaScript 判断脚本可随时调用 `nexus.captureScreenshot()`，返回截图 ID；Python 判断脚本可使用输入中的 `screenshotApi.endpoint` 和 `screenshotApi.token`，向 endpoint 发送带 `X-Nexus-Screenshot-Token` 请求头的 `POST` 请求来截图。该地址仅绑定本机回环，并随当前判断脚本调用结束失效。
+- PC 游戏运行期间由宿主约每秒维护一张最近有效帧（最多保留 2 秒，按 Attempt 隔离）。截图请求先采集当前窗口；如果判断脚本或关键字生效后窗口已经消失，宿主直接回退到有效缓存帧，不增加关闭游戏前的等待阶段。插件无需自行检测窗口、维护截图缓存或实现重试。
 - 输入中的 `screenshots` 仅包含 ID、序号、时间、尝试次数、尺寸、来源和触发类型等元数据，不包含图片字节。
 - 输出的 `notifyScreenshotId` 指定最终 Attempt 的脚本通知附带截图。留空时选择最终 Attempt 当前仍保留的最新截图；填写已被淘汰、属于其他 Attempt 或不存在的 ID 时不附图，并记录警告。脚本通知发送后截图池释放；队列汇总通知不附图。
 

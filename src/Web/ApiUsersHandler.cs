@@ -275,7 +275,9 @@ internal static class ApiUsersHandler
         OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
             userId,
             scriptId,
-            payload.ToBinding());
+            new UserBindingUpdateRequest(
+                payload.ToBinding(),
+                ConfigInputsSpecified: payload.ConfigInputs is not null));
         if (!result.Succeeded)
         {
             await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);

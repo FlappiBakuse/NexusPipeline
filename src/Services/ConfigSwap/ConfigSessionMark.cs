@@ -13,7 +13,25 @@ internal sealed record ConfigSessionRuntimeMetadata(
     string ProfileHash,
     string PluginName,
     string PluginVersion,
-    string ConfigKind);
+    string ConfigKind)
+{
+    /// <summary>已解析并冻结的附加配置路径；启动恢复不重新加载插件 profile。</summary>
+    public IReadOnlyList<ConfigSessionExtraPath> ExtraConfigPaths { get; init; } = Array.Empty<ConfigSessionExtraPath>();
+}
+
+/// <summary>会话标记中的附加配置恢复描述；OriginalKind 在任何现场修改前捕获。</summary>
+internal sealed class ConfigSessionExtraPath
+{
+    public string Path { get; set; } = "";
+
+    public string OriginalKind { get; set; } = "missing";
+
+    public ConfigSessionExtraPath Clone() => new()
+    {
+        Path = Path,
+        OriginalKind = OriginalKind,
+    };
+}
 
 /// <summary>配置交换会话标记：交换开始写入、完成删除；崩溃后可据此恢复（安全优先：原配置必还原）。</summary>
 internal sealed class ConfigSessionMark
@@ -39,6 +57,9 @@ internal sealed class ConfigSessionMark
     public string PluginName { get; set; } = "";
 
     public string PluginVersion { get; set; } = "";
+
+    /// <summary>本次会话已冻结的 extraConfigPaths；字段缺失代表旧版本主配置会话。</summary>
+    public List<ConfigSessionExtraPath> ExtraConfigPaths { get; set; } = new();
 
     /// <summary>编辑会话模式：normal（快照交换，默认）/ fresh（全新配置，原配置移入缓存区）/ reuse（复用现场配置，无文件动作）。</summary>
     public string EditMode { get; set; } = "normal";
@@ -75,7 +96,10 @@ internal sealed class ConfigSessionMark
     ];
 
     private static readonly HashSet<string> AllowedProperties =
-        RequiredProperties.Append(nameof(NeedsFreshRestore)).ToHashSet(StringComparer.Ordinal);
+        RequiredProperties
+            .Append(nameof(NeedsFreshRestore))
+            .Append(nameof(ExtraConfigPaths))
+            .ToHashSet(StringComparer.Ordinal);
 
     public static string MarkFile(string scriptId, string userId)
     {
@@ -90,7 +114,8 @@ internal sealed class ConfigSessionMark
     internal static ConfigSessionRuntimeMetadata FromScript(
         ScriptInstance script,
         string profileHash = "",
-        string pluginVersion = "")
+        string pluginVersion = "",
+        IReadOnlyList<string>? extraConfigPaths = null)
     {
         string workingDirectory = string.IsNullOrWhiteSpace(script.RootPath)
             ? Path.GetDirectoryName(script.MainExe) ?? ""
@@ -105,7 +130,37 @@ internal sealed class ConfigSessionMark
             profileHash,
             script.PluginType,
             pluginVersion,
-            PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)));
+            PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)))
+        {
+            ExtraConfigPaths = FromExtraPaths(extraConfigPaths),
+        };
+    }
+
+    internal static List<ConfigSessionExtraPath> FromExtraPaths(IReadOnlyList<string>? paths)
+    {
+        var result = new List<ConfigSessionExtraPath>();
+        if (paths is null)
+        {
+            return result;
+        }
+        foreach (string rawPath in paths)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                continue;
+            }
+            string path = Path.GetFullPath(rawPath.Trim());
+            if (result.Any(item => string.Equals(item.Path, path, StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+            result.Add(new ConfigSessionExtraPath
+            {
+                Path = path,
+                OriginalKind = PathKindUtil.Text(PathKindUtil.KindOf(path)),
+            });
+        }
+        return result;
     }
 
     public void Write()
@@ -164,7 +219,17 @@ internal sealed class ConfigSessionMark
         && !string.IsNullOrWhiteSpace(ConfigPath)
         && SessionPhase is "run" or "edit"
         && (ConfigKind is "missing" or "file" or "dir")
-        && (EditMode is "normal" or "fresh" or "reuse");
+        && (EditMode is "normal" or "fresh" or "reuse")
+        && ExtraConfigPaths is not null
+        && ExtraConfigPaths.All(IsValidExtraPath);
+
+    private static bool IsValidExtraPath(ConfigSessionExtraPath entry)
+    {
+        return entry is not null
+            && !string.IsNullOrWhiteSpace(entry.Path)
+            && Path.IsPathRooted(entry.Path)
+            && entry.OriginalKind is "missing" or "file" or "dir";
+    }
 
     private void ValidateCurrent()
     {

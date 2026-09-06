@@ -17,7 +17,8 @@ internal sealed record OperationError(
     string Code,
     string Message,
     OperationErrorKind Kind,
-    IReadOnlyList<string>? Candidates = null);
+    IReadOnlyList<string>? Candidates = null,
+    string? CandidateInputName = null);
 
 /// <summary>应用命令/查询的统一结果容器。</summary>
 internal sealed class OperationResult<T>
@@ -51,9 +52,10 @@ internal sealed class OperationResult<T>
         string code,
         string message,
         OperationErrorKind kind,
-        IReadOnlyList<string>? candidates = null)
+        IReadOnlyList<string>? candidates = null,
+        string? candidateInputName = null)
     {
-        return Failure(new OperationError(code, message, kind, candidates));
+        return Failure(new OperationError(code, message, kind, candidates, candidateInputName));
     }
 }
 
@@ -65,8 +67,9 @@ internal static class OperationResult
         string code,
         string message,
         OperationErrorKind kind,
-        IReadOnlyList<string>? candidates = null)
+        IReadOnlyList<string>? candidates = null,
+        string? candidateInputName = null)
     {
-        return OperationResult<bool>.Failure(code, message, kind, candidates);
+        return OperationResult<bool>.Failure(code, message, kind, candidates, candidateInputName);
     }
 }

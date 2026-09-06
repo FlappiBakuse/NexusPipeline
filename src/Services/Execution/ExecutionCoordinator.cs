@@ -21,6 +21,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly RunScreenshotStore _screenshotStore;
 
+    private readonly RecentScreenshotCache _recentScreenshotCache;
+
     private int? _gameProcessId;
 
     private ExecutionPreviewTarget? _currentPreviewTarget;
@@ -52,15 +54,27 @@ internal sealed class ExecutionCoordinator : RunSession
         _users = users;
         _resolvedSpec = resolvedSpec;
         _previewTargetChanged = previewTargetChanged;
+        _recentScreenshotCache = new RecentScreenshotCache(
+            processId => ExecutionPreviewImage.CapturePcOriginal(processId));
         _screenshotStore = new RunScreenshotStore(CaptureCurrentScreenshotAsync);
         SetInitialPreviewTarget();
     }
 
     internal RunScreenshotStore ScreenshotStore => _screenshotStore;
 
-    internal void DisposeScreenshots() => _screenshotStore.Dispose();
+    internal void DisposeScreenshots()
+    {
+        _screenshotStore.Dispose();
+        _recentScreenshotCache.Dispose();
+    }
 
     internal static bool ShouldPublishConsoleData(string? logPath) => string.IsNullOrWhiteSpace(logPath);
+
+    internal static bool ShouldHostLaunchGame(ScriptInstance script, ResolvedScriptSpec? spec)
+    {
+        return script.LaunchGame
+            && !(spec?.SelfManagedPcLaunch == true && !EmulatorSupport.IsEmulator(script));
+    }
 
     public async Task<RunRecord> RunAsync()
     {
@@ -198,6 +212,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
                 _attemptLogStart = _scriptFullLog.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
+                _recentScreenshotCache.BeginAttempt(attemptNo);
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
@@ -438,7 +453,7 @@ internal sealed class ExecutionCoordinator : RunSession
             return early;
         }
 
-        if (_script.LaunchGame)
+        if (ShouldHostLaunchGame(_script, _resolvedSpec))
         {
             if (string.IsNullOrWhiteSpace(_script.GameExe))
             {
@@ -693,6 +708,15 @@ internal sealed class ExecutionCoordinator : RunSession
             while (result is null)
             {
                 OperationToken.ThrowIfCancellationRequested();
+
+                // 先预热最近有效帧，再消费判断结果和新增日志；截图请求可能就在本轮随后到达。
+                // 模拟器模式跳过（模拟器截图走实时 ADB，不使用 PC 窗口缓存）。
+                if (!EmulatorSupport.IsEmulator(_script))
+                {
+                    BringGameToFrontIfRunning();
+                    ScheduleRecentPcScreenshot(attempt.Number);
+                }
+
                 workers.ConsumeConfigSyncResult();
                 await workers.ConsumeJudgeResultAsync().ConfigureAwait(false);
                 workers.TryQueuePendingFinalJudge();
@@ -714,13 +738,6 @@ internal sealed class ExecutionCoordinator : RunSession
                     {
                         Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」配置同步 worker 当前繁忙，本次首次检测已并入已有同步。");
                     }
-                }
-
-                // 游戏由启动器延迟拉起（启动瞬间检测不到），运行期间每轮检测，出现即前置一次。
-                // 模拟器模式跳过窗口前置。
-                if (!EmulatorSupport.IsEmulator(_script))
-                {
-                    BringGameToFrontIfRunning();
                 }
 
                 if (judge.IsFailure)
@@ -1101,16 +1118,41 @@ internal sealed class ExecutionCoordinator : RunSession
         if (target.Source == ExecutionPreviewSource.Pc)
         {
             int? processId = target.ProcessId ?? _gameProcessId;
-            if (processId is not int pid || pid <= 0)
+            if (processId is int pid && pid > 0)
             {
-                return RunScreenshotCaptureResult.Failure("pc", "正在等待游戏窗口");
+                ExecutionPreviewImageResult image = await Task.Run(
+                    () => ExecutionPreviewImage.CapturePcOriginal(pid),
+                    cancellationToken).ConfigureAwait(false);
+                if (image.Ok)
+                {
+                    _recentScreenshotCache.Store(attemptNumber, pid, image);
+                    return RunScreenshotCaptureResult.Success(image.Data, "pc");
+                }
+
+                if (_recentScreenshotCache.TryGet(attemptNumber, pid, out RecentScreenshotFrame cached, out TimeSpan cacheAge))
+                {
+                    return RunScreenshotCaptureResult.Success(
+                        cached.Data,
+                        "pc",
+                        cached.CapturedAt,
+                        fromCache: true,
+                        cacheAge);
+                }
+
+                return RunScreenshotCaptureResult.Failure("pc", image.Error);
             }
-            ExecutionPreviewImageResult image = await Task.Run(
-                () => ExecutionPreviewImage.CapturePcOriginal(pid),
-                cancellationToken).ConfigureAwait(false);
-            return image.Ok
-                ? RunScreenshotCaptureResult.Success(image.Data, "pc")
-                : RunScreenshotCaptureResult.Failure("pc", image.Error);
+
+            if (_recentScreenshotCache.TryGet(attemptNumber, out RecentScreenshotFrame frame, out TimeSpan missingProcessCacheAge))
+            {
+                return RunScreenshotCaptureResult.Success(
+                    frame.Data,
+                    "pc",
+                    frame.CapturedAt,
+                    fromCache: true,
+                    missingProcessCacheAge);
+            }
+
+            return RunScreenshotCaptureResult.Failure("pc", "正在等待游戏窗口");
         }
 
         IEmulatorDriver? driver = target.EmulatorDriver ?? _emulatorDriver;
@@ -1240,5 +1282,19 @@ internal sealed class ExecutionCoordinator : RunSession
         {
             Logger.Warn($"[警告] 检测游戏进程失败：{ex.Message}");
         }
+    }
+
+    private void ScheduleRecentPcScreenshot(int attemptNumber)
+    {
+        ExecutionPreviewTarget? target = _currentPreviewTarget;
+        int? processId = target?.Source == ExecutionPreviewSource.Pc
+            ? target.ProcessId ?? _gameProcessId
+            : null;
+        if (processId is not int pid || pid <= 0)
+        {
+            return;
+        }
+
+        _ = _recentScreenshotCache.TryRefreshAsync(attemptNumber, pid, OperationToken);
     }
 }

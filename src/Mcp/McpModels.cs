@@ -116,6 +116,9 @@ internal sealed class McpBindingInput
 
     public int MaxSuccessfulRunsPerDay { get; set; } = -1;
 
+    /// <summary>用户级专项插件输入；更新时省略表示保留原值，显式空对象表示清空。</summary>
+    public Dictionary<string, string>? ConfigInputs { get; set; }
+
     public UserScriptBinding ToModel(string scriptId)
     {
         return new UserScriptBinding
@@ -130,6 +133,7 @@ internal sealed class McpBindingInput
             SmtpTo = SmtpTo.Trim(),
             RunDays = RunDays,
             MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
+            ConfigInputs = new Dictionary<string, string>(ConfigInputs ?? new(), StringComparer.OrdinalIgnoreCase),
         };
     }
 }
@@ -275,6 +279,7 @@ internal static class McpViews
             binding.SmtpTo,
             binding.RunDays,
             binding.MaxSuccessfulRunsPerDay,
+            configInputs = binding.ConfigInputs,
             binding.Participates,
             effective = new
             {

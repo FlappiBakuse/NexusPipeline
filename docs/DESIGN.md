@@ -272,7 +272,7 @@ data/{脚本Id}/{UserId}/
 
 通用判断脚本属于宿主配置资产，路径为 `config/judge-scripts/<scriptId>.js|py`。源码通过临时文件原子替换；脚本实例删除、语言切换和未引用资产会进入 `orphaned/` 隔离目录。专项判断脚本保留在插件目录，由 `PluginType + RootPath` 解析当前 profile。
 
-运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
+运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。PC 游戏目标在运行期间由宿主以约 1 秒间隔维护一张最近有效的原分辨率 JPEG 帧，缓存最多保留 2 秒且只属于当前 Attempt。截图请求先尝试当前游戏窗口；窗口已消失或当前进程句柄不可用时，若最近帧仍在有效期内则直接使用该帧。缓存只存在内存中，运行结束释放，不增加关闭游戏前的等待或抢拍阶段。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
 
 ```text
 history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/
@@ -283,6 +283,8 @@ history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/
 ```
 
 `NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 用于展示和当前用户查找。配置交换会话使用当前全局用户绑定的 ID 目录，磁盘 `.session` 的 `UserId` 字段记录会话所属用户。
+
+附加配置路径使用冻结的路径与文件/目录形态参与会话；宿主在修改前写入 manifest，并以 stage、backup、commit 事务完成快照交换。准备失败、启动中断或收尾失败时按 manifest 恢复，无法确认归属的现场保留并告警。历史详情中的受保护图片由前端通过带认证的 Blob 请求加载，Object URL 随弹窗关闭释放。
 
 ### 4.2 运行前（PrepareForRun）与运行后（RestoreAfterRun）
 
@@ -307,6 +309,8 @@ flowchart LR
 
 编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份；窗口前置轮询同时校验该身份、目标窗口归属和编辑会话取消令牌。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消轮询，目标进程退出后不会继续争用前台窗口。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
 
+配置路径的准备步骤按声明顺序执行；任一路径失败时，宿主逆序还原本次已准备路径并阻断运行，避免主配置在附加配置不完整时启动。运行前写入的会话标记同时覆盖主配置与附加配置现场。
+
 ### 4.3 插队替换配置（replaceConfigs）
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后应用**，避免进程仍持有配置文件时出现文件占用或半写窗口。**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
@@ -315,6 +319,8 @@ flowchart LR
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
 
 ### 4.4 崩溃恢复（自愈）
+
+- 附加快照事务在启动恢复和运行收尾前先处理未提交的 manifest；已提交事务只清理残留，未提交事务恢复旧 store。manifest 缺失、身份不匹配或现场状态无法判定时保留事务目录并阻断后续写入，等待人工处理。
 
 - **启动恢复（RecoverInterrupted）**：扫描当前格式的 `.session` 标记与 swap-backup，自动还原；格式完整且原配置区为空时，fresh 编辑会话（原形态 Missing，config 位置为脚本生成物）由 `EditMode` 驱动 `DoRestore` 清理，其余会话只清除标记并保留未改变的现场。字段缺失、字段名不符或协议未知的现场保留并告警，等待人工处理。
 - **后台延迟重试**：还原失败（文件被孤儿进程占用）时进入待办队列，每 10 秒重试直至成功或进程退出。
@@ -361,7 +367,7 @@ flowchart LR
 - **输入 JSON**：脚本字段 + 用户 + `config`（运行时生效配置，只读）与 `script` 目录（可读写）全递归文件清单 + `scriptDir` + **本次尝试日志段**（按尝试切片，上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 `logTruncated=true`）。
 - **触发时机**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
 - **输出契约**：stdout 尾行 JSON `{"status":"success|partial|failed","reason":"必填","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":[...]}`；无输出/非 JSON/缺字段 = 继续运行；单次执行 30 秒上限；执行错误 = 警告 + 继续运行。`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。
-- **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本 success/partial/failed 结果时触发。
+- **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。PC 目标由宿主维护约 1 秒间隔的最近有效帧，当前窗口消失时允许回退到不超过 2 秒的缓存帧；缓存按 Attempt 隔离并在运行结束释放。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本 success/partial/failed 结果时触发。
 - **边界**：JS 内置 Jint 引擎（`nexus.readFile` 限 config/script 范围、单文件 2MB；`nexus.writeFile` 防 `../` 与绝对路径逃逸；无 Node 库）；Python 用系统 `python.exe`（`sys.argv[1]` 输入 JSON 路径），截图 RPC 仅绑定本机回环且随单次调用失效。
 
 ### 5.3 判断脚本信任边界
@@ -636,7 +642,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
 | `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时、截图 API 和 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
-| `RunScreenshotStore` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
+| `RunScreenshotStore` / `RecentScreenshotCache` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Execution/RecentScreenshotCache.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、PC 最近有效帧缓存、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断/替换三形态；替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话（normal/fresh/reuse）与隐藏配置管理 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
@@ -644,6 +650,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSwapRecovery` | src/Services/ConfigSwap/ConfigSwapRecovery.cs | `.session` 自愈、启动扫描、孤儿进程延迟重试、fresh 生成物/原配置还原；按当前全局用户绑定建立 UserId 恢复白名单；脚本/用户读取经注入的委托 |
 | `ConfigStoreDiff` | src/Services/Configuration/ConfigStoreDiff.cs | 扫描外部 config 与权威 store，按文件内容生成 added/changed/deleted/preserved 差异计划；避免按完整快照重复复制 |
 | `ConfigStoreTransaction` / `ConfigStoreTransactionRecovery` | src/Services/Configuration/ConfigStoreTransaction.cs | manifest/stage/rollback/commit 增量事务、generation 元数据提交与崩溃回滚；无法确认事务状态时隔离现场并阻断后续写入 |
+| `ExtraConfigSync` / `ExtraConfigStoreTransaction` | src/Services/Configuration/ExtraConfigSync.cs、src/Services/Configuration/ExtraConfigStoreTransaction.cs | 附加配置路径的形态校验、准备/还原和带 manifest 的 stage/backup/commit 快照事务；准备失败 fail closed，未提交现场由恢复流程处理 |
 | `ConfigStoreMetadata` | src/Services/ConfigStoreMetadata.cs | store 归属、定位/形态指纹与 generation 管理；严格读取当前元数据协议 |
 | `ConfigSessionMark` / `EditSession` | src/Services/ConfigSwap/ | 配置会话持久化标记与 Web 编辑会话状态模型 |
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位与清理（持久层在用户目录顶层，会话事务目录收敛于 work/） |
@@ -796,6 +803,8 @@ Capability 扩展约束：
 - 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.2`，入口位于 `web/` 并导出 `activate(host)`；启用且兼容后由宿主直接加载，版本和声明变化继续经过 manifest、路径和资源校验。
 - 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份。脚本实例持久化 `PluginType + RootPath` 等稳定声明，宿主在 API、准入、配置编辑和运行时解析当前 profile，并将当次操作的有效结果冻结到执行计划或会话标记。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
+
+数据化专项 profile 的输入候选响应携带实际 `inputName`，宿主前端按响应消费输入契约；`self-managed-pc-launch` 的启动开关、参数和等待时间保留在用户设置中，仅由运行时计划决定 PC 模式下的宿主启动行为。
 
 ### 10.9 功能定位指南（找代码）
 

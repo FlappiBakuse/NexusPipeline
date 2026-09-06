@@ -290,6 +290,18 @@ public class DataSpecializedPluginInputsTests
     }
 
     [Fact]
+    public void DiscoverCandidates_ReturnsTheInputNameUsedByConfigPath()
+    {
+        (string pluginDir, string scriptRoot) = MakeBetterGILikePlugin(Path.Combine("User", "OneDragon"), ".json");
+        var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+
+        Assert.True(plugin.TryDiscoverConfigInputCandidates(scriptRoot, out ConfigInputCandidateSet? candidates));
+        Assert.NotNull(candidates);
+        Assert.Equal("config", candidates!.InputName);
+        Assert.Equal(new[] { "大号日常", "默认配置" }, candidates.Values.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray());
+    }
+
+    [Fact]
     public void DiscoverCandidates_KeepsFullFileName_BAAHShape()
     {
         // BAAH：模板 BAAH_CONFIGS/{input:config}（后缀在输入值内）→ 候选为完整文件名

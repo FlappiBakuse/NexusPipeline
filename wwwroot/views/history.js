@@ -1,9 +1,9 @@
-import { api } from "../core/api.js";
+import { api, apiBlob } from "../core/api.js";
 import { esc, fmtTime, statusBadge } from "../core/format.js";
 import { pageHeader } from "../core/forms.js";
 import { icon } from "../core/icons.js";
 import { isCurrent, state } from "../core/state.js";
-import { modalShell, showModal } from "../core/modal.js";
+import { modalShell, registerModalCleanup, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 
@@ -16,6 +16,8 @@ let historySelectedUserName = "";
 let historyRecords = [];
 let historyDir = "";
 let historyRangeGlobalBound = false;
+let historyImageSession = null;
+let historyLightboxRequestToken = null;
 
 const pad = n => String(n).padStart(2, "0");
 
@@ -578,7 +580,7 @@ function historyAttemptScreenshotsMarkup(id, attempt, logInfo) {
     const imageUrl = screenshot.imageUrl || historyImageUrl(id, attempt.number, screenshot.id);
     const label = `第 ${attempt.number} 次尝试截图 ${index + 1}`;
     const details = [screenshot.width && screenshot.height ? `${screenshot.width}×${screenshot.height}` : "", screenshot.trigger || ""].filter(Boolean).join(" · ");
-    return `<button class="history-screenshot-thumb" type="button" data-action="history-image" data-image-url="${esc(imageUrl)}" data-image-alt="${esc(label)}" data-image-caption="${esc(details)}" data-testid="history-screenshot"><img src="${esc(imageUrl)}" alt="${esc(label)}" loading="lazy"><span class="history-screenshot-index">${index + 1}</span></button>`;
+    return `<button class="history-screenshot-thumb" type="button" data-action="history-image" data-image-url="${esc(imageUrl)}" data-image-alt="${esc(label)}" data-image-caption="${esc(details)}" data-testid="history-screenshot"><img alt="${esc(label)}" loading="lazy" data-history-image><span class="history-screenshot-index">${index + 1}</span></button>`;
   }).join("");
   return `<div class="history-attempt-screenshots" data-testid="history-attempt-screenshots"><div class="qk-row">运行截图（${screenshots.length} 张）</div><div class="history-screenshot-strip" role="list" aria-label="第 ${attempt.number} 次尝试运行截图">${items}</div></div>`;
 }
@@ -610,6 +612,63 @@ let historyLightboxEscapeBound = false;
 let historyLightboxParent = null;
 let historyLightboxNextSibling = null;
 
+function newHistoryImageSession() {
+  const session = {
+    controller: new AbortController(),
+    requests: new Map(),
+    urls: new Map(),
+    closed: false,
+  };
+  historyImageSession = session;
+  return session;
+}
+
+function disposeHistoryImageSession(session) {
+  if (!session || session.closed) return;
+  session.closed = true;
+  session.controller.abort();
+  for (const url of session.urls.values()) URL.revokeObjectURL(url);
+  session.urls.clear();
+  session.requests.clear();
+  if (historyImageSession === session) historyImageSession = null;
+}
+
+async function loadHistoryImage(session, imageUrl) {
+  if (!session || session.closed) throw new DOMException("图片会话已关闭", "AbortError");
+  const cached = session.urls.get(imageUrl);
+  if (cached) return cached;
+  const existing = session.requests.get(imageUrl);
+  if (existing) return existing;
+  const request = apiBlob(imageUrl, session.controller.signal)
+    .then(blob => {
+      if (!blob.type.startsWith("image/")) throw new Error("运行截图资源格式无效");
+      const url = URL.createObjectURL(blob);
+      if (session.closed) {
+        URL.revokeObjectURL(url);
+        throw new DOMException("图片会话已关闭", "AbortError");
+      }
+      session.urls.set(imageUrl, url);
+      return url;
+    })
+    .finally(() => session.requests.delete(imageUrl));
+  session.requests.set(imageUrl, request);
+  return request;
+}
+
+async function hydrateHistoryImages(session) {
+  const elements = [...document.querySelectorAll("[data-history-image]")];
+  await Promise.all(elements.map(async element => {
+    const imageUrl = element.closest("[data-image-url]")?.dataset.imageUrl;
+    if (!imageUrl) return;
+    try {
+      const objectUrl = await loadHistoryImage(session, imageUrl);
+      if (!session.closed && element.isConnected) element.src = objectUrl;
+    } catch (error) {
+      if (error?.name !== "AbortError" && element.isConnected) element.dataset.imageError = "1";
+    }
+  }));
+}
+
 function bindHistoryLightboxEscape() {
   if (historyLightboxEscapeBound) return;
   window.addEventListener("keydown", event => {
@@ -623,28 +682,39 @@ function bindHistoryLightboxEscape() {
   historyLightboxEscapeBound = true;
 }
 
-export function historyOpenImage(target) {
+export async function historyOpenImage(target) {
   const lightbox = document.querySelector("[data-history-lightbox]");
   const image = lightbox?.querySelector("[data-history-lightbox-image]");
   if (!lightbox || !image || !target.dataset.imageUrl) return;
+  const session = historyImageSession;
+  if (!session) return;
   if (lightbox.parentElement !== document.body) {
     historyLightboxParent = lightbox.parentNode;
     historyLightboxNextSibling = lightbox.nextSibling;
     document.body.appendChild(lightbox);
   }
   historyLightboxOrigin = target;
-  image.src = target.dataset.imageUrl;
+  const requestToken = Symbol("history-lightbox-request");
+  historyLightboxRequestToken = requestToken;
+  image.removeAttribute("src");
   image.alt = target.dataset.imageAlt || "运行截图";
   const caption = lightbox.querySelector("[data-history-lightbox-caption]");
   if (caption) caption.textContent = target.dataset.imageCaption || "";
   lightbox.hidden = false;
   lightbox.querySelector("[data-action=history-image-close]")?.focus();
+  try {
+    const objectUrl = await loadHistoryImage(session, target.dataset.imageUrl);
+    if (historyLightboxRequestToken === requestToken && !session.closed && image.isConnected) image.src = objectUrl;
+  } catch (error) {
+    if (error?.name !== "AbortError" && historyLightboxRequestToken === requestToken) toast(error.message, "error");
+  }
 }
 
 export function historyCloseImage() {
   const lightbox = document.querySelector("[data-history-lightbox]");
   if (!lightbox || lightbox.hidden) return;
   lightbox.hidden = true;
+  historyLightboxRequestToken = null;
   const image = lightbox.querySelector("[data-history-lightbox-image]");
   if (image) image.removeAttribute("src");
   const origin = historyLightboxOrigin;
@@ -671,7 +741,13 @@ export async function historyDetail(id) {
     }).join("");
     const body = `${historyDetailMetaMarkup(record)}${pluginHistoryDetailMarkup(record)}${pluginSlotMarkup("history.detail.sections", "history.detail.sections", "history-detail-plugin-slot", { mode: "detail", primaryId: record.id })}<div class="history-attempt-list">${attempts}</div>${historyImageLightboxMarkup()}`;
     showModal(modalShell(`${esc(record.scriptName)} 运行详情`, body, '<button class="ghost" type="button" data-action="close-modal">关闭</button>'), true);
+    const imageSession = newHistoryImageSession();
+    registerModalCleanup(() => {
+      historyCloseImage();
+      disposeHistoryImageSession(imageSession);
+    });
     bindHistoryLightboxEscape();
+    void hydrateHistoryImages(imageSession);
     void renderPluginSlots(document);
   } catch (error) { toast(error.message, "error"); }
 }

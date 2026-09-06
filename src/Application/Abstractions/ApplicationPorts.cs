@@ -136,10 +136,19 @@ internal interface IPluginCapabilityResolver
 {
     bool SupportsEmulator(string pluginName);
 
+    /// <summary>查询插件声明的通用能力；默认实现供旧测试替身和旧适配器保持兼容。</summary>
+    bool HasCapability(string pluginName, string capabilityKey) => false;
+
     ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null);
 
     /// <summary>复用配置候选：configPath 模板引用单个输入且目标缺失时，枚举静态目录中可绑定的输入值；不适用或无候选返回空。</summary>
     IReadOnlyList<string> GetMissingConfigCandidates(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs);
+
+    /// <summary>返回候选值及其真实输入名；前端不得重新解析插件模板。</summary>
+    ConfigInputCandidateSet? GetMissingConfigCandidateSet(
+        string pluginName,
+        string rootPath,
+        IReadOnlyDictionary<string, string>? inputs) => null;
 }
 
 /// <summary>专项脚本实例的插件可用性端口；运行与配置流程只依赖动态状态，不直接依赖 PluginManager。</summary>

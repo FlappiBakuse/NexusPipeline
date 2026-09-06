@@ -1,6 +1,8 @@
+using System.Text.Json;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Configuration;
+using NexusPipeline.Utilities;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -66,6 +68,132 @@ public class ExtraConfigSyncTests
 
             Assert.Equal("运行前现场", File.ReadAllText(site));
             Assert.False(Directory.Exists(ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site)));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void LegacyRestoreWithoutKindProof_PreservesOriginalExtra()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "software_config.json");
+        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(originalExtra);
+            File.WriteAllText(Path.Combine(originalExtra, "software_config.json"), "待核查现场");
+
+            ExtraConfigSync.RestoreAll(scriptId, userKey, [site]);
+
+            Assert.False(File.Exists(site));
+            Assert.True(Directory.Exists(originalExtra));
+            Assert.True(ExtraConfigSync.HasUntrackedResidue(scriptId, userKey));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void LegacyRestoreWithInvalidKindProof_PreservesOriginalExtra()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "software_config.json");
+        string originalExtra = ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(originalExtra);
+            File.WriteAllText(Path.Combine(originalExtra, "software_config.json"), "待核查现场");
+            File.WriteAllText(originalExtra + ".kind", "unknown");
+
+            ExtraConfigSync.RestoreAll(scriptId, userKey, [site]);
+
+            Assert.False(File.Exists(site));
+            Assert.True(Directory.Exists(originalExtra));
+            Assert.True(ExtraConfigSync.HasUntrackedResidue(scriptId, userKey));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void PrepareFailure_RollsBackEarlierExtraPathsAndBlocksPreparation()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string first = Path.Combine(AppPaths.DataDir, scriptId, "site", "first.json");
+        string second = Path.Combine(AppPaths.DataDir, scriptId, "site", "second");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(first)!);
+            File.WriteAllText(first, "第一条原现场");
+            Directory.CreateDirectory(second);
+
+            var entries = new[]
+            {
+                new ConfigSessionExtraPath { Path = first, OriginalKind = "file" },
+                // 第二条现场形态与 durable manifest 不一致，必须让整批准备失败。
+                new ConfigSessionExtraPath { Path = second, OriginalKind = "file" },
+            };
+
+            Assert.Throws<IOException>(() => ExtraConfigSync.PrepareAll(scriptId, userKey, entries));
+
+            Assert.Equal("第一条原现场", File.ReadAllText(first));
+            Assert.True(Directory.Exists(second));
+            Assert.False(Directory.Exists(ConfigSwapPaths.OriginalExtraDir(scriptId, userKey, first)));
+            Assert.False(ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userKey));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void Recovery_UncommittedExtraStoreSwapRestoresOldSnapshot()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "config.json");
+        string store = ConfigSwapPaths.StoreExtraDir(scriptId, userKey, site);
+        string transactionDir = ConfigSwapPaths.ExtraStoreTransactionDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(site)!);
+            File.WriteAllText(site, "现场");
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "config.json"), "旧快照");
+
+            string backup = ConfigSwapPaths.ExtraStoreTransactionBackupDir(scriptId, userKey, site);
+            Directory.CreateDirectory(transactionDir);
+            Directory.Move(store, backup);
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "config.json"), "未提交新快照");
+            JsonUtil.WriteAtomic(
+                ConfigSwapPaths.ExtraStoreTransactionManifestPath(scriptId, userKey, site),
+                JsonSerializer.Serialize(new
+                {
+                    TransactionId = "txn-test",
+                    ScriptId = scriptId,
+                    UserKey = userKey,
+                    SitePath = Path.GetFullPath(site),
+                    StorePath = Path.GetFullPath(store),
+                    HadStore = true,
+                    StartedAt = DateTimeOffset.UtcNow,
+                }, JsonOpts.Indented));
+
+            ExtraConfigStoreTransaction.Recover(scriptId, userKey, site);
+
+            Assert.Equal("旧快照", File.ReadAllText(Path.Combine(store, "config.json")));
+            Assert.False(Directory.Exists(transactionDir));
         }
         finally
         {

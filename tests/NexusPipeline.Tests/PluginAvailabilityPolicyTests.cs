@@ -196,6 +196,123 @@ public sealed class PluginAvailabilityPolicyTests
     }
 
     [Fact]
+    public void UpdateBinding_WithoutConfigInputs_PreservesExistingSelection()
+    {
+        string scriptId = "binding-config-preserve-" + Guid.NewGuid().ToString("N");
+        var script = new ScriptInstance { Id = scriptId, Name = "通用脚本" };
+        var user = new NexusUser
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "用户甲",
+            Bindings =
+            {
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["config"] = "用户甲配置" },
+                    RunDays = 7,
+                },
+            },
+        };
+
+        using var scope = new RuntimeDataScope(script, user);
+        OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
+            user.Id,
+            scriptId,
+            new UserBindingUpdateRequest(
+                new UserScriptBinding { ScriptInstanceId = scriptId, RunDays = 3 },
+                ConfigInputsSpecified: false));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(3, user.Bindings[0].RunDays);
+        Assert.Equal("用户甲配置", user.Bindings[0].ConfigInputs["config"]);
+    }
+
+    [Fact]
+    public void UpdateBinding_ExplicitEmptyConfigInputs_ClearsSelection()
+    {
+        string scriptId = "binding-config-clear-" + Guid.NewGuid().ToString("N");
+        var script = new ScriptInstance { Id = scriptId, Name = "通用脚本" };
+        var user = new NexusUser
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "用户甲",
+            Bindings =
+            {
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["config"] = "旧配置" },
+                },
+            },
+        };
+
+        using var scope = new RuntimeDataScope(script, user);
+        OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
+            user.Id,
+            scriptId,
+            new UserBindingUpdateRequest(
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(),
+                },
+                ConfigInputsSpecified: true));
+
+        Assert.True(result.Succeeded);
+        Assert.Empty(user.Bindings[0].ConfigInputs);
+    }
+
+    [Fact]
+    public void UpdateBinding_ExplicitConfigInputsReplacesOnlyTargetUserSelection()
+    {
+        string scriptId = "binding-config-users-" + Guid.NewGuid().ToString("N");
+        var script = new ScriptInstance { Id = scriptId, Name = "通用脚本" };
+        var userA = new NexusUser
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "用户甲",
+            Bindings =
+            {
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["config"] = "配置甲" },
+                },
+            },
+        };
+        var userB = new NexusUser
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "用户乙",
+            Bindings =
+            {
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["config"] = "配置乙" },
+                },
+            },
+        };
+
+        using var scope = new RuntimeDataScope(script, userA, userB);
+        OperationResult<UserScriptBinding> result = UserCommands.UpdateBinding(
+            userA.Id,
+            scriptId,
+            new UserBindingUpdateRequest(
+                new UserScriptBinding
+                {
+                    ScriptInstanceId = scriptId,
+                    ConfigInputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["config"] = "新配置甲" },
+                },
+                ConfigInputsSpecified: true));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("新配置甲", userA.Bindings[0].ConfigInputs["config"]);
+        Assert.Equal("配置乙", userB.Bindings[0].ConfigInputs["config"]);
+    }
+
+    [Fact]
     public void DeleteBinding_UnavailableSpecializedPluginRemainsAllowed()
     {
         string scriptId = "plugin-policy-delete-" + Guid.NewGuid().ToString("N");

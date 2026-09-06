@@ -67,7 +67,11 @@ internal sealed class ConfigRunSession
 
     private static ConfigSessionRuntimeMetadata BuildMetadata(ResolvedScriptSpec spec)
     {
-        return ConfigSessionMark.FromScript(spec.Script, spec.ProfileHash, spec.PluginVersion);
+        return ConfigSessionMark.FromScript(
+            spec.Script,
+            spec.ProfileHash,
+            spec.PluginVersion,
+            spec.ExtraConfigPaths);
     }
 
     public string? PrepareForRetry()
@@ -133,7 +137,7 @@ internal sealed class ConfigRunSession
         return steps;
     }
 
-    /// <summary>执行收尾并返回配置交换还原错误；同步失败由现有门面记录警告，不阻断后续还原。</summary>
+    /// <summary>执行收尾并返回配置交换还原错误；同步失败保留旧快照并继续执行现场还原。</summary>
     public string? FinalizeRun(bool autoUpdateConfig)
     {
         lock (_finalizationGate)

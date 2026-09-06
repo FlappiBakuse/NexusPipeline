@@ -35,6 +35,12 @@ internal sealed record ResolvedScriptSpec(
     /// <summary>configPath 模板的绑定输入处于未定状态时的候选清单：编辑启动要求用户选择、运行前拒绝启动。</summary>
     public IReadOnlyList<string> ConfigInputCandidates { get; init; } = Array.Empty<string>();
 
+    /// <summary>候选清单对应的真实插件输入名。</summary>
+    public string ConfigInputName { get; init; } = "";
+
+    /// <summary>插件声明 PC 启动由自身管理；仅在 PC 运行期屏蔽宿主启动，不修改持久脚本。</summary>
+    public bool SelfManagedPcLaunch { get; init; }
+
     public bool Succeeded => string.IsNullOrWhiteSpace(Error);
 }
 
@@ -131,6 +137,10 @@ internal sealed class ScriptSpecResolver
         {
             ExtraConfigPaths = profile.ExtraConfigPaths,
             ConfigInputCandidates = profile.ConfigInputCandidates,
+            ConfigInputName = profile.ConfigInputName,
+            SelfManagedPcLaunch = _capabilities.HasCapability(
+                script.PluginType,
+                PluginCapabilityKeys.SelfManagedPcLaunch),
         };
     }
 

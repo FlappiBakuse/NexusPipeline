@@ -288,6 +288,7 @@ function readBindingPayloads() {
       maxSuccessfulRunsPerDay: locks.general
         ? (typeof raw.maxSuccessfulRunsPerDay === "number" ? raw.maxSuccessfulRunsPerDay : -1)
         : maxSuccessfulRuns,
+      configInputs: raw.configInputs && typeof raw.configInputs === "object" ? { ...raw.configInputs } : {},
     };
     return payload;
   });

@@ -2,6 +2,21 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.14.3（Pre-release）
+
+### 配置与恢复稳定性
+- 用户绑定更新区分 `configInputs` 字段缺失、显式清空和完整替换，普通用户管理保存不会意外清除其他绑定配置。
+- `self-managed-pc-launch` 仅影响 PC 模式下宿主的运行时启动计划，保留用户已保存的启动开关、参数和等待时间，切换模式可恢复原设置。
+- 附加配置路径采用带 manifest 的 stage/backup/commit 事务；准备阶段失败会回滚已处理路径，宿主启动和运行收尾会恢复未提交现场，无法确认的现场保留并告警。
+
+### 运行截图稳定性
+- PC 游戏运行期间由宿主约每秒维护一张按 Attempt 隔离的最近有效截图缓存，最多回退 2 秒；脚本或关键字触发截图时若游戏窗口已消失，则直接使用有效缓存帧，不增加关闭游戏前等待。
+
+### 远程访问与专项插件契约
+- 历史记录图片通过带认证的 Blob 请求加载并在弹窗关闭时释放 Object URL，远程模式可正常查看受保护的历史截图。
+- 配置候选响应返回实际使用的 `inputName`，前端按后端契约展示和提交候选输入。
+- BetterGI 与 ZenlessZoneZeroOneDragon 配套插件升级到 0.2.4，并声明与宿主 v0.14.2 起的 `no-fresh-config`/运行时能力契约兼容。
+
 ## v0.14.2（Pre-release）
 
 ### 专项插件日志

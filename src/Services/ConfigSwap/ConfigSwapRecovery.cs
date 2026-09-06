@@ -32,6 +32,7 @@ internal sealed class ConfigSwapRecovery
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark is null)
         {
+            ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
             if (HasSessionMarkFiles(scriptId, userName))
             {
                 // 当前启动阶段可能尚未加载插件；主/备标记均损坏时禁止使用声明中的旧路径猜测恢复。
@@ -45,7 +46,9 @@ internal sealed class ConfigSwapRecovery
             // （P2）：语义对齐 TryRecoverItem——fresh 编辑会话（原配置 Missing，config 位置为脚本生成物）
             // 仍需 DoRestore 清理（恢复编辑前状态）；其余会话 cache 空 = 现场已还原，仅清标记
             // （避免窄窗口误删用户新写入的 config）。
-            if (mark.NeedsFreshRestore)
+            if (mark.NeedsFreshRestore
+                || mark.ExtraConfigPaths.Count > 0
+                || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName))
             {
                 DoRestore(scriptId, userName, mark);
             }
@@ -153,6 +156,7 @@ internal sealed class ConfigSwapRecovery
                 {
                     ConfigStoreMetadata.RecoverRebind(scriptId, userKey);
                     ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+                    ExtraConfigStoreTransaction.RecoverAll(scriptId, userKey);
                 }
                 catch (Exception ex)
                 {
@@ -175,9 +179,18 @@ internal sealed class ConfigSwapRecovery
     {
         // 脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
+        bool hasUntrackedExtraResidue = !string.IsNullOrWhiteSpace(userName)
+            && ExtraConfigSync.HasUntrackedResidue(scriptId, userName);
+        if (hasUntrackedExtraResidue && !HasSessionMarkFiles(scriptId, userName!))
+        {
+            // 旧版本只保存 extra hash，没有足够信息证明现场归属；保留目录并明确告警，不能猜测恢复。
+            Logger.Warn($"[恢复] 检测到没有当前会话清单可解释的附加配置现场，保留等待人工核查：脚本 {scriptId} / 用户 {userName}");
+        }
         bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
             || (!string.IsNullOrWhiteSpace(userName)
-                && HasSessionMarkFiles(scriptId, userName));
+                && (HasSessionMarkFiles(scriptId, userName)
+                    || hasUntrackedExtraResidue
+                    || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName)));
         if (!string.IsNullOrWhiteSpace(userName)
             && HasSessionMarkFiles(scriptId, userName)
             && ConfigSessionMark.TryRead(scriptId, userName) is null)
@@ -211,9 +224,14 @@ internal sealed class ConfigSwapRecovery
                     // 脚本生成物）仍需 DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；其余会话
                     // cache 空 = 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」
                     // 删除 config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
-                    if (mark.NeedsFreshRestore)
+                    if (mark.NeedsFreshRestore
+                        || mark.ExtraConfigPaths.Count > 0
+                        || ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName))
                     {
-                        DoRestore(scriptId, userName, mark);
+                        if (!RecoverSwapQuiet(scriptId, userName, mark))
+                        {
+                            ok = false;
+                        }
                     }
                     else
                     {
@@ -224,6 +242,21 @@ internal sealed class ConfigSwapRecovery
                 {
                     ok = false;
                 }
+            }
+        }
+        // 没有可解析的会话标记时仍需处理无主的附加快照事务；有会话标记时通常已由
+        // RecoverSwapQuiet/DoRestore 在主配置还原之后处理，若仍有残留则在此重试并保留待办。
+        if (ok && !string.IsNullOrWhiteSpace(userName)
+            && ExtraConfigStoreTransaction.HasAnyResidue(scriptId, userName))
+        {
+            try
+            {
+                ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[恢复] 附加配置快照事务仍未完成（脚本 {scriptId} / 用户 {userName}）：{ex.Message}");
+                ok = false;
             }
         }
         if (!ok)
@@ -463,12 +496,18 @@ internal sealed class ConfigSwapRecovery
                     Logger.Info($"[恢复] 已清理会话期间生成的配置（还原为不存在）：{mark.ConfigPath}");
                 }
             }
+            // 先恢复主配置；附加快照事务异常时保留会话标记，等待后续重试。
+            ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
+            ExtraConfigSync.RestoreAll(scriptId, userName, mark.ExtraConfigPaths);
             ConfigSessionMark.Clear(scriptId, userName);
             return;
         }
         PathKind currentState = PathKindUtil.KindOf(mark.ConfigPath);
         ConfigSwapPrimitives.ClearPath(mark.ConfigPath, currentState);
         ConfigSwapPrimitives.MoveAs(cache, mark.ConfigPath, ConfigSwapPrimitives.RestoreKind(mark));
+        // 先恢复主配置；附加快照事务异常时保留会话标记，等待后续重试。
+        ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
+        ExtraConfigSync.RestoreAll(scriptId, userName, mark.ExtraConfigPaths);
         ConfigSessionMark.Clear(scriptId, userName);
     }
 }

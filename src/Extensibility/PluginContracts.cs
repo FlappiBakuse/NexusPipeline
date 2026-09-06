@@ -23,6 +23,11 @@ internal sealed class PluginInputDeclaration
     public string Pattern { get; init; } = "";
 }
 
+/// <summary>配置候选与产生候选的插件输入名，避免展示层根据 inputs 再次猜测绑定语义。</summary>
+internal sealed record ConfigInputCandidateSet(
+    string InputName,
+    IReadOnlyList<string> Values);
+
 /// <summary>数据化或 C# 插件提供的脚本 profile 推导能力。</summary>
 internal interface IProfileResolver : IPluginCapability
 {
@@ -69,6 +74,9 @@ internal sealed class ScriptProfile
     public string PluginName { get; set; } = "";
 
     public string PluginVersion { get; set; } = "";
+
+    /// <summary>ConfigInputCandidates 对应的真实 inputs 名称。</summary>
+    public string ConfigInputName { get; set; } = "";
 
     /// <summary>
     /// configPath 模板引用的输入未定时可绑定的候选清单（输入值缺失或指向的目标不存在，且目录内存在

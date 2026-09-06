@@ -44,6 +44,27 @@ internal static class ConfigSwapPaths
         return Path.Combine(WorkDir(scriptId, userKey), "original-extra", ExtraKey(declaredPath));
     }
 
+    /// <summary>附加配置快照事务目录：每条声明路径独立保存 manifest/stage/backup/commit。</summary>
+    public static string ExtraStoreTransactionDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "extra-store-txn", ExtraKey(declaredPath));
+    }
+
+    public static string ExtraStoreTransactionManifestPath(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "manifest.json");
+
+    public static string ExtraStoreTransactionStageDir(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "stage");
+
+    public static string ExtraStoreTransactionBackupDir(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "backup");
+
+    public static string ExtraStoreTransactionCommitPath(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "commit.json");
+
+    public static string OriginalExtraRoot(string scriptId, string userKey) =>
+        Path.Combine(WorkDir(scriptId, userKey), "original-extra");
+
     /// <summary>附加配置路径的稳定短键：x + 规范化路径的 SHA256 前 12 位。</summary>
     public static string ExtraKey(string declaredPath)
     {

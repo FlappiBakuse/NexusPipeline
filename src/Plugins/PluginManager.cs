@@ -541,17 +541,23 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     /// <summary>复用配置候选：数据化专项插件 configPath 模板引用单个输入且目标缺失时，枚举静态目录中可绑定的输入值。</summary>
     public IReadOnlyList<string> GetMissingConfigCandidates(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs)
     {
+        return GetMissingConfigCandidateSet(pluginName, rootPath, inputs)?.Values
+            ?? Array.Empty<string>();
+    }
+
+    public ConfigInputCandidateSet? GetMissingConfigCandidateSet(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs)
+    {
         if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))
         {
-            return Array.Empty<string>();
+            return null;
         }
         IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsRuntimeEnabled);
         if (resolver is not DataSpecializedPlugin plugin
-            || !plugin.TryDiscoverConfigInputValues(rootPath.Trim(), out IReadOnlyList<string>? values))
+            || !plugin.TryDiscoverConfigInputCandidates(rootPath.Trim(), out ConfigInputCandidateSet? candidates))
         {
-            return Array.Empty<string>();
+            return null;
         }
-        return values;
+        return candidates;
     }
 
     /// <summary>返回已发现、已启用且有效的数据化插件配置校验脚本；普通脚本和 managed-code 插件不参与。</summary>

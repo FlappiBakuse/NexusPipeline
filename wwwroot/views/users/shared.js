@@ -368,7 +368,12 @@ async function startEditConfig(userId, scriptId, mode) {
     await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", { action: "start", mode });
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
-      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates);
+      const inputName = String(error.data.inputName || "");
+      if (!inputName) {
+        toast("插件未返回配置输入名，无法选择配置文件", "error");
+        return;
+      }
+      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, inputName);
       return;
     }
     throw error;
@@ -379,9 +384,9 @@ async function startEditConfig(userId, scriptId, mode) {
 }
 
 /** 复用编辑绑定修正：现场存在多个配置文件时，列出实际存在的配置供用户选定接管目标（写入用户绑定）。 */
-function openConfigCandidateChooser(userId, scriptId, mode, candidates) {
+function openConfigCandidateChooser(userId, scriptId, mode, candidates, inputName) {
   const cards = candidates.map(candidate =>
-    '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '">' +
+    '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '" data-input-name="' + esc(inputName) + '">' +
     '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">采用后仅该配置写入快照并继续编辑</span></button>').join("");
   const body = '<p class="modal-copy">当前脚本目录存在多个配置文件。请选择要接管的配置文件：仅选中的配置写入你的快照，其他文件保持原样。</p>' +
     '<div class="first-edit-chooser">' + cards + '</div>';
@@ -389,26 +394,17 @@ function openConfigCandidateChooser(userId, scriptId, mode, candidates) {
   showModal(modalShell("选择要接管的配置文件", body, footer), false, true, true);
 }
 
-/** 专项插件声明的配置名输入：唯一必填输入优先，其余取唯一输入；无法确定返回空。 */
-function configInputName(pluginType) {
-  const meta = (state.plugins || []).find(item => item.name === pluginType);
-  const inputs = Array.isArray(meta?.inputs) ? meta.inputs : [];
-  if (inputs.length === 1) return String(inputs[0].name || "");
-  return String(inputs.find(item => item.required)?.name || "");
-}
-
 async function adoptConfigCandidate(target) {
   const userId = target.dataset.userId;
   const scriptId = target.dataset.scriptId;
   const mode = target.dataset.mode;
   const candidate = target.dataset.candidate;
+  const inputName = target.dataset.inputName || "";
   try {
     const user = userById(userId);
     const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
-    const script = await api("GET", "/api/scripts/" + encodeURIComponent(scriptId));
-    const inputName = configInputName(script?.pluginType || "");
     if (!inputName) {
-      toast("无法确定配置名输入项，请检查插件声明后重试", "error");
+      toast("缺少配置输入名，无法接管配置文件", "error");
       return;
     }
     const configInputs = binding?.configInputs && typeof binding.configInputs === "object" ? { ...binding.configInputs } : {};
@@ -419,7 +415,12 @@ async function adoptConfigCandidate(target) {
     await startEditConfig(userId, scriptId, mode);
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
-      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates);
+      const nextInputName = String(error.data.inputName || inputName || "");
+      if (!nextInputName) {
+        toast("插件未返回配置输入名，无法选择配置文件", "error");
+        return;
+      }
+      openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, nextInputName);
       return;
     }
     toast(error.message, "error");

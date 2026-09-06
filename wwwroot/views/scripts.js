@@ -78,19 +78,43 @@ export function changeGameMode() {
     pathTrigger.dataset.pathTitle = isEmu ? "模拟器ADB地址" : "游戏路径";
   }
   const lockPcFields = selfManagedPcLaunch(scriptDraft?.pluginType || "") && !isEmu;
+  const currentMode = isEmu ? "emulator" : "pc";
+  const previousMode = scriptDraft?._lastGameMode;
+  const argsField = $dom("#sm-game-args");
+  const waitField = $dom("#sm-game-wait");
+  const launchButton = $dom("#sm-launch");
+  if (scriptDraft && previousMode && previousMode !== currentMode) {
+    if (currentMode === "pc") {
+      // 从模拟器切回 PC 前保存当前草稿；PC self-managed 只暂时禁用这些设置。
+      scriptDraft.gameArgs = argsField?.value.trim() || "";
+      const parsedWait = Number.parseInt(waitField?.value || "", 10);
+      if (Number.isFinite(parsedWait) && parsedWait >= 0) scriptDraft.gameWaitSeconds = parsedWait;
+      scriptDraft.launchGame = launchButton?.getAttribute("aria-pressed") === "true";
+    } else {
+      // 从 PC 切到模拟器时恢复被暂时禁用的草稿值，保留用户原始启动设置。
+      if (argsField) argsField.value = scriptDraft.gameArgs || "";
+      if (waitField) waitField.value = String(scriptDraft.gameWaitSeconds ?? 30);
+      if (launchButton) {
+        const pressed = scriptDraft.launchGame === true;
+        launchButton.setAttribute("aria-pressed", pressed ? "true" : "false");
+        launchButton.dataset.state = pressed ? "on" : "off";
+        const stateText = launchButton.querySelector("[data-switch-state]");
+        if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+      }
+    }
+    scriptDraft._lastGameMode = currentMode;
+  }
   // self-managed-pc-launch：PC 模式下启动参数与等待秒数禁用（保留显示值）；
   // 游戏路径保留可填写，用于任务失败时的强制关闭游戏；「启动游戏」开关先关闭再禁用。
   // 禁用元件不再派发指针/聚焦事件，禁用提示气泡挂在外层容器上，覆盖字段原有帮助气泡。
   const lockedHelp = "使用 PC 客户端时，禁用该选项。";
-  const argsField = $dom("#sm-game-args");
-  const waitField = $dom("#sm-game-wait");
   const exeField = $dom("#sm-game-exe");
   if (argsField) argsField.disabled = lockPcFields;
   if (waitField) waitField.disabled = lockPcFields;
   if (exeField) exeField.disabled = false;
   setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? "模拟器模式下，该内容会作为 adb shell am start 参数传递。" : ""));
   setFieldBubble(waitField, lockPcFields ? lockedHelp : "启动游戏后等待指定秒数，再运行脚本。");
-  const launch = $dom("#sm-launch");
+  const launch = launchButton;
   if (launch) {
     if (lockPcFields) {
       // 先关闭（状态同步与 toggleSmFlag 一致），再禁用
@@ -271,6 +295,7 @@ export async function openScriptModal(id = "", plugin = "") {
     pluginInputs: value.pluginInputs && typeof value.pluginInputs === "object" ? value.pluginInputs : {},
     mainExe: value.mainExe || "", args: value.args || "", configPath: value.configPath || "", logPath: value.logPath || "",
     launchGame: !!value.launchGame, gameMode: value.gameMode === "emulator" ? "emulator" : "pc", gameExe: value.gameExe || "", gameArgs: value.gameArgs || "",
+    _lastGameMode: value.gameMode === "emulator" ? "emulator" : "pc",
     // 专项脚本实例的「强制关闭」默认打开（通用脚本默认关闭）；编辑时保留用户已有设置。
     gameWaitSeconds: value.gameWaitSeconds ?? 30, forceCloseGame: isSpecial ? (value.forceCloseGame ?? true) : !!value.forceCloseGame,
     maxAttempts: value.maxAttempts ?? 3, logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
@@ -576,6 +601,8 @@ export async function saveScript() {
   const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
   const gameMode = $dom("#sm-mode")?.value === "emulator" ? "emulator" : "pc";
   const selfManagedPc = selfManagedPcLaunch(scriptDraft.pluginType) && gameMode !== "emulator";
+  const gameArgs = $dom("#sm-game-args")?.value.trim() || "";
+  const gameWaitSeconds = +($dom("#sm-game-wait")?.value || 0) || 0;
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     setRequiredFieldError("sm-game-exe");
@@ -600,7 +627,13 @@ export async function saveScript() {
     pluginInputs: isSpecial ? collectPluginInputs() : {},
     mainExe: isSpecial ? "" : stripQuotes($dom("#sm-exe")?.value), args: isSpecial ? "" : $dom("#sm-args").value.trim(),
     configPath: isSpecial ? "" : stripQuotes($dom("#sm-config")?.value), logPath: isSpecial ? "" : stripQuotes($dom("#sm-log")?.value),
-    launchGame: selfManagedPc ? false : launchGame, gameMode, gameExe, gameArgs: selfManagedPc ? "" : ($dom("#sm-game-args")?.value.trim() || ""), gameWaitSeconds: selfManagedPc ? 30 : (+($dom("#sm-game-wait")?.value || 0) || 0),    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
+    // self-managed PC 只禁用宿主本次启动行为，持久化仍保留 dormant 草稿，切回模拟器可继续使用。
+    launchGame: selfManagedPc ? scriptDraft.launchGame === true : launchGame,
+    gameMode,
+    gameExe,
+    gameArgs: selfManagedPc ? (scriptDraft.gameArgs || "") : gameArgs,
+    gameWaitSeconds: selfManagedPc ? (scriptDraft.gameWaitSeconds ?? 30) : gameWaitSeconds,
+    forceCloseGame: $dom("#sm-force")?.getAttribute("aria-pressed") === "true", maxAttempts: attempts, logStallTimeoutMinutes: stall, totalTimeoutMinutes: total,
     successKeywords: isSpecial ? "" : ($dom("#sm-succ-kw")?.value ?? ""), failureKeywords: isSpecial ? "" : ($dom("#sm-fail-kw")?.value ?? ""),
     judgeScriptEnabled: judgeEnabled, judgeScriptLanguage: $dom("#sm-judge-lang")?.value || "", judgeScript: judgeCode,
     autoUpdateConfig: isSpecial ? true : ($dom("#sm-autoupdate")?.getAttribute("aria-pressed") === "true"),
