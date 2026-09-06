@@ -7,7 +7,6 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
   try {
     await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
     await page.getByTestId("new-script").click();
-    await page.locator('.new-script-chooser [data-action="open-script-type"][data-plugin=""]').click();
     const modal = page.locator(".modal");
     await expect(modal).toBeVisible();
     const judgeMode = modal.locator("#sm-mode-btn");

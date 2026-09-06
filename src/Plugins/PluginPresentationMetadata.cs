@@ -10,6 +10,7 @@ internal sealed record PluginPresentationMetadata(
     IReadOnlyList<PluginAuthor> Authors,
     IReadOnlyList<string> Tags,
     string Homepage,
+    string CreatedAt,
     string UpdatedAt,
     IReadOnlyList<PluginChangelogEntry> Changelog,
     bool HasReadme)
@@ -20,6 +21,7 @@ internal sealed record PluginPresentationMetadata(
             gameName?.Trim() ?? "",
             Array.Empty<PluginAuthor>(),
             Array.Empty<string>(),
+            "",
             "",
             "",
             Array.Empty<PluginChangelogEntry>(),
@@ -75,12 +77,25 @@ internal static class PluginPresentationMetadataParser
             {
                 throw new InvalidDataException(changelogError ?? "changelog 无效");
             }
+            string createdAt = root["createdAt"]?.ToString()?.Trim() ?? "";
+            if (createdAt.Length > 0 && !PluginRepositoryCatalog.TryParseDate(createdAt))
+            {
+                throw new InvalidDataException("createdAt 必须使用 YYYY-MM-DD 格式");
+            }
+            string updatedAt = changelog.FirstOrDefault()?.Date ?? "";
+            if (createdAt.Length > 0
+                && updatedAt.Length > 0
+                && string.CompareOrdinal(createdAt, updatedAt) > 0)
+            {
+                throw new InvalidDataException("createdAt 不能晚于更新时间");
+            }
             return new PluginPresentationMetadata(
                 gameName,
                 authors,
                 tags,
                 homepage,
-                changelog.FirstOrDefault()?.Date ?? "",
+                createdAt,
+                updatedAt,
                 changelog,
                 hasReadme);
         }

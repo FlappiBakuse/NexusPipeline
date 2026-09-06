@@ -32,6 +32,8 @@ internal sealed record PluginManagementView(
 
     public string Homepage { get; init; } = "";
 
+    public string CreatedAt { get; init; } = "";
+
     public string UpdatedAt { get; init; } = "";
 
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
@@ -86,6 +88,7 @@ internal sealed record PluginManagementView(
             Authors = summary.Authors,
             Tags = summary.Tags,
             Homepage = summary.Homepage,
+            CreatedAt = summary.CreatedAt,
             UpdatedAt = summary.UpdatedAt,
             Changelog = summary.Changelog,
             HasReadme = summary.HasReadme,

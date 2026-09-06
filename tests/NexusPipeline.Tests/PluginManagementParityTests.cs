@@ -106,6 +106,7 @@ public sealed class PluginManagementParityTests
         Assert.Equal("official-store", view.InstallationSource);
         Assert.Equal("update", view.PendingAction);
         Assert.Equal("1.3.0", view.PendingVersion);
+        Assert.Equal("", view.CreatedAt);
     }
 
     private sealed class FixtureSettingsProvider : ISettingsProvider

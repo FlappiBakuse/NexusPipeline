@@ -194,6 +194,19 @@ internal static class PluginRepositoryCatalog
                     error = $"插件 {name} 的 updatedAt 必须对应最新 changelog 日期";
                     return false;
                 }
+                string createdAt = item["createdAt"]?.ToString()?.Trim() ?? "";
+                if (createdAt.Length > 0 && !TryParseDate(createdAt))
+                {
+                    error = $"插件 {name} 的 createdAt 必须使用 YYYY-MM-DD 格式";
+                    return false;
+                }
+                if (createdAt.Length > 0
+                    && updatedAt.Length > 0
+                    && string.CompareOrdinal(createdAt, updatedAt) > 0)
+                {
+                    error = $"插件 {name} 的 createdAt 不能晚于 updatedAt";
+                    return false;
+                }
 
                 entries.Add(new PluginCatalogEntry(
                     name,
@@ -214,6 +227,7 @@ internal static class PluginRepositoryCatalog
                     Authors = authors,
                     Tags = tags,
                     Homepage = homepage,
+                    CreatedAt = createdAt,
                     UpdatedAt = updatedAt,
                     HasReadme = hasReadme,
                 });
@@ -448,6 +462,18 @@ internal static class PluginRepositoryCatalog
         return true;
     }
 
+    public static bool TryParseDate(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.Length == 10
+            && DateTime.TryParseExact(
+                value,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _);
+    }
+
     public static int CompareVersions(string left, string right)
     {
         return TryParseVersion(left, out PluginVersion leftVersion)
@@ -556,6 +582,8 @@ internal sealed record PluginCatalogEntry(
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     public string Homepage { get; init; } = "";
+
+    public string CreatedAt { get; init; } = "";
 
     public string UpdatedAt { get; init; } = "";
 

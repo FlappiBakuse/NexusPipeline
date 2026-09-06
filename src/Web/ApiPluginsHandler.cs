@@ -140,6 +140,7 @@ internal static class ApiPluginsHandler
                 authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }),
                 tags = plugin.Tags,
                 homepage = plugin.Homepage,
+                createdAt = plugin.CreatedAt,
                 updatedAt = plugin.UpdatedAt,
                 hasReadme = plugin.HasReadme,
                 changelog = plugin.Changelog.Select(change => new
@@ -226,6 +227,7 @@ internal static class ApiPluginsHandler
             authors = detail.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
             tags = detail.Tags,
             homepage = detail.Homepage,
+            createdAt = detail.CreatedAt,
             updatedAt = detail.UpdatedAt,
             hasReadme = detail.HasReadme,
             readmeAvailable = detail.ReadmeMarkdown.Length > 0,

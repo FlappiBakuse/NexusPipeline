@@ -289,6 +289,7 @@ internal sealed class PluginRepositoryService
             view.Authors,
             view.Tags,
             view.Homepage,
+            view.CreatedAt,
             view.UpdatedAt,
             readme.HasReadme,
             readme.Markdown,
@@ -352,6 +353,7 @@ internal sealed class PluginRepositoryService
             item.Authors,
             item.Tags,
             item.Homepage,
+            item.CreatedAt,
             item.UpdatedAt,
             readme.HasReadme,
             readme.Markdown,
@@ -665,6 +667,7 @@ internal sealed class PluginRepositoryService
                 Authors = entry.Authors,
                 Tags = entry.Tags,
                 Homepage = entry.Homepage,
+                CreatedAt = entry.CreatedAt,
                 UpdatedAt = entry.UpdatedAt,
                 HasReadme = entry.HasReadme,
             });
@@ -704,6 +707,7 @@ internal sealed class PluginRepositoryService
                 Authors = local.Authors,
                 Tags = local.Tags,
                 Homepage = local.Homepage,
+                CreatedAt = local.CreatedAt,
                 UpdatedAt = local.UpdatedAt,
                 HasReadme = local.HasReadme,
             });
@@ -1044,6 +1048,8 @@ internal sealed record PluginStoreItem(
     public IReadOnlyList<string> Tags { get; init; } = Array.Empty<string>();
 
     public string Homepage { get; init; } = "";
+
+    public string CreatedAt { get; init; } = "";
 
     public string UpdatedAt { get; init; } = "";
 

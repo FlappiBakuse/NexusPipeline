@@ -31,6 +31,7 @@ internal sealed record PluginDetail(
     IReadOnlyList<PluginAuthor> Authors,
     IReadOnlyList<string> Tags,
     string Homepage,
+    string CreatedAt,
     string UpdatedAt,
     bool HasReadme,
     string ReadmeMarkdown,

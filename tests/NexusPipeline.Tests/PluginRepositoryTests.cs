@@ -59,6 +59,7 @@ public sealed class PluginRepositoryCatalogTests
         });
         entry["tags"] = new JsonArray("原神", "专项插件");
         entry["homepage"] = "https://github.com/FlappiBakuse/NexusPipeline-Plugins";
+        entry["createdAt"] = "2026-08-20";
         entry["hasReadme"] = true;
 
         Assert.True(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out PluginCatalog? catalog, out string? error), error);
@@ -66,8 +67,62 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Equal("Nexus Team", Assert.Single(parsed.Authors).Name);
         Assert.Equal(new[] { "原神", "专项插件" }, parsed.Tags);
         Assert.Equal("https://github.com/FlappiBakuse/NexusPipeline-Plugins", parsed.Homepage);
+        Assert.Equal("2026-08-20", parsed.CreatedAt);
         Assert.Equal("2026-08-28", parsed.UpdatedAt);
         Assert.True(parsed.HasReadme);
+    }
+
+    [Fact]
+    public void TryParse_CreatedAtIsOptionalForOlderCatalogsAndValidatedWhenPresent()
+    {
+        JsonObject root = CreateCatalog(2);
+        Assert.True(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out PluginCatalog? legacyCatalog, out string? legacyError), legacyError);
+        Assert.Equal("", Assert.Single(legacyCatalog!.Plugins).CreatedAt);
+
+        root = CreateCatalog(2);
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["createdAt"] = "2026-08-29";
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? futureError));
+        Assert.Contains("createdAt", futureError);
+
+        root = CreateCatalog(2);
+        ((JsonObject)((JsonArray)root["plugins"]!)[0]!) ["createdAt"] = "2026-02-30";
+        Assert.False(PluginRepositoryCatalog.TryParse(root.ToJsonString(), out _, out string? invalidError));
+        Assert.Contains("createdAt", invalidError);
+    }
+
+    [Fact]
+    public void LoadLocalPresentationMetadata_ParsesCreatedAt()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "nxp-plugin-metadata-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var store = new JsonObject
+            {
+                ["schemaVersion"] = 1,
+                ["gameName"] = "测试游戏",
+                ["authors"] = new JsonArray(new JsonObject { ["name"] = "Nexus Team" }),
+                ["tags"] = new JsonArray("测试"),
+                ["homepage"] = "https://github.com/FlappiBakuse/NexusPipeline-Plugins",
+                ["createdAt"] = "2026-08-20",
+                ["changelog"] = new JsonArray(new JsonObject
+                {
+                    ["version"] = "1.0.0",
+                    ["date"] = "2026-08-28",
+                    ["items"] = new JsonArray("测试版本"),
+                }),
+            };
+            File.WriteAllText(Path.Combine(directory, "store.json"), store.ToJsonString());
+
+            PluginPresentationMetadata metadata = PluginPresentationMetadataParser.LoadLocal(directory, "通用", "1.0.0");
+
+            Assert.Equal("2026-08-20", metadata.CreatedAt);
+            Assert.Equal("2026-08-28", metadata.UpdatedAt);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Theory]

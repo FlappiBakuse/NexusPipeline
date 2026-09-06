@@ -2,6 +2,13 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.14.6（Pre-release）
+
+### 插件仓库治理与插件浏览器
+- 官方插件源码按 `plugins/general/` 与 `plugins/specialized/` 分类，发行包目录继续保持扁平并由 GitHub Actions 自动生成。
+- 新增 `store.json.createdAt` 与 catalog 展示字段，插件管理页支持按插件类型、名称拼音、创建时间和更新时间筛选排序。
+- 插件元数据、ZIP、SHA256、catalog 和最近三个版本保留规则统一迁移到 Python 仓库工具，PR 校验与 main 分支生成流程分离。
+
 ## v0.14.5（Pre-release）
 
 ### 工程治理

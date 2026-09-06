@@ -57,6 +57,15 @@ test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page 
   await expect(page.getByTestId("plugin-detail")).toBeVisible();
   const refresh = page.getByTestId("plugin-store-refresh");
   await expect(refresh).toBeVisible();
+  await page.getByTestId("plugin-filter").click();
+  const filterDialog = page.getByRole("dialog", { name: "插件筛选与排序" });
+  await expect(filterDialog).toBeVisible();
+  await page.getByTestId("plugin-filter-kind-data-specialized").click();
+  await expect(page.getByTestId("plugin-filter-kind-data-specialized")).toHaveAttribute("aria-checked", "true");
+  await page.getByTestId("plugin-filter-sort-updatedAt").click();
+  await page.getByTestId("plugin-filter-direction-desc").click();
+  await page.keyboard.press("Escape");
+  await expect(filterDialog).toBeHidden();
   await search.fill("不存在的插件关键词");
   await expect(page.getByTestId("plugin-store-list")).toContainText("没有匹配的插件");
 });

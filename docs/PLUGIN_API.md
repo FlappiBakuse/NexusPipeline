@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -8,25 +8,22 @@
 
 ```
 NexusPipeline-Plugins/plugins/
-├── BetterGI/                     # artifactName；plugin.json.name = bettergi
-│   ├── plugin.json               # 根文件：元数据 + 引用 data 文件（初始化专项插件）
-│   ├── store.json                # 商店展示元数据与更新记录
-│   └── data/
-│       ├── resolve.json          # 推导配置（require 校验 + paths 模板）
-│       └── judge.js              # 判断脚本（.js = 内置 Jint 引擎 / .py = 系统 python.exe）
-├── GameCheckIn/                  # 可选 managed-code 插件；name = game-checkin
-│   ├── plugin.json
-│   ├── CheckInPlugin.dll
-│   └── web/                      # 可选：Frontend API 模块与静态资源
-│       ├── main.js
-│       └── style.css
-├── March7thAssistant/（plugin.json + store.json + data/{resolve.json, judge.js}）
-├── ZenlessZoneZeroOneDragon/（同构）
-└── MaaEnd/           （同构）
+├── general/
+│   ├── GameCheckIn/              # managed-code 源码；name = game-checkin
+│   │   ├── plugin.json
+│   │   ├── src/                  # .csproj 与 C# 源码
+│   │   └── web/                  # 可选 Frontend API 模块与静态资源
+│   └── CustomWallpaper/          # managed-code 源码
+└── specialized/
+    ├── BetterGI/                 # data-specialized 源码；name = bettergi
+    │   ├── plugin.json
+    │   ├── store.json
+    │   └── data/                 # resolve、judge 与配置脚本
+    └── MaaEnd/                   # 同类专项插件
 ```
 
-- `NexusPipeline-Plugins/plugins/` 下的每个子目录视为一个插件；schema 2 的物理目录名必须与 `artifactName` 完全一致，`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。
-- 官方仓库由每个插件目录的 `plugin.json`、`store.json` 和当前 ZIP 生成根目录 `catalog.json`；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
+- `NexusPipeline-Plugins/plugins/general/` 与 `plugins/specialized/` 下的每个子目录视为一个源码插件；schema 2 的物理目录名必须与 `artifactName` 完全一致，`plugin.json` 无效或 data 引用缺失时仅记警告跳过（不崩溃）。安装后的运行目录仍为扁平 `plugins/<artifactName>/`。
+- 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
 ## managed-code C# 插件（Plugin API v1.4）
@@ -159,7 +156,7 @@ settings.sections               shell.nav
 
 `capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion` 和 `error` 字段中查看。
 
-插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，更新时间取最新更新记录日期。
+插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，创建时间取 `store.json.createdAt`（插件第一次正式公开发布日期），更新时间取最新更新记录日期。旧 catalog 缺少 `createdAt` 时按空值展示并保持可读取。
 
 ## plugin.json（根文件）
 
@@ -321,5 +318,5 @@ settings.sections               shell.nav
 
 ## 构建与部署
 
-- 插件仓库单独构建 ZIP 并提交到 `packages/<ArtifactName>/`；宿主从 catalog 的官方 raw 地址下载，主程序更新不会覆盖用户插件目录。
+- 插件仓库由 GitHub Actions 在只读构建任务中生成 ZIP 和 catalog，合并后由 Bot commit 写入 `packages/<ArtifactName>/`；宿主从 catalog 的官方 raw 地址下载，主程序更新不会覆盖用户插件目录。
 - 修改插件文件后重启服务生效；`/api/status` 的 `plugins` 列表可见，新建脚本选择卡片层出现「新建{displayName}专项脚本实例」。

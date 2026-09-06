@@ -1,7 +1,14 @@
 import { api } from "../core/api.js";
 import { esc } from "../core/format.js";
 import { pageHeader } from "../core/forms.js";
+import { icon } from "../core/icons.js";
 import { renderMarkdown } from "../core/markdown.js";
+import {
+  createPluginViewState,
+  defaultPluginViewState,
+  filterAndSortPlugins,
+  isPluginViewStateActive,
+} from "../core/plugin-list.js";
 import { isCurrent, state } from "../core/state.js";
 import { initAutoScroll, navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { markRestartRequired } from "./settings.js";
@@ -9,11 +16,16 @@ import { markRestartRequired } from "./settings.js";
 let activeTab = "local";
 let pluginLoadId = 0;
 let detailLoadId = 0;
-let searchQuery = "";
 let detailVisibleMobile = false;
+let pluginFilterOpen = false;
+let pluginFilterDismissalBound = false;
 const listCacheTtl = 5 * 60 * 1000;
 
 const selectedByTab = { local: "", store: "" };
+const pluginViewState = {
+  local: defaultPluginViewState(),
+  store: defaultPluginViewState(),
+};
 const listState = {
   local: { loading: false, loaded: false, dirty: false, lastValidatedAt: 0, signature: "", error: "", plugins: [] },
   store: { loading: false, loaded: false, dirty: false, lastValidatedAt: 0, signature: "", available: true, stale: false, error: "", fetchedAt: "", plugins: [] },
@@ -85,19 +97,91 @@ function statusMarkup(plugin, tab) {
   return `<span class="badge ${runtimeClass(plugin)}">${esc(runtimeLabel(plugin))}</span>`;
 }
 
-function pluginSearchText(plugin) {
-  const authors = Array.isArray(plugin.authors) ? plugin.authors.map(author => author?.name || "") : [];
-  const tags = Array.isArray(plugin.tags) ? plugin.tags : [];
-  return [plugin.name, plugin.displayName, plugin.description, plugin.gameName, plugin.kind, ...authors, ...tags]
-    .filter(Boolean)
-    .join(" ")
-    .toLocaleLowerCase();
+function filteredPlugins(tab) {
+  const plugins = Array.isArray(listState[tab].plugins) ? listState[tab].plugins : [];
+  return filterAndSortPlugins(plugins, pluginViewState[tab]);
 }
 
-function filteredPlugins(tab) {
-  const query = searchQuery.trim().toLocaleLowerCase();
-  const plugins = Array.isArray(listState[tab].plugins) ? listState[tab].plugins : [];
-  return query ? plugins.filter(plugin => pluginSearchText(plugin).includes(query)) : plugins;
+const pluginKindOptions = [
+  ["all", "全部"],
+  ["managed-code", "通用插件"],
+  ["data-specialized", "专项插件"],
+];
+
+const pluginSortOptions = [
+  ["name", "名称（首字母 / 拼音）"],
+  ["createdAt", "创建时间"],
+  ["updatedAt", "更新时间"],
+];
+
+function pluginFilterOptionMarkup(testId, action, key, label, selected, dataName) {
+  return `<button class="plugin-filter-option${selected ? " is-selected" : ""}" type="button" role="radio" aria-checked="${selected ? "true" : "false"}" data-action="${action}" data-${dataName}="${esc(key)}" data-testid="${testId}">${esc(label)}${selected ? icon("check", "plugin-filter-option-check") : ""}</button>`;
+}
+
+function pluginFilterPopoverMarkup(tab) {
+  const view = pluginViewState[tab];
+  const open = pluginFilterOpen && activeTab === tab;
+  return `<div id="plugin-filter-popover-${tab}" class="plugin-filter-popover" role="dialog" aria-label="插件筛选与排序"${open ? "" : " hidden"}><fieldset class="plugin-filter-section"><legend>插件类型</legend><div class="plugin-filter-options" role="radiogroup" aria-label="插件类型">${pluginKindOptions.map(([key, label]) => pluginFilterOptionMarkup(`plugin-filter-kind-${key}`, "set-plugin-kind", key, label, view.kind === key, "kind")).join("")}</div></fieldset><fieldset class="plugin-filter-section"><legend>排序</legend><div class="plugin-filter-options" role="radiogroup" aria-label="排序字段">${pluginSortOptions.map(([key, label]) => pluginFilterOptionMarkup(`plugin-filter-sort-${key}`, "set-plugin-sort", key, label, view.sortBy === key, "sort")).join("")}</div><div class="plugin-filter-direction" role="radiogroup" aria-label="排序方向">${pluginFilterOptionMarkup("plugin-filter-direction-asc", "set-plugin-direction", "asc", "正序", view.direction === "asc", "direction")}${pluginFilterOptionMarkup("plugin-filter-direction-desc", "set-plugin-direction", "desc", "逆序", view.direction === "desc", "direction")}</div></fieldset>${isPluginViewStateActive(view) ? `<button class="plugin-filter-reset ghost" type="button" data-action="reset-plugin-filter" data-testid="plugin-filter-reset">恢复默认</button>` : ""}</div>`;
+}
+
+function pluginSearchToolbarMarkup(tab) {
+  const view = pluginViewState[tab];
+  const active = isPluginViewStateActive(view);
+  return `<div class="plugin-search-toolbar"><label class="plugin-search"><span class="sr-only">搜索插件名称、标签或游戏</span><input type="search" value="${esc(view.query)}" placeholder="搜索插件名称、标签或游戏" aria-label="搜索插件名称、标签或游戏" data-action="filter-plugin-list" data-testid="plugin-search" autocomplete="off"></label><div class="plugin-filter-wrap"><button class="plugin-filter-trigger${active ? " is-active" : ""}" type="button" data-action="toggle-plugin-filter" data-testid="plugin-filter" aria-haspopup="dialog" aria-expanded="${pluginFilterOpen && activeTab === tab ? "true" : "false"}" aria-controls="plugin-filter-popover-${tab}">${icon("filter")}<span>筛选</span><span class="plugin-filter-status" data-plugin-filter-status${active ? "" : " hidden"}>已设置</span></button>${pluginFilterPopoverMarkup(tab)}</div></div>`;
+}
+
+function syncPluginFilterTrigger() {
+  const trigger = document.querySelector('[data-testid="plugin-filter"]');
+  if (!trigger) return;
+  const active = isPluginViewStateActive(pluginViewState[activeTab]);
+  trigger.classList.toggle("is-active", active);
+  trigger.setAttribute("aria-expanded", String(pluginFilterOpen));
+  trigger.querySelector("[data-plugin-filter-status]")?.toggleAttribute("hidden", !active);
+}
+
+function renderPluginFilterPopover() {
+  const popover = document.querySelector(`#plugin-filter-popover-${activeTab}`);
+  if (popover) popover.outerHTML = pluginFilterPopoverMarkup(activeTab);
+  syncPluginFilterTrigger();
+}
+
+function closePluginFilter({ restoreFocus = false } = {}) {
+  if (!pluginFilterOpen) return;
+  pluginFilterOpen = false;
+  const popover = document.querySelector(`#plugin-filter-popover-${activeTab}`);
+  if (popover) popover.hidden = true;
+  const trigger = document.querySelector('[data-testid="plugin-filter"]');
+  if (trigger) {
+    trigger.setAttribute("aria-expanded", "false");
+    if (restoreFocus) trigger.focus({ preventScroll: true });
+  }
+}
+
+function togglePluginFilter() {
+  if (pluginFilterOpen) {
+    closePluginFilter();
+    return;
+  }
+  pluginFilterOpen = true;
+  const popover = document.querySelector(`#plugin-filter-popover-${activeTab}`);
+  const trigger = document.querySelector('[data-testid="plugin-filter"]');
+  if (popover) popover.hidden = false;
+  if (trigger) trigger.setAttribute("aria-expanded", "true");
+  popover?.querySelector('[role="radio"][aria-checked="true"]')?.focus({ preventScroll: true });
+}
+
+function bindPluginFilterDismissal() {
+  if (pluginFilterDismissalBound) return;
+  pluginFilterDismissalBound = true;
+  document.addEventListener("pointerdown", event => {
+    if (!pluginFilterOpen || event.target?.closest?.(".plugin-filter-wrap")) return;
+    closePluginFilter();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key !== "Escape" || !pluginFilterOpen || document.querySelector(".modal[data-locked]")) return;
+    event.preventDefault();
+    closePluginFilter({ restoreFocus: true });
+  }, true);
 }
 
 function pluginListItem(plugin, tab) {
@@ -131,8 +215,10 @@ function pluginListPaneMarkup(tab) {
     return `<section class="plugin-list-pane" data-testid="${testId}"><div class="empty"><strong>加载本地插件失败</strong><span>${esc(data.error)}</span></div></section>`;
   }
   const plugins = filteredPlugins(tab);
-  const empty = searchQuery.trim()
-    ? `<div class="empty"><strong>没有匹配的插件</strong><span>尝试更换名称、标签或游戏关键词。</span></div>`
+  const view = pluginViewState[tab];
+  const hasFilter = view.query.trim() || isPluginViewStateActive(view);
+  const empty = hasFilter
+    ? `<div class="empty"><strong>没有匹配的插件</strong><span>调整搜索或筛选条件后重试。</span></div>`
     : `<div class="empty"><strong>${tab === "store" ? "暂无可用插件" : "暂无本地插件"}</strong><span>${tab === "store" ? "官方插件目录当前没有可展示的条目。" : "从插件仓库安装插件后，重启服务即可加载。"}</span></div>`;
   return `<section class="plugin-list-pane" data-testid="${testId}">${storeWarningMarkup()}<div class="plugin-list" role="listbox" aria-label="${tab === "store" ? "插件仓库列表" : "本地插件列表"}">${plugins.length ? plugins.map(plugin => pluginListItem(plugin, tab)).join("") : empty}</div></section>`;
 }
@@ -194,6 +280,7 @@ function storeActionMarkup(detail) {
 function detailMetaMarkup(detail, tab) {
   const rows = [
     ["版本", detail.version ? `v${detail.version}` : "未标注"],
+    ["创建时间", detail.createdAt || "未提供"],
     ["更新时间", detail.updatedAt || "未提供"],
     ["适用项目", detail.gameName || "通用"],
     ["插件类型", pluginKindLabel(detail)],
@@ -253,7 +340,7 @@ function pluginBrowserMarkup(tab) {
   const storeFooter = tab === "store"
     ? `<div class="plugin-browser-footer"><span class="muted">${listState.store.fetchedAt ? `目录更新时间：${esc(listState.store.fetchedAt)}` : ""}</span><button class="tertiary" type="button" data-action="store-refresh" data-testid="plugin-store-refresh">刷新仓库</button></div>`
     : "";
-  return `<div class="plugin-browser${mobileClass}" data-testid="plugin-browser"><div class="plugin-list-column"><label class="plugin-search"><span class="sr-only">搜索插件名称、标签或游戏</span><input type="search" value="${esc(searchQuery)}" placeholder="搜索插件名称、标签或游戏" aria-label="搜索插件名称、标签或游戏" data-action="filter-plugin-list" data-testid="plugin-search" autocomplete="off"></label><div class="plugin-list-pane-slot">${pluginListPaneMarkup(tab)}</div></div><div class="plugin-detail-column${detailColumnClass}">${detailPaneMarkup(tab)}${storeFooter}</div></div>`;
+  return `<div class="plugin-browser${mobileClass}" data-testid="plugin-browser"><div class="plugin-list-column">${pluginSearchToolbarMarkup(tab)}<div class="plugin-list-pane-slot">${pluginListPaneMarkup(tab)}</div></div><div class="plugin-detail-column${detailColumnClass}">${detailPaneMarkup(tab)}${storeFooter}</div></div>`;
 }
 
 function pluginPageMarkup(tab) {
@@ -285,7 +372,7 @@ function renderListPane() {
 }
 
 function selectDefaultPlugin(tab) {
-  const plugins = Array.isArray(listState[tab].plugins) ? listState[tab].plugins : [];
+  const plugins = filteredPlugins(tab);
   if (!plugins.some(plugin => plugin.name === selectedByTab[tab])) {
     selectedByTab[tab] = plugins[0]?.name || "";
   }
@@ -352,6 +439,26 @@ function prepareSelectedDetail(tab) {
   detailState[tab] = { name, loading: Boolean(name && !cached), error: "", data: cached };
 }
 
+function reconcileSelectedPlugin(tab) {
+  const visible = filteredPlugins(tab);
+  if (visible.some(plugin => plugin.name === selectedByTab[tab])) return false;
+  selectedByTab[tab] = visible[0]?.name || "";
+  const name = selectedByTab[tab];
+  const cached = name ? detailCache[tab].get(name) || null : null;
+  detailState[tab] = { name, loading: Boolean(name && !cached), error: "", data: cached };
+  return true;
+}
+
+function updatePluginViewState(tab, patch, focusSelector = "") {
+  pluginViewState[tab] = createPluginViewState({ ...pluginViewState[tab], ...patch });
+  const changed = reconcileSelectedPlugin(tab);
+  renderListPane();
+  renderDetailPane();
+  renderPluginFilterPopover();
+  if (focusSelector) document.querySelector(focusSelector)?.focus({ preventScroll: true });
+  if (changed && selectedByTab[tab]) void loadDetail(tab, state.routeToken);
+}
+
 function markPluginCacheDirty(...tabs) {
   for (const tab of tabs) {
     if (!listState[tab]) continue;
@@ -362,6 +469,7 @@ function markPluginCacheDirty(...tabs) {
 export async function pagePlugins(token) {
   if (!isCurrent("plugins", token)) return;
   navActive("plugins"); setTopbarTitle("插件");
+  pluginFilterOpen = false;
   const requestedTab = activeTab;
   const loadId = ++pluginLoadId;
   detailVisibleMobile = false;
@@ -375,6 +483,7 @@ export async function pagePlugins(token) {
     prepareSelectedDetail(requestedTab);
   }
   render(pluginPageMarkup(requestedTab));
+  bindPluginFilterDismissal();
   if (listCacheIsFresh(requestedTab)) {
     if (selectedByTab[requestedTab] && !detailState[requestedTab].data) {
       await loadDetail(requestedTab, token);
@@ -383,6 +492,7 @@ export async function pagePlugins(token) {
   }
   listState[requestedTab] = { ...listState[requestedTab], loading: true };
   render(pluginPageMarkup(requestedTab));
+  bindPluginFilterDismissal();
   try {
     const data = requestedTab === "store"
       ? await api("GET", "/api/plugins/store")
@@ -421,6 +531,7 @@ export async function pagePlugins(token) {
     }
     prepareSelectedDetail(requestedTab);
     render(pluginPageMarkup(requestedTab));
+    bindPluginFilterDismissal();
     if (selectedByTab[requestedTab] && !detailState[requestedTab].data) {
       await loadDetail(requestedTab, token);
     }
@@ -443,6 +554,7 @@ export async function pagePlugins(token) {
       detailState[requestedTab] = { name: "", loading: false, error: "", data: null };
     }
     render(pluginPageMarkup(requestedTab));
+    bindPluginFilterDismissal();
   }
 }
 
@@ -494,12 +606,32 @@ export const actions = {
     document.querySelector(".plugin-detail-back")?.remove();
   },
   "filter-plugin-list": target => {
-    searchQuery = target.value || "";
+    const tab = activeTab;
+    pluginViewState[tab] = createPluginViewState({ ...pluginViewState[tab], query: target.value || "" });
+    const changed = reconcileSelectedPlugin(tab);
     renderListPane();
+    renderDetailPane();
+    if (changed && selectedByTab[tab]) void loadDetail(tab, state.routeToken);
+  },
+  "toggle-plugin-filter": () => togglePluginFilter(),
+  "set-plugin-kind": target => {
+    const key = target.dataset.kind || "all";
+    updatePluginViewState(activeTab, { kind: key }, `[data-testid="plugin-filter-kind-${key}"]`);
+  },
+  "set-plugin-sort": target => {
+    const key = target.dataset.sort || "name";
+    updatePluginViewState(activeTab, { sortBy: key }, `[data-testid="plugin-filter-sort-${key}"]`);
+  },
+  "set-plugin-direction": target => {
+    const key = target.dataset.direction || "asc";
+    updatePluginViewState(activeTab, { direction: key }, `[data-testid="plugin-filter-direction-${key}"]`);
+  },
+  "reset-plugin-filter": () => {
+    updatePluginViewState(activeTab, defaultPluginViewState(), '[data-testid="plugin-filter-reset"]');
   },
   "switch-plugin-tab": target => {
+    closePluginFilter();
     activeTab = target.dataset.tab === "store" ? "store" : "local";
-    searchQuery = "";
     pagePlugins(state.routeToken);
   },
   "store-refresh": target => withBusy(target, async () => {

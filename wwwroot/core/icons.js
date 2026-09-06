@@ -22,6 +22,7 @@ const PATHS = Object.freeze({
   refresh: '<path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 4v4h-4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  filter: '<path d="M4 5h16l-6.5 7.5v5l-5 2v-7z"/>',
 });
 
 export function icon(name, className = "icon") {

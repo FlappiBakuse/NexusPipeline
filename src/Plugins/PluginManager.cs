@@ -33,6 +33,8 @@ internal sealed record PluginSummary(
 
     public string Homepage { get; init; } = "";
 
+    public string CreatedAt { get; init; } = "";
+
     public string UpdatedAt { get; init; } = "";
 
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
@@ -179,6 +181,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 Authors = metadata.Authors,
                 Tags = metadata.Tags,
                 Homepage = metadata.Homepage,
+                CreatedAt = metadata.CreatedAt,
                 UpdatedAt = metadata.UpdatedAt,
                 Changelog = metadata.Changelog,
                 HasReadme = metadata.HasReadme,
@@ -208,6 +211,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 Authors = metadata.Authors,
                 Tags = metadata.Tags,
                 Homepage = metadata.Homepage,
+                CreatedAt = metadata.CreatedAt,
                 UpdatedAt = metadata.UpdatedAt,
                 Changelog = metadata.Changelog,
                 HasReadme = metadata.HasReadme,

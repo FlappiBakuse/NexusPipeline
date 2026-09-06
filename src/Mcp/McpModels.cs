@@ -425,6 +425,7 @@ internal static class McpViews
                 authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
                 tags = plugin.Tags,
                 homepage = plugin.Homepage,
+                createdAt = plugin.CreatedAt,
                 updatedAt = plugin.UpdatedAt,
                 hasReadme = plugin.HasReadme,
                 changelog = plugin.Changelog.Select(change => new
