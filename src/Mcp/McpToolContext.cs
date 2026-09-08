@@ -92,6 +92,7 @@ internal sealed class McpToolContext
     public object GetUpdateStatus()
     {
         UpdateStatusSnapshot status = Runtime.Resolve<UpdateService>().GetStatus();
+        UpdateAutomationSnapshot automation = Runtime.Resolve<UpdateAutomationService>().GetSnapshot();
         return new
         {
             state = status.State.ToString().ToLowerInvariant(),
@@ -105,6 +106,16 @@ internal sealed class McpToolContext
             status.BytesRead,
             status.BytesTotal,
             status.Error,
+            automation = new
+            {
+                checkEnabled = automation.CheckEnabled,
+                autoUpdateEnabled = automation.AutoUpdateEnabled,
+                lastCheckAt = automation.LastAutomaticCheckAt?.ToString("O"),
+                nextCheckAt = automation.NextAutomaticCheckAt?.ToString("O"),
+                waitingForIdle = automation.WaitingForIdle,
+                idleBlockCode = automation.IdleBlockCode,
+                idleBlockReason = automation.IdleBlockReason,
+            },
         };
     }
 

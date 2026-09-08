@@ -898,6 +898,37 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
         Assert.Equal(UpdateState.Ready, status.State);
     }
+
+    [Fact]
+    public async Task InvalidateDiscovery_ClearsIdleResult()
+    {
+        UpdateService service = NewService();
+        UpdateStatusSnapshot checkedStatus = await service.CheckAsync("test");
+        Assert.True(checkedStatus.Available);
+
+        service.InvalidateDiscovery();
+
+        UpdateStatusSnapshot status = service.GetStatus();
+        Assert.Equal(UpdateState.Idle, status.State);
+        Assert.False(status.Available);
+        Assert.False(status.HasChecked);
+        Assert.True(service.IsAutomaticApplyAllowed);
+    }
+
+    [Fact]
+    public async Task InvalidateDiscovery_PreservesReadyAndBlocksAutomaticApply()
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+
+        service.InvalidateDiscovery();
+
+        Assert.Equal(UpdateState.Ready, service.State);
+        Assert.False(service.IsAutomaticApplyAllowed);
+        Assert.True(service.GetStatus().Available);
+    }
 }
 
 /// <summary>更新应用收尾 L2：完成清理 / 失败回滚 / defer 自动应用的任务标记流转。</summary>

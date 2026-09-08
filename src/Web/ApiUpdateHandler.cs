@@ -86,6 +86,9 @@ internal static class ApiUpdateHandler
 
     private static async Task WriteStatusAsync(HttpListenerContext context, UpdateStatusSnapshot status)
     {
+        UpdateAutomationSnapshot automation = RuntimeContext.Instance
+            .Resolve<UpdateAutomationService>()
+            .GetSnapshot();
         await HttpHelper.WriteJsonAsync(context, new
         {
             state = status.State.ToString().ToLowerInvariant(),
@@ -100,6 +103,16 @@ internal static class ApiUpdateHandler
             bytesRead = status.BytesRead,
             bytesTotal = status.BytesTotal,
             error = status.Error,
+            automation = new
+            {
+                checkEnabled = automation.CheckEnabled,
+                autoUpdateEnabled = automation.AutoUpdateEnabled,
+                lastCheckAt = automation.LastAutomaticCheckAt?.ToString("O"),
+                nextCheckAt = automation.NextAutomaticCheckAt?.ToString("O"),
+                waitingForIdle = automation.WaitingForIdle,
+                idleBlockCode = automation.IdleBlockCode,
+                idleBlockReason = automation.IdleBlockReason,
+            },
         }).ConfigureAwait(false);
     }
 }

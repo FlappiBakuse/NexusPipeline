@@ -103,6 +103,12 @@ internal interface IExecutionService
     void Cancel(string runId, string source);
 }
 
+/// <summary>宿主准入协调锁端口，供调度器与维护策略共享同一竞态边界。</summary>
+internal interface IAdmissionCoordination
+{
+    T WithAdmissionCoordination<T>(Func<T> action);
+}
+
 /// <summary>调度器使用的冻结队列计划入口；普通 Web/CLI 入口仍按 ID 构建即时计划。</summary>
 internal interface IFrozenQueueExecutionService
 {

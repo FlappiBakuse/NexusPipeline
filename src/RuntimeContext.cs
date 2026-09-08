@@ -85,6 +85,7 @@ internal class RuntimeContext
         collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
+        collection.AddSingleton<IAdmissionCoordination>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>();
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
@@ -94,6 +95,13 @@ internal class RuntimeContext
             Bootstrap.TryRequestUpdateExit,
             () => Bootstrap.TryAcquireUpdateMaintenanceLease(),
             provider.GetRequiredService<OutboundHttpClientProvider>()));
+        collection.AddSingleton<AutoUpdateIdlePolicy>(provider => new AutoUpdateIdlePolicy(
+            provider.GetRequiredService<DispatchCenter>(),
+            provider.GetRequiredService<Scheduler>()));
+        collection.AddSingleton<UpdateAutomationService>(provider => new UpdateAutomationService(
+            () => Settings,
+            provider.GetRequiredService<UpdateService>(),
+            provider.GetRequiredService<AutoUpdateIdlePolicy>()));
         _services = collection.BuildServiceProvider();
     }
 

@@ -2,12 +2,86 @@ using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Update;
 using Xunit;
 
 namespace NexusPipeline.Tests;
 
 public class SchedulerTests
 {
+    [Fact]
+    public void AutoUpdateBlocker_IncludesOccurrenceAtFiveMinuteBoundary()
+    {
+        DateTime now = new(2026, 1, 5, 10, 0, 0);
+        var queue = new DispatchQueue
+        {
+            Id = "soon-queue",
+            Name = "五分钟队列",
+            AutoRunMode = "scheduled",
+            Tasks = new List<QueueTask>
+            {
+                new() { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" },
+            },
+            TimeSets = new List<QueueTimeSet>
+            {
+                new() { Enabled = true, Days = new List<int> { (int)now.DayOfWeek }, Time = "10:05" },
+            },
+        };
+        using Scheduler scheduler = CreateScheduler(queue);
+
+        AutoUpdateIdleBlocker? blocker = scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5), now);
+
+        Assert.NotNull(blocker);
+        Assert.Equal("scheduled-soon", blocker!.Code);
+        Assert.Equal("五分钟队列", blocker.QueueName);
+        Assert.Equal(now.AddMinutes(5), blocker.TriggerTime);
+    }
+
+    [Fact]
+    public void AutoUpdateBlocker_IgnoresScheduledOccurrenceAfterHorizon()
+    {
+        DateTime now = new(2026, 1, 5, 10, 0, 0);
+        var queue = new DispatchQueue
+        {
+            Id = "later-queue",
+            Name = "稍后队列",
+            AutoRunMode = "scheduled",
+            Tasks = new List<QueueTask>
+            {
+                new() { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" },
+            },
+            TimeSets = new List<QueueTimeSet>
+            {
+                new() { Enabled = true, Days = new List<int> { (int)now.DayOfWeek }, Time = "10:06" },
+            },
+        };
+        using Scheduler scheduler = CreateScheduler(queue);
+
+        Assert.Null(scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5), now));
+    }
+
+    [Fact]
+    public void AutoUpdateBlocker_StopsForStartupQueueBeforeFirstTick()
+    {
+        var queue = new DispatchQueue
+        {
+            Id = "startup-auto-update",
+            Name = "启动队列",
+            AutoRunMode = "startup",
+            Tasks = new List<QueueTask>
+            {
+                new() { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" },
+            },
+        };
+        using Scheduler scheduler = CreateScheduler(queue);
+
+        AutoUpdateIdleBlocker? blocker = scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5));
+
+        Assert.NotNull(blocker);
+        Assert.Equal("startup-scheduled-queue", blocker!.Code);
+        Assert.Equal("启动队列", blocker.QueueName);
+    }
+
     [Fact]
     public async Task StartupTrigger_RemainsPendingAfterTransientAdmissionConflict()
     {
@@ -113,6 +187,22 @@ public class SchedulerTests
             await Task.Delay(20).ConfigureAwait(false);
         }
         Assert.True(condition(), "条件在超时时间内未满足");
+    }
+
+    private static Scheduler CreateScheduler(DispatchQueue queue)
+    {
+        var queues = new TestQueueRepository(queue);
+        var validator = new ExecutionValidator(
+            new EmptyScriptRepository(),
+            queues,
+            new EmptyUserRepository(),
+            new AllowAllPluginAvailability());
+        return new Scheduler(
+            queues,
+            new EmptyHistoryStore(),
+            new TestSettingsProvider(),
+            new TestExecutionService(failFirst: false),
+            validator);
     }
 
     private static int PendingCount(Scheduler scheduler)

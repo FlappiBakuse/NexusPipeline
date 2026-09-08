@@ -102,8 +102,11 @@ public class AppSettings
 
     public int SmtpTimeout { get; set; } = 30;
 
-    /// <summary>启动时自动检查一次更新（仅检查不下载）。</summary>
+    /// <summary>是否启用定期自动检查更新；服务启动约 5 秒后首次检查，此后每 12 小时检查一次。</summary>
     public bool UpdateCheckEnabled { get; set; } = true;
+
+    /// <summary>发现更新后，宿主进入闲时并满足调度安全窗口时自动应用并重启。</summary>
+    public bool UpdateAutoApplyEnabled { get; set; }
 
     /// <summary>更新接受渠道：stable / prerelease（前项目全是 Pre-release，默认 prerelease 才能收到更新）。</summary>
     public string UpdateChannel { get; set; } = "prerelease";

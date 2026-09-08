@@ -43,6 +43,7 @@ internal sealed class UpdateService
     private string? _readyStagingDir;
     private HostMaintenanceLease? _maintenanceLease;
     private bool _hasChecked;
+    private bool _discoveryInvalidationPending;
 
     public UpdateService(
         Func<AppSettings> settings,
@@ -81,6 +82,18 @@ internal sealed class UpdateService
         }
     }
 
+    /// <summary>当前发现结果是否因渠道或更新源变化而禁止自动应用；Ready 事务仍保留给人工处理。</summary>
+    internal bool IsAutomaticApplyAllowed
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_discoveryInvalidationPending;
+            }
+        }
+    }
+
     public ReleaseInfo? Latest
     {
         get
@@ -111,6 +124,23 @@ internal sealed class UpdateService
         lock (_gate)
         {
             return BuildSnapshotLocked();
+        }
+    }
+
+    /// <summary>
+    /// 标记当前发现结果需要重新验证。正在下载、已就绪或应用中的事务保留现场，
+    /// 待事务回到 Idle 后再清除发现结果，避免留下无法继续应用的半成品状态。
+    /// </summary>
+    public void InvalidateDiscovery()
+    {
+        lock (_gate)
+        {
+            if (_state == UpdateState.Idle)
+            {
+                ClearDiscoveryLocked();
+                return;
+            }
+            _discoveryInvalidationPending = true;
         }
     }
 
@@ -342,6 +372,10 @@ internal sealed class UpdateService
             _readyStagingDir = null;
             _bytesRead = 0;
             _bytesTotal = 0;
+            if (_discoveryInvalidationPending)
+            {
+                ClearDiscoveryLocked();
+            }
         }
         try
         {
@@ -359,47 +393,31 @@ internal sealed class UpdateService
     /// </summary>
     public UpdateApplyResult RequestApply(bool defer, string auditSource)
     {
-        ReleaseInfo? latest;
-        string version;
-        string stagingDir;
         lock (_gate)
         {
-            latest = _latest;
-            if (_state != UpdateState.Ready || latest is null)
+            if (!TryGetReadyLocked(out _, out _, out UpdateApplyResult? failure))
             {
-                return UpdateApplyResult.Busy("not-ready", "更新尚未就绪（请先检查并下载更新）");
-            }
-            if (File.Exists(TaskFile))
-            {
-                return UpdateApplyResult.Busy("transaction-pending", "已有更新事务待处理，请先完成启动恢复");
-            }
-            if (Directory.Exists(BackupDir) || File.Exists(BackupDir))
-            {
-                return UpdateApplyResult.Busy("recovery-pending", "检测到未恢复的更新 backup，请先完成启动恢复");
-            }
-            version = latest.VersionText;
-            stagingDir = _readyStagingDir ?? "";
-            if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
-            {
-                return UpdateApplyResult.Busy("not-ready", "暂存文件不完整，请重新下载");
+                return failure!;
             }
         }
 
         if (defer)
         {
+            string deferVersion;
+            string deferStagingDir;
             try
             {
                 lock (_gate)
                 {
-                    if (_state != UpdateState.Ready)
+                    if (!TryGetReadyLocked(out deferVersion, out deferStagingDir, out UpdateApplyResult? failure))
                     {
-                        return UpdateApplyResult.Busy("busy", "更新状态已变化，请刷新后重试");
+                        return failure!;
                     }
-                    new UpdateTask("defer", version, stagingDir, UpdatePhase.Deferred, DateTimeOffset.UtcNow).Write(TaskFile);
+                    new UpdateTask("defer", deferVersion, deferStagingDir, UpdatePhase.Deferred, DateTimeOffset.UtcNow).Write(TaskFile);
                     _state = UpdateState.ApplyPending;
                 }
-                Audit.Log(auditSource, "申请下次启动更新", $"v{version}");
-                Logger.Info($"[更新] 已登记「下次启动更新」（v{version}），退出后下次启动自动应用。");
+                Audit.Log(auditSource, "申请下次启动更新", $"v{deferVersion}");
+                Logger.Info($"[更新] 已登记「下次启动更新」（v{deferVersion}），退出后下次启动自动应用。");
                 return UpdateApplyResult.Ok(true);
             }
             catch (Exception ex)
@@ -413,12 +431,20 @@ internal sealed class UpdateService
         {
             return UpdateApplyResult.Busy("busy", leaseReason ?? "宿主当前繁忙，暂不能应用更新");
         }
+        return RequestImmediateApplyWithLease(lease, auditSource);
+    }
+
+    /// <summary>使用自动闲时策略已取得的维护租约应用就绪更新；方法接管租约所有权。</summary>
+    internal UpdateApplyResult RequestImmediateApplyWithLease(HostMaintenanceLease lease, string auditSource)
+    {
+        string version;
+        string stagingDir;
         lock (_gate)
         {
-            if (_state != UpdateState.Ready)
+            if (!TryGetReadyLocked(out version, out stagingDir, out UpdateApplyResult? failure))
             {
                 lease.Dispose();
-                return UpdateApplyResult.Busy("busy", "更新状态已变化，请刷新后重试");
+                return failure!;
             }
             _state = UpdateState.Applying;
             _maintenanceLease = lease;
@@ -472,6 +498,39 @@ internal sealed class UpdateService
             UpdateTask.Clear(TaskFile);
             return UpdateApplyResult.Busy("worker-launch-failed", $"无法启动更新切换：{ex.Message}");
         }
+    }
+
+    private bool TryGetReadyLocked(
+        out string version,
+        out string stagingDir,
+        out UpdateApplyResult? failure)
+    {
+        version = "";
+        stagingDir = "";
+        if (_state != UpdateState.Ready || _latest is null)
+        {
+            failure = UpdateApplyResult.Busy("not-ready", "更新尚未就绪（请先检查并下载更新）");
+            return false;
+        }
+        if (File.Exists(TaskFile))
+        {
+            failure = UpdateApplyResult.Busy("transaction-pending", "已有更新事务待处理，请先完成启动恢复");
+            return false;
+        }
+        if (Directory.Exists(BackupDir) || File.Exists(BackupDir))
+        {
+            failure = UpdateApplyResult.Busy("recovery-pending", "检测到未恢复的更新 backup，请先完成启动恢复");
+            return false;
+        }
+        version = _latest.VersionText;
+        stagingDir = _readyStagingDir ?? "";
+        if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
+        {
+            failure = UpdateApplyResult.Busy("not-ready", "暂存文件不完整，请重新下载");
+            return false;
+        }
+        failure = null;
+        return true;
     }
 
     private UpdateOperation BeginOperationLocked(
@@ -534,6 +593,10 @@ internal sealed class UpdateService
             _readyStagingDir = null;
             _bytesRead = 0;
             _bytesTotal = 0;
+            if (_discoveryInvalidationPending)
+            {
+                ClearDiscoveryLocked();
+            }
             return true;
         }
     }
@@ -550,6 +613,10 @@ internal sealed class UpdateService
             if (_state == expectedState)
             {
                 _state = UpdateState.Idle;
+                if (_discoveryInvalidationPending)
+                {
+                    ClearDiscoveryLocked();
+                }
             }
             _operation = null;
             operation.Cts.Dispose();
@@ -627,6 +694,14 @@ internal sealed class UpdateService
             _latest is not null,
             _latest?.Notes ?? "",
             _hasChecked);
+    }
+
+    private void ClearDiscoveryLocked()
+    {
+        _latest = null;
+        _error = "";
+        _hasChecked = false;
+        _discoveryInvalidationPending = false;
     }
 
     private static int? BytesToPercent(long bytesRead, long bytesTotal)

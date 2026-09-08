@@ -49,6 +49,10 @@ internal static class ConfigStore
 
     private static void Normalize(AppSettings settings)
     {
+        if (!settings.UpdateCheckEnabled)
+        {
+            settings.UpdateAutoApplyEnabled = false;
+        }
         if (settings.HistoryRetentionDays < 1 || settings.HistoryRetentionDays > AppFixedLimits.HistoryRetentionDaysMax)
         {
             settings.HistoryRetentionDays = 7;

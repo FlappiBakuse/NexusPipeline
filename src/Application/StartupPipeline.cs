@@ -57,9 +57,6 @@ internal static class StartupPipeline
             return;
         }
 
-        // 启动时按设置自动检查一次更新（仅检查不下载）。
-        ScheduleStartupUpdateCheck();
-
 #if NEXUS_TEST_HOST
         StartTestHostExitMonitor();
 #endif
@@ -205,7 +202,6 @@ internal static class StartupPipeline
         }
         Bootstrap.AfterWebStarted(web);
         McpHost? mcp = Bootstrap.StartMcp();
-        ScheduleStartupUpdateCheck();
         Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
         if (ctx.Settings.AutoOpenBrowser)
         {
@@ -311,16 +307,6 @@ internal static class StartupPipeline
         {
             Logger.Warn($"[运行时] 清理 service.pid 失败：{ex.Message}");
         }
-    }
-
-    /// <summary>启动时按设置自动检查一次更新（仅检查不下载，；复用状态机互斥，失败仅告警）。</summary>
-    private static void ScheduleStartupUpdateCheck()
-    {
-        RuntimeContext ctx = RuntimeContext.Instance;
-        new StartupUpdateCheckService(
-            () => ctx.Settings.UpdateCheckEnabled,
-            () => ctx.Resolve<UpdateService>())
-            .Start();
     }
 
     private static void WaitForSafeShutdown()

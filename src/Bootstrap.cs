@@ -5,19 +5,20 @@ using NexusPipeline.Mcp;
 using NexusPipeline.Web;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Plugins;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
 
-/// <summary>服务启动/停止编排：插件、历史清理、调度器、Web 服务（端口重试）。</summary>
+/// <summary>服务启动/停止编排：插件、历史清理、调度器、配置恢复、更新自动化与 Web 服务。</summary>
 internal static class Bootstrap
 {
     private static readonly object RestartSync = new();
 
     private static HostRestartCoordinator? _restartCoordinator;
 
-    /// <summary>加载插件、清理过期历史、启动调度器与配置恢复重试。</summary>
+    /// <summary>加载插件、清理过期历史、启动调度器、配置恢复重试与更新自动化。</summary>
     public static void StartServices()
     {
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -30,6 +31,7 @@ internal static class Bootstrap
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();
         UserConfigManager.StartRecoveryRetry();
+        ctx.Resolve<UpdateAutomationService>().Start();
     }
 
     /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener 或托管 loopback transport 启动失败后不可复用）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
@@ -249,6 +251,14 @@ internal static class Bootstrap
         catch (Exception ex)
         {
             Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
+        }
+        try
+        {
+            ctx.Resolve<UpdateAutomationService>().Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 更新自动化停止异常：{ex.Message}");
         }
         try
         {

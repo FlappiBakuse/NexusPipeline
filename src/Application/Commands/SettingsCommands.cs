@@ -4,6 +4,7 @@ using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.App.Commands;
@@ -21,6 +22,7 @@ internal static class SettingsCommands
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         AppSettings candidate = ctx.Settings;
+        AppSettings previous = ctx.Settings;
         string? bindError = null;
         string secretDetail = "";
         try
@@ -83,6 +85,10 @@ internal static class SettingsCommands
 
                     if (bindError is null)
                     {
+                        if (!candidate.UpdateCheckEnabled)
+                        {
+                            candidate.UpdateAutoApplyEnabled = false;
+                        }
                         ConfigStore.Save(candidate);
                         ctx.ReplaceSettings(candidate);
                     }
@@ -108,6 +114,7 @@ internal static class SettingsCommands
                 FirewallRule.EnsureAllowInbound(current.WebPort);
             }
             TaskRegistration.SyncWithSettings(current);
+            ctx.Resolve<UpdateAutomationService>().OnSettingsChanged(previous, current);
             Audit.Log(
                 source,
                 "保存设置",

@@ -28,6 +28,7 @@ function writeSettings(updateCheckEnabled) {
     JSON.stringify({
       WebPort: systemWebPort,
       UpdateCheckEnabled: updateCheckEnabled,
+      UpdateAutoApplyEnabled: false,
       AutoOpenBrowser: false,
     }),
     "utf8",
@@ -44,7 +45,7 @@ function createReleaseServer() {
         prerelease: true,
         tag_name: `v${updateVersion}`,
         name: `v${updateVersion} test release`,
-        body: "startup update regression fixture",
+        body: "periodic update regression fixture",
         assets: [
           {
             name: `NexusPipeline-v${updateVersion}-win-x64.zip`,
@@ -95,7 +96,7 @@ afterEach(async () => {
   if (enabled) await stopRuntime();
 });
 
-test("启动自动检查：开启时无需手动调用且只请求一次更新源", { skip: skipReason, concurrency: false }, async () => {
+test("定期自动检查：开启时服务启动后完成首次检查", { skip: skipReason, concurrency: false }, async () => {
   const fixture = createReleaseServer();
   const sourceUrl = await listen(fixture.server);
   writeSettings(true);
@@ -110,16 +111,19 @@ test("启动自动检查：开启时无需手动调用且只请求一次更新�
       return status.available === true && status.latest === updateVersion;
     }, 15000, 100);
     assert.equal(observed, true, "宿主启动后应自动请求更新源");
-    assert.equal(fixture.requestCount, 1, "启动自动检查不得重复触发");
+    assert.equal(fixture.requestCount, 1, "首次检查观察窗口内不得重复触发");
     const status = await (await api("GET", "/api/update/status")).json();
     assert.equal(status.available, true);
     assert.equal(status.latest, updateVersion);
+    assert.equal(status.automation.checkEnabled, true);
+    assert.ok(status.automation.lastCheckAt);
+    assert.ok(status.automation.nextCheckAt);
   } finally {
     await close(fixture.server);
   }
 });
 
-test("服务模式启动自动检查：开启时无需手动调用且只请求一次更新源", { skip: skipReason, concurrency: false }, async () => {
+test("服务模式定期自动检查：开启时完成首次检查", { skip: skipReason, concurrency: false }, async () => {
   const fixture = createReleaseServer();
   const sourceUrl = await listen(fixture.server);
   writeSettings(true);
@@ -128,13 +132,13 @@ test("服务模式启动自动检查：开启时无需手动调用且只请求�
     await waitForService();
     const observed = await waitFor(() => fixture.requestCount > 0, 15000, 100);
     assert.equal(observed, true, "服务宿主启动后应自动请求更新源");
-    assert.equal(fixture.requestCount, 1, "服务模式启动自动检查不得重复触发");
+    assert.equal(fixture.requestCount, 1, "服务模式首次检查观察窗口内不得重复触发");
   } finally {
     await close(fixture.server);
   }
 });
 
-test("启动自动检查：关闭时不请求更新源", { skip: skipReason, concurrency: false }, async () => {
+test("定期自动检查：关闭时不请求更新源", { skip: skipReason, concurrency: false }, async () => {
   const fixture = createReleaseServer();
   const sourceUrl = await listen(fixture.server);
   writeSettings(false);
@@ -143,6 +147,9 @@ test("启动自动检查：关闭时不请求更新源", { skip: skipReason, con
     await waitForService();
     await sleep(2000);
     assert.equal(fixture.requestCount, 0, "关闭自动检查时不得请求更新源");
+    const status = await (await api("GET", "/api/update/status")).json();
+    assert.equal(status.automation.checkEnabled, false);
+    assert.equal(status.automation.autoUpdateEnabled, false);
   } finally {
     await close(fixture.server);
   }

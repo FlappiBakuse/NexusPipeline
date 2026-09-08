@@ -7,13 +7,11 @@ import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.j
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
-import { initialUpdateStatus, updateActionsMarkup } from "../core/update-status.js";
+import { updateActionsMarkup } from "../core/update-status.js";
 
 let restartRequired = false;
 let openSettingsPanel = "service";
-let updateManualCheck = false;
 let updateAutoNoticeKey = "";
-let updateStartupPollCount = 0;
 
 export async function pageSettings(token) {
   if (!isCurrent("settings", token)) return;
@@ -134,8 +132,11 @@ function webhookAdvancedMarkup(settings) {
 
 /** 更新区：设置（自动检查/渠道/镜像源）与检查 / 下载 / 应用状态区。 */
 function updateSectionMarkup(settings) {
+  const checkEnabled = settings.updateCheckEnabled === true;
+  const autoEnabled = checkEnabled && settings.updateAutoApplyEnabled === true;
+  const autoExtra = `data-flag="st-update-auto" aria-disabled="${checkEnabled ? "false" : "true"}"${checkEnabled ? "" : " disabled"}`;
   return `<div class="update-section">
-    <div class="settings-list">${switchControl("st-update-check", "自动检查更新", "服务启动时检查一次（不会自动下载）", settings.updateCheckEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}</div>
+    <div class="settings-list">${switchControl("st-update-check", "定期检查更新", "服务启动约 5 秒后首次检查，此后每 12 小时自动检查", checkEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}${switchControl("st-update-auto", "闲时自动更新", "发现新版本后自动下载，并在宿主空闲且未来 5 分钟无调度时自动更新并重启", autoEnabled, "toggle-update-flag", autoExtra)}</div>
     <div class="form-grid">${selectField("st-update-channel", "更新渠道", settings.updateChannel, [{ value: "prerelease", label: "预发布（Pre-release）" }, { value: "stable", label: "稳定版" }])}${valueField("st-update-source", "镜像源地址", settings.updateSourceUrl, "text", 'placeholder="默认 GitHub"', "留空时使用默认 GitHub 更新源。")}</div>
     <div id="update-status-box" class="update-status" data-testid="update-status"></div>
   </div>`;
@@ -148,38 +149,43 @@ async function loadUpdateStatus(token = state.routeToken) {
     const data = await api("GET", "/api/update/status");
     if (!isCurrent("settings", token)) return;
     updateStatus = data;
-    const autoCheckEnabled = state.settings?.updateCheckEnabled === true;
-    renderUpdateStatus(updateManualCheck ? data : initialUpdateStatus(data, autoCheckEnabled));
-    notifyAutomaticUpdate(data, autoCheckEnabled);
-    if (!updateManualCheck && autoCheckEnabled && data.checked !== true) scheduleStartupUpdateStatusPoll(token);
+    renderUpdateStatus(data);
+    notifyAutomaticUpdate(data);
+    scheduleUpdateStatusPoll(token, data);
   } catch { /* 状态区保持占位 */ }
 }
 
-function notifyAutomaticUpdate(data, autoCheckEnabled) {
-  if (!autoCheckEnabled || updateManualCheck || !data?.available || !data.latest) return;
+function notifyAutomaticUpdate(data) {
+  if (data?.automation?.autoUpdateEnabled !== true || !data?.available || !data.latest) return;
   const key = `${data.latest}|${data.channel || ""}`;
   if (key === updateAutoNoticeKey) return;
   updateAutoNoticeKey = key;
   toast(`发现新版本 v${data.latest}`);
 }
 
-/** 自动检查有启动延迟；前端在设置页存活期间等待一次后台结果，检测完成即停止轮询。 */
-function scheduleStartupUpdateStatusPoll(token) {
-  if (updateStartupPollCount >= 15) return;
+function updateStatusPollDelay(data = {}) {
+  const currentState = data.state || "idle";
+  if (currentState === "checking" || currentState === "downloading") return 1000;
+  if (data.automation?.waitingForIdle === true) return 5000;
+  if (data.automation?.checkEnabled === true) return 60000;
+  return null;
+}
+
+/** 状态区按当前业务状态刷新：进行中的事务高频刷新，闲时等待低频刷新，普通静态状态停止轮询。 */
+function scheduleUpdateStatusPoll(token, hint = updateStatus) {
+  const delay = updateStatusPollDelay(hint);
+  if (delay === null) return;
   schedule(async () => {
-    if (!isCurrent("settings", token) || updateManualCheck) return;
+    if (!isCurrent("settings", token)) return;
     try {
       const data = await api("GET", "/api/update/status");
-      if (!isCurrent("settings", token) || updateManualCheck) return;
+      if (!isCurrent("settings", token)) return;
       updateStatus = data;
-      const autoCheckEnabled = state.settings?.updateCheckEnabled === true;
-      renderUpdateStatus(initialUpdateStatus(data, autoCheckEnabled));
-      notifyAutomaticUpdate(data, autoCheckEnabled);
-      if (!autoCheckEnabled || data.checked === true) return;
-      updateStartupPollCount++;
-      scheduleStartupUpdateStatusPoll(token);
+      renderUpdateStatus(data);
+      notifyAutomaticUpdate(data);
+      scheduleUpdateStatusPoll(token, data);
     } catch { /* 服务重启或短暂不可用时结束本轮等待 */ }
-  }, 1000, "settings", token);
+  }, delay, "settings", token);
 }
 
 /** 状态区渲染：当前版本 / 渠道 / 最新版本与 release note（截断）/ 进度 / 按钮流。 */
@@ -205,18 +211,24 @@ function renderUpdateStatus(data) {
   }
   let stateText = "";
   if (state === "checking") stateText = '<p class="muted update-state-copy">正在检查更新...</p>';
-  else if (state === "downloading") stateText = '<p class="muted update-state-copy">正在下载并校验更新包...</p>';
+  else if (state === "downloading") stateText = `<p class="muted update-state-copy">${data.automation?.autoUpdateEnabled === true ? "发现新版本，正在自动下载并校验更新包..." : "正在下载并校验更新包..."}</p>`;
+  else if (state === "ready" && data.automation?.waitingForIdle === true) stateText = '<p class="muted update-state-copy">更新已就绪，正在等待宿主空闲后自动应用。</p>';
   else if (state === "ready") stateText = '<p class="muted update-state-copy">更新已就绪，应用前请确认没有正在运行的任务。</p>';
   else if (state === "applypending") stateText = '<p class="muted update-state-copy">更新已登记，将在下次启动时应用。</p>';
- else if (state === "applying") stateText = '<p class="muted update-state-copy">正在应用更新，服务即将重启...</p>';
+  else if (state === "applying") stateText = '<p class="muted update-state-copy">正在自动应用更新，服务即将重启...</p>';
   else if (state === "recoverypending") stateText = '<p class="callout callout-warning">检测到未完成的更新恢复现场，请重启服务完成恢复后再检查更新。</p>';
   else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">发现新版本 v${esc(data.latest)}${data.prerelease ? "（Pre-release）" : ""}。</p>`;
+  else if (state === "idle" && !data.checked && data.automation?.checkEnabled === true) stateText = '<p class="muted update-state-copy">等待首次自动检查，服务启动约 5 秒后执行。</p>';
+  else if (state === "idle" && !data.checked) stateText = '<p class="muted update-state-copy">尚未检查更新。</p>';
   else if (state === "idle" && !data.available && data.error) stateText = `<p class="callout callout-warning">检查失败：${esc(data.error)}</p>`;
   else if (state === "idle") stateText = '<p class="muted update-state-copy">当前已是最新版本。</p>';
+  const idleReason = state === "ready" && data.automation?.waitingForIdle && data.automation.idleBlockReason
+    ? `<p class="muted update-state-copy">等待原因：${esc(data.automation.idleBlockReason)}</p>`
+    : "";
   const backupWarning = state === "ready"
     ? '<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">应用更新前请先备份 config、data、history、logs、plugins 和 .nxp 等运行时数据。</p>'
     : "";
-  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">当前版本</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">更新渠道</span><span>${channelText}</span></div></div>${notes}${stateText}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">当前版本</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">更新渠道</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
   box.querySelectorAll("[data-progress]").forEach(element => {
     element.style.width = `${Math.max(0, Math.min(100, Number(element.dataset.progress) || 0))}%`;
   });
@@ -225,16 +237,34 @@ function renderUpdateStatus(data) {
 function updateSettingsPayload() {
   return {
     updateCheckEnabled: $("#st-update-check")?.getAttribute("aria-pressed") === "true",
+    updateAutoApplyEnabled: $("#st-update-auto")?.getAttribute("aria-pressed") === "true",
     updateChannel: $("#st-update-channel")?.value || "prerelease",
     updateSourceUrl: ($("#st-update-source")?.value || "").trim(),
   };
 }
 
+function syncUpdateToggleState(settings = {}) {
+  const checkEnabled = Object.prototype.hasOwnProperty.call(settings, "updateCheckEnabled")
+    ? settings.updateCheckEnabled === true
+    : $("#st-update-check")?.getAttribute("aria-pressed") === "true";
+  const auto = $("#st-update-auto");
+  if (!auto) return;
+  auto.disabled = !checkEnabled;
+  auto.setAttribute("aria-disabled", String(!checkEnabled));
+  if (!checkEnabled) {
+    auto.setAttribute("aria-pressed", "false");
+    auto.dataset.state = "off";
+    const stateText = auto.querySelector("[data-switch-state]");
+    if (stateText) stateText.textContent = "已停用";
+  }
+}
+
 async function saveUpdateSettings() {
   const data = await api("PUT", "/api/settings", updateSettingsPayload());
-  if (data?.settings) state.settings = data.settings;
-  if (state.settings?.updateCheckEnabled !== true) updateManualCheck = false;
-  else updateStartupPollCount = 0;
+  if (data?.settings) {
+    state.settings = data.settings;
+    syncUpdateToggleState(data.settings);
+  }
   await loadUpdateStatus();
 }
 
@@ -266,32 +296,20 @@ const awaitNetworkSaveSettled = () => networkSaveQueue.settled();
 async function checkUpdate() {
   try {
     const result = await api("POST", "/api/update/check");
-    updateManualCheck = true;
-    updateStartupPollCount = 15;
     updateStatus = result;
     renderUpdateStatus(result);
-    if (result.available) toast(`发现新版本 v${result.latest}`);
+    if (result.state === "checking") toast("正在检查更新", "info");
+    else if (result.available) toast(`发现新版本 v${result.latest}`);
     else toast("当前已是最新版本", "info");
+    scheduleUpdateStatusPoll(state.routeToken, result);
   } catch (error) { toast(error.message, "error"); }
 }
 
 async function startUpdateDownload() {
   try {
     await api("POST", "/api/update/download");
-    scheduleUpdateStatusPoll();
+    scheduleUpdateStatusPoll(state.routeToken, { ...(updateStatus || {}), state: "downloading" });
   } catch (error) { toast(error.message, "error"); }
-}
-
-function scheduleUpdateStatusPoll() {
-  schedule(async () => {
-    try {
-      const status = await api("GET", "/api/update/status");
-      if (!isCurrent("settings", state.routeToken)) return;
-      renderUpdateStatus(status);
-      if (status.state !== "downloading") return;
-      scheduleUpdateStatusPoll();
-    } catch { /* 服务可能已重启，停止轮询 */ }
-  }, 1000, "settings", state.routeToken);
 }
 
 async function cancelUpdateDownload() {
@@ -693,9 +711,22 @@ export const actions = {
   },
   "toggle-update-flag": target => {
     const btn = $("#" + target.dataset.flag);
-    if (btn) {
-      btn.setAttribute("aria-pressed", btn.getAttribute("aria-pressed") === "true" ? "false" : "true");
-      queueUpdateSave();
+    if (!btn || btn.disabled) return;
+    const pressed = btn.getAttribute("aria-pressed") !== "true";
+    btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+    btn.dataset.state = pressed ? "on" : "off";
+    const stateText = btn.querySelector("[data-switch-state]");
+    if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+    if (target.dataset.flag === "st-update-check" && !pressed) {
+      const auto = $("#st-update-auto");
+      if (auto) {
+        auto.setAttribute("aria-pressed", "false");
+        auto.dataset.state = "off";
+        const autoState = auto.querySelector("[data-switch-state]");
+        if (autoState) autoState.textContent = "已停用";
+      }
     }
+    syncUpdateToggleState({ updateCheckEnabled: pressed });
+    queueUpdateSave();
   },
 };

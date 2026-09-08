@@ -1,21 +1,5 @@
 import { esc } from "./format.js";
 
-/** 首次进入前端时按自动检查开关决定是否展示后台启动检查结果。 */
-export function initialUpdateStatus(data = {}, autoCheckEnabled = false) {
-  if (autoCheckEnabled) return data;
-  const state = data.state || "idle";
-  if (state !== "idle" && state !== "checking") return data;
-  return {
-    ...data,
-    state: "idle",
-    available: false,
-    latest: null,
-    prerelease: false,
-    notes: "",
-    error: "",
-  };
-}
-
 /** 按更新状态机生成当前允许的动作按钮，避免非 Idle 状态重复发起检查。 */
 export function updateActionsMarkup(data = {}) {
   const state = data.state || "idle";

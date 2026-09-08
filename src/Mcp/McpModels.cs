@@ -387,6 +387,7 @@ internal static class McpViews
             settings.AllowRemoteAccess,
             accessToken = Mask(settings.AccessToken),
             settings.UpdateCheckEnabled,
+            settings.UpdateAutoApplyEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
         };

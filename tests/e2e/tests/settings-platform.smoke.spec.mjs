@@ -12,6 +12,10 @@ test("设置入口：保存普通服务设置并从 API 读取", async ({ page }
   await page.locator("#st-retention").fill(String(next));
   await page.locator("#st-retention").dispatchEvent("change");
   await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.historyRetentionDays, { timeout: 10000 }).toBe(next);
+  await page.locator('[data-action="toggle-settings-panel"][data-panel="updates"]').click();
+  await expect(page.locator("#st-update-check")).toBeVisible();
+  await expect(page.locator("#st-update-auto")).toBeVisible();
+  await expect(page.locator("#st-update-auto")).toHaveAttribute("aria-disabled", "false");
   await page.locator('[data-action="toggle-settings-panel"][data-panel="remote-mcp"]').click();
   await expect(page.locator("#st-mcp-port")).toHaveValue("58732");
 });

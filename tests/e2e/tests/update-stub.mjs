@@ -4,7 +4,7 @@ import path from "node:path";
 import { pluginRepositoryRoot } from "./helpers.mjs";
 
 /**
- * UI Smoke 本地 stub 源：更新检查返回空 releases，阻断服务启动检查对真实 GitHub 的网络依赖；
+ * UI Smoke 本地 stub 源：更新检查返回空 releases，阻断定期检查对真实 GitHub 的网络依赖；
  * 插件仓库 catalog 来自相邻 NexusPipeline-Plugins 仓库。更新事务验证由 tests/system/update-smoke.mjs 承担。
  */
 export const UPDATE_PORT = 58931;

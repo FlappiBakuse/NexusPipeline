@@ -1,6 +1,7 @@
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -36,6 +37,8 @@ internal sealed class Scheduler : IDisposable
 
     private readonly IExecutionService _commands;
 
+    private readonly IAdmissionCoordination? _coordination;
+
     private readonly ExecutionValidator _validator;
 
     private readonly ExecutionPlanBuilder? _plans;
@@ -55,12 +58,14 @@ internal sealed class Scheduler : IDisposable
         ExecutionValidator validator,
         ExecutionPlanBuilder? plans = null,
         ISchedulerStateStore? stateStore = null,
-        Func<bool>? decrementRunDays = null)
+        Func<bool>? decrementRunDays = null,
+        IAdmissionCoordination? coordination = null)
     {
         _queues = queues;
         _history = history;
         _settings = settings;
         _commands = commands;
+        _coordination = coordination;
         _validator = validator;
         _plans = plans;
         _stateStore = stateStore ?? new MemorySchedulerStateStore();
@@ -175,6 +180,98 @@ internal sealed class Scheduler : IDisposable
             }
         }
         return candidates.OrderBy(candidate => candidate.Time).Cast<(string, DateTime)?>().FirstOrDefault();
+    }
+
+    /// <summary>
+    /// 返回阻止闲时自动更新的首个调度原因。调用方可在宿主维护协调锁内调用，
+    /// 以保证 occurrence 注册与维护租约之间没有检查后到登记前的窗口。
+    /// </summary>
+    internal AutoUpdateIdleBlocker? GetAutoUpdateBlocker(TimeSpan horizon, DateTime? nowOverride = null)
+    {
+        DateTime now = nowOverride ?? DateTime.Now;
+        DateTime until = now.Add(horizon < TimeSpan.Zero ? TimeSpan.Zero : horizon);
+        IReadOnlyList<DispatchQueue> queues = _queues.Snapshot();
+        DateTime? lastCheck;
+        lock (_sync)
+        {
+            if (_runningQueueIds.Count > 0)
+            {
+                return new AutoUpdateIdleBlocker(
+                    "running-scheduled-queue",
+                    "存在正在运行的调度队列",
+                    QueueName: null,
+                    TriggerTime: null);
+            }
+            if (_attemptingTriggers.Count > 0)
+            {
+                return new AutoUpdateIdleBlocker(
+                    "attempting-scheduled-queue",
+                    "存在正在准入的调度队列",
+                    QueueName: null,
+                    TriggerTime: null);
+            }
+            PendingScheduledRun? pending = _pendingTriggers.Values
+                .FirstOrDefault(item => item.Status is "Triggered" or "Waiting");
+            if (pending is not null)
+            {
+                return new AutoUpdateIdleBlocker(
+                    pending.Status == "Waiting" ? "waiting-scheduled-queue" : "pending-scheduled-queue",
+                    pending.Status == "Waiting" ? "存在等待执行的调度队列" : "存在尚未准入的调度队列",
+                    pending.QueueName,
+                    pending.OriginalTriggerTime);
+            }
+            if (!_startupRunsIssued && queues.Any(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0))
+            {
+                return new AutoUpdateIdleBlocker(
+                    "startup-scheduled-queue",
+                    "存在尚未触发的启动队列",
+                    queues.First(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0).Name,
+                    null);
+            }
+            lastCheck = _lastSchedulerCheck;
+        }
+
+        DateTime from = lastCheck ?? now.AddMinutes(-1);
+        foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
+        {
+            foreach ((string occurrenceKey, DateTime triggerTime) in EnumerateOccurrences(queue, from, until))
+            {
+                string key = TriggerKey(queue.Id, occurrenceKey);
+                lock (_sync)
+                {
+                    if (_occurrences.TryGetValue(key, out PendingScheduledRun? occurrence)
+                        && occurrence.Status is "Completed" or "Cancelled" or "Invalidated")
+                    {
+                        continue;
+                    }
+                }
+
+                if (triggerTime <= now)
+                {
+                    return new AutoUpdateIdleBlocker(
+                        "missed-scheduled-queue",
+                        "存在已到时但尚未处理的调度任务",
+                        queue.Name,
+                        triggerTime);
+                }
+
+                return new AutoUpdateIdleBlocker(
+                    "scheduled-soon",
+                    $"调度队列「{queue.Name}」将在 {FormatRemaining(triggerTime - now)} 后触发",
+                    queue.Name,
+                    triggerTime);
+            }
+        }
+        return null;
+    }
+
+    private static string FormatRemaining(TimeSpan remaining)
+    {
+        if (remaining.TotalMinutes >= 1)
+        {
+            return $"{Math.Ceiling(remaining.TotalMinutes):0} 分钟";
+        }
+        return $"{Math.Max(1, Math.Ceiling(remaining.TotalSeconds)):0} 秒";
     }
 
     /// <summary>计算单个调度队列的下一次定时触发时间（今天之后 7 天内的最近匹配）；非定时模式/无任务/无匹配返回 null。</summary>
@@ -370,6 +467,21 @@ internal sealed class Scheduler : IDisposable
     }
 
     private void EnqueueTrigger(DispatchQueue queue, string occurrenceKey, DateTime originalTriggerTime, bool isStartup)
+    {
+        if (_coordination is not null)
+        {
+            _coordination.WithAdmissionCoordination(() =>
+            {
+                EnqueueTriggerCore(queue, occurrenceKey, originalTriggerTime, isStartup);
+                return true;
+            });
+            return;
+        }
+
+        EnqueueTriggerCore(queue, occurrenceKey, originalTriggerTime, isStartup);
+    }
+
+    private void EnqueueTriggerCore(DispatchQueue queue, string occurrenceKey, DateTime originalTriggerTime, bool isStartup)
     {
         QueueExecutionPlan? plan = null;
         if (_plans is not null)

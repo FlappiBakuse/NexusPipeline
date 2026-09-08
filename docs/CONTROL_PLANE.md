@@ -27,9 +27,9 @@
 | 设置读取 | 设置 API | `settings status` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
+| 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
 插件读取的本地列表、商店列表和详情投影均以 additive 字段提供 `createdAt`；该字段表示插件第一次正式公开发布日期，旧插件或旧 catalog 缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。
-| 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
 ## 行为护栏
 

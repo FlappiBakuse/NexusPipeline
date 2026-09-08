@@ -153,6 +153,7 @@ internal static class ApiSettingsHandler
             settings.AllowRemoteAccess,
             accessToken = string.IsNullOrWhiteSpace(settings.AccessToken) ? "" : "enc:***",
             settings.UpdateCheckEnabled,
+            settings.UpdateAutoApplyEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
         };
