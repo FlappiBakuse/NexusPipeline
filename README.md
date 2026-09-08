@@ -18,6 +18,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 - 专项插件：官方 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 提供 BetterGI、March7th Assistant、ZenlessZoneZeroOneDragon、MaaEnd 等适配。
 - 模拟器支持：可使用通用 ADB，或由专项插件提供 MuMuManager 等模拟器能力。
 - 控制面：网页、`manage` 菜单和正式 CLI 共享本机服务；可选启用 loopback MCP Server。
+- 诊断与可验证性：提供系统诊断、脱敏支持包和运行计划 dry-run，便于确认环境、恢复现场与准入原因。
 - 内建更新：定期检查、下载和校验 GitHub 发布包，支持立即应用或下次启动应用；可选在宿主闲时自动应用并重启。
 
 ## 安装
@@ -61,13 +62,17 @@ config/    data/    history/    logs/    plugins/    .nxp/
 
 ```text
 nexus-pipeline.exe status --json
+nexus-pipeline.exe doctor --json
+nexus-pipeline.exe doctor export --output "D:\Temp\nexus-pipeline-diagnostics.zip" --json
 nexus-pipeline.exe script list --json
 nexus-pipeline.exe user create --name "我的账号"
+nexus-pipeline.exe run script <脚本 ID 或名称> --dry-run --user "我的账号" --json
 nexus-pipeline.exe run script <脚本 ID 或名称> --detach --json
 nexus-pipeline.exe run cancel <运行 ID> --json
 ```
 
 复杂对象通过 `--file <json 文件>` 或 `--file -` 传入。带 `--json` 的命令输出单个稳定 envelope，目标按 ID 或唯一名称解析。
+`doctor` 读取宿主、监听器、更新/配置恢复现场、插件和依赖状态；`doctor export` 生成不含配置内容、密钥、令牌、Cookie 或截图的脱敏支持包。`run ... --dry-run` 只展示冻结运行计划、用户状态、资源和准入原因，不登记或启动任务。
 
 在「设置 → MCP Agent」启用 MCP 并重启后，Agent 可连接：
 
@@ -100,6 +105,10 @@ MCP 仅监听本机 loopback；运行队列若带有休眠、重启、关机或�
 **端口被占用怎么办？**
 
 Web 默认端口被占用时会顺延到可用端口；实际端口可在状态页或「设置」查看。MCP 使用独立端口，端口被占用时保持关闭。
+
+**如何准备诊断信息？**
+
+打开「设置 → 系统诊断」查看检查结果，或运行 `nexus-pipeline.exe doctor export --output <路径>` 导出脱敏支持包。支持包只包含有限大小的诊断事实、插件状态、运行状态和最近日志尾部。
 
 **运行脚本产生的配置文件会保留吗？**
 

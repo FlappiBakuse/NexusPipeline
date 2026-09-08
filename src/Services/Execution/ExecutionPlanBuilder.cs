@@ -63,6 +63,21 @@ internal sealed class ExecutionPlanBuilder
 
     public ScriptExecutionPlan BuildScript(string scriptId, string? userName)
     {
+        return BuildScriptInternal(scriptId, userName, checkProcessConflicts: true, allowFailedSpec: false);
+    }
+
+    /// <summary>为 dry-run 构建同样的脚本快照；进程冲突由解释服务转成可读准入结果。</summary>
+    public ScriptExecutionPlan BuildScriptForExplain(string scriptId, string? userName)
+    {
+        return BuildScriptInternal(scriptId, userName, checkProcessConflicts: false, allowFailedSpec: true);
+    }
+
+    private ScriptExecutionPlan BuildScriptInternal(
+        string scriptId,
+        string? userName,
+        bool checkProcessConflicts,
+        bool allowFailedSpec)
+    {
         ExecutionScriptSnapshot? executionSnapshot = _snapshots?.SnapshotScript(scriptId);
         ScriptInstance? script = executionSnapshot?.Script
             ?? _scripts.Snapshot().FirstOrDefault(item => item.Id == scriptId)?.Clone();
@@ -71,13 +86,20 @@ internal sealed class ExecutionPlanBuilder
             throw new InvalidOperationException($"脚本实例不存在：{scriptId}");
         }
 
-        ResolvedScriptSpec? resolvedSpec = ResolveForExecution(script);
+        ResolvedScriptSpec? resolvedSpec = ResolveForExecution(script, allowFailedSpec);
         if (resolvedSpec is not null)
         {
             script = resolvedSpec.Script;
         }
 
-        _validator.ValidateScriptStart(script, userName);
+        if (checkProcessConflicts)
+        {
+            _validator.ValidateScriptStart(script, userName);
+        }
+        else
+        {
+            _validator.ValidateScriptStartForExplain(script, userName);
+        }
         IReadOnlyList<ResolvedScriptUser> resolvedUsers = ResolveUsersWithSpecs(script, _users.ResolveEnabledBindings(script, executionSnapshot?.Users));
         ResolvedScriptUser? resolvedSingle = string.IsNullOrWhiteSpace(userName)
             ? null
@@ -102,7 +124,7 @@ internal sealed class ExecutionPlanBuilder
 
     public QueueExecutionPlan BuildQueue(string queueId)
     {
-        return BuildQueueInternal(queueId, checkProcessConflicts: true);
+        return BuildQueueInternal(queueId, checkProcessConflicts: true, allowFailedSpec: false);
     }
 
     /// <summary>
@@ -111,7 +133,13 @@ internal sealed class ExecutionPlanBuilder
     /// </summary>
     public QueueExecutionPlan BuildQueueForSchedule(string queueId)
     {
-        return BuildQueueInternal(queueId, checkProcessConflicts: false);
+        return BuildQueueInternal(queueId, checkProcessConflicts: false, allowFailedSpec: false);
+    }
+
+    /// <summary>为 dry-run 构建队列快照；进程冲突由解释服务展示，不改变真实启动校验。</summary>
+    public QueueExecutionPlan BuildQueueForExplain(string queueId)
+    {
+        return BuildQueueInternal(queueId, checkProcessConflicts: false, allowFailedSpec: true);
     }
 
     internal QueueExecutionPlan RestoreFrozenQueue(FrozenQueuePlanData data)
@@ -219,7 +247,10 @@ internal sealed class ExecutionPlanBuilder
         return new ExecutionAdmissionProfile(data.Kind, queueClass, resources, data.CompletionAction);
     }
 
-    private QueueExecutionPlan BuildQueueInternal(string queueId, bool checkProcessConflicts)
+    private QueueExecutionPlan BuildQueueInternal(
+        string queueId,
+        bool checkProcessConflicts,
+        bool allowFailedSpec)
     {
         ExecutionQueueSnapshot? executionSnapshot = _snapshots?.SnapshotQueue(queueId);
         List<ScriptInstance> scripts;
@@ -253,7 +284,7 @@ internal sealed class ExecutionPlanBuilder
                 effectiveScripts.Add(declaration);
                 continue;
             }
-            ResolvedScriptSpec? resolved = ResolveForExecution(declaration);
+            ResolvedScriptSpec? resolved = ResolveForExecution(declaration, allowFailedSpec);
             effectiveScripts.Add(resolved?.Script ?? declaration);
             resolvedSpecs[declaration.Id] = resolved;
         }
@@ -296,7 +327,7 @@ internal sealed class ExecutionPlanBuilder
         return new QueueExecutionPlan(queueSnapshot, tasks, admission, totalTasks);
     }
 
-    private ResolvedScriptSpec? ResolveForExecution(ScriptInstance declaration)
+    private ResolvedScriptSpec? ResolveForExecution(ScriptInstance declaration, bool allowFailedSpec)
     {
         if (_specs is null)
         {
@@ -311,7 +342,7 @@ internal sealed class ExecutionPlanBuilder
             bool unavailable = !string.IsNullOrWhiteSpace(declaration.PluginType)
                 && _availability is not null
                 && PluginAvailability.GetUnavailableReason(declaration.PluginType, _availability) is not null;
-            if (!unavailable)
+            if (!unavailable && !allowFailedSpec)
             {
                 throw new InvalidOperationException(resolved.Error);
             }

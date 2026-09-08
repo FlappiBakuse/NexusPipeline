@@ -87,6 +87,8 @@ internal sealed class Scheduler : IDisposable
         Logger.Info("调度器已启动。");
     }
 
+    public bool IsRunning => _loop is not null && !_loop.IsCompleted;
+
     public void Stop()
     {
         try

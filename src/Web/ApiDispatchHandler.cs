@@ -26,6 +26,12 @@ internal static class ApiDispatchHandler
             return;
         }
         JsonNode? node = HttpHelper.ParseBody(body);
+        if (seg.Length >= 3
+            && seg[1].Equals("explain", StringComparison.OrdinalIgnoreCase))
+        {
+            await HandleExplainAsync(context, seg[2], node).ConfigureAwait(false);
+            return;
+        }
         string mode = node.Get("mode").Str();
         if (mode != "auto")
         {
@@ -57,6 +63,35 @@ internal static class ApiDispatchHandler
         catch (Exception ex)
         {
             await HttpHelper.WriteJsonAsync(context, new { ok = false, error = ex.Message }, 400).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task HandleExplainAsync(HttpListenerContext context, string kind, JsonNode? node)
+    {
+        try
+        {
+            ExecutionExplainService service = RuntimeContext.Instance.Resolve<ExecutionExplainService>();
+            ExecutionExplainResult result;
+            if (kind.Equals("script", StringComparison.OrdinalIgnoreCase))
+            {
+                string scriptId = node.Get("scriptId").Str();
+                string? userName = node.Get("userName").Str();
+                result = service.ExplainScript(scriptId, string.IsNullOrWhiteSpace(userName) ? null : userName);
+            }
+            else if (kind.Equals("queue", StringComparison.OrdinalIgnoreCase))
+            {
+                result = service.ExplainQueue(node.Get("queueId").Str());
+            }
+            else
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, result }).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "explain_failed", error = ex.Message }, 400).ConfigureAwait(false);
         }
     }
 

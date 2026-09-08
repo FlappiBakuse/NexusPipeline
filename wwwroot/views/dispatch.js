@@ -2,7 +2,7 @@ import { api } from "../core/api.js";
 import { $, $$ } from "../core/dom.js";
 import { pageHeader, selectField, systemActionCard } from "../core/forms.js";
 import { esc, scriptPluginStatus, scriptPluginUnavailableMessage } from "../core/format.js";
-import { closeModal, confirmModal } from "../core/modal.js";
+import { closeModal, confirmModal, modalShell, showModal } from "../core/modal.js";
 import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
@@ -212,7 +212,7 @@ export async function pageDispatch(token) {
         ${selectField("dc-kind", "目标类型", "script", [{ value: "script", label: "脚本实例" }, { value: "queue", label: "调度队列" }], 'data-action="dispatch-kind"')}
         <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script-trigger">脚本实例</label>${selectControlMarkup("dc-script", "", [{ value: "", label: "（选择脚本实例）" }, ...scripts.map(dispatchScriptOption)], 'data-testid="dispatch-script"', "脚本实例")}</div>
         <div class="field" id="dc-queue-wrap" hidden><label class="field-label" for="dc-queue-trigger">调度队列</label>${selectControlMarkup("dc-queue", "", [{ value: "", label: "（选择调度队列）" }, ...queues.map(queue => ({ value: queue.id, label: queue.name }))], "", "调度队列")}</div>
-        <div class="control-action"><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
+        <div class="control-action"><button id="dc-explain" class="ghost" type="button" data-action="explain-current" data-testid="dispatch-explain">检查运行计划</button><button id="dc-run" class="primary" type="button" data-action="dispatch-current" data-testid="dispatch-run">执行脚本</button></div>
       </div>
     </section>${pluginSlotMarkup("dispatch.run.sections", "dispatch.run.sections")}`);
   applyProgress();
@@ -277,6 +277,42 @@ export async function dispatchCurrent() {
   return dispatchScript();
 }
 
+function explainUserStatus(user) {
+  const status = user?.status || "ready";
+  const label = status === "ready" ? "可运行" : status === "skipped" ? "将跳过" : "受阻";
+  const css = status === "ready" ? "ok" : status === "skipped" ? "blue" : "bad";
+  const count = Number.isInteger(user?.successfulRunsToday) ? `，今日成功 ${user.successfulRunsToday}/${user.maxSuccessfulRunsPerDay > 0 ? user.maxSuccessfulRunsPerDay : "不限"}` : "";
+  return `<div class="kv"><span>${esc(user?.userName || "（未命名用户）")}</span><span class="badge ${css}">${label}</span><span class="muted">${esc((user?.reason || "") + count)}</span></div>`;
+}
+
+function explainPlanMarkup(result) {
+  const failure = result?.admissionFailure;
+  const status = result?.admissible ? "可加入运行组" : "当前不能启动";
+  const statusClass = result?.admissible ? "ok" : "bad";
+  const tasks = Array.isArray(result?.tasks) ? result.tasks : [];
+  const users = Array.isArray(result?.users) ? result.users : [];
+  const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
+  return `<div class="settings-list" data-testid="execution-explain-result">
+    <div class="kv"><span class="k">目标</span><span>${esc(result?.targetName || "")}</span><span class="badge ${statusClass}">${status}</span></div>
+    <div class="kv"><span class="k">任务</span><span>${esc(String(result?.totalTasks ?? 0))} 项</span><span class="muted">${esc(result?.queueClass || "")}</span></div>
+    <div class="kv"><span class="k">完成操作</span><span>${esc(result?.completionAction || "none")}</span></div>
+    ${failure ? `<div class="callout callout-warning"><strong>${esc(failure.code || "admission_failed")}</strong>：${esc(failure.message || "无法启动")}</div>` : ""}
+    ${tasks.length ? `<div class="subsection"><div class="section-heading"><h4>任务清单</h4></div>${tasks.map(task => `<div class="kv"><span>${esc(task.scriptName || task.taskId || "")}</span><span class="muted">${esc(String(task.userCount ?? 0))} 个用户</span></div>`).join("")}</div>` : ""}
+    ${users.length ? `<div class="subsection"><div class="section-heading"><h4>用户准入</h4></div>${users.map(explainUserStatus).join("")}</div>` : ""}
+    ${warnings.length ? `<div class="callout callout-warning"><strong>提示</strong><br>${warnings.map(item => esc(item)).join("<br>")}</div>` : ""}
+  </div>`;
+}
+
+export async function explainCurrent() {
+  const kind = $("#dc-kind")?.value === "queue" ? "queue" : "script";
+  const id = kind === "queue" ? $("#dc-queue")?.value : $("#dc-script")?.value;
+  if (!id) { toast(kind === "queue" ? "请选择调度队列" : "请选择脚本实例", "error"); return; }
+  try {
+    const result = await api("POST", `/api/dispatch/explain/${kind}`, kind === "queue" ? { queueId: id } : { scriptId: id });
+    showModal(modalShell("运行计划检查", explainPlanMarkup(result?.result || result), '<button class="ghost" type="button" data-action="close-modal">关闭</button>'), true);
+  } catch (error) { toast(error.message, "error"); }
+}
+
 export function cancelRun(runId) {
   confirmModal("取消运行", "当前任务将被终止；如果这是调度队列，后续任务也不会继续执行。确定取消吗？", "confirm-cancel-run", { id: runId });
 }
@@ -290,6 +326,7 @@ export const actions = {
   "dispatch-script": target => withBusy(target, () => dispatchScript()),
   "dispatch-queue": target => withBusy(target, () => dispatchQueue()),
   "dispatch-current": target => withBusy(target, () => dispatchCurrent()),
+  "explain-current": target => withBusy(target, () => explainCurrent()),
   "dispatch-kind": target => dispatchKindChange(target),
   "cancel-run": target => cancelRun(target.dataset.id),
   "confirm-cancel-run": target => withBusy(target, () => confirmCancelRun(target.dataset.id)),

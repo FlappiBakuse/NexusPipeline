@@ -7,6 +7,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Diagnostics;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Services.Networking;
@@ -102,6 +103,8 @@ internal class RuntimeContext
             () => Settings,
             provider.GetRequiredService<UpdateService>(),
             provider.GetRequiredService<AutoUpdateIdlePolicy>()));
+        collection.AddSingleton<ExecutionExplainService>();
+        collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider();
     }
 

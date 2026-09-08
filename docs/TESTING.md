@@ -9,7 +9,7 @@
 | L1 Unit | `tests/NexusPipeline.Tests/` | 否 | 否 | 模型规则、状态机、解析、规划、重试和边界校验 |
 | L2 Component | `tests/NexusPipeline.Tests/` | 否 | 否 | 临时目录、仓储、配置事务、应用命令和外部端口替身 |
 | L3 Web Logic | `tests/web/` | 否 | 否 | 可独立导入的原生 ES module 纯函数和协议转换 |
-| L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP、解释器、端口、模拟器和更新事务 |
+| L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
 | L5 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
 
 `tests/stress/` 是按需运行的压力与诊断资产，不参与默认发布门禁。历史测试容器已删除；需要追溯行为时使用 CHANGELOG 和 Git 历史。

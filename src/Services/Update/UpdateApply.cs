@@ -149,6 +149,7 @@ internal static class UpdateApply
             backupComplete = true;
             journal = journal with { Phase = UpdatePhase.BackupReady };
             journal.Write();
+            PauseForFaultInjection(UpdatePhase.BackupReady);
 
             string oldExe = Path.Combine(installDir, "nexus-pipeline.exe");
             string oldWww = Path.Combine(installDir, "wwwroot");
@@ -158,6 +159,7 @@ internal static class UpdateApply
             SwapInto(Path.Combine(stagedDir, "wwwroot"), oldWww);
             journal = journal with { Phase = UpdatePhase.SwapReady };
             journal.Write();
+            PauseForFaultInjection(UpdatePhase.SwapReady);
 
             WriteVersionFile(targetVersion);
             journal = journal with { Mode = "completed", Phase = UpdatePhase.Committed };
@@ -276,7 +278,7 @@ internal static class UpdateApply
             }
         }
 
-        if (pending.Mode == "apply")
+        if (pending.Mode == "apply" && pending.Phase != UpdatePhase.RollbackConfirmed)
         {
             if (pending.Phase is UpdatePhase.ApplyRequested or UpdatePhase.Deferred
                 && !HasBackupData(AppPaths.UpdateBackupDir))
@@ -292,6 +294,14 @@ internal static class UpdateApply
 
             Logger.Warn($"[更新] 检测到未完成的更新切换（phase={pending.Phase}），启动时回滚。");
             Audit.Log(Audit.System, "更新失败已回滚", $"v{pending.Version}（切换未完成）");
+            if (HasBackupExecutable(AppPaths.UpdateBackupDir))
+            {
+                if (LaunchRecoveryWorker())
+                {
+                    return true;
+                }
+                Logger.Error("[更新] 无法拉起独立 recovery worker，继续尝试当前进程回滚。");
+            }
             try
             {
                 Rollback(pending with { Phase = UpdatePhase.RollbackPending });
@@ -319,6 +329,39 @@ internal static class UpdateApply
             Logger.Warn($"[更新] 无法识别的更新 journal 状态：Mode={pending.Mode}, Phase={pending.Phase}；保留现场。");
         }
         return false;
+    }
+
+    /// <summary>
+    /// 独立 recovery worker 入口：等待持有当前 exe 的启动实例退出，再还原 immutable backup，
+    /// 写入 RollbackConfirmed 并拉起旧版本。旧版本启动后负责最终删除 backup/journal。
+    /// </summary>
+    public static int RunRecoveryWorker()
+    {
+        Logger.Info("[更新] recovery worker 启动，等待当前宿主退出...");
+        UpdateTask? pending = UpdateTask.Read();
+        if (pending is null || !HasBackupExecutable(AppPaths.UpdateBackupDir))
+        {
+            Logger.Error("[更新] recovery worker 缺少可恢复的更新 journal 或 exe backup。");
+            return 1;
+        }
+        if (!WaitForHostExit(TimeSpan.FromSeconds(MutexWaitSeconds)))
+        {
+            Logger.Error("[更新] recovery worker 等待当前宿主退出超时。");
+            return 1;
+        }
+
+        try
+        {
+            Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending });
+            LaunchService(AppPaths.AppRoot);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[更新] recovery worker 回滚失败（保留 backup/journal）：{ex.Message}");
+            TryWritePhase(pending, UpdatePhase.RollbackPending);
+            return 1;
+        }
     }
 
     /* ---------------- 事务文件操作 ---------------- */
@@ -497,6 +540,11 @@ internal static class UpdateApply
                 || Directory.Exists(Path.Combine(backup, "wwwroot")));
     }
 
+    private static bool HasBackupExecutable(string backup)
+    {
+        return File.Exists(Path.Combine(backup, "nexus-pipeline.exe"));
+    }
+
     private static bool IsStagingValid(string stagedDir)
     {
         return Directory.Exists(stagedDir) && File.Exists(Path.Combine(stagedDir, "nexus-pipeline.exe"));
@@ -566,6 +614,41 @@ internal static class UpdateApply
         {
             Logger.Error($"[更新] 写入 recovery journal 失败（保留现有现场）：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 测试宿主的外部故障注入暂停点。正式构建不包含该环境变量路径，系统测试可在 journal
+    /// 已原子写入后从外部强杀 worker，验证启动恢复的真实现场。
+    /// </summary>
+    private static void PauseForFaultInjection(string phase)
+    {
+#if NEXUS_TEST_HOST
+        string? requestedPhase = Environment.GetEnvironmentVariable("NEXUS_TEST_UPDATE_PAUSE_PHASE")?.Trim();
+        string? signalPath = Environment.GetEnvironmentVariable("NEXUS_TEST_UPDATE_PAUSE_FILE")?.Trim();
+        if (!string.Equals(requestedPhase, phase, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(signalPath))
+        {
+            return;
+        }
+        try
+        {
+            string? parent = Path.GetDirectoryName(signalPath);
+            if (!string.IsNullOrWhiteSpace(parent))
+            {
+                Directory.CreateDirectory(parent);
+            }
+            File.WriteAllText(signalPath, phase);
+            DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+            while (File.Exists(signalPath) && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(20);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[更新] 测试故障注入暂停点失败：{ex.Message}");
+        }
+#endif
     }
 
     private static void DeletePathRequired(string path)
@@ -766,8 +849,47 @@ internal static class UpdateApply
         }
     }
 
+    /// <summary>启动独立 recovery worker，避免当前新版本进程锁住待还原的 exe。</summary>
+    public static bool LaunchRecoveryWorker()
+    {
+        if (LaunchRecoveryOverride is not null)
+        {
+            return LaunchRecoveryOverride();
+        }
+        try
+        {
+            string sourceExe = Environment.ProcessPath ?? Path.Combine(AppPaths.AppRoot, "nexus-pipeline.exe");
+            string workerExe = Path.Combine(AppPaths.AppRoot, $"{WorkerImagePrefix}{Guid.NewGuid():N}.exe");
+            File.Copy(sourceExe, workerExe, overwrite: false);
+            var startInfo = new ProcessStartInfo(workerExe)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppPaths.AppRoot,
+            };
+            startInfo.ArgumentList.Add("recover-update");
+            Process? process = Process.Start(startInfo);
+            if (process is null)
+            {
+                throw new InvalidOperationException("Process.Start 未返回 recovery 子进程");
+            }
+            process.Dispose();
+            Logger.Info($"[更新] 已拉起独立 recovery worker：{Path.GetFileName(workerExe)}。");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[更新] 拉起 recovery worker 失败：{ex.Message}");
+            CleanupWorkerImages();
+            return false;
+        }
+    }
+
     /// <summary>测试注入点：L2 单测替换真实子进程拉起。</summary>
     internal static Func<string, bool>? LaunchApplyOverride;
+
+    /// <summary>测试注入点：L2 单测替换 recovery worker 拉起。</summary>
+    internal static Func<bool>? LaunchRecoveryOverride;
 
     private static void LaunchService(string installDir)
     {

@@ -27,6 +27,7 @@ internal static class CliCommandRouter
             return command switch
             {
                 "status" => ExecuteStatus(parsed),
+                "doctor" => ExecuteDoctor(parsed),
                 "script" or "scripts" => ExecuteScript(parsed),
                 "user" or "users" => ExecuteUser(parsed),
                 "queue" or "queues" => ExecuteQueue(parsed),
@@ -54,6 +55,31 @@ internal static class CliCommandRouter
             return CliExitCodes.For("invalid_arguments");
         }
         return ReturnApi(new CliApiClient().Get("/api/status"));
+    }
+
+    private static int ExecuteDoctor(CliArguments args)
+    {
+        string? sub = Positional(args, 1)?.ToLowerInvariant();
+        var client = new CliApiClient();
+        if (sub is null)
+        {
+            return EnsurePositionals(args, 1, "doctor 不接受位置参数") && EnsureOptions(args)
+                ? ReturnApi(client.Get("/api/diagnostics"))
+                : CliExitCodes.For("invalid_arguments");
+        }
+        if (!sub.Equals("export", StringComparison.OrdinalIgnoreCase))
+        {
+            return CliOutput.WriteFailure("invalid_arguments", $"未知 doctor 子命令：{sub}");
+        }
+        if (!EnsurePositionals(args, 2, "doctor export 不接受额外参数")
+            || !EnsureOptions(args, "output"))
+        {
+            return CliExitCodes.For("invalid_arguments");
+        }
+        JsonNode? body = args.Get("output") is string output && !string.IsNullOrWhiteSpace(output)
+            ? Object(("outputPath", output))
+            : null;
+        return ReturnApi(client.Post("/api/diagnostics/export", body), "诊断包已导出");
     }
 
     private static int ExecuteScript(CliArguments args)
@@ -571,7 +597,7 @@ internal static class CliCommandRouter
 
         int targetPosition = 2;
         if (!EnsurePositionals(args, targetPosition + 1, "run 操作需要一个目标")
-            || !EnsureOptions(args, "mode", "auto", "manual", "user", "detach"))
+            || !EnsureOptions(args, "mode", "auto", "manual", "user", "detach", "dry-run"))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -585,6 +611,17 @@ internal static class CliCommandRouter
         if (!TryResolveTarget(client, resource, reference, display, out string id, out error))
         {
             return error;
+        }
+        if (args.Has("dry-run"))
+        {
+            if (args.Has("detach") || args.Has("auto") || args.Has("manual") || args.Has("mode"))
+            {
+                return CliOutput.WriteFailure("invalid_arguments", "dry-run 仅支持目标和可选 --user");
+            }
+            JsonObject explainBody = sub == "script"
+                ? Object(("scriptId", id), ("userName", args.Get("user") ?? ""))
+                : Object(("queueId", id));
+            return ReturnApi(client.Post($"/api/dispatch/explain/{sub}", explainBody));
         }
         string mode = args.Get("mode")?.Equals("auto", StringComparison.OrdinalIgnoreCase) == true || args.Has("auto")
             ? "auto"
@@ -1328,7 +1365,7 @@ internal static class CliCommandRouter
         const string usage =
             "用法：nexus-pipeline.exe <命令> [子命令] [参数]\n"
             + "\n"
-            + "基础：status\n"
+            + "基础：status、doctor（含 export）\n"
             + "资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n"
             + "\n"
             + "机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n"

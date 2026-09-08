@@ -67,7 +67,20 @@ internal sealed class ExecutionValidator
 
     public void ValidateScriptStart(ScriptInstance script, string? userName)
     {
-        if (IsScriptRunning(script))
+        ValidateScriptStartCore(script, userName, checkProcessConflict: true);
+    }
+
+    internal void ValidateScriptStartForExplain(ScriptInstance script, string? userName)
+    {
+        ValidateScriptStartCore(script, userName, checkProcessConflict: false);
+    }
+
+    private void ValidateScriptStartCore(
+        ScriptInstance script,
+        string? userName,
+        bool checkProcessConflict)
+    {
+        if (checkProcessConflict && IsScriptRunning(script))
         {
             throw new InvalidOperationException($"脚本「{script.Name}」正在运行，请先退出后再执行");
         }

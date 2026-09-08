@@ -97,6 +97,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `NEXUS_TEST_MODE=codex` | 选择本地 Test Host 反馈语义，由统一 runner 设置 |
 | `NEXUS_TEST_MODE=admin` | 选择生产 Administrator Gate 语义，由统一 runner 设置 |
 | `NEXUS_PLUGIN_CATALOG_URL` | 将插件 catalog 指向本地测试源；生产环境不设置 |
+| `NEXUS_TEST_UPDATE_PAUSE_PHASE` / `NEXUS_TEST_UPDATE_PAUSE_FILE` | 仅测试宿主使用：在指定更新 journal 阶段写入外部暂停信号，供故障注入测试强杀 worker |
 
 ### 5.3 Windows 环境注意事项
 

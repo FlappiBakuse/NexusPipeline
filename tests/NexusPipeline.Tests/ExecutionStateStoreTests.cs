@@ -151,6 +151,41 @@ public sealed class ExecutionStateStoreTests
         Assert.True(store.CompleteCancelPending(canceled!, osCancelSucceeded: true));
     }
 
+    [Fact]
+    public void EvaluateCandidateUsesRegistrationPolicyWithoutMutatingState()
+    {
+        var store = new ExecutionStateStore();
+        var active = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-1",
+            TargetName = "当前队列",
+        };
+        var candidate = new RunningExecution
+        {
+            Kind = "queue",
+            TargetId = "queue-2",
+            TargetName = "待检查队列",
+        };
+        ExecutionAdmissionProfile profile = new(
+            "queue",
+            ExecutionConcurrencyClass.Standard,
+            ExecutionResourceSet.Empty,
+            "none");
+
+        Assert.True(store.TryRegister(active, profile, out _));
+        ExecutionAdmissionFailure? explained = store.EvaluateCandidate(
+            candidate.Kind,
+            candidate.TargetId,
+            candidate.TargetName,
+            profile);
+
+        Assert.NotNull(explained);
+        Assert.Equal(ExecutionAdmissionFailureCode.StandardQueueAlreadyRunning, explained!.Code);
+        Assert.Single(store.Active);
+        Assert.Null(store.Find(candidate.Id));
+    }
+
     private static PendingSystemAction CreatePending(ExecutionStateStore store, string action, string queueName)
     {
         var execution = new RunningExecution

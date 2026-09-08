@@ -20,6 +20,7 @@ import {
   waitForService,
 } from "./runtime-helper.mjs";
 import { deriveCandidateVersion, readProjectVersion } from "../support/project-version.mjs";
+import { killProcessTree, waitForExit } from "../support/windows-process.mjs";
 
 /**
  * 内建更新 System Smoke（下一候选版本）：在隔离安装副本上验证 apply-update 的
@@ -37,6 +38,11 @@ const backupDir = path.join(runtimeDir, ".nxp-backup", "previous");
 const versionFile = path.join(runtimeDir, ".nxp-version");
 const taskFile = path.join(updateDir, "task.json");
 const updateVersion = deriveCandidateVersion(readProjectVersion(projectRoot));
+const faultInjectionSkip = !enabled
+  ? skipReason
+  : process.env.NEXUS_TEST_HOST === "1"
+    ? false
+    : "SwapReady 故障注入需要 Codex 测试宿主";
 const stagingRoot = path.join(updateDir, "staging", updateVersion);
 
 function writeTask(mode, stagedDir = stagingRoot) {
@@ -93,6 +99,42 @@ async function runApplyWorker(stagedDir) {
       stderr: "",
     };
   } finally {
+    fs.rmSync(workerExe, { force: true, maxRetries: 20, retryDelay: 250 });
+  }
+}
+
+async function runApplyWorkerUntilPhase(stagedDir, phase) {
+  const workerExe = path.join(runtimeDir, `.nxp-update-worker-fault-${Date.now()}-${Math.random().toString(36).slice(2)}.exe`);
+  const pauseFile = path.join(updateDir, `fault-${phase}-${Date.now()}-${Math.random().toString(36).slice(2)}.signal`);
+  fs.copyFileSync(runtimeExe, workerExe);
+  let worker = null;
+  try {
+    const resultPromise = new Promise(resolve => {
+      worker = spawn(workerExe, ["apply-update", "--staged", stagedDir], {
+        cwd: runtimeDir,
+        env: {
+          ...process.env,
+          NEXUS_TEST_UPDATE_PAUSE_PHASE: phase,
+          NEXUS_TEST_UPDATE_PAUSE_FILE: pauseFile,
+        },
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      worker.once("error", error => resolve({ status: null, signal: null, error }));
+      worker.once("exit", (status, signal) => resolve({ status, signal, error: null }));
+    });
+
+    const paused = await waitFor(() => fs.existsSync(pauseFile), 30000, 10);
+    assert.equal(paused, true, `更新 worker 未到达 ${phase} 暂停点：${logTail()}`);
+    assert.equal(killProcessTree(worker.pid), true, "外部强杀更新 worker 失败");
+    await waitForExit(worker.pid, 10000, 50);
+    const result = await resultPromise;
+    return { ...result, observedPhase: phase };
+  } finally {
+    if (worker?.pid) {
+      killProcessTree(worker.pid);
+    }
+    fs.rmSync(pauseFile, { force: true });
     fs.rmSync(workerExe, { force: true, maxRetries: 20, retryDelay: 250 });
   }
 }
@@ -170,6 +212,26 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
   const audit = logTail();
   assert.match(audit, /更新完成/, "日志应包含「更新完成」审计");
+  await stopRuntimeHard();
+});
+
+test("故障注入：SwapReady 阶段强杀 worker 后启动回滚并清理现场", { skip: faultInjectionSkip, concurrency: false }, async () => {
+  await stopRuntimeHard();
+  prepareRuntime();
+  prepareLegacyInstall();
+  prepareStaging();
+  writeTask("apply");
+
+  const result = await runApplyWorkerUntilPhase(stagingRoot, "SwapReady");
+  assert.equal(result.observedPhase, "SwapReady");
+  assert.equal(fs.existsSync(taskFile), true, "强杀后 journal 应保留给启动恢复");
+  assert.equal(fs.existsSync(backupDir), true, "强杀后 immutable backup 应保留");
+
+  startRuntime(["web"]);
+  await waitForService(null, 60000);
+  assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "legacy-install-marker.txt"), "utf8"), "legacy-install-marker");
+  assert.equal(fs.existsSync(path.join(runtimeDir, "wwwroot", "candidate-install-marker.txt")), false);
+  assertMarkersCleaned();
   await stopRuntimeHard();
 });
 

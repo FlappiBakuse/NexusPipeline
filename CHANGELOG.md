@@ -2,6 +2,15 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.0（Pre-release）
+
+### 可靠性、诊断与可验证性
+- 新增故障注入与更新恢复验证链路，覆盖更新交换阶段的中断恢复、备份完整性和恢复工作进程；保留 KN-90 最近有效截图缓存运行语义。
+- 新增 `doctor`、Web 系统诊断、MCP `get_diagnostics` 与脱敏 Support Bundle 导出，诊断结果和导出内容具备稳定结构、大小边界和敏感信息扫描。
+- 新增脚本/队列 dry-run 与 Execution Explain，通过共享准入评估路径展示运行计划、用户资格、资源冲突和阻断原因，并保持只读。
+- NexusPipeline-Plugins 新增 Plugin TestKit、官方插件生命周期测试与前端插件 conformance 校验。
+- 扩展路径、压缩包、远程访问、MCP、插件 Web API 和密钥脱敏边界测试，强化现有安全契约验证。
+
 ## v0.14.8（Pre-release）
 
 ### 配置编辑窗口与稳定性

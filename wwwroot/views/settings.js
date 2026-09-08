@@ -33,6 +33,7 @@ export async function pageSettings(token) {
     ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
     ${settingsCardMarkup("network", "网络代理", "宿主外部 HTTP/HTTPS 请求", networkSettingsMarkup(settings), "network-settings")}
     ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
+    ${settingsCardMarkup("diagnostics", "系统诊断", "检查运行环境、恢复现场与插件状态", diagnosticsSettingsMarkup(), "diagnostics-settings")}
     ${pluginSlotMarkup("settings.cards", "settings.cards", "settings-cards-plugin-slot", { mode: "settings" })}
   </div>${pluginSlotMarkup("settings.sections", "settings.sections", "settings-plugin-slot", { mode: "settings" })}`);
   await renderPluginSlots(document.querySelector("#view"));
@@ -40,6 +41,7 @@ export async function pageSettings(token) {
   bindAutoSave();
   renderUpdateStatus();
   loadUpdateStatus(token);
+  loadDiagnostics(token);
 }
 
 function settingsCardMarkup(id, title, description, body, testId) {
@@ -66,7 +68,7 @@ function syncSettingsPanels() {
 }
 
 function toggleSettingsPanel(panelId) {
-  const builtInPanels = ["service", "notifications", "remote-mcp", "network", "updates"];
+  const builtInPanels = ["service", "notifications", "remote-mcp", "network", "updates", "diagnostics"];
   const isRenderedPluginPanel = Array.from(document.querySelectorAll("[data-settings-panel]"))
     .some(card => card.dataset.settingsPanel === panelId && card.querySelector(".settings-card-body"));
   if (!builtInPanels.includes(panelId) && !isRenderedPluginPanel) return;
@@ -140,6 +142,70 @@ function updateSectionMarkup(settings) {
     <div class="form-grid">${selectField("st-update-channel", "更新渠道", settings.updateChannel, [{ value: "prerelease", label: "预发布（Pre-release）" }, { value: "stable", label: "稳定版" }])}${valueField("st-update-source", "镜像源地址", settings.updateSourceUrl, "text", 'placeholder="默认 GitHub"', "留空时使用默认 GitHub 更新源。")}</div>
     <div id="update-status-box" class="update-status" data-testid="update-status"></div>
   </div>`;
+}
+
+function diagnosticsSettingsMarkup() {
+  return `<div class="diagnostics-section">
+    <div class="row-actions"><button class="ghost" type="button" data-action="load-diagnostics" data-testid="load-diagnostics">刷新诊断</button><button class="ghost" type="button" data-action="export-diagnostics" data-testid="export-diagnostics">导出脱敏诊断包</button></div>
+    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite"><p class="muted">正在加载诊断…</p></div>
+  </div>`;
+}
+
+function diagnosticStatusLabel(status) {
+  return { pass: "正常", warn: "注意", fail: "失败", skipped: "跳过" }[status] || status || "未知";
+}
+
+function diagnosticStatusClass(status) {
+  return status === "pass" ? "ok" : status === "fail" ? "bad" : status === "warn" ? "warn" : "muted";
+}
+
+function diagnosticCategoryLabel(category) {
+  return {
+    host: "宿主",
+    network: "网络",
+    recovery: "恢复",
+    execution: "执行",
+    scheduler: "调度",
+    plugins: "插件",
+    dependencies: "依赖",
+    logs: "日志",
+    diagnostics: "诊断",
+  }[category] || category || "其他";
+}
+
+function renderDiagnostics(data) {
+  const box = $("#diagnostics-status");
+  if (!box) return;
+  const checks = Array.isArray(data?.checks) ? data.checks : [];
+  const overall = data?.overallStatus || "warn";
+  const attentionCount = checks.filter(check => check?.status === "warn" || check?.status === "fail").length;
+  const attentionText = attentionCount ? `，${attentionCount} 项需要关注` : "，全部通过或按条件跳过";
+  const rows = checks.map(check => `<div class="diagnostic-row" role="row" data-diagnostic-status="${esc(check.status || "unknown")}">
+      <div class="diagnostic-check-name" role="cell"><span class="diagnostic-check-id mono">${esc(check.id || "")}</span><span class="muted diagnostic-check-category">${esc(diagnosticCategoryLabel(check.category))}</span></div>
+      <div class="diagnostic-check-status" role="cell"><span class="badge ${diagnosticStatusClass(check.status)}">${esc(diagnosticStatusLabel(check.status))}</span></div>
+      <div class="diagnostic-check-summary" role="cell">${esc(check.summary || "")}</div>
+      <div class="diagnostic-check-info" role="cell">${check.detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">详情</span>${esc(check.detail)}</div>` : ""}${check.remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">建议</span>${esc(check.remediation)}</div>` : ""}</div>
+    </div>`).join("");
+  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">总体状态</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} 项检查${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="系统诊断检查项"><div class="diagnostics-table-header" role="row"><span role="columnheader">检查项</span><span role="columnheader">状态</span><span role="columnheader">结果</span><span role="columnheader">详情与建议</span></div>${rows || '<div class="diagnostics-empty" role="row">暂无诊断结果</div>'}</div>`;
+}
+
+async function loadDiagnostics(token = state.routeToken) {
+  const box = $("#diagnostics-status");
+  if (!box) return;
+  try {
+    const data = await api("GET", "/api/diagnostics");
+    if (!isCurrent("settings", token)) return;
+    renderDiagnostics(data);
+  } catch (error) {
+    if (box) box.innerHTML = `<p class="callout callout-warning">${esc(error.message || "诊断加载失败")}</p>`;
+  }
+}
+
+async function exportDiagnostics() {
+  try {
+    const result = await api("POST", "/api/diagnostics/export");
+    toast(`诊断包已导出：${result.path || "已生成"}`);
+  } catch (error) { toast(error.message, "error"); }
 }
 
 let updateStatus = null;
@@ -688,6 +754,8 @@ export const actions = {
     void autoSave().then(() => toast("访问令牌已保存"), () => {});
   },
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
+  "load-diagnostics": target => withBusy(target, () => loadDiagnostics()),
+  "export-diagnostics": target => withBusy(target, () => exportDiagnostics()),
   "toggle-panel": target => togglePanel(target.dataset.panel, target),
   "toggle-webhook-fields": () => toggleWebhookFields(),
   "toggle-generic-template": () => toggleWebhookFields(),

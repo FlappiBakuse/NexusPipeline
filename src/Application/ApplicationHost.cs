@@ -107,6 +107,8 @@ internal static class ApplicationHost
                 return StartupPipeline.RunRestart();
             case "apply-update":
                 return RunUpdateApplyCli(args.Skip(1).ToArray());
+            case "recover-update":
+                return UpdateApply.RunRecoveryWorker();
             case "register":
                 TaskRegistration.Register();
                 return 0;

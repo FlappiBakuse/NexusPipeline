@@ -139,7 +139,7 @@ internal sealed class ExecutionRunner
                         successfulRunsDate = today;
                     }
                     successfulRunsByUser.TryGetValue(runUser.UserId, out int successfulRuns);
-                    if (successfulRuns >= maxSuccessfulRuns)
+                    if (ExecutionUserEligibility.HasReachedDailySuccessCap(runUser, successfulRuns))
                     {
                         skippedRecord = CreateDailyCapSkippedRecord(
                             script,

@@ -186,6 +186,129 @@ test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip
   assert.equal(failure.code, "validation_error");
 });
 
+test("doctor 与 dry-run 只读取当前快照并返回可审计结果", { skip, concurrency: false }, async () => {
+  const diagnostics = await api("GET", "/api/diagnostics");
+  const diagnosticsText = await diagnostics.text();
+  assert.equal(diagnostics.status, 200, `诊断快照失败：HTTP ${diagnostics.status} ${diagnosticsText}`);
+  const snapshot = JSON.parse(diagnosticsText);
+  assert.equal(snapshot.schemaVersion, 1);
+  assert.match(snapshot.overallStatus, /^(pass|warn|fail)$/);
+  assert.ok(Array.isArray(snapshot.checks));
+  for (const id of [
+    "host.admin-integrity",
+    "host.install-write",
+    "web.listener",
+    "mcp.listener",
+    "update.transaction",
+    "plugin.runtime",
+    "plugin.pending",
+    "config.recovery",
+    "scheduler.state",
+    "execution.state",
+    "dependency.python",
+    "dependency.adb",
+  ]) {
+    assert.ok(snapshot.checks.some(check => check.id === id), `缺少稳定诊断项：${id}`);
+  }
+  assert.ok(snapshot.checks.every(check => /^(pass|warn|fail|skipped)$/.test(check.status)));
+
+  const doctor = runCli(["doctor", "--json"]);
+  assert.equal(doctor.status, 0, `${doctor.stdout}\n${doctor.stderr}`);
+  const doctorLines = doctor.stdout.trim().split(/\r?\n/).filter(Boolean);
+  assert.equal(doctorLines.length, 1, `doctor stdout: ${doctor.stdout}`);
+  const doctorPayload = JSON.parse(doctorLines[0]);
+  assert.equal(doctorPayload.ok, true);
+  assert.equal(doctorPayload.code, "ok");
+  assert.equal(doctorPayload.data.schemaVersion, 1);
+
+  const fixture = makeFixture("explain");
+  writeBatch(fixture, [`echo explain-ok>>"${fixture.log}"`]);
+  const userName = `Explain User ${Date.now()}`;
+  let scriptId = "";
+  let queueId = "";
+  try {
+    const created = await api("POST", "/api/scripts", {
+      name: `Explain Script ${Date.now()}`,
+      rootPath: fixture.dir,
+      mainExe: fixture.exe,
+      configPath: fixture.cfg,
+      logPath: fixture.log,
+      gameExe: "C:\\Windows\\System32\\PING.EXE",
+      gameArgs: "127.0.0.1 -n 1",
+      launchGame: false,
+      maxAttempts: 1,
+      logStallTimeoutMinutes: 5,
+      totalTimeoutMinutes: 5,
+      autoUpdateConfig: false,
+    });
+    const createdText = await created.text();
+    assert.equal(created.status, 200, `创建 explain 脚本失败：HTTP ${created.status} ${createdText}`);
+    const script = JSON.parse(createdText);
+    scriptId = script.id;
+    await createUserBinding(scriptId, userName);
+
+    const scriptExplain = await api("POST", "/api/dispatch/explain/script", {
+      scriptId,
+      userName,
+    });
+    const scriptExplainText = await scriptExplain.text();
+    assert.equal(scriptExplain.status, 200, `脚本 explain 失败：HTTP ${scriptExplain.status} ${scriptExplainText}`);
+    const scriptExplainBody = JSON.parse(scriptExplainText);
+    assert.equal(scriptExplainBody.ok, true);
+    assert.equal(scriptExplainBody.result.kind, "script");
+    assert.equal(scriptExplainBody.result.targetId, scriptId);
+    assert.equal(scriptExplainBody.result.admissible, true);
+    assert.equal(scriptExplainBody.result.users[0].status, "ready");
+    assert.equal(scriptExplainBody.result.tasks[0].userCount, 1);
+
+    const cliExplain = runCli(["run", "script", scriptId, "--dry-run", "--user", userName, "--json"]);
+    assert.equal(cliExplain.status, 0, `${cliExplain.stdout}\n${cliExplain.stderr}`);
+    const cliExplainLines = cliExplain.stdout.trim().split(/\r?\n/).filter(Boolean);
+    assert.equal(cliExplainLines.length, 1, `dry-run stdout: ${cliExplain.stdout}`);
+    const cliExplainPayload = JSON.parse(cliExplainLines[0]);
+    assert.equal(cliExplainPayload.ok, true);
+    assert.equal(cliExplainPayload.data.result.targetId, scriptId);
+
+    const queueCreated = await api("POST", "/api/queues", {
+      name: `Explain Queue ${Date.now()}`,
+      autoRunMode: "none",
+      completionAction: "none",
+      tasks: [{ index: 0, scriptInstanceId: scriptId }],
+      timeSets: [],
+      notifyEnabled: false,
+    });
+    const queueCreatedText = await queueCreated.text();
+    assert.equal(queueCreated.status, 200, `创建 explain 队列失败：HTTP ${queueCreated.status} ${queueCreatedText}`);
+    queueId = JSON.parse(queueCreatedText).id;
+    const queueExplain = await api("POST", "/api/dispatch/explain/queue", { queueId });
+    const queueExplainText = await queueExplain.text();
+    assert.equal(queueExplain.status, 200, `队列 explain 失败：HTTP ${queueExplain.status} ${queueExplainText}`);
+    const queueExplainBody = JSON.parse(queueExplainText);
+    assert.equal(queueExplainBody.ok, true);
+    assert.equal(queueExplainBody.result.kind, "queue");
+    assert.equal(queueExplainBody.result.targetId, queueId);
+    assert.equal(queueExplainBody.result.admissible, true);
+    assert.ok(queueExplainBody.result.tasks.length >= 1);
+  } finally {
+    if (queueId) await api("DELETE", `/api/queues/${encodeURIComponent(queueId)}`);
+    await deleteScript(scriptId);
+  }
+
+  const bundlePath = path.join(runtimeDir, "diagnostics", "system-smoke-support.zip");
+  try {
+    const exported = await api("POST", "/api/diagnostics/export", { outputPath: bundlePath });
+    const exportedText = await exported.text();
+    assert.equal(exported.status, 200, `诊断包导出失败：HTTP ${exported.status} ${exportedText}`);
+    const exportBody = JSON.parse(exportedText);
+    assert.equal(exportBody.ok, true);
+    assert.equal(exportBody.path, bundlePath);
+    assert.ok(exportBody.sizeBytes > 0 && exportBody.sizeBytes <= 8 * 1024 * 1024);
+    assert.equal(fs.statSync(bundlePath).isFile(), true);
+  } finally {
+    fs.rmSync(bundlePath, { force: true });
+  }
+});
+
 test("通知测试失败通过非 2xx 与稳定错误码传递到 CLI", { skip, concurrency: false }, async () => {
   const settings = await api("PUT", "/api/settings", {
     webhookEnabled: false,

@@ -5,6 +5,7 @@ using NexusPipeline.App.Contracts;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Update;
 
 namespace NexusPipeline.Mcp;
@@ -23,6 +24,38 @@ internal sealed class McpReadOnlyTools
     [McpServerTool(Name = "get_status", Title = "获取运行状态", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("读取 NexusPipeline 当前服务、调度、运行任务、插件和 MCP 端点状态。")]
     public CallToolResult GetStatus() => McpToolResult.Success(_context.BuildStatus());
+
+    [McpServerTool(Name = "get_diagnostics", Title = "获取系统诊断", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("读取宿主、网络、更新、配置恢复、执行状态、插件和外部依赖诊断；不会自动修复或发起网络请求。")]
+    public CallToolResult GetDiagnostics() => McpToolResult.Success(_context.GetDiagnostics());
+
+    [McpServerTool(Name = "explain_script_run", Title = "解释脚本运行计划", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("只读检查脚本运行计划、用户准入、资源冲突和每日成功次数限制。不会登记或启动运行。")]
+    public CallToolResult ExplainScriptRun(
+        [Description("脚本稳定 ID 或唯一名称。")]
+        string scriptReference,
+        [Description("可选用户名称；省略时解释脚本的全部启用用户。")]
+        string? userName = null)
+    {
+        OperationResult<ScriptInstance> script = _context.ResolveScript(scriptReference);
+        return !script.Succeeded
+            ? McpToolResult.From(script)
+            : McpToolResult.Success(_context.Runtime.Resolve<ExecutionExplainService>()
+                .ExplainScript(script.Value!.Id, userName));
+    }
+
+    [McpServerTool(Name = "explain_queue_run", Title = "解释队列运行计划", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
+    [Description("只读检查调度队列运行计划、任务用户、资源冲突和完成操作。不会登记或启动运行。")]
+    public CallToolResult ExplainQueueRun(
+        [Description("调度队列稳定 ID 或唯一名称。")]
+        string queueReference)
+    {
+        OperationResult<DispatchQueue> queue = _context.ResolveQueue(queueReference);
+        return !queue.Succeeded
+            ? McpToolResult.From(queue)
+            : McpToolResult.Success(_context.Runtime.Resolve<ExecutionExplainService>()
+                .ExplainQueue(queue.Value!.Id));
+    }
 
     [McpServerTool(Name = "list_scripts", Title = "列出脚本实例", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
     [Description("列出所有脚本实例及其路径、执行策略和全局用户绑定。")]

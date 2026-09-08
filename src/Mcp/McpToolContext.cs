@@ -4,6 +4,7 @@ using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Diagnostics;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
@@ -88,6 +89,8 @@ internal sealed class McpToolContext
     }
 
     public object GetSettings() => McpViews.Settings(Runtime.Settings);
+
+    public object GetDiagnostics() => Runtime.Resolve<DiagnosticsService>().CreateSnapshot();
 
     public object GetUpdateStatus()
     {

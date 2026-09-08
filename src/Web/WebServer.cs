@@ -135,6 +135,10 @@ internal sealed class WebServer : IDisposable
 
     public bool AllowsRemoteAccess => _options.AllowRemoteAccess;
 
+    public bool IsRunning => ReferenceEquals(Current, this)
+        && _loop is not null
+        && !_loop.IsCompleted;
+
     /// <summary>
     /// 当前已启动的 Web 服务实例：托盘「打开管理页面」等需用实际监听端口
     /// （设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。

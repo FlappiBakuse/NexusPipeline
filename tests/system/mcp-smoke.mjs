@@ -236,6 +236,9 @@ test("启用 MCP 后可完成握手、工具发现、状态读取与 loopback �
   assert.ok(toolNames.includes("list_scripts"));
   assert.ok(toolNames.includes("run_script"));
   assert.ok(toolNames.includes("get_run"));
+  assert.ok(toolNames.includes("get_diagnostics"));
+  assert.ok(toolNames.includes("explain_script_run"));
+  assert.ok(toolNames.includes("explain_queue_run"));
   assert.ok(!toolNames.includes("delete_script"));
   assert.ok(!toolNames.includes("set_secret"));
 
@@ -247,6 +250,11 @@ test("启用 MCP 后可完成握手、工具发现、状态读取与 loopback �
   const settings = await mcpTool("get_settings");
   assert.equal(settings.data.mcpEnabled, true);
   assert.equal(settings.data.accessToken, "");
+
+  const diagnostics = await mcpTool("get_diagnostics");
+  assert.equal(diagnostics.data.schemaVersion, 1);
+  assert.ok(Array.isArray(diagnostics.data.checks));
+  assert.ok(diagnostics.data.checks.some(check => check.id === "execution.state"));
 
   const wrongOrigin = await rawMcpPost({
     Host: `127.0.0.1:${mcpPort}`,
@@ -321,6 +329,15 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     assert.equal(listedBinding?.maxSuccessfulRunsPerDay, 1);
     assert.equal(listedBinding?.effective?.maxSuccessfulRunsPerDay, 1);
 
+    const explainedScript = await mcpTool("explain_script_run", {
+      scriptReference: scriptId,
+      userName,
+    });
+    assert.equal(explainedScript.data.kind, "script");
+    assert.equal(explainedScript.data.targetId, scriptId);
+    assert.equal(explainedScript.data.admissible, true);
+    assert.equal(explainedScript.data.users[0].status, "ready");
+
     const dangerousQueueResponse = await api("POST", "/api/queues", {
       name: `MCP Dangerous Queue ${Date.now()}`,
       autoRunMode: "none",
@@ -334,6 +351,12 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     }
     const dangerousQueue = await dangerousQueueResponse.json();
     dangerousQueueId = dangerousQueue.id;
+    const explainedQueue = await mcpTool("explain_queue_run", {
+      queueReference: dangerousQueue.id,
+    });
+    assert.equal(explainedQueue.data.kind, "queue");
+    assert.equal(explainedQueue.data.targetId, dangerousQueue.id);
+    assert.equal(explainedQueue.data.completionAction, "shutdown");
     const blockedQueueRun = await mcpToolEnvelope("run_queue", {
       queueReference: dangerousQueue.id,
     });

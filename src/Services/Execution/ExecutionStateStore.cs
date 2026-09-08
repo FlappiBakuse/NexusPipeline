@@ -148,6 +148,25 @@ internal sealed class ExecutionStateStore
         }
     }
 
+    /// <summary>返回诊断所需的协调状态快照；不暴露可变运行对象或准入 profile。</summary>
+    internal ExecutionStateSnapshot SnapshotState()
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                return new ExecutionStateSnapshot(
+                    _groupState,
+                    _maintenanceActive,
+                    _active.Count,
+                    _finished.Count,
+                    _editSessionLeases.Count,
+                    _completionIntents.Count,
+                    _pendingSystemAction is not null);
+            }
+        }
+    }
+
     public RunningExecution? Find(string id)
     {
         lock (_sync)
@@ -184,6 +203,25 @@ internal sealed class ExecutionStateStore
     }
 
     /// <summary>
+    /// 只读评估候选计划。它与 TryRegister 共享同一协调域和同一准入策略，
+    /// 因此 dry-run 与真实启动看到的是同一组活动租约和门禁状态。
+    /// </summary>
+    public ExecutionAdmissionFailure? EvaluateCandidate(
+        string candidateKind,
+        string candidateTargetId,
+        string candidateTargetName,
+        ExecutionAdmissionProfile profile)
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync)
+            {
+                return EvaluateCandidateLocked(candidateKind, candidateTargetId, candidateTargetName, profile);
+            }
+        }
+    }
+
+    /// <summary>
     /// 在同一临界区执行“系统操作状态检查 + 资格矩阵 + 资源冲突 + 完成操作兼容性 + 登记”。
     /// </summary>
     public bool TryRegister(
@@ -195,57 +233,7 @@ internal sealed class ExecutionStateStore
         {
             lock (_sync)
             {
-                if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
-                {
-                    failure = new ExecutionAdmissionFailure(
-                        ExecutionAdmissionFailureCode.HostMaintenance,
-                        "宿主正在进行维护操作，暂不能启动新任务");
-                    return false;
-                }
-                if (_pendingSystemAction is not null)
-                {
-                    failure = new ExecutionAdmissionFailure(
-                        ExecutionAdmissionFailureCode.PendingSystemAction,
-                        "系统完成操作正在等待执行，请先取消后再启动新任务");
-                    return false;
-                }
-
-                if (_groupState == ExecutionGroupState.Closing)
-                {
-                    failure = new ExecutionAdmissionFailure(
-                        ExecutionAdmissionFailureCode.ExecutionGroupClosing,
-                        "当前并行运行组已进入收尾阶段，新的任务暂不能加入");
-                    return false;
-                }
-
-                foreach ((string leaseKey, ExecutionResourceSet leaseResources) in _editSessionLeases)
-                {
-                    string? editConflict = profile.Resources.FindConflict(leaseResources);
-                    if (editConflict is not null)
-                    {
-                        failure = new ExecutionAdmissionFailure(
-                            ExecutionAdmissionFailureCode.ResourceConflict,
-                            $"当前执行与配置编辑会话「{leaseKey}」存在资源冲突（{editConflict}）",
-                            Resource: editConflict);
-                        return false;
-                    }
-                }
-
-                List<ExecutionAdmissionEntry> active = _active
-                    .Select(item => new ExecutionAdmissionEntry(
-                        item.Id,
-                        item.Kind,
-                        item.TargetId,
-                        item.TargetName,
-                        _admissions[item.Id]))
-                    .ToList();
-                failure = _policy.Evaluate(
-                    exec.Kind,
-                    exec.TargetId,
-                    exec.TargetName,
-                    profile,
-                    active,
-                    _completionIntents);
+                failure = EvaluateCandidateLocked(exec.Kind, exec.TargetId, exec.TargetName, profile);
                 if (failure is not null)
                 {
                     return false;
@@ -256,6 +244,61 @@ internal sealed class ExecutionStateStore
                 return true;
             }
         }
+    }
+
+    private ExecutionAdmissionFailure? EvaluateCandidateLocked(
+        string candidateKind,
+        string candidateTargetId,
+        string candidateTargetName,
+        ExecutionAdmissionProfile profile)
+    {
+        if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
+        {
+            return new ExecutionAdmissionFailure(
+                ExecutionAdmissionFailureCode.HostMaintenance,
+                "宿主正在进行维护操作，暂不能启动新任务");
+        }
+        if (_pendingSystemAction is not null)
+        {
+            return new ExecutionAdmissionFailure(
+                ExecutionAdmissionFailureCode.PendingSystemAction,
+                "系统完成操作正在等待执行，请先取消后再启动新任务");
+        }
+
+        if (_groupState == ExecutionGroupState.Closing)
+        {
+            return new ExecutionAdmissionFailure(
+                ExecutionAdmissionFailureCode.ExecutionGroupClosing,
+                "当前并行运行组已进入收尾阶段，新的任务暂不能加入");
+        }
+
+        foreach ((string leaseKey, ExecutionResourceSet leaseResources) in _editSessionLeases)
+        {
+            string? editConflict = profile.Resources.FindConflict(leaseResources);
+            if (editConflict is not null)
+            {
+                return new ExecutionAdmissionFailure(
+                    ExecutionAdmissionFailureCode.ResourceConflict,
+                    $"当前执行与配置编辑会话「{leaseKey}」存在资源冲突（{editConflict}）",
+                    Resource: editConflict);
+            }
+        }
+
+        List<ExecutionAdmissionEntry> active = _active
+            .Select(item => new ExecutionAdmissionEntry(
+                item.Id,
+                item.Kind,
+                item.TargetId,
+                item.TargetName,
+                _admissions[item.Id]))
+            .ToList();
+        return _policy.Evaluate(
+            candidateKind,
+            candidateTargetId,
+            candidateTargetName,
+            profile,
+            active,
+            _completionIntents);
     }
 
     /// <summary>
@@ -630,6 +673,15 @@ internal enum ExecutionGroupState
     Cancelling,
     Maintenance,
 }
+
+internal sealed record ExecutionStateSnapshot(
+    ExecutionGroupState GroupState,
+    bool MaintenanceActive,
+    int ActiveCount,
+    int FinishedCount,
+    int EditSessionCount,
+    int CompletionIntentCount,
+    bool PendingSystemAction);
 
 internal sealed record ExecutionLeaseReference(
     string RunId,

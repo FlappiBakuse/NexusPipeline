@@ -204,6 +204,8 @@ flowchart TD
 - `--json` 输出稳定 envelope；标准输出只承载协议数据，连接诊断和运行进度转到标准错误。退出码按参数/校验、找不到或歧义、资源冲突、服务不可用、禁止、执行失败、取消/超时和内部错误分层。
 - 目标解析先按大小写不敏感的完整 ID 匹配，再按大小写不敏感的唯一名称匹配；名称匹配不唯一时保留候选 ID 并返回 `ambiguous_target`，禁止静默选择首项。
 - Control API 服务发现只接受 `/api/status` 返回的 `service=NexusPipeline`、`controlApiVersion=1` 和 `1024–65535` 范围内的 `actualPort`；状态、CRUD 与运行轮询使用短请求超时，通知测试和更新检查使用长同步超时。
+- `doctor` 与 `doctor export` 通过同一诊断服务检查宿主权限、监听器、更新/配置恢复现场、执行/调度状态、插件和外部依赖；安装目录写权限项使用受控临时探针并在检查后清理，支持包只写入脱敏后的诊断事实、插件/运行时状态与最近日志尾部。
+- `run script/queue --dry-run` 以及对应的 Control API 只构建当前冻结计划并调用执行状态的共享准入评估，返回用户状态、资源、任务、完成操作和稳定失败码，不登记运行或触发副作用。
 
 轻量模式仍启动 Control API，监听地址固定为 `127.0.0.1`，仅关闭静态 Web UI 与浏览器自动打开。这样命令行自动拉起服务、脚本化调用和本机管理菜单在轻量模式下仍共享同一运行时状态。
 
@@ -222,7 +224,7 @@ MCP 的启动条件和运行语义如下：
 - `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
-MCP 只保留面向 Agent 的核心子集（19 个工具）：只读工具覆盖状态、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+MCP 只保留面向 Agent 的核心子集（22 个工具）：只读工具覆盖状态、诊断、运行计划解释、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
 v0.10.6 对 MCP 控制面采用以下行为契约：
 
@@ -234,6 +236,8 @@ v0.10.6 对 MCP 控制面采用以下行为契约：
 - `list_plugins`、`/api/plugins` 和 `/api/status` 使用共享 `PluginManagementView`，统一表达 schema 2 的 `artifactName`、展示元数据、商店归属和 pending 事务；插件详情通过专用 detail API 提供 README 与完整更新记录。
 - 插件用户全局设置与用户级插件设置的读取和写入由 Web/CLI 提供；MCP 不暴露这些低频细粒度入口。
 - 执行预览端点按插件声明的 `execution-preview-client`、启用状态和前端存在进行准入，宿主继续负责当前运行目标与截图采集。
+- `get_diagnostics` 返回 `DiagnosticsService` 的稳定检查投影；安装目录写权限项使用受控临时探针并在检查后清理，诊断导出只允许 loopback 请求，支持包使用原子输出、大小上限和敏感值 canary。
+- `explain_script_run` / `explain_queue_run` 与 CLI dry-run 使用同一 `ExecutionPlanBuilder` 和 `ExecutionStateStore.EvaluateCandidate`，解释过程不写运行历史、不创建 lease、不执行配置交换或完成操作。
 
 MCP 适配层只接收类型化参数，经过 `McpToolContext` 解析稳定 ID/唯一名称，再进入 Application Commands 和已有核心服务。它不复用 Web handler 或 CLI 路由，也不提供万能 CLI/API/shell 工具。运行类调用立即返回 `runId`，Agent 通过 `get_run` 轮询活动或最近完成的运行；业务错误保留在结构化工具结果内：
 
@@ -258,6 +262,8 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 自动化等待信息通过更新状态 API 和 MCP `get_update_status` 的 additive `automation` 投影提供，包括检查开关、上次/下次自动检查、是否等待闲时和阻止原因。渠道或更新源变化会使发现结果进入 pending invalidation；正在进行或已 Ready 的事务保留给当前人工处理，自动化不会应用已失效的发现结果。
 
 主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。
+
+启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
 ## 4. 配置交换机制
 
@@ -569,7 +575,7 @@ NexusPipeline/
 │   ├── Application/    应用宿主、启动流程、查询、状态与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/HostedRuntimeInitializer/Queries/State/Abstractions/Repositories
 │   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
 │   ├── Models/         领域模型（NexusPipeline.Models）
-│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update 分域）
+│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update/Diagnostics 分域）
 │   ├── Persistence/    持久化层（NexusPipeline.Persistence）
 │   ├── Utilities/      工具层（NexusPipeline.Utilities）
 │   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
@@ -639,6 +645,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `DataStore` | src/Persistence/DataStore.cs | 持久化仓储（scripts/queues JSON 读写） |
 | `DispatchCenter` | src/Services/DispatchCenter.cs | 执行应用端口门面：获取冻结计划、提交准入登记、取消和入口参数编排；不承载后台运行流程 |
 | `ExecutionPlanBuilder` | src/Services/Execution/ExecutionPlanBuilder.cs | 从脚本/队列/用户仓储快照构建脚本与队列执行计划，固定任务引用、用户顺序、资源和完成操作；运行时通过 `IExecutionSnapshotProvider` 获取队列与脚本的原子输入 |
+| `ExecutionExplainService` | src/Services/Execution/ExecutionExplainService.cs | 基于真实冻结计划和共享准入评估生成只读 dry-run 投影；汇总用户限制、资源、任务、警告和稳定失败原因，不创建运行副作用 |
 | `ExecutionValidator` | src/Services/Execution/ExecutionValidator.cs | 脚本/队列存在性、用户门禁、长时混排、进程预检和任务计数校验 |
 | `PluginAvailability` | src/Services/PluginAvailability.cs | 根据插件身份、数据化专项类型和运行态统一判断脚本实例是否仍可使用专项插件 |
 | `ExecutionAdmissionPolicy` | src/Services/Execution/ExecutionAdmissionPolicy.cs | 纯逻辑比较 EmulatorOnly/Standard 矩阵、重复目标、资源冲突、完成操作兼容性和 pending 阻断，并标注瞬时/永久失败 |
@@ -647,7 +654,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ExecutionCoordinator` | src/Services/Execution/ExecutionCoordinator.cs | 一次运行级编排：用户顺序、重试循环、配置事务和运行收尾；后台任务与历史/通知外层边界由 `ExecutionRunner` 承载 |
 | `RunSession` | src/Services/RunSession.cs | 一次运行的状态对象：元数据、预算、日志收集、配置事务状态和回调；不再拥有 `RunAsync` 流程 |
 | `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
-| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、运行组 `Open/Closing/ActionPending/Maintenance` 状态、完成意图与待执行系统操作，并为执行、编辑、宿主配置 CRUD 提供租约协调 |
+| `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、运行组 `Open/Closing/ActionPending/Maintenance` 状态、完成意图与待执行系统操作，并为执行、dry-run、编辑、宿主配置 CRUD 提供租约协调 |
 | `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、并发安全记录/日志写入与一致快照 |
 | `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
@@ -672,6 +679,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.4 DTO 均从此入口发送 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
+| `ApiDiagnosticsHandler` | src/Web/ApiDiagnosticsHandler.cs | 提供只读诊断快照与 loopback 脱敏支持包导出，不承载自动修复 |
 | `WebTransport` | src/Web/WebTransport.cs | Test Host 的普通权限 HTTP 请求解析、响应流和 HttpListener/托管 transport 共用上下文适配 |
 | `HttpHelper` | src/Web/HttpHelper.cs | 通用 HTTP 辅助（写 JSON/404/405/解析请求体） |
 | `ApiXxxHandler` | src/Web/ | 每资源一个 handler，`[ApiRoute("资源名")]` 标注，路由表自动注册；只做协议解析、应用用例调用与 HTTP 响应 |
@@ -680,7 +688,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `McpHost` | src/Mcp/McpHost.cs | 同进程内嵌的 Kestrel Streamable HTTP MCP 宿主；固定 loopback 监听、启动/停止和工具注册；端口冲突不漂移且不影响 Web/Control API |
 | `McpSecurity` | src/Mcp/McpSecurity.cs | MCP Host、Origin 和请求体边界检查；MCP 端点与 Web 远程访问设置隔离 |
 | `McpToolContext` | src/Mcp/McpToolContext.cs | MCP 适配层组合根；提供快照、ID/唯一名称解析、状态/历史/设置投影，调用 Application Commands 或核心服务 |
-| `McpReadOnlyTools` / `McpMutationTools` | src/Mcp/ | 面向 Agent 的核心工具子集（只读 + 常规变更）；删除、密钥、插件安装等高风险操作走本地 CLI |
+| `McpReadOnlyTools` / `McpMutationTools` | src/Mcp/ | 面向 Agent 的核心工具子集（含诊断与运行解释的只读能力 + 常规变更）；删除、密钥、插件安装等高风险操作走本地 CLI |
 | `McpPolicy` / `McpToolResult` | src/Mcp/ | 行为级安全策略（队列完成操作复核）与统一结构化 `ok/errorCode/errorMessage/data` 结果映射 |
 | `ControlApiContract` | src/Application/Contracts/ControlApiContract.cs | Control API 服务名与协议版本身份契约，供服务状态输出与 CLI 握手校验共用 |
 | `CliArguments` / `CliCommandRouter` | src/Cli/ | noun/subcommand 参数解析和正式命令分派 |
@@ -697,6 +705,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
 | `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
 | `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `DiagnosticsService` | src/Services/Diagnostics/DiagnosticsService.cs | 汇总稳定诊断检查，生成脱敏支持包并执行大小与敏感信息边界校验 |
 | `JsonStore` | src/Persistence/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
 | `AppearanceService` | src/Services/AppearanceService.cs | 服务端外观配置、壁纸资产、配色、配额和轮换游标的持久化与权限校验 |
 | `ApiAppearanceHandler` / `ApiAppearanceAssetsHandler` / `ApiAppearanceUploadHandler` | src/Web/ | 外观快照、配置、资产读取/删除/配色和原始上传 API；上传路由受独立体积上限保护 |

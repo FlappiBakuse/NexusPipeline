@@ -17,6 +17,7 @@
 | 队列读取 | `GET /api/queues` | `queue list/get` | `list_queues` |
 | 队列写入 | 队列 CRUD API | `queue create/update/delete` | 由 CLI 承担 |
 | 运行 | 调度中心/Control API | `run script/queue` | `run_script` / `run_queue` |
+| 运行计划解释 | `POST /api/dispatch/explain/script`、`POST /api/dispatch/explain/queue`（只读） | `run script/queue --dry-run` | `explain_script_run` / `explain_queue_run` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
 | 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ...` | `list_history` |
@@ -26,6 +27,7 @@
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
 | 设置读取 | 设置 API | `settings status` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
+| 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`（仅回环） | `doctor`、`doctor export` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
@@ -34,6 +36,8 @@
 ## 行为护栏
 
 - 三端复用 Application Command、核心服务和共享投影；矩阵记录入口差异，不复制领域规则。
+- 运行计划解释复用真实执行的冻结计划构建器与 `ExecutionStateStore` 准入评估，不创建运行登记、资源租约、历史记录、配置交换或系统操作。
+- 系统诊断检查本地运行状态，不自动修复、不改变用户数据、不默认发起网络请求、不读取设置密钥；安装目录写权限检查使用受控临时探针并在检查后清理。支持包限制为 8 MiB，最近日志尾部限制为 2 MiB，并在写入 ZIP 前执行敏感信息 canary。
 - `run_queue` 提交执行前经 `McpPolicy.ValidateQueueExecution` 复核队列快照的完成操作，任何非 `none` 动作返回 `dangerous_completion_action`。
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
 - 通知截图开关按渠道全局生效；脚本通知可携带所选运行截图，队列汇总通知不附图；Webhook 协议能力存在差异时由发送器记录兼容性警告。

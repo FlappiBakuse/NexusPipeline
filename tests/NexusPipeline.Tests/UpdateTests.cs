@@ -1072,6 +1072,46 @@ public sealed class UpdateApplyFinalizationTests
     }
 
     [Fact]
+    public void Finalization_ExecutableBackupRequestsRecoveryWorker()
+    {
+        try
+        {
+            string backupWww = Path.Combine(AppPaths.UpdateBackupDir, "wwwroot");
+            Directory.CreateDirectory(backupWww);
+            File.WriteAllText(Path.Combine(backupWww, "marker.txt"), "old");
+            File.WriteAllText(Path.Combine(AppPaths.UpdateBackupDir, "nexus-pipeline.exe"), "old-exe");
+            string staging = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
+            Directory.CreateDirectory(staging);
+            WriteTask("apply", "0.10.1", staging);
+
+            bool launched = false;
+            UpdateApply.LaunchRecoveryOverride = () =>
+            {
+                launched = true;
+                return true;
+            };
+            try
+            {
+                bool exit = UpdateApply.RunStartupFinalization();
+
+                Assert.True(exit);
+                Assert.True(launched);
+                Assert.True(File.Exists(AppPaths.UpdateTaskFile));
+            }
+            finally
+            {
+                UpdateApply.LaunchRecoveryOverride = null;
+            }
+        }
+        finally
+        {
+            UpdateTask.Clear();
+            DeleteExact(AppPaths.UpdateDir);
+            DeleteExact(AppPaths.UpdateBackupDir);
+        }
+    }
+
+    [Fact]
     public void Finalization_RollbackLeavesPluginDirectoryUntouched()
     {
         try
