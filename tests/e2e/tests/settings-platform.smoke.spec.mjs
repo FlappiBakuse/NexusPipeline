@@ -37,15 +37,16 @@ test("远程访问开关：切换后同步 API 状态", async ({ page }) => {
   await page.goto(baseUrl + "#/settings", { waitUntil: "domcontentloaded" });
   await page.locator('[data-action="toggle-settings-panel"][data-panel="remote-mcp"]').click();
   const toggle = page.locator("#st-remote");
+  const settingsSaveTimeout = process.env.NEXUS_TIME_SCALE ? 45000 : 10000;
   await expect(toggle).toBeVisible();
   const original = (await toggle.getAttribute("aria-pressed")) === "true";
   const next = !original;
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", String(next));
-  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: 10000 }).toBe(next);
+  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: settingsSaveTimeout }).toBe(next);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", String(original));
-  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: 10000 }).toBe(original);
+  await expect.poll(async () => (await (await api("GET", "/api/settings")).json()).settings.allowRemoteAccess, { timeout: settingsSaveTimeout }).toBe(original);
 });
 
 test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page }) => {
