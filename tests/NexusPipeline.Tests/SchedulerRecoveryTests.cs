@@ -57,6 +57,13 @@ public sealed class SchedulerRecoveryTests
             firstScheduler.TickForTest();
             await EventuallyAsync(() => firstCommands.Attempts >= 1);
             Assert.Equal(1, firstCommands.Attempts);
+            await EventuallyAsync(() =>
+            {
+                PersistedScheduledOccurrence[] occurrences = stateStore.Load().Occurrences.ToArray();
+                return occurrences.Length == 1
+                    && occurrences[0].Status == "Waiting"
+                    && occurrences[0].NextAttemptAt > DateTime.Now;
+            });
         }
 
         var secondCommands = new AlwaysTransientExecutionService();
