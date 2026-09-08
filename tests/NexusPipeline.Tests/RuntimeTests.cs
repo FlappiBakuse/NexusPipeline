@@ -102,6 +102,17 @@ public sealed class RuntimeTests
         Assert.False(identity.Matches(new ProcessIdentity(100, start, "other.exe")));
     }
 
+    [Theory]
+    [InlineData("a1b2c3d4", true)]
+    [InlineData("A1-b2_C3d4", true)]
+    [InlineData("short", false)]
+    [InlineData("contains space", false)]
+    [InlineData("contains.dot", false)]
+    public void RequesterWindowToken_UsesStableSafeShape(string token, bool expected)
+    {
+        Assert.Equal(expected, SystemActions.IsRequesterWindowTokenValid(token));
+    }
+
     private static async Task EventuallyAsync(Func<bool> condition)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(2);

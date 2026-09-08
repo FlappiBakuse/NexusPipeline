@@ -37,6 +37,7 @@ internal static class ConfigEditHttpAdapter
         var parsed = HttpHelper.ParseBody(body);
         string action = parsed.Get("action").Str();
         string mode = parsed.Get("mode").Str();
+        string requesterWindowToken = parsed.Get("requesterWindowToken").Str().Trim();
         string inputName = parsed.Get("configInputName").Str().Trim();
         string inputValue = parsed.Get("configInputValue").Str();
         IReadOnlyDictionary<string, string>? inputOverrides = null;
@@ -56,7 +57,8 @@ internal static class ConfigEditHttpAdapter
                     scriptId,
                     userReference,
                     mode,
-                    inputOverrides: inputOverrides);
+                    inputOverrides: inputOverrides,
+                    requesterWindowToken: requesterWindowToken);
             if (!result.Succeeded)
             {
                 await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);

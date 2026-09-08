@@ -29,7 +29,8 @@ internal static class ConfigEditCommands
         string userReference,
         string mode = "normal",
         string source = Audit.Web,
-        IReadOnlyDictionary<string, string>? inputOverrides = null)
+        IReadOnlyDictionary<string, string>? inputOverrides = null,
+        string? requesterWindowToken = null)
     {
         OperationResult<ConfigEditTarget> targetResult = ResolveTarget(ctx, scriptId, userReference);
         if (!targetResult.Succeeded)
@@ -193,6 +194,9 @@ internal static class ConfigEditCommands
                 pendingInput);
         }
 
+        // Web UI 在请求期间临时把 token 放入浏览器标题；只捕获匹配 token 的本机顶层窗口，
+        // 找不到时编辑流程继续按普通配置编辑执行。
+        SystemActions.RequesterWindowIdentity? requesterWindow = SystemActions.CaptureRequesterWindow(requesterWindowToken);
         SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
         bool gateBusy = false;
@@ -375,20 +379,23 @@ internal static class ConfigEditCommands
                 Process = process,
                 ProcessIdentity = startedIdentity,
                 ProcessOwnership = sessionOwnership,
-                ForegroundCancellation = startedIdentity is null ? null : new CancellationTokenSource(),
+                WindowPlacementCancellation = requesterWindow is null || startedIdentity is null
+                    ? null
+                    : new CancellationTokenSource(),
                 Mark = editMark,
                 Spec = target.Spec,
             };
             pendingSession = session;
-            if (startedIdentity is not null && session.ForegroundCancellation is not null)
+            if (requesterWindow is not null
+                && startedIdentity is not null
+                && session.WindowPlacementCancellation is not null)
             {
-                // 先创建并持有前置任务，再把会话公开给 Complete；避免极短编辑窗口在任务赋值前完成收尾。
-                session.ForegroundTask = SystemActions.BringToFrontAsync(
+                // 先创建并持有窗口后置任务，再把会话公开给 Complete；避免极短编辑窗口在任务赋值前完成收尾。
+                session.WindowPlacementTask = SystemActions.LowerRequesterWindowAsync(
+                    requesterWindow.Value,
                     startedIdentity.Value,
-                    "编辑配置",
-                    session.ForegroundCancellation.Token,
-                    stopAfterFirstAttempt: true);
-                EventHandler processExited = (_, _) => session.CancelForeground();
+                    session.WindowPlacementCancellation.Token);
+                EventHandler processExited = (_, _) => session.CancelWindowPlacement();
                 session.ProcessExitedHandler = processExited;
                 try
                 {
@@ -396,12 +403,12 @@ internal static class ConfigEditCommands
                     process.EnableRaisingEvents = true;
                     if (process.HasExited)
                     {
-                        session.CancelForeground();
+                        session.CancelWindowPlacement();
                     }
                 }
                 catch (Exception ex)
                 {
-                    Logger.Debug($"[配置编辑] 注册进程退出通知失败，将由身份轮询结束前置任务：{ex.Message}");
+                    Logger.Debug($"[配置编辑] 注册进程退出通知失败，将由身份轮询结束窗口后置任务：{ex.Message}");
                 }
             }
             UserConfigManager.EditSessions[target.Script.Id] = session;
@@ -422,7 +429,7 @@ internal static class ConfigEditCommands
                             target.Script.Id,
                             out EditSession? registered))
                     {
-                        registered.CancelForeground();
+                        registered.CancelWindowPlacement();
                         if (registered.Process is not null)
                         {
                             SystemActions.KillEditProcess(
@@ -447,7 +454,7 @@ internal static class ConfigEditCommands
                     }
                     else if (startedProcess is not null)
                     {
-                        pendingSession?.CancelForeground();
+                        pendingSession?.CancelWindowPlacement();
                         SystemActions.KillEditProcess(
                             startedOwnership,
                             startedIdentity,
@@ -556,7 +563,7 @@ internal static class ConfigEditCommands
                     "配置文件不存在（可能已在目标软件中被改名或删除）。可在目标软件中恢复原文件名后重试保存，或取消本次编辑，再在脚本实例中更新配置名设置");
             }
 
-            session.CancelForeground();
+            session.CancelWindowPlacement();
             string launchExe = ResolveLaunchTargetExe(session.Script);
             Stopwatch cleanupTimer = Stopwatch.StartNew();
             bool processClean = session.Process is not null

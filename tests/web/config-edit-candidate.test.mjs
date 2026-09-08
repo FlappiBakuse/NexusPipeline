@@ -16,4 +16,12 @@ test("配置候选选择通过编辑会话临时覆盖传递", () => {
       configInputValue: "profiles/user.json",
     },
   );
+  assert.deepEqual(
+    buildConfigEditRequest("normal", null, "a1b2c3d4e5f6"),
+    {
+      action: "start",
+      mode: "normal",
+      requesterWindowToken: "a1b2c3d4e5f6",
+    },
+  );
 });

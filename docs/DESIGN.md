@@ -318,7 +318,7 @@ flowchart LR
 
 数据化专项插件可声明 `configEdit` 与 `configEditor`。编辑器脚本在目标软件启动前执行，读取 `nexus.input.mode`、`configInputName`、`configInputValue` 和附加工作副本；主配置根保持受限只读，脚本异常或超时会使准备失败并触发回滚。
 
-编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份；窗口前置轮询同时校验该身份、目标窗口归属和编辑会话取消令牌。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消轮询，目标进程退出后不会继续争用前台窗口。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
+编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份。Web UI 启动编辑请求时临时在浏览器标题加入随机 token，宿主捕获包含该 token 的本机顶层窗口及其所有者身份；编辑程序出现首个可见 GUI 窗口后，宿主再次校验浏览器 HWND、所有者 PID、StartTimeUtc 和映像身份，并用 `SetWindowPos(HWND_BOTTOM)` 后置该浏览器窗口。窗口 token 缺失、身份变化或系统调用失败时，编辑流程继续执行。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消窗口后置任务并等待其结束；该行为不改变运行阶段的游戏窗口前置能力。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
 
 配置路径的准备步骤按声明顺序执行；任一路径失败时，宿主逆序还原本次已准备路径并阻断运行，避免主配置在附加配置不完整时启动。运行前写入的会话标记同时覆盖主配置与附加配置现场。
 
@@ -407,11 +407,12 @@ LogMonitor 持有文件句柄（`FileShare.ReadWrite | FileShare.Delete`）按 p
 | 文件形态 | 场景 | 检测机制 | 处理 |
 |---|---|---|---|
 | 追加 | 脚本持续写入 | 正常 ReadNew | 增量读取 |
-| 截断 | `type nul > log.txt` / 脚本自清空 | `_stream.Length < _position` | 部分截断（缩短未归零）从新文件尾续读，避免已读旧行重复进入判定；长度归零从头重读 |
+| 截断 | `type nul > log.txt` / 脚本自清空 / 截断后立即追加 | 同一文件身份的已观察内容 checkpoint 与当前文件公共前缀 | 以公共前缀定位截断边界，从边界读取新段；公共前缀之前的尝试前旧日志不进入判定 |
 | **替换** | move 归档后重建 / 删除重建 | `FileReplaced`：`GetFileInformationByHandle` 对比**卷序列号+文件索引（FileId）**；FileId 不可用时回退创建时间 | 重开文件从头读 |
 
 - **为什么不用创建时间（FileStamp）单独检测替换**：move+重建后新文件的 CreationTime 可能与旧文件相同，单独依赖它会让监控句柄继续指向已改名的旧文件。FileId 能区分同路径下的不同文件；能力不可用时再回退创建时间。
 - **忽略运行前已有内容**：尝试开始前记录日志文件快照（存在性 + 长度）；不存在的文件从头读，已有残留从尝试开始时长度续读，残留内容不进入判定输入与运行日志。
+- **截断边界 checkpoint**：监控器保留上一次已观察的文件内容；同一文件发生长度变化或同长度重写时计算公共前缀，再从首个差异字节读取。物理内容完全相同的重放无法从文件状态区分，其他可观察的新业务字节不会被当前文件尾位置吞掉。
 - **监控循环检测顺序**：路径变化（轮换）→ FileId 替换 → 截断 → 读新增。
 
 ### 6.3 超时语义
@@ -654,7 +655,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时、截图 API 和 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
 | `RunScreenshotStore` / `RecentScreenshotCache` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Execution/RecentScreenshotCache.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、PC 最近有效帧缓存、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
-| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断/替换三形态；替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断后追加/同长度重写/替换四种形态；以已观察内容 checkpoint 定位截断边界，替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话（normal/fresh/reuse）与隐藏配置管理 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |

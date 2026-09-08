@@ -364,9 +364,33 @@ function openFirstEditConfigChooser(userId, scriptId) {
   showModal(modalShell("首次编辑配置", body, footer), false, true, true);
 }
 
+function createRequesterWindowToken() {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    const bytes = new Uint8Array(8);
+    cryptoApi.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(36).slice(2, 18).padEnd(16, "0");
+}
+
+function waitForRequesterTitlePaint() {
+  return new Promise(resolve => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
 async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
+  const requesterWindowToken = createRequesterWindowToken();
+  const previousTitle = document.title;
+  document.title = "NexusPipeline 枢链 · " + requesterWindowToken;
   try {
-    const request = buildConfigEditRequest(mode, inputOverride);
+    await waitForRequesterTitlePaint();
+    const request = buildConfigEditRequest(mode, inputOverride, requesterWindowToken);
     await api("POST", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId) + "/edit-config", request);
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
@@ -379,6 +403,8 @@ async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
       return;
     }
     throw error;
+  } finally {
+    document.title = previousTitle;
   }
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);

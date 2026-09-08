@@ -47,6 +47,12 @@ internal class LogMonitor : IDisposable
 
     private bool _reopenScheduled;
 
+    // 保存上一次已观察到的完整文件内容，用于在同一文件发生截断并重新增长时定位真实边界。
+    // 日志输入本身在判断脚本侧已有容量限制；这里的 checkpoint 只服务当前 Attempt 的增量读取协议。
+    private byte[] _checkpoint = Array.Empty<byte>();
+
+    private bool _checkpointReady;
+
     private uint _volSerial;
 
     private uint _fileIndexHigh;
@@ -144,6 +150,11 @@ internal class LogMonitor : IDisposable
 
     public string ReadNew()
     {
+        if (_reopenScheduled)
+        {
+            Open(resumeCommittedOffset: true);
+            _reopenScheduled = false;
+        }
         if (_stream is null)
         {
             Open();
@@ -152,28 +163,26 @@ internal class LogMonitor : IDisposable
                 return "";
             }
         }
-        if (_reopenScheduled)
+        try
         {
-            Open(resumeCommittedOffset: true);
-            _reopenScheduled = false;
-            if (_stream is null)
+            byte[] current = ReadCurrentBytes();
+            ReadOnlySpan<byte> previous = _checkpointReady ? _checkpoint : ReadOnlySpan<byte>.Empty;
+            if (_checkpointReady && current.AsSpan().SequenceEqual(previous))
             {
                 return "";
             }
-        }
-        try
-        {
-            if (_stream.Length < _position)
-            {
-                // （P8）：部分截断（缩短但未归零，如脚本循环 > 重定向）时从新文件尾续读——此前归零从头读
-                // 会把截断点之前的已读旧行重新输出（判定输入重复污染）；长度归零（Length=0）时仍从头读（契约不变）。
-                _position = Math.Max(0, _stream.Length);
-            }
-            _stream.Seek(_position, SeekOrigin.Begin);
-            using var reader = new StreamReader(_stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true, bufferSize: 4096, leaveOpen: true);
-            string content = reader.ReadToEnd();
-            _position = _stream.Position;
+
+            int commonPrefix = CommonPrefixLength(previous, current);
+            int start = !_checkpointReady
+                ? 0
+                : commonPrefix == previous.Length && current.Length >= previous.Length
+                    ? checked((int)Math.Min(_position, current.Length))
+                    : commonPrefix;
+            string content = DecodeUtf8(current, start);
+            _position = current.Length;
             _lastCommittedOffset = _position;
+            _checkpoint = current;
+            _checkpointReady = true;
             if (content.Length > 0)
             {
                 LastWrite = DateTime.Now;
@@ -236,11 +245,68 @@ internal class LogMonitor : IDisposable
             if (!resumeCommittedOffset || replacementDuringReopen)
             {
                 _lastCommittedOffset = _position;
+                if (_readFromStart || replacementDuringReopen)
+                {
+                    _checkpoint = Array.Empty<byte>();
+                    _checkpointReady = false;
+                }
+                else
+                {
+                    _checkpoint = ReadCurrentBytes();
+                    _checkpointReady = true;
+                }
             }
         }
         catch (Exception)
         {
         }
+    }
+
+    private byte[] ReadCurrentBytes()
+    {
+        if (_stream is null)
+        {
+            return Array.Empty<byte>();
+        }
+        long originalPosition = _stream.Position;
+        try
+        {
+            _stream.Seek(0, SeekOrigin.Begin);
+            using var snapshot = new MemoryStream();
+            _stream.CopyTo(snapshot);
+            return snapshot.ToArray();
+        }
+        finally
+        {
+            _stream.Seek(Math.Min(originalPosition, _stream.Length), SeekOrigin.Begin);
+        }
+    }
+
+    private static int CommonPrefixLength(ReadOnlySpan<byte> previous, ReadOnlySpan<byte> current)
+    {
+        int length = Math.Min(previous.Length, current.Length);
+        int index = 0;
+        while (index < length && previous[index] == current[index])
+        {
+            index++;
+        }
+        return index;
+    }
+
+    private static string DecodeUtf8(byte[] bytes, int start)
+    {
+        if (start >= bytes.Length)
+        {
+            return "";
+        }
+        using var stream = new MemoryStream(bytes, start, bytes.Length - start, writable: false, publiclyVisible: true);
+        using var reader = new StreamReader(
+            stream,
+            Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: start == 0,
+            bufferSize: 4096,
+            leaveOpen: false);
+        return reader.ReadToEnd();
     }
 
     private static (uint Vol, uint Hi, uint Lo, bool Ok) QueryFileId(SafeFileHandle handle)
@@ -262,6 +328,8 @@ internal class LogMonitor : IDisposable
     {
         _stream?.Dispose();
         _stream = null;
+        _checkpoint = Array.Empty<byte>();
+        _checkpointReady = false;
     }
 }
 

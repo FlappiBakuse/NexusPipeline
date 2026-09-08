@@ -1187,6 +1187,144 @@ internal static class SystemActions
         }
     }
 
+    internal readonly record struct RequesterWindowIdentity(IntPtr Handle, ProcessIdentity OwnerIdentity);
+
+    /// <summary>校验 Web UI 用于临时标记浏览器标题的短 token；非法输入不参与窗口枚举。</summary>
+    internal static bool IsRequesterWindowTokenValid(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token) || token.Length is < 8 or > 64)
+        {
+            return false;
+        }
+        return token.All(character =>
+            character is >= 'a' and <= 'z'
+                or >= 'A' and <= 'Z'
+                or >= '0' and <= '9'
+                or '-'
+                or '_');
+    }
+
+    /// <summary>
+    /// 捕获标题包含 Web UI token 的本机顶层窗口及其完整进程身份。窗口不存在时返回 null，调用方继续普通编辑流程。
+    /// </summary>
+    internal static RequesterWindowIdentity? CaptureRequesterWindow(string? token)
+    {
+        if (!IsRequesterWindowTokenValid(token))
+        {
+            return null;
+        }
+
+        RequesterWindowIdentity? found = null;
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindow(hWnd) || !IsWindowVisible(hWnd))
+            {
+                return true;
+            }
+            var title = new StringBuilder(1024);
+            int length = GetWindowText(hWnd, title, title.Capacity);
+            if (length <= 0
+                || title.ToString().IndexOf(token!, StringComparison.Ordinal) < 0)
+            {
+                return true;
+            }
+
+            GetWindowThreadProcessId(hWnd, out uint processId);
+            ProcessIdentity? identity = CaptureProcessIdentity((int)processId);
+            if (identity is not null)
+            {
+                found = new RequesterWindowIdentity(hWnd, identity.Value);
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    /// <summary>
+    /// 等待编辑程序出现第一个可见 GUI 窗口，仅以此决定操作时机；随后校验浏览器窗口身份并将其后置。
+    /// 该路径不调用任何前台激活 API，失败时按辅助窗口动作失败处理。
+    /// </summary>
+    internal static Task<bool> LowerRequesterWindowAsync(
+        RequesterWindowIdentity requester,
+        ProcessIdentity startedIdentity,
+        CancellationToken cancellationToken)
+    {
+        return Task.Run(() =>
+        {
+            try
+            {
+                DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+                while (DateTime.UtcNow < deadline)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!IsIdentityRunning(startedIdentity))
+                    {
+                        return false;
+                    }
+
+                    if (FindFrontWindow(startedIdentity) is not null)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!IsRequesterWindowOwnedByIdentity(requester))
+                        {
+                            Logger.Debug("[配置编辑] 请求浏览器窗口已失效或进程身份变化，跳过后置窗口操作。");
+                            return false;
+                        }
+
+                        bool lowered = SetWindowPos(
+                            requester.Handle,
+                            HWND_BOTTOM,
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOSENDCHANGING);
+                        if (lowered)
+                        {
+                            Logger.Debug($"[配置编辑] 已将请求浏览器窗口后置（句柄 {requester.Handle}，PID {requester.OwnerIdentity.Pid}）。");
+                        }
+                        else
+                        {
+                            Logger.Debug($"[配置编辑] 请求浏览器窗口后置失败（句柄 {requester.Handle}，错误码 {Marshal.GetLastWin32Error()}）。");
+                        }
+                        return lowered;
+                    }
+
+                    if (cancellationToken.WaitHandle.WaitOne(250))
+                    {
+                        return false;
+                    }
+                }
+                Logger.Debug($"[配置编辑] 等待编辑程序 GUI 窗口超时，跳过请求浏览器窗口后置（PID {startedIdentity.Pid}）。");
+                return false;
+            }
+            catch (OperationCanceledException)
+            {
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[配置编辑] 请求浏览器窗口后置失败：{ex.Message}");
+                return false;
+            }
+        }, cancellationToken);
+    }
+
+    private static bool IsRequesterWindowOwnedByIdentity(RequesterWindowIdentity requester)
+    {
+        if (requester.Handle == IntPtr.Zero || !IsWindow(requester.Handle))
+        {
+            return false;
+        }
+        GetWindowThreadProcessId(requester.Handle, out uint ownerPid);
+        if (ownerPid != (uint)requester.OwnerIdentity.Pid)
+        {
+            return false;
+        }
+        return IsIdentityRunning(requester.OwnerIdentity);
+    }
+
     /// <summary>后台前置进程窗口；先捕获完整进程身份，避免 PID 复用后触碰其他窗口。</summary>
     public static void BringToFrontFireAndForget(int pid, string what)
     {
@@ -1214,8 +1352,7 @@ internal static class SystemActions
     public static Task<bool> BringToFrontAsync(
         ProcessIdentity identity,
         string what,
-        CancellationToken cancellationToken,
-        bool stopAfterFirstAttempt = false)
+        CancellationToken cancellationToken)
     {
         return Task.Run(() =>
         {
@@ -1224,8 +1361,7 @@ internal static class SystemActions
                 return BringToFront(
                     identity,
                     timeoutSeconds: 30,
-                    cancellationToken: cancellationToken,
-                    stopAfterFirstAttempt: stopAfterFirstAttempt);
+                    cancellationToken: cancellationToken);
             }
             catch (OperationCanceledException)
             {
@@ -1266,8 +1402,8 @@ internal static class SystemActions
     /// 将指定进程的 GUI 窗口前置（强化）：轮询本次启动进程树的顶层可见窗口（跳过 ConsoleWindowClass），
     /// 找到后组合前置——还原最小化 + AttachThreadInput 模拟前台线程输入（绕过 Windows 前台锁定，
     /// 后台常驻服务进程直接 SetForegroundWindow 几乎必然失败）+ BringWindowToTop 置顶 Z 序 + SetForegroundWindow 激活；
-    /// 编辑配置会话可要求首次尝试后立即停止，运行中的游戏窗口保持可重试。
-    /// 用于游戏窗口/编辑配置主程序启动后避免被浏览器等前台窗口遮挡（如 BetterGI 截图识别游戏画面需要窗口在最前）。
+    /// 运行中的游戏窗口保持可重试；配置编辑会话使用独立的浏览器窗口后置路径。
+    /// 用于游戏窗口启动后避免被其他前台窗口遮挡（如 BetterGI 截图识别游戏画面需要窗口在最前）。
     /// 找不到可见 GUI 窗口（bat/cmd 无窗口、进程无窗口）静默放弃；超时仍失败输出 Warn 日志（可观测）。
     /// </summary>
     public static bool BringToFront(int pid, int timeoutSeconds = 30)
@@ -1292,8 +1428,7 @@ internal static class SystemActions
     public static bool BringToFront(
         ProcessIdentity identity,
         int timeoutSeconds = 30,
-        CancellationToken cancellationToken = default,
-        bool stopAfterFirstAttempt = false)
+        CancellationToken cancellationToken = default)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(Math.Max(0, timeoutSeconds));
         while (DateTime.UtcNow < deadline)
@@ -1308,7 +1443,6 @@ internal static class SystemActions
             FrontWindowCandidate? candidate = FindFrontWindow(identity);
             if (candidate is not null)
             {
-                // 编辑配置要求首次发现目标后只执行这一轮；运行时调用方仍可在失败时重新观察。
                 IntPtr targetWindow = candidate.Value.Handle;
                 ProcessIdentity targetIdentity = candidate.Value.Identity;
                 if (!IsWindowOwnedByIdentity(targetWindow, identity, targetIdentity))
@@ -1328,11 +1462,6 @@ internal static class SystemActions
                     return true;
                 }
 
-                if (stopAfterFirstAttempt)
-                {
-                    Logger.Debug($"[前置] 首次前置尝试未确认成功，停止继续轮询（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
-                    return false;
-                }
                 Logger.Debug($"[前置] 前置尝试未确认成功，继续等待目标进程窗口（根 PID {identity.Pid}，窗口 PID {targetIdentity.Pid}，句柄 {targetWindow}）。");
             }
 
@@ -1547,6 +1676,18 @@ internal static class SystemActions
 
     private const int SW_SHOW = 5;
 
+    private static readonly IntPtr HWND_BOTTOM = new(1);
+
+    private const uint SWP_NOSIZE = 0x0001;
+
+    private const uint SWP_NOMOVE = 0x0002;
+
+    private const uint SWP_NOACTIVATE = 0x0010;
+
+    private const uint SWP_NOOWNERZORDER = 0x0200;
+
+    private const uint SWP_NOSENDCHANGING = 0x0400;
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -1563,6 +1704,9 @@ internal static class SystemActions
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
@@ -1584,6 +1728,16 @@ internal static class SystemActions
 
     [DllImport("user32.dll")]
     private static extern IntPtr SetActiveWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
 
     internal static IntPtr FindVisibleWindow(int pid)
     {

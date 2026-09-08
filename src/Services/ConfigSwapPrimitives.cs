@@ -75,7 +75,9 @@ internal static class ScriptConfigGate
 /// </summary>
 internal static class ConfigSwapPrimitives
 {
-    private static readonly ConcurrentDictionary<string, Mutex> Mutexes = new();
+    private static readonly object MutexesGate = new();
+
+    private static readonly Dictionary<string, MutexEntry> Mutexes = new(StringComparer.Ordinal);
 
     private const int RetryCount = 3;
 
@@ -83,89 +85,136 @@ internal static class ConfigSwapPrimitives
 
     /* ---------------- 跨进程互斥 ---------------- */
 
-    private static Mutex OpenMutex(string scriptId)
+    private sealed class MutexEntry
     {
-        return Mutexes.GetOrAdd(scriptId, id => new Mutex(false, "NexusPipeline.ConfigSwap." + id));
+        public MutexEntry(Mutex mutex)
+        {
+            Mutex = mutex;
+        }
+
+        public Mutex Mutex { get; }
+
+        public int References { get; set; }
+
+        public bool Retired { get; set; }
+
+        public bool Disposed { get; set; }
     }
 
-    /// <summary>脚本删除时清理跨进程互斥体：内核句柄不随进程生命周期释放，删除脚本时移除条目。</summary>
-    public static void RemoveMutex(string scriptId)
+    private static MutexEntry RentMutex(string scriptId)
     {
-        if (Mutexes.TryRemove(scriptId, out Mutex? mutex))
+        lock (MutexesGate)
         {
-            try
+            if (!Mutexes.TryGetValue(scriptId, out MutexEntry? entry) || entry.Retired)
             {
-                mutex.Dispose();
+                entry = new MutexEntry(new Mutex(false, "NexusPipeline.ConfigSwap." + scriptId));
+                Mutexes[scriptId] = entry;
             }
-            catch
+            entry.References++;
+            return entry;
+        }
+    }
+
+    private static void ReturnMutex(MutexEntry entry)
+    {
+        Mutex? dispose = null;
+        lock (MutexesGate)
+        {
+            entry.References--;
+            if (entry.References == 0 && entry.Retired && !entry.Disposed)
             {
+                entry.Disposed = true;
+                dispose = entry.Mutex;
             }
         }
+        dispose?.Dispose();
+    }
+
+    /// <summary>脚本删除时退役跨进程互斥体；所有正在等待或持有的引用结束后才释放内核句柄。</summary>
+    public static void RemoveMutex(string scriptId)
+    {
+        Mutex? dispose = null;
+        lock (MutexesGate)
+        {
+            if (!Mutexes.Remove(scriptId, out MutexEntry? entry))
+            {
+                return;
+            }
+
+            entry.Retired = true;
+            if (entry.References == 0)
+            {
+                entry.Disposed = true;
+                dispose = entry.Mutex;
+            }
+        }
+        dispose?.Dispose();
     }
 
     /// <summary>交换锁空闲探测（B3，维护工具守卫）：立即尝试获取互斥体，成功 = 空闲并即时释放。</summary>
     public static bool TryProbeSwapLock(string scriptId)
     {
-        Mutex mutex = OpenMutex(scriptId);
-        bool acquired;
+        MutexEntry entry = RentMutex(scriptId);
+        bool acquired = false;
         try
-        {
-            acquired = mutex.WaitOne(0);
-        }
-        catch (AbandonedMutexException)
-        {
-            acquired = true;
-        }
-        catch (ObjectDisposedException)
-        {
-            return true;
-        }
-        if (acquired)
         {
             try
             {
-                mutex.ReleaseMutex();
-            }
-            catch
-            {
-            }
-            return true;
-        }
-        return false;
-    }
-
-    public static void WithSwapLock(string scriptId, Action action)
-    {
-        Mutex mutex = OpenMutex(scriptId);
-        bool acquired;
-        try
-        {
-            acquired = mutex.WaitOne(TimeSpan.FromSeconds(30));
-        }
-        catch (AbandonedMutexException)
-        {
-            acquired = true;
-        }
-        catch (ObjectDisposedException)
-        {
-            // 删除脚本（RemoveMutex）与配置交换并发时互斥体被 Dispose，WaitOne 抛
-            // ObjectDisposedException——移除条目重取一次（条目已删除则重建新互斥体；极端并发下可能误删
-            // 重建条目，下一次 WaitOne 仍可恢复，不影响正确性）。
-            Mutexes.TryRemove(scriptId, out _);
-            mutex = OpenMutex(scriptId);
-            try
-            {
-                acquired = mutex.WaitOne(TimeSpan.FromSeconds(30));
+                acquired = entry.Mutex.WaitOne(0);
             }
             catch (AbandonedMutexException)
             {
                 acquired = true;
             }
         }
+        finally
+        {
+            if (acquired)
+            {
+                try
+                {
+                    entry.Mutex.ReleaseMutex();
+                }
+                finally
+                {
+                    ReturnMutex(entry);
+                }
+            }
+            else
+            {
+                ReturnMutex(entry);
+            }
+        }
+        return acquired;
+    }
+
+    public static void WithSwapLock(string scriptId, Action action)
+    {
+        MutexEntry entry = RentMutex(scriptId);
+        bool acquired = false;
+        try
+        {
+            try
+            {
+                acquired = entry.Mutex.WaitOne(TimeSpan.FromSeconds(30));
+            }
+            catch (AbandonedMutexException)
+            {
+                acquired = true;
+            }
+        }
+        catch
+        {
+            ReturnMutex(entry);
+            throw;
+        }
+
         if (!acquired)
         {
+            ReturnMutex(entry);
             throw new IOException($"等待配置交换锁超时（脚本 {scriptId}）");
         }
+
         try
         {
             action();
@@ -174,10 +223,11 @@ internal static class ConfigSwapPrimitives
         {
             try
             {
-                mutex.ReleaseMutex();
+                entry.Mutex.ReleaseMutex();
             }
-            catch
+            finally
             {
+                ReturnMutex(entry);
             }
         }
     }
