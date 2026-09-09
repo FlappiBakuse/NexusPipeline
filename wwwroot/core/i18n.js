@@ -53,7 +53,12 @@ function readStoredLocale() {
 }
 
 function detectLocale() {
-  const candidates = Array.isArray(navigator.languages) ? navigator.languages : [navigator.language];
+  const browserLanguages = typeof navigator !== "undefined" && Array.isArray(navigator.languages)
+    ? navigator.languages
+    : typeof navigator !== "undefined" && navigator.language
+      ? [navigator.language]
+      : [];
+  const candidates = browserLanguages;
   for (const candidate of candidates) {
     const raw = String(candidate || "").trim();
     if (!raw) continue;
