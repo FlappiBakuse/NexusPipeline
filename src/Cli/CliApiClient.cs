@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Localization;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Cli;
@@ -46,7 +47,7 @@ internal sealed class CliApiClient
 
         try
         {
-            using HttpResponseMessage response = CliTransport.Send(Port.Value, method, path, body);
+            using HttpResponseMessage response = CliTransport.Send(Port.Value, method, path, body, LocaleContext.Current);
             string raw = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
             JsonNode? node = Parse(raw);
             if (response.IsSuccessStatusCode)

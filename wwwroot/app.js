@@ -15,6 +15,7 @@ import { actions as settingsActions, pageSettings } from "./views/settings.js";
 import { initAppearance } from "./core/appearance.js";
 import { initPluginRuntime, notifyPluginDispose, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, resolvePluginAction, resolvePluginRoute, syncPluginNavActive } from "./core/plugin-runtime.js";
 import { pickPath } from "./core/path-picker.js";
+import { getLocale, loadLocale, t } from "./core/i18n.js";
 
 const shellActions = {
   "open-nav": () => setNavOpen(true),
@@ -130,6 +131,7 @@ window.addEventListener("resize", () => {
   if (window.innerWidth > 820) setNavOpen(false);
 });
 window.addEventListener("DOMContentLoaded", async () => {
+  await loadLocale();
   initTheme();
   if (!(await ensureAccessToken())) return;
   await initAppearance();
@@ -146,12 +148,14 @@ async function updateLocalAddr() {
   const el = document.getElementById("local-addr");
   if (!el) return;
   try {
-    const res = await fetch("/api/status", { cache: "no-store" });
+    const res = await fetch("/api/status", { cache: "no-store", headers: { "X-Nexus-Locale": getLocale() } });
     const data = await res.json();
     const port = data.actualPort || data.webPort || "";
-    el.textContent = port ? `服务 · ${location.hostname}:${port}` : "服务";
+    el.textContent = port
+      ? t("service.with_host", { host: location.hostname, port }, `服务 · ${location.hostname}:${port}`)
+      : t("service.label", {}, "服务");
   } catch {
-    el.textContent = "服务";
+    el.textContent = t("service.label", {}, "服务");
   }
 }
 
@@ -170,7 +174,7 @@ async function ensureAccessToken() {
     const timer = setTimeout(() => controller.abort(), 10000);
     let res;
     try {
-      res = await fetch("/api/status", { signal: controller.signal });
+      res = await fetch("/api/status", { signal: controller.signal, headers: { "X-Nexus-Locale": getLocale() } });
     } finally {
       clearTimeout(timer);
     }
@@ -193,9 +197,9 @@ function showTokenPrompt() {
   if (document.querySelector("#token-input")) return;
   // （P12）：复用 modal 组件（role=dialog/aria-modal/aria-labelledby/焦点陷阱，locked 锁定不可 Esc/遮罩关闭），
   // 移除内联 style 与硬编码色值（此前 token-mask 自绘遮罩违反前端自约束）。
-  showModal(modalShell("需要访问令牌",
-    `<form id="token-form"><p class="modal-copy">该 NexusPipeline 已开启远程访问，请输入访问令牌（可在本机「设置 → 远程访问」中查看或重置）。</p><input id="token-input" type="password" autocomplete="off" placeholder="访问令牌" aria-label="访问令牌"><div id="token-error" class="req" role="alert" aria-live="polite"></div></form>`,
-    `<button type="submit" form="token-form">进入管理界面</button>`), false, true);
+  showModal(modalShell(t("auth.title", {}, "需要访问令牌"),
+    `<form id="token-form"><p class="modal-copy">${t("auth.copy", {}, "该 NexusPipeline 已开启远程访问，请输入访问令牌（可在本机「设置 → 远程访问」中查看或重置）。")}</p><input id="token-input" type="password" autocomplete="off" placeholder="${t("auth.placeholder", {}, "访问令牌")}" aria-label="${t("auth.placeholder", {}, "访问令牌")}"><div id="token-error" class="req" role="alert" aria-live="polite"></div></form>`,
+    `<button type="submit" form="token-form">${t("auth.enter", {}, "进入管理界面")}</button>`), false, true);
   const form = document.querySelector("#token-form");
   const input = document.querySelector("#token-input");
   const errorEl = document.querySelector("#token-error");
@@ -203,7 +207,7 @@ function showTokenPrompt() {
     event.preventDefault();
     const value = input.value.trim();
     if (!value) {
-      errorEl.textContent = "请输入令牌";
+      errorEl.textContent = t("auth.required_input", {}, "请输入令牌");
       return;
     }
     try {
@@ -211,7 +215,7 @@ function showTokenPrompt() {
     } catch {
       // 存储不可用：令牌仅本次请求使用，刷新后需重输。
     }
-    const check = await fetch("/api/status", { headers: { Authorization: "Bearer " + value } });
+    const check = await fetch("/api/status", { headers: { Authorization: "Bearer " + value, "X-Nexus-Locale": getLocale() } });
     if (check.ok) {
       location.reload();
     } else {
@@ -219,7 +223,7 @@ function showTokenPrompt() {
         localStorage.removeItem("nexus-token");
       } catch {
       }
-      errorEl.textContent = "令牌无效，请重试";
+      errorEl.textContent = t("auth.invalid", {}, "令牌无效，请重试");
     }
   });
 }

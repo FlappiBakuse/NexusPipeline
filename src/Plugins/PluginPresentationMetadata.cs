@@ -5,6 +5,13 @@ namespace NexusPipeline.Plugins;
 
 internal sealed record PluginAuthor(string Name, string Url);
 
+internal sealed record PluginLocalizedMetadata(
+    string DisplayName,
+    string GameName,
+    string Description,
+    IReadOnlyList<string> Tags,
+    IReadOnlyList<PluginChangelogEntry> Changelog);
+
 internal sealed record PluginPresentationMetadata(
     string GameName,
     IReadOnlyList<PluginAuthor> Authors,
@@ -13,7 +20,8 @@ internal sealed record PluginPresentationMetadata(
     string CreatedAt,
     string UpdatedAt,
     IReadOnlyList<PluginChangelogEntry> Changelog,
-    bool HasReadme)
+    bool HasReadme,
+    IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales)
 {
     public static PluginPresentationMetadata Empty(string gameName, bool hasReadme = false)
     {
@@ -25,7 +33,8 @@ internal sealed record PluginPresentationMetadata(
             "",
             "",
             Array.Empty<PluginChangelogEntry>(),
-            hasReadme);
+            hasReadme,
+            new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase));
     }
 }
 
@@ -77,6 +86,16 @@ internal static class PluginPresentationMetadataParser
             {
                 throw new InvalidDataException(changelogError ?? "changelog 无效");
             }
+            if (!TryParseLocales(
+                    root,
+                    Path.GetFileName(pluginDirectory),
+                    version,
+                    changelog,
+                    out IReadOnlyDictionary<string, PluginLocalizedMetadata> locales,
+                    out string? localesError))
+            {
+                throw new InvalidDataException(localesError ?? "locales 无效");
+            }
             string createdAt = root["createdAt"]?.ToString()?.Trim() ?? "";
             if (createdAt.Length > 0 && !PluginRepositoryCatalog.TryParseDate(createdAt))
             {
@@ -97,7 +116,8 @@ internal static class PluginPresentationMetadataParser
                 createdAt,
                 updatedAt,
                 changelog,
-                hasReadme);
+                hasReadme,
+                locales);
         }
         catch (Exception ex)
         {
@@ -193,6 +213,129 @@ internal static class PluginPresentationMetadataParser
             error = ex.Message;
             return false;
         }
+    }
+
+    public static bool TryParseLocales(
+        JsonObject root,
+        string pluginName,
+        string version,
+        IReadOnlyList<PluginChangelogEntry> baseChangelog,
+        out IReadOnlyDictionary<string, PluginLocalizedMetadata> locales,
+        out string? error)
+    {
+        locales = new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
+        error = null;
+        JsonNode? node = root["locales"];
+        if (node is null)
+        {
+            return true;
+        }
+        if (node is not JsonObject localeRoot)
+        {
+            error = "locales 必须是对象";
+            return false;
+        }
+        var parsed = new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string rawLocale, JsonNode? localeNode) in localeRoot)
+        {
+            string locale = rawLocale.Trim().ToLowerInvariant() switch
+            {
+                "zh" or "zh-cn" => "zh-CN",
+                "en" or "en-us" => "en-US",
+                _ => "",
+            };
+            if (locale.Length == 0 || localeNode is not JsonObject localeObject || parsed.ContainsKey(locale))
+            {
+                error = $"locales locale 无效或重复：{rawLocale}";
+                return false;
+            }
+            string displayName = localeObject["displayName"]?.ToString()?.Trim() ?? "";
+            string gameName = localeObject["gameName"]?.ToString()?.Trim() ?? "";
+            string description = localeObject["description"]?.ToString()?.Trim() ?? "";
+            if (!ValidText(displayName, 128) || !ValidText(gameName, 128) || !ValidText(description, 2048))
+            {
+                error = $"locales.{locale} 的展示字段无效";
+                return false;
+            }
+            if (!TryParseTags(localeObject["tags"], out IReadOnlyList<string> tags))
+            {
+                error = $"locales.{locale}.tags 无效";
+                return false;
+            }
+            if (localeObject["changelog"] is not JsonArray changelogNodes
+                || changelogNodes.Count != baseChangelog.Count)
+            {
+                error = $"locales.{locale}.changelog 版本数量与基础记录不一致";
+                return false;
+            }
+            var changelog = new List<PluginChangelogEntry>(changelogNodes.Count);
+            for (int index = 0; index < changelogNodes.Count; index++)
+            {
+                if (changelogNodes[index] is not JsonObject changeObject)
+                {
+                    error = $"locales.{locale}.changelog 条目无效";
+                    return false;
+                }
+                string changeVersion = changeObject["version"]?.ToString()?.Trim() ?? "";
+                if (!string.Equals(changeVersion, baseChangelog[index].Version, StringComparison.Ordinal))
+                {
+                    error = $"locales.{locale}.changelog 版本必须与基础记录一致";
+                    return false;
+                }
+                if (changeObject["items"] is not JsonArray itemNodes || itemNodes.Count is < 1 or > 32)
+                {
+                    error = $"locales.{locale}.changelog items 数量无效";
+                    return false;
+                }
+                var items = new List<string>(itemNodes.Count);
+                foreach (JsonNode? itemNode in itemNodes)
+                {
+                    string item = itemNode?.ToString()?.Trim() ?? "";
+                    if (!ValidText(item, 512))
+                    {
+                        error = $"locales.{locale}.changelog 文本无效";
+                        return false;
+                    }
+                    items.Add(item);
+                }
+                changelog.Add(new PluginChangelogEntry(changeVersion, baseChangelog[index].Date, items));
+            }
+            parsed[locale] = new PluginLocalizedMetadata(displayName, gameName, description, tags, changelog);
+        }
+        locales = parsed;
+        return true;
+    }
+
+    private static bool TryParseTags(
+        JsonNode? node,
+        out IReadOnlyList<string> tags)
+    {
+        tags = Array.Empty<string>();
+        if (node is not JsonArray tagNodes || tagNodes.Count > MaxTags)
+        {
+            return false;
+        }
+        var parsed = new List<string>(tagNodes.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (JsonNode? tagNode in tagNodes)
+        {
+            string tag = tagNode?.ToString()?.Trim() ?? "";
+            if (!ValidText(tag, MaxTagLength) || !seen.Add(tag))
+            {
+                return false;
+            }
+            parsed.Add(tag);
+        }
+        tags = parsed;
+        return true;
+    }
+
+    private static bool ValidText(string value, int maximum)
+    {
+        return value.Length > 0
+            && value.Length <= maximum
+            && !value.Contains('<')
+            && !value.Contains('>');
     }
 
     private static bool TryValidateHttpsUrl(string value, bool allowEmpty)

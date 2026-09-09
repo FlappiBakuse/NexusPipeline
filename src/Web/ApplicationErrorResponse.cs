@@ -1,5 +1,6 @@
 using System.Net;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.Localization;
 
 namespace NexusPipeline.Web;
 
@@ -18,11 +19,16 @@ internal static class ApplicationErrorResponse
             OperationErrorKind.Internal => 500,
             _ => 400,
         };
+        string message = HostLocalization.Translate(
+            error.MessageKey,
+            HostLocalization.TranslateLegacy(error.Message, context.Request.Locale, error.MessageArgs),
+            context.Request.Locale,
+            error.MessageArgs);
         object payload = error.Candidates is { Count: > 0 } || !string.IsNullOrWhiteSpace(error.CandidateInputName)
             ? new
             {
                 ok = false,
-                error = error.Message,
+                error = message,
                 code = error.Code,
                 candidates = error.Candidates,
                 inputName = error.CandidateInputName,
@@ -30,7 +36,7 @@ internal static class ApplicationErrorResponse
             : new
             {
                 ok = false,
-                error = error.Message,
+                error = message,
                 code = error.Code,
             };
         await HttpHelper.WriteJsonAsync(context, payload, status).ConfigureAwait(false);

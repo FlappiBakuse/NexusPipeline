@@ -11,6 +11,7 @@ import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
 import { buildConfigEditRequest } from "./config-edit.js";
+import { text } from "../../core/i18n.js";
 
 export const MAX_ENTITY_NAME_BYTES = 64;
 export const MAX_USER_REMARK_BYTES = 512;
@@ -54,15 +55,15 @@ function initials(name) {
 }
 
 function nextRunLabel(value) {
-  return value ? "正在计算倒计时" : "暂无定时任务";
+  return value ? text("正在计算倒计时") : text("暂无定时任务");
 }
 
 function remainingLabel(milliseconds) {
-  if (milliseconds <= 0) return "即将开始运行";
+  if (milliseconds <= 0) return text("即将开始运行");
   const seconds = Math.floor(milliseconds / 1000);
   const days = Math.floor(seconds / 86400);
   const clock = durationClock(days > 0 ? seconds % 86400 : seconds);
-  return days ? `${days}天 ${clock} 后运行` : `${clock} 后运行`;
+  return days ? text("{days}天 {clock} 后运行", { days, clock }) : text("{clock} 后运行", { clock });
 }
 
 function tickUserCountdowns() {
@@ -71,16 +72,16 @@ function tickUserCountdowns() {
   $$("#view .global-user-next-run[data-next-run]").forEach(element => {
     const raw = element.dataset.nextRun || "";
     if (!raw) {
-      element.textContent = "暂无定时任务";
+      element.textContent = text("暂无定时任务");
       return;
     }
     const target = new Date(raw).getTime();
     if (!Number.isFinite(target)) {
-      element.textContent = "暂无定时任务";
+      element.textContent = text("暂无定时任务");
       return;
     }
     const remaining = target - now;
-    element.textContent = remaining <= 0 ? "即将开始运行" : remainingLabel(remaining);
+    element.textContent = remainingLabel(remaining);
     if (remaining <= 0 && element.dataset.refreshRequested !== "true") {
       element.dataset.refreshRequested = "true";
       shouldRefresh = true;
@@ -120,14 +121,14 @@ function pluginUserBadgeMarkup(user) {
 function userCard(user) {
   const bindingCount = user.bindingCount ?? (user.bindings || []).length;
   const nextRun = user.nextRunAt || "";
-  const queueTitle = user.nextQueueName ? "下次队列：" + user.nextQueueName : "";
+  const queueTitle = user.nextQueueName ? text("下次队列：{name}", { name: user.nextQueueName }) : "";
   return '<article class="script-card global-user-card" data-dnd-id="' + esc(user.id) + '" data-testid="global-user-card">' +
-    '<span class="drag-handle" role="button" tabindex="0" aria-label="拖拽调整全局用户顺序" title="拖拽排序">' + icon("grip") + "</span>" +
+    '<span class="drag-handle" role="button" tabindex="0" aria-label="' + esc(text("拖拽调整全局用户顺序")) + '" title="' + esc(text("拖拽排序")) + '">' + icon("grip") + "</span>" +
     avatarMarkup(user) +
     '<div class="script-main global-user-main">' +
       '<div class="script-name-row"><strong class="global-user-name">' + esc(user.name) + "</strong></div>" +
       '<div class="meta-line global-user-meta">' +
-        '<span class="badge muted">已绑定 ' + bindingCount + " 个脚本</span>" +
+        '<span class="badge muted">' + text("已绑定 {count} 个脚本", { count: bindingCount }) + "</span>" +
         pluginUserBadgeMarkup(user) +
         pluginSlotMarkup("users.list.badges", "user-" + user.id, "user-plugin-slot", { mode: "list", primaryId: user.id }) +
         '<span class="badge blue global-user-next-run" data-next-run="' + esc(nextRun) + '" title="' + esc(queueTitle) + '">' + esc(nextRunLabel(nextRun)) + "</span>" +
@@ -144,7 +145,7 @@ function userCard(user) {
 export async function pageUsers(token) {
   if (!isCurrent("users", token)) return;
   navActive("users");
-  setTopbarTitle("用户管理");
+  setTopbarTitle(text("用户管理"));
   nextRefreshPending = false;
   if (nextTimer) {
     clearInterval(nextTimer);
@@ -159,7 +160,7 @@ export async function pageUsers(token) {
       api("GET", "/api/plugin-contributions/user-list-badges"),
     ]);
   } catch (error) {
-    if (isCurrent("users", token)) render('<div class="empty"><strong>加载用户管理失败</strong><span>' + esc(error.message) + "</span></div>");
+    if (isCurrent("users", token)) render('<div class="empty"><strong>' + text("加载用户管理失败") + '</strong><span>' + esc(error.message) + "</span></div>");
     return;
   }
   if (!isCurrent("users", token)) return;
@@ -221,29 +222,29 @@ export async function saveGlobalUser() {
   const name = $("#gu-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("gu-name");
-    toast("请填写用户名", "error");
+    toast(text("请填写用户名"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
     setFieldError("gu-name", `用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
-    toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
+    toast(text("用户名最多 {bytes} 字节", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   if (hasEntityNameConflict(state.users, name)) {
     setFieldInvalid("gu-name");
-    toast("用户名已存在，请使用其他名称", "error");
+    toast(text("用户名已存在，请使用其他名称"), "error");
     return;
   }
   clearFieldError("gu-name");
   try {
     await api("POST", "/api/users", { name });
     closeModal();
-    toast("用户已创建");
+    toast(text("用户已创建"));
     await reloadUsers();
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("gu-name");
-      toast("用户名已存在，请使用其他名称", "error");
+      toast(text("用户名已存在，请使用其他名称"), "error");
       return;
     }
     toast(error.message, "error");
@@ -266,9 +267,9 @@ export function deleteGlobalUser(id) {
   const user = userById(id);
   if (!user) return;
   deleteDraft = user;
-  const body = '<p class="modal-copy">删除「' + esc(user.name) + '」会解除全部脚本绑定并清理该用户的配置数据。请输入完整用户名确认。</p>' +
+  const body = '<p class="modal-copy">' + text("删除「{name}」会解除全部脚本绑定并清理该用户的配置数据。请输入完整用户名确认。", { name: esc(user.name) }) + '</p>' +
     valueField("gu-delete-name", "确认用户名 <span class='req'>*</span>", "", "text", 'placeholder="' + esc(user.name) + '"');
-  showModal(modalShell("删除用户", body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user" data-testid="confirm-delete-global-user">确认删除</button><button class="ghost" type="button" data-action="close-modal">取消</button>'));
+  showModal(modalShell(text("删除用户"), body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user" data-testid="confirm-delete-global-user">' + text("确认删除") + '</button><button class="ghost" type="button" data-action="close-modal">' + text("取消") + '</button>'));
 }
 
 export async function confirmDeleteGlobalUser() {
@@ -276,12 +277,12 @@ export async function confirmDeleteGlobalUser() {
   const input = $("#gu-delete-name")?.value || "";
   if (!input.trim()) {
     setRequiredFieldError("gu-delete-name");
-    toast("请输入完整用户名以确认删除", "error");
+    toast(text("请输入完整用户名以确认删除"), "error");
     return;
   }
   if (input !== deleteDraft.name) {
     setFieldError("gu-delete-name", "请输入与用户名完全一致的内容");
-    toast("请输入完整用户名以确认删除", "error");
+    toast(text("请输入完整用户名以确认删除"), "error");
     return;
   }
   try {
@@ -289,7 +290,7 @@ export async function confirmDeleteGlobalUser() {
     const deletedName = deleteDraft.name;
     deleteDraft = null;
     closeModal();
-    toast("已删除用户「" + deletedName + "」");
+    toast(text("已删除用户「{name}」", { name: deletedName }));
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");
@@ -299,7 +300,7 @@ export async function confirmDeleteGlobalUser() {
 export async function reorderGlobalUsers(ids) {
   try {
     await api("PUT", "/api/users/order", { ids });
-    toast("用户顺序已保存");
+    toast(text("用户顺序已保存"));
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");
@@ -310,12 +311,12 @@ export async function reorderGlobalUsers(ids) {
 function showGlobalEditConfigCard(userId, scriptId, userName, scriptName, editMode) {
   const mode = editMode || "normal";
   const copy = mode === "fresh"
-    ? '主程序已启动，脚本将生成全新配置。完成后新配置存为快照，取消恢复原配置。'
+    ? text("主程序已启动，脚本将生成全新配置。完成后新配置存为快照，取消恢复原配置。")
     : mode === "reuse"
-      ? '主程序已启动，正在编辑现有配置文件。完成后存为快照，取消不做改动。'
-      : '主程序已启动（不带参数）。请设置用户「' + esc(userName) + '」在脚本「' + esc(scriptName) + '」中的配置。完成后保存，或取消本次修改。';
-  showModal(modalShell("配置编辑中", '<p class="modal-copy">' + copy + '</p>',
-    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">完成</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">取消</button>'), false, true);
+      ? text("主程序已启动，正在编辑现有配置文件。完成后存为快照，取消不做改动。")
+      : text("主程序已启动（不带参数）。请设置用户「{user}」在脚本「{script}」中的配置。完成后保存，或取消本次修改。", { user: esc(userName), script: esc(scriptName) });
+  showModal(modalShell(text("配置编辑中"), '<p class="modal-copy">' + copy + '</p>',
+    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + text("完成") + '</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + text("取消") + '</button>'), false, true);
 }
 
 export async function editGlobalUserConfig(userId, scriptId) {
@@ -387,7 +388,7 @@ function waitForRequesterTitlePaint() {
 async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
   const requesterWindowToken = createRequesterWindowToken();
   const previousTitle = document.title;
-  document.title = "NexusPipeline 枢链 · " + requesterWindowToken;
+  document.title = text("NexusPipeline 枢链") + " · " + requesterWindowToken;
   try {
     await waitForRequesterTitlePaint();
     const request = buildConfigEditRequest(mode, inputOverride, requesterWindowToken);
@@ -396,7 +397,7 @@ async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const inputName = String(error.data.inputName || "");
       if (!inputName) {
-        toast("插件未返回配置输入名，无法选择配置文件", "error");
+        toast(text("插件未返回配置输入名，无法选择配置文件"), "error");
         return;
       }
       openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, inputName);
@@ -430,17 +431,17 @@ async function adoptConfigCandidate(target) {
   const inputName = target.dataset.inputName || "";
   try {
     if (!inputName) {
-      toast("缺少配置输入名，无法接管配置文件", "error");
+      toast(text("缺少配置输入名，无法接管配置文件"), "error");
       return;
     }
     closeModal();
-    toast("本次编辑使用配置「" + candidate + "」");
+    toast(text("本次编辑使用配置「{candidate}」", { candidate }));
     await startEditConfig(userId, scriptId, mode, { name: inputName, value: candidate });
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const nextInputName = String(error.data.inputName || inputName || "");
       if (!nextInputName) {
-        toast("插件未返回配置输入名，无法选择配置文件", "error");
+        toast(text("插件未返回配置输入名，无法选择配置文件"), "error");
         return;
       }
       openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, nextInputName);
@@ -473,7 +474,7 @@ export async function globalEditConfigAction(userId, scriptId, action, mode) {
     } else {
       message = mode === "reuse" ? "已取消" : "已取消，配置已还原";
     }
-    toast(message);
+    toast(text(message));
     if (action === "done") {
       const validation = result?.validation;
       for (const item of Array.isArray(validation?.toasts) ? validation.toasts : []) {
@@ -483,7 +484,7 @@ export async function globalEditConfigAction(userId, scriptId, action, mode) {
         pushNotice(item?.title || "配置检查", item?.body || "", item?.kind || "info");
       }
       if (validation?.error) {
-        toast("配置已保存，但专项插件配置校验执行失败。", "error");
+        toast(text("配置已保存，但专项插件配置校验执行失败。"), "error");
       }
     }
     await reloadUsers();
@@ -498,7 +499,7 @@ export function syncManagementSwitch(target, pressed) {
   target.setAttribute("aria-pressed", pressed ? "true" : "false");
   target.dataset.state = pressed ? "on" : "off";
   const stateText = target.querySelector("[data-switch-state]");
-  if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+  if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
 }
 
 export function toggleManagementSwitch(target) {

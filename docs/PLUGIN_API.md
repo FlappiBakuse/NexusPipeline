@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.4 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.5 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -26,11 +26,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.4）
+## managed-code C# 插件（Plugin API v1.5）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.4`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.4` 插件可加载，`2.0` 插件会被拒绝。
+宿主当前 API 版本为 `1.5`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.5` 插件可加载，`2.0` 插件会被拒绝。
 
 ```text
 plugins/GameCheckIn/
@@ -47,12 +47,12 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.4",
+  "apiVersion": "1.5",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
   "frontend": {
-    "apiVersion": "1.0",
+    "apiVersion": "1.3",
     "entry": "web/main.js",
     "styles": ["web/style.css"]
   }
@@ -61,7 +61,7 @@ plugins/GameCheckIn/
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要 v1.5 本地化端口的插件应检查 `context is IPluginHostContextV1_4`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
@@ -119,14 +119,32 @@ settings.sections               shell.nav
 
 `context.History.Register(new PluginHistoryContribution(...))` 可在运行历史保存前生成纯文本展示快照。快照只允许标题、徽章和字段，单个插件贡献最多 16 KiB，全部插件单次运行最多 64 KiB；处理器最多执行 5 秒。快照写入 `RunRecord.PluginHistory`，不参与状态、尝试次数、结果和通知判定，插件卸载后仍可由历史页面展示。
 
-### 前端插件运行时（Frontend API 1.2）
+### v1.5 插件本地化
+
+`IPluginHostContextV1_4.I18n` 提供插件自有资源查表、占位符替换和按当前请求语言进行的日期/时间/数字格式化。宿主只传入规范化的 `zh-CN` 或 `en-US` 请求语言，插件资源缺失时回退到 `defaultLocale`，再回退到调用方提供的 `fallback`。插件本地化资源不会复用宿主词典，也不会改变机器 ID、配置键或持久化结构。
+
+managed-code 插件可以在 `plugin.json` 声明：
+
+```json
+"localization": {
+  "defaultLocale": "zh-CN",
+  "locales": {
+    "zh-CN": "i18n/zh-CN.json",
+    "en-US": "i18n/en-US.json"
+  }
+}
+```
+
+资源文件是有限大小的扁平 JSON 对象，所有 locale 的 key 集合必须一致；资源路径必须位于插件目录的 `i18n/` 下。声明式 UI、用户列表徽章和历史展示可以用 `PluginLocalizedText(Key, Fallback)` 携带语义引用，宿主按请求语言投影展示值，历史落盘保存引用和回退文本。
+
+### 前端插件运行时（Frontend API 1.3）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.2",
+  "apiVersion": "1.3",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -145,6 +163,7 @@ settings.sections               shell.nav
 - `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
 - `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。该接口用于运行预览，不等同于判断脚本的运行期通知截图。
+- `host.i18n`：读取插件 manifest 中的本地化资源，提供 `locale`、`defaultLocale`、`t(key, args, fallback)` 和本地化日期/时间/数字格式化；资源仅属于当前插件。
 
 前端模块运行在管理页面同源环境，可以使用 DOM、原生 ES module 和 CSS。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 兼容性、公开资源路径、扩展名和文件存在性。同源前端可以访问管理页面可用的 DOM 与请求能力，插件发布前应完成代码审查。可见选择、数字、时间、文件和颜色交互应优先使用 `host.controls`；文件选择器和取色器的浏览器载体保持隐藏，range 使用可访问的语义 input 并由宿主 CSS 绘制视觉层。
 
@@ -154,13 +173,13 @@ settings.sections               shell.nav
 
 `wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
 
-`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend`、`frontendApiVersion` 和 `error` 字段中查看。
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 
 插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，创建时间取 `store.json.createdAt`（插件第一次正式公开发布日期），更新时间取最新更新记录日期。旧 catalog 缺少 `createdAt` 时按空值展示并保持可读取。
 
 ## plugin.json（根文件）
 
-运行时 manifest 使用 schema 2，至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、SemVer `version` 和插件类型。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致。
+运行时 manifest 使用 schema 2，至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、SemVer `version` 和插件类型。需要本地化时，增加 `localization.defaultLocale` 与 `localization.locales`，资源必须随 ZIP 放在 `i18n/` 目录。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致。
 
 ```json
 {

@@ -15,6 +15,7 @@ module.exports = defineConfig({
     baseURL: "http://127.0.0.1:58731/",
     channel: "msedge",
     headless: true,
+    locale: "zh-CN",
     trace: process.env.CI ? "retain-on-failure" : "off",
   },
 });

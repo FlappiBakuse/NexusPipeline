@@ -217,7 +217,7 @@ internal static class ApiPluginContributionsHandler
                     }
                 }
 
-                result.Add(ProjectUiContribution(registration, uiContext, values));
+                result.Add(ProjectUiContribution(registration, uiContext, values, context.Request.Locale));
             }
         }
         await HttpHelper.WriteJsonAsync(context, new { slot, contributions = result }).ConfigureAwait(false);
@@ -387,20 +387,26 @@ internal static class ApiPluginContributionsHandler
     private static object ProjectUiContribution(
         PluginUiContributionRegistration registration,
         PluginUiContext uiContext,
-        JsonObject values)
+        JsonObject values,
+        string locale)
     {
         PluginUiContribution contribution = registration.Contribution;
+        PluginLocalizationManifest localization = RuntimeContext.Instance.Plugins.GetPluginLocalization(registration.PluginName);
+        string pluginDisplayName = RuntimeContext.Instance.Plugins.LocalizePluginDisplayName(
+            registration.PluginName,
+            registration.PluginDisplayName,
+            locale);
         return new
         {
             pluginName = registration.PluginName,
-            pluginDisplayName = registration.PluginDisplayName,
+            pluginDisplayName,
             id = contribution.Id,
             slot = contribution.Slot,
             kind = contribution.Kind,
-            title = contribution.Title,
-            description = contribution.Description,
+            title = PluginLocalizedTextResolver.Resolve(contribution.LocalizedTitle, contribution.Title, localization),
+            description = PluginLocalizedTextResolver.Resolve(contribution.LocalizedDescription, contribution.Description, localization),
             order = contribution.Order,
-            fields = ProjectUiFields(contribution),
+            fields = ProjectUiFields(contribution, localization),
             context = new
             {
                 slot = uiContext.Slot,
@@ -412,23 +418,23 @@ internal static class ApiPluginContributionsHandler
         };
     }
 
-    private static object[] ProjectUiFields(PluginUiContribution contribution)
+    private static object[] ProjectUiFields(PluginUiContribution contribution, PluginLocalizationManifest localization)
     {
         return (contribution.Fields ?? Array.Empty<PluginUiField>())
             .Select(field => new
             {
                 key = field.Key,
-                label = field.Label,
+                label = PluginLocalizedTextResolver.Resolve(field.LocalizedLabel, field.Label, localization),
                 type = field.Type,
-                description = field.Description,
+                description = PluginLocalizedTextResolver.Resolve(field.LocalizedDescription, field.Description, localization),
                 required = field.Required,
-                placeholder = field.Placeholder,
+                placeholder = PluginLocalizedTextResolver.Resolve(field.LocalizedPlaceholder, field.Placeholder, localization),
                 maxLength = field.MaxLength,
                 readOnly = field.ReadOnly || field.Type.Equals("status", StringComparison.OrdinalIgnoreCase),
                 min = field.Min,
                 max = field.Max,
                 step = field.Step,
-                options = field.Options?.Select(option => new { value = option.Value, label = option.Label }).ToList(),
+                options = field.Options?.Select(option => new { value = option.Value, label = PluginLocalizedTextResolver.Resolve(option.LocalizedLabel, option.Label, localization) }).ToList(),
             })
             .Cast<object>()
             .ToArray();
@@ -502,14 +508,19 @@ internal static class ApiPluginContributionsHandler
                 {
                     continue;
                 }
+                PluginLocalizationManifest localization = plugins.GetPluginLocalization(registration.PluginName);
+                string pluginDisplayName = plugins.LocalizePluginDisplayName(
+                    registration.PluginName,
+                    registration.PluginDisplayName,
+                    context.Request.Locale);
                 badges.Add(new
                 {
                     pluginName = registration.PluginName,
-                    pluginDisplayName = registration.PluginDisplayName,
+                    pluginDisplayName,
                     id = registration.Contribution.Id,
-                    label = sanitized.Label,
+                    label = PluginLocalizedTextResolver.Resolve(sanitized.LocalizedLabel, sanitized.Label, localization),
                     tone = sanitized.Tone,
-                    title = sanitized.Title,
+                    title = PluginLocalizedTextResolver.Resolve(sanitized.LocalizedTitle, sanitized.Title, localization),
                     order = registration.Contribution.Order,
                 });
             }
@@ -558,20 +569,7 @@ internal static class ApiPluginContributionsHandler
 
     private static Task WriteOperationErrorAsync(HttpListenerContext context, OperationError error)
     {
-        int status = error.Kind switch
-        {
-            OperationErrorKind.Validation => 400,
-            OperationErrorKind.NotFound => 404,
-            OperationErrorKind.Conflict => 409,
-            OperationErrorKind.Forbidden => 403,
-            OperationErrorKind.Timeout => 504,
-            OperationErrorKind.Unavailable => 502,
-            _ => 500,
-        };
-        return HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = error.Message, message = error.Message, code = error.Code },
-            status);
+        return ApplicationErrorResponse.WriteAsync(context, error);
     }
 
     private static Task UiValidationErrorAsync(HttpListenerContext context, string message) =>

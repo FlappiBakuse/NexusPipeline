@@ -45,6 +45,8 @@ internal sealed class PluginManifest
 
     public PluginFrontendManifest? Frontend { get; private set; }
 
+    public PluginLocalizationManifest Localization { get; private set; } = PluginLocalizationManifest.Empty;
+
     private readonly HashSet<string> _capabilities = new(StringComparer.OrdinalIgnoreCase);
 
     public static bool TryLoad(string pluginDir, out PluginManifest? manifest, out string? error)
@@ -194,6 +196,12 @@ internal sealed class PluginManifest
                 return false;
             }
             result.Frontend = frontend;
+            if (!PluginLocalizationManifest.TryLoad(root, pluginDir, out PluginLocalizationManifest localization, out string? localizationError))
+            {
+                error = localizationError;
+                return false;
+            }
+            result.Localization = localization;
             if (result.Kind == "managed-code"
                 && (string.IsNullOrWhiteSpace(result.ApiVersion)
                     || string.IsNullOrWhiteSpace(result.EntryAssembly)

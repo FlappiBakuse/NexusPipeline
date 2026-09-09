@@ -211,10 +211,16 @@ internal static class CliTransport
     }
 
     /// <summary>向常驻服务发送 JSON 请求，供正式 CLI 与交互菜单共用。</summary>
-    public static HttpResponseMessage Send(int port, string method, string apiPath, JsonNode? body)
+    public static HttpResponseMessage Send(
+        int port,
+        string method,
+        string apiPath,
+        JsonNode? body,
+        string? locale = null)
     {
         using var client = new HttpClient { Timeout = TimeoutFor(method, apiPath) };
         using var request = new HttpRequestMessage(new HttpMethod(method), $"http://127.0.0.1:{port}{apiPath}");
+        request.Headers.TryAddWithoutValidation("X-Nexus-Locale", locale ?? "zh-CN");
         if (body is not null)
         {
             request.Content = new StringContent(body.ToJsonString(JsonOpts.Web), Encoding.UTF8, "application/json");

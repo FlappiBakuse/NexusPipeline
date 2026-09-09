@@ -5,20 +5,21 @@ import { isCurrent, schedule } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { notifyPluginPageUpdated } from "../core/plugin-runtime.js";
+import { text } from "../core/i18n.js";
 
 function runningMarkup(running) {
-  if (!running.length) return '<div class="empty"><strong>当前空闲</strong><span>没有正在运行的脚本或调度队列。</span><a class="back-link" href="#/dispatch">前往调度中心</a></div>';
+  if (!running.length) return `<div class="empty"><strong>${text("当前空闲")}</strong><span>${text("没有正在运行的脚本或调度队列。")}</span><a class="back-link" href="#/dispatch">${text("前往调度中心")}</a></div>`;
   const records = running.map(record => `<article class="running-record">
       <div class="running-record-head"><strong>${esc(record.targetName)}</strong>${statusBadge(record.status)}</div>
-      <div class="running-record-meta"><span>${record.kind === "queue" ? "调度队列" : "脚本实例"}</span><span>${record.mode === "auto" ? "自动" : "手动"}</span></div>
-      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span>${record.persistenceWarning ? `<br><span class="badge warn">历史保存警告：${esc(record.persistenceWarning)}</span>` : ""}</div>
+      <div class="running-record-meta"><span>${text(record.kind === "queue" ? "调度队列" : "脚本实例")}</span><span>${text(record.mode === "auto" ? "自动" : "手动")}</span></div>
+      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${text("第 {attempt}/{max} 次", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span>${record.persistenceWarning ? `<br><span class="badge warn">${text("历史保存警告")}：${esc(record.persistenceWarning)}</span>` : ""}</div>
     </article>`).join("");
   return `<div class="table-scroll running-table"><table class="data-table"><thead><tr><th scope="col">任务</th><th scope="col">类型</th><th scope="col">模式</th><th scope="col">进度</th><th scope="col">状态</th></tr></thead><tbody>
     ${running.map(record => `<tr>
       <td><strong>${esc(record.targetName)}</strong></td>
-      <td>${record.kind === "queue" ? "调度队列" : "脚本实例"}</td>
-      <td>${record.mode === "auto" ? "自动" : "手动"}</td>
-      <td>${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">第 ${record.currentAttempt}/${record.currentMaxAttempts} 次</span></td>
+      <td>${text(record.kind === "queue" ? "调度队列" : "脚本实例")}</td>
+      <td>${text(record.mode === "auto" ? "自动" : "手动")}</td>
+      <td>${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${text("第 {attempt}/{max} 次", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span></td>
       <td>${statusBadge(record.status)}</td>
     </tr>`).join("")}
   </tbody></table></div><div class="running-records">${records}</div>`;
@@ -27,16 +28,16 @@ function runningMarkup(running) {
 function pluginMarkup(status) {
   const disabled = (status.plugins || []).filter(plugin => !plugin.configuredEnabled);
   if (!disabled.length) return "";
-  return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${disabled.length} 个插件当前已禁用：${disabled.map(plugin => esc(plugin.displayName)).join("、")}</p><a class="back-link" href="#/plugins">查看插件</a></div>`;
+  return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${text("{count} 个插件当前已禁用：", { count: disabled.length })}${disabled.map(plugin => esc(plugin.displayName)).join("、")}</p><a class="back-link" href="#/plugins">${text("查看插件")}</a></div>`;
 }
 
 function setVersionLabel(version) {
   const el = document.querySelector("#app-version");
-  if (el) el.textContent = `当前版本 · ${version || "0.0.0"}`;
+  if (el) el.textContent = `${text("当前版本")} · ${version || "0.0.0"}`;
 }
 
 function runningPanelMarkup(status) {
-  return `<div class="section-heading"><h3>正在运行</h3><span class="muted">${(status.running || []).length} 个活动任务</span></div>${runningMarkup(status.running || [])}`;
+  return `<div class="section-heading"><h3>${text("正在运行")}</h3><span class="muted">${(status.running || []).length} ${text("个活动任务")}</span></div>${runningMarkup(status.running || [])}`;
 }
 
 function pluginPanelMarkup(status) {
@@ -48,20 +49,20 @@ function statePanelMarkup(status) {
   const running = status.running || [];
   const active = running.length > 0;
   return `<section id="dashboard-state" class="dashboard-state ${active ? "running" : "idle"}" data-testid="dashboard-state" aria-live="polite">
-    <div class="dashboard-state-copy"><div class="state-label">${active ? "正在运行" : "系统空闲"}</div><h3>${active ? "任务正在执行" : "一切准备就绪"}</h3><p>${active ? `当前有 ${running.length} 个活动任务，状态会自动更新。` : "当前没有活动任务，可以从调度中心手动执行脚本或队列。"}</p></div>
+    <div class="dashboard-state-copy"><div class="state-label">${text(active ? "正在运行" : "系统空闲")}</div><h3>${text(active ? "任务正在执行" : "一切准备就绪")}</h3><p>${active ? text("当前有 {count} 个活动任务，状态会自动更新。", { count: running.length }) : text("当前没有活动任务，可以从调度中心手动执行脚本或队列。")}</p></div>
   </section>`;
 }
 
 export async function pageDashboard(token) {
   if (!isCurrent("dashboard", token)) return;
   navActive("dashboard");
-  setTopbarTitle("仪表盘");
+  setTopbarTitle(text("仪表盘"));
   let status;
   try {
     status = await api("GET", "/api/status");
   } catch (error) {
     if (isCurrent("dashboard", token) && !document.querySelector('[data-testid="dashboard-state"]')) {
-      render(`<div class="empty"><strong>无法连接服务</strong>${esc(error.message)}</div>`);
+      render(`<div class="empty"><strong>${text("无法连接服务")}</strong>${esc(error.message)}</div>`);
     }
     return;
   }
@@ -86,9 +87,9 @@ export async function pageDashboard(token) {
       const label = statePanel.querySelector(".state-label");
       const heading = statePanel.querySelector("h3");
       const copy = statePanel.querySelector("p");
-      if (label) label.textContent = active ? "正在运行" : "系统空闲";
-      if (heading) heading.textContent = active ? "任务正在执行" : "一切准备就绪";
-      if (copy) copy.textContent = active ? `当前有 ${(status.running || []).length} 个活动任务，状态会自动更新。` : "当前没有活动任务，可以从调度中心手动执行脚本或队列。";
+      if (label) label.textContent = text(active ? "正在运行" : "系统空闲");
+      if (heading) heading.textContent = text(active ? "任务正在执行" : "一切准备就绪");
+      if (copy) copy.textContent = active ? text("当前有 {count} 个活动任务，状态会自动更新。", { count: (status.running || []).length }) : text("当前没有活动任务，可以从调度中心手动执行脚本或队列。");
     }
     const sysArea = document.querySelector("#system-action-area");
     if (sysArea) sysArea.innerHTML = systemActionCard(status.systemAction);

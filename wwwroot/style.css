@@ -695,6 +695,30 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .diagnostic-check-remediation { color: var(--accent); }
 .diagnostic-info-label { display: inline-block; margin-right: 5px; color: var(--faint); font-size: 11px; font-weight: 700; }
 .diagnostics-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
+.execution-plan { margin: var(--space-3) 0 0; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
+.execution-plan-summary { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr); align-items: start; gap: var(--space-4); padding: 12px 14px; }
+.execution-plan-summary-main { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
+.execution-plan-summary-label { color: var(--muted); font-size: 11px; }
+.execution-plan-summary-main strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
+.execution-plan-summary-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; min-width: 0; }
+.execution-plan-summary-meta > div { display: flex; min-width: 0; align-items: baseline; flex-wrap: wrap; gap: 6px; line-height: 1.5; }
+.execution-plan-summary-meta .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.execution-plan-summary-meta > div > :last-child { min-width: 0; overflow-wrap: anywhere; }
+.execution-plan-section { border-top: 1px solid var(--border); }
+.execution-plan-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 14px; }
+.execution-plan-section-heading h4 { margin: 0; font-size: 14px; }
+.execution-plan-table-header, .execution-plan-row { display: grid; gap: var(--space-3); min-width: 0; }
+.execution-plan-task-header, .execution-plan-task-row { grid-template-columns: minmax(0, 1fr) minmax(120px, .4fr); }
+.execution-plan-user-header, .execution-plan-user-row { grid-template-columns: minmax(150px, .85fr) 100px minmax(0, 1.4fr); }
+.execution-plan-table-header { padding: 10px 14px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--content-card-soft); color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
+.execution-plan-row { align-items: start; padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.execution-plan-section > .execution-plan-row:last-child { border-bottom: 0; }
+.execution-plan-row:hover { background: var(--content-card-hover); }
+.execution-plan-name { min-width: 0; color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
+.execution-plan-status { padding-top: 1px; }
+.execution-plan-users { text-align: right; }
+.execution-plan-reason { line-height: 1.55; overflow-wrap: anywhere; }
+.execution-plan-warning { margin: 0; border-right: 0; border-radius: 0; }
 .toast { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 200; max-width: min(420px, calc(100vw - 32px)); padding: 13px 16px; border: 1px solid var(--content-control-border); border-radius: 8px; background: var(--content-card); box-shadow: var(--shadow); color: var(--text); font-size: 13px; }
 .toast.error { border-color: var(--bad); }
 @keyframes toast-shake {
@@ -786,6 +810,15 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .diagnostic-check-status { grid-area: status; justify-self: end; }
   .diagnostic-check-summary { grid-area: summary; }
   .diagnostic-check-info { grid-area: info; }
+  .execution-plan-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .execution-plan-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name users"; row-gap: 8px; padding: 14px; }
+  .execution-plan-task-row .execution-plan-name { grid-area: name; }
+  .execution-plan-task-row .execution-plan-users { grid-area: users; justify-self: end; }
+  .execution-plan-user-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "reason reason"; row-gap: 8px; padding: 14px; }
+  .execution-plan-user-row .execution-plan-name { grid-area: name; }
+  .execution-plan-user-row .execution-plan-status { grid-area: status; justify-self: end; }
+  .execution-plan-user-row .execution-plan-reason { grid-area: reason; }
+  .execution-plan-table-header { display: none; }
   .field-btn-row { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--action-gap); }
   .field-btn-row > div { grid-column: 1 / -1; }
   .field-btn-row button { width: 100%; padding-inline: 8px; }

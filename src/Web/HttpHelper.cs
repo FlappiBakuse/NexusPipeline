@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
+using NexusPipeline.Localization;
 
 namespace NexusPipeline.Web;
 
@@ -119,12 +120,12 @@ internal static class HttpHelper
 
     public static async Task NotFoundAsync(HttpListenerContext context)
     {
-        await WriteJsonAsync(context, new { error = "未找到" }, 404).ConfigureAwait(false);
+        await WriteJsonAsync(context, new { error = HostLocalization.Translate("http.not_found", "未找到", context.Request.Locale) }, 404).ConfigureAwait(false);
     }
 
     public static async Task MethodNotAllowedAsync(HttpListenerContext context)
     {
-        await WriteJsonAsync(context, new { error = "请求方法不支持" }, 405).ConfigureAwait(false);
+        await WriteJsonAsync(context, new { error = HostLocalization.Translate("http.method_not_allowed", "请求方法不支持", context.Request.Locale) }, 405).ConfigureAwait(false);
     }
 
     public static JsonNode? ParseBody(string body)

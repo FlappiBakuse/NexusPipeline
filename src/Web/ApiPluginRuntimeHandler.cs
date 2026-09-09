@@ -25,6 +25,11 @@ internal static class ApiPluginRuntimeHandler
                 frontendApiVersion = descriptor.FrontendApiVersion,
                 entryUrl = descriptor.EntryUrl,
                 styleUrls = descriptor.StyleUrls,
+                localization = new
+                {
+                    defaultLocale = descriptor.DefaultLocale,
+                    locales = descriptor.Localization,
+                },
             }).ToArray()).ConfigureAwait(false);
     }
 }

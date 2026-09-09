@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.4）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.5）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 4;
+    public const int Minor = 5;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本。</summary>
@@ -15,9 +15,9 @@ public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 2;
+    public const int Minor = 3;
 
-    public const string Text = "1.2";
+    public const string Text = "1.3";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -139,6 +139,65 @@ public interface IPluginHostContextV1_3 : IPluginHostContextV1_2
     IPluginHistoryContributionRegistry History { get; }
 }
 
+/// <summary>Plugin API v1.5 的插件自有本地化能力。语言由宿主请求作用域决定。</summary>
+public interface IPluginHostContextV1_4 : IPluginHostContextV1_3
+{
+    IPluginLocalization I18n { get; }
+}
+
+/// <summary>插件文案的语义引用；Fallback 用于语言资源缺失时的安全回退。</summary>
+public sealed record PluginLocalizedText(string Key, string Fallback = "");
+
+/// <summary>带命名插值参数的插件动态文案；适合状态、结果和历史字段值。</summary>
+public sealed record PluginLocalizedValue(
+    string Key,
+    string Fallback = "",
+    IReadOnlyDictionary<string, object?>? Args = null);
+
+/// <summary>插件可预期地展示给用户的校验或业务异常；宿主负责按请求语言解析。</summary>
+public sealed class PluginUserVisibleException : Exception
+{
+    public PluginUserVisibleException(
+        string code,
+        string messageKey,
+        string fallback,
+        IReadOnlyDictionary<string, object?>? args = null)
+        : base(fallback)
+    {
+        if (string.IsNullOrWhiteSpace(code)) throw new ArgumentException("插件用户异常 code 不能为空", nameof(code));
+        if (string.IsNullOrWhiteSpace(messageKey)) throw new ArgumentException("插件用户异常 messageKey 不能为空", nameof(messageKey));
+        Code = code.Trim();
+        MessageKey = messageKey.Trim();
+        Fallback = fallback ?? "";
+        Args = args is null
+            ? new Dictionary<string, object?>(StringComparer.Ordinal)
+            : new Dictionary<string, object?>(args, StringComparer.Ordinal);
+    }
+
+    public string Code { get; }
+
+    public string MessageKey { get; }
+
+    public string Fallback { get; }
+
+    public IReadOnlyDictionary<string, object?> Args { get; }
+}
+
+public interface IPluginLocalization
+{
+    string Locale { get; }
+
+    string DefaultLocale { get; }
+
+    string T(string key, string fallback = "", IReadOnlyDictionary<string, object?>? args = null);
+
+    string FormatNumber(double value);
+
+    string FormatDate(DateTimeOffset value);
+
+    string FormatTime(DateTimeOffset value);
+}
+
 /// <summary>声明式 UI 贡献注册表。贡献处理器只接收稳定的 PluginUiContext 与 JSON DTO。</summary>
 public interface IPluginUiContributionRegistry
 {
@@ -151,7 +210,10 @@ public sealed record PluginUiContext(
     string PrimaryId = "",
     string SecondaryId = "");
 
-public sealed record PluginUiOption(string Value, string Label);
+public sealed record PluginUiOption(string Value, string Label)
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
+};
 
 public sealed record PluginUiField(
     string Key,
@@ -165,7 +227,14 @@ public sealed record PluginUiField(
     bool ReadOnly = false,
     double? Min = null,
     double? Max = null,
-    double? Step = null);
+    double? Step = null)
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
+
+    public PluginLocalizedText? LocalizedDescription { get; init; }
+
+    public PluginLocalizedText? LocalizedPlaceholder { get; init; }
+};
 
 public sealed record PluginUiContribution(
     string Id,
@@ -179,6 +248,10 @@ public sealed record PluginUiContribution(
     Func<PluginUiContext, JsonObject, CancellationToken, ValueTask>? SaveHandler = null,
     Func<PluginUiContext, string, JsonObject, CancellationToken, ValueTask<JsonObject?>>? ActionHandler = null)
 {
+    public PluginLocalizedText? LocalizedTitle { get; init; }
+
+    public PluginLocalizedText? LocalizedDescription { get; init; }
+
     public static PluginUiContribution Form(
         string id,
         string slot,
@@ -276,11 +349,24 @@ public sealed record PluginHistoryDisplay(
     string Id,
     string Title,
     IReadOnlyList<PluginUiBadge>? Badges = null,
-    IReadOnlyList<PluginUiFieldValue>? Fields = null);
+    IReadOnlyList<PluginUiFieldValue>? Fields = null)
+{
+    public PluginLocalizedText? LocalizedTitle { get; init; }
+};
 
-public sealed record PluginUiBadge(string Label, string Tone = "muted", string Title = "");
+public sealed record PluginUiBadge(string Label, string Tone = "muted", string Title = "")
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
 
-public sealed record PluginUiFieldValue(string Label, string Value, string Tone = "muted");
+    public PluginLocalizedText? LocalizedTitle { get; init; }
+};
+
+public sealed record PluginUiFieldValue(string Label, string Value, string Tone = "muted")
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
+
+    public PluginLocalizedValue? LocalizedValue { get; init; }
+};
 
 /// <summary>按用户隔离的插件配置与 DPAPI 密钥存储。</summary>
 public interface IPluginUserDataStore
@@ -308,7 +394,12 @@ public sealed record PluginUserGlobalManagementContribution(
     int Order,
     IReadOnlyList<PluginUserGlobalManagementField> Fields,
     Func<string, CancellationToken, ValueTask<System.Text.Json.Nodes.JsonObject>> ReadHandler,
-    Func<string, System.Text.Json.Nodes.JsonObject, CancellationToken, ValueTask> SaveHandler);
+    Func<string, System.Text.Json.Nodes.JsonObject, CancellationToken, ValueTask> SaveHandler)
+{
+    public PluginLocalizedText? LocalizedTitle { get; init; }
+
+    public PluginLocalizedText? LocalizedDescription { get; init; }
+};
 
 /// <summary>用户全局设置字段的有限声明式类型集合。</summary>
 public sealed record PluginUserGlobalManagementField(
@@ -320,9 +411,19 @@ public sealed record PluginUserGlobalManagementField(
     string Placeholder = "",
     int MaxLength = 0,
     IReadOnlyList<PluginUserGlobalManagementOption>? Options = null,
-    bool ReadOnly = false);
+    bool ReadOnly = false)
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
 
-public sealed record PluginUserGlobalManagementOption(string Value, string Label);
+    public PluginLocalizedText? LocalizedDescription { get; init; }
+
+    public PluginLocalizedText? LocalizedPlaceholder { get; init; }
+};
+
+public sealed record PluginUserGlobalManagementOption(string Value, string Label)
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
+};
 
 /// <summary>插件声明式用户列表徽章贡献；处理器只接收用户 ID，不应执行网络请求。</summary>
 public interface IPluginUserListBadgeRegistry
@@ -338,7 +439,12 @@ public sealed record PluginUserListBadgeContribution(
 public sealed record PluginUserListBadge(
     string Label,
     string Tone = "muted",
-    string Title = "");
+    string Title = "")
+{
+    public PluginLocalizedText? LocalizedLabel { get; init; }
+
+    public PluginLocalizedText? LocalizedTitle { get; init; }
+};
 
 /// <summary>用户脚本执行开始事件；仅暴露稳定的宿主无关标识与时间信息。</summary>
 public interface IPluginExecutionEventService

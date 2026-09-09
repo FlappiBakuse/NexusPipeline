@@ -10,6 +10,7 @@ import { hasEntityNameConflict } from "../core/entity-name.js";
 import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
+import { text } from "../core/i18n.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -67,15 +68,15 @@ export function changeGameMode() {
   const exe = $dom("#sm-game-exe");
   const args = $dom("#sm-game-args");
   const exeLabel = $dom('label[for="sm-game-exe"]');
-  if (exeLabel) exeLabel.innerHTML = isEmu ? "模拟器ADB地址 <span class='req'>*</span>" : "游戏路径 <span class='req'>*</span>";
-  if (exe) exe.placeholder = isEmu ? "例如 127.0.0.1:16384" : "请填写游戏可执行文件路径";
-  if (args) args.placeholder = isEmu ? "am start 参数，如 -n 包名/.MainActivity" : "";
+  if (exeLabel) exeLabel.innerHTML = `${text(isEmu ? "模拟器ADB地址" : "游戏路径")} <span class='req'>*</span>`;
+  if (exe) exe.placeholder = isEmu ? text("例如 127.0.0.1:16384") : text("请填写游戏可执行文件路径");
+  if (args) args.placeholder = isEmu ? text("am start 参数，如 -n 包名/.MainActivity") : "";
   const pathTrigger = exe?.closest(".nxp-path")?.querySelector("[data-path-trigger]");
   if (pathTrigger) {
     pathTrigger.hidden = isEmu;
     pathTrigger.setAttribute("aria-hidden", isEmu ? "true" : "false");
     pathTrigger.disabled = isEmu;
-    pathTrigger.dataset.pathTitle = isEmu ? "模拟器ADB地址" : "游戏路径";
+    pathTrigger.dataset.pathTitle = text(isEmu ? "模拟器ADB地址" : "游戏路径");
   }
   const lockPcFields = selfManagedPcLaunch(scriptDraft?.pluginType || "") && !isEmu;
   const currentMode = isEmu ? "emulator" : "pc";
@@ -99,7 +100,7 @@ export function changeGameMode() {
         launchButton.setAttribute("aria-pressed", pressed ? "true" : "false");
         launchButton.dataset.state = pressed ? "on" : "off";
         const stateText = launchButton.querySelector("[data-switch-state]");
-        if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+        if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
       }
     }
     scriptDraft._lastGameMode = currentMode;
@@ -107,13 +108,13 @@ export function changeGameMode() {
   // self-managed-pc-launch：PC 模式下启动参数与等待秒数禁用（保留显示值）；
   // 游戏路径保留可填写，用于任务失败时的强制关闭游戏；「启动游戏」开关先关闭再禁用。
   // 禁用元件不再派发指针/聚焦事件，禁用提示气泡挂在外层容器上，覆盖字段原有帮助气泡。
-  const lockedHelp = "使用 PC 客户端时，禁用该选项。";
+  const lockedHelp = text("使用 PC 客户端时，禁用该选项。");
   const exeField = $dom("#sm-game-exe");
   if (argsField) argsField.disabled = lockPcFields;
   if (waitField) waitField.disabled = lockPcFields;
   if (exeField) exeField.disabled = false;
-  setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? "模拟器模式下，该内容会作为 adb shell am start 参数传递。" : ""));
-  setFieldBubble(waitField, lockPcFields ? lockedHelp : "启动游戏后等待指定秒数，再运行脚本。");
+  setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? text("模拟器模式下，该内容会作为 adb shell am start 参数传递。") : ""));
+  setFieldBubble(waitField, lockPcFields ? lockedHelp : text("启动游戏后等待指定秒数，再运行脚本。"));
   const launch = launchButton;
   if (launch) {
     if (lockPcFields) {
@@ -121,7 +122,7 @@ export function changeGameMode() {
       launch.setAttribute("aria-pressed", "false");
       launch.dataset.state = "off";
       const stateText = launch.querySelector("[data-switch-state]");
-      if (stateText) stateText.textContent = "已停用";
+      if (stateText) stateText.textContent = text("已停用");
     }
     launch.disabled = lockPcFields;
     launch.setAttribute("aria-disabled", lockPcFields ? "true" : "false");
@@ -148,34 +149,34 @@ function scriptCardMarkup(script) {
   const unavailable = pluginStatus.specialized && !pluginStatus.available;
   const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
   const pluginBadge = !pluginStatus.specialized
-    ? '<span class="badge muted">通用脚本</span>'
+    ? `<span class="badge muted">${text("通用脚本")}</span>`
     : pluginStatus.missing
-      ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">未知专项</span>`
-      : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${esc(pluginStatus.displayName)}专项</span>`;
+      ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">${text("未知专项")}</span>`
+      : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${text("{name}专项", { name: esc(pluginStatus.displayName) })}</span>`;
   const judgeBadge = script.judgeScriptEnabled === true && String(script.judgeScript || "").trim()
-    ? '<span class="badge muted" data-testid="script-judge-badge">判断脚本</span>'
+    ? `<span class="badge muted" data-testid="script-judge-badge">${text("判断脚本")}</span>`
     : String(script.successKeywords || "").trim() || String(script.failureKeywords || "").trim()
-      ? '<span class="badge muted" data-testid="script-judge-badge">关键字判断</span>'
+      ? `<span class="badge muted" data-testid="script-judge-badge">${text("关键字判断")}</span>`
       : "";
   const gameModeBadge = script.launchGame === true
-    ? `<span class="badge muted" data-testid="script-game-mode-badge">${String(script.gameMode || "").trim().toLowerCase() === "emulator" ? "安卓模拟器" : "PC 客户端"}</span>`
+    ? `<span class="badge muted" data-testid="script-game-mode-badge">${text(String(script.gameMode || "").trim().toLowerCase() === "emulator" ? "安卓模拟器" : "PC 客户端")}</span>`
     : "";
   const longBadge = script.logStallTimeoutMinutes === -1
-    ? '<span class="badge warn" data-testid="script-long-badge">长时策略</span>'
+    ? `<span class="badge warn" data-testid="script-long-badge">${text("长时策略")}</span>`
     : "";
   const entityState = unavailable
     ? ` class="entity-link is-unavailable" disabled aria-disabled="true" title="${esc(unavailableMessage)}"`
     : ' class="entity-link"';
   return `<article class="script-card${unavailable ? " is-unavailable" : ""}" data-testid="script-card" data-dnd-id="${esc(script.id)}">
-    <span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(text("拖拽排序（方向键调整顺序）"))}" title="${esc(text("拖拽排序"))}">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
-      <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${unavailable ? "无法识别的专项脚本实例" : "编辑脚本实例"}：${esc(script.name)}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
+      <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${esc(text("{action}：{name}", { action: unavailable ? text("无法识别的专项脚本实例") : text("编辑脚本实例"), name: script.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
     <div class="meta-line script-meta">${pluginBadge}${gameModeBadge}${judgeBadge}${longBadge}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
-      <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>编辑脚本</button>
-      <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">删除脚本</button>
+      <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${text("编辑脚本")}</button>
+      <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">${text("删除脚本")}</button>
     </div>
   </article>`;
 }
@@ -183,7 +184,7 @@ function scriptCardMarkup(script) {
 export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
   navActive("scripts");
-  setTopbarTitle("脚本实例");
+  setTopbarTitle(text("脚本实例"));
   let scripts, status;
   try {
     [scripts, status] = await Promise.all([api("GET", "/api/scripts"), api("GET", "/api/status")]);
@@ -276,7 +277,7 @@ export async function openScriptModal(id = "", plugin = "") {
       state.scripts = await api("GET", "/api/scripts");
       script = state.scripts.find(item => item.id === id);
     } catch (error) {
-      toast("加载脚本失败：" + error.message, "error");
+      toast(text("加载脚本失败：") + error.message, "error");
       return;
     }
   }
@@ -395,7 +396,7 @@ async function probeSpecialRoot(rootPath, pluginType) {
   try {
     await api("POST", "/api/scripts/probe", { rootPath, pluginType, inputs: {} });
   } catch (error) {
-    toast("无法从该根目录推导专项配置：" + error.message, "error");
+    toast(text("无法从该根目录推导专项配置：") + error.message, "error");
   }
 }
 
@@ -473,7 +474,7 @@ export function uploadJudgeScript() {
     const file = input.files?.[0];
     if (!file) { finish(); return; }
     if (file.size > 256 * 1024) {
-      toast("脚本文件过大（上限 256KB）", "error");
+      toast(text("脚本文件过大（上限 256KB）"), "error");
       finish();
       return;
     }
@@ -487,11 +488,11 @@ export function uploadJudgeScript() {
         language.value = lang;
         language.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      toast(`已载入脚本（${lang === "python" ? "Python" : "JavaScript"}）`);
+      toast(text("已载入脚本（{language}）", { language: lang === "python" ? "Python" : "JavaScript" }));
       finish();
     };
     reader.onerror = () => {
-      toast("读取脚本文件失败", "error");
+      toast(text("读取脚本文件失败"), "error");
       finish();
     };
     reader.readAsText(file, "utf-8");
@@ -538,7 +539,7 @@ export async function saveScript() {
     }
     clearFieldError(id);
   }
-  if (firstError) { toast("请完善表单中的必填项", "error"); return; }
+  if (firstError) { toast(text("请完善表单中的必填项"), "error"); return; }
   const l = state.limits || {};
   const ILLEGAL_PATH = /["<>|?*{}]/;
   const ILLEGAL_LOG = /["<>|?]/;
@@ -549,20 +550,20 @@ export async function saveScript() {
     const value = stripQuotes($dom("#" + id)?.value);
     if (illegal.test(value)) {
       setFieldError(id, `${label}包含非法字符`);
-      toast(`${label}包含非法字符`, "error");
+      toast(text("{label}包含非法字符", { label }), "error");
       return;
     }
   }
   const nameBytes = new TextEncoder().encode($dom("#sm-name").value.trim()).length;
   if (nameBytes > MAX_ENTITY_NAME_BYTES) {
     setFieldError("sm-name", `脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
-    toast(`脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
+    toast(text("脚本名称最多 {bytes} 字节", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   const name = $dom("#sm-name").value.trim();
   if (hasEntityNameConflict(state.scripts, name, scriptDraft.id)) {
     setFieldInvalid("sm-name");
-    toast("脚本名称已存在，请使用其他名称", "error");
+    toast(text("脚本名称已存在，请使用其他名称"), "error");
     return;
   }
   const attempts = parseInt($dom("#sm-attempts")?.value, 10);
@@ -570,7 +571,7 @@ export async function saveScript() {
   const total = parseInt($dom("#sm-total")?.value, 10);
   if (!(attempts >= (l.minAttempts ?? 1)) || !(attempts <= (l.maxAttempts ?? 10))) {
     setFieldError("sm-attempts", `最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`);
-    toast(`最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`, "error");
+    toast(text("最大尝试次数须在 {min}-{max} 之间", { min: l.minAttempts ?? 1, max: l.maxAttempts ?? 10 }), "error");
     return;
   }
   // 日志无更新上限为 -1 定义长时脚本；普通脚本不能禁用运行总时间上限
@@ -578,24 +579,24 @@ export async function saveScript() {
   const unlimitedTotal = total === -1;
   if (!longStall && unlimitedTotal) {
     setFieldError("sm-total", "日志无更新上限未填 -1 时，运行总时间上限不能填 -1");
-    toast("日志无更新上限未填 -1 时，运行总时间上限不能填 -1", "error");
+    toast(text("日志无更新上限未填 -1 时，运行总时间上限不能填 -1"), "error");
     return;
   }
   if (!longStall && (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60)))) {
     setFieldError("sm-stall", `日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`);
-    toast(`日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`, "error");
+    toast(text("日志无更新超时须在 {min}-{max} 分钟之间", { min: l.minStallMinutes ?? 1, max: l.maxStallMinutes ?? 60 }), "error");
     return;
   }
   if (!unlimitedTotal && (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720)))) {
     setFieldError("sm-total", `运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`);
-    toast(`运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`, "error");
+    toast(text("运行总时间超时须在 {min}-{max} 分钟之间", { min: l.minTotalMinutes ?? 5, max: l.maxTotalMinutes ?? 720 }), "error");
     return;
   }
   const judgeEnabled = ($dom("#sm-mode-btn")?.getAttribute("aria-pressed") ?? "false") === "true";
   const judgeCode = $dom("#sm-judge-code")?.value ?? "";
   if (judgeEnabled && !judgeCode.trim()) {
     setRequiredFieldError("sm-judge-code");
-    toast("请填写判断脚本代码，或关闭「使用脚本」", "error");
+    toast(text("请填写判断脚本代码，或关闭「使用脚本」"), "error");
     return;
   }
   const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
@@ -606,7 +607,7 @@ export async function saveScript() {
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     setRequiredFieldError("sm-game-exe");
-    toast(gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径", "error");
+    toast(text(gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径"), "error");
     return;
   }
   if (gameMode === "emulator") {
@@ -614,12 +615,12 @@ export async function saveScript() {
     const port = parseInt(gameExe.slice(colon + 1), 10);
     if (colon <= 0 || !(port >= 1 && port <= 65535)) {
       setFieldError("sm-game-exe", "模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）");
-      toast("模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）", "error");
+      toast(text("模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）"), "error");
       return;
     }
   } else if (ILLEGAL_PATH.test(gameExe)) {
     setFieldError("sm-game-exe", "游戏路径包含非法字符");
-    toast("游戏路径包含非法字符", "error");
+    toast(text("游戏路径包含非法字符"), "error");
     return;
   }
   const payload = {
@@ -643,7 +644,7 @@ export async function saveScript() {
     if (payload.id) saved = await api("PUT", "/api/scripts/" + payload.id, payload);
     else saved = await api("POST", "/api/scripts", payload);
     closeModal();
-    toast("脚本实例已保存");
+      toast(text("脚本实例已保存"));
     applySaveValidation(saved?.validation);
     const token = state.routeToken;
     await pageScripts(token);
@@ -661,7 +662,7 @@ export async function saveScript() {
 function applySaveValidation(validation) {
   if (!validation) return;
   if (validation.error) {
-    toast("专项插件配置校验执行失败。", "error");
+    toast(text("专项插件配置校验执行失败。"), "error");
   }
   for (const item of validation.notifications || []) {
     pushNotice(item.title || "", item.body || "", item.kind || "info");
@@ -676,7 +677,7 @@ export function deleteScript(id, name) {
 }
 
 export async function confirmDeleteScript(id, name) {
-  try { await api("DELETE", "/api/scripts/" + id); closeModal(); toast("脚本实例已删除"); await pageScripts(state.routeToken); }
+  try { await api("DELETE", "/api/scripts/" + id); closeModal(); toast(text("脚本实例已删除")); await pageScripts(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 

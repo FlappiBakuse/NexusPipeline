@@ -122,6 +122,8 @@ internal static class ApiHistoryHandler
                 await HttpHelper.WriteJsonAsync(context, new { error = "记录不存在" }, 404).ConfigureAwait(false);
                 return;
             }
+            record = record.Clone();
+            RuntimeContext.Instance.Plugins.LocalizeHistory(record, context.Request.Locale);
             Audit.Log(Audit.Web, "查询运行详情", $"{record.ScriptName}（{record.StartTime:yyyy-MM-dd HH:mm:ss}）");
             bool includeFull = string.Equals(context.Request.QueryString["full"], "true", StringComparison.OrdinalIgnoreCase)
                 || context.Request.QueryString["full"] == "1";
@@ -178,6 +180,12 @@ internal static class ApiHistoryHandler
                 day,
                 day.AddDays(1).AddTicks(-1),
                 userKey: string.IsNullOrWhiteSpace(userKey) ? null : userKey);
+            dayRecords = dayRecords.Select(record =>
+            {
+                RunRecord localized = record.Clone();
+                RuntimeContext.Instance.Plugins.LocalizeHistory(localized, context.Request.Locale);
+                return localized;
+            }).ToList();
             Audit.Log(Audit.Web, "查询历史记录", $"{dayRecords.Count} 条（{day:yyyy-MM-dd}）");
             await HttpHelper.WriteJsonAsync(context, new
             {
@@ -222,6 +230,12 @@ internal static class ApiHistoryHandler
             historyStart, historyEnd,
             string.IsNullOrWhiteSpace(scriptId) ? null : scriptId,
             string.IsNullOrWhiteSpace(queueId) ? null : queueId);
+        records = records.Select(record =>
+        {
+            RunRecord localized = record.Clone();
+            RuntimeContext.Instance.Plugins.LocalizeHistory(localized, context.Request.Locale);
+            return localized;
+        }).ToList();
         bool paged = context.Request.QueryString["offset"] is not null || context.Request.QueryString["limit"] is not null;
         if (paged)
         {

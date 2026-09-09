@@ -6,6 +6,7 @@ import { systemActionCard } from "./forms.js";
 import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
 import { durationClock } from "./duration.js";
 import { initTooltips } from "./tooltip.js";
+import { applyTranslations, text, translateText } from "./i18n.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -16,6 +17,7 @@ let noticeSequence = 0;
 
 export function render(html) {
   view.innerHTML = html;
+  applyTranslations(view);
   initAutoScroll(view);
   syncAllModeToggles(view);
   syncAllSwitchControls(view);
@@ -32,7 +34,7 @@ export function syncModeToggleText(btn) {
   if (btn.hasAttribute("data-day") || btn.dataset.toggleText === "false") return;
   const base = btn.dataset.baseText || btn.textContent.trim();
   btn.dataset.baseText = base;
-  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? "：开" : "：关");
+  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? text("：开") : text("：关"));
 }
 
 /** 同步根节点内全部切换按钮文字（render/showModal/点击切换后调用）。 */
@@ -46,7 +48,7 @@ export function syncSwitchControl(btn) {
   const on = btn.getAttribute("aria-pressed") === "true";
   btn.dataset.state = on ? "on" : "off";
   const stateText = btn.querySelector("[data-switch-state]");
-  if (stateText) stateText.textContent = on ? "已启用" : "已停用";
+  if (stateText) stateText.textContent = on ? text("已启用") : text("已停用");
 }
 
 export function syncAllSwitchControls(root = view) {
@@ -182,14 +184,14 @@ export function navActive(page) {
 
 export function setTopbarTitle(title) {
   const el = $("#topbar-title");
-  if (el) el.textContent = title;
+  if (el) el.textContent = translateText(title);
 }
 
 export function toast(message, kind = "info") {
   const element = $("#toast");
   if (!element) return;
   const now = Date.now();
-  element.textContent = message;
+  element.textContent = translateText(message);
   element.classList.toggle("error", kind === "error");
   element.classList.remove("shake");
   if (kind === "error" && message === lastToastMessage && now - lastToastAt < SHAKE_WINDOW_MS) {
@@ -220,19 +222,19 @@ export function pushNotice(title, body = "", kind = "info") {
   content.className = "notice-content";
   const heading = document.createElement("strong");
   heading.className = "notice-title";
-  heading.textContent = String(title ?? "");
+  heading.textContent = translateText(title);
   content.append(heading);
   if (String(body ?? "").length > 0) {
     const copy = document.createElement("p");
     copy.className = "notice-body";
-    copy.textContent = String(body);
+    copy.textContent = translateText(body);
     content.append(copy);
   }
 
   const close = document.createElement("button");
   close.type = "button";
   close.className = "notice-close";
-  close.setAttribute("aria-label", "关闭通知");
+  close.setAttribute("aria-label", text("关闭通知"));
   close.textContent = "×";
   close.addEventListener("click", () => notice.remove());
   notice.append(content, close);
@@ -252,7 +254,7 @@ export function startCountdown(targetId, timeValue) {
     if (!element) return;
     const remain = target - Date.now();
     if (remain <= 0) {
-      element.textContent = "即将触发";
+      element.textContent = text("即将触发");
       return;
     }
     element.textContent = durationClock(Math.floor(remain / 1000));
@@ -279,11 +281,11 @@ export function startSystemActionCountdown() {
   const countdown = card.querySelector('[data-testid="system-action-countdown"]');
   if (!countdown) return;
   const deadline = new Date(countdown.dataset.deadline || "").getTime();
-  const verb = card.dataset.actionVerb || "执行";
+  const verb = card.dataset.actionVerb || text("执行");
   if (systemActionTimer !== null) clearInterval(systemActionTimer);
   const update = () => {
     const remain = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-    countdown.textContent = remain > 0 ? `${remain} 秒后将${verb}` : `即将执行${verb}`;
+    countdown.textContent = remain > 0 ? text("{seconds} 秒后将{verb}", { seconds: remain, verb }) : text("即将执行{verb}", { verb });
   };
   update();
   systemActionTimer = registerInterval(setInterval(update, 1000));
@@ -303,10 +305,10 @@ export function setNavOpen(open) {
 /** 取消完成操作倒计时（全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
 export async function cancelSystemAction() {
   const card = document.querySelector('[data-testid="system-action-card"]');
-  const verb = card?.dataset.actionVerb || "执行";
+  const verb = card?.dataset.actionVerb || text("执行");
   try {
     await api("POST", "/api/system-action/cancel");
-    toast(`已取消${verb}`);
+    toast(text("已取消{verb}", { verb }));
     const status = await api("GET", "/api/status");
     const area = document.querySelector("#system-action-area");
     if (area) {
@@ -330,13 +332,13 @@ export function applyTheme(theme) {
 function syncThemeControls(value) {
   const iconName = value === "light" ? "sun" : value === "dark" ? "moon" : "system";
   $$('[data-theme-icon], #theme-icon').forEach(element => element.innerHTML = icon(iconName));
-  $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", `当前${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}，点击切换主题`));
+  $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", text("当前{theme}，点击切换主题", { theme: text(value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色") })));
 }
 
 export function cycleTheme() {
   const value = cycleThemeValue();
   syncThemeControls(value);
-  toast(`主题：${value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色"}`);
+  toast(text("主题：{theme}", { theme: text(value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色") }));
 }
 
 /** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */
@@ -368,7 +370,7 @@ export function setFieldError(id, message) {
     (element.closest(".field") || element.parentElement)?.append(slot);
   }
   if (slot) {
-    slot.textContent = message || "请检查此项";
+    slot.textContent = translateText(message || text("请检查此项"));
     slot.hidden = false;
     const describedBy = (visual.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
     if (!describedBy.includes(slot.id)) describedBy.push(slot.id);

@@ -7,8 +7,14 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
   try {
     await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
     await page.getByTestId("new-script").click();
-    const modal = page.locator(".modal");
+    let modal = page.locator(".modal");
     await expect(modal).toBeVisible();
+    const genericChooser = modal.getByRole("button", { name: /新建通用脚本实例/ });
+    if (await genericChooser.count()) {
+      await genericChooser.click();
+      modal = page.locator(".modal");
+      await expect(modal.locator("#sm-mode-btn")).toBeVisible();
+    }
     const judgeMode = modal.locator("#sm-mode-btn");
     await judgeMode.click();
     const judgeUpload = modal.locator("#sm-upload-btn");

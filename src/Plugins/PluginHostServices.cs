@@ -530,7 +530,17 @@ internal static class PluginContributionValidation
             error = "插件用户列表徽章 title 无效";
             return false;
         }
-        sanitized = new PluginUserListBadge(badge.Label.Trim(), tone, badge.Title);
+        if (!PluginLocalizationValidation.IsValidText(badge.LocalizedLabel, 64)
+            || !PluginLocalizationValidation.IsValidText(badge.LocalizedTitle, 256))
+        {
+            error = "插件用户列表徽章本地化文案无效";
+            return false;
+        }
+        sanitized = new PluginUserListBadge(badge.Label.Trim(), tone, badge.Title)
+        {
+            LocalizedLabel = badge.LocalizedLabel,
+            LocalizedTitle = badge.LocalizedTitle,
+        };
         return true;
     }
 
@@ -544,6 +554,11 @@ internal static class PluginContributionValidation
             throw new InvalidDataException("插件贡献标题无效");
         }
         if (contribution.Description is null || contribution.Description.Length > 2048) throw new InvalidDataException("插件贡献说明无效");
+        if (!PluginLocalizationValidation.IsValidText(contribution.LocalizedTitle, 128)
+            || !PluginLocalizationValidation.IsValidText(contribution.LocalizedDescription, 2048))
+        {
+            throw new InvalidDataException("插件贡献本地化文案无效");
+        }
         if (contribution.Fields.Count > 64) throw new InvalidDataException("插件贡献字段过多");
         if (contribution.ReadHandler is null || contribution.SaveHandler is null)
         {
@@ -565,6 +580,12 @@ internal static class PluginContributionValidation
             {
                 throw new InvalidDataException($"插件贡献字段展示文本无效：{field.Key}");
             }
+            if (!PluginLocalizationValidation.IsValidText(field.LocalizedLabel, 128)
+                || !PluginLocalizationValidation.IsValidText(field.LocalizedDescription, 1024)
+                || !PluginLocalizationValidation.IsValidText(field.LocalizedPlaceholder, 512))
+            {
+                throw new InvalidDataException($"插件贡献字段本地化文案无效：{field.Key}");
+            }
             if (field.MaxLength < 0 || field.MaxLength > 1024 * 1024)
             {
                 throw new InvalidDataException($"插件贡献字段 maxLength 无效：{field.Key}");
@@ -580,7 +601,9 @@ internal static class PluginContributionValidation
                 {
                     ArgumentNullException.ThrowIfNull(option);
                     if (string.IsNullOrWhiteSpace(option.Value) || option.Value.Length > 128
-                        || option.Label is null || option.Label.Length is 0 or > 128 || !optionValues.Add(option.Value))
+                        || option.Label is null || option.Label.Length is 0 or > 128
+                        || !PluginLocalizationValidation.IsValidText(option.LocalizedLabel, 128)
+                        || !optionValues.Add(option.Value))
                     {
                         throw new InvalidDataException($"选择字段 options 无效：{field.Key}");
                     }

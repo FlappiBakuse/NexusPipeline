@@ -36,7 +36,8 @@ internal sealed record PluginDetail(
     bool HasReadme,
     string ReadmeMarkdown,
     string? ReadmeError,
-    IReadOnlyList<PluginChangelogEntry> Changelog);
+    IReadOnlyList<PluginChangelogEntry> Changelog,
+    IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales);
 
 internal sealed record PluginReadmeResult(
     bool HasReadme,

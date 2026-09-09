@@ -12,6 +12,7 @@ import {
 import { isCurrent, state } from "../core/state.js";
 import { initAutoScroll, navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { markRestartRequired } from "./settings.js";
+import { applyTranslations, text } from "../core/i18n.js";
 
 let activeTab = "local";
 let pluginLoadId = 0;
@@ -37,7 +38,7 @@ const detailState = {
 const detailCache = { local: new Map(), store: new Map() };
 
 function pluginKindLabel(plugin) {
-  return plugin.kind === "data-specialized" ? "专项插件" : "通用插件";
+  return text(plugin.kind === "data-specialized" ? "专项插件" : "通用插件");
 }
 
 function pluginKindClass(plugin) {
@@ -55,14 +56,14 @@ function pluginNameMarkup(plugin) {
 
 function runtimeLabel(plugin) {
   const runtimeState = plugin.state || (plugin.runtimeEnabled ? "Active" : "Disabled");
-  if (runtimeState === "Active") return plugin.configuredEnabled ? "运行中" : "运行中 · 待重启";
-  if (runtimeState === "InitFailed") return "初始化失败";
-  if (runtimeState === "InitTimedOut") return "初始化超时";
-  if (runtimeState === "StartTimedOut") return "启动超时";
-  if (runtimeState === "StopTimedOut") return "停止超时";
-  if (runtimeState === "Incompatible") return "API 不兼容";
-  if (runtimeState === "Loading") return "加载中";
-  return plugin.configuredEnabled ? "待重启" : "已禁用";
+  if (runtimeState === "Active") return text(plugin.configuredEnabled ? "运行中" : "运行中 · 待重启");
+  if (runtimeState === "InitFailed") return text("初始化失败");
+  if (runtimeState === "InitTimedOut") return text("初始化超时");
+  if (runtimeState === "StartTimedOut") return text("启动超时");
+  if (runtimeState === "StopTimedOut") return text("停止超时");
+  if (runtimeState === "Incompatible") return text("API 不兼容");
+  if (runtimeState === "Loading") return text("加载中");
+  return text(plugin.configuredEnabled ? "待重启" : "已禁用");
 }
 
 function runtimeClass(plugin) {
@@ -73,14 +74,14 @@ function runtimeClass(plugin) {
 }
 
 function storeStatusLabel(plugin) {
-  return {
+  return text({
     "not-installed": "未安装",
     installed: "已安装",
     "update-available": "有更新",
     pending: "待重启",
     incompatible: "宿主不兼容",
     unlisted: "未列入仓库",
-  }[plugin.status] || "可用";
+  }[plugin.status] || "可用");
 }
 
 function storeStatusClass(plugin) {
@@ -142,6 +143,7 @@ function syncPluginFilterTrigger() {
 function renderPluginFilterPopover() {
   const popover = document.querySelector(`#plugin-filter-popover-${activeTab}`);
   if (popover) popover.outerHTML = pluginFilterPopoverMarkup(activeTab);
+  applyTranslations(document.querySelector(`#plugin-filter-popover-${activeTab}`));
   syncPluginFilterTrigger();
 }
 
@@ -363,12 +365,16 @@ function renderDetailPane() {
   if (detailVisibleMobile && !back) parent.insertAdjacentHTML("afterbegin", detailBackMarkup());
   if (!detailVisibleMobile) back?.remove();
   pane.outerHTML = detailPaneMarkup(activeTab);
+  applyTranslations(parent);
   initAutoScroll(parent);
 }
 
 function renderListPane() {
   const slot = document.querySelector(".plugin-list-pane-slot");
-  if (slot) slot.innerHTML = pluginListPaneMarkup(activeTab);
+  if (slot) {
+    slot.innerHTML = pluginListPaneMarkup(activeTab);
+    applyTranslations(slot);
+  }
 }
 
 function selectDefaultPlugin(tab) {
@@ -468,7 +474,7 @@ function markPluginCacheDirty(...tabs) {
 
 export async function pagePlugins(token) {
   if (!isCurrent("plugins", token)) return;
-  navActive("plugins"); setTopbarTitle("插件");
+  navActive("plugins"); setTopbarTitle(text("插件"));
   pluginFilterOpen = false;
   const requestedTab = activeTab;
   const loadId = ++pluginLoadId;
@@ -563,7 +569,7 @@ export async function togglePlugin(name, enabled) {
     await api("POST", `/api/plugins/${encodeURIComponent(name)}/${enabled ? "enable" : "disable"}`);
     markPluginCacheDirty("local", "store");
     markRestartRequired();
-    toast("已更新（重启生效）");
+    toast(text("已更新（重启生效）"));
     await pagePlugins(state.routeToken);
   } catch (error) {
     toast(error.message, "error");
@@ -575,7 +581,7 @@ async function runStoreAction(name, action) {
     await api("POST", `/api/plugins/store/${encodeURIComponent(name)}/${action}`);
     markPluginCacheDirty("local", "store");
     markRestartRequired();
-    toast(action === "uninstall" ? "已登记卸载（重启生效）" : "已登记操作（重启生效）");
+    toast(text(action === "uninstall" ? "已登记卸载（重启生效）" : "已登记操作（重启生效）"));
     await pagePlugins(state.routeToken);
   } catch (error) {
     toast(error.message, "error");
@@ -638,7 +644,7 @@ export const actions = {
     try {
       await api("POST", "/api/plugins/store/refresh");
       markPluginCacheDirty("store");
-      toast("插件仓库已刷新");
+      toast(text("插件仓库已刷新"));
       await pagePlugins(state.routeToken);
     } catch (error) {
       toast(error.message, "error");

@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using NexusPipeline.Localization;
 
 namespace NexusPipeline.Web;
 
@@ -62,6 +63,8 @@ internal sealed class WebRequest
     public NameValueCollection QueryString { get; }
 
     public NameValueCollection Headers { get; }
+
+    public string Locale => LocaleCatalog.Resolve(Headers);
 
     public Stream InputStream { get; }
 

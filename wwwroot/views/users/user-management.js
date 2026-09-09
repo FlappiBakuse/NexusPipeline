@@ -9,6 +9,7 @@ import { hasEntityNameConflict } from "../../core/entity-name.js";
 import { setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, toast, withBusy } from "../../core/ui.js";
 import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
+import { text } from "../../core/i18n.js";
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
 import {
   MAX_ENTITY_NAME_BYTES,
@@ -30,25 +31,25 @@ function bindingIdPart(id) {
 
 function umScriptName(binding) {
   const script = (state.scripts || []).find(item => item.id === binding.scriptInstanceId);
-  return binding.scriptName || script?.name || "（脚本实例不存在）";
+  return binding.scriptName || script?.name || text("（脚本实例不存在）");
 }
 
 function umBadges(binding) {
   const effective = binding.effective || binding;
   const runDays = typeof effective.runDays === "number" ? effective.runDays : -1;
   const enabled = effective.enabled !== false && runDays !== 0;
-  const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? "已启用" : "已停用"}</span>`;
+  const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? text("已启用") : text("已停用")}</span>`;
   const daysBadge = runDays === 0
-    ? '<span class="badge warn">运行已停止</span>'
+    ? `<span class="badge warn">${text("运行已停止")}</span>`
     : runDays > 0
-      ? `<span class="badge blue">剩余 ${runDays} 天</span>`
-      : '<span class="badge muted">永久运行</span>';
+      ? `<span class="badge blue">${text("剩余 {days} 天", { days: runDays })}</span>`
+      : `<span class="badge muted">${text("永久运行")}</span>`;
   const script = scriptById(binding.scriptInstanceId);
   const pluginStatus = script ? scriptPluginStatus(script, state.plugins || []) : null;
   const pluginBadge = pluginStatus?.missing
-    ? '<span class="badge bad">未知专项</span>'
+    ? `<span class="badge bad">${text("未知专项")}</span>`
     : pluginStatus?.specialized && !pluginStatus.available
-      ? '<span class="badge warn">专项插件不可用</span>'
+      ? `<span class="badge warn">${text("专项插件不可用")}</span>`
       : "";
   return pluginBadge + stateBadge + daysBadge;
 }
@@ -208,7 +209,7 @@ function syncUmState() {
   const editToggle = section?.querySelector(".um-binding-edit-toggle");
   if (editToggle) {
     editToggle.hidden = !!umState.expandedId;
-    editToggle.textContent = umState.bindingEditMode ? "完成编辑" : "编辑绑定";
+    editToggle.textContent = umState.bindingEditMode ? text("完成编辑") : text("编辑绑定");
     editToggle.setAttribute("aria-pressed", umState.bindingEditMode ? "true" : "false");
   }
   const list = document.getElementById("um-binding-list");
@@ -300,24 +301,24 @@ export async function saveUserManagement() {
   const name = $("#um-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("um-name");
-    toast("请填写用户名", "error");
+    toast(text("请填写用户名"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
     setFieldError("um-name", `用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
-    toast(`用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error");
+    toast(text("用户名最多 {bytes} 字节", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   if (hasEntityNameConflict(state.users, name, draft.userId)) {
     setFieldInvalid("um-name");
-    toast("用户名已存在，请使用其他名称", "error");
+    toast(text("用户名已存在，请使用其他名称"), "error");
     return;
   }
   clearFieldError("um-name");
   const remark = $("#um-remark")?.value.trim() || "";
   if (new TextEncoder().encode(remark).length > MAX_USER_REMARK_BYTES) {
     setFieldError("um-remark", `备注最多 ${MAX_USER_REMARK_BYTES} 字节`);
-    toast(`备注最多 ${MAX_USER_REMARK_BYTES} 字节`, "error");
+    toast(text("备注最多 {bytes} 字节", { bytes: MAX_USER_REMARK_BYTES }), "error");
     return;
   }
   clearFieldError("um-remark");
@@ -330,12 +331,12 @@ export async function saveUserManagement() {
     }
     setManagementDraft(null);
     closeModal();
-    toast("用户设置已保存");
+    toast(text("用户设置已保存"));
     await reloadUsers();
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("um-name");
-      toast("用户名已存在，请使用其他名称", "error");
+      toast(text("用户名已存在，请使用其他名称"), "error");
       return;
     }
     toast(error.message, "error");
@@ -394,7 +395,7 @@ async function reorderManagedBindings(ids) {
   const orderedBindings = ids.map(id => byId.get(id)).filter(Boolean);
   if (orderedBindings.length !== currentBindings.length) {
     restoreManagedBindingOrder();
-    toast("绑定脚本实例顺序无效", "error");
+    toast(text("绑定脚本实例顺序无效"), "error");
     return;
   }
   try {
@@ -405,7 +406,7 @@ async function reorderManagedBindings(ids) {
       const cachedById = new Map((cachedUser.bindings || []).map(binding => [binding.scriptInstanceId, binding]));
       cachedUser.bindings = ids.map(id => cachedById.get(id)).filter(Boolean);
     }
-    if (getManagementDraft() === draft) toast("已绑定脚本实例顺序已保存");
+    if (getManagementDraft() === draft) toast(text("已绑定脚本实例顺序已保存"));
   } catch (error) {
     restoreManagedBindingOrder();
     toast(error.message, "error");
@@ -441,7 +442,7 @@ export async function confirmUmAddBindings() {
   if (!draft) return;
   const ids = Array.from(umState.addSelected);
   if (!ids.length) {
-    toast("请选择要绑定的脚本实例", "error");
+    toast(text("请选择要绑定的脚本实例"), "error");
     return;
   }
   const unavailableScript = ids
@@ -468,7 +469,7 @@ export async function confirmUmAddBindings() {
       };
       addedBindings.push((await api("POST", "/api/users/" + encodeURIComponent(draft.userId) + "/bindings", payload)) || payload);
     }
-    toast(ids.length > 1 ? "已绑定 " + ids.length + " 个脚本实例" : "脚本绑定已添加");
+    toast(ids.length > 1 ? text("已绑定 {count} 个脚本实例", { count: ids.length }) : text("脚本绑定已添加"));
     await refreshManagedUser(addedBindings);
   } catch (error) {
     if (addedBindings.length) await refreshManagedUser(addedBindings);
@@ -523,13 +524,16 @@ export function deleteUserBinding(userId, scriptId) {
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
   if (!user || !binding) return;
-  confirmModal("移除脚本绑定", "确定移除「" + esc(user.name) + "」与「" + esc(binding.scriptName || "该脚本实例") + "」的绑定？该绑定的配置数据会一并清理。", "confirm-delete-user-binding", { "user-id": userId, "script-id": scriptId });
+  confirmModal(text("移除脚本绑定"), text("确定移除「{user}」与「{script}」的绑定？该绑定的配置数据会一并清理。", {
+    user: esc(user.name),
+    script: esc(binding.scriptName || text("该脚本实例")),
+  }), "confirm-delete-user-binding", { "user-id": userId, "script-id": scriptId });
 }
 
 export async function confirmDeleteUserBinding(userId, scriptId) {
   try {
     await api("DELETE", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId));
-    toast("脚本绑定已移除");
+    toast(text("脚本绑定已移除"));
     await refreshManagedUser();
   } catch (error) {
     toast(error.message, "error");
@@ -544,11 +548,11 @@ export async function uploadUserAvatar(id) {
     const file = input.files?.[0];
     if (!file) return;
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      toast("头像仅支持 PNG、JPEG 或 WebP", "error");
+      toast(text("头像仅支持 PNG、JPEG 或 WebP"), "error");
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      toast("头像文件过大（上限 5 MiB）", "error");
+      toast(text("头像文件过大（上限 5 MiB）"), "error");
       return;
     }
     const reader = new FileReader();
@@ -556,7 +560,7 @@ export async function uploadUserAvatar(id) {
       try {
         const dataUrl = String(reader.result || "");
         await api("POST", "/api/users/" + encodeURIComponent(id) + "/avatar", { mimeType: file.type, data: dataUrl.split(",", 2)[1] || "" });
-        toast("头像已更新");
+        toast(text("头像已更新"));
         if (getManagementDraft()?.userId === id) await refreshManagedUser();
         else await reloadUsers();
       } catch (error) {
@@ -571,7 +575,7 @@ export async function uploadUserAvatar(id) {
 export async function removeUserAvatar(id) {
   try {
     await api("DELETE", "/api/users/" + encodeURIComponent(id) + "/avatar");
-    toast("已恢复默认文字头像");
+    toast(text("已恢复默认文字头像"));
     if (getManagementDraft()?.userId === id) await refreshManagedUser();
     else await reloadUsers();
   } catch (error) {

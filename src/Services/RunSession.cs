@@ -82,6 +82,7 @@ internal class RunSession
 
     internal void ReportStatus(string status) => _statusChanged?.Invoke(status);
     internal void ReportLogLine(string line, LogLevel level = LogLevel.Info) => _logLine?.Invoke(line, level);
+    internal void AppendScriptLogLine(string line) => AppendScriptLog(line);
 
     /// <summary>自动更新配置首次检测时机判定（纯函数便于单测）。</summary>
     internal static bool ShouldRunFirstSync(double elapsedSeconds, double thresholdSeconds)

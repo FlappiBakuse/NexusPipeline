@@ -2,6 +2,19 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.1（Pre-release）
+
+### 国际化与插件契约
+- 宿主 Web UI、CLI、托盘/系统提示、通知和用户可见服务端错误接入 `zh-CN` / `en-US` 资源；浏览器按 `navigator.languages` 初始选择语言，并以 `localStorage` 保存偏好。
+- Plugin API 扩展至 1.5，Frontend API 扩展至 1.3；官方插件支持 manifest 本地化资源、声明式 UI/历史展示本地化引用和前端 `host.i18n`。
+- `CustomWallpaper`、`LiveScreenshot`、`GameCheckIn` 同步更新资源、manifest、商店元数据、发布校验和打包流程。
+- 运行记录保存稳定结果码与参数，历史及插件展示按请求语言投影，保留结果判定和持久化安全边界。
+
+### 核心结构治理
+- `SystemActions` 按进程启动、进程树清理、窗口操作和系统电源拆分职责，原有进程所有权、Job Object 和清理确认语义保持有效。
+- `ExecutionCoordinator` 抽离用户脚本、游戏启动、脚本进程会话、截图采集和尝试监控循环，保留取消、预算、判定、截图和收尾时序。
+- `CliCommandRouter` 改为命令注册表与处理器分发；`UserCommands` 按策略、校验和结果适配拆分，保持 CLI/API 行为契约。
+
 ## v0.15.0（Pre-release）
 
 ### 可靠性、诊断与可验证性

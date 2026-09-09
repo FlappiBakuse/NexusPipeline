@@ -294,7 +294,8 @@ internal sealed class PluginRepositoryService
             readme.HasReadme,
             readme.Markdown,
             readme.Error,
-            view.Changelog);
+            view.Changelog,
+            view.Locales);
     }
 
     public async Task<PluginDetail?> GetStoreDetailAsync(
@@ -358,7 +359,8 @@ internal sealed class PluginRepositoryService
             readme.HasReadme,
             readme.Markdown,
             readme.Error,
-            item.Changelog);
+            item.Changelog,
+            item.Locales);
     }
 
     private async Task<PluginReadmeResult> LoadLocalReadmeAsync(
@@ -669,6 +671,7 @@ internal sealed class PluginRepositoryService
                 Homepage = entry.Homepage,
                 CreatedAt = entry.CreatedAt,
                 UpdatedAt = entry.UpdatedAt,
+                Locales = entry.Locales,
                 HasReadme = entry.HasReadme,
             });
         }
@@ -709,6 +712,7 @@ internal sealed class PluginRepositoryService
                 Homepage = local.Homepage,
                 CreatedAt = local.CreatedAt,
                 UpdatedAt = local.UpdatedAt,
+                Locales = local.Locales,
                 HasReadme = local.HasReadme,
             });
         }
@@ -1054,4 +1058,7 @@ internal sealed record PluginStoreItem(
     public string UpdatedAt { get; init; } = "";
 
     public bool HasReadme { get; init; }
+
+    public IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales { get; init; } =
+        new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
 }

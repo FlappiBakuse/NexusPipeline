@@ -1,4 +1,5 @@
 import { trackController, releaseController } from "./state.js";
+import { getLocale } from "./i18n.js";
 
 const iconUrlCache = new Map();
 
@@ -20,12 +21,15 @@ function readAuthToken() {
 
 function authHeaders() {
   const token = readAuthToken();
-  return token ? { Authorization: "Bearer " + token } : {};
+  return token
+    ? { Authorization: "Bearer " + token, "X-Nexus-Locale": getLocale() }
+    : { "X-Nexus-Locale": getLocale() };
 }
 
 function isAuthFailure(response, data) {
   return response.status === 401
     || response.headers.get("X-Nexus-Auth") === "required"
+    || data?.code === "auth_required"
     || (data && data.error && String(data.error).includes("访问令牌"));
 }
 

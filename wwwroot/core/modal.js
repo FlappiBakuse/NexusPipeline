@@ -3,6 +3,7 @@ import { esc } from "./format.js";
 import { icon } from "./icons.js";
 import { initAutoScroll, syncAllModeToggles, syncAllSwitchControls } from "./ui.js";
 import { focusWithoutTooltip, initTooltips } from "./tooltip.js";
+import { applyTranslations, text } from "./i18n.js";
 
 let modalReturnFocus = null;
 
@@ -24,12 +25,12 @@ export function confirmModal(title, message, confirmAction, data = {}) {
   const isDelete = confirmAction.startsWith("confirm-delete");
   const confirmClass = isDelete || confirmAction === "confirm-cancel-run" ? "danger solid" : "primary";
   const confirmLabel = isDelete
-    ? "确认删除"
-    : confirmAction === "restart-confirm" ? "确认重启"
-      : confirmAction === "confirm-cancel-run" ? "确认取消"
-        : "确定";
+    ? text("确认删除")
+    : confirmAction === "restart-confirm" ? text("确认重启")
+      : confirmAction === "confirm-cancel-run" ? text("确认取消")
+        : text("确定");
   showModal(modalShell(title, `<p class="modal-copy">${message}</p>`,
-    `<button class="ghost" type="button" data-action="close-modal">取消</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
+    `<button class="ghost" type="button" data-action="close-modal">${text("取消")}</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
 }
 
 export function showModal(content, wide = false, locked = false, allowClose = false) {
@@ -51,6 +52,7 @@ export function showModal(content, wide = false, locked = false, allowClose = fa
   if (locked) modal.dataset.locked = "";
   if (allowClose) modal.dataset.allowClose = "";
   modal.innerHTML = content;
+  applyTranslations(modal);
   const heading = $("[id^='modal-title-']", modal);
   if (heading) modal.setAttribute("aria-labelledby", heading.id);
   mask.appendChild(modal);

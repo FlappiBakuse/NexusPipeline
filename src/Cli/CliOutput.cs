@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Localization;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Cli;
@@ -31,7 +32,7 @@ internal static class CliOutput
 
         if (!string.IsNullOrWhiteSpace(humanMessage))
         {
-            Console.WriteLine(humanMessage);
+            Console.WriteLine(HostLocalization.TranslateLegacy(humanMessage));
         }
         if (data is not null)
         {
@@ -48,7 +49,7 @@ internal static class CliOutput
             {
                 ["ok"] = false,
                 ["code"] = code,
-                ["message"] = message,
+                ["message"] = HostLocalization.TranslateLegacy(message),
             };
             if (data is not null)
             {
@@ -58,7 +59,7 @@ internal static class CliOutput
         }
         else
         {
-            Console.WriteLine($"[错误] {message}");
+            Console.WriteLine($"[错误] {HostLocalization.TranslateLegacy(message)}");
         }
         return exitCode;
     }
@@ -67,11 +68,11 @@ internal static class CliOutput
     {
         if (MachineMode)
         {
-            Console.Error.WriteLine(message);
+            Console.Error.WriteLine(HostLocalization.TranslateLegacy(message));
         }
         else
         {
-            Console.WriteLine(message);
+            Console.WriteLine(HostLocalization.TranslateLegacy(message));
         }
     }
 
@@ -79,11 +80,11 @@ internal static class CliOutput
     {
         if (MachineMode)
         {
-            Console.Error.WriteLine(message);
+            Console.Error.WriteLine(HostLocalization.TranslateLegacy(message));
         }
         else
         {
-            Console.WriteLine(message);
+            Console.WriteLine(HostLocalization.TranslateLegacy(message));
         }
     }
 }

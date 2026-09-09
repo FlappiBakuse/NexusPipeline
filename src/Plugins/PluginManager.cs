@@ -39,6 +39,9 @@ internal sealed record PluginSummary(
 
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
 
+    public IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales { get; init; } =
+        new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
+
     public bool HasReadme { get; init; }
 
     /// <summary>数据化专项插件 resolve.json 声明的用户输入变量（managed-code 恒为空）。</summary>
@@ -51,7 +54,9 @@ internal sealed record PluginFrontendRuntimeDescriptor(
     string Version,
     string FrontendApiVersion,
     string EntryUrl,
-    IReadOnlyList<string> StyleUrls);
+    IReadOnlyList<string> StyleUrls,
+    string DefaultLocale,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> Localization);
 
 internal enum PluginRuntimeState
 {
@@ -132,6 +137,15 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         }
     }
 
+    internal string LocalizePluginDisplayName(string pluginName, string fallback, string? locale)
+    {
+        PluginSummary? summary = PluginSummaries.FirstOrDefault(item =>
+            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        return summary is null
+            ? fallback
+            : PluginMetadataLocalization.DisplayName(summary.Locales, fallback, locale);
+    }
+
     /// <summary>插件管理投影的当前内存修订号，供宿主缓存和调试观测使用。</summary>
     internal long PluginManagementRevision
     {
@@ -184,6 +198,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 CreatedAt = metadata.CreatedAt,
                 UpdatedAt = metadata.UpdatedAt,
                 Changelog = metadata.Changelog,
+                Locales = metadata.Locales,
                 HasReadme = metadata.HasReadme,
                 Inputs = ReadInputDeclarations(plugin),
             });
@@ -214,6 +229,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 CreatedAt = metadata.CreatedAt,
                 UpdatedAt = metadata.UpdatedAt,
                 Changelog = metadata.Changelog,
+                Locales = metadata.Locales,
                 HasReadme = metadata.HasReadme,
             });
         }
@@ -291,6 +307,19 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     internal IReadOnlyList<PluginUserGlobalManagementRegistration> UserGlobalManagementContributions =>
         _userGlobalManagement.Snapshot();
+
+    internal PluginLocalizationManifest GetPluginLocalization(string pluginName)
+    {
+        DataSpecializedPlugin? data = _dataPlugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        if (data is not null)
+        {
+            return data.Localization;
+        }
+        ManagedPluginDescriptor? managed = _managedPlugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Manifest.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        return managed?.Manifest.Localization ?? PluginLocalizationManifest.Empty;
+    }
 
     internal bool TryGetUserGlobalManagementContribution(
         string pluginName,
@@ -379,18 +408,23 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 PluginDisplayName = registration.PluginDisplayName,
                 Id = sanitized.Id,
                 Title = sanitized.Title,
+                LocalizedTitle = ToLocalizedTextRecord(sanitized.LocalizedTitle),
                 Order = registration.Contribution.Order,
                 Badges = sanitized.Badges?.Select(badge => new PluginHistoryBadgeRecord
                 {
                     Label = badge.Label,
                     Tone = badge.Tone,
                     Title = badge.Title,
+                    LocalizedLabel = ToLocalizedTextRecord(badge.LocalizedLabel),
+                    LocalizedTitle = ToLocalizedTextRecord(badge.LocalizedTitle),
                 }).ToList() ?? new List<PluginHistoryBadgeRecord>(),
                 Fields = sanitized.Fields?.Select(field => new PluginHistoryFieldRecord
                 {
                     Label = field.Label,
                     Value = field.Value,
                     Tone = field.Tone,
+                    LocalizedLabel = ToLocalizedTextRecord(field.LocalizedLabel),
+                    LocalizedValue = ToLocalizedValueRecord(field.LocalizedValue),
                 }).ToList() ?? new List<PluginHistoryFieldRecord>(),
             };
             int bytes;
@@ -414,6 +448,65 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         record.PluginHistory = snapshots;
     }
 
+    internal void LocalizeHistory(RunRecord record, string locale)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        foreach (PluginHistoryRecord item in record.PluginHistory ?? new List<PluginHistoryRecord>())
+        {
+            item.PluginDisplayName = LocalizePluginDisplayName(item.PluginName, item.PluginDisplayName, locale);
+            PluginLocalizationManifest localization = GetPluginLocalization(item.PluginName);
+            if (item.LocalizedTitle is not null)
+            {
+                item.Title = localization.Resolve(locale, item.LocalizedTitle.Key, item.Title);
+            }
+            foreach (PluginHistoryBadgeRecord badge in item.Badges ?? new List<PluginHistoryBadgeRecord>())
+            {
+                if (badge.LocalizedLabel is not null)
+                {
+                    badge.Label = localization.Resolve(locale, badge.LocalizedLabel.Key, badge.Label);
+                }
+                if (badge.LocalizedTitle is not null)
+                {
+                    badge.Title = localization.Resolve(locale, badge.LocalizedTitle.Key, badge.Title);
+                }
+            }
+            foreach (PluginHistoryFieldRecord field in item.Fields ?? new List<PluginHistoryFieldRecord>())
+            {
+                if (field.LocalizedLabel is not null)
+                {
+                    field.Label = localization.Resolve(locale, field.LocalizedLabel.Key, field.Label);
+                }
+                if (field.LocalizedValue is not null)
+                {
+                    field.Value = localization.Resolve(
+                        locale,
+                        field.LocalizedValue.Key,
+                        field.LocalizedValue.Fallback.Length > 0 ? field.LocalizedValue.Fallback : field.Value,
+                        field.LocalizedValue.Args);
+                }
+            }
+        }
+    }
+
+    private static PluginLocalizedTextRecord? ToLocalizedTextRecord(PluginLocalizedText? value)
+    {
+        return value is null ? null : new PluginLocalizedTextRecord { Key = value.Key, Fallback = value.Fallback };
+    }
+
+    private static PluginLocalizedValueRecord? ToLocalizedValueRecord(PluginLocalizedValue? value)
+    {
+        return value is null
+            ? null
+            : new PluginLocalizedValueRecord
+            {
+                Key = value.Key,
+                Fallback = value.Fallback,
+                Args = value.Args is null
+                    ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                    : new Dictionary<string, object?>(value.Args, StringComparer.Ordinal),
+            };
+    }
+
     internal IReadOnlyList<PluginFrontendRuntimeDescriptor> FrontendDescriptors
     {
         get
@@ -426,7 +519,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Name,
                     plugin.DisplayName,
                     plugin.Version,
-                    plugin.Frontend);
+                    plugin.Frontend,
+                    plugin.Localization);
             }
             foreach (ManagedPluginDescriptor plugin in _managedPlugins)
             {
@@ -435,7 +529,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     plugin.Manifest.Name,
                     plugin.Manifest.DisplayName,
                     plugin.Manifest.Version,
-                    plugin.Manifest.Frontend);
+                    plugin.Manifest.Frontend,
+                    plugin.Manifest.Localization);
             }
             return result.OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase).ToArray();
         }
@@ -885,7 +980,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         string name,
         string displayName,
         string version,
-        PluginFrontendManifest frontend)
+        PluginFrontendManifest frontend,
+        PluginLocalizationManifest localization)
     {
         string prefix = "/plugin-assets/" + Uri.EscapeDataString(name) + "/";
         return new PluginFrontendRuntimeDescriptor(
@@ -894,7 +990,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             version,
             frontend.ApiVersion,
             prefix + frontend.Entry,
-            frontend.Styles.Select(style => prefix + style).ToArray());
+            frontend.Styles.Select(style => prefix + style).ToArray(),
+            localization.DefaultLocale,
+            localization.Resources);
     }
 
     private void TryAddFrontendDescriptor(
@@ -902,7 +1000,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         string name,
         string displayName,
         string version,
-        PluginFrontendManifest? frontend)
+        PluginFrontendManifest? frontend,
+        PluginLocalizationManifest localization)
     {
         try
         {
@@ -910,7 +1009,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 return;
             }
-            result.Add(ToFrontendDescriptor(name, displayName, version, frontend));
+            result.Add(ToFrontendDescriptor(name, displayName, version, frontend, localization));
         }
         catch (Exception ex)
         {
@@ -1046,7 +1145,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                     _http,
                     _ui,
                     _webApi,
-                    _history);
+                    _history,
+                    _descriptor.Manifest.Localization);
                 AwaitLifecycle(
                     token => plugin.InitializeAsync(_hostContext, token),
                     PluginLifecyclePhase.Initialize);

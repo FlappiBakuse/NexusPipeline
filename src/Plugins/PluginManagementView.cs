@@ -38,6 +38,9 @@ internal sealed record PluginManagementView(
 
     public IReadOnlyList<PluginChangelogEntry> Changelog { get; init; } = Array.Empty<PluginChangelogEntry>();
 
+    public IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales { get; init; } =
+        new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
+
     public bool HasReadme { get; init; }
 
     /// <summary>声明 self-managed-pc-launch 能力：PC 客户端启动由脚本自身管理，前端据此禁用游戏启动填写项。</summary>
@@ -91,6 +94,7 @@ internal sealed record PluginManagementView(
             CreatedAt = summary.CreatedAt,
             UpdatedAt = summary.UpdatedAt,
             Changelog = summary.Changelog,
+            Locales = summary.Locales,
             HasReadme = summary.HasReadme,
             SelfManagedPcLaunch = manager.HasCapability(summary.Name, Extensibility.PluginCapabilityKeys.SelfManagedPcLaunch),
             NoFreshConfig = manager.HasCapability(summary.Name, Extensibility.PluginCapabilityKeys.NoFreshConfig),

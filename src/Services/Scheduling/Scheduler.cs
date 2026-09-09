@@ -730,6 +730,7 @@ internal sealed class Scheduler : IDisposable
                 EndTime = DateTime.Now,
                 Status = "failed",
                 ResultDetail = reason,
+                ResultCode = "scheduler.trigger_failed",
             };
             _history.Save(skipped, new List<string>(), Array.Empty<RunScreenshot>());
         }

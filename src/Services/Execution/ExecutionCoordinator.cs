@@ -21,13 +21,11 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly RunScreenshotStore _screenshotStore;
 
-    private readonly RecentScreenshotCache _recentScreenshotCache;
+    private readonly AttemptScreenshotCapture _screenshotCapture;
 
     private int? _gameProcessId;
 
     private ExecutionPreviewTarget? _currentPreviewTarget;
-
-    private EmulatorTarget? _emulatorTarget;
 
     private IEmulatorDriver? _emulatorDriver;
 
@@ -36,6 +34,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private CancellationTokenSource? _operationCts;
 
     private RunBudgetWatchdog? _budgetWatchdog;
+
+    private readonly UserHookRunner _userHookRunner;
 
     private volatile bool _budgetExpired;
 
@@ -54,9 +54,20 @@ internal sealed class ExecutionCoordinator : RunSession
         _users = users;
         _resolvedSpec = resolvedSpec;
         _previewTargetChanged = previewTargetChanged;
-        _recentScreenshotCache = new RecentScreenshotCache(
-            processId => ExecutionPreviewImage.CapturePcOriginal(processId));
-        _screenshotStore = new RunScreenshotStore(CaptureCurrentScreenshotAsync);
+        _screenshotCapture = new AttemptScreenshotCapture(
+            _script,
+            () => _currentPreviewTarget,
+            () => _gameProcessId,
+            () => _emulatorDriver);
+        _screenshotStore = new RunScreenshotStore(_screenshotCapture.CaptureAsync);
+        _userHookRunner = new UserHookRunner(
+            _script,
+            _mode,
+            _statusChanged,
+            _logLine,
+            RemainingRunSeconds,
+            () => _budgetExpired || _budget?.IsExpired == true,
+            message => _configRun?.MarkProcessCleanupUnconfirmed(message));
         SetInitialPreviewTarget();
     }
 
@@ -65,7 +76,7 @@ internal sealed class ExecutionCoordinator : RunSession
     internal void DisposeScreenshots()
     {
         _screenshotStore.Dispose();
-        _recentScreenshotCache.Dispose();
+        _screenshotCapture.Dispose();
     }
 
     internal static bool ShouldPublishConsoleData(string? logPath) => string.IsNullOrWhiteSpace(logPath);
@@ -93,6 +104,7 @@ internal sealed class ExecutionCoordinator : RunSession
             JudgeSourceKind = _resolvedSpec?.JudgeScript.SourceKind ?? "",
             JudgeHash = _resolvedSpec?.JudgeScript.ContentHash ?? "",
             StartTime = DateTime.Now,
+            ResultCode = "run.running",
         };
 
         ResolvedScriptUser? resolvedUser = _resolvedUser
@@ -105,6 +117,11 @@ internal sealed class ExecutionCoordinator : RunSession
             record.Status = "failed";
             record.EndTime = DateTime.Now;
             record.ResultDetail = $"用户「{_userName}」不存在或已禁用";
+            record.ResultCode = "run.user_unavailable";
+            record.ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["user"] = _userName,
+            };
             return record;
         }
         if (_resolvedUser?.Spec is { Succeeded: false } userSpec)
@@ -114,6 +131,7 @@ internal sealed class ExecutionCoordinator : RunSession
             record.Status = "failed";
             record.EndTime = DateTime.Now;
             record.ResultDetail = userSpec.Error ?? "脚本配置解析失败";
+            record.ResultCode = "run.spec_failed";
             return record;
         }
         if (_resolvedSpec is { ConfigInputCandidates.Count: >= 2 })
@@ -123,6 +141,7 @@ internal sealed class ExecutionCoordinator : RunSession
             record.Status = "failed";
             record.EndTime = DateTime.Now;
             record.ResultDetail = "当前脚本目录存在多个配置，请先编辑配置选择要接管的配置";
+            record.ResultCode = "run.config_selection_required";
             return record;
         }
         if (user is not null)
@@ -169,6 +188,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.Status = "failed";
                     record.EndTime = DateTime.Now;
                     record.ResultDetail = $"用户配置加载失败：{prepError}";
+                    record.ResultCode = "run.user_config_load_failed";
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.UserName}」配置加载失败：{prepError}");
                     return record;
                 }
@@ -190,6 +210,7 @@ internal sealed class ExecutionCoordinator : RunSession
                             EndTime = DateTime.Now,
                             Status = "failed",
                             Reason = "重试前配置交换失败：" + retryError,
+                            ReasonCode = "run.retry_prepare_failed",
                         };
                         AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{retryAttempt.StartTime:HH:mm:ss}） =====");
                         AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 结束：failed（{retryAttempt.Reason}） =====");
@@ -199,6 +220,7 @@ internal sealed class ExecutionCoordinator : RunSession
                         record.Status = "failed";
                         record.EndTime = retryAttempt.EndTime;
                         record.ResultDetail = retryAttempt.Reason;
+                        record.ResultCode = retryAttempt.ReasonCode;
                         break;
                     }
                 }
@@ -212,7 +234,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
                 _attemptLogStart = _scriptFullLog.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
-                _recentScreenshotCache.BeginAttempt(attemptNo);
+                _screenshotCapture.BeginAttempt(attemptNo);
 
                 Logger.Info($"===== 脚本「{_script.Name}」第 {attemptNo}/{maxAttempts} 次尝试 =====");
                 RunAttemptResult result;
@@ -259,7 +281,11 @@ internal sealed class ExecutionCoordinator : RunSession
                 attempt.EndTime = DateTime.Now;
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
+                attempt.ReasonCode = result.ReasonCode;
+                attempt.ReasonArgs = new Dictionary<string, string>(result.ReasonArgs, StringComparer.Ordinal);
                 record.Attempts = attemptNo;
+                record.ResultCode = result.ReasonCode;
+                record.ResultArgs = new Dictionary<string, string>(result.ReasonArgs, StringComparer.Ordinal);
                 record.NotifyScreenshotId = result.NotifyScreenshotId;
                 if (!string.IsNullOrWhiteSpace(result.NotifyText))
                 {
@@ -290,6 +316,12 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.Status = "failed";
                     record.EndTime = DateTime.Now;
                     record.ResultDetail = $"达到最大尝试次数（{maxAttempts} 次）仍失败，最后原因：{result.Reason}";
+                    record.ResultCode = "run.max_attempts";
+                    record.ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["maximum"] = maxAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        ["reason"] = result.Reason,
+                    };
                     break;
                 }
             }
@@ -322,116 +354,13 @@ internal sealed class ExecutionCoordinator : RunSession
         }
     }
 
-    /// <summary>运行用户自写的前置/后置脚本：启动并等待退出，退出码非 0 视为失败；支持超时与取消。</summary>
-    internal async Task<RunAttemptResult?> RunUserScriptCoreAsync(string scriptPath, string role, RunAttempt attempt, CancellationToken token)
-    {
-        if (!TextRules.IsExecutable(scriptPath))
-        {
-            return RunAttemptResult.Failed($"{role}脚本路径错误或不是可执行文件：{scriptPath}");
-        }
-        string workingDir = string.IsNullOrWhiteSpace(_script.RootPath)
-            ? Path.GetDirectoryName(scriptPath) ?? ""
-            : _script.RootPath;
-        var psi = SystemActions.BuildScriptStartInfo(scriptPath, workingDir, Array.Empty<string>(), noWindow: true, redirect: true);
-        ProcessOwnership? userOwnership = ProcessOwnership.TryCreate(role);
-        Process? process;
-        try
-        {
-            process = SystemActions.StartOwnedProcess(psi, userOwnership);
-        }
-        catch (Exception ex)
-        {
-            userOwnership?.Dispose();
-            return RunAttemptResult.Failed($"{role}脚本启动失败：{ex.Message}");
-        }
-        if (process is null)
-        {
-            userOwnership?.Dispose();
-            return RunAttemptResult.Failed($"{role}脚本启动失败：未能创建进程");
-        }
-        _statusChanged?.Invoke($"{role}脚本已启动（PID {process.Id}）");
-        Logger.Info($"[{(_mode == "auto" ? "自动" : "手动")}运行] 脚本「{_script.Name}」{role}脚本已启动：{scriptPath}（PID {process.Id}）");
-
-        void OnConsoleData(string? data, LogLevel level)
-        {
-            if (string.IsNullOrWhiteSpace(data))
-            {
-                return;
-            }
-            _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
-        }
-
-        process.OutputDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Info);
-        process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Error);
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var timeoutCts = new CancellationTokenSource();
-        if (_script.TotalTimeoutMinutes > 0)
-        {
-            double remainingSeconds = RemainingRunSeconds();
-            if (remainingSeconds <= 0)
-            {
-                SystemActions.KillOwnedProcessTree(userOwnership, process.Id, scriptPath, role);
-                process.Dispose();
-                userOwnership?.Dispose();
-                return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-            }
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(remainingSeconds));
-        }
-        using var combined = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
-        try
-        {
-            await process.WaitForExitAsync(combined.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !token.IsCancellationRequested)
-        {
-            bool cleaned = SystemActions.KillOwnedProcessTree(userOwnership, process.Id, scriptPath, role);
-            if (!cleaned)
-            {
-                _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本超时后仍未确认退出");
-            }
-            process.Dispose();
-            userOwnership?.Dispose();
-            return RunAttemptResult.Fatal($"{role}脚本运行超时（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        catch (OperationCanceledException) when (_budgetExpired || _budget?.IsExpired == true)
-        {
-            bool cleaned = SystemActions.KillOwnedProcessTree(userOwnership, process.Id, scriptPath, role);
-            if (!cleaned)
-            {
-                _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本总预算耗尽后仍未确认退出");
-            }
-            process.Dispose();
-            userOwnership?.Dispose();
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        catch (OperationCanceledException)
-        {
-            bool cleaned = SystemActions.KillOwnedProcessTree(userOwnership, process.Id, scriptPath, role);
-            if (!cleaned)
-            {
-                _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本取消后仍未确认退出");
-                process.Dispose();
-                userOwnership?.Dispose();
-                return RunAttemptResult.Fatal($"{role}脚本取消后进程清理未确认，已保留配置现场");
-            }
-            process.Dispose();
-            userOwnership?.Dispose();
-            return RunAttemptResult.Cancelled($"已取消（{role}脚本执行期间）");
-        }
-        bool hasExited = process.HasExited;
-        int exitCode = process.ExitCode;
-        bool cleanedAfterExit = SystemActions.KillOwnedProcessTree(userOwnership, process.Id, scriptPath, role);
-        process.Dispose();
-        userOwnership?.Dispose();
-        if (!cleanedAfterExit)
-        {
-            _configRun?.MarkProcessCleanupUnconfirmed($"{role}脚本退出后仍有未确认的 owned 进程");
-            return RunAttemptResult.Fatal($"{role}脚本进程清理未确认，已保留配置现场");
-        }
-        return hasExited && exitCode == 0 ? null : RunAttemptResult.Failed($"{role}脚本执行失败（退出码 {exitCode}）");
-    }
+    /// <summary>运行用户自写的前置/后置脚本；进程生命周期由 UserHookRunner 负责。</summary>
+    internal Task<RunAttemptResult?> RunUserScriptCoreAsync(
+        string scriptPath,
+        string role,
+        RunAttempt attempt,
+        CancellationToken token) =>
+        _userHookRunner.RunAsync(scriptPath, role, attempt, token);
 
     internal async Task<RunAttemptResult> RunAttemptCoreAsync(RunAttempt attempt)
     {
@@ -444,87 +373,32 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         // Attempt 起点日志环境：一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
         var logEnv = new AttemptLogEnvironment(_script, modeText);
-        // 「日志无新内容」提示的展示标志：日志恢复更新后复位状态文案，避免调度卡片长期显示误导信息。
-        bool stallStatusShown = false;
-
         async Task<RunAttemptResult> FinishEarlyAsync(RunAttemptResult early)
         {
             await finalizer.CleanupGameOnEarlyExitAsync(early).ConfigureAwait(false);
             return early;
         }
 
-        if (ShouldHostLaunchGame(_script, _resolvedSpec))
+        var gameLauncher = new GameLaunchController(
+            _script,
+            _resolvedSpec,
+            modeText,
+            () => OperationToken,
+            RemainingRunSeconds,
+            () => FindGameProcessId(_gameProcessId),
+            processId =>
+            {
+                _gameProcessId = processId;
+                SetPcPreviewTarget(processId);
+            },
+            () => _emulatorDriver,
+            driver => _emulatorDriver = driver,
+            SetEmulatorPreviewTarget,
+            _statusChanged);
+        RunAttemptResult? gameLaunchError = await gameLauncher.LaunchAsync().ConfigureAwait(false);
+        if (gameLaunchError is not null)
         {
-            if (string.IsNullOrWhiteSpace(_script.GameExe))
-            {
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」未填写游戏路径，跳过游戏启动。");
-            }
-            else if (EmulatorSupport.IsEmulator(_script))
-            {
-                RunAttemptResult? emuError = await LaunchEmulatorGameAsync(modeText).ConfigureAwait(false);
-                if (emuError is not null)
-                {
-                    return await FinishEarlyAsync(emuError).ConfigureAwait(false);
-                }
-            }
-            else
-            {
-                if (!TextRules.IsExecutable(_script.GameExe))
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Failed("游戏路径错误或不是可执行文件")).ConfigureAwait(false);
-                }
-                _statusChanged?.Invoke("正在启动游戏...");
-                try
-                {
-                    string gameWork = Path.GetDirectoryName(_script.GameExe) ?? "";
-                    bool commandFile = SystemActions.IsCommandFile(_script.GameExe);
-                    ProcessStartInfo gamePsi = SystemActions.BuildScriptStartInfo(_script.GameExe, gameWork, TextRules.SplitArgs(_script.GameArgs), noWindow: false, redirect: commandFile);
-                    if (!commandFile)
-                    {
-                        gamePsi.UseShellExecute = true;
-                    }
-                    Process? gameProcess = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
-                    int gamePid = gameProcess?.Id ?? 0;
-                    if (gamePid > 0)
-                    {
-                        _gameProcessId = gamePid;
-                        SetPcPreviewTarget(gamePid);
-                        SystemActions.BringToFrontFireAndForget(gamePid, "游戏");
-                    }
-                    Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
-                }
-                catch (Exception ex)
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Failed($"游戏启动失败：{ex.Message}")).ConfigureAwait(false);
-                }
-                double remainingSeconds = RemainingRunSeconds();
-                if (remainingSeconds <= 0)
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）")).ConfigureAwait(false);
-                }
-                double requestedGameWait = TestHooks.ScaledSeconds(Math.Max(0, _script.GameWaitSeconds));
-                bool gameConfirmed;
-                try
-                {
-                    gameConfirmed = await WaitForGameProcessAsync(TimeSpan.FromSeconds(Math.Min(requestedGameWait, remainingSeconds))).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Cancelled("已取消（等待游戏启动期间）")).ConfigureAwait(false);
-                }
-                if (RemainingRunSeconds() <= 0)
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）")).ConfigureAwait(false);
-                }
-                if (!gameConfirmed)
-                {
-                    return await FinishEarlyAsync(RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后仍未检测到游戏进程，游戏可能启动失败")).ConfigureAwait(false);
-                }
-                _gameProcessId = FindGameProcessId(_gameProcessId);
-                SetPcPreviewTarget(_gameProcessId);
-                _statusChanged?.Invoke("已确认游戏进程启动");
-                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认游戏进程启动，继续运行脚本。");
-            }
+            return await FinishEarlyAsync(gameLaunchError).ConfigureAwait(false);
         }
 
         if (!TextRules.IsExecutable(_script.MainExe))
@@ -538,8 +412,7 @@ internal sealed class ExecutionCoordinator : RunSession
 
         (string launchExe, List<string> launchArgs) = SystemActions.ResolveLaunchTarget(_script.MainExe, workingDir, _script.Args);
 
-        Process? process = null;
-        bool stdoutAttached = false;
+        ScriptProcessSession processSession;
         bool cleanupConfirmed = true;
         string? excludeGame = EmulatorSupport.IsEmulator(_script)
             ? null
@@ -553,37 +426,28 @@ internal sealed class ExecutionCoordinator : RunSession
                 return await FinishEarlyAsync(RunAttemptResult.Fatal("检测到旧脚本进程但无法确认其退出，已拒绝重复启动")).ConfigureAwait(false);
             }
         }
-        ProcessOwnership? ownership = ProcessOwnership.TryCreate("脚本");
-        _processOwnership = ownership;
-        var psi = SystemActions.BuildScriptStartInfo(launchExe, workingDir, launchArgs, noWindow: true, redirect: true);
         try
         {
-            process = SystemActions.StartOwnedProcess(psi, ownership);
-            stdoutAttached = true;
+            processSession = ScriptProcessSession.Start(
+                _script,
+                modeText,
+                launchExe,
+                workingDir,
+                launchArgs,
+                _statusChanged,
+                message => Logger.Info(message));
+            _processOwnership = processSession.Ownership;
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
         {
             _processOwnership = null;
-            ownership?.Dispose();
             return await FinishEarlyAsync(RunAttemptResult.Fatal($"脚本启动失败：目标程序要求管理员权限（{launchExe}）。NexusPipeline 已以管理员身份运行仍被拒绝时，请检查目标程序的权限配置")).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             _processOwnership = null;
-            ownership?.Dispose();
             return await FinishEarlyAsync(RunAttemptResult.Failed($"脚本启动失败：{ex.Message}")).ConfigureAwait(false);
         }
-        if (process is null)
-        {
-            _processOwnership = null;
-            ownership?.Dispose();
-            return await FinishEarlyAsync(RunAttemptResult.Failed("脚本启动失败：未能创建进程")).ConfigureAwait(false);
-        }
-        // 运行脚本实例/调度队列时脚本主窗口最小化让位（命令行/日志已接管输出；控制台脚本无窗口自动跳过），
-        // 游戏窗口另由 BringToFrontFireAndForget 前置以利截图识别。
-        SystemActions.MinimizeWindowFireAndForget(process.Id, "脚本");
-        _statusChanged?.Invoke($"脚本已启动（PID {process.Id}）");
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已启动：{launchExe}（PID {process.Id}）");
 
         // 统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
         // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
@@ -605,17 +469,11 @@ internal sealed class ExecutionCoordinator : RunSession
             }
         }
 
-        if (process is not null && stdoutAttached)
-        {
-            process.OutputDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Info);
-            process.ErrorDataReceived += (_, e) => OnConsoleData(e.Data, LogLevel.Error);
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
-        }
+        processSession.AttachOutput(OnConsoleData);
 
         bool KillScriptAndConfirm()
         {
-            bool confirmed = finalizer.KillScript(process, launchExe, excludeGame, _processOwnership);
+            bool confirmed = processSession.KillAndConfirm(finalizer, excludeGame);
             if (!confirmed)
             {
                 cleanupConfirmed = false;
@@ -631,8 +489,6 @@ internal sealed class ExecutionCoordinator : RunSession
         var attemptMonitor = new AttemptMonitor();
         var judge = new SessionJudge(_script);
         bool scriptMode = judge.ScriptMode;
-        bool keywordScreenshotCaptured = false;
-        DateTime? firstEntryAt = null;
         RunAttemptResult? result = null;
 
         string attemptId = $"{_script.Id}:{attempt.Number}:{attempt.StartTime.Ticks}";
@@ -703,198 +559,30 @@ internal sealed class ExecutionCoordinator : RunSession
         var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
         await using var workersScope = workers;
 
-        try
-        {
-            while (result is null)
-            {
-                OperationToken.ThrowIfCancellationRequested();
-
-                // 先预热最近有效帧，再消费判断结果和新增日志；截图请求可能就在本轮随后到达。
-                // 模拟器模式跳过（模拟器截图走实时 ADB，不使用 PC 窗口缓存）。
-                if (!EmulatorSupport.IsEmulator(_script))
-                {
-                    BringGameToFrontIfRunning();
-                    ScheduleRecentPcScreenshot(attempt.Number);
-                }
-
-                workers.ConsumeConfigSyncResult();
-                await workers.ConsumeJudgeResultAsync().ConfigureAwait(false);
-                workers.TryQueuePendingFinalJudge();
-                result = terminator.TryApplyFinalDecision();
-                if (result is not null)
-                {
-                    break;
-                }
-
-                // 自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
-                // config → store（捕获脚本启动后自行更新的任务配置；重试轮不检测）。
-                // 并入主循环避免后台任务与收尾还原的竞态；关/开模式共有。
-                if (!_firstSyncDone && attempt.Number == 1 && _configRun is not null && _configRun.IsPrepared
-                    && ShouldRunFirstSync(_budget!.ElapsedSeconds, TestHooks.ScaledSeconds(15)))
-                {
-                    _firstSyncDone = true;
-                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」自动更新配置首次检测（运行开始 15 秒后）。");
-                    if (!workers.TryStartConfigSync(new ConfigSyncRequest(attemptId, attempt.Number, true, DateTime.Now)))
-                    {
-                        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」配置同步 worker 当前繁忙，本次首次检测已并入已有同步。");
-                    }
-                }
-
-                if (judge.IsFailure)
-                {
-                    if (KillScriptAndConfirm())
-                    {
-                        result = RunAttemptResult.Failed(judge.Reason ?? "日志出现失败关键字，任务判定失败");
-                        result.NotifyText = judge.NotifyText;
-                        result.NotifyScreenshotId = judge.NotifyScreenshotId;
-                    }
-                    else
-                    {
-                        result = RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
-                    }
-                    break;
-                }
-
-                if (_script.TotalTimeoutMinutes > 0
-                    && _budget!.IsExpired)
-                {
-                    result = RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-                    break;
-                }
-
-                monitor = logEnv.RefreshMonitor(monitor);
-
-                string newContent = attemptMonitor.ReadLog(monitor);
-                if (newContent.Length > 0)
-                {
-                    firstEntryAt ??= DateTime.Now;
-                    if (stallStatusShown)
-                    {
-                        // 日志恢复更新后立即清除「日志无新内容」提示，避免调度卡片误导到判定/退出才复原。
-                        stallStatusShown = false;
-                        _statusChanged?.Invoke("任务运行中");
-                    }
-                    foreach (string line in newContent.Split('\n').Select(l => l.TrimEnd('\r')))
-                    {
-                        if (line.Trim().Length == 0)
-                        {
-                            continue;
-                        }
-                        _logLine?.Invoke(line, LogLevelUtil.ParseObserved(line));
-                        AppendScriptLog(line);
-                        SessionJudge.LineHit lineHit = judge.HandleLine(line);
-                        bool effectiveKeywordHit = lineHit switch
-                        {
-                            SessionJudge.LineHit.SuccessKeyword => judge.IsMarker && !judge.IsFailure,
-                            SessionJudge.LineHit.FailureKeyword => judge.IsFailure,
-                            _ => false,
-                        };
-                        if (effectiveKeywordHit && !keywordScreenshotCaptured)
-                        {
-                            keywordScreenshotCaptured = true;
-                            await _screenshotStore.CaptureAsync(
-                                attempt.Number,
-                                lineHit == SessionJudge.LineHit.FailureKeyword ? "keyword-failed" : "keyword-success",
-                                OperationToken).ConfigureAwait(false);
-                        }
-                        switch (lineHit)
-                        {
-                            case SessionJudge.LineHit.SuccessKeyword:
-                                _statusChanged?.Invoke("已检测到成功关键字，等待脚本退出...");
-                                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现成功关键字。");
-                                break;
-                            case SessionJudge.LineHit.FailureKeyword:
-                                _statusChanged?.Invoke("已检测到失败关键字，任务判定失败");
-                                Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」日志出现失败关键字，任务判定失败。");
-                                break;
-                        }
-                    }
-                }
-
-                // （台账外，修正）：周期触发与退出/stall 最终触发同轮先后命中时跳过最终触发——
-                // 周期触发输入为「无新内容」状态，同轮内日志段不变，最终触发属完全重复执行；
-                // 批次触发（有新内容）后的同轮最终触发**必须保留**（进程退出是新事实，判断脚本可能
-                // 基于自身状态文件在第二次执行给出最终判定，如计数器——06 spec「进程退出时最终触发」用例）。
-                bool skipFinalJudge = false;
-                if (scriptMode && newContent.Length > 0 && result is null && !judge.IsMarker)
-                {
-                    workers.QueueJudge(final: false);
-                }
-                else if (scriptMode && newContent.Length == 0 && result is null
-                    && firstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
-                {
-                    stallStatusShown = true;
-                    _statusChanged?.Invoke("日志无新内容，周期触发判断脚本...");
-                    skipFinalJudge = true;
-                    workers.QueueJudge(final: false);
-                }
-
-                await workers.ConsumeJudgeResultAsync().ConfigureAwait(false);
-                result = terminator.TryApplyFinalDecision();
-                if (result is not null)
-                {
-                    break;
-                }
-
-                bool scriptExited = attemptMonitor.IsScriptExited(process, launchExe, _processOwnership, excludeGame);
-                if (scriptExited)
-                {
-                    result = terminator.OnScriptExited(monitor is null, !string.IsNullOrWhiteSpace(_script.LogPath), skipFinalJudge);
-                    if (result is not null)
-                    {
-                        break;
-                    }
-                }
-
-                if (terminator.TerminalObservation)
-                {
-                    await Task.Delay(TestHooks.ScaledMs(50), OperationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (!judge.IsMarker)
-                {
-                    StallObservation stall = attemptMonitor.CheckStall(
-                        monitor,
-                        !string.IsNullOrWhiteSpace(_script.LogPath),
-                        attemptStart,
-                        firstEntryAt,
-                        _script.LogStallTimeoutMinutes);
-                    if (stall.Hit)
-                    {
-                        result = terminator.OnStall(stall, skipFinalJudge);
-                        if (result is not null)
-                        {
-                            break;
-                        }
-                    }
-                }
-
-                if (judge.IsMarker
-                    && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
-                {
-                    result = KillScriptAndConfirm()
-                        ? terminator.CreateMarkerResult("完成标志已出现，等待退出超时后已终止脚本，判定成功")
-                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
-                    break;
-                }
-
-                await Task.Delay(TestHooks.ScaledMs(1000), OperationToken).ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (_budgetExpired || _budget?.IsExpired == true)
-        {
-            result = RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        catch (OperationCanceledException)
-        {
-            result = RunAttemptResult.Cancelled("运行已取消");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 脚本「{_script.Name}」监控异常：{ex.Message}");
-            result = RunAttemptResult.Failed($"监控异常：{ex.Message}");
-        }
+        AttemptMonitorLoopResult monitorLoop = await new AttemptMonitorLoop().RunAsync(
+            this,
+            attempt,
+            modeText,
+            attemptId,
+            attemptStart,
+            processSession.Process,
+            launchExe,
+            excludeGame,
+            logEnv,
+            monitor,
+            attemptMonitor,
+            judge,
+            scriptMode,
+            workers,
+            terminator,
+            _screenshotStore,
+            () => OperationToken,
+            () => _budgetExpired || _budget?.IsExpired == true,
+            KillScriptAndConfirm,
+            BringGameToFrontIfRunning,
+            ScheduleRecentPcScreenshot).ConfigureAwait(false);
+        result = monitorLoop.Result;
+        monitor = monitorLoop.Monitor;
 
         // 先收拢后台 worker，再进入进程清理与 ConfigRunSession.FinalizeRun，
         // 防止旧 Attempt 的 Judge/配置同步在收尾阶段继续写入状态或文件。
@@ -921,9 +609,8 @@ internal sealed class ExecutionCoordinator : RunSession
         _pendingReplaceConfigs = null;
 
         RunAttemptResult finalResult = result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
-        // 运行收尾后释放进程句柄（此前未 Dispose，句柄延迟到 GC）。
-        process?.Dispose();
-        process = null;
+        // 运行收尾后释放进程句柄与 owned Job Object。
+        processSession.Dispose();
         try
         {
             await finalizer.CleanupGameAsync(finalResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
@@ -931,35 +618,8 @@ internal sealed class ExecutionCoordinator : RunSession
         finally
         {
             _processOwnership = null;
-            ownership?.Dispose();
         }
         return finalResult;
-    }
-
-    /// <summary>
-    /// 等待并确认游戏进程启动：每 1 秒轮询进程是否出现，上限为超时时间。
-    /// bat/cmd 启动器经 cmd.exe 包装无法按名检测（IsExeRunning 返回 false），直接按已启动放行并等待到超时结束（保持原有等待语义）。
-    /// </summary>
-    private async Task<bool> WaitForGameProcessAsync(TimeSpan timeout)
-    {
-        if (SystemActions.IsCommandFile(_script.GameExe))
-        {
-            await Task.Delay(timeout, OperationToken).ConfigureAwait(false);
-            return true;
-        }
-        DateTime deadline = DateTime.Now + timeout;
-        while (true)
-        {
-            if (SystemActions.IsExeRunning(_script.GameExe))
-            {
-                return true;
-            }
-            if (DateTime.Now >= deadline)
-            {
-                return false;
-            }
-            await Task.Delay(TestHooks.ScaledMs(1000), OperationToken).ConfigureAwait(false);
-        }
     }
 
     private double RemainingRunSeconds()
@@ -976,203 +636,6 @@ internal sealed class ExecutionCoordinator : RunSession
         return RemainingRunSeconds() <= 0
             ? RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）")
             : null;
-    }
-
-    /// <summary>
-    /// 模拟器模式游戏启动：连接模拟器 → am start 启动应用 → 前台确认。
-    /// 目标包名从启动参数 -n 解析；解析不到时仅确认 adb connect 与 am start 命令成功（宽松兜底）。
-    /// 返回 null = 成功，否则为失败结果。
-    /// </summary>
-    private async Task<RunAttemptResult?> LaunchEmulatorGameAsync(string modeText)
-    {
-        try
-        {
-            return await LaunchEmulatorGameCoreAsync(modeText).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return RunAttemptResult.Cancelled("已取消（启动模拟器应用期间）");
-        }
-    }
-
-    private async Task<RunAttemptResult?> LaunchEmulatorGameCoreAsync(string modeText)
-    {
-        if (!EmulatorSupport.IsValidAdbAddress(_script.GameExe))
-        {
-            return RunAttemptResult.Failed($"模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）：{_script.GameExe}");
-        }
-        string[] startArgs = TextRules.SplitArgs(_script.GameArgs).ToArray();
-        if (startArgs.Length == 0)
-        {
-            return RunAttemptResult.Failed("模拟器模式未填写启动参数（am start 参数，如 -n 包名/Activity）");
-        }
-        if (_emulatorDriver is null)
-        {
-            _emulatorTarget = await EmulatorDetector.DetectAsync(
-                _script.GameExe,
-                OperationToken,
-                RemainingCommandSeconds(30)).ConfigureAwait(false);
-            if (_emulatorTarget.Kind == EmulatorKind.DetectionError)
-            {
-                return RunAttemptResult.Failed(_emulatorTarget.DetectionError ?? "模拟器目标识别失败");
-            }
-            _emulatorDriver = EmulatorDriverFactory.Create(_emulatorTarget);
-            SetEmulatorPreviewTarget(_emulatorDriver, ready: false);
-            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已冻结模拟器驱动：{_emulatorDriver.Kind}（目标 {_script.GameExe}）。");
-        }
-        _statusChanged?.Invoke("正在连接模拟器...");
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        EmulatorCommandResult ready = await _emulatorDriver.EnsureReadyAsync(OperationToken, RemainingCommandSeconds(30)).ConfigureAwait(false);
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        if (!ready.Ok)
-        {
-            return RunAttemptResult.Failed($"模拟器连接/准备失败（{_script.GameExe}）：{ready.Output.Trim()}");
-        }
-        _statusChanged?.Invoke("正在启动模拟器应用...");
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        EmulatorCommandResult start = await _emulatorDriver.StartAppAsync(
-            startArgs,
-            OperationToken,
-            RemainingCommandSeconds(30)).ConfigureAwait(false);
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        if (!start.Ok)
-        {
-            return RunAttemptResult.Failed($"模拟器应用启动失败：{start.Output.Trim()}");
-        }
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」模拟器应用启动命令已执行（{_script.GameExe}，等待 {_script.GameWaitSeconds} 秒确认前台）。");
-        string? targetPkg = EmulatorSupport.ParseAmStartPackage(_script.GameArgs);
-        bool confirmed = targetPkg is null
-            ? true
-            : await WaitForEmulatorAppAsync(TimeSpan.FromSeconds(Math.Min(TestHooks.ScaledSeconds(Math.Max(0, _script.GameWaitSeconds)), RemainingRunSeconds())), targetPkg).ConfigureAwait(false);
-        if (RemainingRunSeconds() <= 0)
-        {
-            return RunAttemptResult.Fatal($"运行总时间超过限制（{_script.TotalTimeoutMinutes} 分钟）");
-        }
-        if (!confirmed)
-        {
-            return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后模拟器前台未出现应用（{targetPkg}），应用可能启动失败");
-        }
-        SetEmulatorPreviewTarget(_emulatorDriver, ready: true);
-        _statusChanged?.Invoke("已确认模拟器应用启动");
-        Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」已确认模拟器应用启动，继续运行脚本。");
-        return null;
-    }
-
-    /// <summary>等待并确认模拟器前台应用为目标包名：每 1 秒轮询 dumpsys window 前台，上限为超时时间。</summary>
-    private async Task<bool> WaitForEmulatorAppAsync(TimeSpan timeout, string targetPackage)
-    {
-        if (_emulatorDriver is null)
-        {
-            return false;
-        }
-        DateTime deadline = DateTime.Now + timeout;
-        while (true)
-        {
-            if (RemainingRunSeconds() <= 0)
-            {
-                return false;
-            }
-            string? foreground = await _emulatorDriver.GetForegroundPackageAsync(
-                OperationToken,
-                RemainingCommandSeconds(30)).ConfigureAwait(false);
-            if (string.Equals(foreground, targetPackage, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-            if (DateTime.Now >= deadline)
-            {
-                return false;
-            }
-            await Task.Delay(TestHooks.ScaledMs(1000), OperationToken).ConfigureAwait(false);
-        }
-    }
-
-    private int RemainingCommandSeconds(int cap)
-    {
-        return _budget?.RemainingCommandSeconds(cap) ?? cap;
-    }
-
-    /// <summary>按当前宿主已冻结的游戏目标采集一张原始像素尺寸通知截图。</summary>
-    private async Task<RunScreenshotCaptureResult> CaptureCurrentScreenshotAsync(
-        int attemptNumber,
-        string trigger,
-        CancellationToken cancellationToken)
-    {
-        ExecutionPreviewTarget? target = _currentPreviewTarget;
-        if (target is null || target.Source == ExecutionPreviewSource.None)
-        {
-            return RunScreenshotCaptureResult.Failure("", "未配置可截图的游戏目标");
-        }
-        if (target.Source == ExecutionPreviewSource.Pc)
-        {
-            int? processId = target.ProcessId ?? _gameProcessId;
-            if (processId is int pid && pid > 0)
-            {
-                ExecutionPreviewImageResult image = await Task.Run(
-                    () => ExecutionPreviewImage.CapturePcOriginal(pid),
-                    cancellationToken).ConfigureAwait(false);
-                if (image.Ok)
-                {
-                    _recentScreenshotCache.Store(attemptNumber, pid, image);
-                    return RunScreenshotCaptureResult.Success(image.Data, "pc");
-                }
-
-                if (_recentScreenshotCache.TryGet(attemptNumber, pid, out RecentScreenshotFrame cached, out TimeSpan cacheAge))
-                {
-                    return RunScreenshotCaptureResult.Success(
-                        cached.Data,
-                        "pc",
-                        cached.CapturedAt,
-                        fromCache: true,
-                        cacheAge);
-                }
-
-                return RunScreenshotCaptureResult.Failure("pc", image.Error);
-            }
-
-            if (_recentScreenshotCache.TryGet(attemptNumber, out RecentScreenshotFrame frame, out TimeSpan missingProcessCacheAge))
-            {
-                return RunScreenshotCaptureResult.Success(
-                    frame.Data,
-                    "pc",
-                    frame.CapturedAt,
-                    fromCache: true,
-                    missingProcessCacheAge);
-            }
-
-            return RunScreenshotCaptureResult.Failure("pc", "正在等待游戏窗口");
-        }
-
-        IEmulatorDriver? driver = target.EmulatorDriver ?? _emulatorDriver;
-        if (driver is null)
-        {
-            return RunScreenshotCaptureResult.Failure("emulator", "正在等待模拟器目标就绪");
-        }
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(10));
-        EmulatorBinaryResult binary = await driver
-            .CaptureScreenAsync(timeout.Token, 8)
-            .ConfigureAwait(false);
-        if (!binary.Ok)
-        {
-            return RunScreenshotCaptureResult.Failure("emulator", binary.Error);
-        }
-        ExecutionPreviewImageResult converted = ExecutionPreviewImage.ConvertPngOriginal(binary.Data);
-        return converted.Ok
-            ? RunScreenshotCaptureResult.Success(converted.Data, "emulator")
-            : RunScreenshotCaptureResult.Failure("emulator", converted.Error);
     }
 
     private void SetInitialPreviewTarget()
@@ -1295,6 +758,6 @@ internal sealed class ExecutionCoordinator : RunSession
             return;
         }
 
-        _ = _recentScreenshotCache.TryRefreshAsync(attemptNumber, pid, OperationToken);
+        _ = _screenshotCapture.TryRefreshPcAsync(attemptNumber, pid, OperationToken);
     }
 }

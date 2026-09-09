@@ -8,6 +8,7 @@ import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js"
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
 import { state } from "../../core/state.js";
 import { reloadUsers, syncManagementSwitch, userById } from "./shared.js";
+import { text } from "../../core/i18n.js";
 
 let globalManagementDraft = null;
 
@@ -177,7 +178,7 @@ export async function saveGlobalManagement() {
   const draft = globalManagementDraft;
   const settings = readGlobalManagementSettings();
   if (!validateGlobalPluginContributions(draft.contributions)) {
-    toast("请完善插件设置中的必填项", "error");
+    toast(text("请完善插件设置中的必填项"), "error");
     return;
   }
   try {
@@ -189,7 +190,7 @@ export async function saveGlobalManagement() {
     }
     globalManagementDraft = null;
     closeModal();
-    toast("全局设置已保存");
+    toast(text("全局设置已保存"));
     await reloadUsers();
     return saved;
   } catch (error) {

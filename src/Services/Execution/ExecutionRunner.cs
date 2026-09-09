@@ -341,6 +341,12 @@ internal sealed class ExecutionRunner
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "skipped",
             ResultDetail = detail,
+            ResultCode = "run.daily_cap",
+            ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["successful"] = successfulRuns.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["maximum"] = maxSuccessfulRuns.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            },
         };
     }
 
@@ -397,6 +403,7 @@ internal sealed class ExecutionRunner
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "failed",
             ResultDetail = reason,
+            ResultCode = "run.host_error",
             AttemptDetails = new List<RunAttempt>
             {
                 new()
@@ -406,6 +413,7 @@ internal sealed class ExecutionRunner
                     EndTime = now,
                     Status = "failed",
                     Reason = reason,
+                    ReasonCode = "run.host_error",
                 },
             },
         };
@@ -445,6 +453,7 @@ internal sealed class ExecutionRunner
                         EndTime = DateTime.Now,
                         Status = "failed",
                         ResultDetail = "脚本实例不存在或已被删除",
+                        ResultCode = "run.script_missing",
                     };
                     RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedMissing);
@@ -491,6 +500,7 @@ internal sealed class ExecutionRunner
                         EndTime = DateTime.Now,
                         Status = "failed",
                         ResultDetail = "脚本实例未配置启用用户，已跳过",
+                        ResultCode = "run.no_enabled_users",
                     };
                     RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedSkipped);
@@ -577,13 +587,13 @@ internal sealed class ExecutionRunner
         var records = new List<RunRecord>();
         if (users.Count == 0)
         {
-            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, null, detail));
+            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, null, detail, unavailableReason));
             return records;
         }
 
         foreach (ResolvedScriptUser user in users)
         {
-            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, user, detail));
+            records.Add(PublishUnavailableRecord(exec, script, queueId, queueName, user, detail, unavailableReason));
         }
         return records;
     }
@@ -594,7 +604,8 @@ internal sealed class ExecutionRunner
         string queueId,
         string queueName,
         ResolvedScriptUser? user,
-        string detail)
+        string detail,
+        string unavailableReason)
     {
         DateTime now = DateTime.Now;
         var record = new RunRecord
@@ -612,6 +623,11 @@ internal sealed class ExecutionRunner
             MaxAttempts = Math.Max(1, script.MaxAttempts),
             Status = "failed",
             ResultDetail = detail,
+            ResultCode = "run.plugin_unavailable",
+            ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["reason"] = unavailableReason,
+            },
             AttemptDetails = new List<RunAttempt>
             {
                 new()
@@ -621,6 +637,11 @@ internal sealed class ExecutionRunner
                     EndTime = now,
                     Status = "failed",
                     Reason = detail,
+                    ReasonCode = "run.plugin_unavailable",
+                    ReasonArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["reason"] = unavailableReason,
+                    },
                 },
             },
         };

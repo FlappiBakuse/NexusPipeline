@@ -1,8 +1,9 @@
 import { esc } from "./format.js";
 import { numberControlMarkup, pathControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
+import { text } from "./i18n.js";
 
 export function pageHeader(kicker, title, description, action = "", extraClass = "") {
-  return `<header class="page-head${extraClass ? ` ${esc(extraClass)}` : ""}"><div class="page-head-copy">${kicker ? `<div class="eyebrow">${kicker}</div>` : ""}<h2>${title}</h2>${description ? `<p class="page-kicker">${description}</p>` : ""}</div>${action ? `<div class="page-head-actions">${action}</div>` : ""}</header>`;
+  return `<header class="page-head${extraClass ? ` ${esc(extraClass)}` : ""}"><div class="page-head-copy">${kicker ? `<div class="eyebrow">${text(kicker)}</div>` : ""}<h2>${text(title)}</h2>${description ? `<p class="page-kicker">${text(description)}</p>` : ""}</div>${action ? `<div class="page-head-actions">${action}</div>` : ""}</header>`;
 }
 
 function fieldErrorSlot(id) {
@@ -63,10 +64,10 @@ export function switchControl(id, label, description, pressed, action, extra = "
 export function systemActionCard(action) {
   // 退出软件在协调器中立即执行，不展示可取消的倒计时卡片。
   if (!action || action.action === "exit") return "";
-  const verb = action.action === "sleep" ? "休眠" : action.action === "reboot" ? "重启" : "关机";
-  return `<section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${verb}">
-    <div class="section-heading"><h3>完成操作倒计时</h3><span class="muted">队列已完成，等待执行系统操作</span></div>
-    <p class="countdown-text">调度队列「${esc(action.queueName || "")}」已完成，<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
-    <div class="qk-row"><button class="danger" type="button" data-action="cancel-system-action">取消${verb}</button></div>
+  const verb = text(action.action === "sleep" ? "休眠" : action.action === "reboot" ? "重启" : "关机");
+  return `<section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${esc(verb)}">
+    <div class="section-heading"><h3>${text("完成操作倒计时")}</h3><span class="muted">${text("队列已完成，等待执行系统操作")}</span></div>
+    <p class="countdown-text">${text("调度队列「{queueName}」已完成，", { queueName: esc(action.queueName || "") })}<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
+    <div class="qk-row"><button class="danger" type="button" data-action="cancel-system-action">${text("取消{verb}", { verb })}</button></div>
   </section>`;
 }

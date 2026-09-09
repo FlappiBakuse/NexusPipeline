@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.Localization;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
@@ -46,7 +47,11 @@ internal static class ApiPluginsHandler
         if (method == "GET" && seg.Length == 1)
         {
             PluginManager manager = RuntimeContext.Instance.Plugins;
-            await HttpHelper.WriteJsonAsync(context, manager.PluginManagementViews).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(
+                context,
+                manager.PluginManagementViews
+                    .Select(view => ManagementPayload(view, context.Request.Locale))
+                    .ToArray()).ConfigureAwait(false);
             return;
         }
         if (method != "POST" || seg.Length != 3)
@@ -115,41 +120,7 @@ internal static class ApiPluginsHandler
             stale = snapshot.Stale,
             fetchedAt = snapshot.FetchedAt.ToString("O"),
             error = snapshot.Error,
-            plugins = snapshot.Plugins.Select(plugin => new
-            {
-                plugin.Name,
-                artifactName = plugin.ArtifactName,
-                plugin.DisplayName,
-                gameName = plugin.GameName,
-                plugin.Description,
-                plugin.Version,
-                kind = plugin.Kind,
-                apiVersion = plugin.ApiVersion,
-                capabilities = plugin.Capabilities,
-                minHostVersion = plugin.MinHostVersion,
-                installed = plugin.Installed,
-                installedName = plugin.InstalledName,
-                installedVersion = plugin.InstalledVersion,
-                updateAvailable = plugin.UpdateAvailable,
-                compatible = plugin.Compatible,
-                compatibilityReason = plugin.CompatibilityReason,
-                managedByStore = plugin.ManagedByStore,
-                pendingAction = plugin.PendingAction,
-                pendingVersion = plugin.PendingVersion,
-                status = plugin.Status,
-                authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }),
-                tags = plugin.Tags,
-                homepage = plugin.Homepage,
-                createdAt = plugin.CreatedAt,
-                updatedAt = plugin.UpdatedAt,
-                hasReadme = plugin.HasReadme,
-                changelog = plugin.Changelog.Select(change => new
-                {
-                    version = change.Version,
-                    date = change.Date,
-                    items = change.Items,
-                }),
-            }),
+            plugins = snapshot.Plugins.Select(plugin => StorePayload(plugin, context.Request.Locale)),
         }).ConfigureAwait(false);
     }
 
@@ -165,7 +136,7 @@ internal static class ApiPluginsHandler
                 .ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(context, DetailPayload(detail)).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, DetailPayload(detail, context.Request.Locale)).ConfigureAwait(false);
     }
 
     private static async Task WriteStoreDetailAsync(HttpListenerContext context, string name)
@@ -182,7 +153,7 @@ internal static class ApiPluginsHandler
                     .ConfigureAwait(false);
                 return;
             }
-            await HttpHelper.WriteJsonAsync(context, DetailPayload(detail)).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, DetailPayload(detail, context.Request.Locale)).ConfigureAwait(false);
         }
         catch (PluginRepositoryException ex)
         {
@@ -192,16 +163,92 @@ internal static class ApiPluginsHandler
         }
     }
 
-    private static object DetailPayload(PluginDetail detail)
+    private static object ManagementPayload(PluginManagementView view, string locale)
+    {
+        return new
+        {
+            name = view.Name,
+            artifactName = view.ArtifactName,
+            displayName = PluginMetadataLocalization.DisplayName(view.Locales, view.DisplayName, locale),
+            gameName = PluginMetadataLocalization.GameName(view.Locales, view.GameName, locale),
+            description = PluginMetadataLocalization.Description(view.Locales, view.Description, locale),
+            version = view.Version,
+            kind = view.Kind,
+            apiVersion = view.ApiVersion,
+            capabilities = view.Capabilities,
+            supportsEmulator = view.SupportsEmulator,
+            configuredEnabled = view.ConfiguredEnabled,
+            runtimeEnabled = view.RuntimeEnabled,
+            state = view.State,
+            error = view.Error,
+            restartRequired = view.RestartRequired,
+            hasFrontend = view.HasFrontend,
+            frontendApiVersion = view.FrontendApiVersion,
+            managedByStore = view.ManagedByStore,
+            installedName = view.InstalledName,
+            installedVersion = view.InstalledVersion,
+            installationSource = view.InstallationSource,
+            pendingAction = view.PendingAction,
+            pendingVersion = view.PendingVersion,
+            authors = view.Authors.Select(author => new { name = author.Name, url = author.Url }),
+            tags = PluginMetadataLocalization.Tags(view.Locales, view.Tags, locale),
+            homepage = view.Homepage,
+            createdAt = view.CreatedAt,
+            updatedAt = view.UpdatedAt,
+            hasReadme = view.HasReadme,
+            changelog = PluginMetadataLocalization.Changelog(view.Locales, view.Changelog, locale)
+                .Select(change => new { version = change.Version, date = change.Date, items = change.Items }),
+            selfManagedPcLaunch = view.SelfManagedPcLaunch,
+            noFreshConfig = view.NoFreshConfig,
+            inputs = view.Inputs,
+        };
+    }
+
+    private static object StorePayload(PluginStoreItem plugin, string locale)
+    {
+        return new
+        {
+            name = plugin.Name,
+            artifactName = plugin.ArtifactName,
+            displayName = PluginMetadataLocalization.DisplayName(plugin.Locales, plugin.DisplayName, locale),
+            gameName = PluginMetadataLocalization.GameName(plugin.Locales, plugin.GameName, locale),
+            description = PluginMetadataLocalization.Description(plugin.Locales, plugin.Description, locale),
+            version = plugin.Version,
+            kind = plugin.Kind,
+            apiVersion = plugin.ApiVersion,
+            capabilities = plugin.Capabilities,
+            minHostVersion = plugin.MinHostVersion,
+            installed = plugin.Installed,
+            installedName = plugin.InstalledName,
+            installedVersion = plugin.InstalledVersion,
+            updateAvailable = plugin.UpdateAvailable,
+            compatible = plugin.Compatible,
+            compatibilityReason = plugin.CompatibilityReason,
+            managedByStore = plugin.ManagedByStore,
+            pendingAction = plugin.PendingAction,
+            pendingVersion = plugin.PendingVersion,
+            status = plugin.Status,
+            authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }),
+            tags = PluginMetadataLocalization.Tags(plugin.Locales, plugin.Tags, locale),
+            homepage = plugin.Homepage,
+            createdAt = plugin.CreatedAt,
+            updatedAt = plugin.UpdatedAt,
+            hasReadme = plugin.HasReadme,
+            changelog = PluginMetadataLocalization.Changelog(plugin.Locales, plugin.Changelog, locale)
+                .Select(change => new { version = change.Version, date = change.Date, items = change.Items }),
+        };
+    }
+
+    private static object DetailPayload(PluginDetail detail, string locale)
     {
         return new
         {
             ok = true,
             name = detail.Name,
             artifactName = detail.ArtifactName,
-            displayName = detail.DisplayName,
-            gameName = detail.GameName,
-            description = detail.Description,
+            displayName = PluginMetadataLocalization.DisplayName(detail.Locales, detail.DisplayName, locale),
+            gameName = PluginMetadataLocalization.GameName(detail.Locales, detail.GameName, locale),
+            description = PluginMetadataLocalization.Description(detail.Locales, detail.Description, locale),
             version = detail.Version,
             kind = detail.Kind,
             apiVersion = detail.ApiVersion,
@@ -225,7 +272,7 @@ internal static class ApiPluginsHandler
             hasFrontend = detail.HasFrontend,
             frontendApiVersion = detail.FrontendApiVersion,
             authors = detail.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
-            tags = detail.Tags,
+            tags = PluginMetadataLocalization.Tags(detail.Locales, detail.Tags, locale),
             homepage = detail.Homepage,
             createdAt = detail.CreatedAt,
             updatedAt = detail.UpdatedAt,
@@ -233,7 +280,7 @@ internal static class ApiPluginsHandler
             readmeAvailable = detail.ReadmeMarkdown.Length > 0,
             readmeMarkdown = detail.ReadmeMarkdown,
             readmeError = detail.ReadmeError,
-            changelog = detail.Changelog.Select(change => new
+            changelog = PluginMetadataLocalization.Changelog(detail.Locales, detail.Changelog, locale).Select(change => new
             {
                 version = change.Version,
                 date = change.Date,

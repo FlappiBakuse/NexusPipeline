@@ -12,6 +12,12 @@ public class RunAttempt
 
     public string Reason { get; set; } = "";
 
+    /// <summary>稳定的结果语义 key；Reason 保留当前展示文本并兼容既有历史文件。</summary>
+    public string ReasonCode { get; set; } = "";
+
+    /// <summary>结果语义参数；只保存稳定标识或数字，不保存翻译后的文案。</summary>
+    public Dictionary<string, string> ReasonArgs { get; set; } = new(StringComparer.Ordinal);
+
     /// <summary>本尝试脚本日志文件名（如 HH-mm-ss-1.log，按尝试分批落盘）。</summary>
     public string LogFile { get; set; } = "";
 
@@ -80,6 +86,12 @@ public class RunRecord
     public string Status { get; set; } = "running";
 
     public string ResultDetail { get; set; } = "";
+
+    /// <summary>稳定的运行结果语义 key；旧记录缺少该字段时由客户端回退 ResultDetail。</summary>
+    public string ResultCode { get; set; } = "";
+
+    /// <summary>运行结果语义参数，供不同语言的展示层重新组织文案。</summary>
+    public Dictionary<string, string> ResultArgs { get; set; } = new(StringComparer.Ordinal);
 
     /// <summary>相对于当天 history 目录的运行目录，例如「张三\\每日脚本-14-58-21」。</summary>
     public string HistoryDirectory { get; set; } = "";

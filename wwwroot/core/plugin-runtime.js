@@ -3,6 +3,7 @@ import { appearance, createAppearanceHost, refreshAppearance } from "./appearanc
 import { colorControlMarkup, fileControlMarkup, numberControlMarkup, rangeControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 import { toast } from "./ui.js";
 import { captureExecutionPreview } from "./execution-preview.js";
+import { getLocale } from "./i18n.js";
 
 const SLOT_NAMES = new Set([
   "dashboard.cards",
@@ -164,9 +165,39 @@ function registerLifecycle(kind, handler) {
   });
 }
 
+function createPluginI18n(descriptor) {
+  const localization = descriptor.localization || {};
+  const defaultLocale = localization.defaultLocale || "zh-CN";
+  const resources = localization.locales || {};
+  const normalize = value => {
+    const raw = String(value || "").trim().toLowerCase();
+    if (raw === "en" || raw.startsWith("en-")) return "en-US";
+    return "zh-CN";
+  };
+  const format = (value, args) => Object.entries(args || {}).reduce(
+    (result, [key, replacement]) => result.replaceAll(`{${key}}`, String(replacement ?? "")),
+    String(value ?? ""));
+  const lookup = (locale, key) => resources[locale]?.[key] ?? resources[defaultLocale]?.[key];
+  return Object.freeze({
+    locale: getLocale(),
+    defaultLocale,
+    t: (key, args = {}, fallback = "") => format(lookup(normalize(getLocale()), key) ?? fallback ?? key, args),
+    formatNumber: (value, options) => {
+      try { return new Intl.NumberFormat(getLocale(), options).format(value); } catch { return String(value ?? ""); }
+    },
+    formatDate: (value, options) => {
+      try { return new Intl.DateTimeFormat(getLocale(), options).format(new Date(value)); } catch { return String(value ?? ""); }
+    },
+    formatTime: (value, options) => {
+      try { return new Intl.DateTimeFormat(getLocale(), { timeStyle: "short", ...options }).format(new Date(value)); } catch { return String(value ?? ""); }
+    },
+  });
+}
+
 function createHost(descriptor) {
   const host = {
     plugin: Object.freeze({ ...descriptor }),
+    i18n: createPluginI18n(descriptor),
     api: {
       get: (route, signal) => api("GET", pluginApiPath(descriptor.name, route), undefined, signal),
       post: (route, body, signal) => api("POST", pluginApiPath(descriptor.name, route), body, signal),

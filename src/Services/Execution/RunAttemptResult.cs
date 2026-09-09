@@ -7,15 +7,38 @@ internal sealed class RunAttemptResult
 {
     public string Status { get; set; } = "";
     public string Reason { get; set; } = "";
+    public string ReasonCode { get; set; } = "";
+    public Dictionary<string, string> ReasonArgs { get; set; } = new(StringComparer.Ordinal);
     public bool IsFatal { get; set; }
     public string NotifyText { get; set; } = "";
     public string NotifyScreenshotId { get; set; } = "";
 
-    public static RunAttemptResult Success(string reason) => new() { Status = "success", Reason = reason };
-    public static RunAttemptResult Partial(string reason) => new() { Status = "partial", Reason = reason };
-    public static RunAttemptResult Failed(string reason) => new() { Status = "failed", Reason = reason };
-    public static RunAttemptResult Fatal(string reason) => new() { Status = "failed", Reason = reason, IsFatal = true };
-    public static RunAttemptResult Cancelled(string reason) => new() { Status = "cancelled", Reason = reason, IsFatal = true };
+    public static RunAttemptResult Success(string reason, string code = "run.success", IReadOnlyDictionary<string, string>? args = null) => Create("success", reason, code, false, args);
+    public static RunAttemptResult Partial(string reason, string code = "run.partial", IReadOnlyDictionary<string, string>? args = null) => Create("partial", reason, code, false, args);
+    public static RunAttemptResult Failed(string reason, string code = "run.failed", IReadOnlyDictionary<string, string>? args = null) => Create("failed", reason, code, false, args);
+    public static RunAttemptResult Fatal(string reason, string code = "run.fatal", IReadOnlyDictionary<string, string>? args = null) => Create("failed", reason, code, true, args);
+    public static RunAttemptResult Cancelled(string reason, string code = "run.cancelled", IReadOnlyDictionary<string, string>? args = null) => Create("cancelled", reason, code, true, args);
+
+    private static RunAttemptResult Create(
+        string status,
+        string reason,
+        string code,
+        bool fatal,
+        IReadOnlyDictionary<string, string>? args)
+    {
+        var result = new RunAttemptResult
+        {
+            Status = status,
+            Reason = reason,
+            ReasonCode = code,
+            IsFatal = fatal,
+        };
+        if (args is not null)
+        {
+            result.ReasonArgs = new Dictionary<string, string>(args, StringComparer.Ordinal);
+        }
+        return result;
+    }
 
     /// <summary>
     /// 合并主脚本与后置脚本结果。主脚本的致命性、判定原因与通知文本拥有优先级；
@@ -29,6 +52,8 @@ internal sealed class RunAttemptResult
         {
             Status = main.Status,
             Reason = main.Reason,
+            ReasonCode = main.ReasonCode,
+            ReasonArgs = new Dictionary<string, string>(main.ReasonArgs, StringComparer.Ordinal),
             IsFatal = main.IsFatal,
             NotifyText = string.IsNullOrWhiteSpace(main.NotifyText) ? post.NotifyText : main.NotifyText,
             NotifyScreenshotId = string.IsNullOrWhiteSpace(main.NotifyScreenshotId)
@@ -43,12 +68,19 @@ internal sealed class RunAttemptResult
             merged.Reason = string.IsNullOrWhiteSpace(main.Reason)
                 ? post.Reason
                 : $"{main.Reason}；后置脚本：{post.Reason}";
+            merged.ReasonCode = mainFailed ? main.ReasonCode : post.ReasonCode;
+            if (!mainFailed && post.ReasonArgs.Count > 0)
+            {
+                merged.ReasonArgs = new Dictionary<string, string>(post.ReasonArgs, StringComparer.Ordinal);
+            }
         }
 
         if (!mainFailed && postFailed)
         {
             merged.Status = post.Status;
             merged.IsFatal = post.IsFatal;
+            merged.ReasonCode = post.ReasonCode;
+            merged.ReasonArgs = new Dictionary<string, string>(post.ReasonArgs, StringComparer.Ordinal);
         }
         return merged;
     }

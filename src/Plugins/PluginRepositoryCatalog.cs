@@ -186,6 +186,17 @@ internal static class PluginRepositoryCatalog
                     error = $"插件 {name} 的展示元数据无效：{metadataError}";
                     return false;
                 }
+                if (!PluginPresentationMetadataParser.TryParseLocales(
+                        item,
+                        name,
+                        version,
+                        changelog,
+                        out IReadOnlyDictionary<string, PluginLocalizedMetadata> locales,
+                        out string? localesError))
+                {
+                    error = $"插件 {name} 的本地化展示元数据无效：{localesError}";
+                    return false;
+                }
                 string updatedAt = item["updatedAt"]?.ToString()?.Trim() ?? changelog.FirstOrDefault()?.Date ?? "";
                 if ((updatedAt.Length > 0 && (updatedAt.Length != 10
                     || !DateTime.TryParseExact(updatedAt, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)))
@@ -230,6 +241,7 @@ internal static class PluginRepositoryCatalog
                     CreatedAt = createdAt,
                     UpdatedAt = updatedAt,
                     HasReadme = hasReadme,
+                    Locales = locales,
                 });
             }
             catalog = new PluginCatalog(schemaVersion, repository, generatedAt, entries);
@@ -588,6 +600,9 @@ internal sealed record PluginCatalogEntry(
     public string UpdatedAt { get; init; } = "";
 
     public bool HasReadme { get; init; }
+
+    public IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales { get; init; } =
+        new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);
 
 }
 

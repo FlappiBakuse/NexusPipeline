@@ -45,6 +45,8 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     /// <summary>数据化插件可选的同源前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
+    public PluginLocalizationManifest Localization { get; private set; } = PluginLocalizationManifest.Empty;
+
     internal string PluginDirectory { get; private set; } = "";
 
     /// <summary>数据化插件声明的能力 key。</summary>
@@ -98,6 +100,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 Description = manifest.Description,
                 Version = manifest.Version,
                 Frontend = manifest.Frontend,
+                Localization = manifest.Localization,
                 _resolvePath = manifest.ResolvePath,
                 _judgeScriptPath = manifest.JudgeScriptPath,
                 _configValidatorPath = manifest.ConfigValidatorPath,

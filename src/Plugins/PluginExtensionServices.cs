@@ -488,6 +488,11 @@ internal static class PluginUiValidation
             throw new InvalidDataException("插件 UI 贡献标题无效");
         }
         if (contribution.Description is null || contribution.Description.Length > 2048) throw new InvalidDataException("插件 UI 贡献说明无效");
+        if (!PluginLocalizationValidation.IsValidText(contribution.LocalizedTitle, 128)
+            || !PluginLocalizationValidation.IsValidText(contribution.LocalizedDescription, 2048))
+        {
+            throw new InvalidDataException("插件 UI 贡献本地化文案无效");
+        }
         if (contribution.Fields is not null && contribution.Fields.Count > 64) throw new InvalidDataException("插件 UI 贡献字段过多");
         if (contribution.ReadHandler is null && contribution.Kind is PluginUiContributionKinds.Badge or PluginUiContributionKinds.Card)
         {
@@ -503,6 +508,12 @@ internal static class PluginUiValidation
             if (!IsSafeKey(field.Key, 64) || !keys.Add(field.Key)) throw new InvalidDataException($"插件 UI 字段 key 无效或重复：{field.Key}");
             if (field.Label is null || field.Description is null || field.Placeholder is null || string.IsNullOrWhiteSpace(field.Type) || !AllowedTypes.Contains(field.Type)) throw new InvalidDataException($"插件 UI 字段定义无效：{field.Key}");
             if (field.Label.Length is 0 or > 128 || field.Description.Length > 1024 || field.Placeholder.Length > 512 || field.MaxLength < 0 || field.MaxLength > 1024 * 1024) throw new InvalidDataException($"插件 UI 字段文本或长度无效：{field.Key}");
+            if (!PluginLocalizationValidation.IsValidText(field.LocalizedLabel, 128)
+                || !PluginLocalizationValidation.IsValidText(field.LocalizedDescription, 1024)
+                || !PluginLocalizationValidation.IsValidText(field.LocalizedPlaceholder, 512))
+            {
+                throw new InvalidDataException($"插件 UI 字段本地化文案无效：{field.Key}");
+            }
             if (field.Min is double.NaN or double.PositiveInfinity or double.NegativeInfinity
                 || field.Max is double.NaN or double.PositiveInfinity or double.NegativeInfinity
                 || field.Step is double.NaN or double.PositiveInfinity or double.NegativeInfinity
@@ -513,7 +524,7 @@ internal static class PluginUiValidation
             }
             if (field.Type.Equals("select", StringComparison.OrdinalIgnoreCase) || field.Type.Equals("multi-select", StringComparison.OrdinalIgnoreCase))
             {
-                if (field.Options is null || field.Options.Count is < 1 or > 256 || field.Options.Any(option => option is null || string.IsNullOrWhiteSpace(option.Value) || option.Value.Length > 128 || string.IsNullOrWhiteSpace(option.Label) || option.Label.Length > 128)) throw new InvalidDataException($"插件 UI 选择字段 options 无效：{field.Key}");
+                if (field.Options is null || field.Options.Count is < 1 or > 256 || field.Options.Any(option => option is null || string.IsNullOrWhiteSpace(option.Value) || option.Value.Length > 128 || string.IsNullOrWhiteSpace(option.Label) || option.Label.Length > 128 || !PluginLocalizationValidation.IsValidText(option.LocalizedLabel, 128))) throw new InvalidDataException($"插件 UI 选择字段 options 无效：{field.Key}");
             }
         }
     }
@@ -771,21 +782,32 @@ internal static class PluginUiValidation
         sanitized = null;
         error = "";
         if (display is null) return true;
-        if (!IsSafeKey(display.Id, 64) || string.IsNullOrWhiteSpace(display.Title) || display.Title.Length > 128) { error = "插件历史展示 ID 或标题无效"; return false; }
+        if (!IsSafeKey(display.Id, 64) || string.IsNullOrWhiteSpace(display.Title) || display.Title.Length > 128 || !PluginLocalizationValidation.IsValidText(display.LocalizedTitle, 128)) { error = "插件历史展示 ID 或标题无效"; return false; }
         var badges = new List<PluginUiBadge>();
         foreach (PluginUiBadge? badge in display.Badges ?? Array.Empty<PluginUiBadge>())
         {
-            if (badge is null || string.IsNullOrWhiteSpace(badge.Label) || badge.Label.Length > 64 || !AllowedTones.Contains(badge.Tone) || badge.Title is null || badge.Title.Length > 256) { error = "插件历史徽章无效"; return false; }
-            badges.Add(new PluginUiBadge(badge.Label.Trim(), badge.Tone.Trim().ToLowerInvariant(), badge.Title));
+            if (badge is null || string.IsNullOrWhiteSpace(badge.Label) || badge.Label.Length > 64 || !AllowedTones.Contains(badge.Tone) || badge.Title is null || badge.Title.Length > 256 || !PluginLocalizationValidation.IsValidText(badge.LocalizedLabel, 64) || !PluginLocalizationValidation.IsValidText(badge.LocalizedTitle, 256)) { error = "插件历史徽章无效"; return false; }
+            badges.Add(new PluginUiBadge(badge.Label.Trim(), badge.Tone.Trim().ToLowerInvariant(), badge.Title)
+            {
+                LocalizedLabel = badge.LocalizedLabel,
+                LocalizedTitle = badge.LocalizedTitle,
+            });
         }
         var fields = new List<PluginUiFieldValue>();
         foreach (PluginUiFieldValue? field in display.Fields ?? Array.Empty<PluginUiFieldValue>())
         {
-            if (field is null || string.IsNullOrWhiteSpace(field.Label) || field.Label.Length > 128 || field.Value is null || field.Value.Length > 2048 || !AllowedTones.Contains(field.Tone)) { error = "插件历史字段无效"; return false; }
-            fields.Add(new PluginUiFieldValue(field.Label, field.Value, field.Tone.Trim().ToLowerInvariant()));
+            if (field is null || string.IsNullOrWhiteSpace(field.Label) || field.Label.Length > 128 || field.Value is null || field.Value.Length > 2048 || !AllowedTones.Contains(field.Tone) || !PluginLocalizationValidation.IsValidText(field.LocalizedLabel, 128) || !PluginLocalizationValidation.IsValidValue(field.LocalizedValue, 2048)) { error = "插件历史字段无效"; return false; }
+            fields.Add(new PluginUiFieldValue(field.Label, field.Value, field.Tone.Trim().ToLowerInvariant())
+            {
+                LocalizedLabel = field.LocalizedLabel,
+                LocalizedValue = field.LocalizedValue,
+            });
         }
         if (badges.Count > 32 || fields.Count > 64) { error = "插件历史展示数量超限"; return false; }
-        sanitized = new PluginHistoryDisplay(display.Id, display.Title.Trim(), badges, fields);
+        sanitized = new PluginHistoryDisplay(display.Id, display.Title.Trim(), badges, fields)
+        {
+            LocalizedTitle = display.LocalizedTitle,
+        };
         return true;
     }
 

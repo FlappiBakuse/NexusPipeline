@@ -8,6 +8,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
+using NexusPipeline.Localization;
 
 namespace NexusPipeline.Web;
 
@@ -352,6 +353,7 @@ internal sealed class WebServer : IDisposable
 
     private async Task HandleAsync(HttpListenerContext context, CancellationToken token)
     {
+        using IDisposable localeScope = LocaleContext.Push(context.Request.Locale);
         try
         {
             string path = context.Request.Url?.AbsolutePath ?? "/";

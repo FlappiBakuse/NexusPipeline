@@ -8,6 +8,7 @@ import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { updateActionsMarkup } from "../core/update-status.js";
+import { applyTranslations, getLocale, setLocale, t, text, translateText } from "../core/i18n.js";
 
 let restartRequired = false;
 let openSettingsPanel = "service";
@@ -15,7 +16,7 @@ let updateAutoNoticeKey = "";
 
 export async function pageSettings(token) {
   if (!isCurrent("settings", token)) return;
-  navActive("settings"); setTopbarTitle("设置");
+  navActive("settings"); setTopbarTitle(t("shell.settings", {}, "设置"));
   let data;
   try { data = await api("GET", "/api/settings"); }
   catch (error) { render(`<div class="empty"><strong>加载设置失败</strong>${esc(error.message)}</div>`); return; }
@@ -27,7 +28,7 @@ export async function pageSettings(token) {
     ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
   openSettingsPanel = "service";
-  render(pageHeader("系统设置", "设置", "集中管理服务行为、通知渠道、远程访问、代理与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
+  render(pageHeader(t("settings.title", {}, "系统设置"), t("shell.settings", {}, "设置"), "集中管理服务行为、通知渠道、远程访问、代理与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
     ${settingsCardMarkup("service", "服务行为", "服务启动、历史记录与日志选项", serviceSettingsMarkup(settings), "service-settings")}
     ${settingsCardMarkup("notifications", "通知渠道", "Webhook 与 SMTP 通知配置", notificationSettingsMarkup(settings), "notification-settings")}
     ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
@@ -50,6 +51,11 @@ function settingsCardMarkup(id, title, description, body, testId) {
     <button class="settings-card-toggle" type="button" data-action="toggle-settings-panel" data-panel="${id}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="settings-panel-${id}"><span class="settings-card-copy"><strong class="settings-card-title">${title}</strong><span class="muted">${description}</span></span><span class="settings-card-arrow" aria-hidden="true">${icon(expanded ? "chevronDown" : "chevronRight", "settings-card-arrow-icon")}</span></button>
     <div id="settings-panel-${id}" class="settings-card-body"${expanded ? "" : " hidden"}>${body}</div>
   </section>`;
+}
+
+async function changeLocale(target) {
+  await setLocale(target.value);
+  location.reload();
 }
 
 function syncSettingsPanels() {
@@ -83,11 +89,12 @@ function restartNoticeMarkup(settings) {
 }
 
 function serviceSettingsMarkup(settings) {
+  const locale = getLocale();
   return `<div class="settings-list">
     ${switchControl("st-autostart", "开机自启", "注册到当前用户启动项", settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
     ${switchControl("st-lightweight", "轻量模式", "不启动网页服务，重启后生效", settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
     ${switchControl("st-browser", "打开浏览器", "服务启动后自动打开控制台", settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
-  </div><div class="form-grid three" data-help="日志级别即时生效；Web 端口改动需重启服务。">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}</div>${settings.lightweightMode ? '<p class="callout callout-warning">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}`;
+  </div><div class="form-grid" data-help="日志级别即时生效；Web 端口改动需重启服务。">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}${selectField("settings-locale", t("settings.language", {}, "界面语言"), locale, [{ value: "zh-CN", label: t("settings.language_zh", {}, "简体中文") }, { value: "en-US", label: t("settings.language_en", {}, "English") }], 'data-action="change-locale"', t("settings.language_help", {}, "语言偏好仅保存在当前浏览器。"))}</div>${settings.lightweightMode ? '<p class="callout callout-warning">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}`;
 }
 
 function remoteMcpSettingsMarkup(settings, lanList) {
@@ -179,7 +186,9 @@ function renderDiagnostics(data) {
   const checks = Array.isArray(data?.checks) ? data.checks : [];
   const overall = data?.overallStatus || "warn";
   const attentionCount = checks.filter(check => check?.status === "warn" || check?.status === "fail").length;
-  const attentionText = attentionCount ? `，${attentionCount} 项需要关注` : "，全部通过或按条件跳过";
+  const attentionText = attentionCount
+    ? text("，{count} 项需要关注", { count: attentionCount })
+    : text("，全部通过或按条件跳过");
   const rows = checks.map(check => `<div class="diagnostic-row" role="row" data-diagnostic-status="${esc(check.status || "unknown")}">
       <div class="diagnostic-check-name" role="cell"><span class="diagnostic-check-id mono">${esc(check.id || "")}</span><span class="muted diagnostic-check-category">${esc(diagnosticCategoryLabel(check.category))}</span></div>
       <div class="diagnostic-check-status" role="cell"><span class="badge ${diagnosticStatusClass(check.status)}">${esc(diagnosticStatusLabel(check.status))}</span></div>
@@ -187,6 +196,7 @@ function renderDiagnostics(data) {
       <div class="diagnostic-check-info" role="cell">${check.detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">详情</span>${esc(check.detail)}</div>` : ""}${check.remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">建议</span>${esc(check.remediation)}</div>` : ""}</div>
     </div>`).join("");
   box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">总体状态</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} 项检查${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="系统诊断检查项"><div class="diagnostics-table-header" role="row"><span role="columnheader">检查项</span><span role="columnheader">状态</span><span role="columnheader">结果</span><span role="columnheader">详情与建议</span></div>${rows || '<div class="diagnostics-empty" role="row">暂无诊断结果</div>'}</div>`;
+  applyTranslations(box);
 }
 
 async function loadDiagnostics(token = state.routeToken) {
@@ -197,14 +207,17 @@ async function loadDiagnostics(token = state.routeToken) {
     if (!isCurrent("settings", token)) return;
     renderDiagnostics(data);
   } catch (error) {
-    if (box) box.innerHTML = `<p class="callout callout-warning">${esc(error.message || "诊断加载失败")}</p>`;
+    if (box) {
+      box.innerHTML = `<p class="callout callout-warning">${esc(translateText(error.message || "诊断加载失败"))}</p>`;
+      applyTranslations(box);
+    }
   }
 }
 
 async function exportDiagnostics() {
   try {
     const result = await api("POST", "/api/diagnostics/export");
-    toast(`诊断包已导出：${result.path || "已生成"}`);
+    toast(text("诊断包已导出：{path}", { path: result.path || text("已生成") }));
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -226,7 +239,7 @@ function notifyAutomaticUpdate(data) {
   const key = `${data.latest}|${data.channel || ""}`;
   if (key === updateAutoNoticeKey) return;
   updateAutoNoticeKey = key;
-  toast(`发现新版本 v${data.latest}`);
+  toast(text("发现新版本 v{version}", { version: data.latest }));
 }
 
 function updateStatusPollDelay(data = {}) {
@@ -259,16 +272,17 @@ function renderUpdateStatus(data) {
   const box = $("#update-status-box");
   if (!box) return;
   if (!data) {
-    box.innerHTML = '<p class="muted update-state-copy">更新状态加载中...</p>';
+    box.innerHTML = `<p class="muted update-state-copy">${text("更新状态加载中...")}</p>`;
+    applyTranslations(box);
     return;
   }
   const state = data.state || "idle";
   const current = data.current || "—";
-  const channelText = data.channel === "stable" ? "稳定版" : "预发布（Pre-release）";
+  const channelText = data.channel === "stable" ? text("稳定版") : text("预发布（Pre-release）");
   const actions = updateActionsMarkup(data);
   let progress = "";
   if (state === "downloading" && typeof data.progress === "number") {
-    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="下载进度"><div data-progress="${data.progress}"></div></div>`;
+    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="${esc(text("下载进度"))}"><div data-progress="${data.progress}"></div></div>`;
   }
   let notes = "";
   if (data.notes) {
@@ -294,7 +308,8 @@ function renderUpdateStatus(data) {
   const backupWarning = state === "ready"
     ? '<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">应用更新前请先备份 config、data、history、logs、plugins 和 .nxp 等运行时数据。</p>'
     : "";
-  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">当前版本</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">更新渠道</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">${text("当前版本")}</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">${text("更新渠道")}</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  applyTranslations(box);
   box.querySelectorAll("[data-progress]").forEach(element => {
     element.style.width = `${Math.max(0, Math.min(100, Number(element.dataset.progress) || 0))}%`;
   });
@@ -321,7 +336,7 @@ function syncUpdateToggleState(settings = {}) {
     auto.setAttribute("aria-pressed", "false");
     auto.dataset.state = "off";
     const stateText = auto.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = "已停用";
+    if (stateText) stateText.textContent = text("已停用");
   }
 }
 
@@ -364,9 +379,9 @@ async function checkUpdate() {
     const result = await api("POST", "/api/update/check");
     updateStatus = result;
     renderUpdateStatus(result);
-    if (result.state === "checking") toast("正在检查更新", "info");
-    else if (result.available) toast(`发现新版本 v${result.latest}`);
-    else toast("当前已是最新版本", "info");
+    if (result.state === "checking") toast(text("正在检查更新"), "info");
+    else if (result.available) toast(text("发现新版本 v{version}", { version: result.latest }));
+    else toast(text("当前已是最新版本"), "info");
     scheduleUpdateStatusPoll(state.routeToken, result);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -381,17 +396,17 @@ async function startUpdateDownload() {
 async function cancelUpdateDownload() {
   try {
     await api("POST", "/api/update/cancel");
-    toast("下载已取消");
+    toast(text("下载已取消"));
     await loadUpdateStatus();
   } catch (error) { toast(error.message, "error"); }
 }
 
 function confirmUpdateApply(defer) {
   const version = updateStatus?.latest ? ` v${esc(updateStatus.latest)}` : "";
-  const actionText = defer ? "下次启动服务时应用更新" : "现在应用更新并重启服务";
+  const actionText = defer ? text("下次启动服务时应用更新") : text("现在应用更新并重启服务");
   confirmModal(
     defer ? "登记下次启动更新" : "立即更新",
-    `请确认已备份运行时数据。${actionText}${version}？更新备份只包含程序文件和 wwwroot。`,
+    text("请确认已备份运行时数据。{action}{version}？更新备份只包含程序文件和 wwwroot。", { action: actionText, version }),
     "update-apply-confirm",
     { defer: defer ? "true" : "false" },
   );
@@ -402,12 +417,12 @@ async function applyUpdate(defer) {
     const result = await api("POST", "/api/update/apply", { defer });
     if (result.error) {
       toast(result.error, "error");
-      if (result.code === "busy") toast("可先等待任务结束，或选择「下次启动更新」", "info");
+      if (result.code === "busy") toast(text("可先等待任务结束，或选择「下次启动更新」"), "info");
       await loadUpdateStatus();
       return;
     }
     if (result.deferred) {
-      toast("已登记：下次启动服务时自动应用");
+      toast(text("已登记：下次启动服务时自动应用"));
       await loadUpdateStatus();
       return;
     }
@@ -430,7 +445,7 @@ function pollServiceRestart(deadline) {
     if (Date.now() < deadline) pollServiceRestart(deadline);
     else {
       closeModal();
-      toast("服务重启超时，请手动刷新页面", "error");
+      toast(text("服务重启超时，请手动刷新页面"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -537,7 +552,7 @@ function syncNotificationBadges(settings) {
     if (!badge) continue;
     badge.classList.toggle("ok", enabled);
     badge.classList.toggle("muted", !enabled);
-    badge.textContent = enabled ? "已启用" : "已禁用";
+    badge.textContent = enabled ? text("已启用") : text("已禁用");
   }
 }
 
@@ -545,7 +560,7 @@ async function testNotify() {
   await awaitNotifySaveSettled();
   try {
     const result = await api("POST", "/api/settings/test");
-    toast(result.ok ? "测试通知发送成功" : "发送失败，详见日志", result.ok ? "info" : "error");
+    toast(result.ok ? text("测试通知发送成功") : text("发送失败，详见日志"), result.ok ? "info" : "error");
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -558,11 +573,13 @@ export function markRestartRequired() {
   const existing = document.querySelector("#restart-notice");
   if (existing) {
     existing.outerHTML = markup;
+    applyTranslations(document.querySelector("#restart-notice"));
     return;
   }
   if (!view) return;
   const header = view.querySelector(".page-head");
   header?.insertAdjacentHTML("afterend", markup);
+  applyTranslations(document.querySelector("#restart-notice"));
 }
 
 /** 自动保存串行链（用户需求：修改一次即保存一次，成功静默、失败 toast）：连续触发（快速切换开关）
@@ -614,6 +631,7 @@ async function refreshLanList() {
     box.innerHTML = remoteEnabled && lan.length
       ? lan.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${data.settings.webPort}/</span></div>`).join("")
       : "";
+    applyTranslations(box);
     if (remoteEnabled) box.dataset.help = "其他设备请访问局域网访问地址；localhost 与 0.0.0.0 只指向本机，首次访问会要求输入访问令牌。";
     else delete box.dataset.help;
   } catch { /* 静默 */ }
@@ -703,7 +721,7 @@ function pollRestart(candidates, deadline) {
       pollRestart(candidates, deadline);
     } else {
       closeModal();
-      toast("服务重启超时，请手动刷新页面", "error");
+      toast(text("服务重启超时，请手动刷新页面"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -718,7 +736,7 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+    if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
     if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },
@@ -728,17 +746,17 @@ export const actions = {
     const visible = input.type === "password";
     input.type = visible ? "text" : "password";
     target.setAttribute("aria-pressed", String(visible));
-    target.textContent = visible ? "隐藏" : "显示";
+    target.textContent = visible ? text("隐藏") : text("显示");
   },
   "copy-token": async target => {
     const input = $("#st-token");
     const value = input?.value?.trim();
-    if (!value) { toast("当前没有可复制的令牌", "error"); return; }
+    if (!value) { toast(text("当前没有可复制的令牌"), "error"); return; }
     try {
       await navigator.clipboard.writeText(value);
-      toast("访问令牌已复制");
+      toast(text("访问令牌已复制"));
     } catch (error) {
-      toast("复制访问令牌失败，请手动复制", "error");
+      toast(text("复制访问令牌失败，请手动复制"), "error");
     }
   },
   "gen-token": () => {
@@ -750,10 +768,11 @@ export const actions = {
       input.value = hex;
       input.type = "password";
     }
-    toast("已生成随机令牌，正在保存…");
-    void autoSave().then(() => toast("访问令牌已保存"), () => {});
+    toast(text("已生成随机令牌，正在保存…"));
+    void autoSave().then(() => toast(text("访问令牌已保存")), () => {});
   },
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
+  "change-locale": target => changeLocale(target),
   "load-diagnostics": target => withBusy(target, () => loadDiagnostics()),
   "export-diagnostics": target => withBusy(target, () => exportDiagnostics()),
   "toggle-panel": target => togglePanel(target.dataset.panel, target),
@@ -784,14 +803,14 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+    if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
     if (target.dataset.flag === "st-update-check" && !pressed) {
       const auto = $("#st-update-auto");
       if (auto) {
         auto.setAttribute("aria-pressed", "false");
         auto.dataset.state = "off";
         const autoState = auto.querySelector("[data-switch-state]");
-        if (autoState) autoState.textContent = "已停用";
+        if (autoState) autoState.textContent = text("已停用");
       }
     }
     syncUpdateToggleState({ updateCheckEnabled: pressed });
