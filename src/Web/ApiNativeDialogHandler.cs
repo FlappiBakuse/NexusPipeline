@@ -16,7 +16,7 @@ internal static class ApiNativeDialogHandler
         }
         if (!HttpHelper.IsLoopback(context))
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "local_only", error = "路径选择器仅支持本机请求" }, 403).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
             return;
         }
 
@@ -24,7 +24,7 @@ internal static class ApiNativeDialogHandler
         string kind = (payload?.Kind ?? "file").Trim().ToLowerInvariant();
         if (kind is not ("file" or "folder"))
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_request", error = "路径选择器类型无效" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "invalid_request", 400).ConfigureAwait(false);
             return;
         }
         string title = string.IsNullOrWhiteSpace(payload?.Title)
@@ -35,17 +35,12 @@ internal static class ApiNativeDialogHandler
         string invalidInitialPathMessage = payload?.InvalidInitialPathMessage?.Trim() ?? "";
         if (title.Length > 128 || initialPath.Length > 4096 || filter.Length > 1024 || invalidInitialPathMessage.Length > 128)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_request", error = "路径选择器请求参数过长" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "invalid_request", 400).ConfigureAwait(false);
             return;
         }
         if (payload?.RequireInitialDirectory == true && !NativePathPickerService.IsExistingDirectory(initialPath))
         {
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = false,
-                code = "initial_directory_not_found",
-                error = string.IsNullOrWhiteSpace(invalidInitialPathMessage) ? "脚本根目录错误" : invalidInitialPathMessage,
-            }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "initial_directory_not_found", 400).ConfigureAwait(false);
             return;
         }
 
@@ -64,7 +59,7 @@ internal static class ApiNativeDialogHandler
         catch (Exception ex)
         {
             Logger.Warn($"[路径选择器] 打开原生选择器失败：{ex.Message}");
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "dialog_failed", error = "无法打开路径选择器" }, 500).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "dialog_failed", 500).ConfigureAwait(false);
         }
     }
 

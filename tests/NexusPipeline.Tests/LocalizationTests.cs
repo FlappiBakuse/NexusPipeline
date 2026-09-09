@@ -67,4 +67,27 @@ public sealed class LocalizationTests
             "The daily success limit was reached (2/3); this run was skipped",
             RunResultLocalization.Detail(record, "en-US"));
     }
+
+    [Fact]
+    public void HostLocalization_ProjectsHostLogTextAtTheOutputBoundary()
+    {
+        const string message = "[警告] 解析 settings.json 失败，原文件已保留为 settings.json.bak";
+
+        string english = HostLocalization.TranslateLog(message, "en-US");
+        Assert.Equal("[Warning]", HostLocalization.Translate("log.token.warning", "fallback", "en-US"));
+        Assert.Equal("parse", HostLocalization.Translate("log.token.parse", "fallback", "en-US"));
+        Assert.Equal("failed", HostLocalization.Translate("log.token.failed", "fallback", "en-US"));
+        Assert.Equal("original file kept as", HostLocalization.Translate("log.token.original_file_kept", "fallback", "en-US"));
+
+        Assert.Equal("[Warning] parse settings.json failed, original file kept as settings.json.bak", english);
+        Assert.DoesNotContain("解析", english, StringComparison.Ordinal);
+        Assert.DoesNotContain("失败", english, StringComparison.Ordinal);
+        Assert.Contains("settings.json.bak", english, StringComparison.Ordinal);
+        Assert.Equal(message, HostLocalization.TranslateLog(message, "zh-CN"));
+
+        string fallback = HostLocalization.TranslateLog("宿主固定日志文本未登记", "en-US");
+        Assert.StartsWith("Host log event ", fallback, StringComparison.Ordinal);
+        Assert.DoesNotContain("宿主", fallback, StringComparison.Ordinal);
+        Assert.DoesNotContain("未登记", fallback, StringComparison.Ordinal);
+    }
 }

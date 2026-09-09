@@ -23,7 +23,7 @@
 | 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ...` | `list_history` |
 | 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
-| 插件商店/安装/开关 | 插件页 + Control API | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
+| 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
 | 设置读取 | 设置 API | `settings status` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
@@ -49,6 +49,7 @@
 - Web UI 启动配置编辑时会在 `start` 请求中附带一次性浏览器窗口 token，用于将发起请求的窗口后置；CLI/MCP 请求不携带该辅助字段，窗口识别失败不会阻断编辑。
 - 配置编辑启动会按专项 profile 处理 fresh/reuse 目标、文件/目录候选隔离和 `configEditor` 准备脚本；准备失败返回 `execution_failed` 并保留恢复标记供自愈。
 - 配置编辑保存、取消与崩溃恢复共享 `.session`、`edit-isolation`、`original-extra` 和附加快照事务，收尾完成后清理空闲 `work/`。
+- 插件批量更新只选择官方 catalog 中已安装、由官方商店管理且存在新版本的插件，按顺序登记更新；单项失败会进入汇总结果并继续处理后续插件，完成后由用户按页面提示重启宿主。
 - 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 
 ## 维护规则

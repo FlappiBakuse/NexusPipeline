@@ -197,15 +197,7 @@ internal sealed class PluginLocalizationManifest
 
     private static bool TryCanonicalLocale(string value, out string canonical)
     {
-        string candidate = value.Trim();
-        canonical = candidate.Equals("en", StringComparison.OrdinalIgnoreCase)
-            || candidate.StartsWith("en-", StringComparison.OrdinalIgnoreCase)
-            ? LocaleCatalog.EnglishLocale
-            : candidate.Equals("zh", StringComparison.OrdinalIgnoreCase)
-                || candidate.StartsWith("zh-", StringComparison.OrdinalIgnoreCase)
-                ? LocaleCatalog.DefaultLocale
-                : "";
-        return canonical.Length > 0;
+        return LocaleCatalog.TryResolve(value, out canonical);
     }
 
     private static string Format(string value, IReadOnlyDictionary<string, object?>? args)

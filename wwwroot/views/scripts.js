@@ -10,7 +10,7 @@ import { hasEntityNameConflict } from "../core/entity-name.js";
 import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldError, clearFieldError, setTopbarTitle, toast, pushNotice, withBusy } from "../core/ui.js";
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
-import { text } from "../core/i18n.js";
+import { t } from "../core/i18n.js";
 
 let scriptDraft = null;
 let scriptPage = 1;
@@ -41,24 +41,24 @@ function selfManagedPcLaunch(pluginType) {
 function gameBoxHtml(d, emulatorOk) {
   const isEmu = emulatorOk && d.gameMode === "emulator";
   const modeRow = emulatorOk
-    ? `<div class="form-grid game-mode-row">${selectField("sm-mode", "启动方式", isEmu ? "emulator" : "pc", [{ value: "pc", label: "PC 客户端" }, { value: "emulator", label: "安卓模拟器" }], 'data-action="change-sm-mode"', "选择游戏启动方式；模拟器模式使用 ADB 地址。")}<div class="game-wait-field">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"', "启动游戏后等待指定秒数，再运行脚本。")}</div></div>`
-    : `<div class="form-grid game-mode-row">${valueField("sm-game-wait", "启动后等待秒数", d.gameWaitSeconds, "number", 'min="0"', "启动游戏后等待指定秒数，再运行脚本。")}<div class="game-wait-field" aria-hidden="true"></div></div>`;
+    ? `<div class="form-grid game-mode-row">${selectField("sm-mode", t("ui.startup_mode"), isEmu ? "emulator" : "pc", [{ value: "pc", label: t("ui.pc_client") }, { value: "emulator", label: t("ui.android_emulator") }], 'data-action="change-sm-mode"', t("ui.select_game_start_mode"))}<div class="game-wait-field">${valueField("sm-game-wait", t("ui.wait_after_game_start"), d.gameWaitSeconds, "number", 'min="0"', t("ui.wait_after_game_start_help"))}</div></div>`
+    : `<div class="form-grid game-mode-row">${valueField("sm-game-wait", t("ui.wait_after_game_start"), d.gameWaitSeconds, "number", 'min="0"', t("ui.wait_after_game_start_help"))}<div class="game-wait-field" aria-hidden="true"></div></div>`;
   const exeField = pathField(
     "sm-game-exe",
-    isEmu ? "模拟器ADB地址 <span class='req'>*</span>" : "游戏路径 <span class='req'>*</span>",
+    isEmu ? `${t("ui.emulator_adb_address")} <span class='req'>*</span>` : `${t("ui.game_path")} <span class='req'>*</span>`,
     d.gameExe,
     "file",
-    isEmu ? 'placeholder="例如 127.0.0.1:16384"' : 'placeholder="游戏可执行文件路径"',
-    "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*",
+    isEmu ? `placeholder="${t("ui.emulator_adb_address_placeholder")}"` : `placeholder="${t("ui.game_executable_path_placeholder")}"`,
+    t("ui.executable_file_filter"),
     isEmu ? 'hidden aria-hidden="true"' : "",
-    isEmu ? "模拟器 ADB 地址用于失败清理与重试恢复。" : "游戏路径用于失败清理与重试恢复。",
+    isEmu ? t("ui.emulator_adb_address_failure_cleanup_help") : t("ui.the_game_path_is_used_for_failure_cleanup_and_retry_recovery"),
   );
   const argsField = isEmu
-    ? valueField("sm-game-args", "启动参数", d.gameArgs, "text", 'placeholder="am start 参数"', "模拟器模式下，该内容会作为 adb shell am start 参数传递。")
-    : valueField("sm-game-args", "启动参数", d.gameArgs);
+    ? valueField("sm-game-args", t("ui.script_startup_arguments"), d.gameArgs, "text", `placeholder="${t("ui.am_start_arguments")}"`, t("ui.in_emulator_mode_this_value_is_passed_as_adb_shell_am_start_arguments"))
+    : valueField("sm-game-args", t("ui.script_startup_arguments"), d.gameArgs);
   const selfManagedHint = !isEmu && selfManagedPcLaunch(d.pluginType)
-    ? '<p id="sm-self-managed-hint" class="muted">PC 客户端由脚本自身启动；启动参数与等待秒数不可配置，游戏路径用于失败时强制关闭游戏。</p>'
-    : '<p id="sm-self-managed-hint" class="muted" hidden>PC 客户端由脚本自身启动；启动参数与等待秒数不可配置，游戏路径用于失败时强制关闭游戏。</p>';
+    ? `<p id="sm-self-managed-hint" class="muted">${t("ui.the_client_is_launched_by_the_script_startup_arguments_and_wait_time_cannot_be_configured_the_game_path_is_used_to_force_close_the_game_after_a_failure")}</p>`
+    : `<p id="sm-self-managed-hint" class="muted" hidden>${t("ui.the_client_is_launched_by_the_script_startup_arguments_and_wait_time_cannot_be_configured_the_game_path_is_used_to_force_close_the_game_after_a_failure")}</p>`;
   return `${selfManagedHint}<div class="form-grid">${exeField}${argsField}</div>${modeRow}`;
 }
 
@@ -68,15 +68,15 @@ export function changeGameMode() {
   const exe = $dom("#sm-game-exe");
   const args = $dom("#sm-game-args");
   const exeLabel = $dom('label[for="sm-game-exe"]');
-  if (exeLabel) exeLabel.innerHTML = `${text(isEmu ? "模拟器ADB地址" : "游戏路径")} <span class='req'>*</span>`;
-  if (exe) exe.placeholder = isEmu ? text("例如 127.0.0.1:16384") : text("请填写游戏可执行文件路径");
-  if (args) args.placeholder = isEmu ? text("am start 参数，如 -n 包名/.MainActivity") : "";
+  if (exeLabel) exeLabel.innerHTML = `${t(isEmu ? "ui.emulator_adb_address" : "ui.game_path")} <span class='req'>*</span>`;
+  if (exe) exe.placeholder = isEmu ? t("ui.for_example_127_0_0_1_16384") : t("ui.enter_the_game_executable_path");
+  if (args) args.placeholder = isEmu ? t("ui.am_start_arguments_such_as_n_package_mainactivity") : "";
   const pathTrigger = exe?.closest(".nxp-path")?.querySelector("[data-path-trigger]");
   if (pathTrigger) {
     pathTrigger.hidden = isEmu;
     pathTrigger.setAttribute("aria-hidden", isEmu ? "true" : "false");
     pathTrigger.disabled = isEmu;
-    pathTrigger.dataset.pathTitle = text(isEmu ? "模拟器ADB地址" : "游戏路径");
+    pathTrigger.dataset.pathTitle = t(isEmu ? "ui.emulator_adb_address" : "ui.game_path");
   }
   const lockPcFields = selfManagedPcLaunch(scriptDraft?.pluginType || "") && !isEmu;
   const currentMode = isEmu ? "emulator" : "pc";
@@ -100,7 +100,7 @@ export function changeGameMode() {
         launchButton.setAttribute("aria-pressed", pressed ? "true" : "false");
         launchButton.dataset.state = pressed ? "on" : "off";
         const stateText = launchButton.querySelector("[data-switch-state]");
-        if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
+        if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
       }
     }
     scriptDraft._lastGameMode = currentMode;
@@ -108,13 +108,13 @@ export function changeGameMode() {
   // self-managed-pc-launch：PC 模式下启动参数与等待秒数禁用（保留显示值）；
   // 游戏路径保留可填写，用于任务失败时的强制关闭游戏；「启动游戏」开关先关闭再禁用。
   // 禁用元件不再派发指针/聚焦事件，禁用提示气泡挂在外层容器上，覆盖字段原有帮助气泡。
-  const lockedHelp = text("使用 PC 客户端时，禁用该选项。");
+  const lockedHelp = t("ui.this_option_is_disabled_when_using_a_pc_client");
   const exeField = $dom("#sm-game-exe");
   if (argsField) argsField.disabled = lockPcFields;
   if (waitField) waitField.disabled = lockPcFields;
   if (exeField) exeField.disabled = false;
-  setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? text("模拟器模式下，该内容会作为 adb shell am start 参数传递。") : ""));
-  setFieldBubble(waitField, lockPcFields ? lockedHelp : text("启动游戏后等待指定秒数，再运行脚本。"));
+  setFieldBubble(argsField, lockPcFields ? lockedHelp : (isEmu ? t("ui.in_emulator_mode_this_value_is_passed_as_adb_shell_am_start_arguments") : ""));
+  setFieldBubble(waitField, lockPcFields ? lockedHelp : t("ui.wait_the_specified_number_of_seconds_after_launching_the_game_then_run_the_script"));
   const launch = launchButton;
   if (launch) {
     if (lockPcFields) {
@@ -122,7 +122,7 @@ export function changeGameMode() {
       launch.setAttribute("aria-pressed", "false");
       launch.dataset.state = "off";
       const stateText = launch.querySelector("[data-switch-state]");
-      if (stateText) stateText.textContent = text("已停用");
+      if (stateText) stateText.textContent = t("ui.disabled");
     }
     launch.disabled = lockPcFields;
     launch.setAttribute("aria-disabled", lockPcFields ? "true" : "false");
@@ -149,34 +149,34 @@ function scriptCardMarkup(script) {
   const unavailable = pluginStatus.specialized && !pluginStatus.available;
   const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
   const pluginBadge = !pluginStatus.specialized
-    ? `<span class="badge muted">${text("通用脚本")}</span>`
+    ? `<span class="badge muted">${t("ui.general_script")}</span>`
     : pluginStatus.missing
-      ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">${text("未知专项")}</span>`
-      : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${text("{name}专项", { name: esc(pluginStatus.displayName) })}</span>`;
+      ? `<span class="badge bad" data-testid="script-plugin-badge" title="${esc(unavailableMessage)}">${t("ui.unknown_specialized_plugin")}</span>`
+      : `<span class="badge ${unavailable ? "warn" : "muted"}" data-testid="script-plugin-badge"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${t("ui.value_specialized", { name: esc(pluginStatus.displayName) })}</span>`;
   const judgeBadge = script.judgeScriptEnabled === true && String(script.judgeScript || "").trim()
-    ? `<span class="badge muted" data-testid="script-judge-badge">${text("判断脚本")}</span>`
+    ? `<span class="badge muted" data-testid="script-judge-badge">${t("ui.judge_script")}</span>`
     : String(script.successKeywords || "").trim() || String(script.failureKeywords || "").trim()
-      ? `<span class="badge muted" data-testid="script-judge-badge">${text("关键字判断")}</span>`
+      ? `<span class="badge muted" data-testid="script-judge-badge">${t("ui.keyword_judge")}</span>`
       : "";
   const gameModeBadge = script.launchGame === true
-    ? `<span class="badge muted" data-testid="script-game-mode-badge">${text(String(script.gameMode || "").trim().toLowerCase() === "emulator" ? "安卓模拟器" : "PC 客户端")}</span>`
+    ? `<span class="badge muted" data-testid="script-game-mode-badge">${t(String(script.gameMode || "").trim().toLowerCase() === "emulator" ? "ui.android_emulator" : "ui.pc_client")}</span>`
     : "";
   const longBadge = script.logStallTimeoutMinutes === -1
-    ? `<span class="badge warn" data-testid="script-long-badge">${text("长时策略")}</span>`
+    ? `<span class="badge warn" data-testid="script-long-badge">${t("ui.long_running_policy")}</span>`
     : "";
   const entityState = unavailable
     ? ` class="entity-link is-unavailable" disabled aria-disabled="true" title="${esc(unavailableMessage)}"`
     : ' class="entity-link"';
   return `<article class="script-card${unavailable ? " is-unavailable" : ""}" data-testid="script-card" data-dnd-id="${esc(script.id)}">
-    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(text("拖拽排序（方向键调整顺序）"))}" title="${esc(text("拖拽排序"))}">${icon("grip")}</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("ui.drag_to_reorder_use_arrow_keys_to_adjust"))}" title="${esc(t("ui.drag_to_reorder"))}">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${esc(script.id)}">
     <div class="script-main">
-      <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${esc(text("{action}：{name}", { action: unavailable ? text("无法识别的专项脚本实例") : text("编辑脚本实例"), name: script.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
+      <button${entityState} type="button" data-action="edit-script" data-id="${esc(script.id)}" aria-label="${esc(t("ui.{action}：{name}", { action: unavailable ? t("ui.unrecognized_specialized_script_instance") : t("ui.edit_script_instance"), name: script.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(script.name)}</span></span></button>
     <div class="meta-line script-meta">${pluginBadge}${gameModeBadge}${judgeBadge}${longBadge}${pluginSlotMarkup("scripts.list.badges", `script-${script.id}`, "script-plugin-slot", { mode: "list", primaryId: script.id })}</div>
     </div>
     <div class="script-ops row-actions entity-actions">
-      <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${text("编辑脚本")}</button>
-      <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">${text("删除脚本")}</button>
+      <button class="tertiary" type="button" data-action="edit-script" data-id="${esc(script.id)}"${unavailable ? ` title="${esc(unavailableMessage)}"` : ""}>${t("ui.edit_script")}</button>
+      <button class="danger" type="button" data-action="delete-script" data-id="${esc(script.id)}" data-name="${esc(script.name)}">${t("ui.delete_script")}</button>
     </div>
   </article>`;
 }
@@ -184,28 +184,28 @@ function scriptCardMarkup(script) {
 export async function pageScripts(token) {
   if (!isCurrent("scripts", token)) return;
   navActive("scripts");
-  setTopbarTitle(text("脚本实例"));
+  setTopbarTitle(t("ui.script_instance"));
   let scripts, status;
   try {
     [scripts, status] = await Promise.all([api("GET", "/api/scripts"), api("GET", "/api/status")]);
   } catch (error) {
-    if (isCurrent("scripts", token)) render(`<div class="empty"><strong>加载脚本实例失败</strong>${esc(error.message)}</div>`);
+    if (isCurrent("scripts", token)) render(`<div class="empty"><strong>${t("ui.failed_to_load_script_instances")}</strong>${esc(error.message)}</div>`);
     return;
   }
   if (!isCurrent("scripts", token)) return;
   state.scripts = scripts;
   state.plugins = status.plugins || [];
   const atLimit = !!(state.limits && scripts.length >= state.limits.maxScripts);
-  const action = `<button class="primary" type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>新建脚本实例${atLimit ? `（${scripts.length}/${state.limits.maxScripts}）` : ""}</button>`;
+  const action = `<button class="primary" type="button" data-action="open-script-modal" data-testid="new-script" ${atLimit ? "disabled" : ""}>${t("ui.new_script_instance")}${atLimit ? ` (${scripts.length}/${state.limits.maxScripts})` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(scripts.length / SCRIPT_PAGE_SIZE));
   if (scriptPage > totalPages) scriptPage = totalPages;
   const pageItems = scripts.slice((scriptPage - 1) * SCRIPT_PAGE_SIZE, scriptPage * SCRIPT_PAGE_SIZE);
   const content = scripts.length === 0
-    ? '<div class="empty"><strong>暂无脚本实例</strong><span>创建一个脚本实例后，它会出现在这里并可加入调度队列。</span><a class="back-link" href="#/scripts" data-action="open-script-modal">新建脚本实例</a></div>'
+    ? `<div class="empty"><strong>${t("ui.no_script_instances_yet")}</strong><span>${t("ui.create_a_script_instance_and_it_will_appear_here_to_be_added_to_a_queue")}</span><a class="back-link" href="#/scripts" data-action="open-script-modal">${t("ui.new_script_instance")}</a></div>`
     : `<section class="card list-surface"><div class="script-grid">
       ${pageItems.map(script => scriptCardMarkup(script)).join("")}
     </div>${pagerMarkup("scripts", scriptPage, SCRIPT_PAGE_SIZE, scripts.length)}</section>`;
-  render(pageHeader("自动化管理", "脚本实例", "管理脚本入口、用户配置和运行策略。", action) + content);
+  render(pageHeader(t("ui.automation_management"), t("ui.script_instance"), t("ui.manage_script_entry_points_user_configuration_and_run_policies"), action) + content);
   await renderPluginSlots(document.querySelector("#view"));
   registerPager("scripts", page => { scriptPage = page; pageScripts(state.routeToken); });
   wireScriptIcons();
@@ -225,7 +225,7 @@ async function reorderScripts(visibleIds) {
   const full = replacePageOrder(state.scripts, scriptPage, SCRIPT_PAGE_SIZE, visibleIds);
   try {
     await api("PUT", "/api/scripts/order", { ids: full.map(item => item.id) });
-    toast("脚本顺序已保存");
+    toast(t("ui.script_order_saved"));
     await pageScripts(state.routeToken);
   } catch (error) {
     toast(error.message, "error");
@@ -250,14 +250,14 @@ export function openNewScriptChooser() {
   }
   const body = `<div class="new-script-chooser">
     <button type="button" class="chooser-card" data-action="open-script-type" data-plugin="">
-      <strong>新建通用脚本实例</strong><span class="muted">手动配置主程序、自启动参数、配置与日志路径</span>
+      <strong>${t("ui.new_general_script_instance")}</strong><span class="muted">${t("ui.configure_the_main_program_startup_arguments_configuration_and_log_paths_manually")}</span>
     </button>
     ${specials.map(p => `<button type="button" class="chooser-card" data-action="open-script-type" data-plugin="${esc(p.name)}">
-      <strong class="scroll-text"><span class="scroll-inner">新建${esc(p.displayName)}专项脚本实例</span></strong><span class="muted">由专用插件自动适配配置</span>
+      <strong class="scroll-text"><span class="scroll-inner">${t("ui.create_specialized_script_instance", { plugin: esc(p.displayName) })}</span></strong><span class="muted">${t("ui.specialized_plugin_auto_adapt")}</span>
     </button>`).join("")}
   </div>`;
-  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("新建脚本实例", body, footer), false, true, true);
+  const footer = `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button>`;
+  showModal(modalShell(t("ui.new_script_instance"), body, footer), false, true, true);
 }
 
 export function editScript(id) {
@@ -277,7 +277,7 @@ export async function openScriptModal(id = "", plugin = "") {
       state.scripts = await api("GET", "/api/scripts");
       script = state.scripts.find(item => item.id === id);
     } catch (error) {
-      toast(text("加载脚本失败：") + error.message, "error");
+      toast(t("ui.failed_to_load_scripts") + error.message, "error");
       return;
     }
   }
@@ -308,76 +308,76 @@ export async function openScriptModal(id = "", plugin = "") {
   const d = scriptDraft;
   const l = state.limits || {};
   const title = isSpecial
-    ? (id ? `编辑${esc(pluginDisplayName(pluginType, state.plugins || []))}专项脚本实例` : `新建${esc(pluginDisplayName(pluginType, state.plugins || []))}专项脚本实例`)
-    : (id ? "编辑脚本实例" : "新建脚本实例");
+    ? (id ? t("ui.edit_value_specialized_script_instance", { plugin: esc(pluginDisplayName(pluginType, state.plugins || [])) }) : t("ui.new_value_specialized_script_instance", { plugin: esc(pluginDisplayName(pluginType, state.plugins || [])) }))
+    : (id ? t("ui.edit_script_instance") : t("ui.new_general_script_instance"));
   const body = isSpecial
     ? `<div class="form-grid">
-      ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"', "", "", `由专用插件「${pluginDisplayName(pluginType, state.plugins || [])}」自动适配脚本主程序、自启动参数、配置文件与日志路径。接管哪个配置文件/实例目录由各用户在「编辑配置」时选择。`)}
+      ${valueField("sm-name", `${t("ui.script_name")} <span class='req'>*</span>`, d.name)}
+      ${pathField("sm-root", `${t("ui.script_root_directory")} <span class='req'>*</span>`, d.rootPath, "folder", `placeholder="${t("ui.script_root_directory")}"`, "", "", t("ui.configuration_is_adapted_automatically_by_the_specialized_plugin"))}
     </div>
-    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3><span class="muted">路径/ADB 用于失败清理与重试恢复</span></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("ui.game_integration")}</h3><span class="muted">${t("ui.path_adb_is_used_for_failure_cleanup_and_retry_recovery")}</span></div>
       <div class="toggle-grid switch-grid">
-        ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
-        ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", true, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate" disabled')}
+        ${switchControl("sm-launch", t("ui.launch_game"), t("ui.launch_the_game_before_the_task_starts"), d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
+        ${switchControl("sm-force", t("ui.force_close"), t("ui.clean_up_game_processes_when_the_task_ends_or_fails"), d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
+        ${switchControl("sm-autoupdate", t("ui.update_configuration_automatically"), t("ui.sync_user_configuration_when_the_run_ends"), true, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate" disabled')}
       </div>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
-    <div class="subsection"><div class="section-heading"><h3>运行设置</h3></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("ui.run_settings")}</h3></div>
       <div class="form-grid three">
-        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务总运行时间；长时脚本可填 -1（永不超时），普通脚本需填写有效分钟数；总时间包含全部重试以及任务前/后脚本。")}
+        ${valueField("sm-attempts", `${t("ui.maximum_attempts_including_first")} <span class='req'>*</span>`, d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, t("ui.maximum_attempts_per_task_including_the_first_run"))}
+        ${valueField("sm-stall", `${t("ui.log_stall_timeout_minutes")} <span class='req'>*</span>`, d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, t("ui.the_attempt_is_considered_stalled_after_this_many_minutes_without_new_log_output_enter_1_for_a_long_running_script"))}
+        ${valueField("sm-total", `${t("ui.total_timeout_minutes")} <span class='req'>*</span>`, d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, t("ui.limit_the_total_task_time_long_running_scripts_may_use_1_never_time_out_standard_scripts_need_a_valid_number_the_total_includes_retries_and_before_after_task_scripts"))}
       </div>
     </div>`
     : `<div class="form-grid">
-      ${valueField("sm-name", "脚本名称 <span class='req'>*</span>", d.name)}
-      ${pathField("sm-root", "脚本根目录 <span class='req'>*</span>", d.rootPath, "folder", 'placeholder="脚本根目录"')}
+        ${valueField("sm-name", `${t("ui.script_name")} <span class='req'>*</span>`, d.name)}
+      ${pathField("sm-root", `${t("ui.script_root_directory")} <span class='req'>*</span>`, d.rootPath, "folder", `placeholder="${t("ui.script_root_directory")}"`)}
     </div>
     <div class="form-grid">
-      ${pathField("sm-exe", "脚本主程序路径 <span class='req'>*</span>", d.mainExe, "file", 'placeholder="脚本主程序文件"', "可执行文件|*.exe;*.bat;*.cmd;*.com|所有文件|*.*", 'data-path-root-target="sm-root" data-path-root-error="脚本主程序路径错误"', "选择主程序后仍可手动修改路径。")}
-      ${valueField("sm-args", "脚本自启动参数", d.args, "text", 'placeholder="可选启动参数"', "可选；如 -x --mode=1；若以路径开头（如 .\\app.exe?-args），问号后的内容作为执行参数。")}
+      ${pathField("sm-exe", `${t("ui.main_program_path")} <span class='req'>*</span>`, d.mainExe, "file", `placeholder="${t("ui.main_program_file")}"`, t("ui.executable_file_filter"), `data-path-root-target="sm-root" data-path-root-error="${t("ui.main_program_path_error")}"`, t("ui.you_can_still_edit_the_path_after_choosing_the_main_program"))}
+      ${valueField("sm-args", t("ui.script_startup_arguments"), d.args, "text", `placeholder="${t("ui.optional_startup_arguments")}"`, t("ui.optional_for_example_x_mode_1_if_the_value_starts_with_a_path_such_as_app_exe_args_the_content_after_the_question_mark_is_used_as_arguments"))}
     </div>
     <div class="form-grid">
-      ${pathField("sm-config", "配置文件路径/文件夹 <span class='req'>*</span>", d.configPath, "file-or-folder", 'placeholder="请先填写脚本根目录"', "", 'data-path-root-target="sm-root" data-path-root-error="脚本根目录错误"', "配置路径相对于脚本根目录，可选择配置文件或配置文件夹。")}
-      ${pathField("sm-log", "日志路径（支持日期占位符与通配符） <span class='req'>*</span>", d.logPath, "file-or-folder", 'placeholder="日志文件路径"', "日志文件|*.log;*.txt|所有文件|*.*", 'data-path-root-target="sm-root" data-path-root-error="脚本根目录错误"', "支持日期占位符与通配符；例如 D:\\Scripts\\logs\\{YYYY-MM-DD}.log，或 D:\\Scripts\\logs\\*.log。")}
+      ${pathField("sm-config", `${t("ui.configuration_file_folder")} <span class='req'>*</span>`, d.configPath, "file-or-folder", `placeholder="${t("ui.enter_the_script_root_directory_first")}"`, "", `data-path-root-target="sm-root" data-path-root-error="${t("ui.script_root_directory_error")}"`, t("ui.the_configuration_path_is_relative_to_the_script_root_and_may_point_to_a_file_or_folder"))}
+      ${pathField("sm-log", `${t("ui.log_path_date_placeholders_and_wildcards_supported")} <span class='req'>*</span>`, d.logPath, "file-or-folder", `placeholder="${t("ui.log_file_path")}"`, t("ui.log_file"), `data-path-root-target="sm-root" data-path-root-error="${t("ui.script_root_directory_error")}"`, t("ui.date_placeholders_and_wildcards_are_supported_for_example_d_scripts_logs_value_log_or_d_scripts_logs_log"))}
     </div>
-    <div class="subsection"><div class="section-heading"><h3>游戏联动设置</h3></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("ui.game_integration")}</h3></div>
       <div class="toggle-grid switch-grid">
-        ${switchControl("sm-launch", "启动游戏", "任务开始前主动启动游戏", d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
-        ${switchControl("sm-force", "强制关闭", "任务结束或失败时清理游戏进程", d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
-        ${switchControl("sm-autoupdate", "自动更新配置", "运行结束时同步用户配置", d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
+        ${switchControl("sm-launch", t("ui.launch_game"), t("ui.launch_the_game_before_the_task_starts"), d.launchGame, "toggle-sm-flag", 'data-flag="launch"')}
+        ${switchControl("sm-force", t("ui.force_close"), t("ui.clean_up_game_processes_when_the_task_ends_or_fails"), d.forceCloseGame, "toggle-sm-flag", 'data-flag="force"')}
+        ${switchControl("sm-autoupdate", t("ui.update_configuration_automatically"), t("ui.sync_user_configuration_when_the_run_ends"), d.autoUpdateConfig, "toggle-sm-flag", 'data-flag="autoupdate" data-testid="sm-autoupdate"')}
       </div>
       <div id="sm-game-box" class="nested-panel">
         ${gameBoxHtml(d, emulatorAllowed(pluginType))}
       </div>
     </div>
-    <div class="subsection"><div class="section-heading"><h3>运行设置</h3></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("ui.run_settings")}</h3></div>
       <div class="form-grid three">
-        ${valueField("sm-attempts", "最大尝试次数（含首次） <span class='req'>*</span>", d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, "每次任务最多尝试的次数，包含首次运行。")}
-        ${valueField("sm-stall", "日志无更新上限（分钟） <span class='req'>*</span>", d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, "日志无更新达到此分钟数后判定当前尝试停滞；填 -1 表示长时脚本。")}
-        ${valueField("sm-total", "运行总时间上限（分钟） <span class='req'>*</span>", d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, "限制整次任务总运行时间；长时脚本可填 -1（永不超时），普通脚本需填写有效分钟数；总时间包含全部重试以及任务前/后脚本。")}
+        ${valueField("sm-attempts", `${t("ui.maximum_attempts_including_first")} <span class='req'>*</span>`, d.maxAttempts, "number", `min="${l.minAttempts ?? 1}" max="${l.maxAttempts ?? 10}"`, t("ui.maximum_attempts_per_task_including_the_first_run"))}
+        ${valueField("sm-stall", `${t("ui.log_stall_timeout_minutes")} <span class='req'>*</span>`, d.logStallTimeoutMinutes, "number", `min="-1" max="${l.maxStallMinutes ?? 60}"`, t("ui.the_attempt_is_considered_stalled_after_this_many_minutes_without_new_log_output_enter_1_for_a_long_running_script"))}
+        ${valueField("sm-total", `${t("ui.total_timeout_minutes")} <span class='req'>*</span>`, d.totalTimeoutMinutes, "number", `min="-1" max="${l.maxTotalMinutes ?? 720}"`, t("ui.limit_the_total_task_time_long_running_scripts_may_use_1_never_time_out_standard_scripts_need_a_valid_number_the_total_includes_retries_and_before_after_task_scripts"))}
       </div>
-      <div class="subsection judge-box"><div class="section-heading"><h3>自定义完成标志</h3></div>
+      <div class="subsection judge-box"><div class="section-heading"><h3>${t("ui.custom_completion_markers")}</h3></div>
         <div id="sm-kw-box" ${d.judgeScriptEnabled ? "hidden" : ""}>
-          <div class="field" data-help="每行是一组条件；组内用逗号表示 AND，多行表示 OR。留空表示不判定成功。"><label class="field-label" for="sm-succ-kw">成功关键字</label>
-          <textarea id="sm-succ-kw" placeholder="逗号表示 AND，多行表示 OR">${esc(d.successKeywords)}</textarea></div>
-          <div class="field" data-help="任一失败关键字命中即终止本次尝试，并按最大尝试次数重试。语法与成功关键字相同。"><label class="field-label" for="sm-fail-kw">失败关键字</label>
-          <textarea id="sm-fail-kw" placeholder="命中即判定失败">${esc(d.failureKeywords)}</textarea></div>
+          <div class="field" data-help="${t("ui.success_keyword_help")}"><label class="field-label" for="sm-succ-kw">${t("ui.success_keywords")}</label>
+          <textarea id="sm-succ-kw" placeholder="${t("ui.commas_mean_and_separate_lines_mean_or")}">${esc(d.successKeywords)}</textarea></div>
+          <div class="field" data-help="${t("ui.failure_keyword_help")}"><label class="field-label" for="sm-fail-kw">${t("ui.failure_keywords")}</label>
+          <textarea id="sm-fail-kw" placeholder="${t("ui.a_match_marks_the_attempt_as_failed")}">${esc(d.failureKeywords)}</textarea></div>
         </div>
         <div id="sm-script-box" ${d.judgeScriptEnabled ? "" : "hidden"}>
-          ${selectField("sm-judge-lang", "判断脚本语言", d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: "JavaScript（内置引擎）" }, { value: "python", label: "Python（系统解释器）" }], "", "选择判断脚本执行语言；JavaScript 使用内置引擎，Python 使用系统解释器。")}
-           <div class="field" data-help="输入包含本次尝试日志段与 screenshots 截图元数据：JavaScript 用 __NEXUS_INPUT__ 读取，Python 用 sys.argv[1] 读取路径。nexus.readFile 只读 config/script 目录，nexus.writeFile 与 nexus.listFiles 操作 script 目录；JavaScript 可调用 nexus.captureScreenshot()，Python 可使用临时 screenshotApi。输出可用 notifyScreenshotId 选择通知截图。无输出或缺少 status/reason 会继续运行。"><label class="field-label" for="sm-judge-code">判断脚本代码</label><textarea id="sm-judge-code" class="mono code-area" placeholder="输出 JSON 结果">${esc(d.judgeScript)}</textarea></div>
+          ${selectField("sm-judge-lang", t("ui.judge_script_language"), d.judgeScriptLanguage === "python" ? "python" : "javascript", [{ value: "javascript", label: t("ui.javascript_built_in_engine") }, { value: "python", label: t("ui.python_system_interpreter") }], "", t("ui.choose_the_judge_script_language_javascript_uses_the_built_in_engine_python_uses_the_system_interpreter"))}
+           <div class="field" data-help="${t("ui.judge_script_input_output_help")}"><label class="field-label" for="sm-judge-code">${t("ui.judge_script")} ${t("ui.code")}</label><textarea id="sm-judge-code" class="mono code-area" placeholder="${t("ui.output_a_json_result")}">${esc(d.judgeScript)}</textarea></div>
         </div>
         <div class="judge-actions">
-          <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>上传脚本文件</button>
-          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-help="启用判断脚本后，脚本输出优先用于确定运行结果；关闭后使用成功关键字和失败关键字。" data-toggle-text="false" data-hint="脚本优先" aria-label="使用判断脚本，脚本优先" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">使用判断脚本<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
+          <button class="judge-upload-button" type="button" data-action="upload-judge-script" id="sm-upload-btn" ${d.judgeScriptEnabled ? "" : "hidden"}>${t("ui.upload_script_file")}</button>
+          <button class="judge-mode-card mode-toggle" type="button" data-action="toggle-judge-mode" id="sm-mode-btn" data-help="${t("ui.judge_script_mode_help")}" data-toggle-text="false" data-hint="${t("ui.script_takes_priority")}" aria-label="${t("ui.use_judge_script_script_takes_priority")}" aria-pressed="${d.judgeScriptEnabled ? "true" : "false"}">${t("ui.use_judge_script")}<span class="judge-toggle-track" aria-hidden="true"><span class="judge-toggle-thumb"></span></span></button>
         </div>
       </div>
     </div>`;
-  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-script">保存</button>';
+  const footer = `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button><button class="primary" type="button" data-action="save-script">${t("ui.save")}</button>`;
   showModal(modalShell(title, body + pluginSlotMarkup("scripts.editor.sections", "scripts.editor.sections", "script-editor-plugin-slot", { mode: id ? "edit" : "create", primaryId: id || "" }), footer), true, true, true);
   void renderPluginSlots(document);
   syncScriptGhostState();
@@ -396,7 +396,7 @@ async function probeSpecialRoot(rootPath, pluginType) {
   try {
     await api("POST", "/api/scripts/probe", { rootPath, pluginType, inputs: {} });
   } catch (error) {
-    toast(text("无法从该根目录推导专项配置：") + error.message, "error");
+    toast(t("ui.could_not_derive_specialized_configuration_from_this_root_directory") + error.message, "error");
   }
 }
 
@@ -447,7 +447,7 @@ function toggleSmFlag(flag) {
   btn.setAttribute("aria-pressed", pressed ? "true" : "false");
   btn.dataset.state = pressed ? "on" : "off";
   const stateText = btn.querySelector("[data-switch-state]");
-  if (stateText) stateText.textContent = pressed ? "已启用" : "已停用";
+  if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
 }
 
 /** 上传判断脚本文件：读取内容填入代码框，按扩展名自动识别语言（.py=Python，其余=JavaScript）。 */
@@ -474,7 +474,7 @@ export function uploadJudgeScript() {
     const file = input.files?.[0];
     if (!file) { finish(); return; }
     if (file.size > 256 * 1024) {
-      toast(text("脚本文件过大（上限 256KB）"), "error");
+      toast(t("ui.the_script_file_is_too_large_256_kb_maximum"), "error");
       finish();
       return;
     }
@@ -488,11 +488,11 @@ export function uploadJudgeScript() {
         language.value = lang;
         language.dispatchEvent(new Event("change", { bubbles: true }));
       }
-      toast(text("已载入脚本（{language}）", { language: lang === "python" ? "Python" : "JavaScript" }));
+      toast(t("ui.script_loaded_value", { language: lang === "python" ? "Python" : "JavaScript" }));
       finish();
     };
     reader.onerror = () => {
-      toast(text("读取脚本文件失败"), "error");
+      toast(t("ui.failed_to_read_the_script_file"), "error");
       finish();
     };
     reader.readAsText(file, "utf-8");
@@ -527,8 +527,8 @@ export async function saveScript() {
   }
   const isSpecial = !!scriptDraft.pluginType;
   const required = isSpecial
-    ? [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-attempts", "最大尝试次数"], ["sm-stall", "日志无更新上限"], ["sm-total", "运行总时间上限"]]
-    : [["sm-name", "脚本名称"], ["sm-root", "脚本根目录"], ["sm-exe", "脚本主程序路径"], ["sm-config", "配置文件路径"], ["sm-log", "日志路径"], ["sm-attempts", "最大尝试次数"], ["sm-stall", "日志无更新上限"], ["sm-total", "运行总时间上限"]];
+    ? [["sm-name", t("ui.script_name")], ["sm-root", t("ui.script_root_directory")], ["sm-attempts", t("ui.maximum_attempts")], ["sm-stall", t("ui.log_inactivity_limit_minutes")], ["sm-total", t("ui.total_run_time_limit_minutes")]]
+    : [["sm-name", t("ui.script_name")], ["sm-root", t("ui.script_root_directory")], ["sm-exe", t("ui.main_program_path")], ["sm-config", t("ui.configuration_file_path")], ["sm-log", t("ui.log_path")], ["sm-attempts", t("ui.maximum_attempts")], ["sm-stall", t("ui.log_inactivity_limit_minutes")], ["sm-total", t("ui.total_run_time_limit_minutes")]];
   let firstError = null;
   for (const [id, label] of required) {
     const element = $dom("#" + id);
@@ -539,64 +539,64 @@ export async function saveScript() {
     }
     clearFieldError(id);
   }
-  if (firstError) { toast(text("请完善表单中的必填项"), "error"); return; }
+  if (firstError) { toast(t("ui.complete_the_required_fields"), "error"); return; }
   const l = state.limits || {};
   const ILLEGAL_PATH = /["<>|?*{}]/;
   const ILLEGAL_LOG = /["<>|?]/;
   const pathFields = isSpecial
-    ? [["sm-root", "脚本根目录", ILLEGAL_PATH]]
-    : [["sm-root", "脚本根目录", ILLEGAL_PATH], ["sm-exe", "脚本主程序路径", ILLEGAL_PATH], ["sm-config", "配置文件路径/文件夹", ILLEGAL_PATH], ["sm-log", "日志路径（支持日期占位符与通配符）", ILLEGAL_LOG]];
+    ? [["sm-root", t("ui.script_root_directory"), ILLEGAL_PATH]]
+    : [["sm-root", t("ui.script_root_directory"), ILLEGAL_PATH], ["sm-exe", t("ui.main_program_path"), ILLEGAL_PATH], ["sm-config", t("ui.configuration_file_folder"), ILLEGAL_PATH], ["sm-log", t("ui.log_path_date_placeholders_and_wildcards_supported"), ILLEGAL_LOG]];
   for (const [id, label, illegal] of pathFields) {
     const value = stripQuotes($dom("#" + id)?.value);
     if (illegal.test(value)) {
-      setFieldError(id, `${label}包含非法字符`);
-      toast(text("{label}包含非法字符", { label }), "error");
+      setFieldError(id, t("ui.value_contains_invalid_characters", { label }));
+      toast(t("ui.value_contains_invalid_characters", { label }), "error");
       return;
     }
   }
   const nameBytes = new TextEncoder().encode($dom("#sm-name").value.trim()).length;
   if (nameBytes > MAX_ENTITY_NAME_BYTES) {
-    setFieldError("sm-name", `脚本名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
-    toast(text("脚本名称最多 {bytes} 字节", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
+    setFieldError("sm-name", t("ui.script_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }));
+    toast(t("ui.script_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   const name = $dom("#sm-name").value.trim();
   if (hasEntityNameConflict(state.scripts, name, scriptDraft.id)) {
     setFieldInvalid("sm-name");
-    toast(text("脚本名称已存在，请使用其他名称"), "error");
+    toast(t("ui.that_script_name_already_exists_choose_another_name"), "error");
     return;
   }
   const attempts = parseInt($dom("#sm-attempts")?.value, 10);
   const stall = parseInt($dom("#sm-stall")?.value, 10);
   const total = parseInt($dom("#sm-total")?.value, 10);
   if (!(attempts >= (l.minAttempts ?? 1)) || !(attempts <= (l.maxAttempts ?? 10))) {
-    setFieldError("sm-attempts", `最大尝试次数须在 ${l.minAttempts ?? 1}-${l.maxAttempts ?? 10} 之间`);
-    toast(text("最大尝试次数须在 {min}-{max} 之间", { min: l.minAttempts ?? 1, max: l.maxAttempts ?? 10 }), "error");
+    setFieldError("sm-attempts", t("ui.maximum_attempts_must_be_between_value_and_value", { min: l.minAttempts ?? 1, max: l.maxAttempts ?? 10 }));
+    toast(t("ui.maximum_attempts_must_be_between_value_and_value", { min: l.minAttempts ?? 1, max: l.maxAttempts ?? 10 }), "error");
     return;
   }
   // 日志无更新上限为 -1 定义长时脚本；普通脚本不能禁用运行总时间上限
   const longStall = stall === -1;
   const unlimitedTotal = total === -1;
   if (!longStall && unlimitedTotal) {
-    setFieldError("sm-total", "日志无更新上限未填 -1 时，运行总时间上限不能填 -1");
-    toast(text("日志无更新上限未填 -1 时，运行总时间上限不能填 -1"), "error");
+    setFieldError("sm-total", t("ui.the_total_run_time_cannot_be_1_unless_the_log_inactivity_limit_is_also_1"));
+    toast(t("ui.the_total_run_time_cannot_be_1_unless_the_log_inactivity_limit_is_also_1"), "error");
     return;
   }
   if (!longStall && (!(stall >= (l.minStallMinutes ?? 1)) || !(stall <= (l.maxStallMinutes ?? 60)))) {
-    setFieldError("sm-stall", `日志无更新超时须在 ${l.minStallMinutes ?? 1}-${l.maxStallMinutes ?? 60} 分钟之间`);
-    toast(text("日志无更新超时须在 {min}-{max} 分钟之间", { min: l.minStallMinutes ?? 1, max: l.maxStallMinutes ?? 60 }), "error");
+    setFieldError("sm-stall", t("ui.log_inactivity_timeout_must_be_between_value_and_value_minutes", { min: l.minStallMinutes ?? 1, max: l.maxStallMinutes ?? 60 }));
+    toast(t("ui.log_inactivity_timeout_must_be_between_value_and_value_minutes", { min: l.minStallMinutes ?? 1, max: l.maxStallMinutes ?? 60 }), "error");
     return;
   }
   if (!unlimitedTotal && (!(total >= (l.minTotalMinutes ?? 5)) || !(total <= (l.maxTotalMinutes ?? 720)))) {
-    setFieldError("sm-total", `运行总时间超时须在 ${l.minTotalMinutes ?? 5}-${l.maxTotalMinutes ?? 720} 分钟之间`);
-    toast(text("运行总时间超时须在 {min}-{max} 分钟之间", { min: l.minTotalMinutes ?? 5, max: l.maxTotalMinutes ?? 720 }), "error");
+    setFieldError("sm-total", t("ui.total_run_timeout_must_be_between_value_and_value_minutes", { min: l.minTotalMinutes ?? 5, max: l.maxTotalMinutes ?? 720 }));
+    toast(t("ui.total_run_timeout_must_be_between_value_and_value_minutes", { min: l.minTotalMinutes ?? 5, max: l.maxTotalMinutes ?? 720 }), "error");
     return;
   }
   const judgeEnabled = ($dom("#sm-mode-btn")?.getAttribute("aria-pressed") ?? "false") === "true";
   const judgeCode = $dom("#sm-judge-code")?.value ?? "";
   if (judgeEnabled && !judgeCode.trim()) {
     setRequiredFieldError("sm-judge-code");
-    toast(text("请填写判断脚本代码，或关闭「使用脚本」"), "error");
+    toast(t("ui.enter_judge_script_code_or_turn_off_use_judge_script"), "error");
     return;
   }
   const launchGame = $dom("#sm-launch")?.getAttribute("aria-pressed") === "true";
@@ -607,20 +607,20 @@ export async function saveScript() {
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     setRequiredFieldError("sm-game-exe");
-    toast(text(gameMode === "emulator" ? "请填写模拟器ADB地址" : "请填写游戏路径"), "error");
+    toast(t(gameMode === "emulator" ? "ui.enter_the_emulator_adb_address" : "ui.enter_the_game_path"), "error");
     return;
   }
   if (gameMode === "emulator") {
     const colon = gameExe.lastIndexOf(":");
     const port = parseInt(gameExe.slice(colon + 1), 10);
     if (colon <= 0 || !(port >= 1 && port <= 65535)) {
-      setFieldError("sm-game-exe", "模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）");
-      toast(text("模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）"), "error");
+      setFieldError("sm-game-exe", t("ui.invalid_emulator_adb_address_expected_host_port_such_as_127_0_0_1_16384"));
+      toast(t("ui.invalid_emulator_adb_address_expected_host_port_such_as_127_0_0_1_16384"), "error");
       return;
     }
   } else if (ILLEGAL_PATH.test(gameExe)) {
-    setFieldError("sm-game-exe", "游戏路径包含非法字符");
-    toast(text("游戏路径包含非法字符"), "error");
+    setFieldError("sm-game-exe", t("ui.the_game_path_contains_invalid_characters"));
+    toast(t("ui.the_game_path_contains_invalid_characters"), "error");
     return;
   }
   const payload = {
@@ -644,14 +644,14 @@ export async function saveScript() {
     if (payload.id) saved = await api("PUT", "/api/scripts/" + payload.id, payload);
     else saved = await api("POST", "/api/scripts", payload);
     closeModal();
-      toast(text("脚本实例已保存"));
+      toast(t("ui.script_instance_saved"));
     applySaveValidation(saved?.validation);
     const token = state.routeToken;
     await pageScripts(token);
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("sm-name");
-      toast("脚本名称已存在，请使用其他名称", "error");
+      toast(t("ui.that_script_name_already_exists_choose_another_name"), "error");
       return;
     }
     toast(error.message, "error");
@@ -662,7 +662,7 @@ export async function saveScript() {
 function applySaveValidation(validation) {
   if (!validation) return;
   if (validation.error) {
-    toast(text("专项插件配置校验执行失败。"), "error");
+    toast(t("ui.specialized_plugin_configuration_validation_failed"), "error");
   }
   for (const item of validation.notifications || []) {
     pushNotice(item.title || "", item.body || "", item.kind || "info");
@@ -673,11 +673,11 @@ function applySaveValidation(validation) {
 }
 
 export function deleteScript(id, name) {
-  confirmModal("删除脚本实例", `确定删除脚本实例「${esc(name)}」？此操作不可恢复。`, "confirm-delete-script", { id, name });
+  confirmModal(t("ui.delete_script_instance"), t("ui.confirm_delete_script_instance", { name: esc(name) }), "confirm-delete-script", { id, name });
 }
 
 export async function confirmDeleteScript(id, name) {
-  try { await api("DELETE", "/api/scripts/" + id); closeModal(); toast(text("脚本实例已删除")); await pageScripts(state.routeToken); }
+  try { await api("DELETE", "/api/scripts/" + id); closeModal(); toast(t("ui.script_instance_deleted")); await pageScripts(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 

@@ -6,7 +6,7 @@ import { systemActionCard } from "./forms.js";
 import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
 import { durationClock } from "./duration.js";
 import { initTooltips } from "./tooltip.js";
-import { applyTranslations, text, translateText } from "./i18n.js";
+import { applyTranslations, t } from "./i18n.js";
 
 const view = $("#view");
 let toastTimer = null;
@@ -34,7 +34,7 @@ export function syncModeToggleText(btn) {
   if (btn.hasAttribute("data-day") || btn.dataset.toggleText === "false") return;
   const base = btn.dataset.baseText || btn.textContent.trim();
   btn.dataset.baseText = base;
-  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? text("：开") : text("：关"));
+  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? t("ui.on") : t("ui.off"));
 }
 
 /** 同步根节点内全部切换按钮文字（render/showModal/点击切换后调用）。 */
@@ -48,7 +48,7 @@ export function syncSwitchControl(btn) {
   const on = btn.getAttribute("aria-pressed") === "true";
   btn.dataset.state = on ? "on" : "off";
   const stateText = btn.querySelector("[data-switch-state]");
-  if (stateText) stateText.textContent = on ? text("已启用") : text("已停用");
+  if (stateText) stateText.textContent = on ? t("ui.enabled") : t("ui.disabled");
 }
 
 export function syncAllSwitchControls(root = view) {
@@ -184,14 +184,14 @@ export function navActive(page) {
 
 export function setTopbarTitle(title) {
   const el = $("#topbar-title");
-  if (el) el.textContent = translateText(title);
+  if (el) el.textContent = title;
 }
 
 export function toast(message, kind = "info") {
   const element = $("#toast");
   if (!element) return;
   const now = Date.now();
-  element.textContent = translateText(message);
+  element.textContent = message;
   element.classList.toggle("error", kind === "error");
   element.classList.remove("shake");
   if (kind === "error" && message === lastToastMessage && now - lastToastAt < SHAKE_WINDOW_MS) {
@@ -222,19 +222,19 @@ export function pushNotice(title, body = "", kind = "info") {
   content.className = "notice-content";
   const heading = document.createElement("strong");
   heading.className = "notice-title";
-  heading.textContent = translateText(title);
+  heading.textContent = title;
   content.append(heading);
   if (String(body ?? "").length > 0) {
     const copy = document.createElement("p");
     copy.className = "notice-body";
-    copy.textContent = translateText(body);
+    copy.textContent = body;
     content.append(copy);
   }
 
   const close = document.createElement("button");
   close.type = "button";
   close.className = "notice-close";
-  close.setAttribute("aria-label", text("关闭通知"));
+  close.setAttribute("aria-label", t("ui.close_notification"));
   close.textContent = "×";
   close.addEventListener("click", () => notice.remove());
   notice.append(content, close);
@@ -254,7 +254,7 @@ export function startCountdown(targetId, timeValue) {
     if (!element) return;
     const remain = target - Date.now();
     if (remain <= 0) {
-      element.textContent = text("即将触发");
+      element.textContent = t("ui.triggering_soon");
       return;
     }
     element.textContent = durationClock(Math.floor(remain / 1000));
@@ -281,11 +281,11 @@ export function startSystemActionCountdown() {
   const countdown = card.querySelector('[data-testid="system-action-countdown"]');
   if (!countdown) return;
   const deadline = new Date(countdown.dataset.deadline || "").getTime();
-  const verb = card.dataset.actionVerb || text("执行");
+  const verb = card.dataset.actionVerb || t("ui.run");
   if (systemActionTimer !== null) clearInterval(systemActionTimer);
   const update = () => {
     const remain = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-    countdown.textContent = remain > 0 ? text("{seconds} 秒后将{verb}", { seconds: remain, verb }) : text("即将执行{verb}", { verb });
+    countdown.textContent = remain > 0 ? t("ui.values_until_value", { seconds: remain, verb }) : t("ui.executing_value_soon", { verb });
   };
   update();
   systemActionTimer = registerInterval(setInterval(update, 1000));
@@ -305,10 +305,10 @@ export function setNavOpen(open) {
 /** 取消完成操作倒计时（全局 shell 动作，仪表盘/调度中心共用）：成功提示并拉取最新状态局部刷新卡片。 */
 export async function cancelSystemAction() {
   const card = document.querySelector('[data-testid="system-action-card"]');
-  const verb = card?.dataset.actionVerb || text("执行");
+  const verb = card?.dataset.actionVerb || t("ui.run");
   try {
     await api("POST", "/api/system-action/cancel");
-    toast(text("已取消{verb}", { verb }));
+    toast(t("ui.value_cancelled", { verb }));
     const status = await api("GET", "/api/status");
     const area = document.querySelector("#system-action-area");
     if (area) {
@@ -332,13 +332,13 @@ export function applyTheme(theme) {
 function syncThemeControls(value) {
   const iconName = value === "light" ? "sun" : value === "dark" ? "moon" : "system";
   $$('[data-theme-icon], #theme-icon').forEach(element => element.innerHTML = icon(iconName));
-  $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", text("当前{theme}，点击切换主题", { theme: text(value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色") })));
+  $$('[data-action="toggle-theme"]').forEach(toggle => toggle.setAttribute("aria-label", t("ui.current_theme_value_click_to_switch", { theme: t(value === "system" ? "ui.follow_system" : value === "light" ? "ui.light" : "ui.dark") })));
 }
 
 export function cycleTheme() {
   const value = cycleThemeValue();
   syncThemeControls(value);
-  toast(text("主题：{theme}", { theme: text(value === "system" ? "跟随系统" : value === "light" ? "浅色" : "深色") }));
+  toast(t("ui.theme_value", { theme: t(value === "system" ? "ui.follow_system" : value === "light" ? "ui.light" : "ui.dark") }));
 }
 
 /** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */
@@ -370,7 +370,7 @@ export function setFieldError(id, message) {
     (element.closest(".field") || element.parentElement)?.append(slot);
   }
   if (slot) {
-    slot.textContent = translateText(message || text("请检查此项"));
+    slot.textContent = message || t("ui.check_this_field");
     slot.hidden = false;
     const describedBy = (visual.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean);
     if (!describedBy.includes(slot.id)) describedBy.push(slot.id);

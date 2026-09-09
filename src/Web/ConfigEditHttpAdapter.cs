@@ -26,10 +26,7 @@ internal static class ConfigEditHttpAdapter
     {
         if (!HttpHelper.IsLoopback(context))
         {
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { ok = false, code = "local_only", error = "编辑配置仅支持本机请求" },
-                403).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
             return;
         }
 
@@ -87,9 +84,6 @@ internal static class ConfigEditHttpAdapter
             return;
         }
 
-        await HttpHelper.WriteJsonAsync(
-            context,
-            new { error = "未知操作：" + action },
-            400).ConfigureAwait(false);
+        await HttpHelper.ErrorAsync(context, "unknown_action", 400, new { action }).ConfigureAwait(false);
     }
 }

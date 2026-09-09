@@ -34,12 +34,7 @@ internal static class ApiDiagnosticsHandler
         }
         if (!HttpHelper.IsLoopback(context))
         {
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = false,
-                code = "local_only",
-                error = "诊断包导出仅允许本机请求",
-            }, 403).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
             return;
         }
 
@@ -58,12 +53,9 @@ internal static class ApiDiagnosticsHandler
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = false,
-                code = "diagnostics_export_failed",
-                error = ex.Message,
-            }, 500).ConfigureAwait(false);
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[诊断] 导出支持包失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "diagnostics_export_failed", 500, new { traceId }).ConfigureAwait(false);
         }
     }
 }

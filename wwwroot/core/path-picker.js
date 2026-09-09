@@ -1,6 +1,7 @@
 import { api } from "./api.js";
 import { toast } from "./ui.js";
 import { hideTooltip } from "./tooltip.js";
+import { t } from "./i18n.js";
 
 let nativeDialogLockCount = 0;
 let nativeDialogLockElement = null;
@@ -26,7 +27,7 @@ function acquireNativeDialogLock() {
     nativeDialogLockElement = document.createElement("div");
     nativeDialogLockElement.className = "native-dialog-lock";
     nativeDialogLockElement.setAttribute("role", "status");
-    nativeDialogLockElement.setAttribute("aria-label", "路径选择器已打开");
+    nativeDialogLockElement.setAttribute("aria-label", t("ui.path_picker_open"));
     nativeDialogLockElement.innerHTML = '<span class="spinner" aria-hidden="true"></span>';
     shell?.setAttribute("inert", "");
     shell?.setAttribute("aria-busy", "true");
@@ -78,7 +79,7 @@ function dialogPathForTrigger(input, trigger) {
   return {
     initialPath: pathForDialog(rootInput?.value),
     requiresExistingDirectory: true,
-    invalidMessage: trigger.dataset.pathRootError || "脚本根目录错误",
+    invalidMessage: trigger.dataset.pathRootError || t("ui.script_root_error"),
   };
 }
 
@@ -111,7 +112,7 @@ export async function pickPath(trigger) {
   try {
     const result = await api("POST", "/api/native-dialog", {
       kind,
-      title: `选择${trigger.dataset.pathTitle || "路径"}`,
+      title: trigger.dataset.pathTitle || t("ui.select_path"),
       initialPath: dialogPath.initialPath,
       filter: trigger.dataset.pathFilter || "",
       requireInitialDirectory: dialogPath.requiresExistingDirectory,
@@ -125,7 +126,7 @@ export async function pickPath(trigger) {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }
   } catch (error) {
-    toast(error.message || "无法打开路径选择器", "error");
+    toast(error.message || t("ui.unable_to_open_path_picker"), "error");
   } finally {
     releaseNativeDialogLock();
     trigger.disabled = wasDisabled;

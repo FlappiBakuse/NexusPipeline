@@ -95,7 +95,7 @@ internal static class ApiUsersHandler
         UserPayload? payload = HttpHelper.ParseBody<UserPayload>(body);
         if (payload is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "user_name_invalid", 400).ConfigureAwait(false);
             return;
         }
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -116,7 +116,7 @@ internal static class ApiUsersHandler
         UserPayload? payload = HttpHelper.ParseBody<UserPayload>(body);
         if (payload is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "用户名不能为空且不能包含非法字符" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "user_name_invalid", 400).ConfigureAwait(false);
             return;
         }
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -199,10 +199,7 @@ internal static class ApiUsersHandler
         {
             if (!HttpHelper.IsLoopback(context))
             {
-                await HttpHelper.WriteJsonAsync(
-                    context,
-                    new { ok = false, code = "local_only", error = "编辑配置仅支持本机请求" },
-                    403).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
                 return;
             }
             if (method == "GET")
@@ -247,7 +244,7 @@ internal static class ApiUsersHandler
         BindingPayload? payload = HttpHelper.ParseBody<BindingPayload>(body);
         if (payload is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "必须指定脚本实例" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "script_instance_required", 400).ConfigureAwait(false);
             return;
         }
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -268,7 +265,7 @@ internal static class ApiUsersHandler
         BindingPayload? payload = HttpHelper.ParseBody<BindingPayload>(body);
         if (payload is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "绑定设置格式不正确" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "binding_invalid", 400).ConfigureAwait(false);
             return;
         }
         RuntimeContext ctx = RuntimeContext.Instance;
@@ -329,7 +326,7 @@ internal static class ApiUsersHandler
         UserBindingOverrides? payload = HttpHelper.ParseBody<UserBindingOverrides>(body);
         if (payload is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "全局设置格式不正确" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "global_settings_invalid", 400).ConfigureAwait(false);
             return;
         }
         OperationResult<UserBindingOverrides> result = UserCommands.UpdateGlobalSettings(userId, payload);
@@ -386,7 +383,7 @@ internal static class ApiUsersHandler
         };
         if (extension.Length == 0 || string.IsNullOrWhiteSpace(payload?.Data))
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "头像仅支持 PNG、JPEG 或 WebP" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "avatar_type_invalid", 400).ConfigureAwait(false);
             return;
         }
         byte[] data;
@@ -396,7 +393,7 @@ internal static class ApiUsersHandler
         }
         catch
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "头像数据不是有效的 Base64" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "avatar_data_invalid", 400).ConfigureAwait(false);
             return;
         }
         OperationResult<bool> result = UserCommands.SetAvatar(userId, mime, data);

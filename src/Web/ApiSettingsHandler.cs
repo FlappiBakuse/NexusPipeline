@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Networking;
@@ -49,7 +50,7 @@ internal static class ApiSettingsHandler
             JsonNode? node = HttpHelper.ParseBody(body);
             if (node is not JsonObject patch)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "请求体无效" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "invalid_request", 400).ConfigureAwait(false);
                 return;
             }
             OperationResult<AppSettings> result = SettingsCommands.Update(patch);
@@ -66,7 +67,18 @@ internal static class ApiSettingsHandler
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "test")
         {
             AppSettings settings = ctx.Settings;
-            string text = $"[NexusPipeline] 通知测试\r\n时间：{DateTime.Now:yyyy-MM-dd HH:mm:ss}\r\n如果你收到这条消息，说明通知渠道配置正确。";
+            string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", LocaleCatalog.Culture(LocaleCatalog.HostLocale));
+            string text = string.Join(
+                "\r\n",
+                HostLocalization.TranslateNamed(
+                    "notification.test.title",
+                    "[NexusPipeline] 通知测试",
+                    locale: LocaleCatalog.HostLocale),
+                HostLocalization.TranslateNamed(
+                    "notification.test.body",
+                    $"时间：{time}\r\n如果你收到这条消息，说明通知渠道配置正确。",
+                    new Dictionary<string, object?> { ["time"] = time },
+                    LocaleCatalog.HostLocale));
             bool ok = await NotifySender.SendAsync(
                 settings,
                 text,
@@ -75,11 +87,7 @@ internal static class ApiSettingsHandler
             if (!ok)
             {
                 const string code = "notification_test_failed";
-                const string message = "通知测试发送失败，请检查渠道配置与服务端日志";
-                await HttpHelper.WriteJsonAsync(
-                    context,
-                    new { ok = false, code, error = message, message },
-                    502).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, code, 502).ConfigureAwait(false);
                 return;
             }
             await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
@@ -92,10 +100,7 @@ internal static class ApiSettingsHandler
             if (!restart.Accepted)
             {
                 int status = restart.Code == "operation_forbidden" ? 400 : 409;
-                await HttpHelper.WriteJsonAsync(
-                    context,
-                    new { ok = false, code = restart.Code, error = restart.Message, message = restart.Message },
-                    status).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, restart.Code, status).ConfigureAwait(false);
                 return;
             }
             // 接受重启前已经取得维护租约，后台生命周期不会再重新做一次易竞态的状态检查。
@@ -150,6 +155,7 @@ internal static class ApiSettingsHandler
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
             settings.LogLevel,
+            settings.HostLocale,
             settings.AllowRemoteAccess,
             accessToken = string.IsNullOrWhiteSpace(settings.AccessToken) ? "" : "enc:***",
             settings.UpdateCheckEnabled,

@@ -3,10 +3,14 @@ namespace NexusPipeline.Services.Execution;
 /// <summary>运行计划解释的稳定准入失败投影。</summary>
 internal sealed record ExecutionExplainAdmissionFailure(
     string Code,
-    string Message,
+    IReadOnlyDictionary<string, object?> Args,
     string Disposition,
     string? ConflictingRunId,
     string? Resource);
+
+internal sealed record ExecutionExplainWarning(
+    string Code,
+    IReadOnlyDictionary<string, object?> Args);
 
 internal sealed record ExecutionExplainResources(
     IReadOnlyList<string> ScriptIds,
@@ -25,7 +29,7 @@ internal sealed record ExecutionExplainUser(
     string UserName,
     string Status,
     string ReasonCode,
-    string Reason,
+    IReadOnlyDictionary<string, object?> ReasonArgs,
     int? SuccessfulRunsToday,
     int MaxSuccessfulRunsPerDay);
 
@@ -54,4 +58,4 @@ internal sealed record ExecutionExplainResult(
     ExecutionExplainResources Resources,
     IReadOnlyList<ExecutionExplainUser> Users,
     IReadOnlyList<ExecutionExplainTask> Tasks,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<ExecutionExplainWarning> Warnings);

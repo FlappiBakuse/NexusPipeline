@@ -19,7 +19,7 @@ internal static class ApiSystemActionHandler
         }
         if (!RuntimeContext.Instance.Center.CancelSystemAction())
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "没有待执行的系统操作" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "system_action_not_pending", 400).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);

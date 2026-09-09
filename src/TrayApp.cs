@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using NexusPipeline.Cli;
+using NexusPipeline.Localization;
 using NexusPipeline.Utilities;
 using NexusPipeline.Web;
 
@@ -15,7 +16,7 @@ internal class TrayApp : ApplicationContext
         {
             // 托盘使用 exe 内置品牌图标（侧边栏 N 徽章），提取失败回退系统默认图标。
             Icon = ExtractAppIcon(),
-            Text = "NexusPipeline 枢链",
+            Text = HostLocalization.TranslateNamed("tray.title", "NexusPipeline", locale: LocaleCatalog.HostLocale),
             Visible = true,
             ContextMenuStrip = BuildMenu(),
         };
@@ -41,17 +42,32 @@ internal class TrayApp : ApplicationContext
     {
         var menu = new ContextMenuStrip();
         // （P11）：轻量模式未启动 Web 服务，禁用「打开管理页面」避免打开 404 页面
-        var openWebItem = new ToolStripMenuItem("打开管理页面", null, (_, _) => OpenWeb());
+        var openWebItem = new ToolStripMenuItem(
+            HostLocalization.TranslateNamed("tray.open_web", "打开管理页面", locale: LocaleCatalog.HostLocale),
+            null,
+            (_, _) => OpenWeb());
         if (RuntimeContext.Instance.Settings.LightweightMode)
         {
             openWebItem.Enabled = false;
-            openWebItem.ToolTipText = "轻量运行模式未启动 Web 服务，请使用「命令行管理菜单」";
+            openWebItem.ToolTipText = HostLocalization.TranslateNamed(
+                "tray.lightweight_tooltip",
+                "轻量运行模式未启动 Web 服务，请使用命令行管理菜单",
+                locale: LocaleCatalog.HostLocale);
         }
         menu.Items.Add(openWebItem);
-        menu.Items.Add("命令行管理菜单", null, (_, _) => OpenConsole("manage"));
-        menu.Items.Add("查看状态", null, (_, _) => OpenConsole("status"));
+        menu.Items.Add(
+            HostLocalization.TranslateNamed("tray.cli_menu", "命令行管理菜单", locale: LocaleCatalog.HostLocale),
+            null,
+            (_, _) => OpenConsole("manage"));
+        menu.Items.Add(
+            HostLocalization.TranslateNamed("tray.status", "查看状态", locale: LocaleCatalog.HostLocale),
+            null,
+            (_, _) => OpenConsole("status"));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("退出 NexusPipeline", null, (_, _) =>
+        menu.Items.Add(
+            HostLocalization.TranslateNamed("tray.exit", "退出 NexusPipeline", locale: LocaleCatalog.HostLocale),
+            null,
+            (_, _) =>
         {
             if (Bootstrap.TryRequestDirectExit())
             {
@@ -66,7 +82,10 @@ internal class TrayApp : ApplicationContext
         // （P11）：轻量模式防御（双击图标同样走此入口）
         if (RuntimeContext.Instance.Settings.LightweightMode)
         {
-            Logger.Warn("[警告] 轻量运行模式未启动 Web 服务，无法打开管理页面（请使用「命令行管理菜单」）。");
+            Logger.Warn(HostLocalization.TranslateNamed(
+                "tray.lightweight_open_failed",
+                "轻量运行模式未启动 Web 服务，无法打开管理页面（请使用命令行管理菜单）。",
+                locale: LocaleCatalog.HostLocale));
             return;
         }
         // 用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
@@ -87,7 +106,11 @@ internal class TrayApp : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[警告] 打开浏览器失败：{ex.Message}");
+            Logger.Warn(HostLocalization.TranslateNamed(
+                "tray.open_browser_failed",
+                $"打开浏览器失败：{ex.Message}",
+                new Dictionary<string, object?> { ["detail"] = ex.Message },
+                LocaleCatalog.HostLocale));
         }
     }
 
@@ -103,7 +126,11 @@ internal class TrayApp : ApplicationContext
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[警告] 打开命令行窗口失败：{ex.Message}");
+            Logger.Warn(HostLocalization.TranslateNamed(
+                "tray.open_console_failed",
+                $"打开命令行窗口失败：{ex.Message}",
+                new Dictionary<string, object?> { ["detail"] = ex.Message },
+                LocaleCatalog.HostLocale));
         }
     }
 

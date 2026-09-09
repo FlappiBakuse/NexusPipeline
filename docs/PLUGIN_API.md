@@ -113,7 +113,7 @@ settings.sections               shell.nav
 
 插件可通过 `context.WebApi.Register(new PluginWebApiRoute("GET", "health", handler))` 注册自己的路由。最终地址为 `/api/plugin-api/{pluginName}/health`，支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`。handler 收到 `PluginWebApiRequest`（方法、规范化相对路由、查询字典、可选 JSON body），返回 `PluginWebApiResponse.Json(...)` 或 `PluginWebApiResponse.Empty(204)`。
 
-宿主为每次调用设置 30 秒超时，并限制 JSON 响应为 2 MiB；未知路由、无效状态码、超时、异常和无效 JSON 响应均使用 `{ "ok": false, "code": "plugin_error", "error": "..." }` 形式处理。路由只能由注册它的插件访问，路径段拒绝空段、反斜杠及 `.`/`..`。
+宿主为每次调用设置 30 秒超时，并限制 JSON 响应为 2 MiB；未知路由、无效状态码、超时、异常和无效 JSON 响应均使用 `{ "ok": false, "code": "plugin_error", "args": {} }` 形式处理。错误响应只包含稳定机器码和机器可读参数，不传递本地化句子或异常文本；前端和调用方根据自身语言资源显示文字。路由只能由注册它的插件访问，路径段拒绝空段、反斜杠及 `.`/`..`。
 
 #### 历史展示
 

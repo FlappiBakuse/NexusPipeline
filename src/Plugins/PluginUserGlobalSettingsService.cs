@@ -151,8 +151,10 @@ internal sealed class PluginUserGlobalSettingsService
         {
             return OperationResult<bool>.Failure(
                 ex.Code,
-                Localize(ex, registration.PluginName),
-                OperationErrorKind.Validation);
+                ex.Fallback,
+                OperationErrorKind.Validation,
+                messageKey: ex.MessageKey,
+                messageArgs: ex.Args);
         }
         catch (OperationCanceledException)
         {
@@ -197,8 +199,10 @@ internal sealed class PluginUserGlobalSettingsService
         {
             return OperationResult<PluginUserGlobalSettingsView>.Failure(
                 ex.Code,
-                Localize(ex, registration.PluginName),
-                OperationErrorKind.Validation);
+                ex.Fallback,
+                OperationErrorKind.Validation,
+                messageKey: ex.MessageKey,
+                messageArgs: ex.Args);
         }
         catch (OperationCanceledException)
         {
@@ -253,15 +257,6 @@ internal sealed class PluginUserGlobalSettingsService
         CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         source.CancelAfter(timeout);
         return source;
-    }
-
-    private string Localize(PluginUserVisibleException exception, string pluginName)
-    {
-        return _localization(pluginName).Resolve(
-            LocaleContext.Current,
-            exception.MessageKey,
-            exception.Fallback,
-            exception.Args);
     }
 
     private static OperationResult<T> NotFound<T>() => OperationResult<T>.Failure(

@@ -1,5 +1,5 @@
 import { trackController, releaseController } from "./state.js";
-import { getLocale } from "./i18n.js";
+import { getLocale, t } from "./i18n.js";
 
 const iconUrlCache = new Map();
 
@@ -9,6 +9,14 @@ function apiError(message, status, data) {
   error.status = status;
   error.data = data;
   return error;
+}
+
+function formatApiError(data, status) {
+  const code = data?.code;
+  if (code) {
+    return t(`api.error.${code}`, data?.args || {}, code);
+  }
+  return t("api.error.http", { status }, `HTTP ${status}`);
 }
 
 function readAuthToken() {
@@ -29,8 +37,7 @@ function authHeaders() {
 function isAuthFailure(response, data) {
   return response.status === 401
     || response.headers.get("X-Nexus-Auth") === "required"
-    || data?.code === "auth_required"
-    || (data && data.error && String(data.error).includes("访问令牌"));
+    || data?.code === "auth_required";
 }
 
 function handleAuthFailure(response, data) {
@@ -39,7 +46,7 @@ function handleAuthFailure(response, data) {
   } catch {
   }
   if (typeof window.__showTokenPrompt === "function") window.__showTokenPrompt();
-  return apiError((data && data.error) || "需要访问令牌", response.status, data);
+  return apiError(formatApiError(data || { code: "auth_required" }, response.status), response.status, data);
 }
 
 /** 远程访问下图标 API 需要 Bearer 头（`<img>` 无法携带，远程模式图标必 401）——
@@ -76,11 +83,11 @@ export async function apiBlob(path, signal) {
       signal: signal || controller.signal,
       cache: "no-store",
     });
-    if (response.status === 204) throw apiError("二进制资源不存在", response.status, null);
+    if (response.status === 204) throw apiError(t("api.error.binary_not_found", {}, "Binary resource not found"), response.status, null);
     if (response.ok && response.headers.get("X-Nexus-Auth") !== "required") return await response.blob();
     const data = await response.json().catch(() => null);
     if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
-    throw apiError((data && data.error) || ("HTTP " + response.status), response.status, data);
+    throw apiError(formatApiError(data, response.status), response.status, data);
   } finally {
     if (controller) releaseController(controller);
   }
@@ -101,7 +108,7 @@ export async function api(method, path, body, signal) {
     const data = await response.json().catch(() => null);
     if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
     if (!response.ok) {
-      throw apiError((data && data.error) || ("HTTP " + response.status), response.status, data);
+      throw apiError(formatApiError(data, response.status), response.status, data);
     }
     return data;
   } finally {

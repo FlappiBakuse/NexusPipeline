@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.Localization;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
@@ -189,11 +190,13 @@ internal static class CliTransport
         try
         {
             string text = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            return JsonNode.Parse(text)?["error"]?.ToString() ?? text;
+            JsonNode? node = JsonNode.Parse(text);
+            string code = node?["code"]?.ToString() ?? "service_unavailable";
+            return HostLocalization.TranslateApiError(code, node?["args"], (int)resp.StatusCode, LocaleCatalog.HostLocale);
         }
         catch
         {
-            return $"服务返回错误（HTTP {(int)resp.StatusCode}）";
+            return HostLocalization.TranslateApiError("service_unavailable", null, (int)resp.StatusCode, LocaleCatalog.HostLocale);
         }
     }
 
@@ -220,7 +223,7 @@ internal static class CliTransport
     {
         using var client = new HttpClient { Timeout = TimeoutFor(method, apiPath) };
         using var request = new HttpRequestMessage(new HttpMethod(method), $"http://127.0.0.1:{port}{apiPath}");
-        request.Headers.TryAddWithoutValidation("X-Nexus-Locale", locale ?? "zh-CN");
+        request.Headers.TryAddWithoutValidation("X-Nexus-Locale", locale ?? LocaleCatalog.HostLocale);
         if (body is not null)
         {
             request.Content = new StringContent(body.ToJsonString(JsonOpts.Web), Encoding.UTF8, "application/json");

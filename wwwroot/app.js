@@ -152,10 +152,10 @@ async function updateLocalAddr() {
     const data = await res.json();
     const port = data.actualPort || data.webPort || "";
     el.textContent = port
-      ? t("service.with_host", { host: location.hostname, port }, `服务 · ${location.hostname}:${port}`)
-      : t("service.label", {}, "服务");
+      ? t("service.with_host", { host: location.hostname, port })
+      : t("service.label");
   } catch {
-    el.textContent = t("service.label", {}, "服务");
+    el.textContent = t("service.label");
   }
 }
 
@@ -197,9 +197,9 @@ function showTokenPrompt() {
   if (document.querySelector("#token-input")) return;
   // （P12）：复用 modal 组件（role=dialog/aria-modal/aria-labelledby/焦点陷阱，locked 锁定不可 Esc/遮罩关闭），
   // 移除内联 style 与硬编码色值（此前 token-mask 自绘遮罩违反前端自约束）。
-  showModal(modalShell(t("auth.title", {}, "需要访问令牌"),
-    `<form id="token-form"><p class="modal-copy">${t("auth.copy", {}, "该 NexusPipeline 已开启远程访问，请输入访问令牌（可在本机「设置 → 远程访问」中查看或重置）。")}</p><input id="token-input" type="password" autocomplete="off" placeholder="${t("auth.placeholder", {}, "访问令牌")}" aria-label="${t("auth.placeholder", {}, "访问令牌")}"><div id="token-error" class="req" role="alert" aria-live="polite"></div></form>`,
-    `<button type="submit" form="token-form">${t("auth.enter", {}, "进入管理界面")}</button>`), false, true);
+  showModal(modalShell(t("auth.title", {}, "Access token required"),
+    `<form id="token-form"><p class="modal-copy">${t("auth.copy", {}, "This NexusPipeline has remote access enabled. Enter the access token (view or reset it under Settings → Remote access on the local machine).")}</p><input id="token-input" type="password" autocomplete="off" placeholder="${t("auth.placeholder", {}, "Access token")}" aria-label="${t("auth.placeholder", {}, "Access token")}"><div id="token-error" class="req" role="alert" aria-live="polite"></div></form>`,
+    `<button type="submit" form="token-form">${t("auth.enter", {}, "Enter management interface")}</button>`), false, true);
   const form = document.querySelector("#token-form");
   const input = document.querySelector("#token-input");
   const errorEl = document.querySelector("#token-error");
@@ -207,7 +207,7 @@ function showTokenPrompt() {
     event.preventDefault();
     const value = input.value.trim();
     if (!value) {
-      errorEl.textContent = t("auth.required_input", {}, "请输入令牌");
+      errorEl.textContent = t("auth.required_input", {}, "Enter token");
       return;
     }
     try {
@@ -223,7 +223,7 @@ function showTokenPrompt() {
         localStorage.removeItem("nexus-token");
       } catch {
       }
-      errorEl.textContent = t("auth.invalid", {}, "令牌无效，请重试");
+      errorEl.textContent = t("auth.invalid", {}, "Invalid token. Try again.");
     }
   });
 }

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 
@@ -34,6 +35,7 @@ internal static class ConfigStore
             }
         }
         Normalize(settings);
+        LocaleCatalog.SetHostLocale(settings.HostLocale);
         Logger.ConfigureLevel(settings.LogLevel);
         return settings;
     }
@@ -43,6 +45,7 @@ internal static class ConfigStore
         Normalize(settings);
         Directory.CreateDirectory(AppPaths.ConfigDir);
         JsonUtil.WriteAtomic(AppPaths.ConfigPath, JsonSerializer.Serialize(settings, JsonOpts.Indented));
+        LocaleCatalog.SetHostLocale(settings.HostLocale);
         // 原子保存成功后才更新日志阈值，失败时保留旧阈值。
         Logger.ConfigureLevel(settings.LogLevel);
     }
@@ -69,6 +72,7 @@ internal static class ConfigStore
         {
             settings.LogLevel = "info";
         }
+        settings.HostLocale = LocaleCatalog.Normalize(settings.HostLocale);
         settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
         // Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
         if (!AppSettings.WebhookTypes.Contains(settings.WebhookType))

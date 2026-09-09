@@ -28,8 +28,7 @@ internal static partial class CliCommandRouter
 
     public static int Run(string[] rawArgs)
     {
-        using IDisposable localeScope = LocaleContext.Push(
-            LocaleCatalog.Normalize(System.Globalization.CultureInfo.CurrentUICulture.Name));
+        using IDisposable localeScope = LocaleContext.Push(LocaleCatalog.HostLocale);
         CliOutput.Configure(rawArgs);
         if (!CliArguments.TryParse(rawArgs, out CliArguments? parsed, out string? parseError))
         {

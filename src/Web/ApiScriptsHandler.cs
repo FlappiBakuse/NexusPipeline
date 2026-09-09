@@ -119,7 +119,7 @@ internal static class ApiScriptsHandler
             ScriptInstance? script = HttpHelper.ParseBody<ScriptInstance>(body);
             if (script is null)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "脚本名称不能为空" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "script_name_required", 400).ConfigureAwait(false);
                 return;
             }
             OperationResult<ScriptInstance> result = ScriptCommands.Create(script);

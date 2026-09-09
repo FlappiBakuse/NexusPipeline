@@ -1,5 +1,6 @@
 using System.Net;
 using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -17,7 +18,7 @@ internal static class ApiAppearanceUploadHandler
         {
             if (context.Request.ContentLength64 > AppearanceService.MaxAssetBytes)
             {
-                await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "too_large", error = "壁纸文件不能超过 8192 KB" }, 413).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "too_large", 413, new { maxKb = AppearanceService.MaxAssetBytes / 1024 }).ConfigureAwait(false);
                 return;
             }
             string caller = AppearanceApiSupport.ResolveCaller(context, null);
@@ -31,11 +32,13 @@ internal static class ApiAppearanceUploadHandler
         }
         catch (AppearanceException ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, ex.Code, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "internal_error", error = ex.Message }, 500).ConfigureAwait(false);
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[外观] 文件上传失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
         }
     }
 }

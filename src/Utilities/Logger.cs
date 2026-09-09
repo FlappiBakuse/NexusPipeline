@@ -1,5 +1,9 @@
 ﻿using System.Text;
 
+using System.Globalization;
+using System.Runtime.CompilerServices;
+using NexusPipeline.Localization;
+
 namespace NexusPipeline.Utilities;
 
 internal static class Logger
@@ -34,13 +38,23 @@ internal static class Logger
 
     public static void Debug(string message) => Log(LogLevel.Debug, message);
 
+    public static void Debug(ref LocalizedLogInterpolatedStringHandler message) => LogLocalized(LogLevel.Debug, message.GetFormattedText());
+
     public static void Info(string message) => Log(LogLevel.Info, message);
+
+    public static void Info(ref LocalizedLogInterpolatedStringHandler message) => LogLocalized(LogLevel.Info, message.GetFormattedText());
 
     public static void Warn(string message) => Log(LogLevel.Warn, message);
 
+    public static void Warn(ref LocalizedLogInterpolatedStringHandler message) => LogLocalized(LogLevel.Warn, message.GetFormattedText());
+
     public static void Error(string message) => Log(LogLevel.Error, message);
 
+    public static void Error(ref LocalizedLogInterpolatedStringHandler message) => LogLocalized(LogLevel.Error, message.GetFormattedText());
+
     public static void Fatal(string message) => Log(LogLevel.Fatal, message);
+
+    public static void Fatal(ref LocalizedLogInterpolatedStringHandler message) => LogLocalized(LogLevel.Fatal, message.GetFormattedText());
 
     internal static bool IsEnabled(LogLevel level) => level >= Threshold;
 
@@ -50,6 +64,16 @@ internal static class Logger
         {
             return;
         }
+        LogLocalized(level, HostLocalization.TranslateLog(message, LocaleCatalog.HostLocale));
+    }
+
+    private static void LogLocalized(LogLevel level, string message)
+    {
+        if (level < Threshold)
+        {
+            return;
+        }
+
         string line = FormatLine(level, message);
         WriteConsole(line, level);
         lock (Sync)
@@ -118,5 +142,53 @@ internal static class Logger
         catch
         {
         }
+    }
+}
+
+[InterpolatedStringHandler]
+internal ref struct LocalizedLogInterpolatedStringHandler
+{
+    private StringBuilder _builder;
+
+    public LocalizedLogInterpolatedStringHandler(int literalLength, int formattedCount)
+    {
+        _builder = new StringBuilder(literalLength);
+    }
+
+    public void AppendLiteral(string value)
+    {
+        _builder.Append(HostLocalization.TranslateLog(value, LocaleCatalog.HostLocale));
+    }
+
+    public void AppendFormatted<T>(T value)
+    {
+        _builder.Append(value);
+    }
+
+    public void AppendFormatted<T>(T value, string? format)
+    {
+        _builder.Append(FormatValue(value, format));
+    }
+
+    public void AppendFormatted<T>(T value, int alignment)
+    {
+        AppendFormatted(value, alignment, null);
+    }
+
+    public void AppendFormatted<T>(T value, int alignment, string? format)
+    {
+        string text = FormatValue(value, format);
+        _builder.Append(alignment >= 0 ? text.PadLeft(alignment) : text.PadRight(-alignment));
+    }
+
+    public string GetFormattedText() => _builder.ToString();
+
+    private static string FormatValue<T>(T value, string? format)
+    {
+        if (value is IFormattable formattable)
+        {
+            return formattable.ToString(format, CultureInfo.InvariantCulture) ?? string.Empty;
+        }
+        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 }

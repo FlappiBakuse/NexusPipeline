@@ -17,9 +17,12 @@ internal sealed record DiagnosticCheck(
     string Id,
     string Category,
     string Status,
-    string Summary,
-    string Detail,
-    string Remediation);
+    string SummaryCode,
+    IReadOnlyDictionary<string, object?> SummaryArgs,
+    string? DetailCode,
+    IReadOnlyDictionary<string, object?> DetailArgs,
+    string? RemediationCode,
+    IReadOnlyDictionary<string, object?> RemediationArgs);
 
 internal sealed record DiagnosticSnapshot(
     int SchemaVersion,
@@ -88,7 +91,7 @@ internal sealed class DiagnosticsService
                 ? "warn"
                 : "pass";
         return new DiagnosticSnapshot(
-            1,
+            2,
             DateTimeOffset.Now,
             UpdateService.CurrentVersion,
             overall,
@@ -195,26 +198,36 @@ internal sealed class DiagnosticsService
         return Pass(
             "host.version",
             "host",
-            $"宿主版本 v{UpdateService.CurrentVersion}，运行时为 {RuntimeInformation.FrameworkDescription}");
+            Args(
+                ("version", UpdateService.CurrentVersion),
+                ("framework", RuntimeInformation.FrameworkDescription)));
     }
 
     private DiagnosticCheck CheckAdministrator()
     {
         if (!OperatingSystem.IsWindows())
         {
-            return Skipped("host.admin-integrity", "host", "管理员权限检查仅适用于 Windows");
+            return Skipped("host.admin-integrity", "host");
         }
         try
         {
             using WindowsIdentity identity = WindowsIdentity.GetCurrent();
             bool admin = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
             return admin
-                ? Pass("host.admin-integrity", "host", "当前进程具备管理员权限")
-                : Fail("host.admin-integrity", "host", "当前进程不具备管理员权限", "请使用管理员权限启动 NexusPipeline");
+                ? Pass("host.admin-integrity", "host")
+                : Fail(
+                    "host.admin-integrity",
+                    "host",
+                    remediationCode: "diagnostics.host_admin_integrity.remediation.admin");
         }
         catch (Exception ex)
         {
-            return Warn("host.admin-integrity", "host", "无法确认当前进程权限", ex.Message, "请确认宿主以管理员权限运行");
+            return Warn(
+                "host.admin-integrity",
+                "host",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.host_admin_integrity.detail.exception",
+                remediationCode: "diagnostics.host_admin_integrity.remediation.admin");
         }
     }
 
@@ -225,7 +238,10 @@ internal sealed class DiagnosticsService
         {
             if (!Directory.Exists(AppPaths.AppRoot))
             {
-                return Fail("host.install-write", "host", "宿主安装目录不存在", "检查安装路径或重新安装宿主");
+                return Fail(
+                    "host.install-write",
+                    "host",
+                    remediationCode: "diagnostics.host_install_write.remediation.missing");
             }
 
             // 写入并立即删除一个临时探针，验证更新 worker 和运行时所需的安装目录权限。
@@ -235,12 +251,17 @@ internal sealed class DiagnosticsService
                 stream.Flush(flushToDisk: true);
             }
             File.Delete(probe);
-            return Pass("host.install-write", "host", "宿主安装目录可写");
+            return Pass("host.install-write", "host");
         }
         catch (Exception ex)
         {
             TryDelete(probe);
-            return Fail("host.install-write", "host", "宿主安装目录不可写", "检查安装目录权限或使用管理员权限启动宿主", ex.Message);
+            return Fail(
+                "host.install-write",
+                "host",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.host_install_write.detail.exception",
+                remediationCode: "diagnostics.host_install_write.remediation.permission");
         }
     }
 
@@ -248,19 +269,27 @@ internal sealed class DiagnosticsService
     {
         Web.WebServer? server = Web.WebServer.Current;
         return server is { IsRunning: true }
-            ? Pass("web.listener", "network", $"Web 服务正在 127.0.0.1:{server.Port} 监听")
-            : Warn("web.listener", "network", "Web 服务当前未监听", "没有发现活动 Web 服务实例", "启动宿主 Web 服务或检查端口占用");
+            ? Pass("web.listener", "network", Args(("port", server.Port)))
+            : Warn(
+                "web.listener",
+                "network",
+                detailCode: "diagnostics.web_listener.detail.not_listening",
+                remediationCode: "diagnostics.web_listener.remediation.start");
     }
 
     private DiagnosticCheck CheckMcpListener()
     {
         if (!_settings.Current.McpEnabled)
         {
-            return Skipped("mcp.listener", "network", "MCP 服务已在设置中关闭");
+            return Skipped("mcp.listener", "network");
         }
         return Mcp.McpHost.Current is { IsRunning: true } host
-            ? Pass("mcp.listener", "network", $"MCP 服务正在 127.0.0.1:{host.Port} 监听")
-            : Warn("mcp.listener", "network", "MCP 已启用但当前未监听", "没有发现活动 MCP 服务实例", "检查 MCP 端口和服务启动日志");
+            ? Pass("mcp.listener", "network", Args(("port", host.Port)))
+            : Warn(
+                "mcp.listener",
+                "network",
+                detailCode: "diagnostics.mcp_listener.detail.not_listening",
+                remediationCode: "diagnostics.mcp_listener.remediation.start");
     }
 
     private DiagnosticCheck CheckUpdateTransaction()
@@ -272,10 +301,18 @@ internal sealed class DiagnosticsService
         if (status.State == UpdateState.RecoveryPending || artifacts)
         {
             return status.State == UpdateState.RecoveryPending
-                ? Fail("update.transaction", "recovery", "发现待恢复的更新事务现场", "检查更新目录并按更新恢复流程处理", "更新状态仍处于 RecoveryPending")
-                : Warn("update.transaction", "recovery", "更新目录存在事务痕迹", "当前更新状态未完成清理", "确认更新事务已完成后再进行下一次更新");
+                ? Fail(
+                    "update.transaction",
+                    "recovery",
+                    detailCode: "diagnostics.update_transaction.detail.recovery_pending",
+                    remediationCode: "diagnostics.update_transaction.remediation.recover")
+                : Warn(
+                    "update.transaction",
+                    "recovery",
+                    detailCode: "diagnostics.update_transaction.detail.artifacts",
+                    remediationCode: "diagnostics.update_transaction.remediation.recover");
         }
-        return Pass("update.transaction", "recovery", "未发现待处理的更新事务现场");
+        return Pass("update.transaction", "recovery");
     }
 
     private DiagnosticCheck CheckConfigRecovery()
@@ -291,17 +328,32 @@ internal sealed class DiagnosticsService
                 : 0;
             if (blocked > 0)
             {
-                return Fail("config.recovery", "recovery", "发现被阻断的配置快照事务", "人工核查配置快照事务现场后再解除阻断", $"阻断标记 {blocked} 个");
+                return Fail(
+                    "config.recovery",
+                    "recovery",
+                    Args(("blocked", blocked)),
+                    "diagnostics.config_recovery.detail.blocked",
+                    remediationCode: "diagnostics.config_recovery.remediation.blocked");
             }
             if (editSessions > 0 || workDirs > 0)
             {
-                return Warn("config.recovery", "recovery", "配置系统存在活动或未清理现场", $"编辑会话 {editSessions} 个，工作目录 {workDirs} 个", "完成或取消配置编辑，并确认恢复循环已收敛");
+                return Warn(
+                    "config.recovery",
+                    "recovery",
+                    Args(("editSessions", editSessions), ("workDirs", workDirs)),
+                    "diagnostics.config_recovery.detail.active",
+                    remediationCode: "diagnostics.config_recovery.remediation.active");
             }
-            return Pass("config.recovery", "recovery", "未发现待处理的配置恢复现场");
+            return Pass("config.recovery", "recovery");
         }
         catch (Exception ex)
         {
-            return Warn("config.recovery", "recovery", "无法完整扫描配置恢复现场", ex.Message, "检查数据目录访问权限");
+            return Warn(
+                "config.recovery",
+                "recovery",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.config_recovery.detail.exception",
+                remediationCode: "diagnostics.config_recovery.remediation.permission");
         }
     }
 
@@ -310,21 +362,41 @@ internal sealed class DiagnosticsService
         ExecutionStateSnapshot state = _executionState.SnapshotState();
         if (state.PendingSystemAction || state.GroupState is ExecutionGroupState.Closing or ExecutionGroupState.ActionPending or ExecutionGroupState.Cancelling)
         {
-            return Warn("execution.state", "execution", "运行组正在收尾或等待系统操作", $"活动运行 {state.ActiveCount} 个，待处理系统操作 {state.PendingSystemAction}", "等待运行组完成，或从运行页面取消可取消的系统操作");
+            return Warn(
+                "execution.state",
+                "execution",
+                Args(("activeCount", state.ActiveCount), ("pendingSystemAction", state.PendingSystemAction)),
+                "diagnostics.execution_state.detail.closing",
+                remediationCode: "diagnostics.execution_state.remediation.closing");
         }
         if (state.MaintenanceActive)
         {
-            return Warn("execution.state", "execution", "宿主维护租约正在生效", "新的执行和配置编辑已暂时冻结", "等待维护操作完成");
+            return Warn(
+                "execution.state",
+                "execution",
+                Args(("activeCount", state.ActiveCount), ("pendingSystemAction", state.PendingSystemAction)),
+                detailCode: "diagnostics.execution_state.detail.maintenance",
+                remediationCode: "diagnostics.execution_state.remediation.maintenance");
         }
-        return Pass("execution.state", "execution", $"执行准入状态正常，活动运行 {state.ActiveCount} 个");
+        return Pass("execution.state", "execution", Args(("activeCount", state.ActiveCount)));
     }
 
     private DiagnosticCheck CheckScheduler()
     {
         (string QueueName, DateTime TriggerTime)? next = _scheduler.NextTrigger();
         return _scheduler.IsRunning
-            ? Pass("scheduler.state", "scheduler", next is null ? "调度器正在运行，当前没有下一次触发" : $"调度器正在运行，下一次触发队列「{next.Value.QueueName}」")
-            : Warn("scheduler.state", "scheduler", "调度器当前未运行", "没有发现调度循环任务", "启动宿主调度服务并检查启动日志");
+            ? next is null
+                ? Pass("scheduler.state", "scheduler")
+                : Pass(
+                    "scheduler.state",
+                    "scheduler",
+                    detailCode: "diagnostics.scheduler_state.detail.next",
+                    detailArgs: Args(("queueName", next.Value.QueueName)))
+            : Warn(
+                "scheduler.state",
+                "scheduler",
+                detailCode: "diagnostics.scheduler_state.detail.not_running",
+                remediationCode: "diagnostics.scheduler_state.remediation.start");
     }
 
     private DiagnosticCheck CheckPlugins()
@@ -334,7 +406,7 @@ internal sealed class DiagnosticsService
             IReadOnlyList<PluginManagementView> plugins = _plugins.PluginManagementViews;
             if (plugins.Count == 0)
             {
-                return Skipped("plugin.runtime", "plugins", "当前没有已发现的插件");
+                return Skipped("plugin.runtime", "plugins");
             }
             string[] unhealthy = plugins
                 .Where(plugin => !string.Equals(plugin.State, "Active", StringComparison.OrdinalIgnoreCase)
@@ -343,12 +415,23 @@ internal sealed class DiagnosticsService
                 .Take(8)
                 .ToArray();
             return unhealthy.Length == 0
-                ? Pass("plugin.runtime", "plugins", $"已发现 {plugins.Count} 个插件，运行状态正常")
-                : Warn("plugin.runtime", "plugins", $"发现 {unhealthy.Length} 个插件状态需要关注", string.Join("、", unhealthy), "检查插件状态、API 版本和最近错误");
+                ? Pass("plugin.runtime", "plugins", Args(("count", plugins.Count)))
+                : Warn(
+                    "plugin.runtime",
+                    "plugins",
+                    Args(("count", unhealthy.Length)),
+                    "diagnostics.plugin_runtime.detail.unhealthy",
+                    Args(("names", string.Join(", ", unhealthy))),
+                    "diagnostics.plugin_runtime.remediation.inspect");
         }
         catch (Exception ex)
         {
-            return Warn("plugin.runtime", "plugins", "无法读取插件运行状态", ex.Message, "检查插件目录和插件状态文件");
+            return Warn(
+                "plugin.runtime",
+                "plugins",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.plugin_runtime.detail.exception",
+                remediationCode: "diagnostics.plugin_runtime.remediation.inspect");
         }
     }
 
@@ -358,12 +441,22 @@ internal sealed class DiagnosticsService
         {
             IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
             return pending.Count == 0
-                ? Pass("plugin.pending", "plugins", "未发现待应用的插件事务")
-                : Warn("plugin.pending", "plugins", $"发现 {pending.Count} 个待应用的插件事务", "插件安装/更新现场仍在 pending 阶段", "确认插件事务可继续应用或按恢复流程处理");
+                ? Pass("plugin.pending", "plugins")
+                : Warn(
+                    "plugin.pending",
+                    "plugins",
+                    Args(("count", pending.Count)),
+                    detailCode: "diagnostics.plugin_pending.detail.pending",
+                    remediationCode: "diagnostics.plugin_pending.remediation.recover");
         }
         catch (Exception ex)
         {
-            return Warn("plugin.pending", "plugins", "无法读取插件事务状态", ex.Message, "检查插件状态目录访问权限");
+            return Warn(
+                "plugin.pending",
+                "plugins",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.plugin_pending.detail.exception",
+                remediationCode: "diagnostics.plugin_pending.remediation.permission");
         }
     }
 
@@ -374,11 +467,14 @@ internal sealed class DiagnosticsService
             && string.Equals(script.JudgeScriptLanguage, "python", StringComparison.OrdinalIgnoreCase));
         if (!needed)
         {
-            return Skipped("dependency.python", "dependencies", "当前没有启用 Python 判断脚本");
+            return Skipped("dependency.python", "dependencies");
         }
         return FindOnPath("python.exe") is not null
-            ? Pass("dependency.python", "dependencies", "已找到 Python 解释器")
-            : Fail("dependency.python", "dependencies", "未找到 Python 解释器", "启用的判断脚本需要 Python，但 PATH 中没有 python.exe");
+            ? Pass("dependency.python", "dependencies")
+            : Fail(
+                "dependency.python",
+                "dependencies",
+                remediationCode: "diagnostics.dependency_python.remediation.install");
     }
 
     private DiagnosticCheck CheckAdb()
@@ -386,11 +482,15 @@ internal sealed class DiagnosticsService
         bool needed = _scripts.Snapshot().Any(EmulatorSupport.IsEmulator);
         if (!needed)
         {
-            return Skipped("dependency.adb", "dependencies", "当前没有使用安卓模拟器脚本");
+            return Skipped("dependency.adb", "dependencies");
         }
         return FindOnPath("adb.exe") is not null
-            ? Pass("dependency.adb", "dependencies", "已找到 ADB 依赖")
-            : Warn("dependency.adb", "dependencies", "未在 PATH 中找到 adb.exe", "模拟器脚本可能无法连接设备", "安装 Android platform-tools 或配置 ADB 路径");
+            ? Pass("dependency.adb", "dependencies")
+            : Warn(
+                "dependency.adb",
+                "dependencies",
+                detailCode: "diagnostics.dependency_adb.detail.missing",
+                remediationCode: "diagnostics.dependency_adb.remediation.install");
     }
 
     private DiagnosticCheck CheckLogs()
@@ -399,19 +499,30 @@ internal sealed class DiagnosticsService
         {
             if (!Directory.Exists(AppPaths.LogDir))
             {
-                return Skipped("logs.recent", "logs", "日志目录尚未创建");
+                return Skipped(
+                    "logs.recent",
+                    "logs",
+                    detailCode: "diagnostics.logs_recent.detail.directory");
             }
             FileInfo? latest = new DirectoryInfo(AppPaths.LogDir)
                 .EnumerateFiles("*.log", SearchOption.TopDirectoryOnly)
                 .OrderByDescending(file => file.LastWriteTimeUtc)
                 .FirstOrDefault();
             return latest is null
-                ? Skipped("logs.recent", "logs", "当前没有可供诊断的日志文件")
-                : Pass("logs.recent", "logs", $"最近日志文件可访问，大小 {latest.Length} 字节");
+                ? Skipped(
+                    "logs.recent",
+                    "logs",
+                    detailCode: "diagnostics.logs_recent.detail.empty")
+                : Pass("logs.recent", "logs", Args(("sizeBytes", latest.Length)));
         }
         catch (Exception ex)
         {
-            return Warn("logs.recent", "logs", "无法读取最近日志状态", ex.Message, "检查日志目录访问权限");
+            return Warn(
+                "logs.recent",
+                "logs",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.logs_recent.detail.exception",
+                remediationCode: "diagnostics.logs_recent.remediation.permission");
         }
     }
 
@@ -423,7 +534,12 @@ internal sealed class DiagnosticsService
         }
         catch (Exception ex)
         {
-            checks.Add(Warn("diagnostics.internal", "diagnostics", "诊断项执行失败", ex.Message, "检查宿主错误日志"));
+            checks.Add(Warn(
+                "diagnostics.internal",
+                "diagnostics",
+                Args(("exceptionType", ex.GetType().Name)),
+                "diagnostics.internal.detail.exception",
+                remediationCode: "diagnostics.internal.remediation.logs"));
         }
     }
 
@@ -542,17 +658,73 @@ internal sealed class DiagnosticsService
         return null;
     }
 
-    private static DiagnosticCheck Pass(string id, string category, string summary, string detail = "") =>
-        new(id, category, "pass", summary, detail, "");
+    private static DiagnosticCheck Pass(
+        string id,
+        string category,
+        IReadOnlyDictionary<string, object?>? summaryArgs = null,
+        string? detailCode = null,
+        IReadOnlyDictionary<string, object?>? detailArgs = null,
+        string? remediationCode = null,
+        IReadOnlyDictionary<string, object?>? remediationArgs = null) =>
+        CreateStructuredCheck(id, category, "pass", summaryArgs, detailCode, detailArgs, remediationCode, remediationArgs);
 
-    private static DiagnosticCheck Warn(string id, string category, string summary, string detail, string remediation) =>
-        new(id, category, "warn", summary, detail, remediation);
+    private static DiagnosticCheck Warn(
+        string id,
+        string category,
+        IReadOnlyDictionary<string, object?>? summaryArgs = null,
+        string? detailCode = null,
+        IReadOnlyDictionary<string, object?>? detailArgs = null,
+        string? remediationCode = null,
+        IReadOnlyDictionary<string, object?>? remediationArgs = null) =>
+        CreateStructuredCheck(id, category, "warn", summaryArgs, detailCode, detailArgs, remediationCode, remediationArgs);
 
-    private static DiagnosticCheck Fail(string id, string category, string summary, string remediation, string detail = "") =>
-        new(id, category, "fail", summary, detail, remediation);
+    private static DiagnosticCheck Fail(
+        string id,
+        string category,
+        IReadOnlyDictionary<string, object?>? summaryArgs = null,
+        string? detailCode = null,
+        IReadOnlyDictionary<string, object?>? detailArgs = null,
+        string? remediationCode = null,
+        IReadOnlyDictionary<string, object?>? remediationArgs = null) =>
+        CreateStructuredCheck(id, category, "fail", summaryArgs, detailCode, detailArgs, remediationCode, remediationArgs);
 
-    private static DiagnosticCheck Skipped(string id, string category, string summary, string detail = "") =>
-        new(id, category, "skipped", summary, detail, "");
+    private static DiagnosticCheck Skipped(
+        string id,
+        string category,
+        IReadOnlyDictionary<string, object?>? summaryArgs = null,
+        string? detailCode = null,
+        IReadOnlyDictionary<string, object?>? detailArgs = null) =>
+        CreateStructuredCheck(id, category, "skipped", summaryArgs, detailCode, detailArgs, null, null);
+
+    private static DiagnosticCheck CreateStructuredCheck(
+        string id,
+        string category,
+        string status,
+        IReadOnlyDictionary<string, object?>? summaryArgs,
+        string? detailCode,
+        IReadOnlyDictionary<string, object?>? detailArgs,
+        string? remediationCode,
+        IReadOnlyDictionary<string, object?>? remediationArgs)
+    {
+        string key = id.Replace('.', '_');
+        IReadOnlyDictionary<string, object?> empty = new Dictionary<string, object?>();
+        return new DiagnosticCheck(
+            id,
+            category,
+            status,
+            $"diagnostics.{key}.summary.{status}",
+            summaryArgs ?? empty,
+            detailCode,
+            detailArgs ?? empty,
+            remediationCode,
+            remediationArgs ?? empty);
+    }
+
+    private static IReadOnlyDictionary<string, object?> Args(
+        params (string Key, object? Value)[] values)
+    {
+        return values.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+    }
 
     private static void TryDelete(string path)
     {

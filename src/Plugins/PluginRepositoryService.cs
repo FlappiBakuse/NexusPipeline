@@ -23,6 +23,7 @@ internal sealed class PluginRepositoryService
     private readonly PluginPackageService _packages;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _operationGate = new(1, 1);
     private readonly object _cacheSync = new();
     private readonly object _readmeSync = new();
     private readonly Dictionary<string, PluginReadmeResult> _localReadmeCache = new(StringComparer.Ordinal);
@@ -166,79 +167,92 @@ internal sealed class PluginRepositoryService
         bool update,
         CancellationToken cancellationToken = default)
     {
-        PluginCatalogEntry entry = await RequireEntryAsync(name, cancellationToken).ConfigureAwait(false);
-        if (!PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason))
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new PluginRepositoryException("incompatible", compatibilityReason);
+            PluginCatalogEntry entry = await RequireEntryAsync(name, cancellationToken).ConfigureAwait(false);
+            if (!PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason))
+            {
+                throw new PluginRepositoryException("incompatible", compatibilityReason);
+            }
+            PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
+                string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
+            if (update && installed is null)
+            {
+                throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
+            }
+            if (!update && installed is not null)
+            {
+                throw new PluginRepositoryException("already_installed", $"插件已安装：{entry.Name}");
+            }
+            if (HasPending(entry.Name))
+            {
+                throw new PluginRepositoryException("pending", $"插件已有待重启事务：{entry.Name}");
+            }
+            if (update && installed is not null
+                && PluginRepositoryCatalog.CompareVersions(installed.Version, entry.Version) >= 0)
+            {
+                throw new PluginRepositoryException("up_to_date", $"插件已是 v{installed.Version}");
+            }
+            PluginPendingOperation operation = await _packages.StageAsync(
+                entry,
+                update ? "update" : "install",
+                cancellationToken).ConfigureAwait(false);
+            _plugins().InvalidateManagementSnapshot();
+            return operation;
         }
-        PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
-            string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
-        if (update && installed is null)
+        finally
         {
-            throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
+            _operationGate.Release();
         }
-        if (!update && installed is not null)
-        {
-            throw new PluginRepositoryException("already_installed", $"插件已安装：{entry.Name}");
-        }
-        if (HasPending(entry.Name))
-        {
-            throw new PluginRepositoryException("pending", $"插件已有待重启事务：{entry.Name}");
-        }
-        if (update && installed is not null
-            && PluginRepositoryCatalog.CompareVersions(installed.Version, entry.Version) >= 0)
-        {
-            throw new PluginRepositoryException("up_to_date", $"插件已是 v{installed.Version}");
-        }
-        PluginPendingOperation operation = await _packages.StageAsync(
-            entry,
-            update ? "update" : "install",
-            cancellationToken).ConfigureAwait(false);
-        _plugins().InvalidateManagementSnapshot();
-        return operation;
     }
 
-    public Task<PluginPendingOperation> UninstallAsync(
+    public async Task<PluginPendingOperation> UninstallAsync(
         string name,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
+        await _operationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            throw new PluginRepositoryException("invalid_name", "插件名称无效");
-        }
-        PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
-            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
-        PluginOwnership? ownership = PluginInstallRecovery.ReadOwnership()
-            .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
-            .Value;
-        if (installed is null)
-        {
-            if (ownership is null)
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
+            {
+                throw new PluginRepositoryException("invalid_name", "插件名称无效");
+            }
+            PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
+                string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+            PluginOwnership? ownership = PluginInstallRecovery.ReadOwnership()
+                .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
+                .Value;
+            if (installed is null && ownership is null)
             {
                 throw new PluginRepositoryException("not_installed", $"插件尚未安装：{name}");
             }
+            string actualName = installed?.Name ?? ownership!.Name;
+            if (HasPending(actualName))
+            {
+                throw new PluginRepositoryException("pending", $"插件已有待重启事务：{actualName}");
+            }
+            var operation = new PluginPendingOperation
+            {
+                Action = "uninstall",
+                Name = actualName,
+                ArtifactName = installed?.ArtifactName ?? ownership!.ArtifactName,
+                Version = installed?.Version ?? ownership!.Version,
+                Kind = installed?.Kind ?? ownership!.Kind,
+                ApiVersion = installed?.ApiVersion ?? ownership!.ApiVersion,
+                Phase = "pending",
+                StagedPath = Path.Combine(AppPaths.PluginStagingDir, $"uninstall.{actualName}.{Guid.NewGuid():N}"),
+                CreatedAt = DateTimeOffset.UtcNow,
+            };
+            PluginInstallRecovery.AddPending(operation);
+            _plugins().InvalidateManagementSnapshot();
+            return operation;
         }
-        string actualName = installed?.Name ?? ownership!.Name;
-        if (HasPending(actualName))
+        finally
         {
-            throw new PluginRepositoryException("pending", $"插件已有待重启事务：{actualName}");
+            _operationGate.Release();
         }
-        var operation = new PluginPendingOperation
-        {
-            Action = "uninstall",
-            Name = actualName,
-            ArtifactName = installed?.ArtifactName ?? ownership!.ArtifactName,
-            Version = installed?.Version ?? ownership!.Version,
-            Kind = installed?.Kind ?? ownership!.Kind,
-            ApiVersion = installed?.ApiVersion ?? ownership!.ApiVersion,
-            Phase = "pending",
-            StagedPath = Path.Combine(AppPaths.PluginStagingDir, $"uninstall.{actualName}.{Guid.NewGuid():N}"),
-            CreatedAt = DateTimeOffset.UtcNow,
-        };
-        PluginInstallRecovery.AddPending(operation);
-        _plugins().InvalidateManagementSnapshot();
-        return Task.FromResult(operation);
     }
 
     public async Task<PluginDetail?> GetLocalDetailAsync(

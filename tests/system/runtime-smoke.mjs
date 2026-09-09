@@ -191,7 +191,7 @@ test("doctor 与 dry-run 只读取当前快照并返回可审计结果", { skip,
   const diagnosticsText = await diagnostics.text();
   assert.equal(diagnostics.status, 200, `诊断快照失败：HTTP ${diagnostics.status} ${diagnosticsText}`);
   const snapshot = JSON.parse(diagnosticsText);
-  assert.equal(snapshot.schemaVersion, 1);
+  assert.equal(snapshot.schemaVersion, 2);
   assert.match(snapshot.overallStatus, /^(pass|warn|fail)$/);
   assert.ok(Array.isArray(snapshot.checks));
   for (const id of [
@@ -219,7 +219,7 @@ test("doctor 与 dry-run 只读取当前快照并返回可审计结果", { skip,
   const doctorPayload = JSON.parse(doctorLines[0]);
   assert.equal(doctorPayload.ok, true);
   assert.equal(doctorPayload.code, "ok");
-  assert.equal(doctorPayload.data.schemaVersion, 1);
+  assert.equal(doctorPayload.data.schemaVersion, 2);
 
   const fixture = makeFixture("explain");
   writeBatch(fixture, [`echo explain-ok>>"${fixture.log}"`]);

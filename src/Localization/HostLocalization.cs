@@ -1,10 +1,19 @@
 using System.Globalization;
+using System.Reflection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Localization;
 
-/// <summary>宿主协议错误和基础 UI 文案的稳定翻译表。业务模块可继续逐步迁移到语义 key。</summary>
+/// <summary>宿主协议、通知、日志和基础 UI 文案的稳定翻译表。</summary>
 internal static class HostLocalization
 {
+    private static readonly Dictionary<string, IReadOnlyDictionary<string, string>> ResourceCache =
+        new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly object ResourceSync = new();
+
     private static readonly IReadOnlyDictionary<string, string> English =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -42,15 +51,154 @@ internal static class HostLocalization
         IReadOnlyList<object?>? args = null)
     {
         string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
-        if (normalized == LocaleCatalog.DefaultLocale || string.IsNullOrWhiteSpace(key))
+        if (string.IsNullOrWhiteSpace(key))
         {
             return fallback;
         }
-        if (!English.TryGetValue(key!, out string? template))
+        if (!TryGetTemplate(normalized, key!, out string? template)
+            && !English.TryGetValue(key!, out template))
         {
             return fallback;
         }
-        return Format(template, args);
+        return Format(template ?? fallback, args);
+    }
+
+    /// <summary>按稳定资源 key 渲染宿主输出；资源缺失时返回调用方提供的安全回退文本。</summary>
+    public static string TranslateNamed(
+        string? key,
+        string fallback,
+        IReadOnlyDictionary<string, object?>? args = null,
+        string? locale = null)
+    {
+        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
+        if (string.IsNullOrWhiteSpace(key)
+            || (!TryGetTemplate(normalized, key!, out string? template)
+                && !English.TryGetValue(key!, out template)))
+        {
+            return fallback;
+        }
+        string value = template!;
+        foreach ((string name, object? replacement) in args ?? new Dictionary<string, object?>())
+        {
+            value = value.Replace("{" + name + "}", Convert.ToString(replacement, CultureInfo.InvariantCulture) ?? "", StringComparison.Ordinal);
+        }
+        return value;
+    }
+
+    /// <summary>将 Control API 的机器错误码投影为 CLI 等宿主输出使用的本地化文字。</summary>
+    public static string TranslateApiError(
+        string code,
+        JsonNode? args,
+        int statusCode,
+        string? locale = null)
+    {
+        var named = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (args is JsonObject objectArgs)
+        {
+            foreach ((string key, JsonNode? value) in objectArgs)
+            {
+                named[key] = JsonScalar(value);
+            }
+        }
+        string fallback = code switch
+        {
+            "auth_required" => "需要访问令牌",
+            "not_found" => "未找到",
+            "method_not_allowed" => "请求方法不支持",
+            "validation_error" or "invalid_request" => "请求格式无效",
+            "operation_forbidden" or "local_only" => "当前操作不被允许",
+            "resource_busy" or "pending" => "资源当前忙碌，请稍后重试",
+            "timeout" => "请求超时",
+            "service_unavailable" or "repository_unavailable" => "服务暂不可用",
+            "internal_error" => "服务内部错误",
+            _ => $"服务返回 HTTP {statusCode}（{code}）",
+        };
+        return TranslateNamed("api.error." + code, fallback, named, locale);
+    }
+
+    /// <summary>CLI 人类输出的统一入口；未知旧调用在英文环境下也不会泄漏中文源文案。</summary>
+    public static string TranslateCli(string code, string fallback, string? locale = null)
+    {
+        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
+        string translated = TranslateLegacy(fallback, normalized);
+        if (normalized == LocaleCatalog.DefaultLocale || !ContainsCjk(translated))
+        {
+            return translated;
+        }
+        return code switch
+        {
+            "invalid_arguments" => "Invalid command-line arguments",
+            "not_found" => "Not found",
+            "ambiguous_target" => "Multiple matching objects found",
+            "service_unavailable" => "The NexusPipeline service is unavailable",
+            "timeout" => "The operation timed out",
+            "cancelled" => "Cancelled",
+            "execution_failed" => "Execution failed",
+            "internal_error" => "The operation failed",
+            "progress" => "Progress update",
+            "diagnostic" => "Diagnostic information",
+            _ => "The operation failed",
+        };
+    }
+
+    /// <summary>
+    /// 在宿主日志输出边界按 HostLocale 投影宿主生成的固定文字。
+    /// 动态值仍由调用方拼接并保留原样；脚本、游戏和插件自行产生的日志内容不由这里翻译。
+    /// </summary>
+    public static string TranslateLog(string message, string? locale = null)
+    {
+        string normalized = LocaleCatalog.Normalize(locale ?? LocaleCatalog.HostLocale);
+        if (normalized == LocaleCatalog.DefaultLocale || string.IsNullOrEmpty(message) || !ContainsCjk(message))
+        {
+            return message;
+        }
+
+        IReadOnlyDictionary<string, string> source = GetResources(LocaleCatalog.DefaultLocale);
+        IReadOnlyDictionary<string, string> target = GetResources(normalized);
+        string translated = message;
+        var replacements = source
+            .Where(item => item.Key.StartsWith("log.token.", StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(item.Value)
+                && !item.Value.Contains('{', StringComparison.Ordinal)
+                && target.TryGetValue(item.Key, out string? value)
+                && !string.IsNullOrWhiteSpace(value)
+                && !string.Equals(item.Value, value, StringComparison.Ordinal))
+            .Select(item => (Source: item.Value, Target: target[item.Key]))
+            .Where(item => item.Source.Length >= 2)
+            .OrderByDescending(item => item.Source.Length)
+            .ThenBy(item => item.Source, StringComparer.Ordinal)
+            .ToArray();
+
+        foreach ((string sourceText, string targetText) in replacements)
+        {
+            translated = translated.Replace(sourceText, targetText, StringComparison.Ordinal);
+        }
+
+        translated = translated
+            .Replace('：', ':')
+            .Replace("，", ", ", StringComparison.Ordinal)
+            .Replace(",  ", ", ", StringComparison.Ordinal)
+            .Replace('。', '.')
+            .Replace('；', ';')
+            .Replace('（', '(')
+            .Replace('）', ')')
+            .Replace('「', '"')
+            .Replace('」', '"')
+            .Replace('、', ',');
+
+        if (!ContainsCjk(translated))
+        {
+            return translated;
+        }
+
+        // 未登记的固定文案不能泄漏到其他语言日志；保留稳定诊断编号，便于切回默认语言或查找源码。
+        string fingerprint = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(message)))[..8].ToLowerInvariant();
+        return TranslateNamed(
+            "log.untranslated",
+            "Host log event {code} contains untranslated host text",
+            new Dictionary<string, object?> { ["code"] = fingerprint },
+            normalized);
     }
 
     public static string TranslateLegacy(
@@ -104,5 +252,75 @@ internal static class HostLocalization
         {
             return template;
         }
+    }
+
+    private static bool TryGetTemplate(string locale, string key, out string? template)
+    {
+        IReadOnlyDictionary<string, string> resources = GetResources(locale);
+        return resources.TryGetValue(key, out template);
+    }
+
+    private static IReadOnlyDictionary<string, string> GetResources(string locale)
+    {
+        lock (ResourceSync)
+        {
+            if (ResourceCache.TryGetValue(locale, out IReadOnlyDictionary<string, string>? cached))
+            {
+                return cached;
+            }
+
+            var result = new Dictionary<string, string>(StringComparer.Ordinal);
+            try
+            {
+                using Stream? stream = OpenResource(locale + ".json");
+                if (stream is not null)
+                {
+                    Dictionary<string, string>? values = JsonSerializer.Deserialize<Dictionary<string, string>>(stream);
+                    if (values is not null)
+                    {
+                        foreach ((string key, string value) in values)
+                        {
+                            result[key] = value;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // 内置 English 回退表和调用方 fallback 保证宿主在资源损坏时仍可用。
+            }
+            ResourceCache[locale] = result;
+            return result;
+        }
+    }
+
+    private static Stream? OpenResource(string fileName)
+    {
+        Assembly assembly = typeof(HostLocalization).Assembly;
+        string suffix = $".Localization.Resources.{fileName}";
+        string? resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        return resourceName is null ? null : assembly.GetManifestResourceStream(resourceName);
+    }
+
+    private static object? JsonScalar(JsonNode? node)
+    {
+        if (node is null)
+        {
+            return null;
+        }
+        if (node is JsonValue value)
+        {
+            if (value.TryGetValue<string>(out string? text)) return text;
+            if (value.TryGetValue<long>(out long integer)) return integer;
+            if (value.TryGetValue<double>(out double number)) return number;
+            if (value.TryGetValue<bool>(out bool boolean)) return boolean;
+        }
+        return node.ToJsonString(JsonOpts.Web);
+    }
+
+    private static bool ContainsCjk(string value)
+    {
+        return value.Any(character => character is >= '\u4e00' and <= '\u9fff');
     }
 }

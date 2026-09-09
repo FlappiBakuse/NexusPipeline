@@ -6,7 +6,7 @@ import { isCurrent, state } from "../core/state.js";
 import { modalShell, registerModalCleanup, showModal } from "../core/modal.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
-import { applyTranslations, getLocale, text, translateText } from "../core/i18n.js";
+import { applyTranslations, getLocale, t } from "../core/i18n.js";
 
 let historyDates = [];
 let historySelectedDate = "";
@@ -45,7 +45,6 @@ function isHistoryMobile() {
 function fmtDateCN(dateStr) {
   const parts = String(dateStr || "").split("-");
   if (parts.length !== 3) return esc(dateStr);
-  if (getLocale() === "zh-CN") return `${parts[0]}年${parts[1]}月${parts[2]}日`;
   const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   return Number.isNaN(date.getTime()) ? esc(dateStr) : date.toLocaleDateString(getLocale(), { year: "numeric", month: "short", day: "numeric" });
 }
@@ -54,37 +53,36 @@ function fmtDateCN(dateStr) {
 function fmtDateTimeCN(value) {
   const d = new Date(value);
   if (!value || isNaN(d.getTime())) return "-";
-  if (getLocale() !== "zh-CN") return d.toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "medium" });
-  return `${d.getFullYear()}年${pad(d.getMonth() + 1)}月${pad(d.getDate())}日 ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return d.toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "medium" });
 }
 
 /** 记录条状态徽章（参考图2）：成功=✓ 完成、失败=✕ 失败：原因、部分完成/已取消=警示色。 */
 function entryBadge(record) {
   const status = record.status;
-  if (status === "success") return `<span class="badge ok">✓ ${text("完成")}</span>`;
-  if (status === "partial") return `<span class="badge warn">⚠ ${text("部分完成")}</span>`;
-  if (status === "cancelled") return `<span class="badge warn">${text("已取消")}</span>`;
-  if (status === "skipped") return `<span class="badge blue">${text("已跳过")}</span>`;
+  if (status === "success") return `<span class="badge ok">✓ ${t("ui.complete")}</span>`;
+  if (status === "partial") return `<span class="badge warn">⚠ ${t("ui.partially_complete")}</span>`;
+  if (status === "cancelled") return `<span class="badge warn">${t("ui.cancelled")}</span>`;
+  if (status === "skipped") return `<span class="badge blue">${t("ui.skipped")}</span>`;
   const detail = resultDetail(record);
-  const reason = detail && detail !== "-" ? `${getLocale() === "en-US" ? ": " : "："}${detail}` : "";
-  return `<span class="badge bad" title="${esc(reason)}">✕ ${text("失败")}${esc(reason)}</span>`;
+  const reason = detail && detail !== "-" ? `${t("ui.reason_separator")}${detail}` : "";
+  return `<span class="badge bad" title="${esc(reason)}">✕ ${t("ui.failed")}${esc(reason)}</span>`;
 }
 
 function historyRangeMarkup() {
-  const displayValue = `${historyStartDate.replaceAll("-", "/")} ${text("至")} ${historyEndDate.replaceAll("-", "/")}`;
+  const displayValue = `${historyStartDate.replaceAll("-", "/")} ${t("ui.to")} ${historyEndDate.replaceAll("-", "/")}`;
   return `<div class="history-range-search" data-history-range data-testid="history-range-search">
     <div class="history-range-picker">
       <button id="history-range-display" class="history-range-display" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="history-range-popover" data-history-range-display data-testid="history-range-display"><span data-history-range-label>${esc(displayValue)}</span>
         <span class="history-range-icon" aria-hidden="true">${icon("calendar")}</span>
       </button>
-      <div id="history-range-popover" class="history-range-popover secondary-surface" role="dialog" aria-label="${text("选择时间段")}" hidden data-history-range-popover>
-        <div class="history-calendar-toolbar"><button class="ghost sm" type="button" data-history-calendar-prev aria-label="${text("上一个月份")}">‹</button><strong data-history-calendar-title>${text("选择日期")}</strong><button class="ghost sm" type="button" data-history-calendar-next aria-label="${text("下一个月份")}">›</button></div>
+      <div id="history-range-popover" class="history-range-popover secondary-surface" role="dialog" aria-label="${t("ui.choose_time_range")}" hidden data-history-range-popover>
+        <div class="history-calendar-toolbar"><button class="ghost sm" type="button" data-history-calendar-prev aria-label="${t("ui.previous_month")}">‹</button><strong data-history-calendar-title>${t("ui.choose_date")}</strong><button class="ghost sm" type="button" data-history-calendar-next aria-label="${t("ui.next_month")}">›</button></div>
         <div class="history-calendar-months" data-history-calendar-months></div>
-        <div class="history-range-selection"><span class="history-range-selection-item"><span class="muted">${text("开始")}</span><strong data-history-range-from-label>${esc(historyStartDate.replaceAll("-", "/"))}</strong></span><span class="history-range-selection-arrow" aria-hidden="true">→</span><span class="history-range-selection-item"><span class="muted">${text("结束")}</span><strong data-history-range-to-label>${esc(historyEndDate.replaceAll("-", "/"))}</strong></span></div>
-        <div class="history-range-popover-footer"><span class="muted history-range-hint">${text("点击日期选择范围，今天及之后的日期不可选")}</span><button class="primary sm" type="button" data-history-range-apply>${text("应用范围")}</button></div>
+        <div class="history-range-selection"><span class="history-range-selection-item"><span class="muted">${t("ui.start")}</span><strong data-history-range-from-label>${esc(historyStartDate.replaceAll("-", "/"))}</strong></span><span class="history-range-selection-arrow" aria-hidden="true">→</span><span class="history-range-selection-item"><span class="muted">${t("ui.end")}</span><strong data-history-range-to-label>${esc(historyEndDate.replaceAll("-", "/"))}</strong></span></div>
+        <div class="history-range-popover-footer"><span class="muted history-range-hint">${t("ui.click_a_date_to_choose_a_range_today_and_later_cannot_be_selected")}</span><button class="primary sm" type="button" data-history-range-apply>${t("ui.apply_range")}</button></div>
       </div>
-      <input id="history-from" type="hidden" value="${esc(historyStartDate)}" aria-label="开始日期" data-testid="history-from">
-      <input id="history-to" type="hidden" value="${esc(historyEndDate)}" aria-label="结束日期" data-testid="history-to">
+      <input id="history-from" type="hidden" value="${esc(historyStartDate)}" aria-label="${t("ui.start")} ${t("ui.date")}" data-testid="history-from">
+      <input id="history-to" type="hidden" value="${esc(historyEndDate)}" aria-label="${t("ui.end")} ${t("ui.date")}" data-testid="history-to">
     </div>
   </div>`;
 }
@@ -103,7 +101,6 @@ function shiftMonth(value, offset) {
 
 function monthLabel(value) {
   const [year, month] = monthKey(value).split("-");
-  if (getLocale() === "zh-CN") return `${year}年${month}月`;
   return new Date(Number(year), Number(month) - 1, 1).toLocaleDateString(getLocale(), { year: "numeric", month: "long" });
 }
 
@@ -112,9 +109,7 @@ function calendarMonthMarkup(value, start, end, maxDate) {
   const first = new Date(year, month - 1, 1);
   const leading = first.getDay();
   const dayCount = new Date(year, month, 0).getDate();
-  const weekdayLabels = getLocale() === "zh-CN"
-    ? ["日", "一", "二", "三", "四", "五", "六"]
-    : ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const weekdayLabels = [t("ui.sun"), t("ui.mon"), t("ui.tue"), t("ui.wed"), t("ui.thu"), t("ui.fri"), t("ui.sat")];
   const cells = weekdayLabels.map(day => `<span class="history-calendar-weekday">${day}</span>`);
   for (let index = 0; index < leading; index++) cells.push('<span class="history-calendar-day is-empty" aria-hidden="true"></span>');
   for (let day = 1; day <= dayCount; day++) {
@@ -135,9 +130,9 @@ function syncHistoryRangeLabels(root) {
   const display = root.querySelector("[data-history-range-label]");
   const fromLabel = root.querySelector("[data-history-range-from-label]");
   const toLabel = root.querySelector("[data-history-range-to-label]");
-  if (display) display.textContent = from && to ? `${from.replaceAll("-", "/")} ${text("至")} ${to.replaceAll("-", "/")}` : (from ? `${from.replaceAll("-", "/")} ${text("至")} ${text("选择结束日期")}` : text("选择时间段"));
-  if (fromLabel) fromLabel.textContent = from ? from.replaceAll("-", "/") : text("未选择");
-  if (toLabel) toLabel.textContent = to ? to.replaceAll("-", "/") : text("未选择");
+  if (display) display.textContent = from && to ? `${from.replaceAll("-", "/")} ${t("ui.to")} ${to.replaceAll("-", "/")}` : (from ? `${from.replaceAll("-", "/")} ${t("ui.to")} ${t("ui.choose_end_date")}` : t("ui.choose_time_range"));
+  if (fromLabel) fromLabel.textContent = from ? from.replaceAll("-", "/") : t("ui.not_selected");
+  if (toLabel) toLabel.textContent = to ? to.replaceAll("-", "/") : t("ui.not_selected");
 }
 
 function renderHistoryCalendar(root) {
@@ -262,28 +257,28 @@ function dateRowsMarkup() {
       const expanded = historyExpandedDates.has(date.date);
       const users = historyUsersByDate.get(date.date);
       const usersMarkup = users === undefined
-        ? `<div class="history-users-loading muted" role="status">${text("正在加载运行用户…")}</div>`
+        ? `<div class="history-users-loading muted" role="status">${t("ui.loading_run_users")}</div>`
         : userRowsMarkup(date.date, users);
       return `<div class="history-date-group${expanded ? " active" : ""}" data-history-date-group data-date="${esc(date.date)}" data-testid="history-date-group">
-        <button class="history-date-row${expanded ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-expanded="${expanded ? "true" : "false"}" aria-pressed="${expanded ? "true" : "false"}">${icon(expanded ? "chevronDown" : "chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} ${text("条")}</span></button>
+        <button class="history-date-row${expanded ? " active" : ""}" type="button" data-action="history-date" data-date="${esc(date.date)}" data-testid="history-date" aria-expanded="${expanded ? "true" : "false"}" aria-pressed="${expanded ? "true" : "false"}">${icon(expanded ? "chevronDown" : "chevronRight")}<span>${fmtDateCN(date.date)}</span><span class="muted">${date.count} ${t("ui.items")}</span></button>
         ${expanded ? `<div class="history-date-users" data-date="${esc(date.date)}" data-testid="history-date-users">${usersMarkup}</div>` : ""}
       </div>`;
     }).join("")
-    : `<div class="history-dates-empty-message"><strong>${text("该时间段暂无记录")}</strong><span>${text("请选择其他日期范围。")}</span></div>`;
+    : `<div class="history-dates-empty-message"><strong>${t("ui.no_records_in_this_time_range")}</strong><span>${t("ui.choose_another_date_range")}</span></div>`;
 }
 
 function historyDetailBackMarkup() {
   return historySelectedUserKey
-    ? `<button class="history-detail-back ghost" type="button" data-action="history-detail-back" data-testid="history-user-back">${text("返回用户列表")}</button>`
+    ? `<button class="history-detail-back ghost" type="button" data-action="history-detail-back" data-testid="history-user-back">${t("ui.back_to_user_list")}</button>`
     : "";
 }
 
 function userRowsMarkup(date, users = []) {
   if (!users.length) {
-    return `<div class="history-empty-message"><strong>${text("该日暂无运行用户")}</strong><span>${text("请选择其他日期。")}</span></div>`;
+    return `<div class="history-empty-message"><strong>${t("ui.no_run_users_on_this_day")}</strong><span>${t("ui.choose_another_date")}</span></div>`;
   }
   return users.map(user => {
-    const name = user.userName || text("未指定用户");
+    const name = user.userName || t("ui.no_user_specified");
     const selected = date === historySelectedDate && user.userKey === historySelectedUserKey;
     return `<button class="history-user-row${selected ? " active" : ""}" type="button" data-action="history-user" data-history-date="${esc(date)}" data-user-key="${esc(user.userKey || "")}" data-user-name="${esc(name)}" data-testid="history-user" aria-pressed="${selected ? "true" : "false"}">
       <span class="history-user-avatar" aria-hidden="true">${icon("user")}</span>
@@ -323,9 +318,9 @@ function pluginHistoryDetailMarkup(record) {
       return `<span class="badge ${tone}" title="${esc(badge.title || "")}">${esc(badge.label || "")}</span>`;
     }).join("");
     const fields = (item.fields || []).map(field => `<div class="kv"><span class="k">${esc(field.label || "")}</span><span>${esc(field.value || "")}</span></div>`).join("");
-    return `<section class="subsection plugin-history-detail"><div class="section-heading"><h3>${esc(item.title || item.id || text("插件信息"))}</h3><span class="muted">${esc(item.pluginDisplayName || item.pluginName || "")}</span></div>${badges ? `<div class="plugin-contribution-badge">${badges}</div>` : ""}${fields ? `<div class="detail">${fields}</div>` : ""}</section>`;
+    return `<section class="subsection plugin-history-detail"><div class="section-heading"><h3>${esc(item.title || item.id || t("ui.plugin_information"))}</h3><span class="muted">${esc(item.pluginDisplayName || item.pluginName || "")}</span></div>${badges ? `<div class="plugin-contribution-badge">${badges}</div>` : ""}${fields ? `<div class="detail">${fields}</div>` : ""}</section>`;
   }).join("");
-  return items ? `<section class="plugin-history-section"><div class="section-heading"><h3>${text("插件运行信息")}</h3><span class="muted">${text("运行完成时保存的展示快照")}</span></div>${items}</section>` : "";
+  return items ? `<section class="plugin-history-section"><div class="section-heading"><h3>${t("ui.plugin_run_information")}</h3><span class="muted">${t("ui.display_snapshot_saved_when_the_run_completes")}</span></div>${items}</section>` : "";
 }
 
 function panelsMarkup() {
@@ -334,23 +329,23 @@ function panelsMarkup() {
   const usersVisible = isHistoryMobile() && hasDate && !hasUser;
   const detailVisible = isHistoryMobile() && hasUser;
   const modeClass = hasUser ? " history-user-selected" : usersVisible ? " history-users-visible" : "";
-  const panelTitle = hasUser ? `${historySelectedUserName || text("用户")} · ${text("运行记录")}` : text("运行记录");
-  const panelCount = hasUser ? `${historyRecords.length} ${text("条记录")}` : text("选择用户");
+  const panelTitle = hasUser ? `${historySelectedUserName || t("ui.user")} · ${t("ui.run_records")}` : t("ui.run_records");
+  const panelCount = hasUser ? `${historyRecords.length} ${t("ui.record_s")}` : t("ui.choose_user");
   const content = hasUser
-    ? (historyRecords.length ? historyRecords.map(entryMarkup).join("") : `<div class="history-empty-message">${text("该用户当天暂无运行记录")}</div>`)
-    : `<div class="history-empty-message"><strong>${text("选择运行用户")}</strong><span>${text("点击日期下的用户查看当天运行记录。")}</span></div>`;
+    ? (historyRecords.length ? historyRecords.map(entryMarkup).join("") : `<div class="history-empty-message">${t("ui.this_user_has_no_run_records_for_the_day")}</div>`)
+    : `<div class="history-empty-message"><strong>${t("ui.choose_run_users")}</strong><span>${t("ui.click_a_user_under_a_date_to_view_that_day_s_run_records")}</span></div>`;
   return `<div class="history-browser${detailVisible ? " history-detail-visible" : ""}${modeClass}" data-testid="history-panels">
     <div class="history-list-column">
       ${historyRangeMarkup()}
       <aside class="history-dates-panel">
-        <div class="history-panel-head">${icon("calendar")}<h3>${text("日期列表")}</h3><span class="muted">${historyDates.length} ${text("天")}</span></div>
+        <div class="history-panel-head">${icon("calendar")}<h3>${t("ui.date_list")}</h3><span class="muted">${historyDates.length} ${t("ui.days")}</span></div>
         <div class="history-dates-list">${dateRowsMarkup()}</div>
       </aside>
     </div>
     <div class="history-records-column">
       ${hasDate ? historyDetailBackMarkup() : ""}
       <section class="history-records-panel history-level-panel">
-        <div class="history-panel-head">${icon(hasUser ? "queues" : hasDate ? "scripts" : "history")}<h3>${esc(panelTitle)}</h3><span class="muted" data-testid="history-records-count">${esc(panelCount)}</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="${text("刷新记录")}" data-testid="history-refresh">${icon("refresh")}</button></div>
+        <div class="history-panel-head">${icon(hasUser ? "queues" : hasDate ? "scripts" : "history")}<h3>${esc(panelTitle)}</h3><span class="muted" data-testid="history-records-count">${esc(panelCount)}</span><button class="history-refresh" type="button" data-action="history-refresh" aria-label="${t("ui.refresh_records")}" data-testid="history-refresh">${icon("refresh")}</button></div>
         <div class="history-entry-list history-level-list">${content}</div>
       </section>
     </div>
@@ -358,23 +353,23 @@ function panelsMarkup() {
 }
 
 function historyRangeLabel() {
-  return `${fmtDateCN(historyStartDate)} 至 ${fmtDateCN(historyEndDate)}`;
+  return `${fmtDateCN(historyStartDate)} ${t("ui.to")} ${fmtDateCN(historyEndDate)}`;
 }
 
 function historyViewLabel() {
-  if (!historySelectedDate) return `${historyRangeLabel()} · ${text("选择运行用户")}`;
-  if (!historySelectedUserKey) return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · ${text("选择运行用户")}`;
-  return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · ${historySelectedUserName || text("运行记录")}`;
+  if (!historySelectedDate) return `${historyRangeLabel()} · ${t("ui.choose_run_users")}`;
+  if (!historySelectedUserKey) return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · ${t("ui.choose_run_users")}`;
+  return `${historyRangeLabel()} · ${fmtDateCN(historySelectedDate)} · ${historySelectedUserName || t("ui.run_records")}`;
 }
 
 function renderHistoryView() {
-  render(pageHeader("历史记录", "历史记录", historyViewLabel(), "") + panelsMarkup());
+  render(pageHeader(t("shell.history"), t("shell.history"), historyViewLabel(), "") + panelsMarkup());
   bindHistoryRangePicker();
 }
 
 export async function pageHistory(token) {
   if (!isCurrent("history", token)) return;
-  navActive("history"); setTopbarTitle("历史记录");
+  navActive("history"); setTopbarTitle(t("shell.history"));
   if (isHistoryMobile()) {
     historySelectedDate = "";
     historySelectedUserKey = "";
@@ -489,11 +484,11 @@ export function historyRangeSearch(root = document.querySelector("[data-history-
   const from = scope.querySelector("#history-from")?.value || "";
   const to = scope.querySelector("#history-to")?.value || "";
   if (!from || !to) {
-    toast("请选择开始日期和结束日期", "error");
+    toast(t("ui.choose_a_start_date_and_an_end_date"), "error");
     return;
   }
   if (from > to) {
-    toast("开始日期不能晚于结束日期", "error");
+    toast(t("ui.the_start_date_cannot_be_later_than_the_end_date"), "error");
     return;
   }
   if (from === historyStartDate && to === historyEndDate) return;
@@ -536,7 +531,7 @@ export async function historySelectUser(target) {
   if (!date || !historyExpandedDates.has(date) || !userKey) return;
   historySelectedDate = date;
   historySelectedUserKey = userKey;
-  historySelectedUserName = target.dataset.userName || text("未指定用户");
+  historySelectedUserName = target.dataset.userName || t("ui.no_user_specified");
   await loadDayRecords(state.routeToken);
 }
 
@@ -571,12 +566,12 @@ export function historyDetailBack() {
 function historyLogMarkup(id, attemptKey, logInfo, label) {
   const total = logInfo?.logTotalLines || 0;
   const full = logInfo?.logText != null;
-  const tailNote = total > 200 && !full ? text("，仅显示尾部 200 行") : "";
+  const tailNote = total > 200 && !full ? t("ui.showing_only_the_last_200_lines") : "";
   const action = total > 200 && !full
-    ? `<div class="history-log-actions"><span class="muted">${text("日志较长，默认只加载尾部")}</span><button class="ghost sm" type="button" data-action="history-full-log" data-id="${esc(id)}" data-attempt="${esc(attemptKey)}">${text("查看完整日志")}</button></div>`
+    ? `<div class="history-log-actions"><span class="muted">${t("ui.this_log_is_long_only_the_tail_is_loaded_by_default")}</span><button class="ghost sm" type="button" data-action="history-full-log" data-id="${esc(id)}" data-attempt="${esc(attemptKey)}">${t("ui.view_full_log")}</button></div>`
     : "";
-  const logText = full ? logInfo.logText : (logInfo?.logTail || text("（无脚本日志）"));
-  return `<div class="history-log" data-history-log data-attempt="${esc(attemptKey)}"><div class="qk-row" data-history-log-meta>${translateText(label)}${logInfo ? `，${total} ${text("行")}${tailNote}` : ""}</div>${action}<pre class="logbox" data-history-log-body>${esc(logText)}</pre></div>`;
+  const logText = full ? logInfo.logText : (logInfo?.logTail || t("ui.no_script_log"));
+  return `<div class="history-log" data-history-log data-attempt="${esc(attemptKey)}"><div class="qk-row" data-history-log-meta>${esc(label)}${logInfo ? `，${total} ${t("ui.lines")}${tailNote}` : ""}</div>${action}<pre class="logbox" data-history-log-body>${esc(logText)}</pre></div>`;
 }
 
 function historyImageUrl(id, attemptNumber, screenshotId) {
@@ -588,32 +583,32 @@ function historyAttemptScreenshotsMarkup(id, attempt, logInfo) {
   if (!screenshots.length) return "";
   const items = screenshots.map((screenshot, index) => {
     const imageUrl = screenshot.imageUrl || historyImageUrl(id, attempt.number, screenshot.id);
-    const label = translateText(`第 ${attempt.number} 次尝试截图 ${index + 1}`);
+    const label = t("ui.screenshot_value_from_attempt_value", { attempt: attempt.number, index: index + 1 });
     const details = [screenshot.width && screenshot.height ? `${screenshot.width}×${screenshot.height}` : "", screenshot.trigger || ""].filter(Boolean).join(" · ");
     return `<button class="history-screenshot-thumb" type="button" data-action="history-image" data-image-url="${esc(imageUrl)}" data-image-alt="${esc(label)}" data-image-caption="${esc(details)}" data-testid="history-screenshot"><img alt="${esc(label)}" loading="lazy" data-history-image><span class="history-screenshot-index">${index + 1}</span></button>`;
   }).join("");
-  return `<div class="history-attempt-screenshots" data-testid="history-attempt-screenshots"><div class="qk-row">${text("运行截图")}（${screenshots.length} ${text("张")}）</div><div class="history-screenshot-strip" role="list" aria-label="${translateText(`第 ${attempt.number} 次尝试运行截图`)}">${items}</div></div>`;
+  return `<div class="history-attempt-screenshots" data-testid="history-attempt-screenshots"><div class="qk-row">${t("ui.run_screenshot")}（${screenshots.length} ${t("ui.images")}）</div><div class="history-screenshot-strip" role="list" aria-label="${t("ui.run_screenshots_from_attempt_value", { attempt: attempt.number })}">${items}</div></div>`;
 }
 
 function historyDetailMetaMarkup(record) {
-  const user = record.userName || text("未指定用户");
-  const mode = record.mode === "auto" ? text("自动运行") : text("手动运行");
+  const user = record.userName || t("ui.no_user_specified");
+  const mode = record.mode === "auto" ? t("ui.automatic_run") : t("ui.run_manually");
   return `<div class="history-detail-meta" data-testid="history-detail-meta">
-    <div class="history-detail-meta-item"><span class="k">${text("结果")}</span><span>${statusBadge(record.status)}</span></div>
-    <div class="history-detail-meta-item"><span class="k">${text("运行模式")}</span><span>${mode}</span></div>
-    <div class="history-detail-meta-item"><span class="k">${text("运行用户")}</span><span>${esc(user)}</span></div>
-    <div class="history-detail-meta-item"><span class="k">${text("尝试次数")}</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div>
-    <div class="history-detail-meta-item"><span class="k">${text("开始时间")}</span><span>${esc(fmtTime(record.startTime))}</span></div>
-    <div class="history-detail-meta-item"><span class="k">${text("结束时间")}</span><span>${esc(fmtTime(record.endTime))}</span></div>
-    <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">${text("结果说明")}</span><span>${esc(resultDetail(record))}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.result")}</span><span>${statusBadge(record.status)}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.run_mode")}</span><span>${mode}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.run_users")}</span><span>${esc(user)}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.attempts")}</span><span>${record.attempts || 0} / ${record.maxAttempts || "-"}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.start_time")}</span><span>${esc(fmtTime(record.startTime))}</span></div>
+    <div class="history-detail-meta-item"><span class="k">${t("ui.end_time")}</span><span>${esc(fmtTime(record.endTime))}</span></div>
+    <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">${t("ui.result_description")}</span><span>${esc(resultDetail(record))}</span></div>
   </div>`;
 }
 
 function historyImageLightboxMarkup() {
-  return `<div class="history-image-lightbox" data-history-lightbox hidden role="dialog" aria-modal="true" aria-label="${text("查看运行截图")}">
+  return `<div class="history-image-lightbox" data-history-lightbox hidden role="dialog" aria-modal="true" aria-label="${t("ui.view_run_screenshot")}">
     <div class="history-image-lightbox-backdrop" data-action="history-image-close" aria-hidden="true"></div>
     <figure class="history-image-lightbox-content" data-history-lightbox-content><img data-history-lightbox-image alt=""><figcaption data-history-lightbox-caption></figcaption></figure>
-    <button class="icon-button history-image-lightbox-close" type="button" data-action="history-image-close" aria-label="${text("关闭截图预览")}">${icon("close")}</button>
+    <button class="icon-button history-image-lightbox-close" type="button" data-action="history-image-close" aria-label="${t("ui.close_screenshot_preview")}">${icon("close")}</button>
   </div>`;
 }
 
@@ -644,18 +639,18 @@ function disposeHistoryImageSession(session) {
 }
 
 async function loadHistoryImage(session, imageUrl) {
-  if (!session || session.closed) throw new DOMException("图片会话已关闭", "AbortError");
+  if (!session || session.closed) throw new DOMException(t("ui.image_session_closed"), "AbortError");
   const cached = session.urls.get(imageUrl);
   if (cached) return cached;
   const existing = session.requests.get(imageUrl);
   if (existing) return existing;
   const request = apiBlob(imageUrl, session.controller.signal)
     .then(blob => {
-      if (!blob.type.startsWith("image/")) throw new Error("运行截图资源格式无效");
+      if (!blob.type.startsWith("image/")) throw new Error(t("ui.invalid_run_screenshot_format"));
       const url = URL.createObjectURL(blob);
       if (session.closed) {
         URL.revokeObjectURL(url);
-        throw new DOMException("图片会话已关闭", "AbortError");
+        throw new DOMException(t("ui.image_session_closed"), "AbortError");
       }
       session.urls.set(imageUrl, url);
       return url;
@@ -707,7 +702,7 @@ export async function historyOpenImage(target) {
   const requestToken = Symbol("history-lightbox-request");
   historyLightboxRequestToken = requestToken;
   image.removeAttribute("src");
-  image.alt = target.dataset.imageAlt || text("运行截图");
+  image.alt = target.dataset.imageAlt || t("ui.run_screenshot");
   const caption = lightbox.querySelector("[data-history-lightbox-caption]");
   if (caption) caption.textContent = target.dataset.imageCaption || "";
   lightbox.hidden = false;
@@ -745,13 +740,13 @@ export async function historyDetail(id) {
     if (!record) return;
     const attempts = (record.attemptDetails || []).map(attempt => {
       const logInfo = (data.attemptLogs || []).find(l => l.number === attempt.number);
-      const status = attempt.status === "success" ? text("成功") : attempt.status === "partial" ? text("部分完成") : attempt.status === "cancelled" ? text("已取消") : attempt.status === "skipped" ? text("已跳过") : text("失败");
+      const status = attempt.status === "success" ? t("ui.success") : attempt.status === "partial" ? t("ui.partially_complete") : attempt.status === "cancelled" ? t("ui.cancelled") : attempt.status === "skipped" ? t("ui.skipped") : t("ui.failed");
       const badgeClass = attempt.status === "success" ? "ok" : attempt.status === "partial" || attempt.status === "cancelled" ? "warn" : attempt.status === "skipped" ? "blue" : "bad";
-      const attemptReason = translateText(attempt.reason || "-");
-      return `<section class="subsection history-attempt-detail"><div class="section-heading"><h3>${translateText(`第 ${attempt.number} 次尝试`)}</h3><span class="badge ${badgeClass}">${status}</span></div><div class="history-attempt-meta"><div><span class="k">${text("时间")}</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div><div><span class="k">${text("原因")}</span><span>${esc(attemptReason)}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, `脚本日志（第 ${attempt.number} 次尝试）`)}${historyAttemptScreenshotsMarkup(id, attempt, logInfo)}</section>`;
+      const attemptReason = attempt.reason || "-";
+      return `<section class="subsection history-attempt-detail"><div class="section-heading"><h3>${t("ui.attempt_value", { attempt: attempt.number })}</h3><span class="badge ${badgeClass}">${status}</span></div><div class="history-attempt-meta"><div><span class="k">${t("ui.time")}</span><span>${esc(fmtTime(attempt.startTime))} - ${esc(fmtTime(attempt.endTime))}</span></div><div><span class="k">${t("ui.reason")}</span><span>${esc(attemptReason)}</span></div></div>${historyLogMarkup(id, String(attempt.number), logInfo, t("ui.script_log_attempt_value", { attempt: attempt.number }))}${historyAttemptScreenshotsMarkup(id, attempt, logInfo)}</section>`;
     }).join("");
     const body = `${historyDetailMetaMarkup(record)}${pluginHistoryDetailMarkup(record)}${pluginSlotMarkup("history.detail.sections", "history.detail.sections", "history-detail-plugin-slot", { mode: "detail", primaryId: record.id })}<div class="history-attempt-list">${attempts}</div>${historyImageLightboxMarkup()}`;
-    showModal(modalShell(`${esc(record.scriptName)} ${text("运行详情")}`, body, `<button class="ghost" type="button" data-action="close-modal">${text("关闭")}</button>`), true);
+    showModal(modalShell(`${esc(record.scriptName)} ${t("ui.run_details")}`, body, `<button class="ghost" type="button" data-action="close-modal">${t("ui.close")}</button>`), true);
     const imageSession = newHistoryImageSession();
     registerModalCleanup(() => {
       historyCloseImage();
@@ -768,13 +763,13 @@ export async function historyFullLog(id, attemptKey, target) {
     const query = `/api/history/detail?id=${encodeURIComponent(id)}&full=true&attempt=${encodeURIComponent(attemptKey)}`;
     const data = await api("GET", query);
     const info = (data.attemptLogs || []).find(log => String(log.number) === String(attemptKey));
-    if (!info || info.logText == null) throw new Error(text("完整日志不存在或已被清理"));
+    if (!info || info.logText == null) throw new Error(t("ui.the_full_log_does_not_exist_or_has_been_cleaned_up"));
     const root = target.closest("[data-history-log]");
     const body = root?.querySelector("[data-history-log-body]");
     const meta = root?.querySelector("[data-history-log-meta]");
     if (!body || !meta) return;
-    body.textContent = info.logText || text("（无脚本日志）");
-    meta.textContent = `${translateText(`脚本日志（第 ${attemptKey} 次尝试）`)}，${info.logTotalLines || 0} ${text("行")}`;
+    body.textContent = info.logText || t("ui.no_script_log");
+    meta.textContent = `${t("ui.script_log_attempt_value", { attempt: attemptKey })}，${info.logTotalLines || 0} ${t("ui.lines")}`;
     target.remove();
   } catch (error) { toast(error.message, "error"); }
 }

@@ -12,7 +12,7 @@ import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldErro
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { durationClock } from "../core/duration.js";
-import { text } from "../core/i18n.js";
+import { t } from "../core/i18n.js";
 
 let queueDraft = null;
 let queuePage = 1;
@@ -37,21 +37,21 @@ if (typeof document !== "undefined") {
 
 export async function pageQueues(token) {
   if (!isCurrent("queues", token)) return;
-  navActive("queues"); setTopbarTitle(text("调度队列"));
+  navActive("queues"); setTopbarTitle(t("ui.schedule_queues"));
   let queues, scripts, status;
   try { [queues, scripts, status] = await Promise.all([api("GET", "/api/queues"), api("GET", "/api/scripts"), api("GET", "/api/status")]); }
-  catch (error) { render(`<div class="empty"><strong>${text("加载队列失败")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("ui.failed_to_load_queues")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("queues", token)) return;
   state.queues = queues; state.scripts = scripts; state.plugins = status.plugins || [];
   const atLimit = !!(state.limits && queues.length >= state.limits.maxQueues);
-  const action = `<button class="primary" type="button" data-action="open-queue-modal" ${atLimit ? "disabled" : ""}>${text("新建调度队列")}${atLimit ? `（${queues.length}/${state.limits.maxQueues}）` : ""}</button>`;
+  const action = `<button class="primary" type="button" data-action="open-queue-modal" ${atLimit ? "disabled" : ""}>${t("ui.new_schedule_queue")}${atLimit ? `（${queues.length}/${state.limits.maxQueues}）` : ""}</button>`;
   const totalPages = Math.max(1, Math.ceil(queues.length / QUEUE_PAGE_SIZE));
   if (queuePage > totalPages) queuePage = totalPages;
   const pageItems = queues.slice((queuePage - 1) * QUEUE_PAGE_SIZE, queuePage * QUEUE_PAGE_SIZE);
   const content = queues.length ? `<section class="card list-surface"><div class="script-grid">
     ${pageItems.map(queue => queueCardMarkup(queue, scripts)).join("")}
-    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : `<div class="empty"><strong>${text("暂无调度队列")}</strong><span>${text("把多个脚本串成一个可重复执行的工作流。")}</span><a class="back-link" href="#/queues" data-action="open-queue-modal">${text("新建调度队列")}</a></div>`;
-  render(pageHeader(text("调度管理"), text("调度队列"), text("把多个脚本串成可重复执行的工作流。"), action) + content);
+    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : `<div class="empty"><strong>${t("ui.no_queues_yet")}</strong><span>${t("ui.turn_multiple_scripts_into_a_repeatable_workflow")}</span><a class="back-link" href="#/queues" data-action="open-queue-modal">${t("ui.new_schedule_queue")}</a></div>`;
+  render(pageHeader(t("ui.queue_management"), t("ui.schedule_queues"), t("ui.turn_multiple_scripts_into_a_repeatable_workflow"), action) + content);
   await renderPluginSlots(document.querySelector("#view"));
   registerPager("queues", p => { queuePage = p; pageQueues(state.routeToken); });
   tickQueueNext();
@@ -76,7 +76,7 @@ async function reorderQueues(visibleIds) {
   const full = replacePageOrder(state.queues, queuePage, QUEUE_PAGE_SIZE, visibleIds);
   try {
     await api("PUT", "/api/queues/order", { ids: full.map(item => item.id) });
-    toast(text("队列顺序已保存"));
+    toast(t("ui.queue_order_saved"));
     await pageQueues(state.routeToken);
     restorePageScroll(pageScrollTop);
   } catch (error) {
@@ -105,29 +105,29 @@ function queueCardMarkup(queue, scripts) {
   const disabledScripts = unavailableScripts.filter(item => !item.status.missing);
   const unavailableBadge = [
     missingScripts.length
-      ? `<span class="badge bad" title="${esc(missingScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${text("含 {count} 个未知专项任务", { count: missingScripts.length })}</span>`
+      ? `<span class="badge bad" title="${esc(missingScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${t("ui.value_unknown_specialized_tasks", { count: missingScripts.length })}</span>`
       : "",
     disabledScripts.length
-      ? `<span class="badge warn" title="${esc(disabledScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${text("含 {count} 个不可用专项任务", { count: disabledScripts.length })}</span>`
+      ? `<span class="badge warn" title="${esc(disabledScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${t("ui.value_unavailable_specialized_tasks", { count: disabledScripts.length })}</span>`
       : "",
   ].join("");
   const nextAt = queue.nextTrigger ? new Date(queue.nextTrigger).getTime() : 0;
   const timeBadge = queue.autoRunMode === "scheduled"
-    ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? text("正在计算倒计时") : text("等待定时触发")}</span>`
+    ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? t("ui.calculating_countdown") : t("ui.waiting_for_scheduled_trigger")}</span>`
     : queue.autoRunMode === "startup"
-      ? `<span class="badge blue">${text("将在下次启动开始运行")}</span>`
-      : `<span class="badge blue" data-testid="queue-manual-badge">${text("不自动运行")}</span>`;
-  const notifyBadge = `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? text("队列通知已开启") : text("队列通知未开启")}</span>`;
+      ? `<span class="badge blue">${t("ui.runs_at_the_next_startup")}</span>`
+      : `<span class="badge blue" data-testid="queue-manual-badge">${t("ui.manual_only")}</span>`;
+  const notifyBadge = `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? t("ui.queue_notifications_enabled") : t("ui.queue_notifications_disabled")}</span>`;
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
-    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(text("拖拽排序（方向键调整顺序）"))}" title="${esc(text("拖拽排序"))}">${icon("grip")}</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("ui.drag_to_reorder_use_arrow_keys_to_adjust"))}" title="${esc(t("ui.drag_to_reorder"))}">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
-      <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="${esc(text("编辑调度队列：{name}", { name: queue.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
-      <div class="meta-line queue-meta"><span class="badge muted">${text("{count} 个任务", { count: (queue.tasks || []).length })}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? text("完成后{action}", { action: text(queue.completionAction === "exit" ? "退出软件" : queue.completionAction === "sleep" ? "休眠" : queue.completionAction === "reboot" ? "重启" : "关机") }) : text("完成后无操作")}</span>${unavailableBadge}${timeBadge}${notifyBadge}${pluginSlotMarkup("queues.list.badges", `queue-${queue.id}`, "queue-plugin-slot", { mode: "list", primaryId: queue.id })}</div>
+      <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="${esc(t("ui.edit_queue_value", { name: queue.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
+      <div class="meta-line queue-meta"><span class="badge muted">${t("ui.value_tasks", { count: (queue.tasks || []).length })}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? t("ui.after_completion_value", { action: t(queue.completionAction === "exit" ? "ui.exit_application" : queue.completionAction === "sleep" ? "ui.sleep" : queue.completionAction === "reboot" ? "ui.restart" : "ui.shut_down") }) : t("ui.no_action_after_completion")}</span>${unavailableBadge}${timeBadge}${notifyBadge}${pluginSlotMarkup("queues.list.badges", `queue-${queue.id}`, "queue-plugin-slot", { mode: "list", primaryId: queue.id })}</div>
     </div>
     <div class="queue-ops row-actions entity-actions">
-      <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">${text("编辑队列")}</button>
-      <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">${text("删除队列")}</button>
+      <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">${t("ui.edit_queue_button")}</button>
+      <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">${t("ui.delete_queue")}</button>
     </div>
   </article>`;
 }
@@ -139,10 +139,10 @@ function tickQueueNext() {
     if (!target) return;
     const remain = target - now;
     if (remain <= 0) {
-      el.textContent = text("即将开始运行");
+      el.textContent = t("ui.about_to_run");
       return;
     }
-    el.textContent = text("{duration}后开始", { duration: durationClock(Math.floor(remain / 1000)) });
+    el.textContent = t("ui.starts_in_value", { duration: durationClock(Math.floor(remain / 1000)) });
   });
 }
 
@@ -160,7 +160,7 @@ export async function openQueueModal(id = "") {
   let queue = id ? state.queues.find(item => item.id === id) : null;
   if (id && !queue) {
     try { state.queues = await api("GET", "/api/queues"); queue = state.queues.find(item => item.id === id); }
-    catch (error) { toast(text("加载队列失败：") + error.message, "error"); return; }
+    catch (error) { toast(t("ui.failed_to_load_queues_f4f44409") + error.message, "error"); return; }
   }
   const value = queue || {};
   queueDraft = {
@@ -190,13 +190,13 @@ function syncQueueDraftFromDom() {
 }
 
 function queueTaskOptions(scripts) {
-  return [{ value: "", label: "（选择脚本实例）" }, ...(scripts || []).map(script => {
+  return [{ value: "", label: t("ui.select_a_script_instance_fc5e40d7") }, ...(scripts || []).map(script => {
     const pluginStatus = scriptPluginStatus(script, state.plugins || []);
     const unavailable = pluginStatus.specialized && !pluginStatus.available;
     const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
     const suffix = unavailable
-      ? (pluginStatus.missing ? text("（未知专项）") : text("（专项插件不可用）"))
-      : (script.logStallTimeoutMinutes === -1 ? text("（长时）") : "");
+      ? (pluginStatus.missing ? t("ui.unknown_specialized_plugin_c960d836") : t("ui.specialized_plugin_unavailable_faec8375"))
+      : (script.logStallTimeoutMinutes === -1 ? t("ui.long_running") : "");
     return {
       value: script.id,
       label: `${script.name}${suffix}`,
@@ -220,16 +220,16 @@ export function renderQueueModal(skipOpenCapture = false) {
   syncQueueDraftFromDom();
   const d = queueDraft;
   const scripts = state.scripts;
-  const days = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"].map(text);
-  const dayLetters = ["日", "一", "二", "三", "四", "五", "六"].map(text);
+  const days = [t("ui.sunday"), t("ui.monday"), t("ui.tuesday"), t("ui.wednesday"), t("ui.thursday"), t("ui.friday"), t("ui.saturday")];
+  const dayLetters = [t("ui.sun"), t("ui.mon"), t("ui.tue"), t("ui.wed"), t("ui.thu"), t("ui.fri"), t("ui.sat")];
   const l = state.limits || {};
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
-  const body = `${valueField("qm-name", "队列名称 <span class='req'>*</span>", d.name)}
-    <div class="form-grid">${selectField("qm-mode", "自动运行方式", d.autoRunMode, [{ value: "none", label: text("不运行") }, { value: "scheduled", label: text("定时运行") }, { value: "startup", label: text("启动时运行") }])}${selectField("qm-action", "运行完成操作", d.completionAction, [{ value: "none", label: text("无操作") }, { value: "exit", label: text("退出软件") }, { value: "sleep", label: text("休眠") }, { value: "reboot", label: text("重启") }, { value: "shutdown", label: text("关机") }])}</div>
-    <div>${switchControl("qm-notify", "队列通知", "统一发送所有脚本状态，覆盖实例级设置；队列汇总通知不附带截图", d.notifyEnabled, "toggle-qm-flag")}</div>
-      <div class="subsection"><div class="section-heading"><h3>${text("定时列表")}</h3><span class="muted">${text("默认收起；展开后编辑周期与执行时间，拖拽左侧把手排序")}</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="${esc(text("拖拽排序（方向键调整顺序）"))}" title="${esc(text("拖拽排序"))}">${icon("grip")}</span><strong>${text("定时 {index}", { index: index + 1 })}</strong><span class="muted">${esc(timeSet.time || text("未设置时间"))} · ${timeSet.days.length ? text("{count} 天", { count: timeSet.days.length }) : text("未选周期")}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">${text("执行周期（可多选）")}</label><div class="days-btn-grid" role="group" aria-label="${esc(text("执行周期"))}">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc(dayLetters[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">${text("执行时间")}</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, text("执行时间"))}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? text("已启用") : text("已停用")}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">${text("删除定时")}</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>${text("+ 添加定时")}${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
-    <div class="subsection"><div class="section-heading"><h3>任务列表</h3><span class="muted">按顺序先后执行，拖拽左侧把手排序；长时运行与标准运行不能混合编排</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="拖拽排序（方向键调整顺序）" title="拖拽排序">${icon("grip")}</span>${selectControlMarkup(`qm-task-${index}`, task.scriptInstanceId, queueTaskOptions(scripts), `data-task-idx="${index}"`, `第 ${index + 1} 个任务：脚本实例`)}<button class="sm danger" type="button" data-action="remove-task" data-index="${index}">删除</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">+ 添加任务</button></div>`;
-  showModal(modalShell(d.id ? "编辑调度队列" : "新建调度队列", body + pluginSlotMarkup("queues.editor.sections", "queues.editor.sections", "queue-editor-plugin-slot", { mode: d.id ? "edit" : "create", primaryId: d.id || "" }), '<button class="ghost" type="button" data-action="close-modal">取消</button><button class="primary" type="button" data-action="save-queue">保存</button>'), true, true, true);
+  const body = `${valueField("qm-name", `${t("ui.queue_name")} <span class='req'>*</span>`, d.name)}
+    <div class="form-grid">${selectField("qm-mode", t("ui.automatic_run_mode"), d.autoRunMode, [{ value: "none", label: t("ui.do_not_run") }, { value: "scheduled", label: t("ui.run_on_schedule") }, { value: "startup", label: t("ui.run_at_startup") }])}${selectField("qm-action", t("ui.completion_action"), d.completionAction, [{ value: "none", label: t("ui.no_action") }, { value: "exit", label: t("ui.exit_application") }, { value: "sleep", label: t("ui.sleep") }, { value: "reboot", label: t("ui.restart") }, { value: "shutdown", label: t("ui.shut_down") }])}</div>
+    <div>${switchControl("qm-notify", t("ui.queue_notifications"), t("ui.send_all_script_statuses_using_this_setting_overriding_instance_settings"), d.notifyEnabled, "toggle-qm-flag")}</div>
+      <div class="subsection"><div class="section-heading"><h3>${t("ui.schedules")}</h3><span class="muted">${t("ui.collapsed_by_default_expand_to_edit_days_and_time_then_drag_the_handle_to_reorder")}</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("ui.drag_to_reorder_use_arrow_keys_to_adjust"))}" title="${esc(t("ui.drag_to_reorder"))}">${icon("grip")}</span><strong>${t("ui.schedule_value", { index: index + 1 })}</strong><span class="muted">${esc(timeSet.time || t("ui.time_not_set"))} · ${timeSet.days.length ? t("ui.value_days", { count: timeSet.days.length }) : t("ui.no_days_selected")}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">${t("ui.run_days_multiple_selection")}</label><div class="days-btn-grid" role="group" aria-label="${esc(t("ui.execution_days"))}">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc(dayLetters[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">${t("ui.run_time")}</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, t("ui.run_time"))}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? t("ui.enabled") : t("ui.disabled")}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">${t("ui.delete_schedule")}</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>${t("ui.add_schedule")}${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("ui.task_list")}</h3><span class="muted">${t("ui.run_in_order_drag_the_handle_to_reorder_long_running_and_standard_runs_cannot_be_mixed")}</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="${t("ui.drag_to_reorder_use_arrow_keys_to_adjust")}" title="${t("ui.drag_to_reorder")}">${icon("grip")}</span>${selectControlMarkup(`qm-task-${index}`, task.scriptInstanceId, queueTaskOptions(scripts), `data-task-idx="${index}"`, t("ui.task_value_script_instance", { index: index + 1 }))}<button class="sm danger" type="button" data-action="remove-task" data-index="${index}">${t("ui.delete")}</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">${t("ui.add_task")}</button></div>`;
+  showModal(modalShell(d.id ? t("ui.edit_queue") : t("ui.new_schedule_queue"), body + pluginSlotMarkup("queues.editor.sections", "queues.editor.sections", "queue-editor-plugin-slot", { mode: d.id ? "edit" : "create", primaryId: d.id || "" }), `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button><button class="primary" type="button" data-action="save-queue">${t("ui.save")}</button>`), true, true, true);
   void renderPluginSlots(document);
   const restoreModalScroll = () => {
     if (!queueModalScroll) return;
@@ -282,7 +282,7 @@ export function queueAddTask() {
   const l = state.limits || {};
   const current = queueTotalUsers();
   if (l.maxQueueTotalUsers && current + 1 > l.maxQueueTotalUsers) {
-    toast(`任务列表的启用用户总数已达上限（${current}/${l.maxQueueTotalUsers}）`, "error");
+    toast(t("ui.the_total_enabled_users_in_the_task_list_reached_the_limit_value_value", { current, maximum: l.maxQueueTotalUsers }), "error");
     return;
   }
   queueDraft.tasks.push({ id: "", index: queueDraft.tasks.length, scriptInstanceId: "" }); renderQueueModal();
@@ -297,32 +297,32 @@ export async function saveQueue() {
   draft.timeSets = draft.timeSets.filter(timeSet => timeSet.days.length);
   draft.tasks = draft.tasks.map((task, index) => ({ ...task, index, scriptInstanceId: $(`[data-task-idx='${index}']`)?.value || task.scriptInstanceId })).filter(task => task.scriptInstanceId);
   queuePendingDuplicateMerged = mergeDuplicateTasks();
-  if (!draft.name) { setRequiredFieldError("qm-name"); toast("队列名称不能为空", "error"); return; }
+  if (!draft.name) { setRequiredFieldError("qm-name"); toast(t("ui.queue_name_cannot_be_empty"), "error"); return; }
   clearFieldError("qm-name");
-  if (!draft.tasks.length) { toast("任务列表为空，请至少添加一个脚本任务", "error"); return; }
+  if (!draft.tasks.length) { toast(t("ui.the_task_list_is_empty_add_at_least_one_script_task"), "error"); return; }
   const unavailableScript = draft.tasks
     .map(task => state.scripts.find(script => script.id === task.scriptInstanceId))
     .find(script => script && scriptPluginStatus(script, state.plugins || []).specialized && !scriptPluginStatus(script, state.plugins || []).available);
   if (unavailableScript) {
-    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []) + "；请先移除该任务后再保存队列", "error");
+    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []) + t("ui.remove_this_task_before_saving_the_queue"), "error");
     return;
   }
   const l = state.limits || {};
   const nameBytes = new TextEncoder().encode(draft.name).length;
-  if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", `队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`); toast(`队列名称最多 ${MAX_ENTITY_NAME_BYTES} 字节`, "error"); return; }
-  if (hasEntityNameConflict(state.queues, draft.name, draft.id)) { setFieldInvalid("qm-name"); toast("队列名称已存在，请使用其他名称", "error"); return; }
-  if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(`定时列表已达上限（${draft.timeSets.length}/${l.maxTimeSetsPerQueue}）`, "error"); return; }
+  if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", t("ui.queue_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES })); toast(t("ui.queue_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }), "error"); return; }
+  if (hasEntityNameConflict(state.queues, draft.name, draft.id)) { setFieldInvalid("qm-name"); toast(t("ui.that_queue_name_already_exists_choose_another_name"), "error"); return; }
+  if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(t("ui.the_schedule_limit_was_reached_value_value", { current: draft.timeSets.length, maximum: l.maxTimeSetsPerQueue }), "error"); return; }
   const totalUsers = queueTotalUsers();
-  if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(`任务列表的启用用户总数已达上限（${totalUsers}/${l.maxQueueTotalUsers}）`, "error"); return; }
+  if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(t("ui.the_total_enabled_users_in_the_task_list_reached_the_limit_value_value", { current: totalUsers, maximum: l.maxQueueTotalUsers }), "error"); return; }
   // 长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本可能持续运行并阻塞队列后续任务）
   const taskScripts = draft.tasks.map(task => state.scripts.find(item => item.id === task.scriptInstanceId)).filter(Boolean);
   const hasLong = taskScripts.some(script => script.logStallTimeoutMinutes === -1);
   const hasNormal = taskScripts.some(script => script.logStallTimeoutMinutes !== -1);
-  if (hasLong && hasNormal) { toast("队列不能混合编排长时脚本（日志无更新上限为 -1）与普通脚本实例，请分开建立队列", "error"); return; }
+  if (hasLong && hasNormal) { toast(t("ui.a_queue_cannot_mix_long_running_scripts_log_inactivity_limit_1_with_standard_script_instances_create_separate_queues"), "error"); return; }
   const mergedCount = mergeTimeSets();
   queuePendingMerged = mergedCount > 0;
   if (hasTimeGap()) {
-    showModal(modalShell("定时间隔警告", `<p class="modal-copy">存在间隔低于10分钟的定时任务，如果之前的定时任务还未完成，之后的定时任务可能会忽略，确定吗？</p>`, '<button class="primary" type="button" data-action="confirm-timegap-save">确定</button><button class="ghost" type="button" data-action="cancel-timegap">取消</button>'));
+    showModal(modalShell(t("ui.schedule_interval_warning"), `<p class="modal-copy">${t("ui.schedule_interval_warning_message")}</p>`, `<button class="primary" type="button" data-action="confirm-timegap-save">${t("ui.confirm")}</button><button class="ghost" type="button" data-action="cancel-timegap">${t("ui.cancel")}</button>`));
     return;
   }
   await doSaveQueue(queuePendingMerged, queuePendingDuplicateMerged);
@@ -396,16 +396,16 @@ async function doSaveQueue(merged, duplicateMerged) {
     else await api("POST", "/api/queues", draft);
     closeModal();
     const messages = [];
-    if (duplicateMerged) messages.push("重复脚本实例任务已合并");
-    if (merged) messages.push("重复定时列表已合并");
-    toast(messages.join("；") || "调度队列已保存");
+    if (duplicateMerged) messages.push(t("ui.duplicate_script_tasks_were_merged"));
+    if (merged) messages.push(t("ui.duplicate_schedules_were_merged"));
+    toast(messages.join("；") || t("ui.schedule_queue_saved"));
     queuePendingMerged = false;
     queuePendingDuplicateMerged = false;
     await pageQueues(state.routeToken);
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("qm-name");
-      toast("队列名称已存在，请使用其他名称", "error");
+      toast(t("ui.that_queue_name_already_exists_choose_another_name"), "error");
       return;
     }
     toast(error.message, "error");
@@ -413,11 +413,11 @@ async function doSaveQueue(merged, duplicateMerged) {
 }
 
 export function deleteQueue(id, name) {
-  confirmModal("删除调度队列", `确定删除调度队列「${esc(name)}」？`, "confirm-delete-queue", { id, name });
+  confirmModal(`${t("ui.delete")}${t("ui.schedule_queues")}`, `${t("ui.confirm_queue_deletion")}「${esc(name)}」？`, "confirm-delete-queue", { id, name });
 }
 
 export async function confirmDeleteQueue(id, name) {
-  try { await api("DELETE", "/api/queues/" + id); closeModal(); toast("调度队列已删除"); await pageQueues(state.routeToken); }
+  try { await api("DELETE", "/api/queues/" + id); closeModal(); toast(t("ui.schedule_queue_deleted")); await pageQueues(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 

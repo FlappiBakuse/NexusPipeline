@@ -8,7 +8,7 @@ import { isCurrent, schedule, state } from "../core/state.js";
 import { navActive, render, setTopbarTitle, toast, withBusy } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { updateActionsMarkup } from "../core/update-status.js";
-import { applyTranslations, getLocale, setLocale, t, text, translateText } from "../core/i18n.js";
+import { applyTranslations, getLocale, getLocaleOptions, setLocale, t } from "../core/i18n.js";
 
 let restartRequired = false;
 let openSettingsPanel = "service";
@@ -16,25 +16,25 @@ let updateAutoNoticeKey = "";
 
 export async function pageSettings(token) {
   if (!isCurrent("settings", token)) return;
-  navActive("settings"); setTopbarTitle(t("shell.settings", {}, "设置"));
+  navActive("settings"); setTopbarTitle(t("shell.settings", {}, "Settings"));
   let data;
   try { data = await api("GET", "/api/settings"); }
-  catch (error) { render(`<div class="empty"><strong>加载设置失败</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("ui.failed_to_load_settings")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("settings", token)) return;
   state.settings = data.settings;
   const settings = data.settings;
   const remote = data.status && data.status.remote;
   const lanList = (remote && remote.lanAddresses && remote.lanAddresses.length)
-    ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
+    ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">${t("ui.lan_address")}</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
   openSettingsPanel = "service";
-  render(pageHeader(t("settings.title", {}, "系统设置"), t("shell.settings", {}, "设置"), "集中管理服务行为、通知渠道、远程访问、代理与更新设置。") + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
-    ${settingsCardMarkup("service", "服务行为", "服务启动、历史记录与日志选项", serviceSettingsMarkup(settings), "service-settings")}
-    ${settingsCardMarkup("notifications", "通知渠道", "Webhook 与 SMTP 通知配置", notificationSettingsMarkup(settings), "notification-settings")}
-    ${settingsCardMarkup("remote-mcp", "远程访问和 MCP", "远程管理入口与本机 Agent 服务", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
-    ${settingsCardMarkup("network", "网络代理", "宿主外部 HTTP/HTTPS 请求", networkSettingsMarkup(settings), "network-settings")}
-    ${settingsCardMarkup("updates", "更新设置", "更新渠道、检查与应用操作", updateSectionMarkup(settings), "update-section")}
-    ${settingsCardMarkup("diagnostics", "系统诊断", "检查运行环境、恢复现场与插件状态", diagnosticsSettingsMarkup(), "diagnostics-settings")}
+  render(pageHeader(t("settings.title", {}, "System settings"), t("shell.settings", {}, "Settings"), t("ui.manage_service_behavior_notifications_remote_access_proxy_and_update_settings_in_one_place")) + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
+    ${settingsCardMarkup("service", "ui.service_behavior", "ui.service_startup_history_and_log_options", serviceSettingsMarkup(settings), "service-settings")}
+    ${settingsCardMarkup("notifications", "ui.notification_channels", "ui.webhook_and_smtp_notification_settings", notificationSettingsMarkup(settings), "notification-settings")}
+    ${settingsCardMarkup("remote-mcp", "ui.remote_access_and_mcp", "ui.remote_management_entry_points_and_the_local_agent_service", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
+    ${settingsCardMarkup("network", "ui.network_proxy", "ui.host_external_http_https_requests", networkSettingsMarkup(settings), "network-settings")}
+    ${settingsCardMarkup("updates", "ui.update_settings", "ui.update_channel_checks_and_apply_actions", updateSectionMarkup(settings), "update-section")}
+    ${settingsCardMarkup("diagnostics", "ui.system_diagnostics", "ui.check_the_runtime_environment_recovery_state_and_plugin_status", diagnosticsSettingsMarkup(), "diagnostics-settings")}
     ${pluginSlotMarkup("settings.cards", "settings.cards", "settings-cards-plugin-slot", { mode: "settings" })}
   </div>${pluginSlotMarkup("settings.sections", "settings.sections", "settings-plugin-slot", { mode: "settings" })}`);
   await renderPluginSlots(document.querySelector("#view"));
@@ -48,7 +48,7 @@ export async function pageSettings(token) {
 function settingsCardMarkup(id, title, description, body, testId) {
   const expanded = openSettingsPanel === id;
   return `<section class="settings-card section-surface${expanded ? " is-expanded" : ""}" data-settings-panel="${id}"${testId ? ` data-testid="${testId}"` : ""}>
-    <button class="settings-card-toggle" type="button" data-action="toggle-settings-panel" data-panel="${id}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="settings-panel-${id}"><span class="settings-card-copy"><strong class="settings-card-title">${title}</strong><span class="muted">${description}</span></span><span class="settings-card-arrow" aria-hidden="true">${icon(expanded ? "chevronDown" : "chevronRight", "settings-card-arrow-icon")}</span></button>
+    <button class="settings-card-toggle" type="button" data-action="toggle-settings-panel" data-panel="${id}" aria-expanded="${expanded ? "true" : "false"}" aria-controls="settings-panel-${id}"><span class="settings-card-copy"><strong class="settings-card-title">${t(title)}</strong><span class="muted">${t(description)}</span></span><span class="settings-card-arrow" aria-hidden="true">${icon(expanded ? "chevronDown" : "chevronRight", "settings-card-arrow-icon")}</span></button>
     <div id="settings-panel-${id}" class="settings-card-body"${expanded ? "" : " hidden"}>${body}</div>
   </section>`;
 }
@@ -85,48 +85,49 @@ function toggleSettingsPanel(panelId) {
 function restartNoticeMarkup(settings) {
   if (!restartRequired) return "";
   const disabled = settings.lightweightMode;
-  return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>有需要重启服务的设置已保存。</p>${disabled ? '<span class="muted">轻量模式请手动重启程序。</span>' : '<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">重启服务</button>'}</section>`;
+  return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>${t("ui.settings_that_require_a_service_restart_have_been_saved")}</p>${disabled ? `<span class="muted">${t("ui.in_lightweight_mode_restart_the_program_manually")}</span>` : `<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">${t("ui.restart_service")}</button>`}</section>`;
 }
 
 function serviceSettingsMarkup(settings) {
   const locale = getLocale();
+  const localeOptions = getLocaleOptions().map(item => ({ value: item.id, label: item.nativeName }));
   return `<div class="settings-list">
-    ${switchControl("st-autostart", "开机自启", "注册到当前用户启动项", settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
-    ${switchControl("st-lightweight", "轻量模式", "不启动网页服务，重启后生效", settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
-    ${switchControl("st-browser", "打开浏览器", "服务启动后自动打开控制台", settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
-  </div><div class="form-grid" data-help="日志级别即时生效；Web 端口改动需重启服务。">${valueField("st-retention", "历史保留天数", settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", "Web 端口", settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", "日志级别", settings.logLevel || "info", [{ value: "debug", label: "Debug" }, { value: "info", label: "Info" }, { value: "warn", label: "Warn" }, { value: "error", label: "Error" }, { value: "fatal", label: "Fatal" }])}${selectField("settings-locale", t("settings.language", {}, "界面语言"), locale, [{ value: "zh-CN", label: t("settings.language_zh", {}, "简体中文") }, { value: "en-US", label: t("settings.language_en", {}, "English") }], 'data-action="change-locale"', t("settings.language_help", {}, "语言偏好仅保存在当前浏览器。"))}</div>${settings.lightweightMode ? '<p class="callout callout-warning">轻量模式未启动 Web 服务，重启请手动操作。</p>' : ""}`;
+    ${switchControl("st-autostart", t("ui.start_with_windows"), t("ui.register_in_the_current_user_s_startup_items"), settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
+    ${switchControl("st-lightweight", t("ui.lightweight_mode"), t("ui.do_not_start_the_web_service_takes_effect_after_restart"), settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
+    ${switchControl("st-browser", t("ui.open_browser"), t("ui.open_the_console_automatically_when_the_service_starts"), settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
+  </div><div class="settings-service-fields" data-help="${t("ui.log_level_changes_apply_immediately_web_port_changes_require_a_service_restart")}"><div class="form-grid settings-service-grid settings-service-grid-primary">${valueField("st-retention", t("ui.history_retention_days"), settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", t("ui.web_port"), settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", t("ui.log_level"), settings.logLevel || "info", [{ value: "debug", label: t("ui.log_level_debug") }, { value: "info", label: t("ui.log_level_info") }, { value: "warn", label: t("ui.log_level_warn") }, { value: "error", label: t("ui.log_level_error") }, { value: "fatal", label: t("ui.log_level_fatal") }])}</div><div class="form-grid settings-service-grid settings-service-grid-locale">${selectField("settings-locale", t("settings.language", {}, "Interface language"), locale, localeOptions, 'data-action="change-locale"', t("settings.language_help", {}, "Language preference is stored in this browser only"))}${selectField("st-host-locale", t("settings.host_language", {}, "Host language"), settings.hostLocale || "zh-CN", localeOptions, "", t("settings.host_language_help", {}, "Controls CLI, tray, notifications, and background logs."))}</div></div>${settings.lightweightMode ? `<p class="callout callout-warning">${t("ui.lightweight_mode_did_not_start_the_web_service_restart_manually")}</p>` : ""}`;
 }
 
 function remoteMcpSettingsMarkup(settings, lanList) {
   const port = Number(settings.mcpPort) || 58732;
   return `<div class="settings-merged-content">
-    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", "远程访问", "绑定所有网卡，API 需要访问令牌；本地 127.0.0.1 请求豁免", settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}</div><div class="field-btn-row">${valueField("st-token", "访问令牌", "", "password", 'autocomplete="new-password" placeholder="留空不修改"', "留空时保持当前令牌不变。")}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">显示</button><button type="button" class="ghost" data-action="copy-token">复制</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">生成令牌</button></div><div id="remote-lan-list" class="detail"${settings.allowRemoteAccess ? ' data-help="其他设备请访问局域网访问地址；localhost 与 0.0.0.0 只指向本机，首次访问会要求输入访问令牌。"' : ""}>${lanList}</div><p class="callout callout-warning">安全提示：开启远程访问后，持有令牌的人都能管理本机脚本与配置。请勿在公共网络环境开启，令牌与配置数据绑定当前电脑（DPAPI 加密，不可迁移）。开启时程序会自动添加防火墙入站允许规则。</p></section>
+    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", t("ui.remote_access"), t("ui.bind_to_all_network_interfaces_the_api_requires_an_access_token_while_local_127_0_0_1_requests_are_exempt"), settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}</div><div class="field-btn-row">${valueField("st-token", t("ui.access_token"), "", "password", `autocomplete="new-password" placeholder="${t("ui.leave_blank_to_keep")}"`, t("ui.leave_blank_to_keep_the_current_token"))}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">${t("ui.show")}</button><button type="button" class="ghost" data-action="copy-token">${t("ui.copy")}</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">${t("ui.generate_token")}</button></div><div id="remote-lan-list" class="detail"${settings.allowRemoteAccess ? ` data-help="${t("ui.lan_address_help")}"` : ""}>${lanList}</div><p class="callout callout-warning">${t("ui.remote_access_warning")}</p></section>
     <section class="settings-subsection mcp-settings"><div class="settings-list">
-    ${switchControl("st-mcp-enabled", "启用 MCP 服务", "重启后监听本机 MCP 端点", settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
-  </div><div class="form-grid settings-single-field" data-help="端点：http://127.0.0.1:${port}/mcp；端口和工具权限改动需重启服务。端口冲突时 MCP 保持不可用，Control API 继续运行。">${valueField("st-mcp-port", "MCP 端口", port, "number", 'min="1024" max="65535"')}</div></section>
+    ${switchControl("st-mcp-enabled", t("ui.enable_mcp_service"), t("ui.listen_on_the_local_mcp_endpoint_after_restart"), settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
+  </div><div class="form-grid settings-single-field" data-help="${t("ui.endpoint_http_127_0_0_1_value_mcp_port_and_tool_permission_changes_require_a_restart_if_the_port_is_occupied_mcp_remains_unavailable_while_the_control_api_continues_running", { port })}">${valueField("st-mcp-port", t("ui.mcp_port"), port, "number", 'min="1024" max="65535"')}</div></section>
   </div>`;
 }
 
 function networkSettingsMarkup(settings) {
   const mode = settings.proxyMode || "none";
   const customHidden = mode === "http" ? "" : " hidden";
-  return `<div class="network-settings" data-help="代理覆盖插件仓库、插件包下载、软件更新和 Webhook。SMTP、本机 Control API、MCP 与插件子进程保持原有网络行为；localhost 和回环地址始终直连。">
-    ${selectField("st-proxy-mode", "代理模式", mode, [{ value: "none", label: "无代理" }, { value: "system", label: "使用系统设置" }, { value: "http", label: "HTTP/HTTPS 代理" }], 'data-action="toggle-proxy-fields"')}
+  return `<div class="network-settings" data-help="${t("ui.network_proxy_help")}">
+    ${selectField("st-proxy-mode", t("ui.proxy_mode"), mode, [{ value: "none", label: t("ui.no_proxy") }, { value: "system", label: t("ui.use_system_settings") }, { value: "http", label: t("ui.http_https_proxy") }], 'data-action="toggle-proxy-fields"')}
     <div id="st-proxy-custom" class="proxy-custom-fields"${customHidden}>
-      ${valueField("st-proxy-url", "HTTP/HTTPS 代理地址", settings.proxyUrl || "", "text", 'placeholder="http://127.0.0.1:7890"', "代理地址需要包含 http:// 或 https://。")}
-      ${valueField("st-proxy-user", "用户名（可选）", settings.proxyUsername || "")}
-      <div class="field" data-help="留空时保持已保存的代理密码不变。"><label class="field-label" for="st-proxy-pwd">密码（可选） ${settings.proxyPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-proxy-pwd" type="password" autocomplete="new-password" placeholder="${settings.proxyPassword ? "已设置，留空不变" : ""}"></div>
+      ${valueField("st-proxy-url", t("ui.http_https_proxy_address"), settings.proxyUrl || "", "text", 'placeholder="http://127.0.0.1:7890"', t("ui.the_proxy_address_must_include_http_or_https"))}
+      ${valueField("st-proxy-user", t("ui.username_optional"), settings.proxyUsername || "")}
+      <div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_proxy_password")}"><label class="field-label" for="st-proxy-pwd">${t("ui.password_optional")} ${settings.proxyPassword ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-proxy-pwd" type="password" autocomplete="new-password" placeholder="${settings.proxyPassword ? t("ui.leave_blank_to_keep") : ""}"></div>
     </div>
   </div>`;
 }
 
 function notificationSettingsMarkup(settings) {
   const body = `<div class="notification-settings">
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook 通知</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? "已启用" : "已禁用"}</span></button>
-    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", "启用 Webhook", "发送运行状态到 Webhook 服务", settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", "发送截图", "脚本完成通知附带所选截图；队列汇总通知不附图", settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", "Webhook 类型", settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-webhook-fields"')} ${valueField("st-whtimeout", "超时秒数", settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="留空时保持已保存的 Webhook 地址不变。"><label class="field-label" for="st-whurl">Webhook 地址 ${settings.webhookUrl ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? "已设置，留空不变" : "https://…"}"></div><div class="field" data-help="留空时保持已保存的 Webhook 签名密钥不变。"><label class="field-label" for="st-whsec">Webhook 签名密钥 ${settings.webhookSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? "已设置，留空不变" : ""}"></div></div>${webhookAdvancedMarkup(settings)}<div id="st-whtpl-box" class="field" data-help="JSON 模板中的 {text}、{imageBase64}、{imageDataUri}、{imageFileName}、{imageContentType} 会替换为对应值。" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">generic 自定义模板（JSON）</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP 邮件通知</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? "已启用" : "已禁用"}</span></button>
-    <div id="panel-smtp" class="panel-body" hidden><div class="settings-list">${switchControl("st-smtp-enabled", "启用 SMTP", "发送运行状态到邮箱", settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}${switchControl("st-smtp-screenshot", "发送截图", "脚本完成通知附带所选截图；队列汇总通知不附图", settings.smtpScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-smtp-screenshot"')}</div><div class="form-grid three">${valueField("st-host", "SMTP 服务器", settings.smtpHost)}${valueField("st-port2", "端口", settings.smtpPort, "number")}${selectField("st-secure", "加密方式", settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", "账号", settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">授权码 ${settings.smtpPassword ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? "（已设置，留空不变）" : ""}"></div></div><div class="form-grid">${valueField("st-to", "收件人（逗号分隔）", settings.smtpTo)}${valueField("st-from", "发件人显示地址（留空=账号）", settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", "主题前缀", settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", "超时秒数", settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
-    <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">测试通知</button></div>
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook ${t("ui.notifications")}</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? t("ui.enabled") : t("ui.disabled")}</span></button>
+    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", t("ui.enable_webhook"), t("ui.send_run_status_to_the_webhook_service"), settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", t("ui.send_screenshots"), t("ui.script_completion_notifications_include_selected_screenshots_queue_summaries_do_not_include_screenshots"), settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", t("ui.webhook_type"), settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-webhook-fields"')} ${valueField("st-whtimeout", t("ui.timeout_seconds"), settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_webhook_url")}"><label class="field-label" for="st-whurl">${t("ui.webhook_address")} ${settings.webhookUrl ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? t("ui.leave_blank_to_keep") : "https://…"}"></div><div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_webhook_signing_secret")}"><label class="field-label" for="st-whsec">${t("ui.webhook_signing_secret")} ${settings.webhookSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div>${webhookAdvancedMarkup(settings)}<div id="st-whtpl-box" class="field" data-help="${t("ui.value_value_value_value_and_value_in_the_json_template_are_replaced_with_their_corresponding_values")}" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">${t("ui.generic_custom_template")}</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP ${t("ui.smtp_email_notifications")}</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? t("ui.enabled") : t("ui.disabled")}</span></button>
+    <div id="panel-smtp" class="panel-body" hidden><div class="settings-list">${switchControl("st-smtp-enabled", t("ui.enable_smtp"), t("ui.send_run_status_by_email"), settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}${switchControl("st-smtp-screenshot", t("ui.send_screenshots"), t("ui.script_completion_notifications_include_selected_screenshots_queue_summaries_do_not_include_screenshots"), settings.smtpScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-smtp-screenshot"')}</div><div class="form-grid three">${valueField("st-host", t("ui.smtp_server"), settings.smtpHost)}${valueField("st-port2", t("ui.port"), settings.smtpPort, "number")}${selectField("st-secure", t("ui.encryption"), settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", t("ui.account"), settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">${t("ui.smtp_password")} ${settings.smtpPassword ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? t("ui.leave_blank_to_keep") : ""}"></div></div><div class="form-grid">${valueField("st-to", t("ui.recipients_comma_separated"), settings.smtpTo)}${valueField("st-from", t("ui.from_address_blank_account"), settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", t("ui.subject_prefix"), settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", t("ui.timeout_seconds"), settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
+    <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">${t("ui.test_notifications")}</button></div>
   </div>`;
   return body.replaceAll("▾", icon("chevronDown", "icon panel-arrow-icon")).replaceAll("▸", icon("chevronRight", "icon panel-arrow-icon"));
 }
@@ -134,9 +135,9 @@ function notificationSettingsMarkup(settings) {
 function webhookAdvancedMarkup(settings) {
   const type = settings.webhookType || "feishu";
   const hidden = name => type === name ? "" : " hidden";
-  return `<div class="webhook-advanced-fields" data-webhook-advanced="feishu"${hidden("feishu")}><div class="form-grid">${valueField("st-feishu-appid", "飞书 App ID", settings.feishuAppId || "", "text", "", "用于上传图片的自建应用凭据。")}<div class="field" data-help="留空时保持已保存的 App Secret 不变。"><label class="field-label" for="st-feishu-secret">飞书 App Secret ${settings.feishuAppSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-feishu-secret" type="password" placeholder="${settings.feishuAppSecret ? "已设置，留空不变" : ""}"></div></div></div>
-    <div class="webhook-advanced-fields" data-webhook-advanced="slack"${hidden("slack")}><div class="form-grid">${valueField("st-slack-channel", "Slack Channel ID", settings.slackChannelId || "", "text", "", "机器人需要已加入该频道。")}<div class="field" data-help="留空时保持已保存的 Bot Token 不变。"><label class="field-label" for="st-slack-token">Slack Bot Token ${settings.slackBotToken ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-slack-token" type="password" placeholder="${settings.slackBotToken ? "已设置，留空不变" : "xoxb-…"}"></div></div></div>
-    <div class="webhook-advanced-fields" data-webhook-advanced="dingtalk"${hidden("dingtalk")}><div class="form-grid">${valueField("st-dingtalk-key", "钉钉 App Key", settings.dingTalkAppKey || "")}${valueField("st-dingtalk-robot", "Robot Code", settings.dingTalkRobotCode || "")}</div><div class="form-grid">${valueField("st-dingtalk-conversation", "Open Conversation ID", settings.dingTalkOpenConversationId || "")}<div class="field" data-help="留空时保持已保存的 App Secret 不变。"><label class="field-label" for="st-dingtalk-secret">钉钉 App Secret ${settings.dingTalkAppSecret ? '<span class="badge ok">已设置</span>' : ""}</label><input id="st-dingtalk-secret" type="password" placeholder="${settings.dingTalkAppSecret ? "已设置，留空不变" : ""}"></div></div></div>`;
+  return `<div class="webhook-advanced-fields" data-webhook-advanced="feishu"${hidden("feishu")}><div class="form-grid">${valueField("st-feishu-appid", t("ui.feishu_app_id"), settings.feishuAppId || "", "text", "", t("ui.credentials_for_the_custom_app_used_to_upload_images"))}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_app_secret")}"><label class="field-label" for="st-feishu-secret">Feishu App Secret ${settings.feishuAppSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-feishu-secret" type="password" placeholder="${settings.feishuAppSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="slack"${hidden("slack")}><div class="form-grid">${valueField("st-slack-channel", t("ui.slack_channel_id"), settings.slackChannelId || "", "text", "", t("ui.the_bot_must_already_be_a_member_of_this_channel"))}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_bot_token")}"><label class="field-label" for="st-slack-token">${t("ui.slack_bot_token")} ${settings.slackBotToken ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-slack-token" type="password" placeholder="${settings.slackBotToken ? t("ui.leave_blank_to_keep") : "xoxb-…"}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="dingtalk"${hidden("dingtalk")}><div class="form-grid">${valueField("st-dingtalk-key", t("ui.dingtalk_app_key"), settings.dingTalkAppKey || "")}${valueField("st-dingtalk-robot", t("ui.dingtalk_robot_code"), settings.dingTalkRobotCode || "")}</div><div class="form-grid">${valueField("st-dingtalk-conversation", t("ui.dingtalk_open_conversation_id"), settings.dingTalkOpenConversationId || "")}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_app_secret")}"><label class="field-label" for="st-dingtalk-secret">${t("ui.dingtalk_app_secret")} ${settings.dingTalkAppSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-dingtalk-secret" type="password" placeholder="${settings.dingTalkAppSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div></div>`;
 }
 
 /** 更新区：设置（自动检查/渠道/镜像源）与检查 / 下载 / 应用状态区。 */
@@ -145,21 +146,21 @@ function updateSectionMarkup(settings) {
   const autoEnabled = checkEnabled && settings.updateAutoApplyEnabled === true;
   const autoExtra = `data-flag="st-update-auto" aria-disabled="${checkEnabled ? "false" : "true"}"${checkEnabled ? "" : " disabled"}`;
   return `<div class="update-section">
-    <div class="settings-list">${switchControl("st-update-check", "定期检查更新", "服务启动约 5 秒后首次检查，此后每 12 小时自动检查", checkEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}${switchControl("st-update-auto", "闲时自动更新", "发现新版本后自动下载，并在宿主空闲且未来 5 分钟无调度时自动更新并重启", autoEnabled, "toggle-update-flag", autoExtra)}</div>
-    <div class="form-grid">${selectField("st-update-channel", "更新渠道", settings.updateChannel, [{ value: "prerelease", label: "预发布（Pre-release）" }, { value: "stable", label: "稳定版" }])}${valueField("st-update-source", "镜像源地址", settings.updateSourceUrl, "text", 'placeholder="默认 GitHub"', "留空时使用默认 GitHub 更新源。")}</div>
+    <div class="settings-list">${switchControl("st-update-check", t("ui.check_for_updates_periodically"), t("ui.check_about_5_seconds_after_service_startup_then_every_12_hours"), checkEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}${switchControl("st-update-auto", t("ui.update_automatically_when_idle"), t("ui.download_new_versions_automatically_then_update_and_restart_when_the_host_is_idle_and_no_run_is_scheduled_within_the_next_5_minutes"), autoEnabled, "toggle-update-flag", autoExtra)}</div>
+    <div class="form-grid">${selectField("st-update-channel", t("ui.update_channel"), settings.updateChannel, [{ value: "prerelease", label: t("ui.pre_release") }, { value: "stable", label: t("ui.stable") }])}${valueField("st-update-source", t("ui.mirror_url"), settings.updateSourceUrl, "text", `placeholder="${t("ui.default_github")}"`, t("ui.leave_blank_to_use_the_default_github_update_source"))}</div>
     <div id="update-status-box" class="update-status" data-testid="update-status"></div>
   </div>`;
 }
 
 function diagnosticsSettingsMarkup() {
   return `<div class="diagnostics-section">
-    <div class="row-actions"><button class="ghost" type="button" data-action="load-diagnostics" data-testid="load-diagnostics">刷新诊断</button><button class="ghost" type="button" data-action="export-diagnostics" data-testid="export-diagnostics">导出脱敏诊断包</button></div>
-    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite"><p class="muted">正在加载诊断…</p></div>
+    <div class="row-actions"><button class="ghost" type="button" data-action="load-diagnostics" data-testid="load-diagnostics">${t("ui.refresh_diagnostics")}</button><button class="ghost" type="button" data-action="export-diagnostics" data-testid="export-diagnostics">${t("ui.export_redacted_diagnostics")}</button></div>
+    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite"><p class="muted">${t("ui.loading_diagnostics")}</p></div>
   </div>`;
 }
 
 function diagnosticStatusLabel(status) {
-  return { pass: "正常", warn: "注意", fail: "失败", skipped: "跳过" }[status] || status || "未知";
+  return t(`diagnostics.status.${status}`, {}, { pass: "Normal", warn: "Attention", fail: "Failed", skipped: "Skipped" }[status] || status || "Unknown");
 }
 
 function diagnosticStatusClass(status) {
@@ -167,17 +168,33 @@ function diagnosticStatusClass(status) {
 }
 
 function diagnosticCategoryLabel(category) {
-  return {
-    host: "宿主",
-    network: "网络",
-    recovery: "恢复",
-    execution: "执行",
-    scheduler: "调度",
-    plugins: "插件",
-    dependencies: "依赖",
-    logs: "日志",
-    diagnostics: "诊断",
-  }[category] || category || "其他";
+  return t(`diagnostics.category.${category}`, {}, {
+    host: "Host",
+    network: "Network",
+    recovery: "Recovery",
+    execution: "Run",
+    scheduler: "Scheduler",
+    plugins: "Plugin",
+    dependencies: "Dependencies",
+    logs: "Logs",
+    diagnostics: "Diagnostics",
+  }[category] || category || "Other");
+}
+
+function diagnosticCheckLabel(id) {
+  const key = String(id || "").replaceAll(".", "_").replaceAll("-", "_");
+  const fallback = String(id || "").split(".").map(part => part.replaceAll("-", " ")).join(" · ");
+  return t(`diagnostics.check.${key}`, {}, fallback || "Diagnostic check");
+}
+
+function diagnosticMessage(code, args, fallback) {
+  if (!code) return fallback;
+  const value = t(code, args || {}, "");
+  if (value !== code) return value;
+  if (code.includes(".summary.")) return fallback || t("diagnostics.summary", {}, "Summary");
+  if (code.endsWith(".detail")) return t("diagnostics.detail", {}, fallback);
+  if (code.endsWith(".remediation")) return t("diagnostics.remediation", {}, fallback);
+  return fallback;
 }
 
 function renderDiagnostics(data) {
@@ -187,15 +204,19 @@ function renderDiagnostics(data) {
   const overall = data?.overallStatus || "warn";
   const attentionCount = checks.filter(check => check?.status === "warn" || check?.status === "fail").length;
   const attentionText = attentionCount
-    ? text("，{count} 项需要关注", { count: attentionCount })
-    : text("，全部通过或按条件跳过");
-  const rows = checks.map(check => `<div class="diagnostic-row" role="row" data-diagnostic-status="${esc(check.status || "unknown")}">
-      <div class="diagnostic-check-name" role="cell"><span class="diagnostic-check-id mono">${esc(check.id || "")}</span><span class="muted diagnostic-check-category">${esc(diagnosticCategoryLabel(check.category))}</span></div>
+    ? t("ui.value_item_s_need_attention", { count: attentionCount })
+    : t("ui.all_passed_or_were_skipped_by_condition");
+  const rows = checks.map(check => {
+    const summary = diagnosticMessage(check.summaryCode, check.summaryArgs, diagnosticStatusLabel(check.status));
+    const detail = diagnosticMessage(check.detailCode, check.detailArgs, "");
+    const remediation = diagnosticMessage(check.remediationCode, check.remediationArgs, "");
+    return `<div class="diagnostic-row" role="row" data-diagnostic-status="${esc(check.status || "unknown")}">
+      <div class="diagnostic-check-name" role="cell"><div class="diagnostic-check-title-line"><strong class="diagnostic-check-title">${esc(diagnosticCheckLabel(check.id))}</strong><span class="badge muted diagnostic-category-badge">${esc(diagnosticCategoryLabel(check.category))}</span></div><span class="muted diagnostic-check-id mono">${esc(check.id || "")}</span></div>
       <div class="diagnostic-check-status" role="cell"><span class="badge ${diagnosticStatusClass(check.status)}">${esc(diagnosticStatusLabel(check.status))}</span></div>
-      <div class="diagnostic-check-summary" role="cell">${esc(check.summary || "")}</div>
-      <div class="diagnostic-check-info" role="cell">${check.detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">详情</span>${esc(check.detail)}</div>` : ""}${check.remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">建议</span>${esc(check.remediation)}</div>` : ""}</div>
-    </div>`).join("");
-  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">总体状态</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} 项检查${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="系统诊断检查项"><div class="diagnostics-table-header" role="row"><span role="columnheader">检查项</span><span role="columnheader">状态</span><span role="columnheader">结果</span><span role="columnheader">详情与建议</span></div>${rows || '<div class="diagnostics-empty" role="row">暂无诊断结果</div>'}</div>`;
+      <div class="diagnostic-check-info" role="cell"><div class="diagnostic-check-summary"><span class="diagnostic-info-label">${esc(t("diagnostics.summary", {}, "Summary"))}</span><span>${esc(summary)}</span></div>${detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">${esc(t("diagnostics.detail", {}, "Details"))}</span><span>${esc(detail)}</span></div>` : ""}${remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">${esc(t("diagnostics.remediation", {}, "Recommendation"))}</span><span>${esc(remediation)}</span></div>` : ""}</div>
+    </div>`;
+  }).join("");
+  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">${esc(t("diagnostics.overall", {}, "Overall status"))}</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} ${t("ui.checks")}${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="${esc(t("ui.system_diagnostic_checks"))}"><div class="diagnostics-table-header" role="row"><span role="columnheader">${t("ui.check")}</span><span role="columnheader">${t("ui.status")}</span><span role="columnheader">${t("ui.diagnostics")}</span></div>${rows || `<div class="diagnostics-empty" role="row">${esc(t("diagnostics.empty", {}, "No diagnostic results"))}</div>`}</div>`;
   applyTranslations(box);
 }
 
@@ -208,7 +229,7 @@ async function loadDiagnostics(token = state.routeToken) {
     renderDiagnostics(data);
   } catch (error) {
     if (box) {
-      box.innerHTML = `<p class="callout callout-warning">${esc(translateText(error.message || "诊断加载失败"))}</p>`;
+      box.innerHTML = `<p class="callout callout-warning">${esc(error.message || t("ui.failed_to_load_diagnostics"))}</p>`;
       applyTranslations(box);
     }
   }
@@ -217,7 +238,7 @@ async function loadDiagnostics(token = state.routeToken) {
 async function exportDiagnostics() {
   try {
     const result = await api("POST", "/api/diagnostics/export");
-    toast(text("诊断包已导出：{path}", { path: result.path || text("已生成") }));
+    toast(t("ui.diagnostic_package_exported_value", { path: result.path || t("ui.generated") }));
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -239,7 +260,7 @@ function notifyAutomaticUpdate(data) {
   const key = `${data.latest}|${data.channel || ""}`;
   if (key === updateAutoNoticeKey) return;
   updateAutoNoticeKey = key;
-  toast(text("发现新版本 v{version}", { version: data.latest }));
+  toast(t("ui.new_version_vvalue_available", { version: data.latest }));
 }
 
 function updateStatusPollDelay(data = {}) {
@@ -272,17 +293,17 @@ function renderUpdateStatus(data) {
   const box = $("#update-status-box");
   if (!box) return;
   if (!data) {
-    box.innerHTML = `<p class="muted update-state-copy">${text("更新状态加载中...")}</p>`;
+    box.innerHTML = `<p class="muted update-state-copy">${t("ui.loading_update_status")}</p>`;
     applyTranslations(box);
     return;
   }
   const state = data.state || "idle";
   const current = data.current || "—";
-  const channelText = data.channel === "stable" ? text("稳定版") : text("预发布（Pre-release）");
+  const channelText = data.channel === "stable" ? t("ui.stable") : t("ui.pre_release");
   const actions = updateActionsMarkup(data);
   let progress = "";
   if (state === "downloading" && typeof data.progress === "number") {
-    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="${esc(text("下载进度"))}"><div data-progress="${data.progress}"></div></div>`;
+    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="${esc(t("ui.download_progress"))}"><div data-progress="${data.progress}"></div></div>`;
   }
   let notes = "";
   if (data.notes) {
@@ -290,25 +311,25 @@ function renderUpdateStatus(data) {
     notes = `<p class="update-notes">${esc(text)}</p>`;
   }
   let stateText = "";
-  if (state === "checking") stateText = '<p class="muted update-state-copy">正在检查更新...</p>';
-  else if (state === "downloading") stateText = `<p class="muted update-state-copy">${data.automation?.autoUpdateEnabled === true ? "发现新版本，正在自动下载并校验更新包..." : "正在下载并校验更新包..."}</p>`;
-  else if (state === "ready" && data.automation?.waitingForIdle === true) stateText = '<p class="muted update-state-copy">更新已就绪，正在等待宿主空闲后自动应用。</p>';
-  else if (state === "ready") stateText = '<p class="muted update-state-copy">更新已就绪，应用前请确认没有正在运行的任务。</p>';
-  else if (state === "applypending") stateText = '<p class="muted update-state-copy">更新已登记，将在下次启动时应用。</p>';
-  else if (state === "applying") stateText = '<p class="muted update-state-copy">正在自动应用更新，服务即将重启...</p>';
-  else if (state === "recoverypending") stateText = '<p class="callout callout-warning">检测到未完成的更新恢复现场，请重启服务完成恢复后再检查更新。</p>';
-  else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">发现新版本 v${esc(data.latest)}${data.prerelease ? "（Pre-release）" : ""}。</p>`;
-  else if (state === "idle" && !data.checked && data.automation?.checkEnabled === true) stateText = '<p class="muted update-state-copy">等待首次自动检查，服务启动约 5 秒后执行。</p>';
-  else if (state === "idle" && !data.checked) stateText = '<p class="muted update-state-copy">尚未检查更新。</p>';
-  else if (state === "idle" && !data.available && data.error) stateText = `<p class="callout callout-warning">检查失败：${esc(data.error)}</p>`;
-  else if (state === "idle") stateText = '<p class="muted update-state-copy">当前已是最新版本。</p>';
-  const idleReason = state === "ready" && data.automation?.waitingForIdle && data.automation.idleBlockReason
-    ? `<p class="muted update-state-copy">等待原因：${esc(data.automation.idleBlockReason)}</p>`
+  if (state === "checking") stateText = `<p class="muted update-state-copy">${t("ui.checking_for_updates_5d4de917")}</p>`;
+  else if (state === "downloading") stateText = `<p class="muted update-state-copy">${t(data.automation?.autoUpdateEnabled === true ? "ui.a_new_version_was_found_downloading_and_verifying_the_package_automatically" : "ui.downloading_and_verifying_the_package")}</p>`;
+  else if (state === "ready" && data.automation?.waitingForIdle === true) stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_ready_and_waiting_for_the_host_to_become_idle_before_applying")}</p>`;
+  else if (state === "ready") stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_ready_confirm_that_no_tasks_are_running_before_applying_it")}</p>`;
+  else if (state === "applypending") stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_queued_and_will_be_applied_at_the_next_startup")}</p>`;
+  else if (state === "applying") stateText = `<p class="muted update-state-copy">${t("ui.applying_the_update_automatically_the_service_will_restart_soon")}</p>`;
+  else if (state === "recoverypending") stateText = `<p class="callout callout-warning">${t("ui.an_incomplete_update_recovery_state_was_found_restart_the_service_to_finish_recovery_then_check_again")}</p>`;
+  else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">${t("ui.new_version_vvaluevalue", { version: esc(data.latest), channel: data.prerelease ? t("ui.pre_release") : "" })}</p>`;
+  else if (state === "idle" && !data.checked && data.automation?.checkEnabled === true) stateText = `<p class="muted update-state-copy">${t("ui.waiting_for_the_first_automatic_check_which_runs_about_5_seconds_after_service_startup")}</p>`;
+  else if (state === "idle" && !data.checked) stateText = `<p class="muted update-state-copy">${t("ui.updates_have_not_been_checked_yet")}</p>`;
+  else if (state === "idle" && !data.available && data.errorCode) stateText = `<p class="callout callout-warning">${esc(t(`api.error.${data.errorCode}`, {}, data.errorCode))}</p>`;
+  else if (state === "idle") stateText = `<p class="muted update-state-copy">${t("ui.you_are_running_the_latest_version")}</p>`;
+  const idleReason = state === "ready" && data.automation?.waitingForIdle && data.automation.idleBlockCode
+    ? `<p class="muted update-state-copy">${t("ui.waiting_value", { reason: esc(t(`update.idle.${data.automation.idleBlockCode}`, {}, data.automation.idleBlockCode)) })}</p>`
     : "";
   const backupWarning = state === "ready"
-    ? '<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">应用更新前请先备份 config、data、history、logs、plugins 和 .nxp 等运行时数据。</p>'
+    ? `<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">${t("ui.back_up_runtime_data_such_as_config_data_history_logs_plugins_and_nxp_before_applying_the_update")}</p>`
     : "";
-  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">${text("当前版本")}</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">${text("更新渠道")}</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">${t("ui.current_version")}</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">${t("ui.update_channel")}</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
   applyTranslations(box);
   box.querySelectorAll("[data-progress]").forEach(element => {
     element.style.width = `${Math.max(0, Math.min(100, Number(element.dataset.progress) || 0))}%`;
@@ -336,7 +357,7 @@ function syncUpdateToggleState(settings = {}) {
     auto.setAttribute("aria-pressed", "false");
     auto.dataset.state = "off";
     const stateText = auto.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = text("已停用");
+    if (stateText) stateText.textContent = t("ui.disabled");
   }
 }
 
@@ -379,9 +400,9 @@ async function checkUpdate() {
     const result = await api("POST", "/api/update/check");
     updateStatus = result;
     renderUpdateStatus(result);
-    if (result.state === "checking") toast(text("正在检查更新"), "info");
-    else if (result.available) toast(text("发现新版本 v{version}", { version: result.latest }));
-    else toast(text("当前已是最新版本"), "info");
+    if (result.state === "checking") toast(t("ui.checking_for_updates"), "info");
+    else if (result.available) toast(t("ui.new_version_vvalue_available", { version: result.latest }));
+    else toast(t("ui.already_up_to_date"), "info");
     scheduleUpdateStatusPoll(state.routeToken, result);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -396,17 +417,17 @@ async function startUpdateDownload() {
 async function cancelUpdateDownload() {
   try {
     await api("POST", "/api/update/cancel");
-    toast(text("下载已取消"));
+    toast(t("ui.download_cancelled"));
     await loadUpdateStatus();
   } catch (error) { toast(error.message, "error"); }
 }
 
 function confirmUpdateApply(defer) {
   const version = updateStatus?.latest ? ` v${esc(updateStatus.latest)}` : "";
-  const actionText = defer ? text("下次启动服务时应用更新") : text("现在应用更新并重启服务");
+  const actionText = defer ? t("ui.apply_the_update_when_the_service_starts_next_time") : t("ui.apply_the_update_and_restart_the_service_now");
   confirmModal(
-    defer ? "登记下次启动更新" : "立即更新",
-    text("请确认已备份运行时数据。{action}{version}？更新备份只包含程序文件和 wwwroot。", { action: actionText, version }),
+    defer ? t("ui.update_on_next_startup") : t("ui.update_now"),
+    t("ui.confirm_that_runtime_data_has_been_backed_up_valuevalue_the_update_backup_contains_only_program_files_and_wwwroot", { action: actionText, version }),
     "update-apply-confirm",
     { defer: defer ? "true" : "false" },
   );
@@ -417,17 +438,17 @@ async function applyUpdate(defer) {
     const result = await api("POST", "/api/update/apply", { defer });
     if (result.error) {
       toast(result.error, "error");
-      if (result.code === "busy") toast(text("可先等待任务结束，或选择「下次启动更新」"), "info");
+      if (result.code === "busy") toast(t("ui.wait_for_the_task_to_finish_or_choose_update_on_next_startup"), "info");
       await loadUpdateStatus();
       return;
     }
     if (result.deferred) {
-      toast(text("已登记：下次启动服务时自动应用"));
+      toast(t("ui.queued_the_update_will_be_applied_at_the_next_service_startup"));
       await loadUpdateStatus();
       return;
     }
     renderUpdateStatus({ ...(updateStatus || {}), state: "applying" });
-    showModal(modalShell("正在应用更新", '<p class="modal-copy">更新已开始，服务即将重启并自动恢复，页面连接会短暂中断...</p>'), false, true);
+    showModal(modalShell(t("ui.applying_update"), `<p class="modal-copy">${t("ui.update_apply_started")}</p>`), false, true);
     pollServiceRestart(Date.now() + 120000);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -445,7 +466,7 @@ function pollServiceRestart(deadline) {
     if (Date.now() < deadline) pollServiceRestart(deadline);
     else {
       closeModal();
-      toast(text("服务重启超时，请手动刷新页面"), "error");
+      toast(t("ui.service_restart_timed_out_refresh_the_page_manually"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -552,7 +573,7 @@ function syncNotificationBadges(settings) {
     if (!badge) continue;
     badge.classList.toggle("ok", enabled);
     badge.classList.toggle("muted", !enabled);
-    badge.textContent = enabled ? text("已启用") : text("已禁用");
+    badge.textContent = enabled ? t("ui.enabled") : t("ui.disabled");
   }
 }
 
@@ -560,7 +581,7 @@ async function testNotify() {
   await awaitNotifySaveSettled();
   try {
     const result = await api("POST", "/api/settings/test");
-    toast(result.ok ? text("测试通知发送成功") : text("发送失败，详见日志"), result.ok ? "info" : "error");
+    toast(result.ok ? t("ui.test_notification_sent_successfully") : t("ui.sending_failed_see_the_logs"), result.ok ? "info" : "error");
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -608,6 +629,7 @@ async function doSave() {
     mcpEnabled: $("#st-mcp-enabled")?.getAttribute("aria-pressed") === "true",
     mcpPort: +($("#st-mcp-port")?.value || 58732),
     logLevel: $("#st-loglevel")?.value || "info",
+    hostLocale: $("#st-host-locale")?.value || "zh-CN",
     allowRemoteAccess: $("#st-remote")?.getAttribute("aria-pressed") === "true",
   };
   if (token) {
@@ -629,17 +651,17 @@ async function refreshLanList() {
     const lan = (data.status && data.status.remote && data.status.remote.lanAddresses) || [];
     const remoteEnabled = data.settings.allowRemoteAccess === true;
     box.innerHTML = remoteEnabled && lan.length
-      ? lan.map(addr => `<div class="kv"><span class="k">局域网访问地址</span><span>http://${esc(addr)}:${data.settings.webPort}/</span></div>`).join("")
+      ? lan.map(addr => `<div class="kv"><span class="k">${t("ui.lan_address")}</span><span>http://${esc(addr)}:${data.settings.webPort}/</span></div>`).join("")
       : "";
     applyTranslations(box);
-    if (remoteEnabled) box.dataset.help = "其他设备请访问局域网访问地址；localhost 与 0.0.0.0 只指向本机，首次访问会要求输入访问令牌。";
+    if (remoteEnabled) box.dataset.help = t("ui.other_devices_should_use_the_lan_address_localhost_and_0_0_0_0_point_only_to_this_machine_the_first_visit_requires_an_access_token");
     else delete box.dataset.help;
   } catch { /* 静默 */ }
 }
 
 /** 设置页控件自动保存绑定：服务行为沿用 change 保存，通知与更新设置按输入失焦或下拉 change 保存。 */
 function bindAutoSave() {
-  ["st-loglevel", "st-retention", "st-port", "st-mcp-port", "st-token"].forEach(id => {
+  ["st-loglevel", "st-host-locale", "st-retention", "st-port", "st-mcp-port", "st-token"].forEach(id => {
     $("#" + id)?.addEventListener("change", () => {
       if (["st-port", "st-mcp-port"].includes(id)) markRestartRequired();
       autoSave();
@@ -661,7 +683,7 @@ function bindSettingsFields(ids, handler) {
 /** 重启服务：等待挂起的自动保存完成后弹确认卡片（端口改动已即时保存，无需再校验）。 */
 export async function restartService() {
   await Promise.all([awaitSaveSettled(), awaitNotifySaveSettled(), awaitUpdateSaveSettled(), awaitNetworkSaveSettled()]);
-  confirmModal("重启服务", "重启将中断正在运行的任务，页面会短暂断开连接。确认重启服务？", "restart-confirm");
+  confirmModal(t("ui.restart_service"), t("ui.restart_warning"), "restart-confirm");
 }
 
 export async function restartConfirmed() {
@@ -678,7 +700,7 @@ export async function restartConfirmed() {
   for (const port of [currentPort, newPort, newPort + 1]) {
     if (port > 0 && !candidates.includes(port)) candidates.push(port);
   }
-  showModal(modalShell("服务重启中", '<p class="modal-copy">服务正在重启，页面将短暂断开连接并自动恢复...</p>'), false, true);
+  showModal(modalShell(t("ui.service_restarting"), `<p class="modal-copy">${t("ui.service_restarting")}</p>`), false, true);
   pollRestart(candidates, Date.now() + 60000);
 }
 
@@ -721,7 +743,7 @@ function pollRestart(candidates, deadline) {
       pollRestart(candidates, deadline);
     } else {
       closeModal();
-      toast(text("服务重启超时，请手动刷新页面"), "error");
+      toast(t("ui.service_restart_timed_out_refresh_the_page_manually"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -736,7 +758,7 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
+    if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
     if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },
@@ -746,17 +768,17 @@ export const actions = {
     const visible = input.type === "password";
     input.type = visible ? "text" : "password";
     target.setAttribute("aria-pressed", String(visible));
-    target.textContent = visible ? text("隐藏") : text("显示");
+    target.textContent = visible ? t("ui.hide") : t("ui.show");
   },
   "copy-token": async target => {
     const input = $("#st-token");
     const value = input?.value?.trim();
-    if (!value) { toast(text("当前没有可复制的令牌"), "error"); return; }
+    if (!value) { toast(t("ui.there_is_no_token_to_copy"), "error"); return; }
     try {
       await navigator.clipboard.writeText(value);
-      toast(text("访问令牌已复制"));
+      toast(t("ui.access_token_copied"));
     } catch (error) {
-      toast(text("复制访问令牌失败，请手动复制"), "error");
+      toast(t("ui.could_not_copy_the_access_token_copy_it_manually"), "error");
     }
   },
   "gen-token": () => {
@@ -768,8 +790,8 @@ export const actions = {
       input.value = hex;
       input.type = "password";
     }
-    toast(text("已生成随机令牌，正在保存…"));
-    void autoSave().then(() => toast(text("访问令牌已保存")), () => {});
+    toast(t("ui.random_token_generated_saving"));
+    void autoSave().then(() => toast(t("ui.access_token_saved")), () => {});
   },
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
   "change-locale": target => changeLocale(target),
@@ -803,14 +825,14 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
+    if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
     if (target.dataset.flag === "st-update-check" && !pressed) {
       const auto = $("#st-update-auto");
       if (auto) {
         auto.setAttribute("aria-pressed", "false");
         auto.dataset.state = "off";
         const autoState = auto.querySelector("[data-switch-state]");
-        if (autoState) autoState.textContent = text("已停用");
+        if (autoState) autoState.textContent = t("ui.disabled");
       }
     }
     syncUpdateToggleState({ updateCheckEnabled: pressed });

@@ -1,4 +1,4 @@
-import { text } from "./i18n.js";
+import { t } from "./i18n.js";
 
 const pagers = new Map();
 
@@ -12,7 +12,7 @@ export function pagerMarkup(key, page, pageSize, total) {
   for (let p = 1; p <= totalPages; p++) {
     pages += `<button type="button" class="sm ${p === page ? "pager-active" : ""}" data-action="pager-page" data-pager="${key}" data-page="${p}" ${p === page ? 'aria-current="page"' : ""}>${p}</button>`;
   }
-  return `<div class="pager" data-testid="pager-${key}" data-page-current="${page}" data-pages="${totalPages}"><span class="pager-info">${text("共 {total} 条{range}", { total, range: total ? text("，第 {from}-{to} 条", { from, to }) : "" })}</span><button type="button" class="sm" data-action="pager-prev" data-pager="${key}" ${page <= 1 ? "disabled" : ""}>${text("上一页")}</button>${pages}<button type="button" class="sm" data-action="pager-next" data-pager="${key}" ${page >= totalPages ? "disabled" : ""}>${text("下一页")}</button></div>`;
+  return `<div class="pager" data-testid="pager-${key}" data-page-current="${page}" data-pages="${totalPages}"><span class="pager-info">${t("ui.value_itemsvalue", { total, range: total ? t("ui.value_value", { from, to }) : "" })}</span><button type="button" class="sm" data-action="pager-prev" data-pager="${key}" ${page <= 1 ? "disabled" : ""}>${t("ui.previous")}</button>${pages}<button type="button" class="sm" data-action="pager-next" data-pager="${key}" ${page >= totalPages ? "disabled" : ""}>${t("ui.next")}</button></div>`;
 }
 
 export function registerPager(key, onChange) {

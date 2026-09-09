@@ -4,6 +4,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -62,7 +63,8 @@ internal static class ApiDispatchHandler
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = ex.Message }, 400).ConfigureAwait(false);
+            Logger.Warn($"[调度] 启动运行失败：{ex}");
+            await HttpHelper.ErrorAsync(context, "dispatch_failed", 400).ConfigureAwait(false);
         }
     }
 
@@ -91,7 +93,8 @@ internal static class ApiDispatchHandler
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "explain_failed", error = ex.Message }, 400).ConfigureAwait(false);
+            Logger.Warn($"[调度] 运行计划检查失败：{ex}");
+            await HttpHelper.ErrorAsync(context, "explain_failed", 400).ConfigureAwait(false);
         }
     }
 
@@ -101,7 +104,7 @@ internal static class ApiDispatchHandler
         RunningExecution? exec = RuntimeContext.Instance.Center.FindAny(runId);
         if (exec is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = $"未找到运行任务：{runId}" }, 404).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "run_not_found", 404, new { runId }).ConfigureAwait(false);
             return;
         }
         RunningExecutionSnapshot snapshot = exec.Snapshot();
@@ -152,7 +155,8 @@ internal static class ApiDispatchHandler
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = ex.Message }, 400).ConfigureAwait(false);
+            Logger.Warn($"[调度] 取消运行失败：{ex}");
+            await HttpHelper.ErrorAsync(context, "dispatch_cancel_failed", 400).ConfigureAwait(false);
         }
     }
 }

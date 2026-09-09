@@ -1,4 +1,4 @@
-import { getLocale, text, translateText } from "./i18n.js";
+import { getLocale, t } from "./i18n.js";
 
 export function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, char => ({
@@ -12,13 +12,13 @@ export function fmtTime(value) {
 }
 
 export function statusBadge(status) {
-  if (status === "success") return `<span class="badge ok">${text("成功")}</span>`;
-  if (status === "partial") return `<span class="badge warn">${text("部分失败")}</span>`;
-  if (status === "running") return `<span class="badge blue">${text("运行中")}</span>`;
-  if (status === "cancelled") return `<span class="badge warn">${text("已取消")}</span>`;
-  if (status === "skipped") return `<span class="badge blue">${text("已跳过")}</span>`;
-  if (status === "error") return `<span class="badge bad">${text("异常")}</span>`;
-  return `<span class="badge bad">${text("失败")}</span>`;
+  if (status === "success") return `<span class="badge ok">${t("ui.success")}</span>`;
+  if (status === "partial") return `<span class="badge warn">${t("ui.partially_failed")}</span>`;
+  if (status === "running") return `<span class="badge blue">${t("ui.running")}</span>`;
+  if (status === "cancelled") return `<span class="badge warn">${t("ui.cancelled")}</span>`;
+  if (status === "skipped") return `<span class="badge blue">${t("ui.skipped")}</span>`;
+  if (status === "error") return `<span class="badge bad">${t("ui.error")}</span>`;
+  return `<span class="badge bad">${t("ui.failed")}</span>`;
 }
 
 /**
@@ -26,41 +26,41 @@ export function statusBadge(status) {
  * ResultDetail 仍作为旧历史记录和未知结果码的回退，参数只使用稳定值。
  */
 export function resultDetail(record) {
-  const fallback = translateText(record?.resultDetail || "-");
+  const fallback = record?.resultDetail || "-";
   const args = record?.resultArgs || {};
-  const reason = translateText(args.reason || record?.resultDetail || "-");
+  const reason = args.reason || record?.resultDetail || "-";
   switch (record?.resultCode) {
     case "run.running":
-      return text("运行中");
+      return t("ui.running");
     case "run.success":
       return fallback;
     case "run.partial":
       return fallback;
     case "run.cancelled":
-      return fallback === "-" ? text("运行已取消") : fallback;
+      return fallback === "-" ? t("ui.run_cancelled") : fallback;
     case "run.daily_cap":
-      return text("当天已成功运行 {successful}/{maximum} 次，达到最多成功运行次数，已跳过本次运行", args);
+      return t("ui.the_daily_success_limit_was_reached_value_value_this_run_was_skipped", args);
     case "run.user_unavailable":
-      return text("用户「{user}」不存在或已禁用", args);
+      return t("ui.user_value_does_not_exist_or_is_disabled", args);
     case "run.spec_failed":
       return fallback;
     case "run.config_selection_required":
-      return text("当前脚本目录存在多个配置，请先编辑配置选择要接管的配置");
+      return t("ui.multiple_configurations_exist_in_the_script_directory_choose_one_in_edit_configuration_before_running");
     case "run.user_config_load_failed":
-      return text("用户配置加载失败：{reason}", { reason });
+      return t("ui.failed_to_load_the_user_s_configuration_value", { reason });
     case "run.retry_prepare_failed":
-      return text("重试前配置交换失败：{reason}", { reason });
+      return t("ui.configuration_swap_before_retry_failed_value", { reason });
     case "run.max_attempts":
-      return text("达到最大尝试次数（{maximum} 次）仍失败，最后原因：{reason}", {
+      return t("ui.the_maximum_number_of_attempts_value_failed_last_reason_value", {
         maximum: args.maximum || record?.maxAttempts || "-",
         reason,
       });
     case "run.script_missing":
-      return text("脚本实例不存在或已被删除");
+      return t("ui.the_script_instance_does_not_exist_or_was_deleted");
     case "run.no_enabled_users":
-      return text("脚本实例未配置启用用户，已跳过");
+      return t("ui.no_enabled_users_are_configured_for_this_script_instance_skipped");
     case "run.plugin_unavailable":
-      return text("绑定的{reason}，已跳过本次运行", { reason });
+      return t("ui.the_bound_value_this_run_was_skipped", { reason });
     case "run.host_error":
       return fallback;
     case "scheduler.trigger_failed":
@@ -111,9 +111,9 @@ export function scriptPluginUnavailableMessage(script, plugins = []) {
   const status = scriptPluginStatus(script, plugins);
   if (!status.specialized || status.available) return "";
   const reason = status.missing
-    ? text("专项插件「{name}」未安装，请先安装对应专项插件", { name: status.displayName })
-    : text("专项插件「{name}」当前不可用，请先启用对应专项插件", { name: status.displayName });
-  return text("脚本实例「{name}」绑定的{reason}", { name: script?.name || "", reason });
+    ? t("ui.specialized_plugin_value_is_not_installed_install_it_first", { name: status.displayName })
+    : t("ui.specialized_plugin_value_is_unavailable_enable_it_first", { name: status.displayName });
+  return t("ui.value_bound_to_script_instance_value", { name: script?.name || "", reason });
 }
 
 /** 脚本主程序图标加载失败时的通用占位图（内联 SVG，主题无关）。 */

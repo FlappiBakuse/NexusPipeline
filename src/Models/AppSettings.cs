@@ -24,6 +24,9 @@ public class AppSettings
 
     public string LogLevel { get; set; } = "info";
 
+    /// <summary>宿主后台输出、CLI、托盘和通知使用的全局语言；Web 页面语言由浏览器偏好决定。</summary>
+    public string HostLocale { get; set; } = "zh-CN";
+
     /// <summary>允许远程访问（绑定 http.sys 强通配符 +，非 0.0.0.0——http.sys 不接受 0.0.0.0 前缀；远程请求需访问令牌；默认仅本地 127.0.0.1）。</summary>
     public bool AllowRemoteAccess { get; set; }
 

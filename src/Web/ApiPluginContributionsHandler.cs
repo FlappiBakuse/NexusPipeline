@@ -245,7 +245,7 @@ internal static class ApiPluginContributionsHandler
         }
         if (registration.Contribution.SaveHandler is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "action_not_supported", error = "该插件 UI 贡献不支持保存" }, 405).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "action_not_supported", 405).ConfigureAwait(false);
             return;
         }
         if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
@@ -302,7 +302,7 @@ internal static class ApiPluginContributionsHandler
         }
         if (registration.Contribution.ActionHandler is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "action_not_supported", error = "该插件 UI 贡献不支持此动作" }, 405).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "action_not_supported", 405).ConfigureAwait(false);
             return;
         }
         if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
@@ -540,7 +540,7 @@ internal static class ApiPluginContributionsHandler
         JsonObject? values = root?["values"] as JsonObject;
         if (values is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, error = "插件设置格式不正确", code = "validation_error" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "validation_error", 400).ConfigureAwait(false);
             return;
         }
         OperationResult<bool> result = await RuntimeContext.Instance
@@ -556,16 +556,10 @@ internal static class ApiPluginContributionsHandler
     }
 
     private static Task ContributionNotFoundAsync(HttpListenerContext context) =>
-        HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = "插件设置贡献不存在或插件未启用", code = "contribution_not_found" },
-            404);
+        HttpHelper.ErrorAsync(context, "contribution_not_found", 404);
 
     private static Task PluginErrorAsync(HttpListenerContext context, string message) =>
-        HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = message, code = "plugin_error" },
-            500);
+        HttpHelper.ErrorAsync(context, "plugin_error", 500);
 
     private static Task WriteOperationErrorAsync(HttpListenerContext context, OperationError error)
     {
@@ -573,20 +567,11 @@ internal static class ApiPluginContributionsHandler
     }
 
     private static Task UiValidationErrorAsync(HttpListenerContext context, string message) =>
-        HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = message, code = "validation_error" },
-            400);
+        HttpHelper.ErrorAsync(context, "validation_error", 400);
 
     private static Task UiContributionNotFoundAsync(HttpListenerContext context) =>
-        HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = "插件 UI 贡献不存在或插件未启用", code = "contribution_not_found" },
-            404);
+        HttpHelper.ErrorAsync(context, "contribution_not_found", 404);
 
     private static Task UiPluginErrorAsync(HttpListenerContext context, string message) =>
-        HttpHelper.WriteJsonAsync(
-            context,
-            new { ok = false, error = message, code = "plugin_error" },
-            500);
+        HttpHelper.ErrorAsync(context, "plugin_error", 500);
 }

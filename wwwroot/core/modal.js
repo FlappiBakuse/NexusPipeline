@@ -3,7 +3,7 @@ import { esc } from "./format.js";
 import { icon } from "./icons.js";
 import { initAutoScroll, syncAllModeToggles, syncAllSwitchControls } from "./ui.js";
 import { focusWithoutTooltip, initTooltips } from "./tooltip.js";
-import { applyTranslations, text } from "./i18n.js";
+import { applyTranslations, t } from "./i18n.js";
 
 let modalReturnFocus = null;
 
@@ -11,7 +11,7 @@ export function modalShell(title, body, footer = "") {
   const titleId = "modal-title-" + Math.random().toString(36).slice(2);
   return `<div class="modal-header">
     <div><h3 class="modal-title" id="${titleId}">${title}</h3></div>
-    <button class="icon-button modal-close" type="button" data-action="close-modal" aria-label="关闭">${icon("close")}</button>
+    <button class="icon-button modal-close" type="button" data-action="close-modal" aria-label="${t("ui.close")}">${icon("close")}</button>
   </div>
   <div class="modal-body">${body}</div>
   ${footer ? `<div class="modal-footer">${footer}</div>` : ""}`;
@@ -25,12 +25,12 @@ export function confirmModal(title, message, confirmAction, data = {}) {
   const isDelete = confirmAction.startsWith("confirm-delete");
   const confirmClass = isDelete || confirmAction === "confirm-cancel-run" ? "danger solid" : "primary";
   const confirmLabel = isDelete
-    ? text("确认删除")
-    : confirmAction === "restart-confirm" ? text("确认重启")
-      : confirmAction === "confirm-cancel-run" ? text("确认取消")
-        : text("确定");
+    ? t("ui.confirm_deletion")
+    : confirmAction === "restart-confirm" ? t("ui.confirm_restart")
+      : confirmAction === "confirm-cancel-run" ? t("ui.confirm_cancellation")
+        : t("ui.confirm");
   showModal(modalShell(title, `<p class="modal-copy">${message}</p>`,
-    `<button class="ghost" type="button" data-action="close-modal">${text("取消")}</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
+    `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
 }
 
 export function showModal(content, wide = false, locked = false, allowClose = false) {
@@ -134,7 +134,7 @@ export function closeModal(restoreFocus = true) {
       try {
         cleanup();
       } catch (error) {
-        console.error("弹窗资源清理失败", error);
+        console.error("[NexusPipeline] modal cleanup failed", error);
       }
     }
     mask._cleanupCallbacks.clear();

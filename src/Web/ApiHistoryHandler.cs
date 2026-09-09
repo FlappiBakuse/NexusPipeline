@@ -53,7 +53,7 @@ internal static class ApiHistoryHandler
             bool hasExplicitRange = TryParseDateRange(context.Request, out DateTime rangeStart, out DateTime rangeEnd, out string? rangeError);
             if (hasExplicitRange && rangeError is not null)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = rangeError }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, rangeError, 400).ConfigureAwait(false);
                 return;
             }
             int rangeDays;
@@ -96,7 +96,7 @@ internal static class ApiHistoryHandler
             string userDateParam = context.Request.QueryString["date"] ?? "";
             if (!DateTime.TryParseExact(userDateParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime day))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "date 参数格式须为 yyyy-MM-dd" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "history_invalid_date", 400).ConfigureAwait(false);
                 return;
             }
             List<HistoryUserSummary> users = RuntimeContext.Instance.History.QueryUsers(day);
@@ -113,13 +113,13 @@ internal static class ApiHistoryHandler
             string id = context.Request.QueryString["id"] ?? "";
             if (string.IsNullOrWhiteSpace(id))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "缺少记录 ID" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "history_id_required", 400).ConfigureAwait(false);
                 return;
             }
             RunRecord? record = RuntimeContext.Instance.History.FindById(id);
             if (record is null)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "记录不存在" }, 404).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "history_not_found", 404).ConfigureAwait(false);
                 return;
             }
             record = record.Clone();
@@ -167,13 +167,13 @@ internal static class ApiHistoryHandler
         {
             if (!DateTime.TryParseExact(dateParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime day))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "date 参数格式须为 yyyy-MM-dd" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "history_invalid_date", 400).ConfigureAwait(false);
                 return;
             }
             string? userKey = context.Request.QueryString["userKey"];
             if (!string.IsNullOrWhiteSpace(userKey) && !HistoryService.IsValidUserKey(userKey))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "userKey 参数格式无效" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "history_invalid_user_key", 400).ConfigureAwait(false);
                 return;
             }
             List<RunRecord> dayRecords = RuntimeContext.Instance.History.Query(
@@ -201,7 +201,7 @@ internal static class ApiHistoryHandler
         bool hasHistoryRange = TryParseDateRange(context.Request, out DateTime historyStart, out DateTime historyEnd, out string? historyRangeError);
         if (hasHistoryRange && historyRangeError is not null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = historyRangeError }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, historyRangeError, 400).ConfigureAwait(false);
             return;
         }
         int days;
@@ -264,24 +264,24 @@ internal static class ApiHistoryHandler
         }
         if (!hasFrom || !hasTo)
         {
-            error = "from 与 to 参数必须同时提供";
+            error = "history_range_required";
             return true;
         }
         if (!DateTime.TryParseExact(fromParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime from)
             || !DateTime.TryParseExact(toParam, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime to))
         {
-            error = "日期范围格式须为 yyyy-MM-dd";
+            error = "history_invalid_date_range";
             return true;
         }
         if (to.Date < from.Date)
         {
-            error = "结束日期不能早于开始日期";
+            error = "history_range_reversed";
             return true;
         }
         int rangeDays = (int)(to.Date - from.Date).TotalDays + 1;
         if (rangeDays > AppFixedLimits.HistoryRetentionDaysMax)
         {
-            error = $"日期范围不能超过 {AppFixedLimits.HistoryRetentionDaysMax} 天";
+            error = "history_range_too_large";
             return true;
         }
         start = from.Date;

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -37,7 +38,7 @@ internal static class ApiAppearanceAssetsHandler
                 JsonNode? node = HttpHelper.ParseBody(body);
                 if (node is not JsonObject palette)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_palette", error = "壁纸配色请求体无效" }, 400).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "invalid_palette", 400).ConfigureAwait(false);
                     return;
                 }
                 string caller = AppearanceApiSupport.ResolveCaller(context, palette);
@@ -55,11 +56,13 @@ internal static class ApiAppearanceAssetsHandler
         }
         catch (AppearanceException ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, ex.Code, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "internal_error", error = ex.Message }, 500).ConfigureAwait(false);
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[外观] 资源操作失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
         }
     }
 }

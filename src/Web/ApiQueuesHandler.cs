@@ -45,7 +45,7 @@ internal static class ApiQueuesHandler
             DispatchQueue? queue = HttpHelper.ParseBody<DispatchQueue>(body);
             if (queue is null || string.IsNullOrWhiteSpace(queue.Name))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "队列名称不能为空" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "queue_name_required", 400).ConfigureAwait(false);
                 return;
             }
             OperationResult<DispatchQueue> result = QueueCommands.Create(queue);

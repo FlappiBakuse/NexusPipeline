@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json.Nodes;
 using NexusPipeline.Services;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -22,7 +23,7 @@ internal static class ApiAppearanceHandler
                 JsonNode? node = HttpHelper.ParseBody(body);
                 if (node is not JsonObject patch)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_config", error = "外观配置请求体无效" }, 400).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "invalid_config", 400).ConfigureAwait(false);
                     return;
                 }
                 string caller = AppearanceApiSupport.ResolveCaller(context, patch);
@@ -31,7 +32,7 @@ internal static class ApiAppearanceHandler
             }
             if (method == "POST" && seg.Length == 2 && seg[1].Equals("rotation", StringComparison.OrdinalIgnoreCase))
             {
-                await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "invalid_action", error = "外观轮换操作无效" }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "invalid_action", 400).ConfigureAwait(false);
                 return;
             }
             if (method == "POST" && seg.Length == 3
@@ -46,11 +47,13 @@ internal static class ApiAppearanceHandler
         }
         catch (AppearanceException ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, ex.Code, AppearanceApiSupport.StatusCode(ex.Code)).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "internal_error", error = ex.Message }, 500).ConfigureAwait(false);
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[外观] 配置操作失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
         }
     }
 

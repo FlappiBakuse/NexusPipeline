@@ -1,3 +1,5 @@
+import { t } from "./i18n.js";
+
 function authHeaders() {
   const headers = {};
   try {
@@ -12,13 +14,13 @@ function authHeaders() {
 function unauthorized(message) {
   try { localStorage.removeItem("nexus-token"); } catch { /* ignore */ }
   if (typeof window.__showTokenPrompt === "function") window.__showTokenPrompt();
-  return new Error(message || "需要访问令牌");
+  return new Error(message || t("ui.auth_required"));
 }
 
 export async function captureExecutionPreview(runId, pluginName, signal) {
   const id = String(runId || "").trim();
   const plugin = String(pluginName || "").trim();
-  if (!id || !plugin) throw new TypeError("实时截图目标无效");
+  if (!id || !plugin) throw new TypeError(t("ui.live_screenshot_target_invalid"));
   const response = await fetch(
     `/api/execution-preview/${encodeURIComponent(id)}?plugin=${encodeURIComponent(plugin)}`,
     { headers: authHeaders(), cache: "no-store", signal });
@@ -31,14 +33,14 @@ export async function captureExecutionPreview(runId, pluginName, signal) {
     };
   }
   if (response.status === 401) {
-    throw unauthorized("需要访问令牌");
+    throw unauthorized(t("ui.auth_required"));
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new Error(data?.error || `HTTP ${response.status}`);
   }
   const blob = await response.blob();
-  if (!blob.type.startsWith("image/")) throw new Error("实时截图响应格式无效");
+  if (!blob.type.startsWith("image/")) throw new Error(t("ui.live_screenshot_response_invalid"));
   return {
     state: "ready",
     capturedAt: response.headers.get("X-Nexus-Preview-Captured-At") || "",

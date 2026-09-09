@@ -413,15 +413,14 @@ internal sealed class WebServer : IDisposable
                 if (!IsAllowedOrigin(context, out string? originDetail))
                 {
                     Logger.Debug($"[安全] 拒绝跨源请求：{originDetail}");
-                    await HttpHelper.WriteJsonAsync(context, new { error = originDetail }, 403).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "origin_forbidden", 403).ConfigureAwait(false);
                     return;
                 }
                 if (!AuthorizeRequest(context, out string? authDetail))
                 {
                     Logger.Debug($"[认证] 拒绝远程请求：{authDetail}");
-                    context.Response.StatusCode = 401;
                     context.Response.Headers["X-Nexus-Auth"] = "required";
-                    await HttpHelper.WriteJsonAsync(context, new { error = "需要访问令牌（请求头 Authorization: Bearer <token>）" }, 401).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "auth_required", 401).ConfigureAwait(false);
                     return;
                 }
                 await HandleApiAsync(context, method, path, token).ConfigureAwait(false);
@@ -445,11 +444,11 @@ internal sealed class WebServer : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Web] 请求处理异常：{ex.Message}");
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[Web] 请求处理异常（追踪 {traceId}）：{ex}");
             try
             {
-                context.Response.StatusCode = 500;
-                await HttpHelper.WriteJsonAsync(context, new { error = ex.Message }).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
             }
             catch
             {
@@ -579,7 +578,7 @@ internal sealed class WebServer : IDisposable
                 : MaxRequestBodyBytes;
             if (context.Request.ContentLength64 > maxBodyBytes)
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = $"请求体过大（上限 {maxBodyBytes / (1024 * 1024)}MB）" }, 413).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "request_too_large", 413, new { maxMb = maxBodyBytes / (1024 * 1024) }).ConfigureAwait(false);
                 return;
             }
             using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8);
@@ -592,7 +591,7 @@ internal sealed class WebServer : IDisposable
                 total += read;
                 if (total > maxBodyBytes)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = $"请求体过大（上限 {maxBodyBytes / (1024 * 1024)}MB）" }, 413).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "request_too_large", 413, new { maxMb = maxBodyBytes / (1024 * 1024) }).ConfigureAwait(false);
                     return;
                 }
                 text.Append(buffer, 0, read);

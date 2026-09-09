@@ -9,29 +9,35 @@ internal static class RunResultLocalization
     public static string Detail(RunRecord record, string? locale = null)
     {
         string fallback = record.ResultDetail ?? "";
-        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
-        if (normalized == LocaleCatalog.DefaultLocale)
-        {
-            return fallback;
-        }
-
         string reason = GetArg(record.ResultArgs, "reason", fallback);
+        var args = record.ResultArgs.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
         return record.ResultCode switch
         {
-            "run.running" => "Running",
-            "run.cancelled" when fallback == "运行已取消" => "Run cancelled",
-            "run.daily_cap" => $"The daily success limit was reached ({GetArg(record.ResultArgs, "successful", "0")}/{GetArg(record.ResultArgs, "maximum", "0")}); this run was skipped",
-            "run.user_unavailable" => $"User \"{GetArg(record.ResultArgs, "user", "")}\" does not exist or is disabled",
-            "run.config_selection_required" => "Multiple configurations exist in the script directory. Choose one in Edit configuration before running",
-            "run.user_config_load_failed" => $"Failed to load the user's configuration: {reason}",
-            "run.retry_prepare_failed" => $"Configuration swap before retry failed: {reason}",
-            "run.max_attempts" => $"The maximum number of attempts ({GetArg(record.ResultArgs, "maximum", record.MaxAttempts.ToString())}) failed; last reason: {reason}",
-            "run.script_missing" => "The script instance does not exist or was deleted",
-            "run.no_enabled_users" => "No enabled users are configured for this script instance; skipped",
-            "run.plugin_unavailable" => $"The bound {TranslatePluginReason(reason)}; this run was skipped",
-            "run.success" when fallback == "一次成功" => "Succeeded on the first attempt",
-            _ when TryGetAttemptSuccess(fallback, out int attempt) => $"Succeeded on attempt {attempt}",
-            "run.partial" when fallback == "判断脚本判定部分完成" => "The judge reported partial completion",
+            "run.running" => HostLocalization.TranslateNamed("run.running", "运行中", args, locale),
+            "run.cancelled" when fallback == "运行已取消" => HostLocalization.TranslateNamed("run.cancelled", fallback, args, locale),
+            "run.daily_cap" => HostLocalization.TranslateNamed("run.daily_cap", fallback, args, locale),
+            "run.user_unavailable" => HostLocalization.TranslateNamed("run.user_unavailable", fallback, args, locale),
+            "run.config_selection_required" => HostLocalization.TranslateNamed("run.config_selection_required", fallback, args, locale),
+            "run.user_config_load_failed" => HostLocalization.TranslateNamed("run.user_config_load_failed", fallback, args, locale),
+            "run.retry_prepare_failed" => HostLocalization.TranslateNamed("run.retry_prepare_failed", fallback, args, locale),
+            "run.max_attempts" => HostLocalization.TranslateNamed("run.max_attempts", fallback, args, locale),
+            "run.script_missing" => HostLocalization.TranslateNamed("run.script_missing", fallback, args, locale),
+            "run.no_enabled_users" => HostLocalization.TranslateNamed("run.no_enabled_users", fallback, args, locale),
+            "run.plugin_unavailable" => HostLocalization.TranslateNamed(
+                "run.plugin_unavailable",
+                fallback,
+                new Dictionary<string, object?>
+                {
+                    ["reason"] = TranslatePluginReason(reason, locale),
+                },
+                locale),
+            "run.success" when fallback == "一次成功" => HostLocalization.TranslateNamed("run.success_first", fallback, args, locale),
+            _ when TryGetAttemptSuccess(fallback, out int attempt) => HostLocalization.TranslateNamed(
+                "run.success_attempt",
+                fallback,
+                new Dictionary<string, object?> { ["attempt"] = attempt },
+                locale),
+            "run.partial" when fallback == "判断脚本判定部分完成" => HostLocalization.TranslateNamed("run.partial_judge", fallback, args, locale),
             _ => fallback,
         };
     }
@@ -43,17 +49,25 @@ internal static class RunResultLocalization
             : fallback;
     }
 
-    private static string TranslatePluginReason(string reason)
+    private static string TranslatePluginReason(string reason, string? locale)
     {
         Match missing = Regex.Match(reason, "^专项插件「(?<name>.+)」未安装");
         if (missing.Success)
         {
-            return $"specialized plugin \"{missing.Groups["name"].Value}\" is not installed";
+            return HostLocalization.TranslateNamed(
+                "run.plugin_missing",
+                $"专项插件「{missing.Groups["name"].Value}」未安装",
+                new Dictionary<string, object?> { ["name"] = missing.Groups["name"].Value },
+                locale);
         }
         Match disabled = Regex.Match(reason, "^专项插件「(?<name>.+)」当前不可用");
         if (disabled.Success)
         {
-            return $"specialized plugin \"{disabled.Groups["name"].Value}\" is unavailable";
+            return HostLocalization.TranslateNamed(
+                "run.plugin_disabled",
+                $"专项插件「{disabled.Groups["name"].Value}」当前不可用",
+                new Dictionary<string, object?> { ["name"] = disabled.Groups["name"].Value },
+                locale);
         }
         return reason;
     }

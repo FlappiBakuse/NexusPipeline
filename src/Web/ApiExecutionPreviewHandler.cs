@@ -36,10 +36,8 @@ internal static class ApiExecutionPreviewHandler
         }
         if (response.StatusCode != 200 || response.Data is null)
         {
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { error = response.Error ?? "实时截图暂不可用" },
-                response.StatusCode).ConfigureAwait(false);
+            string code = response.StatusCode == 404 ? "execution_preview_not_found" : "execution_preview_unavailable";
+            await HttpHelper.ErrorAsync(context, code, response.StatusCode).ConfigureAwait(false);
             return;
         }
 

@@ -1,6 +1,7 @@
 using System.Net;
 using NexusPipeline.App.Queries;
 using NexusPipeline.Models;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -39,12 +40,12 @@ internal static class ApiFsHandler
             }
             if (!Directory.Exists(path))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "目录不存在：" + path }, 400).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "fs_path_not_found", 400, new { path }).ConfigureAwait(false);
                 return;
             }
             if (!IsWhitelisted(path))
             {
-                await HttpHelper.WriteJsonAsync(context, new { error = "路径不在允许浏览范围内（仅限已配置脚本的根目录/配置路径/游戏路径及其子路径）" }, 403).ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "fs_path_forbidden", 403).ConfigureAwait(false);
                 return;
             }
             var dirs = Directory.EnumerateDirectories(path).OrderBy(d => d).ToList();
@@ -54,7 +55,8 @@ internal static class ApiFsHandler
         }
         catch (Exception ex)
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "读取目录失败：" + ex.Message }, 400).ConfigureAwait(false);
+            Logger.Warn($"[文件浏览] 读取目录失败：{ex}");
+            await HttpHelper.ErrorAsync(context, "fs_read_failed", 400).ConfigureAwait(false);
         }
     }
 

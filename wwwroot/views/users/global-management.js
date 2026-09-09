@@ -8,7 +8,7 @@ import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js"
 import { PRE_ONLY_MARKER, POST_FINAL_MARKER, encodePrePost, splitPrePost } from "../../core/prepost.js";
 import { state } from "../../core/state.js";
 import { reloadUsers, syncManagementSwitch, userById } from "./shared.js";
-import { text } from "../../core/i18n.js";
+import { t } from "../../core/i18n.js";
 
 let globalManagementDraft = null;
 
@@ -25,24 +25,24 @@ function globalManagementHostMarkup(settings) {
   const pre = encodePrePost(PRE_ONLY_MARKER, advanced.preRunOnceOnly, advanced.preRunScript);
   const post = encodePrePost(POST_FINAL_MARKER, advanced.postRunOnFinalOnly, advanced.postRunScript);
   return '<div class="global-management-grid">' +
-    '<section class="global-management-card"><div class="section-heading"><div><h3>通用</h3><p class="muted">统一控制所有脚本绑定的启用状态与运行天数。</p></div></div><div class="settings-list">' +
-      switchControl("gm-general-sync", "同步通用设置", "开启后覆盖每个脚本绑定的通用设置", general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
-      switchControl("gm-general-enabled", "是否启用", "关闭后所有绑定均不参与运行", general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
+    `<section class="global-management-card"><div class="section-heading"><div><h3>${t("ui.general")}</h3><p class="muted">${t("ui.global_general_copy")}</p></div></div><div class="settings-list">` +
+      switchControl("gm-general-sync", t("ui.sync_general_settings"), t("ui.when_enabled_override_the_general_settings_of_every_script_binding"), general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
+      switchControl("gm-general-enabled", t("ui.enabled"), t("ui.when_disabled_no_binding_participates_in_runs"), general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
     '</div>' +
-      valueField("gm-general-run-days", "运行天数", typeof general.runDays === "number" ? general.runDays : -1, "number", 'data-global-field="general.runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="-1 永久；0 停止"', "-1 表示永久运行；0 表示停止；正数表示剩余运行天数，每日递减。") +
-      valueField("gm-general-max-success", "最多成功运行次数", typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", 'data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRuns) + '" step="1" placeholder="-1 不限制；正数达到上限后跳过"', "-1 表示不限制；正整数达到上限后跳过，0 不是有效值。") +
+      valueField("gm-general-run-days", t("ui.run_days"), typeof general.runDays === "number" ? general.runDays : -1, "number", `data-global-field="general.runDays" min="-1" max="${esc(maxRunDays)}" step="1" placeholder="${t("ui.run_days_placeholder")}"`, t("ui.run_days_help")) +
+      valueField("gm-general-max-success", t("ui.maximum_successful_runs"), typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", `data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="${esc(maxSuccessfulRuns)}" step="1" placeholder="${t("ui.maximum_successful_runs_placeholder")}"`, t("ui.1_means_unlimited_a_positive_value_skips_runs_after_the_limit_is_reached_0_is_invalid")) +
     '</section>' +
-    '<section class="global-management-card"><div class="section-heading"><div><h3>通知</h3><p class="muted">统一控制所有脚本绑定的通知开关与 SMTP 收件人。</p></div></div><div class="settings-list">' +
-      switchControl("gm-notification-sync", "同步通知设置", "开启后覆盖每个脚本绑定的通知设置", notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
-      switchControl("gm-notification-enabled", "开启通知推送", "按用户绑定通知设置发送运行状态通知", notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
+    `<section class="global-management-card"><div class="section-heading"><div><h3>${t("ui.notifications")}</h3><p class="muted">${t("ui.control_notification_switches_and_smtp_recipients_for_all_script_bindings")}</p></div></div><div class="settings-list">` +
+      switchControl("gm-notification-sync", t("ui.sync_notification_settings"), t("ui.when_enabled_override_the_notification_settings_of_every_script_binding"), notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
+      switchControl("gm-notification-enabled", t("ui.enable_notifications"), t("ui.global_notification_copy"), notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
     '</div>' +
-      valueField("gm-notification-smtp", "SMTP 收件人", notification.smtpTo || "", "text", 'data-global-field="notification.smtpTo" placeholder="留空继承全局收件人"', "留空时继承每个脚本绑定的 SMTP 收件人设置。") +
+      valueField("gm-notification-smtp", t("ui.smtp_recipients"), notification.smtpTo || "", "text", `data-global-field="notification.smtpTo" placeholder="${t("ui.leave_blank_to_inherit_global_recipients")}"`, t("ui.global_smtp_help")) +
     '</section>' +
-    '<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>高级</h3><p class="muted">统一控制所有脚本绑定的任务前后脚本。</p></div></div><div class="settings-list">' +
-      switchControl("gm-advanced-sync", "同步高级设置", "开启后覆盖每个脚本绑定的高级设置", advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
+    `<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>${t("ui.advanced")}</h3><p class="muted">${t("ui.control_before_and_after_task_scripts_for_all_script_bindings")}</p></div></div><div class="settings-list">` +
+      switchControl("gm-advanced-sync", t("ui.sync_advanced_settings"), t("ui.when_enabled_override_the_advanced_settings_of_every_script_binding"), advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
     '</div>' +
-      pathField("gm-advanced-pre", "任务前运行脚本路径", pre, "file", 'data-global-field="advanced.preRunScript" placeholder="%FIRST% 开头填写仅首次运行"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%FIRST% 开头填写仅首次运行。") +
-      pathField("gm-advanced-post", "任务后运行脚本路径", post, "file", 'data-global-field="advanced.postRunScript" placeholder="%LAST% 开头填写仅最终运行"', "脚本文件|*.exe;*.bat;*.cmd;*.ps1;*.py;*.js|所有文件|*.*", "", "选择后仍可手动编辑；%LAST% 开头填写仅最终运行。") +
+      pathField("gm-advanced-pre", t("ui.before_task_script_path"), pre, "file", `data-global-field="advanced.preRunScript" placeholder="${t("ui.pre_task_placeholder")}"`, t("ui.executable_file_filter"), "", t("ui.pre_task_help")) +
+      pathField("gm-advanced-post", t("ui.after_task_script_path"), post, "file", `data-global-field="advanced.postRunScript" placeholder="${t("ui.post_task_placeholder")}"`, t("ui.executable_file_filter"), "", t("ui.post_task_help")) +
     '</section>' +
   '</div>';
 }
@@ -70,10 +70,10 @@ function pluginFieldMarkup(contribution, field) {
   }
   if (type === "secret") {
     const configured = value?.configured === true;
-    return '<div class="field plugin-field plugin-secret-field"' + help + '><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><div class="plugin-secret-row"><input id="' + esc(id) + '" type="password" data-plugin-field="' + esc(field.key) + '" data-plugin-type="secret" data-secret-action="keep" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 16384) + '" placeholder="' + esc(configured ? "已设置，留空保持不变" : (field.placeholder || "请输入密钥")) + '"' + readOnly + '>' + (configured && !field.readOnly ? '<button class="tertiary" type="button" data-action="clear-plugin-secret" data-plugin-field="' + esc(field.key) + '">清除</button>' : "") + '</div></div>';
+    return '<div class="field plugin-field plugin-secret-field"' + help + '><label class="field-label" for="' + esc(id) + '">' + esc(field.label) + required + '</label><div class="plugin-secret-row"><input id="' + esc(id) + '" type="password" data-plugin-field="' + esc(field.key) + '" data-plugin-type="secret" data-secret-action="keep" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 16384) + '" placeholder="' + esc(configured ? `${t("ui.set")}，${t("ui.leave_blank_to_keep").toLowerCase()}` : (field.placeholder || t("ui.enter_secret"))) + '"' + readOnly + '>' + (configured && !field.readOnly ? '<button class="tertiary" type="button" data-action="clear-plugin-secret" data-plugin-field="' + esc(field.key) + '">' + t("ui.clear") + '</button>' : "") + '</div></div>';
   }
   if (type === "status") {
-    return '<div class="field plugin-field"' + help + '><span class="field-label">' + esc(field.label) + '</span><span class="plugin-status-value" data-plugin-field="' + esc(field.key) + '" data-plugin-type="status">' + esc(typeof value === "string" ? value : "暂无状态") + '</span></div>';
+    return '<div class="field plugin-field"' + help + '><span class="field-label">' + esc(field.label) + '</span><span class="plugin-status-value" data-plugin-field="' + esc(field.key) + '" data-plugin-type="status">' + esc(typeof value === "string" ? value : t("ui.no_status")) + '</span></div>';
   }
   return valueField(id, esc(field.label) + required, typeof value === "string" ? value : "", "text", 'data-plugin-field="' + esc(field.key) + '" data-plugin-type="text" maxlength="' + esc(field.maxLength > 0 ? field.maxLength : 65536) + '" placeholder="' + esc(field.placeholder || "") + '"' + readOnly, field.description || "");
 }
@@ -87,15 +87,15 @@ function globalManagementPluginMarkup(contributions) {
       : "";
     return '<article class="global-management-plugin" data-plugin-name="' + esc(contribution.pluginName) + '" data-plugin-contribution-id="' + esc(contribution.id) + '"><div class="section-heading"><div><h4>' + esc(displayName) + '</h4>' + title + (contribution.description ? '<p class="muted">' + esc(contribution.description) + '</p>' : "") + '</div></div><div class="plugin-contribution-fields">' + (contribution.fields || []).map(field => pluginFieldMarkup(contribution, field)).join("") + '</div></article>';
   }).join("");
-  return '<section class="global-management-plugins"><div class="section-heading"><div><h3>插件设置</h3><p class="muted">由当前已启用的插件提供的用户级设置。</p></div></div>' + cards + '</section>';
+  return `<section class="global-management-plugins"><div class="section-heading"><div><h3>${t("ui.plugin_settings")}</h3><p class="muted">${t("ui.user_level_settings_provided_by_currently_enabled_plugins")}</p></div></div>` + cards + '</section>';
 }
 
 function renderGlobalManagementModal() {
   if (!globalManagementDraft) return;
   const draft = globalManagementDraft;
   const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions) + pluginSlotMarkup("users.global.sections", "users.global.sections", "global-management-plugin-slot", { mode: "user", primaryId: draft.userId });
-  const footer = '<button class="primary" type="button" data-action="save-global-management">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("全局管理", body, footer), true, true, true);
+  const footer = `<button class="primary" type="button" data-action="save-global-management">${t("ui.save")}</button><button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button>`;
+  showModal(modalShell(t("ui.global_management"), body, footer), true, true, true);
   void renderPluginSlots(document);
   hydrateIcons(document);
 }
@@ -178,7 +178,7 @@ export async function saveGlobalManagement() {
   const draft = globalManagementDraft;
   const settings = readGlobalManagementSettings();
   if (!validateGlobalPluginContributions(draft.contributions)) {
-    toast(text("请完善插件设置中的必填项"), "error");
+    toast(t("ui.complete_the_required_plugin_settings"), "error");
     return;
   }
   try {
@@ -190,7 +190,7 @@ export async function saveGlobalManagement() {
     }
     globalManagementDraft = null;
     closeModal();
-    toast(text("全局设置已保存"));
+    toast(t("ui.global_settings_saved"));
     await reloadUsers();
     return saved;
   } catch (error) {

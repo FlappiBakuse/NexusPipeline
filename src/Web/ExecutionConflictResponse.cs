@@ -17,18 +17,15 @@ internal static class ExecutionConflictResponse
             return false;
         }
 
-        string message = $"执行计划正在引用资源「{resource}」，当前无法修改；请等待相关运行结束";
-        await HttpHelper.WriteJsonAsync(
+        await HttpHelper.ErrorAsync(
             context,
+            "execution_resource_in_use",
+            409,
             new
             {
-                ok = false,
-                error = message,
-                code = "execution_resource_in_use",
                 resource,
                 runIds = leases.Select(lease => lease.RunId).Distinct(StringComparer.Ordinal).ToArray(),
-            },
-            409).ConfigureAwait(false);
+            }).ConfigureAwait(false);
         return true;
     }
 
@@ -80,17 +77,15 @@ internal static class ExecutionConflictResponse
     public static async Task WriteAdmissionAsync(HttpListenerContext context, ExecutionAdmissionException exception)
     {
         ExecutionAdmissionFailure failure = exception.Failure;
-        await HttpHelper.WriteJsonAsync(
+        await HttpHelper.ErrorAsync(
             context,
+            failure.StableCode,
+            409,
             new
             {
-                ok = false,
-                error = failure.Message,
-                code = failure.StableCode,
                 resource = failure.Resource,
                 conflictingRunId = failure.ConflictingRunId,
                 retryable = failure.Disposition == AdmissionFailureDisposition.Transient,
-            },
-            409).ConfigureAwait(false);
+            }).ConfigureAwait(false);
     }
 }

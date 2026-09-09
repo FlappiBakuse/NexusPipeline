@@ -3,6 +3,7 @@ import { createColorControl, createNumberControl, createSelectControl } from "./
 import { validateRequiredPluginFields } from "./plugin-fields.js";
 import { disposePluginSlot, queryContributions, renderFrontendSlots } from "./plugin-runtime.js";
 import { clearFieldError, setRequiredFieldError, toast } from "./ui.js";
+import { t } from "./i18n.js";
 
 export const pluginSlotNames = Object.freeze([
   "dashboard.cards", "dashboard.after-running", "users.list.badges", "users.binding.sections", "users.global.sections",
@@ -13,7 +14,7 @@ export const pluginSlotNames = Object.freeze([
 const validSlots = new Set(pluginSlotNames);
 
 export function pluginSlotMarkup(slot, anchor = slot, className = "", context = {}) {
-  if (!validSlots.has(slot)) throw new TypeError(`插件 UI slot 不受支持：${slot}`);
+  if (!validSlots.has(slot)) throw new TypeError(t("ui.plugin_slot_unsupported", { slot }));
   const contextAttributes = ["mode", "primaryId", "secondaryId"]
     .filter(key => context[key] !== undefined && context[key] !== null)
     .map(key => ` data-plugin-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}="${escapeAttribute(context[key])}"`)
@@ -111,7 +112,7 @@ function createInput(field, value, id) {
   } else {
     element = input = document.createElement("input");
   }
-  if (!input || !element) throw new Error(`插件字段无法渲染：${field.key}`);
+  if (!input || !element) throw new Error(t("ui.plugin_field_render_failed", { key: field.key }));
   input.id = id;
   input.dataset.pluginFormField = field.key;
   input.dataset.pluginType = type;
@@ -133,7 +134,7 @@ function createInput(field, value, id) {
     input.value = value == null ? "" : String(value);
   }
   if (type === "secret" && value?.configured === true && !input.placeholder) {
-    input.placeholder = "已设置，留空保持不变";
+    input.placeholder = t("ui.configured_leave_empty_to_keep");
   }
   return { element, input };
 }
@@ -179,7 +180,7 @@ function renderFormContribution(parent, contribution) {
   });
   const footer = document.createElement("div");
   footer.className = "row-actions";
-  const save = textElement("button", "保存");
+  const save = textElement("button", "Save");
   save.type = "submit";
   footer.append(save);
   form.append(footer);
@@ -189,7 +190,7 @@ function renderFormContribution(parent, contribution) {
     const markRequired = input => setRequiredFieldError(input.id);
     const clearRequired = input => clearFieldError(input.id);
     if (!validateRequiredPluginFields(form, fields, contribution.values || {}, "data-plugin-form-field", markRequired, clearRequired)) {
-      toast("请完善插件设置中的必填项", "error");
+      toast(t("ui.complete_the_required_plugin_settings"), "error");
       return;
     }
     save.disabled = true;
@@ -198,7 +199,7 @@ function renderFormContribution(parent, contribution) {
         context: contribution.context,
         values: readFormValues(form),
       });
-      toast("插件设置已保存");
+      toast(t("ui.plugin_settings_saved"));
     } catch (error) {
       toast(error.message, "error");
     } finally {

@@ -1,29 +1,51 @@
 const STORAGE_KEY = "nexus-locale";
 const DEFAULT_LOCALE = "zh-CN";
 const ENGLISH_LOCALE = "en-US";
-const SUPPORTED_LOCALES = new Set([DEFAULT_LOCALE, ENGLISH_LOCALE]);
 
+let localeRegistry = {
+  default: DEFAULT_LOCALE,
+  supported: [DEFAULT_LOCALE, ENGLISH_LOCALE],
+  names: { [DEFAULT_LOCALE]: "\u7b80\u4f53\u4e2d\u6587", [ENGLISH_LOCALE]: "English" },
+};
 let currentLocale = readStoredLocale() || detectLocale();
 let messages = Object.create(null);
+let defaultMessages = Object.create(null);
+let registryLoaded = false;
 const listeners = new Set();
-const legacyTextValues = new WeakMap();
-const legacyAttributeValues = new WeakMap();
 const explicitTextValues = new WeakMap();
 const explicitAttributeValues = new WeakMap();
+const noResourceFallbacks = {
+  "ui.success": "\u6210\u529f",
+  "ui.partially_failed": "\u90e8\u5206\u5931\u8d25",
+  "ui.running": "\u8fd0\u884c\u4e2d",
+  "ui.cancelled": "\u5df2\u53d6\u6d88",
+  "ui.skipped": "\u5df2\u8df3\u8fc7",
+  "ui.error": "\u9519\u8bef",
+  "ui.failed": "\u5931\u8d25",
+  "ui.value_itemsvalue": "\u5171 {total} \u6761{range}",
+  "ui.value_value": "\uff0c\u7b2c {from}-{to} \u6761",
+  "ui.previous": "\u4e0a\u4e00\u9875",
+  "ui.next": "\u4e0b\u4e00\u9875",
+};
 
 function canonicalLocale(value) {
-  const candidate = String(value || "").trim().toLowerCase();
-  if (candidate === "en" || candidate.startsWith("en-")) return ENGLISH_LOCALE;
-  if (candidate === "zh" || candidate.startsWith("zh-")) return DEFAULT_LOCALE;
-  return DEFAULT_LOCALE;
+  const candidate = String(value || "").trim().replaceAll("_", "-").toLowerCase();
+  const supported = localeRegistry.supported || [DEFAULT_LOCALE, ENGLISH_LOCALE];
+  const exact = supported.find(locale => String(locale).toLowerCase() === candidate);
+  if (exact) return exact;
+  const language = candidate.split("-", 1)[0];
+  const match = supported.find(locale => String(locale).toLowerCase().split("-", 1)[0] === language);
+  return match || localeRegistry.default || DEFAULT_LOCALE;
 }
 
 function readStoredLocale() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    const raw = String(stored || "").trim().toLowerCase();
-    if (raw === "en" || raw.startsWith("en-")) return ENGLISH_LOCALE;
-    if (raw === "zh" || raw.startsWith("zh-")) return DEFAULT_LOCALE;
+    const raw = String(stored || "").trim();
+    if (!raw) return null;
+    const candidate = canonicalLocale(raw);
+    const supported = localeRegistry.supported || [];
+    if (supported.some(locale => String(locale).toLowerCase() === candidate.toLowerCase())) return candidate;
     return null;
   } catch {
     return null;
@@ -33,10 +55,16 @@ function readStoredLocale() {
 function detectLocale() {
   const candidates = Array.isArray(navigator.languages) ? navigator.languages : [navigator.language];
   for (const candidate of candidates) {
-    const locale = canonicalLocale(candidate);
-    const raw = String(candidate || "").toLowerCase();
-    if (raw === "en" || raw.startsWith("en-")) return locale;
-    if (raw === "zh" || raw.startsWith("zh-")) return locale;
+    const raw = String(candidate || "").trim();
+    if (!raw) continue;
+    const locale = canonicalLocale(raw);
+    const language = raw.replaceAll("_", "-").toLowerCase().split("-", 1)[0];
+    const supported = localeRegistry.supported || [];
+    if (supported.some(item => {
+      const normalized = String(item).toLowerCase();
+      return normalized === raw.replaceAll("_", "-").toLowerCase()
+        || normalized.split("-", 1)[0] === language;
+    })) return locale;
   }
   return DEFAULT_LOCALE;
 }
@@ -46,7 +74,14 @@ export function getLocale() {
 }
 
 export function getSupportedLocales() {
-  return [DEFAULT_LOCALE, ENGLISH_LOCALE];
+  return [...(localeRegistry.supported || [DEFAULT_LOCALE, ENGLISH_LOCALE])];
+}
+
+export function getLocaleOptions() {
+  return getSupportedLocales().map(id => ({
+    id,
+    nativeName: localeRegistry.names?.[id] || id,
+  }));
 }
 
 export function resolveLocale(value) {
@@ -58,20 +93,47 @@ export function localeHeaders() {
 }
 
 export async function loadLocale(value = currentLocale) {
-  currentLocale = canonicalLocale(value);
-  let loaded = false;
-  try {
-    const response = await fetch(`i18n/${encodeURIComponent(currentLocale)}.json`, { cache: "no-store" });
-    if (response.ok) {
-      const candidate = await response.json();
-      if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-        messages = candidate;
-        loaded = true;
+  if (!registryLoaded) {
+    try {
+      const registryResponse = await fetch("i18n/locales.json", { cache: "no-store" });
+      if (registryResponse.ok) {
+        const candidate = await registryResponse.json();
+        const entries = Array.isArray(candidate?.supported)
+          ? candidate.supported.map(item => typeof item === "string" ? { id: item, nativeName: item } : item).filter(item => item?.id)
+          : [];
+        if (entries.length) {
+          localeRegistry = {
+            default: String(candidate.default || entries[0].id),
+            supported: entries.map(item => String(item.id)),
+            names: Object.fromEntries(entries.map(item => [String(item.id), String(item.nativeName || item.id)])),
+          };
+        }
       }
+    } catch {
+      // 内置注册表保持页面可用。
     }
-  } catch {
-    // 内置回退文案保持页面可用。
+    registryLoaded = true;
   }
+  currentLocale = canonicalLocale(value);
+  const loadResource = async locale => {
+    try {
+      const response = await fetch(`i18n/${encodeURIComponent(locale)}.json`, { cache: "no-store" });
+      if (!response.ok) return null;
+      const candidate = await response.json();
+      return candidate && typeof candidate === "object" && !Array.isArray(candidate) ? candidate : null;
+    } catch {
+      return null;
+    }
+  };
+  const loadedMessages = await loadResource(currentLocale);
+  if (loadedMessages) messages = loadedMessages;
+  const loadedDefault = currentLocale === localeRegistry.default
+    ? loadedMessages
+    : await loadResource(localeRegistry.default);
+  if (loadedDefault) {
+    defaultMessages = loadedDefault;
+  }
+  const loaded = Boolean(loadedMessages);
   document.documentElement.lang = currentLocale;
   applyTranslations();
   listeners.forEach(listener => listener(currentLocale));
@@ -99,54 +161,17 @@ export function subscribeLocale(listener) {
 }
 
 export function t(key, args = {}, fallback = "") {
-  let value = messages[key];
+  let value = messages[key] ?? defaultMessages[key];
+  if ((value === undefined || value === null) && typeof key === "string" && !key.includes(".")) {
+    value = messages[`ui.${key}`] ?? defaultMessages[`ui.${key}`];
+  }
+  if (value === undefined || value === null) value = noResourceFallbacks[key];
   if (value === undefined || value === null) value = fallback || key;
   value = String(value);
   for (const [name, replacement] of Object.entries(args || {})) {
     value = value.replaceAll(`{${name}}`, String(replacement ?? ""));
   }
   return value;
-}
-
-/** 将尚未迁移到显式 data-i18n 的固定界面文案通过资源表过渡；原始回退值保存在节点上，支持往返切换语言。 */
-export function text(fallback, args = {}) {
-  const value = String(fallback ?? "");
-  return t(`legacy.${value}`, args, value);
-}
-
-/** 将包含已知固定片段的动态界面文案翻译到当前语言。用户数据保持原样。 */
-export function translateText(value) {
-  return translateLegacyFragments(String(value ?? ""));
-}
-
-function translateLegacyFragments(value) {
-  let result = value;
-  const entries = Object.entries(messages)
-    .filter(([key, candidate]) => key.startsWith("legacy.") && String(candidate) !== key.slice(7))
-    .map(([key, candidate]) => [key.slice(7), String(candidate)])
-    .filter(([key]) => key.length > 1)
-    .sort((left, right) => right[0].length - left[0].length);
-  for (const [source, target] of entries) {
-    if (!source.includes("{")) {
-      result = result.replaceAll(source, target);
-      continue;
-    }
-    const names = [];
-    const pattern = source.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\\{([^{}]+)\\\}/g, (_, name) => {
-      names.push(name);
-      return "([\\s\\S]*?)";
-    });
-    if (!names.length) continue;
-    const expression = new RegExp(pattern, "g");
-    result = result.replace(expression, (...matches) => {
-      const captures = matches.slice(1, names.length + 1);
-      return target.replace(/\{([^{}]+)\}/g, (_, name) => {
-        const index = names.indexOf(name);
-        return index >= 0 ? captures[index] : "";
-      });
-    });
-  }
-  return result;
 }
 
 export function formatNumber(value, options) {
@@ -179,40 +204,6 @@ export function applyTranslations(root = document) {
   root.querySelectorAll("[data-i18n-placeholder]").forEach(element => {
     const fallback = getExplicitAttributeFallback(element, "placeholder");
     element.setAttribute("placeholder", t(element.dataset.i18nPlaceholder, {}, fallback));
-  });
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const nodes = [];
-  let node;
-  while ((node = walker.nextNode())) nodes.push(node);
-  nodes.forEach(textNode => {
-    const parent = textNode.parentElement;
-    if (!parent || parent.closest("script,style,[data-i18n]")) return;
-    const raw = legacyTextValues.get(textNode) ?? textNode.nodeValue ?? "";
-    const trimmed = raw.trim();
-    if (!trimmed) return;
-    const translated = translateLegacyFragments(trimmed);
-    if (translated === trimmed) return;
-    legacyTextValues.set(textNode, raw);
-    const start = raw.indexOf(trimmed);
-    const end = start + trimmed.length;
-    textNode.nodeValue = raw.slice(0, start) + translated + raw.slice(end);
-  });
-  ["title", "aria-label", "placeholder", "data-help"].forEach(attribute => {
-    root.querySelectorAll(`[${attribute}]`).forEach(element => {
-      if (element.hasAttribute(`data-i18n-${attribute}`)) return;
-      let values = legacyAttributeValues.get(element);
-      if (!values) {
-        values = Object.create(null);
-        legacyAttributeValues.set(element, values);
-      }
-      const raw = values[attribute] ?? element.getAttribute(attribute) ?? "";
-      if (!raw) return;
-      const translated = translateLegacyFragments(raw);
-      if (translated !== raw) {
-        values[attribute] = raw;
-        element.setAttribute(attribute, translated);
-      }
-    });
   });
 }
 

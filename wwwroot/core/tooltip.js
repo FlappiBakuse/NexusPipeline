@@ -123,7 +123,7 @@ function closestHelpTarget(node) {
   return element?.closest("[data-help], [data-tooltip]") || null;
 }
 
-function closestHelpContext(node) {
+function closestHelpCont(node) {
   const element = node instanceof Element ? node : null;
   const helpTarget = closestHelpTarget(element);
   if (!helpTarget) return null;
@@ -144,12 +144,12 @@ export function initTooltips() {
     const next = closestHelpTarget(event.target);
     const related = closestHelpTarget(event.relatedTarget);
     if (!next) return;
-    const context = closestHelpContext(event.target);
+    const context = closestHelpCont(event.target);
     if (!context) {
       hideTooltip();
       return;
     }
-    if (next === related && closestHelpContext(event.relatedTarget)?.anchor === context.anchor) return;
+    if (next === related && closestHelpCont(event.relatedTarget)?.anchor === context.anchor) return;
     schedule({ ...context, trigger: "pointer" });
   });
   document.addEventListener("pointerout", event => {
@@ -163,7 +163,7 @@ export function initTooltips() {
       hideTooltip();
       return;
     }
-    const context = closestHelpContext(event.target);
+    const context = closestHelpCont(event.target);
     if (!context) {
       hideTooltip();
       return;

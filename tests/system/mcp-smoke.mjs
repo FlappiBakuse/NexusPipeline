@@ -252,7 +252,7 @@ test("启用 MCP 后可完成握手、工具发现、状态读取与 loopback �
   assert.equal(settings.data.accessToken, "");
 
   const diagnostics = await mcpTool("get_diagnostics");
-  assert.equal(diagnostics.data.schemaVersion, 1);
+  assert.equal(diagnostics.data.schemaVersion, 2);
   assert.ok(Array.isArray(diagnostics.data.checks));
   assert.ok(diagnostics.data.checks.some(check => check.id === "execution.state"));
 

@@ -1,6 +1,7 @@
 using System.Net;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Web;
 
@@ -39,7 +40,9 @@ internal static class ApiUpdateHandler
                 }
                 catch (Exception ex)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { error = $"检查更新失败：{ex.Message}" }, 500).ConfigureAwait(false);
+                    string traceId = Guid.NewGuid().ToString("N");
+                    Logger.Error($"[更新] 检查更新失败（追踪 {traceId}）：{ex}");
+                    await HttpHelper.ErrorAsync(context, "update_check_failed", 500, new { traceId }).ConfigureAwait(false);
                 }
                 return;
             }
@@ -48,7 +51,7 @@ internal static class ApiUpdateHandler
                 string? error = updates.StartDownload(Audit.Web);
                 if (error is not null)
                 {
-                    await HttpHelper.WriteJsonAsync(context, new { ok = false, error }, 409).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, "update_download_rejected", 409).ConfigureAwait(false);
                     return;
                 }
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
@@ -72,7 +75,7 @@ internal static class ApiUpdateHandler
                 if (!result.Succeeded)
                 {
                     int statusCode = result.Code is "busy" or "not-ready" ? 409 : 400;
-                    await HttpHelper.WriteJsonAsync(context, new { ok = false, error = result.Error, code = result.Code }, statusCode).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, result.Code ?? "update_apply_failed", statusCode).ConfigureAwait(false);
                     return;
                 }
                 await HttpHelper.WriteJsonAsync(context, new { ok = true, deferred = result.Deferred }).ConfigureAwait(false);
@@ -102,7 +105,7 @@ internal static class ApiUpdateHandler
             progress = status.Progress,
             bytesRead = status.BytesRead,
             bytesTotal = status.BytesTotal,
-            error = status.Error,
+            errorCode = string.IsNullOrWhiteSpace(status.Error) ? null : "update_failed",
             automation = new
             {
                 checkEnabled = automation.CheckEnabled,
@@ -111,7 +114,6 @@ internal static class ApiUpdateHandler
                 nextCheckAt = automation.NextAutomaticCheckAt?.ToString("O"),
                 waitingForIdle = automation.WaitingForIdle,
                 idleBlockCode = automation.IdleBlockCode,
-                idleBlockReason = automation.IdleBlockReason,
             },
         }).ConfigureAwait(false);
     }

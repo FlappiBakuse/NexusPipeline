@@ -3,7 +3,7 @@ import { appearance, createAppearanceHost, refreshAppearance } from "./appearanc
 import { colorControlMarkup, fileControlMarkup, numberControlMarkup, rangeControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 import { toast } from "./ui.js";
 import { captureExecutionPreview } from "./execution-preview.js";
-import { getLocale } from "./i18n.js";
+import { getLocale, t } from "./i18n.js";
 
 const SLOT_NAMES = new Set([
   "dashboard.cards",
@@ -72,19 +72,19 @@ function pluginApiPath(name, route) {
 }
 
 function registerAction(descriptor, id, handler) {
-  if (!id || typeof handler !== "function") throw new TypeError("插件 action 无效");
+  if (!id || typeof handler !== "function") throw new TypeError(t("ui.plugin_action_invalid"));
   const actionId = `plugin:${descriptor.name}:${String(id).trim()}`;
   const key = normalizeActionKey(actionId);
-  if (actions.has(key)) throw new Error(`插件 action 重复：${actionId}`);
+  if (actions.has(key)) throw new Error(t("ui.plugin_action_duplicate", { id: actionId }));
   actions.set(key, { handler, plugin: descriptor.name });
   return disposable(() => actions.delete(key));
 }
 
 function registerRoute(descriptor, route, handler) {
   const normalized = normalizeRoute(route);
-  if (!normalized || typeof handler !== "function") throw new TypeError("插件 route 无效");
+  if (!normalized || typeof handler !== "function") throw new TypeError(t("ui.plugin_route_invalid"));
   const key = pluginKey(descriptor.name, normalized);
-  if (routes.has(key)) throw new Error(`插件 route 重复：${normalized}`);
+  if (routes.has(key)) throw new Error(t("ui.plugin_route_duplicate", { route: normalized }));
   routes.set(key, { handler, plugin: descriptor.name, route: normalized });
   return disposable(() => routes.delete(key));
 }
@@ -119,9 +119,9 @@ function registerNav(descriptor, item = {}) {
   const id = String(item.id || item.route || "item").trim();
   const title = String(item.title || "").trim();
   const route = normalizeRoute(item.route || id);
-  if (!title || !route || !/^[^#?]+$/.test(route)) throw new TypeError("插件导航项无效");
+  if (!title || !route || !/^[^#?]+$/.test(route)) throw new TypeError(t("ui.plugin_navigation_invalid"));
   const key = pluginKey(descriptor.name, id);
-  if (navItems.has(key)) throw new Error(`插件导航项重复：${id}`);
+  if (navItems.has(key)) throw new Error(t("ui.plugin_navigation_duplicate", { id }));
   const value = {
     key,
     title,
@@ -139,10 +139,10 @@ function registerNav(descriptor, item = {}) {
 }
 
 function registerSlot(descriptor, slot, renderer) {
-  if (!SLOT_NAMES.has(slot) || typeof renderer !== "function") throw new TypeError("插件 UI slot renderer 无效");
+  if (!SLOT_NAMES.has(slot) || typeof renderer !== "function") throw new TypeError(t("ui.plugin_slot_renderer_invalid"));
   const list = slotRenderers.get(slot) || [];
   if (list.some(item => item.plugin === descriptor.name && item.renderer === renderer)) {
-    throw new Error(`插件 slot renderer 重复：${slot}`);
+    throw new Error(t("ui.plugin_slot_renderer_duplicate", { slot }));
   }
   const registration = { plugin: descriptor.name, renderer, host: null };
   list.push(registration);
@@ -156,7 +156,7 @@ function registerSlot(descriptor, slot, renderer) {
 }
 
 function registerLifecycle(kind, handler) {
-  if (!lifecycle.has(kind) || typeof handler !== "function") throw new TypeError("插件生命周期处理器无效");
+  if (!lifecycle.has(kind) || typeof handler !== "function") throw new TypeError(t("ui.plugin_lifecycle_handler_invalid"));
   const list = lifecycle.get(kind);
   list.push(handler);
   return disposable(() => {
@@ -240,7 +240,7 @@ function createHost(descriptor) {
         rangeControlMarkup(id, value, extra, ariaLabel),
       time: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
         timeControlMarkup(id, value, extra, ariaLabel),
-      file: ({ id, extra = "", accept = "", multiple = false, label = "选择文件" } = {}) =>
+      file: ({ id, extra = "", accept = "", multiple = false, label = t("ui.plugin_file_select") } = {}) =>
         fileControlMarkup(id, extra, accept, multiple, label),
       color: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
         colorControlMarkup(id, value, extra, ariaLabel),
@@ -271,7 +271,7 @@ async function activateDescriptor(descriptor) {
       document.head.append(link);
     });
     const module = await import(descriptor.entryUrl);
-    if (typeof module.activate !== "function") throw new Error("缺少 activate 导出");
+    if (typeof module.activate !== "function") throw new Error(t("ui.plugin_activate_missing"));
     const host = createHost(descriptor);
     const result = await module.activate(host);
     plugins.set(String(descriptor.name).toLowerCase(), {
@@ -280,7 +280,7 @@ async function activateDescriptor(descriptor) {
       dispose: typeof result === "function" ? result : result?.dispose || result?.deactivate,
     });
   } catch (error) {
-    console.warn(`[NexusPipeline] 插件前端加载失败：${descriptor.name}`, error);
+    console.warn(`[NexusPipeline] ${t("ui.plugin_frontend_load_failed", { name: descriptor.name })}`, error);
   }
 }
 
@@ -295,7 +295,7 @@ export async function initPluginRuntime() {
       renderPluginNav();
       return true;
     } catch (error) {
-      console.warn("[NexusPipeline] 插件前端运行时未启动", error);
+      console.warn("[NexusPipeline]", t("ui.plugin_frontend_not_started"), error);
       return false;
     }
   })();
@@ -336,7 +336,7 @@ export function resolvePluginRoute(segments) {
 }
 
 export async function queryContributions(slot, contexts = [], signal) {
-  if (!SLOT_NAMES.has(slot)) throw new Error(`插件 UI slot 不受支持：${slot}`);
+  if (!SLOT_NAMES.has(slot)) throw new Error(t("ui.plugin_slot_unsupported", { slot }));
   return api("POST", "/api/plugin-contributions/ui/query", { slot, contexts }, signal);
 }
 
@@ -344,7 +344,7 @@ export async function renderFrontendSlots(container, slot, context = {}) {
   if (!container || !SLOT_NAMES.has(slot)) return 0;
   const oldCleanups = slotCleanups.get(container) || [];
   oldCleanups.splice(0).forEach(cleanup => {
-    try { cleanup(); } catch (error) { console.warn("[NexusPipeline] 插件 slot 清理失败", error); }
+    try { cleanup(); } catch (error) { console.warn("[NexusPipeline]", t("ui.plugin_slot_cleanup_failed"), error); }
   });
   const cleanups = [];
   const registrations = slotRenderers.get(slot) || [];
@@ -353,7 +353,7 @@ export async function renderFrontendSlots(container, slot, context = {}) {
       const result = await registration.renderer(container, { slot, ...context }, registration.host || plugins.get(registration.plugin)?.host);
       if (typeof result === "function") cleanups.push(result);
     } catch (error) {
-      console.warn(`[NexusPipeline] 插件 slot 渲染失败：${registration.plugin}/${slot}`, error);
+    console.warn(`[NexusPipeline] ${t("ui.plugin_slot_render_failed", { plugin: registration.plugin, slot })}`, error);
     }
   }
   slotCleanups.set(container, cleanups);
@@ -364,14 +364,14 @@ export async function disposePluginSlot(container) {
   const cleanups = slotCleanups.get(container) || [];
   slotCleanups.delete(container);
   cleanups.splice(0).forEach(cleanup => {
-    try { cleanup(); } catch (error) { console.warn("[NexusPipeline] 插件 slot 清理失败", error); }
+    try { cleanup(); } catch (error) { console.warn("[NexusPipeline]", t("ui.plugin_slot_cleanup_failed"), error); }
   });
 }
 
 async function notifyLifecycle(kind, payload) {
   const handlers = lifecycle.get(kind) || [];
   for (const handler of handlers.slice()) {
-    try { await handler(payload); } catch (error) { console.warn(`[NexusPipeline] 插件生命周期失败：${kind}`, error); }
+    try { await handler(payload); } catch (error) { console.warn("[NexusPipeline]", t("ui.plugin_lifecycle_failed", { kind }), error); }
   }
 }
 

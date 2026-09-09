@@ -29,7 +29,7 @@ internal sealed class ExecutionExplainService
     public ExecutionExplainResult ExplainScript(string scriptId, string? userName = null)
     {
         ScriptExecutionPlan plan = _plans.BuildScriptForExplain(scriptId, userName);
-        List<string> warnings = new();
+        List<ExecutionExplainWarning> warnings = new();
         ExecutionAdmissionFailure? failure = null;
         if (ExecutionValidator.IsScriptRunning(plan.Script))
         {
@@ -80,7 +80,7 @@ internal sealed class ExecutionExplainService
     public ExecutionExplainResult ExplainQueue(string queueId)
     {
         QueueExecutionPlan plan = _plans.BuildQueueForExplain(queueId);
-        List<string> warnings = new();
+        List<ExecutionExplainWarning> warnings = new();
         ExecutionAdmissionFailure? failure = null;
         PlannedQueueTask? blocked = plan.Tasks.FirstOrDefault(task =>
             task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script));
@@ -107,12 +107,12 @@ internal sealed class ExecutionExplainService
             ScriptInstance? script = task.Script;
             if (script is null)
             {
-                warnings.Add($"任务 {task.Task.Id} 引用的脚本实例不存在：{task.Task.ScriptInstanceId}");
+                AddWarning(warnings, "script_missing", ("taskId", task.Task.Id), ("scriptId", task.Task.ScriptInstanceId));
                 tasks.Add(new ExecutionExplainTask(
                     task.Task.Id,
                     task.Task.Index,
                     task.Task.ScriptInstanceId,
-                    "（脚本实例不存在）",
+                    "",
                     0,
                     null,
                     null));
@@ -129,7 +129,7 @@ internal sealed class ExecutionExplainService
             users.AddRange(taskUsers);
             if (taskUsers.Count == 0)
             {
-                warnings.Add($"脚本「{script.Name}」未配置启用用户，运行时将生成跳过记录");
+                AddWarning(warnings, "no_enabled_users", ("scriptId", script.Id));
             }
             tasks.Add(new ExecutionExplainTask(
                 task.Task.Id,
@@ -158,7 +158,7 @@ internal sealed class ExecutionExplainService
         IReadOnlyList<ResolvedScriptUser>? resolvedUsers,
         string? requestedUserName,
         IDictionary<string, IReadOnlyDictionary<string, int>> historyCache,
-        ICollection<string> warnings)
+        ICollection<ExecutionExplainWarning> warnings)
     {
         List<ResolvedScriptUser> source = resolvedUsers?.ToList() ?? new List<ResolvedScriptUser>();
         if (source.Count == 0 && !string.IsNullOrWhiteSpace(requestedUserName))
@@ -174,7 +174,7 @@ internal sealed class ExecutionExplainService
                         requestedUserName.Trim(),
                         "skipped",
                         "plugin_unavailable",
-                        unavailable,
+                        Args(("scriptId", script.Id)),
                         null,
                         -1),
                 };
@@ -192,9 +192,9 @@ internal sealed class ExecutionExplainService
                     counts = _history.GetSuccessfulRunsByUser(DateTime.Today, script.Id);
                     historyCache[script.Id] = counts;
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    warnings.Add($"无法读取脚本「{script.Name}」的今日运行历史：{ex.Message}");
+                    AddWarning(warnings, "history_unavailable", ("scriptId", script.Id));
                     counts = null;
                 }
             }
@@ -205,26 +205,26 @@ internal sealed class ExecutionExplainService
         {
             string status = "ready";
             string reasonCode = "ready";
-            string reason = "符合当前用户绑定和每日运行限制";
+            IReadOnlyDictionary<string, object?> reasonArgs = Args();
             int? successfulRuns = null;
             int max = user.Binding.MaxSuccessfulRunsPerDay;
             if (pluginUnavailable is not null)
             {
                 status = "skipped";
                 reasonCode = "plugin_unavailable";
-                reason = pluginUnavailable;
+                reasonArgs = Args(("scriptId", script.Id));
             }
             else if (user.Spec is { Succeeded: false } failedSpec)
             {
                 status = "blocked";
                 reasonCode = "invalid_script_spec";
-                reason = failedSpec.Error ?? "脚本专项配置解析失败";
+                reasonArgs = Args(("scriptId", script.Id));
             }
             else if (counts is null && max > 0)
             {
                 status = "blocked";
                 reasonCode = "history_unavailable";
-                reason = "无法读取今日成功运行次数，暂不能确认每日限制";
+                reasonArgs = Args(("scriptId", script.Id));
             }
             else if (counts is not null)
             {
@@ -234,7 +234,7 @@ internal sealed class ExecutionExplainService
                 {
                     status = "skipped";
                     reasonCode = "daily_success_cap";
-                    reason = ExecutionUserEligibility.DailySuccessCapReason(count, max);
+                    reasonArgs = Args(("successfulRuns", count), ("maximum", max));
                 }
             }
 
@@ -244,7 +244,7 @@ internal sealed class ExecutionExplainService
                 user.UserName,
                 status,
                 reasonCode,
-                reason,
+                reasonArgs,
                 successfulRuns,
                 max));
         }
@@ -254,15 +254,15 @@ internal sealed class ExecutionExplainService
     private static void AddScriptWarnings(
         ScriptInstance script,
         ResolvedScriptSpec? spec,
-        ICollection<string> warnings)
+        ICollection<ExecutionExplainWarning> warnings)
     {
         if (spec is { Succeeded: false } && !string.IsNullOrWhiteSpace(spec.Error))
         {
-            warnings.Add(spec.Error);
+            AddWarning(warnings, "invalid_script_spec", ("scriptId", script.Id));
         }
         if (string.IsNullOrWhiteSpace(script.ConfigPath))
         {
-            warnings.Add($"脚本「{script.Name}」未声明配置路径");
+            AddWarning(warnings, "config_path_missing", ("scriptId", script.Id));
         }
     }
 
@@ -275,7 +275,7 @@ internal sealed class ExecutionExplainService
         ExecutionAdmissionFailure? failure,
         IReadOnlyList<ExecutionExplainUser> users,
         IReadOnlyList<ExecutionExplainTask> tasks,
-        IReadOnlyList<string> warnings)
+        IReadOnlyList<ExecutionExplainWarning> warnings)
     {
         return new ExecutionExplainResult(
             kind,
@@ -290,14 +290,31 @@ internal sealed class ExecutionExplainService
                 ? null
                 : new ExecutionExplainAdmissionFailure(
                     failure.StableCode,
-                    failure.Message,
+                    Args(("resource", failure.Resource)),
                     failure.Disposition.ToString().ToLowerInvariant(),
                     failure.ConflictingRunId,
                     failure.Resource),
             ToResources(admission.Resources),
             users,
             tasks,
-            warnings.Distinct(StringComparer.Ordinal).ToList());
+            warnings
+                .GroupBy(warning => warning.Code + "|" + string.Join(";", warning.Args.Select(item => $"{item.Key}={item.Value}")), StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToList());
+    }
+
+    private static void AddWarning(
+        ICollection<ExecutionExplainWarning> warnings,
+        string code,
+        params (string Key, object? Value)[] args)
+    {
+        warnings.Add(new ExecutionExplainWarning(code, Args(args)));
+    }
+
+    private static IReadOnlyDictionary<string, object?> Args(
+        params (string Key, object? Value)[] values)
+    {
+        return values.ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
     }
 
     private static ExecutionExplainResources ToResources(ExecutionResourceSet resources)

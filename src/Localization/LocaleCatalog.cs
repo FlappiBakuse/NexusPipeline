@@ -1,29 +1,69 @@
 using System.Collections.Specialized;
 using System.Globalization;
+using System.Reflection;
+using System.Text.Json;
 
 namespace NexusPipeline.Localization;
 
-/// <summary>宿主支持的有限语言集合。请求输入只参与选择白名单语言。</summary>
+/// <summary>宿主支持的语言注册表。请求输入只参与选择已注册的语言。</summary>
 internal static class LocaleCatalog
 {
     public const string DefaultLocale = "zh-CN";
     public const string EnglishLocale = "en-US";
 
-    public static IReadOnlyList<string> SupportedLocales { get; } =
-        new[] { DefaultLocale, EnglishLocale };
+    private sealed record Registry(string DefaultLocale, IReadOnlyList<string> SupportedLocales);
+
+    private static readonly Registry LocaleRegistry = LoadRegistry();
+
+    public static IReadOnlyList<string> SupportedLocales => LocaleRegistry.SupportedLocales;
+
+    private static string _hostLocale = DefaultLocale;
+
+    /// <summary>后台任务、CLI、托盘、通知和宿主日志使用的全局语言。</summary>
+    public static string HostLocale => _hostLocale;
+
+    public static void SetHostLocale(string? locale)
+    {
+        _hostLocale = Normalize(locale);
+    }
 
     public static string Normalize(string? value)
     {
         string candidate = value?.Trim() ?? "";
-        if (IsLanguage(candidate, "zh"))
+        if (TryResolve(candidate, out string? resolved))
         {
-            return DefaultLocale;
+            return resolved;
         }
-        if (IsLanguage(candidate, "en"))
+        return LocaleRegistry.DefaultLocale;
+    }
+
+    public static bool TryResolve(string? value, out string locale)
+    {
+        string candidate = NormalizeTag(value);
+        if (candidate.Length > 0)
         {
-            return EnglishLocale;
+            string? exact = LocaleRegistry.SupportedLocales.FirstOrDefault(
+                item => string.Equals(NormalizeTag(item), candidate, StringComparison.OrdinalIgnoreCase));
+            if (exact is not null)
+            {
+                locale = exact;
+                return true;
+            }
+
+            string language = candidate.Split('-', 2)[0];
+            string? languageMatch = LocaleRegistry.SupportedLocales.FirstOrDefault(
+                item => string.Equals(
+                    NormalizeTag(item).Split('-', 2)[0],
+                    language,
+                    StringComparison.OrdinalIgnoreCase));
+            if (languageMatch is not null)
+            {
+                locale = languageMatch;
+                return true;
+            }
         }
-        return DefaultLocale;
+        locale = LocaleRegistry.DefaultLocale;
+        return false;
     }
 
     public static string Resolve(NameValueCollection headers)
@@ -37,22 +77,18 @@ internal static class LocaleCatalog
         string? acceptLanguage = headers["Accept-Language"];
         if (string.IsNullOrWhiteSpace(acceptLanguage))
         {
-            return DefaultLocale;
+            return LocaleRegistry.DefaultLocale;
         }
 
         foreach (string item in acceptLanguage.Split(',', StringSplitOptions.RemoveEmptyEntries))
         {
             string language = item.Split(';', 2)[0].Trim();
-            if (IsLanguage(language, "en"))
+            if (TryResolve(language, out string? resolved))
             {
-                return EnglishLocale;
-            }
-            if (IsLanguage(language, "zh"))
-            {
-                return DefaultLocale;
+                return resolved;
             }
         }
-        return DefaultLocale;
+        return LocaleRegistry.DefaultLocale;
     }
 
     public static CultureInfo Culture(string? locale)
@@ -60,10 +96,58 @@ internal static class LocaleCatalog
         return CultureInfo.GetCultureInfo(Normalize(locale));
     }
 
-    private static bool IsLanguage(string value, string language)
+    private static string NormalizeTag(string? value)
     {
-        return value.Equals(language, StringComparison.OrdinalIgnoreCase)
-            || value.StartsWith(language + "-", StringComparison.OrdinalIgnoreCase);
+        return (value ?? "").Trim().Replace('_', '-');
+    }
+
+    private static Registry LoadRegistry()
+    {
+        try
+        {
+            using Stream? stream = OpenResource("locales.json");
+            if (stream is not null)
+            {
+                using JsonDocument document = JsonDocument.Parse(stream);
+                JsonElement root = document.RootElement;
+                string defaultLocale = root.TryGetProperty("default", out JsonElement defaultNode)
+                    ? NormalizeTag(defaultNode.GetString())
+                    : DefaultLocale;
+                var supported = root.TryGetProperty("supported", out JsonElement supportedNode)
+                    && supportedNode.ValueKind == JsonValueKind.Array
+                    ? supportedNode.EnumerateArray()
+                        .Select(item => item.ValueKind == JsonValueKind.String
+                            ? NormalizeTag(item.GetString())
+                            : item.TryGetProperty("id", out JsonElement idNode) ? NormalizeTag(idNode.GetString()) : "")
+                        .Where(item => item.Length > 0)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray()
+                    : Array.Empty<string>();
+                if (supported.Length > 0)
+                {
+                    if (!supported.Contains(defaultLocale, StringComparer.OrdinalIgnoreCase))
+                    {
+                        defaultLocale = supported[0];
+                    }
+                    return new Registry(defaultLocale, supported);
+                }
+            }
+        }
+        catch
+        {
+            // 内置默认注册表保证设置、CLI 和测试在资源损坏时仍可启动。
+        }
+
+        return new Registry(DefaultLocale, new[] { DefaultLocale, EnglishLocale });
+    }
+
+    private static Stream? OpenResource(string fileName)
+    {
+        Assembly assembly = typeof(LocaleCatalog).Assembly;
+        string suffix = $".Localization.Resources.{fileName}";
+        string? resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+        return resourceName is null ? null : assembly.GetManifestResourceStream(resourceName);
     }
 }
 
@@ -72,7 +156,7 @@ internal static class LocaleContext
 {
     private static readonly AsyncLocal<string?> CurrentValue = new();
 
-    public static string Current => LocaleCatalog.Normalize(CurrentValue.Value);
+    public static string Current => LocaleCatalog.Normalize(CurrentValue.Value ?? LocaleCatalog.HostLocale);
 
     public static IDisposable Push(string? locale)
     {

@@ -29,10 +29,7 @@ internal static class ApiPluginWebApiHandler
         if (!plugins.TryGetWebApi(pluginName, method, route, out PluginWebApiRegistration? registration)
             || registration is null)
         {
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { ok = false, code = "plugin_api_not_found", error = "插件 Web API 路由不存在或插件未启用" },
-                404).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "plugin_api_not_found", 404).ConfigureAwait(false);
             return;
         }
 
@@ -112,5 +109,5 @@ internal static class ApiPluginWebApiHandler
     }
 
     private static Task PluginErrorAsync(HttpListenerContext context, string message) =>
-        HttpHelper.WriteJsonAsync(context, new { ok = false, code = "plugin_error", error = message }, 500);
+        HttpHelper.ErrorAsync(context, "plugin_error", 500);
 }

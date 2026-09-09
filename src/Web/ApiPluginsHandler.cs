@@ -38,6 +38,13 @@ internal static class ApiPluginsHandler
             await WriteStoreAsync(context, forceRefresh: true).ConfigureAwait(false);
             return;
         }
+        if (method == "POST" && seg.Length == 3
+            && seg[1].Equals("store", StringComparison.OrdinalIgnoreCase)
+            && seg[2].Equals("update-all", StringComparison.OrdinalIgnoreCase))
+        {
+            await UpdateAllStorePluginsAsync(context).ConfigureAwait(false);
+            return;
+        }
         if (method == "POST" && seg.Length == 4
             && seg[1].Equals("store", StringComparison.OrdinalIgnoreCase))
         {
@@ -64,7 +71,7 @@ internal static class ApiPluginsHandler
         string verb = seg[2].ToLowerInvariant();
         if (verb is not ("enable" or "disable"))
         {
-            await HttpHelper.WriteJsonAsync(context, new { error = "操作无效（应为 enable 或 disable）" }, 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "invalid_action", 400).ConfigureAwait(false);
             return;
         }
         bool enabled = verb == "enable";
@@ -72,13 +79,7 @@ internal static class ApiPluginsHandler
         if (!plugins.SetEnabled(name, enabled, Audit.Web, out string? failureCode))
         {
             int status = failureCode == "host_maintenance" ? 409 : 404;
-            string message = failureCode == "host_maintenance"
-                ? "宿主正在进行维护操作，暂不能修改插件设置"
-                : $"插件不存在：{name}";
-            await HttpHelper.WriteJsonAsync(
-                context,
-                new { ok = false, code = failureCode ?? "not_found", error = message, message },
-                status).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, failureCode ?? "not_found", status, new { name }).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new
@@ -99,18 +100,11 @@ internal static class ApiPluginsHandler
             .ConfigureAwait(false);
         if (!snapshot.Available)
         {
-            await HttpHelper.WriteJsonAsync(
+            await HttpHelper.ErrorAsync(
                 context,
-                new
-                {
-                    ok = false,
-                    available = false,
-                    code = "repository_unavailable",
-                    error = snapshot.Error ?? "插件仓库暂不可用",
-                    stale = false,
-                    plugins = Array.Empty<object>(),
-                },
-                502).ConfigureAwait(false);
+                "repository_unavailable",
+                502,
+                details: new { available = false, stale = false, plugins = Array.Empty<object>() }).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new
@@ -119,7 +113,7 @@ internal static class ApiPluginsHandler
             available = true,
             stale = snapshot.Stale,
             fetchedAt = snapshot.FetchedAt.ToString("O"),
-            error = snapshot.Error,
+            staleErrorCode = snapshot.Error is null ? null : "repository_stale",
             plugins = snapshot.Plugins.Select(plugin => StorePayload(plugin, context.Request.Locale)),
         }).ConfigureAwait(false);
     }
@@ -132,8 +126,7 @@ internal static class ApiPluginsHandler
             .ConfigureAwait(false);
         if (detail is null)
         {
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "not_found", error = $"插件不存在：{name}" }, 404)
-                .ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "not_found", 404, new { name }).ConfigureAwait(false);
             return;
         }
         await HttpHelper.WriteJsonAsync(context, DetailPayload(detail, context.Request.Locale)).ConfigureAwait(false);
@@ -149,8 +142,7 @@ internal static class ApiPluginsHandler
                 .ConfigureAwait(false);
             if (detail is null)
             {
-                await HttpHelper.WriteJsonAsync(context, new { ok = false, code = "not_found", error = $"插件仓库中不存在：{name}" }, 404)
-                    .ConfigureAwait(false);
+                await HttpHelper.ErrorAsync(context, "not_found", 404, new { name }).ConfigureAwait(false);
                 return;
             }
             await HttpHelper.WriteJsonAsync(context, DetailPayload(detail, context.Request.Locale)).ConfigureAwait(false);
@@ -158,8 +150,7 @@ internal static class ApiPluginsHandler
         catch (PluginRepositoryException ex)
         {
             int status = ex.Code is "repository_unavailable" or "catalog_invalid" or "catalog_too_large" ? 502 : 400;
-            await HttpHelper.WriteJsonAsync(context, new { ok = false, code = ex.Code, error = ex.Message }, status)
-                .ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, ex.Code, status, new { name }).ConfigureAwait(false);
         }
     }
 
@@ -180,7 +171,7 @@ internal static class ApiPluginsHandler
             configuredEnabled = view.ConfiguredEnabled,
             runtimeEnabled = view.RuntimeEnabled,
             state = view.State,
-            error = view.Error,
+            runtimeErrorCode = string.IsNullOrWhiteSpace(view.Error) ? null : "plugin_runtime_error",
             restartRequired = view.RestartRequired,
             hasFrontend = view.HasFrontend,
             frontendApiVersion = view.FrontendApiVersion,
@@ -223,7 +214,7 @@ internal static class ApiPluginsHandler
             installedVersion = plugin.InstalledVersion,
             updateAvailable = plugin.UpdateAvailable,
             compatible = plugin.Compatible,
-            compatibilityReason = plugin.CompatibilityReason,
+            compatibilityCode = plugin.Compatible ? null : "incompatible",
             managedByStore = plugin.ManagedByStore,
             pendingAction = plugin.PendingAction,
             pendingVersion = plugin.PendingVersion,
@@ -259,7 +250,7 @@ internal static class ApiPluginsHandler
             installedVersion = detail.InstalledVersion,
             updateAvailable = detail.UpdateAvailable,
             compatible = detail.Compatible,
-            compatibilityReason = detail.CompatibilityReason,
+            compatibilityCode = detail.Compatible ? null : "incompatible",
             managedByStore = detail.ManagedByStore,
             pendingAction = detail.PendingAction,
             pendingVersion = detail.PendingVersion,
@@ -267,7 +258,7 @@ internal static class ApiPluginsHandler
             configuredEnabled = detail.ConfiguredEnabled,
             runtimeEnabled = detail.RuntimeEnabled,
             runtimeState = detail.RuntimeState,
-            error = detail.RuntimeError,
+            runtimeErrorCode = string.IsNullOrWhiteSpace(detail.RuntimeError) ? null : "plugin_runtime_error",
             restartRequired = detail.RestartRequired,
             hasFrontend = detail.HasFrontend,
             frontendApiVersion = detail.FrontendApiVersion,
@@ -279,7 +270,7 @@ internal static class ApiPluginsHandler
             hasReadme = detail.HasReadme,
             readmeAvailable = detail.ReadmeMarkdown.Length > 0,
             readmeMarkdown = detail.ReadmeMarkdown,
-            readmeError = detail.ReadmeError,
+            readmeErrorCode = string.IsNullOrWhiteSpace(detail.ReadmeError) ? null : "plugin_readme_error",
             changelog = PluginMetadataLocalization.Changelog(detail.Locales, detail.Changelog, locale).Select(change => new
             {
                 version = change.Version,
@@ -309,7 +300,6 @@ internal static class ApiPluginsHandler
                 action = operation.Action,
                 name = operation.Name,
                 version = operation.Version,
-                message = "操作已登记，将在下次重启服务时生效",
             }).ConfigureAwait(false);
         }
         catch (PluginRepositoryException ex)
@@ -321,24 +311,85 @@ internal static class ApiPluginsHandler
                 "invalid_name" or "invalid_action" or "invalid_package_url" => 400,
                 _ => 409,
             };
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = false,
-                code = ex.Code,
-                error = ex.Message,
-                message = ex.Message,
-            }, status).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, ex.Code, status, new { name });
         }
         catch (Exception ex)
         {
             Logger.Error($"[插件] 商店操作失败：{ex.Message}");
-            await HttpHelper.WriteJsonAsync(context, new
-            {
-                ok = false,
-                code = "internal_error",
-                error = ex.Message,
-                message = ex.Message,
-            }, 500).ConfigureAwait(false);
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[插件] 商店操作失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
         }
+    }
+
+    private static async Task UpdateAllStorePluginsAsync(HttpListenerContext context)
+    {
+        PluginRepositoryService repository = RuntimeContext.Instance.Resolve<PluginRepositoryService>();
+        PluginStoreSnapshot snapshot;
+        try
+        {
+            snapshot = await repository.GetStoreAsync(false).ConfigureAwait(false);
+        }
+        catch (PluginRepositoryException ex)
+        {
+            int status = ex.Code is "repository_unavailable" or "catalog_invalid" or "catalog_too_large" ? 502 : 400;
+            await HttpHelper.ErrorAsync(context, ex.Code, status).ConfigureAwait(false);
+            return;
+        }
+        catch (Exception ex)
+        {
+            string traceId = Guid.NewGuid().ToString("N");
+            Logger.Error($"[插件] 批量更新读取仓库失败（追踪 {traceId}）：{ex}");
+            await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
+            return;
+        }
+        if (!snapshot.Available)
+        {
+            await HttpHelper.ErrorAsync(context, "repository_unavailable", 502).ConfigureAwait(false);
+            return;
+        }
+
+        IReadOnlyList<PluginStoreItem> candidates = snapshot.Plugins
+            .Where(plugin => plugin.Installed
+                && plugin.ManagedByStore
+                && plugin.Compatible
+                && plugin.UpdateAvailable
+                && string.IsNullOrWhiteSpace(plugin.PendingAction))
+            .ToArray();
+        var updated = new List<object>();
+        var failed = new List<object>();
+        foreach (PluginStoreItem candidate in candidates)
+        {
+            try
+            {
+                PluginPendingOperation operation = await repository.InstallAsync(candidate.Name, update: true).ConfigureAwait(false);
+                updated.Add(new { name = operation.Name, version = operation.Version });
+            }
+            catch (PluginRepositoryException ex)
+            {
+                failed.Add(new { name = candidate.Name, code = ex.Code, args = new { name = candidate.Name } });
+            }
+            catch (Exception ex)
+            {
+                string traceId = Guid.NewGuid().ToString("N");
+                Logger.Error($"[插件] 批量更新 {candidate.Name} 失败（追踪 {traceId}）：{ex}");
+                failed.Add(new { name = candidate.Name, code = "internal_error", args = new { name = candidate.Name, traceId }, traceId });
+            }
+        }
+
+        await HttpHelper.WriteJsonAsync(context, new
+        {
+            ok = true,
+            pending = updated.Count > 0,
+            eligible = candidates.Count,
+            succeeded = updated.Count,
+            eligibleCount = candidates.Count,
+            succeededCount = updated.Count,
+            failedCount = failed.Count,
+            restartRequired = updated.Count > 0,
+            updated,
+            failed,
+            results = updated.Concat(failed).ToArray(),
+        }).ConfigureAwait(false);
     }
 }

@@ -11,7 +11,7 @@ import { initDndList } from "../../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../../core/plugin-slots.js";
 import { durationClock } from "../../core/duration.js";
 import { buildConfigEditRequest } from "./config-edit.js";
-import { text } from "../../core/i18n.js";
+import { t } from "../../core/i18n.js";
 
 export const MAX_ENTITY_NAME_BYTES = 64;
 export const MAX_USER_REMARK_BYTES = 512;
@@ -48,22 +48,22 @@ export function unavailableScriptMessage(scriptId) {
 }
 
 function initials(name) {
-  const chars = Array.from((name || "用户").trim());
-  if (!chars.length) return "用";
+  const chars = Array.from((name || t("ui.user")).trim());
+  if (!chars.length) return t("ui.user_initial");
   const first = chars[0];
   return /[\u3400-\u9fff]/.test(first) ? first : chars.slice(0, 2).join("").toUpperCase();
 }
 
 function nextRunLabel(value) {
-  return value ? text("正在计算倒计时") : text("暂无定时任务");
+  return value ? t("ui.calculating_countdown") : t("ui.no_scheduled_tasks");
 }
 
 function remainingLabel(milliseconds) {
-  if (milliseconds <= 0) return text("即将开始运行");
+  if (milliseconds <= 0) return t("ui.about_to_run");
   const seconds = Math.floor(milliseconds / 1000);
   const days = Math.floor(seconds / 86400);
   const clock = durationClock(days > 0 ? seconds % 86400 : seconds);
-  return days ? text("{days}天 {clock} 后运行", { days, clock }) : text("{clock} 后运行", { clock });
+  return days ? t("ui.runs_in_valued_value", { days, clock }) : t("ui.runs_in_value", { clock });
 }
 
 function tickUserCountdowns() {
@@ -72,12 +72,12 @@ function tickUserCountdowns() {
   $$("#view .global-user-next-run[data-next-run]").forEach(element => {
     const raw = element.dataset.nextRun || "";
     if (!raw) {
-      element.textContent = text("暂无定时任务");
+      element.textContent = t("ui.no_scheduled_tasks");
       return;
     }
     const target = new Date(raw).getTime();
     if (!Number.isFinite(target)) {
-      element.textContent = text("暂无定时任务");
+      element.textContent = t("ui.no_scheduled_tasks");
       return;
     }
     const remaining = target - now;
@@ -100,7 +100,7 @@ function avatarMarkup(user) {
   const content = user.avatarUrl
     ? '<img class="global-user-avatar" src="' + esc(user.avatarUrl) + '" alt="" loading="lazy">'
     : '<span class="global-user-avatar global-user-avatar-fallback" aria-hidden="true">' + esc(initials(user.name)) + "</span>";
-  return '<button class="global-user-avatar-button" type="button" data-action="upload-user-avatar" data-user-id="' + esc(user.id) + '" aria-label="点击上传或更换' + esc(user.name) + '的头像" title="点击上传或更换头像">' +
+  return '<button class="global-user-avatar-button" type="button" data-action="upload-user-avatar" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("ui.avatar_upload_for_user", { name: user.name })) + '" title="' + esc(t("ui.avatar_upload")) + '">' +
     content + '<span class="global-user-avatar-mark" aria-hidden="true">+</span></button>';
 }
 
@@ -121,23 +121,23 @@ function pluginUserBadgeMarkup(user) {
 function userCard(user) {
   const bindingCount = user.bindingCount ?? (user.bindings || []).length;
   const nextRun = user.nextRunAt || "";
-  const queueTitle = user.nextQueueName ? text("下次队列：{name}", { name: user.nextQueueName }) : "";
+  const queueTitle = user.nextQueueName ? t("ui.next_queue_value", { name: user.nextQueueName }) : "";
   return '<article class="script-card global-user-card" data-dnd-id="' + esc(user.id) + '" data-testid="global-user-card">' +
-    '<span class="drag-handle" role="button" tabindex="0" aria-label="' + esc(text("拖拽调整全局用户顺序")) + '" title="' + esc(text("拖拽排序")) + '">' + icon("grip") + "</span>" +
+    '<span class="drag-handle" role="button" tabindex="0" aria-label="' + esc(t("ui.drag_to_reorder_global_users")) + '" title="' + esc(t("ui.drag_to_reorder")) + '">' + icon("grip") + "</span>" +
     avatarMarkup(user) +
     '<div class="script-main global-user-main">' +
       '<div class="script-name-row"><strong class="global-user-name">' + esc(user.name) + "</strong></div>" +
       '<div class="meta-line global-user-meta">' +
-        '<span class="badge muted">' + text("已绑定 {count} 个脚本", { count: bindingCount }) + "</span>" +
+        '<span class="badge muted">' + t("ui.value_scripts_bound", { count: bindingCount }) + "</span>" +
         pluginUserBadgeMarkup(user) +
         pluginSlotMarkup("users.list.badges", "user-" + user.id, "user-plugin-slot", { mode: "list", primaryId: user.id }) +
         '<span class="badge blue global-user-next-run" data-next-run="' + esc(nextRun) + '" title="' + esc(queueTitle) + '">' + esc(nextRunLabel(nextRun)) + "</span>" +
       "</div>" +
     "</div>" +
     '<div class="global-user-actions row-actions entity-actions">' +
-      '<button class="tertiary" type="button" data-action="open-user-management" data-user-id="' + esc(user.id) + '">用户管理</button>' +
-      '<button class="tertiary" type="button" data-action="open-global-management" data-user-id="' + esc(user.id) + '">全局管理</button>' +
-      '<button class="danger" type="button" data-action="delete-global-user" data-user-id="' + esc(user.id) + '">删除用户</button>' +
+      '<button class="tertiary" type="button" data-action="open-user-management" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("ui.user_management")) + '" title="' + esc(t("ui.user_management")) + '">' + t("ui.user_management_button") + "</button>" +
+      '<button class="tertiary" type="button" data-action="open-global-management" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("ui.global_management")) + '" title="' + esc(t("ui.global_management")) + '">' + t("ui.global_management_button") + "</button>" +
+      '<button class="danger" type="button" data-action="delete-global-user" data-user-id="' + esc(user.id) + `">${t("ui.delete_user")}</button>` +
     "</div>" +
   "</article>";
 }
@@ -145,7 +145,7 @@ function userCard(user) {
 export async function pageUsers(token) {
   if (!isCurrent("users", token)) return;
   navActive("users");
-  setTopbarTitle(text("用户管理"));
+  setTopbarTitle(t("ui.user_management"));
   nextRefreshPending = false;
   if (nextTimer) {
     clearInterval(nextTimer);
@@ -160,7 +160,7 @@ export async function pageUsers(token) {
       api("GET", "/api/plugin-contributions/user-list-badges"),
     ]);
   } catch (error) {
-    if (isCurrent("users", token)) render('<div class="empty"><strong>' + text("加载用户管理失败") + '</strong><span>' + esc(error.message) + "</span></div>");
+    if (isCurrent("users", token)) render('<div class="empty"><strong>' + t("ui.failed_to_load_user_management") + '</strong><span>' + esc(error.message) + "</span></div>");
     return;
   }
   if (!isCurrent("users", token)) return;
@@ -170,12 +170,12 @@ export async function pageUsers(token) {
   userListBadgesByUser = new Map((Array.isArray(userListBadges) ? userListBadges : []).map(item => [item?.userId, Array.isArray(item?.badges) ? item.badges : []]));
   const limit = state.limits?.maxUsers ?? 50;
   const atLimit = state.users.length >= limit;
-  const action = '<button class="primary" type="button" data-action="open-global-user-modal" data-testid="open-global-user-modal" ' + (atLimit ? "disabled" : "") + ">添加用户" + (atLimit ? "（" + state.users.length + "/" + limit + "）" : "") + "</button>";
+  const action = '<button class="primary" type="button" data-action="open-global-user-modal" data-testid="open-global-user-modal" ' + (atLimit ? "disabled" : "") + `>${t("ui.add_user")}` + (atLimit ? "（" + state.users.length + "/" + limit + "）" : "") + "</button>";
   const sorted = state.users.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
   const content = sorted.length
     ? '<section class="card list-surface"><div class="script-grid global-user-list" id="global-user-list">' + sorted.map(userCard).join("") + "</div></section>"
-    : '<div class="empty"><strong>暂无用户</strong><span>点击右上角「添加用户」创建用户后，再为它绑定一个或多个脚本实例。</span></div>';
-  render(pageHeader("账号管理", "用户管理", "统一管理用户头像、脚本绑定、运行优先级和通知设置。", action) + content);
+    : `<div class="empty"><strong>${t("ui.no_users_yet")}</strong><span>${t("ui.click_add_user_in_the_upper_right_corner_then_bind_one_or_more_script_instances")}</span></div>`;
+  render(pageHeader(t("ui.account_management"), t("ui.user_management"), t("ui.manage_user_avatars_script_bindings_run_priority_and_notification_settings"), action) + content);
   await renderPluginSlots(document.querySelector("#view"));
   const list = $("#global-user-list");
   if (list) initDndList(list, { onDrop: reorderGlobalUsers });
@@ -214,37 +214,37 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", "用户名 <span class='req'>*</span>", "", "text", 'placeholder="输入用户名"', "用户名不区分大小写。");
-  showModal(modalShell("添加用户", body, '<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">保存</button><button class="ghost" type="button" data-action="close-modal">取消</button>'), false, true, true);
+  const body = valueField("gu-name", `${t("ui.user_name")} <span class='req'>*</span>`, "", "text", `placeholder="${t("ui.enter_username_placeholder")}"`, t("ui.username_case_insensitive"));
+  showModal(modalShell(t("ui.add_user"), body, `<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">${t("ui.save")}</button><button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button>`), false, true, true);
 }
 
 export async function saveGlobalUser() {
   const name = $("#gu-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("gu-name");
-    toast(text("请填写用户名"), "error");
+    toast(t("ui.enter_a_username"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
-    setFieldError("gu-name", `用户名最多 ${MAX_ENTITY_NAME_BYTES} 字节`);
-    toast(text("用户名最多 {bytes} 字节", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
+    setFieldError("gu-name", t("ui.username_max_bytes", { bytes: MAX_ENTITY_NAME_BYTES }));
+    toast(t("ui.usernames_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   if (hasEntityNameConflict(state.users, name)) {
     setFieldInvalid("gu-name");
-    toast(text("用户名已存在，请使用其他名称"), "error");
+    toast(t("ui.that_username_already_exists_choose_another_name"), "error");
     return;
   }
   clearFieldError("gu-name");
   try {
     await api("POST", "/api/users", { name });
     closeModal();
-    toast(text("用户已创建"));
+    toast(t("ui.user_created"));
     await reloadUsers();
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("gu-name");
-      toast(text("用户名已存在，请使用其他名称"), "error");
+      toast(t("ui.that_username_already_exists_choose_another_name"), "error");
       return;
     }
     toast(error.message, "error");
@@ -267,9 +267,9 @@ export function deleteGlobalUser(id) {
   const user = userById(id);
   if (!user) return;
   deleteDraft = user;
-  const body = '<p class="modal-copy">' + text("删除「{name}」会解除全部脚本绑定并清理该用户的配置数据。请输入完整用户名确认。", { name: esc(user.name) }) + '</p>' +
-    valueField("gu-delete-name", "确认用户名 <span class='req'>*</span>", "", "text", 'placeholder="' + esc(user.name) + '"');
-  showModal(modalShell(text("删除用户"), body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user" data-testid="confirm-delete-global-user">' + text("确认删除") + '</button><button class="ghost" type="button" data-action="close-modal">' + text("取消") + '</button>'));
+  const body = '<p class="modal-copy">' + t("ui.deleting_value_removes_all_script_bindings_and_clears_this_user_s_configuration_enter_the_full_username_to_confirm", { name: esc(user.name) }) + '</p>' +
+    valueField("gu-delete-name", `${t("ui.confirm_username")} <span class='req'>*</span>`, "", "text", 'placeholder="' + esc(user.name) + '"');
+  showModal(modalShell(t("ui.delete_user"), body, '<button class="danger solid" type="button" data-action="confirm-delete-global-user" data-testid="confirm-delete-global-user">' + t("ui.confirm_deletion") + '</button><button class="ghost" type="button" data-action="close-modal">' + t("ui.cancel") + '</button>'));
 }
 
 export async function confirmDeleteGlobalUser() {
@@ -277,12 +277,12 @@ export async function confirmDeleteGlobalUser() {
   const input = $("#gu-delete-name")?.value || "";
   if (!input.trim()) {
     setRequiredFieldError("gu-delete-name");
-    toast(text("请输入完整用户名以确认删除"), "error");
+    toast(t("ui.enter_the_full_username_to_confirm_deletion"), "error");
     return;
   }
   if (input !== deleteDraft.name) {
-    setFieldError("gu-delete-name", "请输入与用户名完全一致的内容");
-    toast(text("请输入完整用户名以确认删除"), "error");
+    setFieldError("gu-delete-name", t("ui.enter_the_username_exactly"));
+    toast(t("ui.enter_the_full_username_to_confirm_deletion"), "error");
     return;
   }
   try {
@@ -290,7 +290,7 @@ export async function confirmDeleteGlobalUser() {
     const deletedName = deleteDraft.name;
     deleteDraft = null;
     closeModal();
-    toast(text("已删除用户「{name}」", { name: deletedName }));
+    toast(t("ui.deleted_user_value", { name: deletedName }));
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");
@@ -300,7 +300,7 @@ export async function confirmDeleteGlobalUser() {
 export async function reorderGlobalUsers(ids) {
   try {
     await api("PUT", "/api/users/order", { ids });
-    toast(text("用户顺序已保存"));
+    toast(t("ui.user_order_saved"));
     await reloadUsers();
   } catch (error) {
     toast(error.message, "error");
@@ -311,12 +311,12 @@ export async function reorderGlobalUsers(ids) {
 function showGlobalEditConfigCard(userId, scriptId, userName, scriptName, editMode) {
   const mode = editMode || "normal";
   const copy = mode === "fresh"
-    ? text("主程序已启动，脚本将生成全新配置。完成后新配置存为快照，取消恢复原配置。")
+    ? t("ui.the_main_program_started_and_the_script_will_create_a_new_configuration_save_the_new_configuration_as_a_snapshot_when_finished_or_cancel_to_restore_the_original")
     : mode === "reuse"
-      ? text("主程序已启动，正在编辑现有配置文件。完成后存为快照，取消不做改动。")
-      : text("主程序已启动（不带参数）。请设置用户「{user}」在脚本「{script}」中的配置。完成后保存，或取消本次修改。", { user: esc(userName), script: esc(scriptName) });
-  showModal(modalShell(text("配置编辑中"), '<p class="modal-copy">' + copy + '</p>',
-    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + text("完成") + '</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + text("取消") + '</button>'), false, true);
+      ? t("ui.the_main_program_started_and_is_editing_the_existing_configuration_save_a_snapshot_when_finished_or_cancel_without_changes")
+      : t("ui.the_main_program_started_without_arguments_configure_user_value_in_script_value_then_save_or_cancel_this_edit", { user: esc(userName), script: esc(scriptName) });
+  showModal(modalShell(t("ui.configuration_edit_in_progress"), '<p class="modal-copy">' + copy + '</p>',
+    '<button class="primary" type="button" data-action="global-edit-config-done" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + t("ui.complete") + '</button><button class="ghost" type="button" data-action="global-edit-config-cancel" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '">' + t("ui.cancel") + '</button>'), false, true);
 }
 
 export async function editGlobalUserConfig(userId, scriptId) {
@@ -352,17 +352,17 @@ function openFirstEditConfigChooser(userId, scriptId) {
   const freshDisabled = pluginLacksFreshConfig(scriptId);
   const freshCard = freshDisabled
     ? '<button type="button" class="chooser-card" disabled>' +
-      '<strong>全新配置文件</strong><span class="muted">因脚本配置限制，无法生成全新配置。</span></button>'
+      `<strong>${t("ui.fresh_configuration_file")}</strong><span class="muted">${t("ui.fresh_configuration_unavailable")}</span></button>`
     : '<button type="button" class="chooser-card" data-action="first-edit-config-fresh" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
-      '<strong>全新配置文件</strong><span class="muted">由脚本生成全新配置</span></button>';
-  const body = '<p class="modal-copy">这是你第一次编辑该脚本实例的配置文件，请选择编辑方式：</p>' +
+      `<strong>${t("ui.fresh_configuration_file")}</strong><span class="muted">${t("ui.fresh_configuration_generated")}</span></button>`;
+  const body = `<p class="modal-copy">${t("ui.configuration_edit_first_time", { script: t("ui.this_script_instance") })}</p>` +
     '<div class="first-edit-chooser">' +
     freshCard +
     '<button type="button" class="chooser-card" data-action="first-edit-config-reuse" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '">' +
-    '<strong>复用配置文件</strong><span class="muted">直接编辑现有配置文件</span></button>' +
+    `<strong>${t("ui.reuse_configuration_file")}</strong><span class="muted">${t("ui.edit_existing_configuration_file")}</span></button>` +
     '</div>';
-  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("首次编辑配置", body, footer), false, true, true);
+  const footer = `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button>`;
+  showModal(modalShell(`${t("ui.first_edit")} ${t("ui.edit_configuration")}`, body, footer), false, true, true);
 }
 
 function createRequesterWindowToken() {
@@ -388,7 +388,7 @@ function waitForRequesterTitlePaint() {
 async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
   const requesterWindowToken = createRequesterWindowToken();
   const previousTitle = document.title;
-  document.title = text("NexusPipeline 枢链") + " · " + requesterWindowToken;
+  document.title = t("ui.nexuspipeline_core") + " · " + requesterWindowToken;
   try {
     await waitForRequesterTitlePaint();
     const request = buildConfigEditRequest(mode, inputOverride, requesterWindowToken);
@@ -397,7 +397,7 @@ async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const inputName = String(error.data.inputName || "");
       if (!inputName) {
-        toast(text("插件未返回配置输入名，无法选择配置文件"), "error");
+        toast(t("ui.the_plugin_did_not_return_a_configuration_input_name_so_a_configuration_file_cannot_be_selected"), "error");
         return;
       }
       openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, inputName);
@@ -409,18 +409,18 @@ async function startEditConfig(userId, scriptId, mode, inputOverride = null) {
   }
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
-  showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || "脚本实例", mode);
+  showGlobalEditConfigCard(userId, scriptId, user?.name || "", binding?.scriptName || t("ui.script_instance"), mode);
 }
 
 /** 复用编辑候选选择：现场存在多个配置时，把候选作为编辑会话临时输入；成功保存后才写入用户绑定。 */
 function openConfigCandidateChooser(userId, scriptId, mode, candidates, inputName) {
   const cards = candidates.map(candidate =>
     '<button type="button" class="chooser-card" data-action="adopt-config-candidate" data-user-id="' + esc(userId) + '" data-script-id="' + esc(scriptId) + '" data-mode="' + esc(mode) + '" data-candidate="' + esc(candidate) + '" data-input-name="' + esc(inputName) + '">' +
-    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + '</span></strong><span class="muted">本次编辑使用该配置，保存后写入快照</span></button>').join("");
-  const body = '<p class="modal-copy">当前脚本目录存在多个配置文件。请选择要编辑的配置：保存后仅选中的配置写入你的快照，取消后可重新选择。</p>' +
+    '<strong class="scroll-text"><span class="scroll-inner">' + esc(candidate) + `</span></strong><span class="muted">${t("ui.configuration_candidate_use")}</span></button>`).join("");
+  const body = `<p class="modal-copy">${t("ui.configuration_candidates_copy")}</p>` +
     '<div class="first-edit-chooser">' + cards + '</div>';
-  const footer = '<button class="ghost" type="button" data-action="close-modal">取消</button>';
-  showModal(modalShell("选择要接管的配置文件", body, footer), false, true, true);
+  const footer = `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button>`;
+  showModal(modalShell(t("ui.take_over_configuration"), body, footer), false, true, true);
 }
 
 async function adoptConfigCandidate(target) {
@@ -431,17 +431,17 @@ async function adoptConfigCandidate(target) {
   const inputName = target.dataset.inputName || "";
   try {
     if (!inputName) {
-      toast(text("缺少配置输入名，无法接管配置文件"), "error");
+      toast(t("ui.the_configuration_input_name_is_missing_so_the_configuration_file_cannot_be_taken_over"), "error");
       return;
     }
     closeModal();
-    toast(text("本次编辑使用配置「{candidate}」", { candidate }));
+    toast(t("ui.this_edit_uses_configuration_value", { candidate }));
     await startEditConfig(userId, scriptId, mode, { name: inputName, value: candidate });
   } catch (error) {
     if (error.code === "config_input_mismatch" && Array.isArray(error.data?.candidates) && error.data.candidates.length > 0) {
       const nextInputName = String(error.data.inputName || inputName || "");
       if (!nextInputName) {
-        toast(text("插件未返回配置输入名，无法选择配置文件"), "error");
+        toast(t("ui.the_plugin_did_not_return_a_configuration_input_name_so_a_configuration_file_cannot_be_selected"), "error");
         return;
       }
       openConfigCandidateChooser(userId, scriptId, mode, error.data.candidates, nextInputName);
@@ -470,21 +470,21 @@ export async function globalEditConfigAction(userId, scriptId, action, mode) {
     closeModal();
     let message;
     if (action === "done") {
-      message = mode === "fresh" ? "新配置已存为快照" : "用户配置已保存";
+      message = mode === "fresh" ? t("ui.config_saved_as_snapshot") : t("ui.user_configuration_saved", { user: t("ui.user") });
     } else {
-      message = mode === "reuse" ? "已取消" : "已取消，配置已还原";
+      message = mode === "reuse" ? t("ui.cancelled") : t("ui.cancelled_configuration_restored");
     }
-    toast(text(message));
+    toast(message);
     if (action === "done") {
       const validation = result?.validation;
       for (const item of Array.isArray(validation?.toasts) ? validation.toasts : []) {
         toast(item?.message || "", item?.kind || "info");
       }
       for (const item of Array.isArray(validation?.notifications) ? validation.notifications : []) {
-        pushNotice(item?.title || "配置检查", item?.body || "", item?.kind || "info");
+        pushNotice(item?.title || t("ui.configuration_check_fallback"), item?.body || "", item?.kind || "info");
       }
       if (validation?.error) {
-        toast(text("配置已保存，但专项插件配置校验执行失败。"), "error");
+        toast(t("ui.configuration_saved_but_specialized_plugin_validation_failed"), "error");
       }
     }
     await reloadUsers();
@@ -499,7 +499,7 @@ export function syncManagementSwitch(target, pressed) {
   target.setAttribute("aria-pressed", pressed ? "true" : "false");
   target.dataset.state = pressed ? "on" : "off";
   const stateText = target.querySelector("[data-switch-state]");
-  if (stateText) stateText.textContent = pressed ? text("已启用") : text("已停用");
+  if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
 }
 
 export function toggleManagementSwitch(target) {

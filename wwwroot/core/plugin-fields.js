@@ -1,5 +1,6 @@
 import { esc } from "./format.js";
 import { selectControlMarkup } from "./controls.js";
+import { t } from "./i18n.js";
 
 function normalizedOptions(field) {
   return (Array.isArray(field?.options) ? field.options : [])
@@ -104,7 +105,7 @@ export function syncPluginMultiSelect(element) {
     if (check) check.textContent = checked ? "✓" : "";
     if (checked) selectedLabels.push(option.querySelector("span")?.textContent || option.dataset.value || "");
   });
-  const summary = selectedLabels.length ? selectedLabels.join("、") : "请选择";
+  const summary = selectedLabels.length ? selectedLabels.join("、") : t("ui.select_an_option");
   const summaryElement = element.querySelector(".plugin-multi-select-summary");
   if (summaryElement) {
     summaryElement.textContent = summary;

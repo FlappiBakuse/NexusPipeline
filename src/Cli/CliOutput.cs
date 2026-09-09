@@ -32,7 +32,7 @@ internal static class CliOutput
 
         if (!string.IsNullOrWhiteSpace(humanMessage))
         {
-            Console.WriteLine(HostLocalization.TranslateLegacy(humanMessage));
+            Console.WriteLine(HostLocalization.TranslateCli("ok", humanMessage, LocaleCatalog.HostLocale));
         }
         if (data is not null)
         {
@@ -49,7 +49,7 @@ internal static class CliOutput
             {
                 ["ok"] = false,
                 ["code"] = code,
-                ["message"] = HostLocalization.TranslateLegacy(message),
+                ["message"] = HostLocalization.TranslateCli(code, message, LocaleCatalog.HostLocale),
             };
             if (data is not null)
             {
@@ -59,7 +59,7 @@ internal static class CliOutput
         }
         else
         {
-            Console.WriteLine($"[错误] {HostLocalization.TranslateLegacy(message)}");
+            Console.WriteLine($"[错误] {HostLocalization.TranslateCli(code, message, LocaleCatalog.HostLocale)}");
         }
         return exitCode;
     }
@@ -68,11 +68,11 @@ internal static class CliOutput
     {
         if (MachineMode)
         {
-            Console.Error.WriteLine(HostLocalization.TranslateLegacy(message));
+            Console.Error.WriteLine(HostLocalization.TranslateCli("diagnostic", message, LocaleCatalog.HostLocale));
         }
         else
         {
-            Console.WriteLine(HostLocalization.TranslateLegacy(message));
+            Console.WriteLine(HostLocalization.TranslateCli("diagnostic", message, LocaleCatalog.HostLocale));
         }
     }
 
@@ -80,11 +80,11 @@ internal static class CliOutput
     {
         if (MachineMode)
         {
-            Console.Error.WriteLine(HostLocalization.TranslateLegacy(message));
+            Console.Error.WriteLine(HostLocalization.TranslateCli("progress", message, LocaleCatalog.HostLocale));
         }
         else
         {
-            Console.WriteLine(HostLocalization.TranslateLegacy(message));
+            Console.WriteLine(HostLocalization.TranslateCli("progress", message, LocaleCatalog.HostLocale));
         }
     }
 }

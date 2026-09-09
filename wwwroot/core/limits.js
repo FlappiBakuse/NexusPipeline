@@ -1,6 +1,7 @@
 import { api } from "../core/api.js";
 import { esc } from "../core/format.js";
 import { state } from "../core/state.js";
+import { t } from "./i18n.js";
 
 const DISMISS_KEY = "nexus-limits-dismissed";
 
@@ -44,10 +45,10 @@ export function showWarning() {
   mask.setAttribute("aria-labelledby", "limits-warning-title");
   const items = (state.limitsWarnings || []).map(item => `<li>${esc(item)}</li>`).join("");
   mask.innerHTML = `<div class="limits-warning-card">
-    <h3 class="modal-title" id="limits-warning-title">约束配置警告</h3>
-    <p class="limits-warning-copy">config/limits.json 中的约束配置超出绝对安全区间，程序已按配置生效，请注意数据规模。</p>
+    <h3 class="modal-title" id="limits-warning-title">${t("ui.limits_warning_title")}</h3>
+    <p class="limits-warning-copy">${t("ui.limits_warning_copy")}</p>
     <ul class="limits-warning-list">${items}</ul>
-    <div class="modal-footer"><button type="button" data-action="limits-dismiss-once">知道了</button><button class="ghost" type="button" data-action="limits-dismiss-forever">不再提醒</button></div>
+    <div class="modal-footer"><button type="button" data-action="limits-dismiss-once">${t("ui.acknowledge")}</button><button class="ghost" type="button" data-action="limits-dismiss-forever">${t("ui.do_not_remind_again")}</button></div>
   </div>`;
   document.body.appendChild(mask);
   // 焦点陷阱（Tab/Shift+Tab 限制在警告层内）与 Esc 关闭。

@@ -11,14 +11,15 @@ internal sealed record CliApiResponse(
     bool Succeeded,
     int StatusCode,
     JsonNode? Body,
+    JsonNode? Args,
     string Code,
     string Message)
 {
     public static CliApiResponse Success(int statusCode, JsonNode? body) =>
-        new(true, statusCode, body, "ok", "");
+        new(true, statusCode, body, null, "ok", "");
 
-    public static CliApiResponse Failure(int statusCode, JsonNode? body, string code, string message) =>
-        new(false, statusCode, body, code, message);
+    public static CliApiResponse Failure(int statusCode, JsonNode? body, JsonNode? args, string code, string message) =>
+        new(false, statusCode, body, args, code, message);
 }
 
 /// <summary>CLI 到 owning service 的控制 API 客户端。CLI 进程不直接修改运行时数据。</summary>
@@ -41,7 +42,7 @@ internal sealed class CliApiClient
             Port = CliTransport.EnsureService();
             if (Port is null)
             {
-                return CliApiResponse.Failure(503, null, "service_unavailable", "无法连接到常驻 NexusPipeline 服务");
+                return Failure(503, null, "service_unavailable");
             }
         }
 
@@ -56,23 +57,33 @@ internal sealed class CliApiClient
             }
 
             string serverCode = node?["code"]?.ToString() ?? MapCode((int)response.StatusCode);
-            string message = node?["message"]?.ToString()
-                ?? node?["error"]?.ToString()
-                ?? (string.IsNullOrWhiteSpace(raw) ? $"服务返回 HTTP {(int)response.StatusCode}" : raw.Trim());
-            return CliApiResponse.Failure((int)response.StatusCode, node, NormalizeCode(serverCode), message);
+            string normalizedCode = NormalizeCode(serverCode);
+            JsonNode? args = node?["args"]?.DeepClone();
+            return Failure((int)response.StatusCode, node, normalizedCode, args);
         }
-        catch (TaskCanceledException ex)
+        catch (TaskCanceledException)
         {
-            return CliApiResponse.Failure(408, null, "timeout", $"控制 API 请求超时：{ex.Message}");
+            return Failure(408, null, "timeout");
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException)
         {
-            return CliApiResponse.Failure(503, null, "service_unavailable", $"控制 API 请求失败：{ex.Message}");
+            return Failure(503, null, "service_unavailable");
         }
         catch (Exception ex)
         {
-            return CliApiResponse.Failure(503, null, "service_unavailable", $"控制 API 请求失败：{ex.Message}");
+            Logger.Debug($"Control API request failed: {ex}");
+            return Failure(503, null, "service_unavailable");
         }
+    }
+
+    private static CliApiResponse Failure(int statusCode, JsonNode? body, string code, JsonNode? args = null)
+    {
+        return CliApiResponse.Failure(
+            statusCode,
+            body,
+            args,
+            code,
+            HostLocalization.TranslateApiError(code, args, statusCode, LocaleCatalog.HostLocale));
     }
 
     private static JsonNode? Parse(string raw)
