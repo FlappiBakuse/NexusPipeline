@@ -52,6 +52,14 @@ public sealed class LocalizationTests
     }
 
     [Fact]
+    public void ApiErrorTranslationsKeepDispatchFailureSemantics()
+    {
+        Assert.Equal(
+            "Failed to start the run",
+            HostLocalization.TranslateApiError("dispatch_failed", null, 400, "en-US"));
+    }
+
+    [Fact]
     public void CliLocalization_UsesStableKeysAndNamedPlaceholders()
     {
         Assert.Equal(
@@ -88,6 +96,19 @@ public sealed class LocalizationTests
             Assert.False(string.IsNullOrWhiteSpace(zh[key]));
             Assert.False(string.IsNullOrWhiteSpace(en[key]));
             Assert.Equal(Placeholders(zh[key]), Placeholders(en[key]));
+        }
+    }
+
+    [Fact]
+    public void EnglishFallbackKeysExistInBothEmbeddedLocaleResources()
+    {
+        Dictionary<string, string> zh = ReadEmbeddedResource("zh-CN");
+        Dictionary<string, string> en = ReadEmbeddedResource("en-US");
+
+        foreach (string key in HostLocalization.EnglishFallbackKeys)
+        {
+            Assert.True(zh.ContainsKey(key), $"Missing Chinese resource for fallback key: {key}");
+            Assert.True(en.ContainsKey(key), $"Missing English resource for fallback key: {key}");
         }
     }
 

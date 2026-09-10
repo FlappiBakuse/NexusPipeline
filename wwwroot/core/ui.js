@@ -285,7 +285,8 @@ export function startSystemActionCountdown() {
   if (systemActionTimer !== null) clearInterval(systemActionTimer);
   const update = () => {
     const remain = Math.max(0, Math.round((deadline - Date.now()) / 1000));
-    countdown.textContent = remain > 0 ? t("common.status.until_action", { seconds: remain, verb }) : t("common.status.executing_soon", { verb });
+    const countdownText = remain > 0 ? t("common.status.until_action", { seconds: remain, verb }) : t("common.status.executing_soon", { verb });
+    countdown.textContent = t("common.status.queue_complete", { queueName: countdown.dataset.queueName || "", countdown: countdownText });
   };
   update();
   systemActionTimer = registerInterval(setInterval(update, 1000));

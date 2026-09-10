@@ -277,7 +277,7 @@ export async function openScriptModal(id = "", plugin = "") {
       state.scripts = await api("GET", "/api/scripts");
       script = state.scripts.find(item => item.id === id);
     } catch (error) {
-      toast(t("scripts.load.failed") + error.message, "error");
+      toast(t("scripts.load.failed", { reason: error.message }), "error");
       return;
     }
   }
@@ -396,7 +396,7 @@ async function probeSpecialRoot(rootPath, pluginType) {
   try {
     await api("POST", "/api/scripts/probe", { rootPath, pluginType, inputs: {} });
   } catch (error) {
-    toast(t("scripts.plugin.config_derive_failed") + error.message, "error");
+    toast(t("scripts.plugin.config_derive_failed", { reason: error.message }), "error");
   }
 }
 

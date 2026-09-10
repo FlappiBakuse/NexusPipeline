@@ -25,18 +25,18 @@ function globalManagementHostMarkup(settings) {
   const pre = encodePrePost(PRE_ONLY_MARKER, advanced.preRunOnceOnly, advanced.preRunScript);
   const post = encodePrePost(POST_FINAL_MARKER, advanced.postRunOnFinalOnly, advanced.postRunScript);
   return '<div class="global-management-grid">' +
-    `<section class="global-management-card"><div class="section-heading"><div><h3>${t("common.general")}</h3><p class="muted">${t("users.global_general_copy")}</p></div></div><div class="settings-list">` +
+    `<section class="global-management-card"><div class="section-heading"><div><h3>${t("common.general")}</h3><p class="muted">${t("users.global.general.help")}</p></div></div><div class="settings-list">` +
       switchControl("gm-general-sync", t("users.sync_general_settings"), t("users.global.general_override_help"), general.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="general.syncEnabled"') +
       switchControl("gm-general-enabled", t("common.enabled"), t("users.global.disabled_help"), general.enabled !== false, "toggle-global-management-switch", 'data-global-field="general.enabled"') +
     '</div>' +
-      valueField("gm-general-run-days", t("common.run_days"), typeof general.runDays === "number" ? general.runDays : -1, "number", `data-global-field="general.runDays" min="-1" max="${esc(maxRunDays)}" step="1" placeholder="${t("users.run_days_placeholder")}"`, t("users.run_days_help")) +
+      valueField("gm-general-run-days", t("common.run_days"), typeof general.runDays === "number" ? general.runDays : -1, "number", `data-global-field="general.runDays" min="-1" max="${esc(maxRunDays)}" step="1" placeholder="${t("users.global.run_days.placeholder")}"`, t("users.global.run_days.help")) +
       valueField("gm-general-max-success", t("users.maximum_successful_runs"), typeof general.maxSuccessfulRunsPerDay === "number" ? general.maxSuccessfulRunsPerDay : -1, "number", `data-global-field="general.maxSuccessfulRunsPerDay" min="-1" max="${esc(maxSuccessfulRuns)}" step="1" placeholder="${t("users.editor.daily_limit.placeholder")}"`, t("users.binding.daily_limit.help")) +
     '</section>' +
     `<section class="global-management-card"><div class="section-heading"><div><h3>${t("common.notifications")}</h3><p class="muted">${t("users.global.notification_help")}</p></div></div><div class="settings-list">` +
       switchControl("gm-notification-sync", t("users.binding.sync_notifications"), t("users.global.notification_override_help"), notification.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="notification.syncEnabled"') +
-      switchControl("gm-notification-enabled", t("users.enable_notifications"), t("users.global_notification_copy"), notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
+      switchControl("gm-notification-enabled", t("users.enable_notifications"), t("users.global.notification.enabled_help"), notification.notifyEnabled !== false, "toggle-global-management-switch", 'data-global-field="notification.notifyEnabled"') +
     '</div>' +
-      valueField("gm-notification-smtp", t("users.smtp_recipients"), notification.smtpTo || "", "text", `data-global-field="notification.smtpTo" placeholder="${t("users.binding.smtp_inherit_help")}"`, t("users.global_smtp_help")) +
+      valueField("gm-notification-smtp", t("users.smtp_recipients"), notification.smtpTo || "", "text", `data-global-field="notification.smtpTo" placeholder="${t("users.binding.smtp_inherit_help")}"`, t("users.global.notification.smtp_help")) +
     '</section>' +
     `<section class="global-management-card global-management-card-wide"><div class="section-heading"><div><h3>${t("users.advanced")}</h3><p class="muted">${t("users.global.lifecycle_help")}</p></div></div><div class="settings-list">` +
       switchControl("gm-advanced-sync", t("users.sync_advanced_settings"), t("users.global.advanced_override_help"), advanced.syncEnabled === true, "toggle-global-management-switch", 'data-global-field="advanced.syncEnabled"') +
@@ -95,7 +95,7 @@ function renderGlobalManagementModal() {
   const draft = globalManagementDraft;
   const body = globalManagementHostMarkup(draft.settings) + globalManagementPluginMarkup(draft.contributions) + pluginSlotMarkup("users.global.sections", "users.global.sections", "global-management-plugin-slot", { mode: "user", primaryId: draft.userId });
   const footer = `<button class="primary" type="button" data-action="save-global-management">${t("common.save")}</button><button class="ghost" type="button" data-action="close-modal">${t("common.cancel")}</button>`;
-  showModal(modalShell(t("users.global_management"), body, footer), true, true, true);
+  showModal(modalShell(t("users.global.title"), body, footer), true, true, true);
   void renderPluginSlots(document);
   hydrateIcons(document);
 }
@@ -190,7 +190,7 @@ export async function saveGlobalManagement() {
     }
     globalManagementDraft = null;
     closeModal();
-    toast(t("users.global_settings_saved"));
+    toast(t("users.global.saved"));
     await reloadUsers();
     return saved;
   } catch (error) {

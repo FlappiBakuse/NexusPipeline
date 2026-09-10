@@ -44,6 +44,8 @@ internal static class HostLocalization
             ["system.local_only"] = "This operation is available only to local requests",
         };
 
+    internal static IEnumerable<string> EnglishFallbackKeys => English.Keys;
+
     public static string Translate(
         string? key,
         string fallback,

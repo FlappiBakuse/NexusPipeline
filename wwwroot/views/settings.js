@@ -203,9 +203,9 @@ function renderDiagnostics(data) {
   const checks = Array.isArray(data?.checks) ? data.checks : [];
   const overall = data?.overallStatus || "warn";
   const attentionCount = checks.filter(check => check?.status === "warn" || check?.status === "fail").length;
-  const attentionText = attentionCount
-    ? t("settings.diagnostics.attention_summary", { count: attentionCount })
-    : t("settings.diagnostics.all_passed_suffix");
+  const attentionKey = attentionCount
+    ? "settings.diagnostics.overview_attention"
+    : "settings.diagnostics.overview_clear";
   const rows = checks.map(check => {
     const summary = diagnosticMessage(check.summaryCode, check.summaryArgs, diagnosticStatusLabel(check.status));
     const detail = diagnosticMessage(check.detailCode, check.detailArgs, "");
@@ -216,7 +216,7 @@ function renderDiagnostics(data) {
       <div class="diagnostic-check-info" role="cell"><div class="diagnostic-check-summary"><span class="diagnostic-info-label">${esc(t("diagnostics.summary", {}, "Summary"))}</span><span>${esc(summary)}</span></div>${detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">${esc(t("diagnostics.detail", {}, "Details"))}</span><span>${esc(detail)}</span></div>` : ""}${remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">${esc(t("diagnostics.remediation", {}, "Recommendation"))}</span><span>${esc(remediation)}</span></div>` : ""}</div>
     </div>`;
   }).join("");
-  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">${esc(t("diagnostics.overall", {}, "Overall status"))}</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} ${t("settings.checks")}${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="${esc(t("settings.diagnostics.system_checks"))}"><div class="diagnostics-table-header" role="row"><span role="columnheader">${t("common.check")}</span><span role="columnheader">${t("common.status")}</span><span role="columnheader">${t("settings.diagnostics")}</span></div>${rows || `<div class="diagnostics-empty" role="row">${esc(t("diagnostics.empty", {}, "No diagnostic results"))}</div>`}</div>`;
+  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">${esc(t("diagnostics.overall", {}, "Overall status"))}</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${t(attentionKey, { total: checks.length, count: attentionCount })}</span></div><div class="diagnostics-table" role="table" aria-label="${esc(t("settings.diagnostics.system_checks"))}"><div class="diagnostics-table-header" role="row"><span role="columnheader">${t("common.check")}</span><span role="columnheader">${t("common.status")}</span><span role="columnheader">${t("settings.diagnostics")}</span></div>${rows || `<div class="diagnostics-empty" role="row">${esc(t("diagnostics.empty", {}, "No diagnostic results"))}</div>`}</div>`;
   applyTranslations(box);
 }
 

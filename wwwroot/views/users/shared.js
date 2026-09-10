@@ -136,7 +136,7 @@ function userCard(user) {
     "</div>" +
     '<div class="global-user-actions row-actions entity-actions">' +
       '<button class="tertiary" type="button" data-action="open-user-management" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("users.user_management")) + '" title="' + esc(t("users.user_management")) + '">' + t("users.user_management_button") + "</button>" +
-      '<button class="tertiary" type="button" data-action="open-global-management" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("users.global_management")) + '" title="' + esc(t("users.global_management")) + '">' + t("users.global_management_button") + "</button>" +
+      '<button class="tertiary" type="button" data-action="open-global-management" data-user-id="' + esc(user.id) + '" aria-label="' + esc(t("users.global.title")) + '" title="' + esc(t("users.global.title")) + '">' + t("users.global.open_action") + "</button>" +
       '<button class="danger" type="button" data-action="delete-global-user" data-user-id="' + esc(user.id) + `">${t("users.delete_user")}</button>` +
     "</div>" +
   "</article>";

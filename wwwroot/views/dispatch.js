@@ -94,7 +94,7 @@ function updateLogState(logbox, record, initial = false) {
 function runningItemMarkup(record) {
   const mode = record.kind === "queue" ? "queue" : "script";
   const newestSequence = logEntries(record).reduce((max, entry) => Math.max(max, Number(entry.sequence) || 0), 0);
-  return `<div class="list-item-head"><div><div class="list-item-title"><strong>${esc(record.targetName)}</strong><span class="badge ${record.kind === "queue" ? "blue" : "muted"}">${t(record.kind === "queue" ? "common.schedule_queues" : "common.script_instance")}</span><span class="badge muted">${t(record.mode === "auto" ? "common.automatic" : "common.manual")}</span>${record.kind === "queue" ? `<span class="muted done-count">${record.doneTasks}/${record.totalTasks} ${t("dispatch.summary.items_suffix")}</span>` : ""}</div></div><button class="sm danger" type="button" data-action="cancel-run" data-id="${record.id}">${t("dispatch.cancel_run")}</button></div>
+  return `<div class="list-item-head"><div><div class="list-item-title"><strong>${esc(record.targetName)}</strong><span class="badge ${record.kind === "queue" ? "blue" : "muted"}">${t(record.kind === "queue" ? "common.schedule_queues" : "common.script_instance")}</span><span class="badge muted">${t(record.mode === "auto" ? "common.automatic" : "common.manual")}</span>${record.kind === "queue" ? `<span class="muted done-count">${t("dispatch.summary.items", { done: record.doneTasks, total: record.totalTasks })}</span>` : ""}</div></div><button class="sm danger" type="button" data-action="cancel-run" data-id="${record.id}">${t("dispatch.cancel_run")}</button></div>
     <div class="qk-row">${t("dispatch.running.current_attempt", { script: record.currentScriptName || "-", status: record.currentStatus || "", attempt: record.currentAttempt, max: record.currentMaxAttempts })}</div>${record.persistenceWarning ? `<div class="qk-row"><span class="badge warn">${t("common.history.persistence_warning")}</span> ${esc(record.persistenceWarning)}</div>` : ""}
     <div class="progress-line"><div data-progress="0"></div></div>
     <div class="running-item-content"><pre class="logbox run-log run-terminal" data-log-sequence="${newestSequence}">${logMarkup(record)}</pre>${pluginSlotMarkup("dispatch.running.sidecar", "dispatch.running.sidecar", "running-sidecar", { mode, primaryId: record.id })}</div>`;
@@ -121,7 +121,7 @@ function updateRunningItem(el, record) {
   const qk = el.querySelector(".qk-row");
   if (qk) qk.textContent = t("dispatch.running.current_attempt", { script: record.currentScriptName || "-", status: record.currentStatus || "", attempt: record.currentAttempt, max: record.currentMaxAttempts });
   const counter = el.querySelector(".done-count");
-  if (counter && record.kind === "queue") counter.textContent = `${record.doneTasks}/${record.totalTasks} ${t("dispatch.summary.items_suffix")}`;
+  if (counter && record.kind === "queue") counter.textContent = t("dispatch.summary.items", { done: record.doneTasks, total: record.totalTasks });
   const prog = el.querySelector("[data-progress]");
   if (prog) {
     prog.dataset.progress = String(record.kind === "queue" && record.totalTasks
@@ -241,7 +241,7 @@ async function refreshDispatch(token) {
       });
     }
   }
-  catch (error) { if (isCurrent("dispatch", token)) toast(t("dispatch.status_update_failed") + error.message, "error"); }
+  catch (error) { if (isCurrent("dispatch", token)) toast(t("dispatch.status_update_failed", { reason: error.message }), "error"); }
   schedule(() => refreshDispatch(token), 1000, "dispatch", token);
 }
 

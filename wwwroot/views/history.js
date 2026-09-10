@@ -64,8 +64,8 @@ function entryBadge(record) {
   if (status === "cancelled") return `<span class="badge warn">${t("common.cancelled")}</span>`;
   if (status === "skipped") return `<span class="badge blue">${t("common.skipped")}</span>`;
   const detail = resultDetail(record);
-  const reason = detail && detail !== "-" ? `${t("history.reason_separator")}${detail}` : "";
-  return `<span class="badge bad" title="${esc(reason)}">✕ ${t("common.failed")}${esc(reason)}</span>`;
+  const reason = detail && detail !== "-" ? t("history.failure_reason", { reason: detail }) : t("common.failed");
+  return `<span class="badge bad" title="${esc(reason)}">✕ ${esc(reason)}</span>`;
 }
 
 function historyRangeMarkup() {
@@ -566,13 +566,13 @@ export function historyDetailBack() {
 function historyLogMarkup(id, attemptKey, logInfo, label) {
   const total = logInfo?.logTotalLines || 0;
   const full = logInfo?.logText != null;
-  const tailNote = total > 200 && !full ? t("history.log.tail_summary") : "";
+  const hasTail = total > 200 && !full;
   const action = total > 200 && !full
     ? `<div class="history-log-actions"><span class="muted">${t("history.log.tail_only")}</span><button class="ghost sm" type="button" data-action="history-full-log" data-id="${esc(id)}" data-attempt="${esc(attemptKey)}">${t("history.view_full_log")}</button></div>`
     : "";
   const logText = full ? logInfo.logText : (logInfo?.logTail || t("history.no_script_log"));
   const lineSummary = logInfo
-    ? t("history.log.lines_summary", { label, count: total, lines: t("history.lines"), tail: tailNote ? ` ${tailNote}` : "" })
+    ? t(hasTail ? "history.log.lines_summary.tail" : "history.log.lines_summary", { label, count: total, lines: t("history.lines") })
     : "";
   return `<div class="history-log" data-history-log data-attempt="${esc(attemptKey)}"><div class="qk-row" data-history-log-meta>${esc(logInfo ? lineSummary : label)}</div>${action}<pre class="logbox" data-history-log-body>${esc(logText)}</pre></div>`;
 }
@@ -772,7 +772,7 @@ export async function historyFullLog(id, attemptKey, target) {
     const meta = root?.querySelector("[data-history-log-meta]");
     if (!body || !meta) return;
     body.textContent = info.logText || t("history.no_script_log");
-    meta.textContent = t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attemptKey }), count: info.logTotalLines || 0, lines: t("history.lines"), tail: "" });
+  meta.textContent = t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attemptKey }), count: info.logTotalLines || 0, lines: t("history.lines") });
     target.remove();
   } catch (error) { toast(error.message, "error"); }
 }

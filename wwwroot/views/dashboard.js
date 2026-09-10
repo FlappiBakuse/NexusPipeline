@@ -37,7 +37,8 @@ function setVersionLabel(version) {
 }
 
 function runningPanelMarkup(status) {
-  return `<div class="section-heading"><h3>${t("common.running")}</h3><span class="muted">${(status.running || []).length} ${t("dashboard.active_tasks")}</span></div>${runningMarkup(status.running || [])}`;
+  const activeCount = (status.running || []).length;
+  return `<div class="section-heading"><h3>${t("common.running")}</h3><span class="muted">${t("dashboard.active_tasks.count", { count: activeCount })}</span></div>${runningMarkup(status.running || [])}`;
 }
 
 function pluginPanelMarkup(status) {

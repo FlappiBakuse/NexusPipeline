@@ -87,7 +87,7 @@ export function systemActionCard(action) {
   const verb = t(action.action === "sleep" ? "common.sleep" : action.action === "reboot" ? "common.restart" : "common.shut_down");
   return `<section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${esc(verb)}">
     <div class="section-heading"><h3>${t("common.completion_action_countdown")}</h3><span class="muted">${t("common.status.queue_action_pending")}</span></div>
-    <p class="countdown-text">${t("common.status.queue_complete", { queueName: esc(action.queueName || "") })}<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
+    <p class="countdown-text"><span data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}" data-queue-name="${esc(action.queueName || "")}">${t("common.status.queue_complete", { queueName: esc(action.queueName || ""), countdown: "" })}</span></p>
     <div class="qk-row"><button class="danger" type="button" data-action="cancel-system-action">${t("common.action.cancel_verb", { verb })}</button></div>
   </section>`;
 }

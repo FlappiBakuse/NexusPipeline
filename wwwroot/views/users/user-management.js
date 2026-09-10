@@ -71,7 +71,7 @@ function umBindingCardMarkup(binding) {
   const preValue = encodePrePost(PRE_ONLY_MARKER, effective.preRunOnceOnly, effective.preRunScript || "");
   const postValue = encodePrePost(POST_FINAL_MARKER, effective.postRunOnFinalOnly, effective.postRunScript || "");
   const overrideHelper = category => locks[category]
-    ? `<p class="muted helper-copy um-override-helper">${t("users.global_override_copy", { global: t("users.global_management"), script: t("common.script_instance") })}</p>`
+    ? `<p class="muted helper-copy um-override-helper">${t("users.binding.global_override.help", { global: t("users.global.title"), script: t("common.script_instance") })}</p>`
     : "";
   const runDaysPlaceholder = t("users.binding.run_days.input_help");
   const dragEnabled = umBindingDragEnabled();

@@ -11,7 +11,7 @@
   "api.error.diagnostics_export_failed": "Failed to export diagnostics",
   "api.error.dialog_failed": "Failed to open the dialog",
   "api.error.dispatch_cancel_failed": "Failed to cancel the task",
-  "api.error.dispatch_failed": "Failed to load the dispatch state",
+  "api.error.dispatch_failed": "Failed to start the run",
   "api.error.duplicate_target": "The target is already in the run list",
   "api.error.execution_group_closing": "The execution group is closing",
   "api.error.execution_preview_not_found": "The execution preview was not found",

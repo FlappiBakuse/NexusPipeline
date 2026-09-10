@@ -160,7 +160,7 @@ export async function openQueueModal(id = "") {
   let queue = id ? state.queues.find(item => item.id === id) : null;
   if (id && !queue) {
     try { state.queues = await api("GET", "/api/queues"); queue = state.queues.find(item => item.id === id); }
-    catch (error) { toast(t("queues.error.load") + error.message, "error"); return; }
+    catch (error) { toast(t("queues.error.load", { reason: error.message }), "error"); return; }
   }
   const value = queue || {};
   queueDraft = {
