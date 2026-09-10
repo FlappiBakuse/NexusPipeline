@@ -202,7 +202,7 @@ export async function pageDispatch(token) {
   navActive("dispatch"); setTopbarTitle(t("dispatch.scheduler"));
   let status, scripts, queues;
   try { [status, scripts, queues] = await Promise.all([api("GET", "/api/status"), api("GET", "/api/scripts"), api("GET", "/api/queues")]); }
-  catch (error) { render(`<div class="empty"><strong>${t("dispatch.failed_to_load_dispatch")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("dispatch.load.failed")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("dispatch", token)) return;
   state.scripts = scripts; state.queues = queues; state.plugins = status.plugins || [];
   render(pageHeader(t("dispatch.scheduler"), t("dispatch.scheduler"), t("dispatch.page.help")) + pluginSlotMarkup("dispatch.cards", "dispatch.cards") + `
@@ -338,7 +338,7 @@ function explainPlanMarkup(result) {
         <div class="execution-plan-stat"><span class="k">${esc(t("common.completion_action"))}</span><strong class="execution-plan-stat-value">${esc(completionAction)}</strong></div>
       </div>
     </div>
-    ${failure ? `<div class="callout callout-warning execution-plan-warning"><strong>${esc(t(`api.error.${failure.code || "admission_failed"}`, failure.args || {}, failure.code || t("dispatch.unable_to_start")))}</strong></div>` : ""}
+    ${failure ? `<div class="callout callout-warning execution-plan-warning"><strong>${esc(t(`api.error.${failure.code || "admission_failed"}`, failure.args || {}, failure.code || t("dispatch.start.unavailable")))}</strong></div>` : ""}
     ${tasks.length ? `<section class="execution-plan-section" aria-labelledby="execution-explain-tasks-heading"><div class="execution-plan-section-heading"><div class="execution-plan-section-heading-main"><h4 id="execution-explain-tasks-heading">${esc(t("common.task_list"))}</h4><span class="badge muted">${esc(t("common.unit.tasks", { count: tasks.length }))}</span></div></div><div class="execution-plan-table-header execution-plan-task-header" role="row"><span role="columnheader">${esc(t("common.task"))}</span><span role="columnheader">${esc(t("dispatch.users"))}</span></div>${tasks.map((task, index) => explainTaskRow(task, index)).join("")}</section>` : ""}
     ${users.length ? `<section class="execution-plan-section" aria-labelledby="execution-explain-users-heading"><div class="execution-plan-section-heading"><div class="execution-plan-section-heading-main"><h4 id="execution-explain-users-heading">${esc(t("dispatch.user_eligibility"))}</h4><span class="badge muted">${esc(t("dispatch.summary.users", { count: users.length }))}</span></div></div><div class="execution-plan-table-header execution-plan-user-header" role="row"><span role="columnheader">${esc(t("common.user"))}</span><span role="columnheader">${esc(t("common.status"))}</span><span role="columnheader">${esc(t("dispatch.successful_today"))}</span><span role="columnheader">${esc(t("common.reason"))}</span></div>${users.map(explainUserStatus).join("")}</section>` : ""}
     ${warnings.length ? `<div class="callout callout-warning execution-plan-warning"><strong>${esc(t("dispatch.notice"))}</strong><br>${warnings.map(item => esc(t(`dispatch.warning.${item.code}`, item.args || {}, item.code || t("dispatch.needs_attention")))).join("<br>")}</div>` : ""}

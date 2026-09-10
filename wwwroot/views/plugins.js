@@ -224,7 +224,7 @@ function pluginListPaneMarkup(tab) {
     return `<section class="plugin-list-pane" data-testid="${testId}"><div class="plugin-store-unavailable-message"><strong>${esc(t("plugins.plugin_repository_unavailable"))}</strong><span>${esc(data.error || t("plugins.catalog.network_help"))}</span></div></section>`;
   }
   if (data.error && !data.plugins.length) {
-    return `<section class="plugin-list-pane" data-testid="${testId}"><div class="empty"><strong>${esc(t("plugins.failed_to_load_local_plugins"))}</strong><span>${esc(data.error)}</span></div></section>`;
+    return `<section class="plugin-list-pane" data-testid="${testId}"><div class="empty"><strong>${esc(t("plugins.load.local_failed"))}</strong><span>${esc(data.error)}</span></div></section>`;
   }
   const plugins = filteredPlugins(tab);
   const view = pluginViewState[tab];
@@ -328,7 +328,7 @@ function detailPaneMarkup(tab) {
     return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="plugin-detail-loading" role="status" aria-live="polite"><div class="plugin-loading-progress" role="progressbar" aria-label="${t("plugins.loading_plugin_details")}"><span></span></div><strong>${t("plugins.loading_plugin_details")}</strong><span class="muted">${t("plugins.detail.readme_loading")}</span></div></section>`;
   }
   if (current.error) {
-    return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="empty"><strong>${t("plugins.failed_to_load_plugin_details")}</strong><span>${esc(current.error)}</span></div></section>`;
+    return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="empty"><strong>${t("plugins.load.detail_failed")}</strong><span>${esc(current.error)}</span></div></section>`;
   }
   if (!current.data) {
     return `<section class="plugin-detail-pane" data-testid="plugin-detail"><div class="empty"><strong>${t("plugins.select_a_plugin")}</strong><span>${t("plugins.selection.help")}</span></div></section>`;
@@ -425,7 +425,7 @@ async function loadDetail(tab, token, force = false) {
     detailState[tab] = {
       name,
       loading: false,
-      error: cached ? "" : (error.message || t("plugins.failed_to_read_details")),
+      error: cached ? "" : (error.message || t("plugins.load.readme_failed")),
       data: cached,
     };
     renderDetailPane();

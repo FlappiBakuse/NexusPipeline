@@ -9,6 +9,12 @@ const RESOURCE_FILES = ["zh-CN.json", "en-US.json"];
 const SAFE_KEY = /^[A-Za-z][A-Za-z0-9_.-]*$/u;
 const PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9_.-]*)\}/gu;
 const CJK = /[\u4e00-\u9fff]/u;
+const FORBIDDEN_KEY_PATTERNS = [
+  { pattern: /(?:^|[._])(?:for_example|enter_the|failed_to|complete_the)(?:[._]|$)/u, description: "sentence-derived key" },
+  { pattern: /_s_/u, description: "ambiguous plural suffix" },
+  { pattern: /(?:_value){2,}/u, description: "duplicated value suffix" },
+  { pattern: /[._][a-f0-9]{8}$/u, description: "hash-derived suffix" },
+];
 const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html"]);
 
 function read(relativePath) {
@@ -74,10 +80,14 @@ test("host locale resources use the same safe key and placeholder contract", () 
     assert.match(key, SAFE_KEY, `unsafe locale key at index ${index}: ${key}`);
     assert.ok(key.length <= 40, `locale key is too long at index ${index}: ${key}`);
     assert.doesNotMatch(key, /^(?:ui|legacy)\./u, `legacy host locale namespace: ${key}`);
+    for (const { pattern, description } of FORBIDDEN_KEY_PATTERNS) {
+      assert.doesNotMatch(key, pattern, `${description} is not allowed: ${key}`);
+    }
     assert.equal(typeof defaultResource.values[key], "string", `default locale value must be a string: ${key}`);
     assert.equal(typeof englishResource.values[key], "string", `English locale value must be a string: ${key}`);
     assert.ok(defaultResource.values[key].trim(), `default locale value is empty: ${key}`);
     assert.ok(englishResource.values[key].trim(), `English locale value is empty: ${key}`);
+    assert.doesNotMatch(englishResource.values[key], /\(\s*s\s*\)/u, `ambiguous English plural marker: ${key}`);
     assert.deepEqual(
       [...placeholders(defaultResource.values[key])].sort(),
       [...placeholders(englishResource.values[key])].sort(),

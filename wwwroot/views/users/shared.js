@@ -214,7 +214,7 @@ async function restoreEditSessionCard() {
 }
 
 export function openGlobalUserModal() {
-  const body = valueField("gu-name", `${t("users.user_name")} <span class='req'>*</span>`, "", "text", `placeholder="${t("users.enter_username_placeholder")}"`, t("users.username_case_insensitive"));
+  const body = valueField("gu-name", `${t("users.user_name")} <span class='req'>*</span>`, "", "text", `placeholder="${t("users.editor.name.placeholder")}"`, t("users.username_case_insensitive"));
   showModal(modalShell(t("users.add_user"), body, `<button class="primary" type="button" data-action="save-global-user" data-testid="save-global-user">${t("common.save")}</button><button class="ghost" type="button" data-action="close-modal">${t("common.cancel")}</button>`), false, true, true);
 }
 
@@ -222,7 +222,7 @@ export async function saveGlobalUser() {
   const name = $("#gu-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("gu-name");
-    toast(t("users.enter_a_username"), "error");
+    toast(t("users.validation.username_required"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
@@ -281,7 +281,7 @@ export async function confirmDeleteGlobalUser() {
     return;
   }
   if (input !== deleteDraft.name) {
-    setFieldError("gu-delete-name", t("users.enter_the_username_exactly"));
+    setFieldError("gu-delete-name", t("users.validation.username_confirmation"));
     toast(t("users.confirm.username_help"), "error");
     return;
   }

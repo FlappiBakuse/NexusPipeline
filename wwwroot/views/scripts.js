@@ -48,7 +48,7 @@ function gameBoxHtml(d, emulatorOk) {
     isEmu ? `${t("scripts.emulator_adb_address")} <span class='req'>*</span>` : `${t("scripts.game_path")} <span class='req'>*</span>`,
     d.gameExe,
     "file",
-    isEmu ? `placeholder="${t("scripts.emulator_adb_address_placeholder")}"` : `placeholder="${t("scripts.game_executable_path_placeholder")}"`,
+    isEmu ? `placeholder="${t("scripts.editor.adb.placeholder")}"` : `placeholder="${t("scripts.editor.game_path.placeholder")}"`,
     t("common.executable_file_filter"),
     isEmu ? 'hidden aria-hidden="true"' : "",
     isEmu ? t("scripts.editor.adb_cleanup_help") : t("scripts.editor.game_path.cleanup_help"),
@@ -69,7 +69,7 @@ export function changeGameMode() {
   const args = $dom("#sm-game-args");
   const exeLabel = $dom('label[for="sm-game-exe"]');
   if (exeLabel) exeLabel.innerHTML = `${t(isEmu ? "scripts.emulator_adb_address" : "scripts.game_path")} <span class='req'>*</span>`;
-  if (exe) exe.placeholder = isEmu ? t("scripts.for_example_127_0_0_1_16384") : t("scripts.enter_the_game_executable_path");
+  if (exe) exe.placeholder = isEmu ? t("scripts.editor.adb.placeholder") : t("scripts.editor.game_path.placeholder");
   if (args) args.placeholder = isEmu ? t("scripts.android.arguments_help") : "";
   const pathTrigger = exe?.closest(".nxp-path")?.querySelector("[data-path-trigger]");
   if (pathTrigger) {
@@ -189,7 +189,7 @@ export async function pageScripts(token) {
   try {
     [scripts, status] = await Promise.all([api("GET", "/api/scripts"), api("GET", "/api/status")]);
   } catch (error) {
-    if (isCurrent("scripts", token)) render(`<div class="empty"><strong>${t("scripts.failed_to_load_script_instances")}</strong>${esc(error.message)}</div>`);
+    if (isCurrent("scripts", token)) render(`<div class="empty"><strong>${t("scripts.load.instances_failed")}</strong>${esc(error.message)}</div>`);
     return;
   }
   if (!isCurrent("scripts", token)) return;
@@ -277,7 +277,7 @@ export async function openScriptModal(id = "", plugin = "") {
       state.scripts = await api("GET", "/api/scripts");
       script = state.scripts.find(item => item.id === id);
     } catch (error) {
-      toast(t("scripts.failed_to_load_scripts") + error.message, "error");
+      toast(t("scripts.load.failed") + error.message, "error");
       return;
     }
   }
@@ -492,7 +492,7 @@ export function uploadJudgeScript() {
       finish();
     };
     reader.onerror = () => {
-      toast(t("scripts.failed_to_read_the_script_file"), "error");
+      toast(t("scripts.file.read_failed"), "error");
       finish();
     };
     reader.readAsText(file, "utf-8");
@@ -539,7 +539,7 @@ export async function saveScript() {
     }
     clearFieldError(id);
   }
-  if (firstError) { toast(t("scripts.complete_the_required_fields"), "error"); return; }
+  if (firstError) { toast(t("scripts.validation.required_fields"), "error"); return; }
   const l = state.limits || {};
   const ILLEGAL_PATH = /["<>|?*{}]/;
   const ILLEGAL_LOG = /["<>|?]/;
@@ -607,7 +607,7 @@ export async function saveScript() {
   const gameExe = stripQuotes($dom("#sm-game-exe")?.value);
   if (!gameExe) {
     setRequiredFieldError("sm-game-exe");
-    toast(t(gameMode === "emulator" ? "scripts.enter_the_emulator_adb_address" : "scripts.enter_the_game_path"), "error");
+    toast(t(gameMode === "emulator" ? "scripts.validation.adb_required" : "scripts.validation.game_path_required"), "error");
     return;
   }
   if (gameMode === "emulator") {

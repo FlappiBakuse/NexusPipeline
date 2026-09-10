@@ -330,7 +330,7 @@ function panelsMarkup() {
   const detailVisible = isHistoryMobile() && hasUser;
   const modeClass = hasUser ? " history-user-selected" : usersVisible ? " history-users-visible" : "";
   const panelTitle = hasUser ? `${historySelectedUserName || t("common.user")} · ${t("history.run_records")}` : t("history.run_records");
-  const panelCount = hasUser ? `${historyRecords.length} ${t("history.record_s")}` : t("history.choose_user");
+  const panelCount = hasUser ? t("history.records.count", { count: historyRecords.length }) : t("history.choose_user");
   const content = hasUser
     ? (historyRecords.length ? historyRecords.map(entryMarkup).join("") : `<div class="history-empty-message">${t("history.records.empty_day")}</div>`)
     : `<div class="history-empty-message"><strong>${t("history.choose_run_users")}</strong><span>${t("history.filter.user_day_help")}</span></div>`;

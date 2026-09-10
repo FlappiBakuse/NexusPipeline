@@ -40,7 +40,7 @@ export async function pageQueues(token) {
   navActive("queues"); setTopbarTitle(t("common.schedule_queues"));
   let queues, scripts, status;
   try { [queues, scripts, status] = await Promise.all([api("GET", "/api/queues"), api("GET", "/api/scripts"), api("GET", "/api/status")]); }
-  catch (error) { render(`<div class="empty"><strong>${t("queues.failed_to_load_queues")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("queues.load.failed")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("queues", token)) return;
   state.queues = queues; state.scripts = scripts; state.plugins = status.plugins || [];
   const atLimit = !!(state.limits && queues.length >= state.limits.maxQueues);

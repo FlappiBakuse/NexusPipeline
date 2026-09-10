@@ -172,7 +172,7 @@ function renderUserManagementModal() {
   const bindingEditToggle = '<button class="ghost sm um-binding-edit-toggle" type="button" data-action="toggle-um-binding-edit" aria-pressed="' + (umState.bindingEditMode ? "true" : "false") + '"' + (umState.expandedId ? " hidden" : "") + '>' + (umState.bindingEditMode ? t("users.done_editing") : t("users.edit_bindings")) + "</button>";
   const body =
     '<section class="user-management-settings">' +
-      valueField("um-name", `${t("users.user_name")} <span class='req'>*</span>`, user.name, "text", `placeholder="${t("users.enter_username_placeholder")}"`, t("users.username_case_insensitive")) +
+      valueField("um-name", `${t("users.user_name")} <span class='req'>*</span>`, user.name, "text", `placeholder="${t("users.editor.name.placeholder")}"`, t("users.username_case_insensitive")) +
       textareaField("um-remark", t("users.remark"), user.remark || "", 'rows="3"', t("common.optional"), t("users.add_user_remark")) +
       (user.avatarUrl ? `<div class="user-avatar-setting"><span class="muted">${t("users.custom_avatar")}</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="` + esc(user.id) + `">${t("users.remove_custom_avatar")}</button></div>` : "") +
     "</section>" +
@@ -301,7 +301,7 @@ export async function saveUserManagement() {
   const name = $("#um-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("um-name");
-    toast(t("users.enter_a_username"), "error");
+    toast(t("users.validation.username_required"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
