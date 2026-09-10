@@ -391,9 +391,12 @@ function installControlEvents() {
         updateSelect(root);
         dispatchValueEvent(input);
       } else {
-        input.value = value;
-        updateSelect(root);
-        dispatchValueEvent(input);
+        const changed = String(input.value || "") !== value;
+        if (changed) {
+          input.value = value;
+          updateSelect(root);
+          dispatchValueEvent(input);
+        }
         setPopoverOpen(root, false);
         root.querySelector("[data-nxp-select-trigger]")?.focus();
       }

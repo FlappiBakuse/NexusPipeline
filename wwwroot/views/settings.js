@@ -54,6 +54,7 @@ function settingsCardMarkup(id, title, description, body, testId) {
 }
 
 async function changeLocale(target) {
+  if (!target?.value || target.value === getLocale()) return;
   await setLocale(target.value);
   location.reload();
 }

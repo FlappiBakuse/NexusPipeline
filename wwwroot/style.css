@@ -706,18 +706,17 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .diagnostic-check-remediation { padding-top: 7px; border-top: 1px solid var(--border); color: var(--accent); }
 .diagnostic-info-label { color: var(--faint); font-size: 11px; font-weight: 700; }
 .diagnostics-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
-.execution-plan { margin: var(--space-3) 0 0; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); box-shadow: 0 2px 7px rgba(0, 0, 0, .08); }
-.execution-plan-summary { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.45fr); align-items: stretch; gap: var(--space-4); padding: 16px; background: linear-gradient(135deg, var(--content-card-soft), var(--content-card)); }
+.execution-plan { display: grid; gap: var(--space-3); margin: var(--space-3) 0 0; min-width: 0; }
+.execution-plan-summary { display: grid; grid-template-columns: minmax(0, 1.05fr) repeat(2, minmax(0, 1fr)); align-items: stretch; gap: var(--space-4); }
 .execution-plan-summary-main { display: flex; min-width: 0; min-height: 64px; align-items: center; align-content: center; flex-wrap: wrap; gap: 8px; padding: 12px 14px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); }
 .execution-plan-summary-label { color: var(--muted); font-size: 11px; }
 .execution-plan-summary-main strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
-.execution-plan-summary-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; min-width: 0; }
-.execution-plan-summary-meta > div { display: grid; min-width: 0; align-content: center; gap: 4px; padding: 10px 12px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); line-height: 1.5; }
-.execution-plan-summary-meta .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
-.execution-plan-summary-meta > div > :last-child { min-width: 0; overflow-wrap: anywhere; }
+.execution-plan-summary-stat { display: grid; min-width: 0; align-content: center; gap: 4px; padding: 10px 12px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); line-height: 1.5; }
+.execution-plan-summary-stat .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.execution-plan-summary-stat > :last-child { min-width: 0; overflow-wrap: anywhere; }
 .execution-plan-stat-value { color: var(--text); font-size: 13px; }
 .execution-plan-stat-subvalue { font-size: 11px; }
-.execution-plan-section { border-top: 1px solid var(--border); }
+.execution-plan-section { overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); box-shadow: 0 2px 7px rgba(0, 0, 0, .08); }
 .execution-plan-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 13px 14px; background: var(--content-card-soft); }
 .execution-plan-section-heading-main { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
 .execution-plan-section-heading h4 { margin: 0; font-size: 14px; }
@@ -734,10 +733,11 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .execution-plan-task-copy { display: grid; min-width: 0; gap: 3px; }
 .execution-plan-task-copy strong, .execution-plan-task-copy .mono { min-width: 0; overflow-wrap: anywhere; }
 .execution-plan-status { padding-top: 1px; }
-.execution-plan-users { align-self: center; text-align: right; }
+.execution-plan-users { align-self: center; }
+.execution-plan-task-row .execution-plan-users { text-align: left; }
 .execution-plan-today { overflow-wrap: anywhere; }
 .execution-plan-reason { line-height: 1.55; overflow-wrap: anywhere; }
-.execution-plan-warning { margin: 0; border-right: 0; border-radius: 0; }
+.execution-plan-warning { margin: 0; }
 .toast { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 200; max-width: min(420px, calc(100vw - 32px)); padding: 13px 16px; border: 1px solid var(--content-control-border); border-radius: 8px; background: var(--content-card); box-shadow: var(--shadow); color: var(--text); font-size: 13px; }
 .toast.error { border-color: var(--bad); }
 @keyframes toast-shake {
@@ -831,10 +831,9 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
   .diagnostic-check-summary, .diagnostic-check-detail, .diagnostic-check-remediation { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .form-grid.settings-service-grid-primary, .form-grid.settings-service-grid-locale { grid-template-columns: minmax(0, 1fr); }
   .execution-plan-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .execution-plan-summary-meta { grid-template-columns: minmax(0, 1fr); }
   .execution-plan-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name users"; row-gap: 8px; padding: 14px; }
   .execution-plan-task-row .execution-plan-name { grid-area: name; }
-  .execution-plan-task-row .execution-plan-users { grid-area: users; justify-self: end; }
+  .execution-plan-task-row .execution-plan-users { grid-area: users; justify-self: end; text-align: right; }
   .execution-plan-user-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "today today" "reason reason"; row-gap: 8px; padding: 14px; }
   .execution-plan-user-row .execution-plan-name { grid-area: name; }
   .execution-plan-user-row .execution-plan-status { grid-area: status; justify-self: end; }
@@ -1843,6 +1842,14 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 }
 .global-user-actions button { width: auto; }
 .global-user-actions > button { overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 820px) {
+  .global-user-actions > button {
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
 .user-management-settings { display: grid; gap: var(--space-4); }
 .user-management-settings .form-textarea { min-height: 96px; padding: 10px 12px; resize: vertical; line-height: 1.65; }
 .user-avatar-setting {
