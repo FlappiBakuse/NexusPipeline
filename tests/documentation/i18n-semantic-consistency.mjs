@@ -73,6 +73,12 @@ test("critical i18n bindings keep their business semantics", () => {
   assert.notEqual(en["api.error.dispatch_failed"], en["dispatch.load.failed"]);
   assert.equal(zh["dashboard.active_tasks.count"], "{count} 个活动任务");
   assert.equal(en["dashboard.active_tasks.count"], "{count} active tasks");
+  assert.equal(zh["common.mode_toggle.on"], "{label}：开");
+  assert.equal(en["common.mode_toggle.on"], "{label}: On");
+  assert.equal(zh["common.mode_toggle.off"], "{label}：关");
+  assert.equal(en["common.mode_toggle.off"], "{label}: Off");
+  assert.equal(zh["common.plugin.unavailable_badge"], "专项插件不可用");
+  assert.equal(en["common.plugin.unavailable_badge"], "Specialized plugin unavailable");
   assert.deepEqual(placeholders(zh["dispatch.summary.items"]), ["done", "total"]);
   assert.deepEqual(placeholders(en["dispatch.summary.items"]), ["done", "total"]);
   assert.deepEqual(placeholders(zh["common.status.queue_complete"]), ["countdown", "queueName"]);
@@ -80,15 +86,20 @@ test("critical i18n bindings keep their business semantics", () => {
 
   const removedKeys = [
     "common.check_failed",
+    "common.off",
+    "common.on",
     "common.until_start",
     "common.waiting_because",
     "dashboard.active_tasks",
     "dispatch.summary.items_suffix",
+    "dispatch.plan.queue_placeholder",
+    "dispatch.plan.target_placeholder",
     "history.log.tail_summary",
     "history.reason_separator",
     "queues.after_completion",
     "settings.diagnostics.all_passed_suffix",
     "settings.diagnostics.attention_summary",
+    "common.plugin.unavailable_suffix",
     "users.global_general_copy",
     "users.global_management",
     "users.global_management_button",
@@ -116,7 +127,12 @@ test("localized values are complete templates at fragment migration boundaries",
   const directReferences = collectDirectReferences();
   const requiredReferences = {
     "wwwroot/views/dashboard.js": ["dashboard.active_tasks.count"],
-    "wwwroot/views/dispatch.js": ["dispatch.summary.items", "dispatch.status_update_failed"],
+    "wwwroot/views/dispatch.js": [
+      "dispatch.summary.items",
+      "dispatch.status_update_failed",
+      "dispatch.plan.queue_required",
+      "dispatch.plan.target_help",
+    ],
     "wwwroot/views/history.js": ["history.failure_reason", "history.log.lines_summary", "history.log.lines_summary.tail"],
     "wwwroot/views/users/global-management.js": [
       "users.global.general.help",
@@ -128,7 +144,11 @@ test("localized values are complete templates at fragment migration boundaries",
       "users.global.title",
     ],
     "wwwroot/views/users/shared.js": ["users.global.open_action", "users.global.title"],
-    "wwwroot/views/users/user-management.js": ["users.binding.global_override.help", "users.binding.run_days.help"],
+    "wwwroot/views/users/user-management.js": [
+      "users.binding.global_override.help",
+      "users.binding.run_days.help",
+      "common.plugin.unavailable_badge",
+    ],
   };
   for (const [relativePath, keys] of Object.entries(requiredReferences)) {
     for (const key of keys) {

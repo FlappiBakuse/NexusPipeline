@@ -34,7 +34,10 @@ export function syncModeToggleText(btn) {
   if (btn.hasAttribute("data-day") || btn.dataset.toggleText === "false") return;
   const base = btn.dataset.baseText || btn.textContent.trim();
   btn.dataset.baseText = base;
-  btn.textContent = base + (btn.getAttribute("aria-pressed") === "true" ? t("common.on") : t("common.off"));
+  const stateKey = btn.getAttribute("aria-pressed") === "true"
+    ? "common.mode_toggle.on"
+    : "common.mode_toggle.off";
+  btn.textContent = t(stateKey, { label: base });
 }
 
 /** 同步根节点内全部切换按钮文字（render/showModal/点击切换后调用）。 */

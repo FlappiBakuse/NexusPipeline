@@ -208,7 +208,7 @@ export async function pageDispatch(token) {
   render(pageHeader(t("dispatch.scheduler"), t("dispatch.scheduler"), t("dispatch.page.help")) + pluginSlotMarkup("dispatch.cards", "dispatch.cards") + `
     <div id="system-action-area"></div>
     <section class="content-section list-surface" id="dispatch-running" data-testid="dispatch-running"><div class="section-heading"><h3>${t("common.running")} (${(status.running || []).length})</h3><span class="muted">${t("dispatch.updates_every_second")}</span></div><div id="running-list">${runningMarkup(status.running || [])}</div></section>${pluginSlotMarkup("dispatch.running.badges", "dispatch.running.badges")}
-    <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">${t("dispatch.start_one_run")}</h3><span class="muted">${t("dispatch.plan.target_placeholder")}</span></div>
+    <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">${t("dispatch.start_one_run")}</h3><span class="muted">${t("dispatch.plan.target_help")}</span></div>
       <div class="dispatch-runbar">
         ${selectField("dc-kind", t("dispatch.target_type"), "script", [{ value: "script", label: t("common.script_instance") }, { value: "queue", label: t("common.schedule_queues") }], 'data-action="dispatch-kind"')}
         <div class="field" id="dc-script-wrap"><label class="field-label" for="dc-script-trigger">${t("common.script_instance")}</label>${selectControlMarkup("dc-script", "", [{ value: "", label: t("common.select.script_instance_option") }, ...scripts.map(dispatchScriptOption)], 'data-testid="dispatch-script"', t("common.script_instance"))}</div>
@@ -257,7 +257,7 @@ export async function dispatchScript() {
 
 export async function dispatchQueue() {
   const id = $("#dc-queue")?.value;
-  if (!id) { toast(t("dispatch.plan.queue_placeholder"), "error"); return; }
+  if (!id) { toast(t("dispatch.plan.queue_required"), "error"); return; }
   try { await api("POST", "/api/dispatch/queue", { queueId: id, mode: "manual" }); toast(t("dispatch.run_started")); }
   catch (error) { toast(error.message, "error"); }
 }
@@ -348,7 +348,7 @@ function explainPlanMarkup(result) {
 export async function explainCurrent() {
   const kind = $("#dc-kind")?.value === "queue" ? "queue" : "script";
   const id = kind === "queue" ? $("#dc-queue")?.value : $("#dc-script")?.value;
-  if (!id) { toast(t(kind === "queue" ? "dispatch.plan.queue_placeholder" : "common.select.script_instance_label"), "error"); return; }
+  if (!id) { toast(t(kind === "queue" ? "dispatch.plan.queue_required" : "common.select.script_instance_label"), "error"); return; }
   try {
     const result = await api("POST", `/api/dispatch/explain/${kind}`, kind === "queue" ? { queueId: id } : { scriptId: id });
     showModal(modalShell(t("dispatch.run_plan_check"), explainPlanMarkup(result?.result || result), `<button class="ghost" type="button" data-action="close-modal">${t("common.close")}</button>`), true);

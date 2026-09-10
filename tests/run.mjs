@@ -144,7 +144,7 @@ async function runWeb() {
 }
 
 async function runDocs() {
-  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs"]);
+  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs"]);
 }
 
 async function runSyntax() {

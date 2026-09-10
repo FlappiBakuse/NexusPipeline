@@ -130,7 +130,7 @@ function openDatabase() {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("IndexedDB unavailable"));
+    request.onerror = () => reject(request.error || new Error(t("common.error.storage_unavailable")));
   });
 }
 

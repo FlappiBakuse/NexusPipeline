@@ -49,7 +49,7 @@ function umBadges(binding) {
   const pluginBadge = pluginStatus?.missing
     ? `<span class="badge bad">${t("common.plugin.unknown")}</span>`
     : pluginStatus?.specialized && !pluginStatus.available
-      ? `<span class="badge warn">${t("common.plugin.unavailable_suffix")}</span>`
+      ? `<span class="badge warn">${t("common.plugin.unavailable_badge")}</span>`
       : "";
   return pluginBadge + stateBadge + daysBadge;
 }
