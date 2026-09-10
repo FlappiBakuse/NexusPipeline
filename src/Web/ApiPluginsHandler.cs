@@ -57,7 +57,7 @@ internal static class ApiPluginsHandler
             await HttpHelper.WriteJsonAsync(
                 context,
                 manager.PluginManagementViews
-                    .Select(view => ManagementPayload(view, context.Request.Locale))
+                    .Select(view => ManagementPayload(manager, view, context.Request.Locale))
                     .ToArray()).ConfigureAwait(false);
             return;
         }
@@ -154,7 +154,7 @@ internal static class ApiPluginsHandler
         }
     }
 
-    private static object ManagementPayload(PluginManagementView view, string locale)
+    private static object ManagementPayload(PluginManager manager, PluginManagementView view, string locale)
     {
         return new
         {
@@ -191,7 +191,7 @@ internal static class ApiPluginsHandler
                 .Select(change => new { version = change.Version, date = change.Date, items = change.Items }),
             selfManagedPcLaunch = view.SelfManagedPcLaunch,
             noFreshConfig = view.NoFreshConfig,
-            inputs = view.Inputs,
+            inputs = manager.LocalizeInputDeclarations(view.Name, view.Inputs, locale),
         };
     }
 
@@ -325,10 +325,10 @@ internal static class ApiPluginsHandler
     private static async Task UpdateAllStorePluginsAsync(HttpListenerContext context)
     {
         PluginRepositoryService repository = RuntimeContext.Instance.Resolve<PluginRepositoryService>();
-        PluginStoreSnapshot snapshot;
+        IReadOnlyList<PluginStoreItem> candidates;
         try
         {
-            snapshot = await repository.GetStoreAsync(false).ConfigureAwait(false);
+            candidates = await repository.GetUpdateCandidatesAsync().ConfigureAwait(false);
         }
         catch (PluginRepositoryException ex)
         {
@@ -343,19 +343,6 @@ internal static class ApiPluginsHandler
             await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
             return;
         }
-        if (!snapshot.Available)
-        {
-            await HttpHelper.ErrorAsync(context, "repository_unavailable", 502).ConfigureAwait(false);
-            return;
-        }
-
-        IReadOnlyList<PluginStoreItem> candidates = snapshot.Plugins
-            .Where(plugin => plugin.Installed
-                && plugin.ManagedByStore
-                && plugin.Compatible
-                && plugin.UpdateAvailable
-                && string.IsNullOrWhiteSpace(plugin.PendingAction))
-            .ToArray();
         var updated = new List<object>();
         var failed = new List<object>();
         foreach (PluginStoreItem candidate in candidates)

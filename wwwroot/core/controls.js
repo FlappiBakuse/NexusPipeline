@@ -1,6 +1,6 @@
 import { esc } from "./format.js";
 import { icon } from "./icons.js";
-import { t } from "./i18n.js";
+import { formatCompactList, t } from "./i18n.js";
 
 function normalizedOptions(options) {
   return (Array.isArray(options) ? options : []).map(option => {
@@ -35,7 +35,7 @@ export function selectControlMarkup(id, value, options, extra = "", ariaLabel = 
   const current = multiple ? selected : [selected[0] || ""];
   const selectedOption = normalized.find(option => option.value === current[0]);
   const selectedLabels = normalized.filter(option => current.includes(option.value)).map(option => option.label);
-  const summary = selectedLabels.length ? selectedLabels.join("、") : t("ui.select_an_option");
+  const summary = selectedLabels.length ? formatCompactList(selectedLabels) : t("common.select_an_option");
   const controlId = safeId(id);
   const triggerId = `${controlId}-trigger`;
   const menuId = `${controlId}-menu`;
@@ -48,7 +48,7 @@ export function selectControlMarkup(id, value, options, extra = "", ariaLabel = 
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
   return `<div class="nxp-select" data-nxp-select${multiple ? ' data-nxp-select-multiple="true"' : ""}${rootExtra}>
     <input id="${controlId}" type="hidden" value="${esc(storedValue)}" data-nxp-select-value${hiddenAttributes} ${extra}>
-    <button id="${triggerId}" class="nxp-select-trigger" type="button" data-nxp-select-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" aria-label="${esc(ariaLabel || selectedOption?.label || t("ui.select_an_option"))}"${disabled}><span data-nxp-select-label>${esc(summary)}</span><span class="nxp-select-chevron" aria-hidden="true">⌄</span></button>
+    <button id="${triggerId}" class="nxp-select-trigger" type="button" data-nxp-select-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" aria-label="${esc(ariaLabel || selectedOption?.label || t("common.select_an_option"))}"${disabled}><span data-nxp-select-label>${esc(summary)}</span><span class="nxp-select-chevron" aria-hidden="true">⌄</span></button>
     <div id="${menuId}" class="nxp-select-menu secondary-surface" data-nxp-select-menu role="listbox"${multiple ? ' aria-multiselectable="true"' : ""} hidden>${optionMarkup}</div>
   </div>`;
 }
@@ -57,7 +57,7 @@ export function selectControlMarkup(id, value, options, extra = "", ariaLabel = 
 export function numberControlMarkup(id, value, extra = "", ariaLabel = "") {
   const controlId = safeId(id);
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  return `<div class="nxp-number" data-nxp-number><input id="${controlId}" class="nxp-number-input" type="text" inputmode="decimal" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-number-value ${extra}><span class="nxp-number-actions"><button type="button" class="nxp-number-step" data-nxp-step="increment" aria-label="${esc(t("ui.increase"))}"${disabled}>＋</button><button type="button" class="nxp-number-step" data-nxp-step="decrement" aria-label="${esc(t("ui.decrease"))}"${disabled}>－</button></span></div>`;
+  return `<div class="nxp-number" data-nxp-number><input id="${controlId}" class="nxp-number-input" type="text" inputmode="decimal" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-number-value ${extra}><span class="nxp-number-actions"><button type="button" class="nxp-number-step" data-nxp-step="increment" aria-label="${esc(t("common.increase"))}"${disabled}>＋</button><button type="button" class="nxp-number-step" data-nxp-step="decrement" aria-label="${esc(t("common.decrease"))}"${disabled}>－</button></span></div>`;
 }
 
 /** 本机路径字段：文本框保持完全可编辑，右侧仅显示自绘文件 SVG 图标。 */
@@ -68,8 +68,8 @@ export function pathControlMarkup(id, value, kind = "file", extra = "", ariaLabe
   const pickerFilter = filter ? ` data-path-filter="${esc(filter)}"` : "";
   const trigger = (pickerKind, label, testId) => `<button type="button" class="nxp-path-trigger${normalizedKind === "file-or-folder" ? " nxp-path-choice" : ""}" data-action="pick-path" data-path-trigger data-path-target="${controlId}" data-path-kind="${pickerKind}" data-path-title="${esc(ariaLabel || label)}" aria-label="${esc(t(label))}" title="${esc(t(label))}" data-testid="${testId}"${pickerFilter}${disabled}${triggerExtra ? ` ${triggerExtra}` : ""}>${icon(pickerKind)}</button>`;
   const triggers = normalizedKind === "file-or-folder"
-    ? `<span class="nxp-path-actions" role="group" aria-label="${esc(t("ui.select_value", { label: ariaLabel || t("ui.path") }))}">${trigger("file", "ui.select_file", "path-picker-file")}${trigger("folder", "ui.select_folder", "path-picker-folder")}</span>`
-    : trigger(normalizedKind, "ui.select_path", "path-picker");
+    ? `<span class="nxp-path-actions" role="group" aria-label="${esc(t("common.select.label", { label: ariaLabel || t("common.path") }))}">${trigger("file", "common.select_file", "path-picker-file")}${trigger("folder", "common.select_folder", "path-picker-folder")}</span>`
+    : trigger(normalizedKind, "common.select_path", "path-picker");
   return `<div class="nxp-path" data-nxp-path data-path-kind="${normalizedKind}">
     <input id="${controlId}" class="nxp-path-input" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-path-value ${extra}>
     ${triggers}
@@ -96,11 +96,11 @@ function timeWheelMarkup(unit, current, limit, label) {
   const previous = (current - 1 + limit) % limit;
   const next = (current + 1) % limit;
   const options = [previous, current, next].map((value, index) => `<button type="button" class="nxp-time-option${index === 1 ? " is-current" : ""}" ${attribute}="${timeText(value)}" aria-selected="${index === 1 ? "true" : "false"}">${timeText(value)}</button>`).join("");
-  return `<div class="nxp-time-wheel" data-nxp-time-wheel="${unit}" role="group" aria-label="${esc(t(label))}"><button type="button" class="nxp-time-step" data-nxp-time-adjust="${unit}:-1" aria-label="${esc(t("ui.decrease_value", { label }))}">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="${esc(t(label))}">${options}</div><button type="button" class="nxp-time-step" data-nxp-time-adjust="${unit}:1" aria-label="${esc(t("ui.increase_value", { label }))}">⌄</button></div>`;
+  return `<div class="nxp-time-wheel" data-nxp-time-wheel="${unit}" role="group" aria-label="${esc(t(label))}"><button type="button" class="nxp-time-step" data-nxp-time-adjust="${unit}:-1" aria-label="${esc(t("common.action.decrease", { label }))}">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="${esc(t(label))}">${options}</div><button type="button" class="nxp-time-step" data-nxp-time-adjust="${unit}:1" aria-label="${esc(t("common.action.increase", { label }))}">⌄</button></div>`;
 }
 
 function timeWheelsMarkup(hour, minute) {
-  return `${timeWheelMarkup("hour", normalizedTimePart(hour, 24), 24, "ui.hour")}${timeWheelMarkup("minute", normalizedTimePart(minute, 60), 60, "ui.minute")}`;
+  return `${timeWheelMarkup("hour", normalizedTimePart(hour, 24), 24, "common.hour")}${timeWheelMarkup("minute", normalizedTimePart(minute, 60), 60, "common.minute")}`;
 }
 
 /** 自定义时间选择器：输入值仍为 HH:mm，弹层内使用小时/分钟滚轮。 */
@@ -110,15 +110,15 @@ export function timeControlMarkup(id, value, extra = "", ariaLabel = "") {
   const [hour, minute] = String(value || "").split(":");
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
   return `<div class="nxp-time" data-nxp-time data-nxp-time-hour="${esc(hour || "")}" data-nxp-time-minute="${esc(minute || "")}" data-nxp-time-disabled="${disabled ? "true" : "false"}">
-    <div class="nxp-time-input-wrap"><input id="${controlId}" class="nxp-time-value" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" readonly aria-haspopup="dialog" aria-expanded="false" aria-controls="${popupId}" data-nxp-time-value ${extra}><button type="button" class="nxp-time-trigger" data-nxp-time-trigger aria-label="${esc(t("ui.open_time_picker"))}"${disabled}>⌄</button></div>
-    <div id="${popupId}" class="nxp-time-popover secondary-surface" data-nxp-time-popover role="dialog" aria-label="${esc(ariaLabel || t("ui.select_time"))}" hidden><div class="nxp-time-columns" data-nxp-time-wheels>${timeWheelsMarkup(hour, minute)}</div></div>
+    <div class="nxp-time-input-wrap"><input id="${controlId}" class="nxp-time-value" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" readonly aria-haspopup="dialog" aria-expanded="false" aria-controls="${popupId}" data-nxp-time-value ${extra}><button type="button" class="nxp-time-trigger" data-nxp-time-trigger aria-label="${esc(t("common.open_time_picker"))}"${disabled}>⌄</button></div>
+    <div id="${popupId}" class="nxp-time-popover secondary-surface" data-nxp-time-popover role="dialog" aria-label="${esc(ariaLabel || t("common.select_time"))}" hidden><div class="nxp-time-columns" data-nxp-time-wheels>${timeWheelsMarkup(hour, minute)}</div></div>
   </div>`;
 }
 
 /** 文件选择只保留隐藏的安全载体，界面按钮和文件名展示完全自定义。 */
-export function fileControlMarkup(id, extra = "", accept = "", multiple = false, label = "ui.select_file") {
+export function fileControlMarkup(id, extra = "", accept = "", multiple = false, label = "common.select_file") {
   const controlId = safeId(id);
-  return `<span class="nxp-file" data-nxp-file><button type="button" class="ghost nxp-file-trigger" data-nxp-file-trigger>${esc(t(label))}</button><span class="nxp-file-name" data-nxp-file-name>${esc(t("ui.no_file_selected"))}</span><input id="${controlId}" class="sr-only" type="file"${accept ? ` accept="${esc(accept)}"` : ""}${multiple ? " multiple" : ""} data-nxp-file-input ${extra}></span>`;
+  return `<span class="nxp-file" data-nxp-file><button type="button" class="ghost nxp-file-trigger" data-nxp-file-trigger>${esc(t(label))}</button><span class="nxp-file-name" data-nxp-file-name>${esc(t("common.no_file_selected"))}</span><input id="${controlId}" class="sr-only" type="file"${accept ? ` accept="${esc(accept)}"` : ""}${multiple ? " multiple" : ""} data-nxp-file-input ${extra}></span>`;
 }
 
 function normalizedColor(value) {
@@ -134,7 +134,7 @@ export function colorControlMarkup(id, value, extra = "", ariaLabel = "") {
   const pickerId = `${controlId}-picker`;
   const color = normalizedColor(value);
   const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  return `<div class="nxp-color" data-nxp-color data-nxp-color-value="${color}"><div class="nxp-color-row"><input id="${controlId}" class="nxp-color-value" type="text" inputmode="text" value="${esc(value || color)}" aria-label="${esc(ariaLabel || id)}" data-nxp-color-text ${extra}><button type="button" class="nxp-color-trigger" data-nxp-color-trigger aria-label="${esc(t("ui.open_color_picker"))}"${disabled}><span class="nxp-color-swatch" data-nxp-color-swatch aria-hidden="true"></span><span>${esc(t("ui.select_color"))}</span></button></div><input id="${pickerId}" class="sr-only" type="color" value="${color}" data-nxp-color-picker${disabled}></div>`;
+  return `<div class="nxp-color" data-nxp-color data-nxp-color-value="${color}"><div class="nxp-color-row"><input id="${controlId}" class="nxp-color-value" type="text" inputmode="text" value="${esc(value || color)}" aria-label="${esc(ariaLabel || id)}" data-nxp-color-text ${extra}><button type="button" class="nxp-color-trigger" data-nxp-color-trigger aria-label="${esc(t("common.open_color_picker"))}"${disabled}><span class="nxp-color-swatch" data-nxp-color-swatch aria-hidden="true"></span><span>${esc(t("common.select_color"))}</span></button></div><input id="${pickerId}" class="sr-only" type="color" value="${color}" data-nxp-color-picker${disabled}></div>`;
 }
 
 /** 动态插件表单使用的 DOM 工厂，与静态表单共享同一事件和视觉层。 */
@@ -190,9 +190,9 @@ function updateSelect(root) {
     if (!selected && check) check.remove();
     if (selected) labels.push(option.querySelector("span")?.textContent || option.dataset.value || "");
   });
-  label.textContent = labels.length ? labels.join("、") : t("ui.select_an_option");
+  label.textContent = labels.length ? formatCompactList(labels) : t("common.select_an_option");
   const trigger = root.querySelector("[data-nxp-select-trigger]");
-  if (trigger) trigger.setAttribute("aria-label", labels.join("、") || t("ui.select_an_option"));
+  if (trigger) trigger.setAttribute("aria-label", formatCompactList(labels) || t("common.select_an_option"));
 }
 
 function syncColor(root, value = null, dispatch = false) {
@@ -464,7 +464,7 @@ function installControlEvents() {
       const root = target.closest("[data-nxp-file]");
       const files = Array.from(target.files || []);
       const label = root?.querySelector("[data-nxp-file-name]");
-      if (label) label.textContent = files.length ? files.map(file => file.name).join(", ") : t("ui.no_file_selected");
+      if (label) label.textContent = files.length ? files.map(file => file.name).join(", ") : t("common.no_file_selected");
     }
     if (target.matches("[data-nxp-color-picker]")) {
       syncColor(target.closest("[data-nxp-color]"), target.value, true);

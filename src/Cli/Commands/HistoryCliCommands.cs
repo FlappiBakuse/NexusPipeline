@@ -15,7 +15,8 @@ internal static partial class CliCommandRouter
         var client = new CliApiClient();
         if (sub is "dates")
         {
-            if (!EnsurePositionals(args, 2, "history dates 不接受额外参数") || !EnsureOptions(args, "days"))
+            if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "history dates")))
+                || !EnsureOptions(args, "days"))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -24,7 +25,14 @@ internal static partial class CliCommandRouter
         }
         if (sub is "get" or "detail")
         {
-            if (!EnsurePositionals(args, 3, "history get 需要历史记录 ID")
+            if (!EnsurePositionals(
+                    args,
+                    3,
+                    CliText.Get(
+                        "error.requires_value",
+                        "{usage}需要{label}",
+                        ("usage", "history get"),
+                        ("label", CliText.Label("历史记录 ID"))))
                 || !EnsureOptions(args, "full", "attempt"))
             {
                 return CliExitCodes.For("invalid_arguments");
@@ -38,9 +46,16 @@ internal static partial class CliCommandRouter
         }
         if (sub is not null && !sub.Equals("list", StringComparison.OrdinalIgnoreCase))
         {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 history 子命令：{sub}");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "history"),
+                    ("subcommand", sub)));
         }
-        if (!EnsurePositionals(args, rawSub is null ? 1 : 2, "history list 不接受额外参数")
+        if (!EnsurePositionals(
+                args,
+                rawSub is null ? 1 : 2,
+                CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "history list")))
             || !EnsureOptions(args, "date", "days", "script", "queue", "offset", "limit"))
         {
             return CliExitCodes.For("invalid_arguments");

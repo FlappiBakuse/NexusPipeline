@@ -15,11 +15,18 @@ internal static partial class CliCommandRouter
         int error;
         if (sub is null)
         {
-            return CliOutput.WriteFailure("invalid_arguments", "缺少 run 子命令（script/queue/get/list/cancel）");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.missing_subcommand", "缺少 {command} 子命令（{commands}）",
+                    ("command", "run"),
+                    ("commands", "script/queue/get/list/cancel")));
         }
         if (sub == "get")
         {
-            if (!EnsurePositionals(args, 3, "run get 需要运行 ID") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 3, CliText.Get("error.requires_value", "{usage}需要{label}",
+                    ("usage", "run get"),
+                    ("label", CliText.Label("运行 ID"))))
+                || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -31,7 +38,8 @@ internal static partial class CliCommandRouter
         }
         if (sub == "list")
         {
-            if (!EnsurePositionals(args, 2, "run list 不接受额外参数") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "run list")))
+                || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -39,7 +47,10 @@ internal static partial class CliCommandRouter
         }
         if (sub == "cancel")
         {
-            if (!EnsurePositionals(args, 3, "run cancel 需要运行 ID") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 3, CliText.Get("error.requires_value", "{usage}需要{label}",
+                    ("usage", "run cancel"),
+                    ("label", CliText.Label("运行 ID"))))
+                || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -47,11 +58,15 @@ internal static partial class CliCommandRouter
         }
         if (sub is not ("script" or "queue"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 run 子命令：{sub}");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "run"),
+                    ("subcommand", sub)));
         }
 
         int targetPosition = 2;
-        if (!EnsurePositionals(args, targetPosition + 1, "run 操作需要一个目标")
+        if (!EnsurePositionals(args, targetPosition + 1, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", $"run {sub}")))
             || !EnsureOptions(args, "mode", "auto", "manual", "user", "detach", "dry-run"))
         {
             return CliExitCodes.For("invalid_arguments");
@@ -71,7 +86,9 @@ internal static partial class CliCommandRouter
         {
             if (args.Has("detach") || args.Has("auto") || args.Has("manual") || args.Has("mode"))
             {
-                return CliOutput.WriteFailure("invalid_arguments", "dry-run 仅支持目标和可选 --user");
+                return CliOutput.WriteFailure(
+                    "invalid_arguments",
+                    CliText.Get("error.dry_run_options", "dry-run 仅支持目标和可选 --user"));
             }
             JsonObject explainBody = sub == "script"
                 ? Object(("scriptId", id), ("userName", args.Get("user") ?? ""))
@@ -91,18 +108,23 @@ internal static partial class CliCommandRouter
         }
         if (response.Body is not JsonObject dispatch || string.IsNullOrWhiteSpace(dispatch["runId"]?.ToString()))
         {
-            return CliOutput.WriteFailure("internal_error", "服务已接受任务，但响应中没有有效 runId");
+            return CliOutput.WriteFailure(
+                "internal_error",
+                CliText.Get("error.run_id_missing", "服务已接受任务，但响应中没有有效 runId"));
         }
         if (args.Has("detach"))
         {
-            return ReturnApi(response, "任务已提交（detach）");
+            return ReturnApi(response, CliText.Get("success.task_submitted", "任务已提交（detach）"));
         }
         return PollRun(client, dispatch["runId"]!.ToString());
     }
 
     private static int ExecuteCancel(CliArguments args)
     {
-        if (!EnsurePositionals(args, 3, "run cancel 需要运行 ID") || !EnsureOptions(args))
+        if (!EnsurePositionals(args, 3, CliText.Get("error.requires_value", "{usage}需要{label}",
+                ("usage", "run cancel"),
+                ("label", CliText.Label("运行 ID"))))
+            || !EnsureOptions(args))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -110,7 +132,9 @@ internal static partial class CliCommandRouter
         {
             return error;
         }
-        return ReturnApi(new CliApiClient().Post("/api/cancel", Object(("runId", runId))), "已发送取消请求");
+        return ReturnApi(
+            new CliApiClient().Post("/api/cancel", Object(("runId", runId))),
+            CliText.Get("success.cancel_requested", "已发送取消请求"));
     }
 
     private static int PollRun(CliApiClient client, string runId)
@@ -118,7 +142,9 @@ internal static partial class CliCommandRouter
         int timeoutSeconds = 6 * 60 * 60;
         if (client is null)
         {
-            return CliOutput.WriteFailure("service_unavailable", "无法连接到常驻服务");
+            return CliOutput.WriteFailure(
+                "service_unavailable",
+                CliText.Get("error.service_unavailable", "无法连接到常驻服务"));
         }
         DateTime deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
         string lastStatus = "";
@@ -135,7 +161,11 @@ internal static partial class CliCommandRouter
             if (currentStatus.Length > 0 && currentStatus != lastStatus)
             {
                 lastStatus = currentStatus;
-                CliOutput.WriteProgress($"运行 {runId}：{currentStatus}");
+                CliOutput.WriteProgress(CliText.Get(
+                    "progress.run_status",
+                    "运行 {runId}：{status}",
+                    ("runId", runId),
+                    ("status", currentStatus)));
             }
             if (!status.Equals("running", StringComparison.OrdinalIgnoreCase))
             {
@@ -146,18 +176,27 @@ internal static partial class CliCommandRouter
                     && failedRecords.Any(record => Status(record) is not ("success" or "skipped"));
                 if (cancelled)
                 {
-                    return CliOutput.WriteFailure("cancelled", "运行已取消", body);
+                    return CliOutput.WriteFailure(
+                        "cancelled",
+                        CliText.Get("status.run_cancelled", "运行已取消"),
+                        body);
                 }
                 if (failed)
                 {
-                    return CliOutput.WriteFailure("execution_failed", "运行完成，但存在失败记录", body);
+                    return CliOutput.WriteFailure(
+                        "execution_failed",
+                        CliText.Get("status.run_failed_records", "运行完成，但存在失败记录"),
+                        body);
                 }
-                CliOutput.WriteSuccess(body, "运行已完成");
+                CliOutput.WriteSuccess(body, CliText.Get("success.run_completed", "运行已完成"));
                 return 0;
             }
             Thread.Sleep(1000);
         }
-        return CliOutput.WriteFailure("timeout", "轮询运行结果超过 6 小时上限", Object(("runId", runId)));
+        return CliOutput.WriteFailure(
+            "timeout",
+            CliText.Get("error.run_poll_timeout", "轮询运行结果超过 6 小时上限"),
+            Object(("runId", runId)));
     }
 
 }

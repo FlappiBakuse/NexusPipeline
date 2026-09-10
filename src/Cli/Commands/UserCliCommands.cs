@@ -13,20 +13,26 @@ internal static partial class CliCommandRouter
         string? sub = Positional(args, 1);
         if (sub is null)
         {
-            return CliOutput.WriteFailure("invalid_arguments", "缺少 user 子命令（list/get/create/update/delete/reorder/avatar/binding/global-settings）");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.missing_subcommand", "缺少 {command} 子命令（{commands}）",
+                    ("command", "user"),
+                    ("commands", "list/get/create/update/delete/reorder/avatar/binding/global-settings")));
         }
         var client = new CliApiClient();
         switch (sub.ToLowerInvariant())
         {
             case "list":
-                if (!EnsurePositionals(args, 2, "user list 不接受额外参数") || !EnsureOptions(args))
+                if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "user list")))
+                    || !EnsureOptions(args))
                 {
                     return CliExitCodes.For("invalid_arguments");
                 }
                 return ReturnApi(client.Get("/api/users"));
             case "get":
             {
-                if (!EnsurePositionals(args, 3, "user get 需要一个目标") || !EnsureOptions(args))
+                if (!EnsurePositionals(args, 3, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user get")))
+                    || !EnsureOptions(args))
                 {
                     return CliExitCodes.For("invalid_arguments");
                 }
@@ -39,7 +45,7 @@ internal static partial class CliCommandRouter
             }
             case "create":
             {
-                if (!EnsurePositionals(args, 2, "user create 不接受额外参数")
+                if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "user create")))
                     || !EnsureOptions(args, "name", "remark"))
                 {
                     return CliExitCodes.For("invalid_arguments");
@@ -49,11 +55,13 @@ internal static partial class CliCommandRouter
                     return error;
                 }
                 JsonObject body = Object(("name", name), ("remark", args.Get("remark") ?? ""));
-                return ReturnApi(client.Post("/api/users", body), "用户已创建");
+                return ReturnApi(
+                    client.Post("/api/users", body),
+                    CliText.Get("success.created", "{label}已创建", ("label", CliText.Resource("user"))));
             }
             case "update":
             {
-                if (!EnsurePositionals(args, 3, "user update 需要一个目标")
+                if (!EnsurePositionals(args, 3, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user update")))
                     || !EnsureOptions(args, "name", "remark"))
                 {
                     return CliExitCodes.For("invalid_arguments");
@@ -70,16 +78,20 @@ internal static partial class CliCommandRouter
                 }
                 if (!args.Has("name") && !args.Has("remark"))
                 {
-                    return CliOutput.WriteFailure("invalid_arguments", "user update 至少需要 --name 或 --remark");
+                    return CliOutput.WriteFailure(
+                        "invalid_arguments",
+                        CliText.Get("error.update_field", "user update 至少需要 --name 或 --remark"));
                 }
                 string nextName = args.Get("name") ?? currentObject["name"]?.ToString() ?? "";
                 string nextRemark = args.Get("remark") ?? currentObject["remark"]?.ToString() ?? "";
                 JsonObject body = Object(("name", nextName), ("remark", nextRemark));
-                return ReturnApi(client.Put($"/api/users/{Escape(id)}", body), "用户已更新");
+                return ReturnApi(
+                    client.Put($"/api/users/{Escape(id)}", body),
+                    CliText.Get("success.updated", "{label}已更新", ("label", CliText.Resource("user"))));
             }
             case "delete":
             {
-                if (!EnsurePositionals(args, 3, "user delete 需要一个目标")
+                if (!EnsurePositionals(args, 3, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user delete")))
                     || !EnsureOptions(args, "confirm"))
                 {
                     return CliExitCodes.For("invalid_arguments");
@@ -93,10 +105,12 @@ internal static partial class CliCommandRouter
                 {
                     return error;
                 }
-                return ReturnApi(client.Delete($"/api/users/{Escape(id)}", Object(("confirmName", confirm))), "用户已删除");
+                return ReturnApi(
+                    client.Delete($"/api/users/{Escape(id)}", Object(("confirmName", confirm))),
+                    CliText.Get("success.deleted", "{label}已删除", ("label", CliText.Resource("user"))));
             }
             case "reorder":
-                if (!EnsurePositionals(args, 2, "user reorder 不接受额外参数"))
+                if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "user reorder"))))
                 {
                     return CliExitCodes.For("invalid_arguments");
                 }
@@ -108,7 +122,11 @@ internal static partial class CliCommandRouter
             case "global-settings":
                 return ExecuteUserGlobalSettings(args, client);
             default:
-                return CliOutput.WriteFailure("invalid_arguments", $"未知 user 子命令：{sub}");
+                return CliOutput.WriteFailure(
+                    "invalid_arguments",
+                    CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                        ("command", "user"),
+                        ("subcommand", sub)));
         }
     }
 
@@ -117,9 +135,11 @@ internal static partial class CliCommandRouter
         string? action = Positional(args, 2)?.ToLowerInvariant();
         if (action is not ("get" or "update"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", "user global-settings 子命令必须为 get 或 update");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.invalid_subcommand_set", "user global-settings 子命令必须为 get 或 update"));
         }
-        if (!EnsurePositionals(args, 4, $"user global-settings {action} 需要一个用户目标")
+        if (!EnsurePositionals(args, 4, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", $"user global-settings {action}")))
             || !EnsureOptions(args, action == "update" ? new[] { "file" } : Array.Empty<string>()))
         {
             return CliExitCodes.For("invalid_arguments");
@@ -149,9 +169,11 @@ internal static partial class CliCommandRouter
         string? action = actionFirst ? firstAction : Positional(args, 3)?.ToLowerInvariant();
         if (action is null)
         {
-            return CliOutput.WriteFailure("invalid_arguments", "缺少 avatar 子命令（set/remove）");
+            return CliOutput.WriteFailure("invalid_arguments", CliText.Get("error.missing_subcommand", "缺少 {command} 子命令（{commands}）",
+                ("command", "avatar"),
+                ("commands", "set/remove")));
         }
-        if (!EnsurePositionals(args, 4, "user avatar 需要用户目标和操作"))
+        if (!EnsurePositionals(args, 4, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user avatar"))))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -167,11 +189,15 @@ internal static partial class CliCommandRouter
             {
                 return CliExitCodes.For("invalid_arguments");
             }
-            return ReturnApi(client.Delete($"/api/users/{Escape(userId)}/avatar"), "用户头像已移除");
+            return ReturnApi(client.Delete($"/api/users/{Escape(userId)}/avatar"), CliText.Get("success.avatar_removed", "用户头像已移除"));
         }
         if (!action.Equals("set", StringComparison.OrdinalIgnoreCase))
         {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 avatar 子命令：{action}");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "avatar"),
+                    ("subcommand", action)));
         }
         if (!EnsureOptions(args, "file"))
         {
@@ -184,10 +210,10 @@ internal static partial class CliCommandRouter
         string mime = MimeFromExtension(Path.GetExtension(fileName));
         if (mime.Length == 0)
         {
-            return CliOutput.WriteFailure("validation_error", "头像文件扩展名必须为 .png、.jpg/.jpeg 或 .webp");
+            return CliOutput.WriteFailure("validation_error", CliText.Get("error.file_extension", "头像文件扩展名必须为 .png、.jpg/.jpeg 或 .webp"));
         }
         JsonObject body = Object(("mimeType", mime), ("data", Convert.ToBase64String(bytes!)));
-        return ReturnApi(client.Post($"/api/users/{Escape(userId)}/avatar", body), "用户头像已更新");
+        return ReturnApi(client.Post($"/api/users/{Escape(userId)}/avatar", body), CliText.Get("success.avatar_updated", "用户头像已更新"));
     }
 
     private static int ExecuteBinding(CliArguments args, CliApiClient client)
@@ -201,12 +227,18 @@ internal static partial class CliCommandRouter
         string? action = actionFirst ? firstAction : second?.ToLowerInvariant();
         if (action is null)
         {
-            return CliOutput.WriteFailure("invalid_arguments", "缺少 binding 子命令（list/add/update/delete/config）");
+            return CliOutput.WriteFailure("invalid_arguments", CliText.Get("error.missing_subcommand", "缺少 {command} 子命令（{commands}）",
+                ("command", "binding"),
+                ("commands", "list/add/update/delete/config")));
         }
 
         if (action is not ("list" or "add" or "update" or "delete" or "config"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 binding 子命令：{action}");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "binding"),
+                    ("subcommand", action)));
         }
 
         int userPosition = configActionFirst ? 4 : actionFirst ? 3 : 2;
@@ -219,7 +251,8 @@ internal static partial class CliCommandRouter
         }
         if (action.Equals("list", StringComparison.OrdinalIgnoreCase))
         {
-            if (!EnsurePositionals(args, 4, "user binding list 不接受脚本参数") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 4, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "user binding list")))
+                || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -228,7 +261,10 @@ internal static partial class CliCommandRouter
 
         if (action.Equals("config", StringComparison.OrdinalIgnoreCase))
         {
-            if (!EnsurePositionals(args, 6, "user binding config 需要配置操作") || !EnsureOptions(args, "mode"))
+            if (!EnsurePositionals(args, 6, CliText.Get("error.requires_value", "{usage}需要{label}",
+                    ("usage", "user binding config"),
+                    ("label", CliText.Label("配置操作"))))
+                || !EnsureOptions(args, "mode"))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -240,17 +276,21 @@ internal static partial class CliCommandRouter
             string? configAction = Positional(args, configActionPosition)?.ToLowerInvariant();
             if (configAction is not ("start" or "done" or "cancel"))
             {
-                return CliOutput.WriteFailure("invalid_arguments", "config 子命令必须为 start、done 或 cancel");
+                return CliOutput.WriteFailure(
+                    "invalid_arguments",
+                    CliText.Get("error.invalid_subcommand_set", "{command} 子命令必须为 {commands}",
+                        ("command", "config"),
+                        ("commands", "start/done/cancel")));
             }
             // v0.12.8：首次编辑（无配置快照）必须显式选择配置方式；--mode 缺省按 normal（有快照时行为不变）。
             string configMode = args.Get("mode")?.ToLowerInvariant() ?? "";
             if (configAction == "start" && configMode is not ("" or "normal" or "fresh" or "reuse"))
             {
-                return CliOutput.WriteFailure("invalid_arguments", "--mode 仅支持 normal、fresh 或 reuse");
+                return CliOutput.WriteFailure("invalid_arguments", CliText.Get("error.unsupported_mode", "--mode 仅支持 normal、fresh 或 reuse"));
             }
             if (configAction != "start" && !string.IsNullOrEmpty(configMode))
             {
-                return CliOutput.WriteFailure("invalid_arguments", "--mode 仅在 config start 时可用");
+                return CliOutput.WriteFailure("invalid_arguments", CliText.Get("error.mode_not_start", "--mode 仅在 config start 时可用"));
             }
             string configPath = $"/api/users/{Escape(userId)}/bindings/{Escape(configScriptId)}/edit-config";
             return ReturnApi(client.Post(configPath, Object(("action", configAction), ("mode", configMode))));
@@ -259,7 +299,7 @@ internal static partial class CliCommandRouter
         string scriptReference;
         if (action.Equals("add", StringComparison.OrdinalIgnoreCase) && args.Has("script"))
         {
-            if (!EnsurePositionals(args, 4, "user binding add 需要一个用户目标")
+            if (!EnsurePositionals(args, 4, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user binding add")))
                 || !EnsureOptions(args, "file", "script"))
             {
                 return CliExitCodes.For("invalid_arguments");
@@ -274,7 +314,7 @@ internal static partial class CliCommandRouter
             string[] allowed = action.Equals("update", StringComparison.OrdinalIgnoreCase)
                 ? new[] { "file" }
                 : Array.Empty<string>();
-            if (!EnsurePositionals(args, 5, "user binding 操作需要完整目标参数")
+            if (!EnsurePositionals(args, 5, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user binding 操作")))
                 || !EnsureOptions(args, allowed))
             {
                 return CliExitCodes.For("invalid_arguments");
@@ -296,7 +336,9 @@ internal static partial class CliCommandRouter
                 return error;
             }
             body!["scriptInstanceId"] = scriptId;
-            return ReturnApi(client.Post($"/api/users/{Escape(userId)}/bindings", body), "绑定已添加");
+            return ReturnApi(
+                client.Post($"/api/users/{Escape(userId)}/bindings", body),
+                CliText.Get("success.binding_added", "绑定已添加"));
         }
         if (action.Equals("update", StringComparison.OrdinalIgnoreCase))
         {
@@ -308,9 +350,13 @@ internal static partial class CliCommandRouter
         }
         if (action.Equals("delete", StringComparison.OrdinalIgnoreCase))
         {
-            return ReturnApi(client.Delete(bindingPath), "绑定已删除");
+            return ReturnApi(client.Delete(bindingPath), CliText.Get("success.binding_deleted", "绑定已删除"));
         }
-        return CliOutput.WriteFailure("invalid_arguments", $"未知 binding 子命令：{action}");
+        return CliOutput.WriteFailure(
+            "invalid_arguments",
+            CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                ("command", "binding"),
+                ("subcommand", action)));
     }
 
 }

@@ -250,6 +250,16 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         return declarations;
     }
 
+    internal IReadOnlyList<PluginInputDeclaration> LocalizeInputDeclarations(
+        string pluginName,
+        IReadOnlyList<PluginInputDeclaration> declarations,
+        string? locale)
+    {
+        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
+            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+        return plugin?.LocalizeInputDeclarations(declarations, locale) ?? declarations;
+    }
+
     /// <summary>插件管理控制面共享投影；ownership/pending 由同一份快照合并，避免各适配器自行拼装。</summary>
     internal IReadOnlyList<PluginManagementView> PluginManagementViews
     {

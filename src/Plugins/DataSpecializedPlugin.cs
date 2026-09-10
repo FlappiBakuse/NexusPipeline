@@ -409,8 +409,39 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         {
             return false;
         }
+        foreach (PluginInputDeclaration declaration in parsed)
+        {
+            if ((declaration.LabelKey.Length > 0 && !Localization.ContainsKey(declaration.LabelKey))
+                || (declaration.DescriptionKey.Length > 0 && !Localization.ContainsKey(declaration.DescriptionKey)))
+            {
+                error = $"inputs「{declaration.Name}」引用了插件词典中不存在的 labelKey 或 descriptionKey";
+                return false;
+            }
+        }
         declarations = parsed;
         return true;
+    }
+
+    /// <summary>按请求语言解析输入字段展示文字；未声明 key 时保留 resolve.json 中的字符串回退。</summary>
+    internal IReadOnlyList<PluginInputDeclaration> LocalizeInputDeclarations(
+        IReadOnlyList<PluginInputDeclaration> declarations,
+        string? locale)
+    {
+        return declarations.Select(declaration => new PluginInputDeclaration
+        {
+            Name = declaration.Name,
+            Label = string.IsNullOrWhiteSpace(declaration.LabelKey)
+                ? declaration.Label
+                : Localization.Resolve(locale ?? "", declaration.LabelKey, declaration.Label),
+            LabelKey = declaration.LabelKey,
+            Description = string.IsNullOrWhiteSpace(declaration.DescriptionKey)
+                ? declaration.Description
+                : Localization.Resolve(locale ?? "", declaration.DescriptionKey, declaration.Description),
+            DescriptionKey = declaration.DescriptionKey,
+            Default = declaration.Default,
+            Required = declaration.Required,
+            Pattern = declaration.Pattern,
+        }).ToArray();
     }
 
     /// <summary>复用配置候选推导：configPath 模板恰好引用一个输入（{input:名称}，且无绑定占位符）时，
@@ -670,6 +701,14 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 error = $"inputs 声明的 name「{name}」无效（须为字母开头的字母/数字/下划线）";
                 return list;
             }
+            string labelKey = item?["labelKey"]?.ToString()?.Trim() ?? "";
+            string descriptionKey = item?["descriptionKey"]?.ToString()?.Trim() ?? "";
+            if ((labelKey.Length > 0 && !PluginLocalizationValidation.IsSafeKey(labelKey, 128))
+                || (descriptionKey.Length > 0 && !PluginLocalizationValidation.IsSafeKey(descriptionKey, 128)))
+            {
+                error = $"inputs「{name}」的 labelKey 或 descriptionKey 无效";
+                return list;
+            }
             string pattern = item?["pattern"]?.ToString() ?? "";
             if (pattern.Length > 0)
             {
@@ -687,7 +726,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             {
                 Name = name,
                 Label = item?["label"]?.ToString()?.Trim() ?? "",
+                LabelKey = labelKey,
                 Description = item?["description"]?.ToString()?.Trim() ?? "",
+                DescriptionKey = descriptionKey,
                 Default = item?["default"]?.ToString() ?? "",
                 Required = item?["required"]?.GetValue<bool>() ?? false,
                 Pattern = pattern,

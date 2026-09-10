@@ -32,7 +32,7 @@ public class SchedulerTests
         AutoUpdateIdleBlocker? blocker = scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5), now);
 
         Assert.NotNull(blocker);
-        Assert.Equal("scheduled-soon", blocker!.Code);
+        Assert.Equal("queue_soon", blocker!.Code);
         Assert.Equal("五分钟队列", blocker.QueueName);
         Assert.Equal(now.AddMinutes(5), blocker.TriggerTime);
     }
@@ -78,7 +78,7 @@ public class SchedulerTests
         AutoUpdateIdleBlocker? blocker = scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5));
 
         Assert.NotNull(blocker);
-        Assert.Equal("startup-scheduled-queue", blocker!.Code);
+        Assert.Equal("queue_startup", blocker!.Code);
         Assert.Equal("启动队列", blocker.QueueName);
     }
 

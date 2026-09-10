@@ -15,18 +15,24 @@ const listeners = new Set();
 const explicitTextValues = new WeakMap();
 const explicitAttributeValues = new WeakMap();
 const noResourceFallbacks = {
-  "ui.success": "\u6210\u529f",
-  "ui.partially_failed": "\u90e8\u5206\u5931\u8d25",
-  "ui.running": "\u8fd0\u884c\u4e2d",
-  "ui.cancelled": "\u5df2\u53d6\u6d88",
-  "ui.skipped": "\u5df2\u8df3\u8fc7",
-  "ui.error": "\u9519\u8bef",
-  "ui.failed": "\u5931\u8d25",
-  "ui.value_itemsvalue": "\u5171 {total} \u6761{range}",
-  "ui.value_value": "\uff0c\u7b2c {from}-{to} \u6761",
-  "ui.previous": "\u4e0a\u4e00\u9875",
-  "ui.next": "\u4e0b\u4e00\u9875",
+  "common.success": "\u6210\u529f",
+  "common.partially_failed": "\u90e8\u5206\u5931\u8d25",
+  "common.running": "\u8fd0\u884c\u4e2d",
+  "common.cancelled": "\u5df2\u53d6\u6d88",
+  "common.skipped": "\u5df2\u8df3\u8fc7",
+  "common.error": "\u9519\u8bef",
+  "common.failed": "\u5931\u8d25",
+  "common.pager.summary": "\u5171 {total} \u6761{range}",
+  "common.pager.range": "\uff0c\u7b2c {from}-{to} \u6761",
+  "common.previous": "\u4e0a\u4e00\u9875",
+  "common.next": "\u4e0b\u4e00\u9875",
 };
+
+function syncDocumentLocale() {
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.lang = currentLocale;
+  }
+}
 
 function canonicalLocale(value) {
   const candidate = String(value || "").trim().replaceAll("_", "-").toLowerCase();
@@ -139,7 +145,7 @@ export async function loadLocale(value = currentLocale) {
     defaultMessages = loadedDefault;
   }
   const loaded = Boolean(loadedMessages);
-  document.documentElement.lang = currentLocale;
+  syncDocumentLocale();
   applyTranslations();
   listeners.forEach(listener => listener(currentLocale));
   return loaded;
@@ -153,7 +159,7 @@ export async function setLocale(value) {
   }
   if (next !== currentLocale || !Object.keys(messages).length) await loadLocale(next);
   else {
-    document.documentElement.lang = currentLocale;
+    syncDocumentLocale();
     applyTranslations();
   }
   return currentLocale;
@@ -167,9 +173,6 @@ export function subscribeLocale(listener) {
 
 export function t(key, args = {}, fallback = "") {
   let value = messages[key] ?? defaultMessages[key];
-  if ((value === undefined || value === null) && typeof key === "string" && !key.includes(".")) {
-    value = messages[`ui.${key}`] ?? defaultMessages[`ui.${key}`];
-  }
   if (value === undefined || value === null) value = noResourceFallbacks[key];
   if (value === undefined || value === null) value = fallback || key;
   value = String(value);
@@ -191,7 +194,33 @@ export function formatTime(value, options) {
   try { return new Intl.DateTimeFormat(currentLocale, { timeStyle: "short", ...options }).format(new Date(value)); } catch { return String(value ?? ""); }
 }
 
-export function applyTranslations(root = document) {
+function normalizeListValues(values) {
+  return (Array.isArray(values) ? values : [values])
+    .map(value => String(value ?? "").trim())
+    .filter(Boolean);
+}
+
+/** 使用当前界面的语言规则连接用户可见列表，避免业务视图内写死语言特有标点。 */
+export function formatList(values, options = {}) {
+  const items = normalizeListValues(values);
+  if (items.length < 2) return items[0] || "";
+  try {
+    return new Intl.ListFormat(currentLocale, {
+      style: "long",
+      type: "conjunction",
+      ...options,
+    }).format(items);
+  } catch {
+    return items.join(currentLocale.toLowerCase().startsWith("zh") ? "、" : ", ");
+  }
+}
+
+/** 紧凑列表格式，适合按钮摘要、标签和短提示。 */
+export function formatCompactList(values) {
+  return formatList(values, { style: "short" });
+}
+
+export function applyTranslations(root = typeof document !== "undefined" ? document : null) {
   if (!root?.querySelectorAll) return;
   root.querySelectorAll("[data-i18n]").forEach(element => {
     const fallback = explicitTextValues.get(element) ?? element.dataset.i18nFallback ?? element.textContent;

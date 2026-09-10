@@ -47,7 +47,7 @@ internal sealed class AutoUpdateIdlePolicy
             if (lease is null)
             {
                 return AutoUpdateIdleAttempt.Blocked(new AutoUpdateIdleBlocker(
-                    "host-busy",
+                    "host_busy",
                     string.IsNullOrWhiteSpace(reason) ? "宿主当前繁忙，暂不能应用更新" : reason,
                     null,
                     null));
@@ -68,7 +68,7 @@ internal sealed class AutoUpdateIdlePolicy
                 lease.Dispose();
                 Logger.Warn($"[更新自动化] 闲时检查失败，按繁忙处理：{ex.Message}");
                 return AutoUpdateIdleAttempt.Blocked(new AutoUpdateIdleBlocker(
-                    "scheduler-check-failed",
+                    "check_unavailable",
                     "调度器状态暂不可用，等待下一次闲时检查",
                     null,
                     null));

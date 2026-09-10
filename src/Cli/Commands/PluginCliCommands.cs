@@ -14,7 +14,8 @@ internal static partial class CliCommandRouter
         string? rawSub = Positional(args, 1);
         if (rawSub is null)
         {
-            if (!EnsurePositionals(args, 1, "plugin list 不接受额外参数") || !EnsureOptions(args))
+            if (!EnsurePositionals(args, 1, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "plugin list")))
+                || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
@@ -37,7 +38,7 @@ internal static partial class CliCommandRouter
         string sub = actionFirst ? first : second ?? first;
         if (sub == "list")
         {
-            if (!EnsurePositionals(args, 2, "plugin list 不接受额外参数")
+            if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "plugin list")))
                 || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
@@ -46,9 +47,13 @@ internal static partial class CliCommandRouter
         }
         if (sub is not ("get" or "enable" or "disable" or "install" or "update" or "uninstall"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", $"未知 plugin 子命令：{sub}");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "plugin"),
+                    ("subcommand", sub)));
         }
-        if (!EnsurePositionals(args, 3, "plugin 操作需要插件名称"))
+        if (!EnsurePositionals(args, 3, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "plugin 操作"))))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -65,7 +70,7 @@ internal static partial class CliCommandRouter
             }
             return ReturnApi(
                 client.Post($"/api/plugins/store/{Escape(reference)}/{sub}"),
-                $"插件商店操作已登记：{sub}");
+                CliText.Get("success.plugin_store_registered", "插件商店操作已登记：{action}", ("action", sub)));
         }
         CliApiResponse list = client.Get("/api/plugins");
         if (!TryResolvePlugin(list, reference, out JsonObject? match, out error))
@@ -86,7 +91,9 @@ internal static partial class CliCommandRouter
         {
             return CliExitCodes.For("invalid_arguments");
         }
-        return ReturnApi(client.Post($"/api/plugins/{Escape(name)}/{sub}"), "插件设置已更新");
+        return ReturnApi(
+            client.Post($"/api/plugins/{Escape(name)}/{sub}"),
+            CliText.Get("success.plugin_settings_updated", "插件设置已更新"));
     }
 
     private static int ExecutePluginStore(CliArguments args, CliApiClient client)
@@ -94,20 +101,25 @@ internal static partial class CliCommandRouter
         string? action = Positional(args, 2)?.ToLowerInvariant();
         if (action is "list" or "refresh")
         {
-            if (!EnsurePositionals(args, 3, $"plugin store {action} 不接受额外参数")
+            if (!EnsurePositionals(args, 3, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", $"plugin store {action}")))
                 || !EnsureOptions(args))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
             return action == "list"
                 ? ReturnApi(client.Get("/api/plugins/store"))
-                : ReturnApi(client.Post("/api/plugins/store/refresh"), "插件商店已刷新");
+                : ReturnApi(client.Post("/api/plugins/store/refresh"), CliText.Get("success.plugin_store_refreshed", "插件商店已刷新"));
         }
         if (action is not ("install" or "update" or "uninstall"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", "plugin store 子命令必须为 list、refresh、install、update 或 uninstall");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.invalid_subcommand_set", "{command} 子命令必须为 {commands}",
+                    ("command", "plugin store"),
+                    ("commands", "list/refresh/install/update/uninstall")));
         }
-        if (!EnsurePositionals(args, 4, $"plugin store {action} 需要插件名称") || !EnsureOptions(args))
+        if (!EnsurePositionals(args, 4, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", $"plugin store {action}")))
+            || !EnsureOptions(args))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -117,7 +129,7 @@ internal static partial class CliCommandRouter
         }
         return ReturnApi(
             client.Post($"/api/plugins/store/{Escape(name)}/{action}"),
-            $"插件商店操作已登记：{action}");
+            CliText.Get("success.plugin_store_registered", "插件商店操作已登记：{action}", ("action", action)));
     }
 
     private static int ExecutePluginUserSettings(CliArguments args, CliApiClient client)
@@ -125,10 +137,14 @@ internal static partial class CliCommandRouter
         string? action = Positional(args, 2)?.ToLowerInvariant();
         if (action is not ("list" or "get" or "update"))
         {
-            return CliOutput.WriteFailure("invalid_arguments", "plugin user-settings 子命令必须为 list、get 或 update");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.invalid_subcommand_set", "{command} 子命令必须为 {commands}",
+                    ("command", "plugin user-settings"),
+                    ("commands", "list/get/update")));
         }
         int expected = action == "list" ? 4 : 6;
-        if (!EnsurePositionals(args, expected, $"plugin user-settings {action} 参数数量不正确")
+        if (!EnsurePositionals(args, expected, CliText.Get("error.invalid_argument_count", "{usage} 参数数量不正确", ("usage", $"plugin user-settings {action}")))
             || !EnsureOptions(args, action == "update" ? new[] { "file" } : Array.Empty<string>()))
         {
             return CliExitCodes.For("invalid_arguments");
@@ -156,7 +172,11 @@ internal static partial class CliCommandRouter
             && string.Equals(item["id"]?.ToString(), contributionId, StringComparison.OrdinalIgnoreCase));
         if (match is null)
         {
-            return CliOutput.WriteFailure("not_found", $"未找到插件设置贡献：{pluginName}/{contributionId}");
+            return CliOutput.WriteFailure(
+                "not_found",
+                CliText.Get("error.plugin_contribution", "未找到插件设置贡献：{plugin}/{contribution}",
+                    ("plugin", pluginName),
+                    ("contribution", contributionId)));
         }
         if (action == "get")
         {
@@ -169,7 +189,7 @@ internal static partial class CliCommandRouter
         }
         return ReturnApi(
             client.Put($"{path}/{Escape(pluginName)}/{Escape(contributionId)}", Object(("values", values))),
-            "插件用户设置已更新");
+            CliText.Get("success.plugin_user_settings_updated", "插件用户设置已更新"));
     }
 
     private static bool TryResolvePlugin(
@@ -186,7 +206,9 @@ internal static partial class CliCommandRouter
         }
         if (response.Body is not JsonArray plugins)
         {
-            error = CliOutput.WriteFailure("internal_error", "服务返回的插件列表格式无效");
+            error = CliOutput.WriteFailure(
+                "internal_error",
+                CliText.Get("error.invalid_list", "服务返回的{label}列表格式无效", ("label", CliText.Resource("plugin"))));
             return false;
         }
         JsonObject[] entries = plugins.OfType<JsonObject>().ToArray();
@@ -213,10 +235,19 @@ internal static partial class CliCommandRouter
                 ["name"] = plugin["name"]?.ToString() ?? "",
                 ["displayName"] = plugin["displayName"]?.ToString() ?? "",
             }).ToArray());
-            error = CliOutput.WriteFailure("ambiguous_target", $"插件名称匹配到多个对象：{reference}", Object(("candidates", candidates)));
+            error = CliOutput.WriteFailure(
+                "ambiguous_target",
+                CliText.Get("error.ambiguous_target", "{label}名称匹配到多个对象：{reference}",
+                    ("label", CliText.Resource("plugin")),
+                    ("reference", reference)),
+                Object(("candidates", candidates)));
             return false;
         }
-        error = CliOutput.WriteFailure("not_found", $"未找到插件：{reference}");
+        error = CliOutput.WriteFailure(
+            "not_found",
+            CliText.Get("error.not_found", "未找到{label}：{reference}",
+                ("label", CliText.Resource("plugin")),
+                ("reference", reference)));
         return false;
     }
 

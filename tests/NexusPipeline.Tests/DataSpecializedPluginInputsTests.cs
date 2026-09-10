@@ -225,6 +225,54 @@ public class DataSpecializedPluginInputsTests
     }
 
     [Fact]
+    public void LocalizeInputDeclarations_ResolvesPluginResources()
+    {
+        JsonObject resolve = JsonNode.Parse(BaahResolveJson)!.AsObject();
+        JsonObject input = resolve["inputs"]!.AsArray()[0]!.AsObject();
+        input["labelKey"] = "input.config.label";
+        input["descriptionKey"] = "input.config.description";
+        (string pluginDir, _) = MakeBaahLikePlugin(resolve.ToJsonString());
+
+        string localizationDirectory = Path.Combine(pluginDir, "i18n");
+        Directory.CreateDirectory(localizationDirectory);
+        File.WriteAllText(
+            Path.Combine(localizationDirectory, "zh-CN.json"),
+            JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["input.config.label"] = "配置文件名",
+                ["input.config.description"] = "选择 BAAH 配置文件",
+            }));
+        File.WriteAllText(
+            Path.Combine(localizationDirectory, "en-US.json"),
+            JsonSerializer.Serialize(new Dictionary<string, string>
+            {
+                ["input.config.label"] = "Configuration file",
+                ["input.config.description"] = "Select a BAAH configuration file",
+            }));
+        JsonObject manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(pluginDir, "plugin.json")))!.AsObject();
+        manifest["localization"] = new JsonObject
+        {
+            ["defaultLocale"] = "zh-CN",
+            ["locales"] = new JsonObject
+            {
+                ["zh-CN"] = "i18n/zh-CN.json",
+                ["en-US"] = "i18n/en-US.json",
+            },
+        };
+        File.WriteAllText(Path.Combine(pluginDir, "plugin.json"), manifest.ToJsonString());
+
+        var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+        Assert.True(plugin.TryReadInputDeclarations(out IReadOnlyList<PluginInputDeclaration>? declarations, out string? error));
+        Assert.Null(error);
+
+        PluginInputDeclaration localized = Assert.Single(plugin.LocalizeInputDeclarations(declarations!, "en-US"));
+        Assert.Equal("Configuration file", localized.Label);
+        Assert.Equal("Select a BAAH configuration file", localized.Description);
+        Assert.Equal("input.config.label", localized.LabelKey);
+        Assert.Equal("input.config.description", localized.DescriptionKey);
+    }
+
+    [Fact]
     public void ScriptInstance_PluginInputs_RoundTripsThroughClone()
     {
         var script = new NexusPipeline.Models.ScriptInstance

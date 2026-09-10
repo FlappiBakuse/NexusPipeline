@@ -162,6 +162,32 @@ internal sealed class PluginRepositoryService
         }
     }
 
+    /// <summary>返回当前 catalog 中实际可登记更新的插件；ownership 只描述来源，不参与更新资格。</summary>
+    public async Task<IReadOnlyList<PluginStoreItem>> GetUpdateCandidatesAsync(
+        CancellationToken cancellationToken = default)
+    {
+        PluginStoreSnapshot snapshot = await GetStoreAsync(false, cancellationToken).ConfigureAwait(false);
+        if (!snapshot.Available)
+        {
+            throw new PluginRepositoryException(
+                "repository_unavailable",
+                snapshot.Error ?? "插件仓库暂不可用");
+        }
+        return snapshot.Plugins.Where(IsUpdateEligible).ToArray();
+    }
+
+    /// <summary>
+    /// 批量更新与单插件更新共用的资格投影。ManagedByStore 是管理信息，不能阻止
+    /// 身份与 catalog 匹配的手动安装或历史遗留插件获得官方更新。
+    /// </summary>
+    internal static bool IsUpdateEligible(PluginStoreItem plugin)
+    {
+        return plugin.Installed
+            && plugin.Compatible
+            && plugin.UpdateAvailable
+            && string.IsNullOrWhiteSpace(plugin.PendingAction);
+    }
+
     public async Task<PluginPendingOperation> InstallAsync(
         string name,
         bool update,

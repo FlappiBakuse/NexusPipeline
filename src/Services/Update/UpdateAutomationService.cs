@@ -333,7 +333,7 @@ internal sealed class UpdateAutomationService
         if (!attempt.Acquired || attempt.Lease is null)
         {
             SetIdleBlocker(attempt.Blocker ?? new AutoUpdateIdleBlocker(
-                "host-busy",
+                "host_busy",
                 "宿主当前繁忙，等待下一次闲时检查",
                 null,
                 null));
@@ -349,7 +349,7 @@ internal sealed class UpdateAutomationService
         }
 
         SetIdleBlocker(new AutoUpdateIdleBlocker(
-            "apply-rejected",
+            "apply_rejected",
             result.Error ?? "自动应用暂未受理，等待下一次闲时检查",
             null,
             null));

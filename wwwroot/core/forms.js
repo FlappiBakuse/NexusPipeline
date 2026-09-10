@@ -76,7 +76,7 @@ export function switchControl(id, label, description, pressed, action, extra = "
   const descriptionMarkup = descriptionText ? `<span id="${esc(descriptionId)}" class="muted">${esc(descriptionText)}</span>` : "";
   return `<div class="switch-row settings-option switch-card" data-switch-row="${esc(id)}">
     <div class="switch-copy"><strong>${displayLabel}</strong>${descriptionMarkup}</div>
-    <button id="${esc(id)}" class="mode-toggle switch-control" type="button" aria-label="${esc(accessibleLabel)}"${describedBy} aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="${esc(action)}" ${extra}><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${t(pressed ? "ui.enabled" : "ui.disabled")}</span></button>
+    <button id="${esc(id)}" class="mode-toggle switch-control" type="button" aria-label="${esc(accessibleLabel)}"${describedBy} aria-pressed="${pressed ? "true" : "false"}" data-state="${pressed ? "on" : "off"}" data-toggle-text="false" data-action="${esc(action)}" ${extra}><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${t(pressed ? "common.enabled" : "common.disabled")}</span></button>
   </div>`;
 }
 
@@ -84,10 +84,10 @@ export function switchControl(id, label, description, pressed, action, extra = "
 export function systemActionCard(action) {
   // 退出软件在协调器中立即执行，不展示可取消的倒计时卡片。
   if (!action || action.action === "exit") return "";
-  const verb = t(action.action === "sleep" ? "ui.sleep" : action.action === "reboot" ? "ui.restart" : "ui.shut_down");
+  const verb = t(action.action === "sleep" ? "common.sleep" : action.action === "reboot" ? "common.restart" : "common.shut_down");
   return `<section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" data-action-verb="${esc(verb)}">
-    <div class="section-heading"><h3>${t("ui.completion_action_countdown")}</h3><span class="muted">${t("ui.the_queue_is_complete_waiting_to_run_the_system_action")}</span></div>
-    <p class="countdown-text">${t("ui.queue_value_is_complete", { queueName: esc(action.queueName || "") })}<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
-    <div class="qk-row"><button class="danger" type="button" data-action="cancel-system-action">${t("ui.cancel_value", { verb })}</button></div>
+    <div class="section-heading"><h3>${t("common.completion_action_countdown")}</h3><span class="muted">${t("common.status.queue_action_pending")}</span></div>
+    <p class="countdown-text">${t("common.status.queue_complete", { queueName: esc(action.queueName || "") })}<strong data-testid="system-action-countdown" data-deadline="${esc(action.deadline || "")}"></strong></p>
+    <div class="qk-row"><button class="danger" type="button" data-action="cancel-system-action">${t("common.action.cancel_verb", { verb })}</button></div>
   </section>`;
 }

@@ -32,7 +32,9 @@ internal static partial class CliCommandRouter
         CliOutput.Configure(rawArgs);
         if (!CliArguments.TryParse(rawArgs, out CliArguments? parsed, out string? parseError))
         {
-            return CliOutput.WriteFailure("invalid_arguments", parseError ?? "命令行参数无效");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                parseError ?? CliText.Get("error.invalid_arguments", "命令行参数无效"));
         }
 
         if (parsed!.HelpRequested || parsed.Positionals.Count == 0)
@@ -47,12 +49,19 @@ internal static partial class CliCommandRouter
             {
                 return handler(parsed);
             }
-            return CliOutput.WriteFailure("invalid_arguments", $"未知命令：{parsed.Positionals[0]}")
+            return CliOutput.WriteFailure(
+                    "invalid_arguments",
+                    CliText.Get(
+                        "error.unknown_command",
+                        "未知命令：{command}",
+                        ("command", parsed.Positionals[0])))
                 .AlsoWriteUsage();
         }
         catch (Exception ex)
         {
-            return CliOutput.WriteFailure("internal_error", $"命令执行失败：{ex.Message}");
+            return CliOutput.WriteFailure(
+                "internal_error",
+                CliText.Get("error.command_failed", "命令执行失败：{detail}", ("detail", ex.Message)));
         }
     }
 }

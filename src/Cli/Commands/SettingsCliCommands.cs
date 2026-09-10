@@ -12,7 +12,10 @@ internal static partial class CliCommandRouter
     {
         string? rawSub = Positional(args, 1);
         string sub = rawSub?.ToLowerInvariant() ?? "get";
-        if (!EnsurePositionals(args, rawSub is null ? 1 : 2, "settings 只接受一个子命令"))
+        if (!EnsurePositionals(
+                args,
+                rawSub is null ? 1 : 2,
+                CliText.Get("error.only_subcommand", "{command} 只接受一个子命令", ("command", "settings"))))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -23,7 +26,11 @@ internal static partial class CliCommandRouter
             "test" => ExecuteSettingsTest(args, client),
             "restart" => ExecuteSettingsRestart(args, client),
             "update" or "set" => ExecuteSettingsUpdate(args, client),
-            _ => CliOutput.WriteFailure("invalid_arguments", $"未知 settings 子命令：{sub}"),
+            _ => CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.unknown_subcommand", "未知 {command} 子命令：{subcommand}",
+                    ("command", "settings"),
+                    ("subcommand", sub))),
         };
     }
 
@@ -44,7 +51,7 @@ internal static partial class CliCommandRouter
     private static int ExecuteSettingsRestart(CliArguments args, CliApiClient client)
     {
         return EnsureOptions(args)
-            ? ReturnApi(client.Post("/api/settings/restart"), "服务重启请求已提交")
+            ? ReturnApi(client.Post("/api/settings/restart"), CliText.Get("success.settings_restart_requested", "服务重启请求已提交"))
             : CliExitCodes.For("invalid_arguments");
     }
 
@@ -72,7 +79,7 @@ internal static partial class CliCommandRouter
             }
             body = Object(("secretKey", key), ("secretValue", value));
         }
-        return ReturnApi(client.Put("/api/settings", body), "设置已更新");
+        return ReturnApi(client.Put("/api/settings", body), CliText.Get("success.settings_updated", "设置已更新"));
     }
 
 }

@@ -11,7 +11,7 @@ export function modalShell(title, body, footer = "") {
   const titleId = "modal-title-" + Math.random().toString(36).slice(2);
   return `<div class="modal-header">
     <div><h3 class="modal-title" id="${titleId}">${title}</h3></div>
-    <button class="icon-button modal-close" type="button" data-action="close-modal" aria-label="${t("ui.close")}">${icon("close")}</button>
+    <button class="icon-button modal-close" type="button" data-action="close-modal" aria-label="${t("common.close")}">${icon("close")}</button>
   </div>
   <div class="modal-body">${body}</div>
   ${footer ? `<div class="modal-footer">${footer}</div>` : ""}`;
@@ -25,12 +25,12 @@ export function confirmModal(title, message, confirmAction, data = {}) {
   const isDelete = confirmAction.startsWith("confirm-delete");
   const confirmClass = isDelete || confirmAction === "confirm-cancel-run" ? "danger solid" : "primary";
   const confirmLabel = isDelete
-    ? t("ui.confirm_deletion")
-    : confirmAction === "restart-confirm" ? t("ui.confirm_restart")
-      : confirmAction === "confirm-cancel-run" ? t("ui.confirm_cancellation")
-        : t("ui.confirm");
+    ? t("common.confirm_deletion")
+    : confirmAction === "restart-confirm" ? t("common.confirm_restart")
+      : confirmAction === "confirm-cancel-run" ? t("common.confirm_cancellation")
+        : t("common.confirm");
   showModal(modalShell(title, `<p class="modal-copy">${message}</p>`,
-    `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
+    `<button class="ghost" type="button" data-action="close-modal">${t("common.cancel")}</button><button class="${confirmClass}" type="button" data-action="${esc(confirmAction)}"${dataAttrs}>${confirmLabel}</button>`));
 }
 
 export function showModal(content, wide = false, locked = false, allowClose = false) {

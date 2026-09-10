@@ -265,6 +265,72 @@ public sealed class PluginRepositoryCatalogTests
     }
 
     [Fact]
+    public void UpdateEligibility_DoesNotRequireStoreOwnership()
+    {
+        PluginStoreItem unmanaged = CreateStoreItem(
+            installed: true,
+            updateAvailable: true,
+            compatible: true,
+            managedByStore: false);
+
+        Assert.True(PluginRepositoryService.IsUpdateEligible(unmanaged));
+    }
+
+    [Theory]
+    [InlineData(false, true, true, "", false)]
+    [InlineData(true, false, true, "", false)]
+    [InlineData(true, true, false, "", false)]
+    [InlineData(true, true, true, "update", false)]
+    [InlineData(true, true, true, "", true)]
+    public void UpdateEligibility_RequiresCurrentInstallableUpdate(
+        bool installed,
+        bool compatible,
+        bool updateAvailable,
+        string pendingAction,
+        bool expected)
+    {
+        PluginStoreItem item = CreateStoreItem(
+            installed,
+            updateAvailable,
+            compatible,
+            managedByStore: true,
+            pendingAction: pendingAction);
+
+        Assert.Equal(expected, PluginRepositoryService.IsUpdateEligible(item));
+    }
+
+    private static PluginStoreItem CreateStoreItem(
+        bool installed,
+        bool updateAvailable,
+        bool compatible,
+        bool managedByStore,
+        string pendingAction = "")
+    {
+        return new PluginStoreItem(
+            "fixture",
+            "Fixture",
+            "Fixture",
+            "",
+            "",
+            "0.2.0",
+            "data-specialized",
+            "",
+            Array.Empty<string>(),
+            "0.1.0",
+            installed,
+            installed ? "0.1.0" : "",
+            updateAvailable,
+            compatible,
+            "",
+            managedByStore,
+            pendingAction,
+            "",
+            updateAvailable ? "update-available" : "installed",
+            installed ? "fixture" : "",
+            Array.Empty<PluginChangelogEntry>());
+    }
+
+    [Fact]
     public void PluginApiCompatibility_UsesMajorAndMinorVersion()
     {
         Assert.Equal(1, PluginApiVersion.Major);

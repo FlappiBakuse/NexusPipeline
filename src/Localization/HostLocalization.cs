@@ -116,7 +116,10 @@ internal static class HostLocalization
         return TranslateNamed("api.error." + code, fallback, named, locale);
     }
 
-    /// <summary>CLI 人类输出的统一入口；未知旧调用在英文环境下也不会泄漏中文源文案。</summary>
+    /// <summary>
+    /// 旧 CLI 调用的兼容回退；新增 CLI 文案必须经由 cli.* 稳定 key 进入 TranslateNamed。
+    /// 未迁移的旧调用在英文环境下也不会泄漏中文源文案。
+    /// </summary>
     public static string TranslateCli(string code, string fallback, string? locale = null)
     {
         string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);

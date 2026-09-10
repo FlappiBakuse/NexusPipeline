@@ -218,7 +218,7 @@ internal sealed class DiagnosticsService
                 : Fail(
                     "host.admin-integrity",
                     "host",
-                    remediationCode: "diagnostics.host_admin_integrity.remediation.admin");
+                    remediationCode: "diagnostics.host.admin.remediation.admin");
         }
         catch (Exception ex)
         {
@@ -226,8 +226,8 @@ internal sealed class DiagnosticsService
                 "host.admin-integrity",
                 "host",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.host_admin_integrity.detail.exception",
-                remediationCode: "diagnostics.host_admin_integrity.remediation.admin");
+                "diagnostics.host.admin.detail.exception",
+                remediationCode: "diagnostics.host.admin.remediation.admin");
         }
     }
 
@@ -241,7 +241,7 @@ internal sealed class DiagnosticsService
                 return Fail(
                     "host.install-write",
                     "host",
-                    remediationCode: "diagnostics.host_install_write.remediation.missing");
+                    remediationCode: "diagnostics.host.install.missing");
             }
 
             // 写入并立即删除一个临时探针，验证更新 worker 和运行时所需的安装目录权限。
@@ -260,8 +260,8 @@ internal sealed class DiagnosticsService
                 "host.install-write",
                 "host",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.host_install_write.detail.exception",
-                remediationCode: "diagnostics.host_install_write.remediation.permission");
+                "diagnostics.host.install.exception",
+                remediationCode: "diagnostics.host.install.permission");
         }
     }
 
@@ -273,8 +273,8 @@ internal sealed class DiagnosticsService
             : Warn(
                 "web.listener",
                 "network",
-                detailCode: "diagnostics.web_listener.detail.not_listening",
-                remediationCode: "diagnostics.web_listener.remediation.start");
+                detailCode: "diagnostics.web.detail.not_listening",
+                remediationCode: "diagnostics.web.remediation.start");
     }
 
     private DiagnosticCheck CheckMcpListener()
@@ -288,8 +288,8 @@ internal sealed class DiagnosticsService
             : Warn(
                 "mcp.listener",
                 "network",
-                detailCode: "diagnostics.mcp_listener.detail.not_listening",
-                remediationCode: "diagnostics.mcp_listener.remediation.start");
+                detailCode: "diagnostics.mcp.detail.not_listening",
+                remediationCode: "diagnostics.mcp.remediation.start");
     }
 
     private DiagnosticCheck CheckUpdateTransaction()
@@ -304,13 +304,13 @@ internal sealed class DiagnosticsService
                 ? Fail(
                     "update.transaction",
                     "recovery",
-                    detailCode: "diagnostics.update_transaction.detail.recovery_pending",
-                    remediationCode: "diagnostics.update_transaction.remediation.recover")
+                    detailCode: "diagnostics.update.recovery_pending",
+                    remediationCode: "diagnostics.update.remediation.recover")
                 : Warn(
                     "update.transaction",
                     "recovery",
-                    detailCode: "diagnostics.update_transaction.detail.artifacts",
-                    remediationCode: "diagnostics.update_transaction.remediation.recover");
+                    detailCode: "diagnostics.update.detail.artifacts",
+                    remediationCode: "diagnostics.update.remediation.recover");
         }
         return Pass("update.transaction", "recovery");
     }
@@ -332,8 +332,8 @@ internal sealed class DiagnosticsService
                     "config.recovery",
                     "recovery",
                     Args(("blocked", blocked)),
-                    "diagnostics.config_recovery.detail.blocked",
-                    remediationCode: "diagnostics.config_recovery.remediation.blocked");
+                    "diagnostics.config.recovery.blocked",
+                    remediationCode: "diagnostics.config.recovery.blocked_help");
             }
             if (editSessions > 0 || workDirs > 0)
             {
@@ -341,8 +341,8 @@ internal sealed class DiagnosticsService
                     "config.recovery",
                     "recovery",
                     Args(("editSessions", editSessions), ("workDirs", workDirs)),
-                    "diagnostics.config_recovery.detail.active",
-                    remediationCode: "diagnostics.config_recovery.remediation.active");
+                    "diagnostics.config.recovery.active",
+                    remediationCode: "diagnostics.config.recovery.active_help");
             }
             return Pass("config.recovery", "recovery");
         }
@@ -352,8 +352,8 @@ internal sealed class DiagnosticsService
                 "config.recovery",
                 "recovery",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.config_recovery.detail.exception",
-                remediationCode: "diagnostics.config_recovery.remediation.permission");
+                "diagnostics.config.recovery.exception",
+                remediationCode: "diagnostics.config.recovery.permission");
         }
     }
 
@@ -366,8 +366,8 @@ internal sealed class DiagnosticsService
                 "execution.state",
                 "execution",
                 Args(("activeCount", state.ActiveCount), ("pendingSystemAction", state.PendingSystemAction)),
-                "diagnostics.execution_state.detail.closing",
-                remediationCode: "diagnostics.execution_state.remediation.closing");
+                "diagnostics.execution.detail.closing",
+                remediationCode: "diagnostics.execution.closing");
         }
         if (state.MaintenanceActive)
         {
@@ -375,8 +375,8 @@ internal sealed class DiagnosticsService
                 "execution.state",
                 "execution",
                 Args(("activeCount", state.ActiveCount), ("pendingSystemAction", state.PendingSystemAction)),
-                detailCode: "diagnostics.execution_state.detail.maintenance",
-                remediationCode: "diagnostics.execution_state.remediation.maintenance");
+                detailCode: "diagnostics.execution.detail.maintenance",
+                remediationCode: "diagnostics.execution.maintenance");
         }
         return Pass("execution.state", "execution", Args(("activeCount", state.ActiveCount)));
     }
@@ -390,13 +390,13 @@ internal sealed class DiagnosticsService
                 : Pass(
                     "scheduler.state",
                     "scheduler",
-                    detailCode: "diagnostics.scheduler_state.detail.next",
+                    detailCode: "diagnostics.scheduler.detail.next",
                     detailArgs: Args(("queueName", next.Value.QueueName)))
             : Warn(
                 "scheduler.state",
                 "scheduler",
-                detailCode: "diagnostics.scheduler_state.detail.not_running",
-                remediationCode: "diagnostics.scheduler_state.remediation.start");
+                detailCode: "diagnostics.scheduler.detail.not_running",
+                remediationCode: "diagnostics.scheduler.remediation.start");
     }
 
     private DiagnosticCheck CheckPlugins()
@@ -420,9 +420,9 @@ internal sealed class DiagnosticsService
                     "plugin.runtime",
                     "plugins",
                     Args(("count", unhealthy.Length)),
-                    "diagnostics.plugin_runtime.detail.unhealthy",
+                    "diagnostics.plugin.runtime.unhealthy",
                     Args(("names", string.Join(", ", unhealthy))),
-                    "diagnostics.plugin_runtime.remediation.inspect");
+                    "diagnostics.plugin.runtime.inspect");
         }
         catch (Exception ex)
         {
@@ -430,8 +430,8 @@ internal sealed class DiagnosticsService
                 "plugin.runtime",
                 "plugins",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.plugin_runtime.detail.exception",
-                remediationCode: "diagnostics.plugin_runtime.remediation.inspect");
+                "diagnostics.plugin.runtime.exception",
+                remediationCode: "diagnostics.plugin.runtime.inspect");
         }
     }
 
@@ -446,8 +446,8 @@ internal sealed class DiagnosticsService
                     "plugin.pending",
                     "plugins",
                     Args(("count", pending.Count)),
-                    detailCode: "diagnostics.plugin_pending.detail.pending",
-                    remediationCode: "diagnostics.plugin_pending.remediation.recover");
+                    detailCode: "diagnostics.plugin.pending.pending",
+                    remediationCode: "diagnostics.plugin.pending.recover");
         }
         catch (Exception ex)
         {
@@ -455,8 +455,8 @@ internal sealed class DiagnosticsService
                 "plugin.pending",
                 "plugins",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.plugin_pending.detail.exception",
-                remediationCode: "diagnostics.plugin_pending.remediation.permission");
+                "diagnostics.plugin.pending.exception",
+                remediationCode: "diagnostics.plugin.pending.permission");
         }
     }
 
@@ -474,7 +474,7 @@ internal sealed class DiagnosticsService
             : Fail(
                 "dependency.python",
                 "dependencies",
-                remediationCode: "diagnostics.dependency_python.remediation.install");
+                remediationCode: "diagnostics.dependency.python.install");
     }
 
     private DiagnosticCheck CheckAdb()
@@ -489,8 +489,8 @@ internal sealed class DiagnosticsService
             : Warn(
                 "dependency.adb",
                 "dependencies",
-                detailCode: "diagnostics.dependency_adb.detail.missing",
-                remediationCode: "diagnostics.dependency_adb.remediation.install");
+                detailCode: "diagnostics.dependency.adb.missing",
+                remediationCode: "diagnostics.dependency.adb.install");
     }
 
     private DiagnosticCheck CheckLogs()
@@ -502,7 +502,7 @@ internal sealed class DiagnosticsService
                 return Skipped(
                     "logs.recent",
                     "logs",
-                    detailCode: "diagnostics.logs_recent.detail.directory");
+                    detailCode: "diagnostics.logs.detail.directory");
             }
             FileInfo? latest = new DirectoryInfo(AppPaths.LogDir)
                 .EnumerateFiles("*.log", SearchOption.TopDirectoryOnly)
@@ -512,7 +512,7 @@ internal sealed class DiagnosticsService
                 ? Skipped(
                     "logs.recent",
                     "logs",
-                    detailCode: "diagnostics.logs_recent.detail.empty")
+                    detailCode: "diagnostics.logs.detail.empty")
                 : Pass("logs.recent", "logs", Args(("sizeBytes", latest.Length)));
         }
         catch (Exception ex)
@@ -521,8 +521,8 @@ internal sealed class DiagnosticsService
                 "logs.recent",
                 "logs",
                 Args(("exceptionType", ex.GetType().Name)),
-                "diagnostics.logs_recent.detail.exception",
-                remediationCode: "diagnostics.logs_recent.remediation.permission");
+                "diagnostics.logs.detail.exception",
+                remediationCode: "diagnostics.logs.remediation.permission");
         }
     }
 

@@ -31,25 +31,25 @@ function bindingIdPart(id) {
 
 function umScriptName(binding) {
   const script = (state.scripts || []).find(item => item.id === binding.scriptInstanceId);
-  return binding.scriptName || script?.name || t("ui.script_instance_not_found");
+  return binding.scriptName || script?.name || t("users.script_instance_not_found");
 }
 
 function umBadges(binding) {
   const effective = binding.effective || binding;
   const runDays = typeof effective.runDays === "number" ? effective.runDays : -1;
   const enabled = effective.enabled !== false && runDays !== 0;
-  const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? t("ui.enabled_badge") : t("ui.disabled")}</span>`;
+  const stateBadge = `<span class="badge ${enabled ? "ok" : "muted"}">${enabled ? t("users.enabled_badge") : t("common.disabled")}</span>`;
   const daysBadge = runDays === 0
-    ? `<span class="badge warn">${t("ui.run_stopped")}</span>`
+    ? `<span class="badge warn">${t("users.run_stopped")}</span>`
     : runDays > 0
-      ? `<span class="badge blue">${t("ui.value_days_left", { days: runDays })}</span>`
-      : `<span class="badge muted">${t("ui.run_indefinitely")}</span>`;
+      ? `<span class="badge blue">${t("users.schedule.days_left", { days: runDays })}</span>`
+      : `<span class="badge muted">${t("users.run_indefinitely")}</span>`;
   const script = scriptById(binding.scriptInstanceId);
   const pluginStatus = script ? scriptPluginStatus(script, state.plugins || []) : null;
   const pluginBadge = pluginStatus?.missing
-    ? `<span class="badge bad">${t("ui.unknown_specialized_plugin")}</span>`
+    ? `<span class="badge bad">${t("common.plugin.unknown")}</span>`
     : pluginStatus?.specialized && !pluginStatus.available
-      ? `<span class="badge warn">${t("ui.specialized_plugin_unavailable")}</span>`
+      ? `<span class="badge warn">${t("common.plugin.unavailable_suffix")}</span>`
       : "";
   return pluginBadge + stateBadge + daysBadge;
 }
@@ -71,44 +71,44 @@ function umBindingCardMarkup(binding) {
   const preValue = encodePrePost(PRE_ONLY_MARKER, effective.preRunOnceOnly, effective.preRunScript || "");
   const postValue = encodePrePost(POST_FINAL_MARKER, effective.postRunOnFinalOnly, effective.postRunScript || "");
   const overrideHelper = category => locks[category]
-    ? `<p class="muted helper-copy um-override-helper">${t("ui.global_override_copy", { global: t("ui.global_management"), script: t("ui.script_instance") })}</p>`
+    ? `<p class="muted helper-copy um-override-helper">${t("users.global_override_copy", { global: t("users.global_management"), script: t("common.script_instance") })}</p>`
     : "";
-  const runDaysPlaceholder = t("ui.enter_1_to_run_indefinitely_0_to_disable_this_script_instance_or_a_positive_number_to_run_it_while_decrementing_daily");
+  const runDaysPlaceholder = t("users.binding.run_days.input_help");
   const dragEnabled = umBindingDragEnabled();
   const dragHidden = umState.bindingEditMode || !!umState.expandedId;
   const head =
     '<div class="um-binding-head">' +
-      '<span class="drag-handle um-binding-drag-handle" role="button" tabindex="' + (dragEnabled ? "0" : "-1") + '" aria-disabled="' + (dragEnabled ? "false" : "true") + '"' + (dragHidden ? " hidden" : "") + ` aria-label="${t("ui.drag_to_reorder_use_arrow_keys_to_adjust")}" title="${t("ui.drag_to_reorder")}" data-testid="um-binding-drag-handle">` + icon("grip") + "</span>" +
-      '<button class="um-binding-toggle' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="' + esc(unavailable ? t("ui.unrecognized_specialized_script_instance") : t("ui.open_script_instance_settings")) + '：' + esc(name) + '"' + (unavailable ? ' aria-disabled="true" title="' + esc(unavailableMessage) + '"' : '') + (umState.bindingEditMode ? ' disabled aria-disabled="true"' : '') + '>' +
+      '<span class="drag-handle um-binding-drag-handle" role="button" tabindex="' + (dragEnabled ? "0" : "-1") + '" aria-disabled="' + (dragEnabled ? "false" : "true") + '"' + (dragHidden ? " hidden" : "") + ` aria-label="${t("common.reorder.keyboard_help")}" title="${t("common.drag_to_reorder")}" data-testid="um-binding-drag-handle">` + icon("grip") + "</span>" +
+      '<button class="um-binding-toggle' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="toggle-um-binding" aria-expanded="false" aria-label="' + esc(t("users.accessibility.instance_action", { action: unavailable ? t("common.error.specialized_script_instance") : t("users.open_script_instance_settings"), name })) + '"' + (unavailable ? ' aria-disabled="true" title="' + esc(unavailableMessage) + '"' : '') + (umState.bindingEditMode ? ' disabled aria-disabled="true"' : '') + '>' +
         '<img class="script-ico um-binding-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="36" height="36" loading="lazy" data-icon-id="' + esc(binding.scriptInstanceId) + '">' +
         '<span class="um-binding-copy"><strong class="um-binding-name">' + esc(name) + '</strong><span class="um-binding-badges">' + umBadges(binding) + "</span></span>" +
       "</button>" +
-      '<button class="danger um-binding-remove" type="button" data-action="delete-user-binding" data-testid="um-remove-binding" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + `">${t("ui.remove_binding")}</button>` +
+      '<button class="danger um-binding-remove" type="button" data-action="delete-user-binding" data-testid="um-remove-binding" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + `">${t("users.remove_binding")}</button>` +
       '<span class="um-binding-bottom-arrow" aria-hidden="true">' + icon("chevronRight") + "</span>" +
     "</div>";
   const mainView =
     '<button class="um-edit-config' + (unavailable ? ' is-unavailable' : '') + '" type="button" data-action="edit-user-config-global" data-user-id="' + esc(draft.userId) + '" data-script-id="' + esc(binding.scriptInstanceId) + '"' + (unavailable ? ' title="' + esc(unavailableMessage) + '"' : '') + '>' +
-      `<span class="um-edit-config-copy"><strong>${t("ui.edit_configuration")}</strong><span class="muted">${t("ui.start_the_main_program_and_open_this_script_instance_s_user_configuration")}</span></span>` +
+      `<span class="um-edit-config-copy"><strong>${t("users.edit_configuration")}</strong><span class="muted">${t("users.binding.config_open_help")}</span></span>` +
       '<span class="um-edit-config-arrow">' + icon("chevronRight") + "</span>" +
     "</button>";
   const generalView =
-    `<section class="um-binding-option-section um-view um-view-general"><div class="section-heading"><div><h4>${t("ui.general")}</h4><p class="muted">${t("ui.binding_status_run_days_and_daily_success_count")}</p></div></div>` +
-      switchControl("um-" + idPart + "-enabled", t("ui.enabled"), t("ui.a_run_days_value_of_0_excludes_it_from_runs"), enabled, "toggle-user-management-switch", 'data-binding-field="enabled"' + (locks.general ? " disabled" : "")) +
-      valueField("um-" + idPart + "-run-days", t("ui.run_days"), runDays, "number", 'data-binding-field="runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : ""), t("ui.1_means_indefinitely_0_stops_this_script_instance_positive_values_are_remaining_run_days_and_decrease_daily")) +
-      valueField("um-" + idPart + "-max-success", t("ui.maximum_successful_runs"), maxSuccessfulRuns, "number", 'data-binding-field="maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRunsLimit) + `" step="1" placeholder="${t("ui.unlimited_placeholder")}"` + (locks.general ? " disabled" : ""), t("ui.1_means_unlimited_a_positive_value_skips_runs_after_the_limit_is_reached_0_is_invalid")) +
-      `<p class="muted helper-copy">${t("ui.after_the_daily_success_limit_is_reached_later_manual_and_automatic_runs_are_recorded_as_skipped_failures_cancellations_and_skips_do_not_count")}</p>` +
+    `<section class="um-binding-option-section um-view um-view-general"><div class="section-heading"><div><h4>${t("common.general")}</h4><p class="muted">${t("users.binding.status_help")}</p></div></div>` +
+      switchControl("um-" + idPart + "-enabled", t("common.enabled"), t("users.binding.run_days.zero_help"), enabled, "toggle-user-management-switch", 'data-binding-field="enabled"' + (locks.general ? " disabled" : "")) +
+      valueField("um-" + idPart + "-run-days", t("common.run_days"), runDays, "number", 'data-binding-field="runDays" min="-1" max="' + esc(maxRunDays) + '" step="1" placeholder="' + esc(runDaysPlaceholder) + '"' + (locks.general ? " disabled" : ""), t("users.binding.run_days.help")) +
+      valueField("um-" + idPart + "-max-success", t("users.maximum_successful_runs"), maxSuccessfulRuns, "number", 'data-binding-field="maxSuccessfulRunsPerDay" min="-1" max="' + esc(maxSuccessfulRunsLimit) + `" step="1" placeholder="${t("users.unlimited_placeholder")}"` + (locks.general ? " disabled" : ""), t("users.binding.daily_limit.help")) +
+      `<p class="muted helper-copy">${t("users.binding.daily_limit.policy_help")}</p>` +
       overrideHelper("general") +
     "</section>";
   const notifyView =
-    `<section class="um-binding-option-section um-view um-view-notify"><div class="section-heading"><div><h4>${t("ui.notifications")}</h4><p class="muted">${t("ui.send_run_result_notifications_when_allowed_by_the_user_binding")}</p></div></div>` +
-      switchControl("um-" + idPart + "-notify", t("ui.enable_notifications"), t("ui.send_run_status_notifications_using_the_user_binding_settings"), notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
-      valueField("um-" + idPart + "-smtp", t("ui.smtp_recipients"), effective.smtpTo || "", "text", `data-binding-field="smtpTo" placeholder="${t("ui.leave_blank_to_inherit_global_recipients")}"` + (locks.notification ? " disabled" : ""), t("ui.used_only_by_smtp_leave_blank_to_inherit_global_recipients_webhook_is_unaffected")) +
+    `<section class="um-binding-option-section um-view um-view-notify"><div class="section-heading"><div><h4>${t("common.notifications")}</h4><p class="muted">${t("users.binding.result_notification_help")}</p></div></div>` +
+      switchControl("um-" + idPart + "-notify", t("users.enable_notifications"), t("users.binding.status_notification_help"), notifyEnabled, "toggle-user-management-switch", 'data-binding-field="notifyEnabled"' + (locks.notification ? " disabled" : "")) +
+      valueField("um-" + idPart + "-smtp", t("users.smtp_recipients"), effective.smtpTo || "", "text", `data-binding-field="smtpTo" placeholder="${t("users.binding.smtp_inherit_help")}"` + (locks.notification ? " disabled" : ""), t("users.binding.smtp_help")) +
       overrideHelper("notification") +
     "</section>";
   const advancedView =
-    `<section class="um-binding-option-section um-view um-view-advanced"><div class="section-heading"><div><h4>${t("ui.advanced")}</h4><p class="muted">${t("ui.before_and_after_task_script_settings")}</p></div></div>` +
-      pathField("um-" + idPart + "-pre", t("ui.before_task_script_path"), preValue, "file", `data-binding-field="preRunScript" placeholder="${t("ui.pre_task_placeholder")}"` + (locks.advanced ? " disabled" : ""), t("ui.script_file_filter"), "", t("ui.pre_task_help")) +
-      pathField("um-" + idPart + "-post", t("ui.after_task_script_path"), postValue, "file", `data-binding-field="postRunScript" placeholder="${t("ui.post_task_placeholder")}"` + (locks.advanced ? " disabled" : ""), t("ui.script_file_filter"), "", t("ui.post_task_help")) +
+    `<section class="um-binding-option-section um-view um-view-advanced"><div class="section-heading"><div><h4>${t("users.advanced")}</h4><p class="muted">${t("users.binding.lifecycle_help")}</p></div></div>` +
+      pathField("um-" + idPart + "-pre", t("users.before_task_script_path"), preValue, "file", `data-binding-field="preRunScript" placeholder="${t("users.pre_task_placeholder")}"` + (locks.advanced ? " disabled" : ""), t("users.script_file_filter"), "", t("users.pre_task_help")) +
+      pathField("um-" + idPart + "-post", t("users.after_task_script_path"), postValue, "file", `data-binding-field="postRunScript" placeholder="${t("users.post_task_placeholder")}"` + (locks.advanced ? " disabled" : ""), t("users.script_file_filter"), "", t("users.post_task_help")) +
       overrideHelper("advanced") +
     "</section>";
   return '<article class="um-binding-card' + (umState.bindingEditMode ? ' is-binding-editing' : '') + (unavailable ? ' is-unavailable' : '') + '" data-testid="um-binding-card" data-dnd-id="' + esc(binding.scriptInstanceId) + '" data-binding-id="' + esc(binding.scriptInstanceId) + '" data-binding-enabled="' + (enabled ? "true" : "false") + '"' + (unavailable ? ' data-plugin-unavailable="true"' : '') + '>' +
@@ -133,7 +133,7 @@ function umAddItemMarkup(script) {
   const selected = umState.addSelected.has(script.id);
   return '<button class="um-add-item" type="button" data-action="toggle-um-add-item" data-script-id="' + esc(script.id) + '" aria-pressed="' + (selected ? "true" : "false") + '">' +
     '<img class="script-ico" src="' + esc(scriptFallbackIcon) + '" alt="" width="32" height="32" loading="lazy" data-icon-id="' + esc(script.id) + '">' +
-    '<span class="um-add-item-copy"><strong>' + esc(script.name) + "</strong>" + (script.pluginType ? `<span class="muted">${t("ui.specialized_script")}</span>` : "") + "</span>" +
+    '<span class="um-add-item-copy"><strong>' + esc(script.name) + "</strong>" + (script.pluginType ? `<span class="muted">${t("users.specialized_script")}</span>` : "") + "</span>" +
     '<span class="um-add-item-mark" aria-hidden="true">' + icon("check") + "</span>" +
   "</button>";
 }
@@ -155,34 +155,34 @@ function renderUserManagementModal() {
   const scripts = availableScripts(user);
   const addItems = scripts.length
     ? '<div class="um-add-grid" id="um-add-grid">' + scripts.map(umAddItemMarkup).join("") + "</div>"
-    : `<div class="empty compact-empty"><strong>${t("ui.no_script_instances_can_be_added")}</strong><span>${t("ui.all_script_instances_are_already_bound")}</span></div>`;
+    : `<div class="empty compact-empty"><strong>${t("users.no_script_instances_can_be_added")}</strong><span>${t("users.binding.all_bound")}</span></div>`;
   const addArea =
     '<div class="um-add-area"' + (umState.addOpen ? " data-open" : "") + ">" +
-      '<button class="um-add-script" type="button" data-action="toggle-um-add-panel" data-testid="um-add-script">' + icon("plus") + `<span>${t("ui.add_script")}</span></button>` +
+      '<button class="um-add-script" type="button" data-action="toggle-um-add-panel" data-testid="um-add-script">' + icon("plus") + `<span>${t("users.add_script")}</span></button>` +
       '<div class="um-add-panel secondary-surface" data-testid="um-add-panel">' +
-        `<div class="um-add-head"><h4>${t("ui.choose_script_instances_to_bind")}</h4><span class="muted">${t("ui.multiple_selection")}</span></div>` +
+        `<div class="um-add-head"><h4>${t("users.binding.choose")}</h4><span class="muted">${t("users.multiple_selection")}</span></div>` +
         addItems +
-        `<div class="um-add-actions"><button class="ghost" type="button" data-action="close-um-add-panel">${t("ui.cancel")}</button><button class="primary" type="button" data-action="confirm-um-add-bindings" data-testid="um-add-confirm">${t("ui.confirm")}</button></div>` +
+        `<div class="um-add-actions"><button class="ghost" type="button" data-action="close-um-add-panel">${t("common.cancel")}</button><button class="primary" type="button" data-action="confirm-um-add-bindings" data-testid="um-add-confirm">${t("common.confirm")}</button></div>` +
       "</div>" +
     "</div>";
   const bindings = Array.isArray(user.bindings) ? user.bindings : [];
   const bindingList = bindings.length
     ? '<div class="um-bindings" id="um-binding-list">' + bindings.map(umBindingCardMarkup).join("") + "</div>"
-    : `<div class="empty compact-empty"><strong>${t("ui.no_script_instances_bound_yet")}</strong><span>${t("ui.choose_script_instances_from_add_script_above_to_add_bindings")}</span></div>`;
-  const bindingEditToggle = '<button class="ghost sm um-binding-edit-toggle" type="button" data-action="toggle-um-binding-edit" aria-pressed="' + (umState.bindingEditMode ? "true" : "false") + '"' + (umState.expandedId ? " hidden" : "") + '>' + (umState.bindingEditMode ? t("ui.done_editing") : t("ui.edit_bindings")) + "</button>";
+    : `<div class="empty compact-empty"><strong>${t("users.no_script_instances_bound_yet")}</strong><span>${t("users.binding.add_help")}</span></div>`;
+  const bindingEditToggle = '<button class="ghost sm um-binding-edit-toggle" type="button" data-action="toggle-um-binding-edit" aria-pressed="' + (umState.bindingEditMode ? "true" : "false") + '"' + (umState.expandedId ? " hidden" : "") + '>' + (umState.bindingEditMode ? t("users.done_editing") : t("users.edit_bindings")) + "</button>";
   const body =
     '<section class="user-management-settings">' +
-      valueField("um-name", `${t("ui.user_name")} <span class='req'>*</span>`, user.name, "text", `placeholder="${t("ui.enter_username_placeholder")}"`, t("ui.username_case_insensitive")) +
-      textareaField("um-remark", t("ui.remark"), user.remark || "", 'rows="3"', t("ui.optional"), t("ui.add_user_remark")) +
-      (user.avatarUrl ? `<div class="user-avatar-setting"><span class="muted">${t("ui.custom_avatar")}</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="` + esc(user.id) + `">${t("ui.remove_custom_avatar")}</button></div>` : "") +
+      valueField("um-name", `${t("users.user_name")} <span class='req'>*</span>`, user.name, "text", `placeholder="${t("users.enter_username_placeholder")}"`, t("users.username_case_insensitive")) +
+      textareaField("um-remark", t("users.remark"), user.remark || "", 'rows="3"', t("common.optional"), t("users.add_user_remark")) +
+      (user.avatarUrl ? `<div class="user-avatar-setting"><span class="muted">${t("users.custom_avatar")}</span><button class="tertiary" type="button" data-action="remove-user-avatar" data-user-id="` + esc(user.id) + `">${t("users.remove_custom_avatar")}</button></div>` : "") +
     "</section>" +
     '<section class="subsection user-binding-section">' +
-      `<div class="section-heading um-binding-section-heading"><div><h3>${t("ui.bound_script_instances")}</h3><p class="muted">${t("ui.each_binding_stores_its_run_notification_and_advanced_settings_independently")}</p></div>` + bindingEditToggle + "</div>" +
+      `<div class="section-heading um-binding-section-heading"><div><h3>${t("users.bound_script_instances")}</h3><p class="muted">${t("users.binding.settings_help")}</p></div>` + bindingEditToggle + "</div>" +
       addArea +
       bindingList +
     "</section>";
-  const footer = `<button class="primary" type="button" data-action="save-user-management">${t("ui.save")}</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${t("ui.cancel")}</button>`;
-  showModal(modalShell(t("ui.user_management"), body, footer), true, true, true);
+  const footer = `<button class="primary" type="button" data-action="save-user-management">${t("common.save")}</button><button class="ghost user-management-back" type="button" data-action="user-management-back">${t("common.cancel")}</button>`;
+  showModal(modalShell(t("users.user_management"), body, footer), true, true, true);
   syncUmState();
   void renderPluginSlots(document);
   wireManagedBindingDnd();
@@ -209,7 +209,7 @@ function syncUmState() {
   const editToggle = section?.querySelector(".um-binding-edit-toggle");
   if (editToggle) {
     editToggle.hidden = !!umState.expandedId;
-    editToggle.textContent = umState.bindingEditMode ? t("ui.done_editing") : t("ui.edit_bindings");
+    editToggle.textContent = umState.bindingEditMode ? t("users.done_editing") : t("users.edit_bindings");
     editToggle.setAttribute("aria-pressed", umState.bindingEditMode ? "true" : "false");
   }
   const list = document.getElementById("um-binding-list");
@@ -301,24 +301,24 @@ export async function saveUserManagement() {
   const name = $("#um-name")?.value.trim() || "";
   if (!name) {
     setRequiredFieldError("um-name");
-    toast(t("ui.enter_a_username"), "error");
+    toast(t("users.enter_a_username"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > MAX_ENTITY_NAME_BYTES) {
-    setFieldError("um-name", t("ui.username_max_bytes", { bytes: MAX_ENTITY_NAME_BYTES }));
-    toast(t("ui.usernames_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
+    setFieldError("um-name", t("users.username_max_bytes", { bytes: MAX_ENTITY_NAME_BYTES }));
+    toast(t("users.validation.username_length", { bytes: MAX_ENTITY_NAME_BYTES }), "error");
     return;
   }
   if (hasEntityNameConflict(state.users, name, draft.userId)) {
     setFieldInvalid("um-name");
-    toast(t("ui.that_username_already_exists_choose_another_name"), "error");
+    toast(t("users.validation.username_duplicate"), "error");
     return;
   }
   clearFieldError("um-name");
   const remark = $("#um-remark")?.value.trim() || "";
   if (new TextEncoder().encode(remark).length > MAX_USER_REMARK_BYTES) {
-    setFieldError("um-remark", t("ui.remark_max_bytes", { bytes: MAX_USER_REMARK_BYTES }));
-    toast(t("ui.notes_may_contain_at_most_value_bytes", { bytes: MAX_USER_REMARK_BYTES }), "error");
+    setFieldError("um-remark", t("users.remark_max_bytes", { bytes: MAX_USER_REMARK_BYTES }));
+    toast(t("users.validation.remark_length", { bytes: MAX_USER_REMARK_BYTES }), "error");
     return;
   }
   clearFieldError("um-remark");
@@ -331,12 +331,12 @@ export async function saveUserManagement() {
     }
     setManagementDraft(null);
     closeModal();
-    toast(t("ui.user_settings_saved"));
+    toast(t("users.user_settings_saved"));
     await reloadUsers();
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("um-name");
-      toast(t("ui.that_username_already_exists_choose_another_name"), "error");
+      toast(t("users.validation.username_duplicate"), "error");
       return;
     }
     toast(error.message, "error");
@@ -395,7 +395,7 @@ async function reorderManagedBindings(ids) {
   const orderedBindings = ids.map(id => byId.get(id)).filter(Boolean);
   if (orderedBindings.length !== currentBindings.length) {
     restoreManagedBindingOrder();
-    toast(t("ui.the_script_binding_order_is_invalid"), "error");
+    toast(t("users.validation.binding_order"), "error");
     return;
   }
   try {
@@ -406,7 +406,7 @@ async function reorderManagedBindings(ids) {
       const cachedById = new Map((cachedUser.bindings || []).map(binding => [binding.scriptInstanceId, binding]));
       cachedUser.bindings = ids.map(id => cachedById.get(id)).filter(Boolean);
     }
-    if (getManagementDraft() === draft) toast(t("ui.bound_script_order_saved"));
+    if (getManagementDraft() === draft) toast(t("users.bound_script_order_saved"));
   } catch (error) {
     restoreManagedBindingOrder();
     toast(error.message, "error");
@@ -442,7 +442,7 @@ export async function confirmUmAddBindings() {
   if (!draft) return;
   const ids = Array.from(umState.addSelected);
   if (!ids.length) {
-    toast(t("ui.choose_the_script_instance_to_bind"), "error");
+    toast(t("users.binding.choose_one"), "error");
     return;
   }
   const unavailableScript = ids
@@ -469,7 +469,7 @@ export async function confirmUmAddBindings() {
       };
       addedBindings.push((await api("POST", "/api/users/" + encodeURIComponent(draft.userId) + "/bindings", payload)) || payload);
     }
-    toast(ids.length > 1 ? t("ui.value_script_instance_s_bound", { count: ids.length }) : t("ui.script_binding_added"));
+    toast(ids.length > 1 ? t("users.binding.count", { count: ids.length }) : t("users.script_binding_added"));
     await refreshManagedUser(addedBindings);
   } catch (error) {
     if (addedBindings.length) await refreshManagedUser(addedBindings);
@@ -524,16 +524,16 @@ export function deleteUserBinding(userId, scriptId) {
   const user = userById(userId);
   const binding = user?.bindings?.find(item => item.scriptInstanceId === scriptId);
   if (!user || !binding) return;
-  confirmModal(t("ui.remove_script_binding"), t("ui.remove_the_binding_between_value_and_value_its_configuration_data_will_also_be_removed", {
+  confirmModal(t("users.remove_script_binding"), t("users.confirm.remove_binding", {
     user: esc(user.name),
-    script: esc(binding.scriptName || t("ui.this_script_instance")),
+    script: esc(binding.scriptName || t("users.this_script_instance")),
   }), "confirm-delete-user-binding", { "user-id": userId, "script-id": scriptId });
 }
 
 export async function confirmDeleteUserBinding(userId, scriptId) {
   try {
     await api("DELETE", "/api/users/" + encodeURIComponent(userId) + "/bindings/" + encodeURIComponent(scriptId));
-    toast(t("ui.script_binding_removed"));
+    toast(t("users.script_binding_removed"));
     await refreshManagedUser();
   } catch (error) {
     toast(error.message, "error");
@@ -548,11 +548,11 @@ export async function uploadUserAvatar(id) {
     const file = input.files?.[0];
     if (!file) return;
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
-      toast(t("ui.avatars_support_png_jpeg_or_webp_only"), "error");
+      toast(t("users.validation.avatar_type"), "error");
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      toast(t("ui.avatar_file_is_too_large_5_mib_maximum"), "error");
+      toast(t("users.validation.avatar_size"), "error");
       return;
     }
     const reader = new FileReader();
@@ -560,7 +560,7 @@ export async function uploadUserAvatar(id) {
       try {
         const dataUrl = String(reader.result || "");
         await api("POST", "/api/users/" + encodeURIComponent(id) + "/avatar", { mimeType: file.type, data: dataUrl.split(",", 2)[1] || "" });
-        toast(t("ui.avatar_updated"));
+        toast(t("users.avatar_updated"));
         if (getManagementDraft()?.userId === id) await refreshManagedUser();
         else await reloadUsers();
       } catch (error) {
@@ -575,7 +575,7 @@ export async function uploadUserAvatar(id) {
 export async function removeUserAvatar(id) {
   try {
     await api("DELETE", "/api/users/" + encodeURIComponent(id) + "/avatar");
-    toast(t("ui.default_text_avatar_restored"));
+    toast(t("users.avatar.default_restored"));
     if (getManagementDraft()?.userId === id) await refreshManagedUser();
     else await reloadUsers();
   } catch (error) {

@@ -55,7 +55,7 @@ internal sealed class CliArguments
             if (name.Length == 0)
             {
                 result = null;
-                error = "选项名称不能为空";
+                error = CliText.Get("error.option_name_empty", "选项名称不能为空");
                 return false;
             }
 

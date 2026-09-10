@@ -150,7 +150,7 @@ public sealed class UpdateAutomationServiceTests
             interval: TimeSpan.FromHours(12),
             idleRetry: TimeSpan.FromMilliseconds(20),
             tryAcquireIdle: _ => blocked
-                ? AutoUpdateIdleAttempt.Blocked(new AutoUpdateIdleBlocker("scheduled-soon", "队列将在 4 分钟后触发", "每日队列", DateTime.Now.AddMinutes(4)))
+                ? AutoUpdateIdleAttempt.Blocked(new AutoUpdateIdleBlocker("queue_soon", "队列将在 4 分钟后触发", "每日队列", DateTime.Now.AddMinutes(4)))
                 : AutoUpdateIdleAttempt.Accepted(new HostMaintenanceLease()),
             apply: (lease, _) =>
             {
@@ -269,7 +269,7 @@ public sealed class UpdateAutomationServiceTests
                 return UpdateApplyResult.Ok(false);
             }),
             tryAcquireIdle ?? (_ => AutoUpdateIdleAttempt.Blocked(new AutoUpdateIdleBlocker(
-                "host-busy",
+                "host_busy",
                 "宿主繁忙",
                 null,
                 null))),

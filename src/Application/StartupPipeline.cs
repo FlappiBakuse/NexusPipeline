@@ -175,7 +175,7 @@ internal static class StartupPipeline
                 return 0;
             }
             Logger.Warn("[错误] 检测到 NexusPipeline 已在运行，但未能发现其 Web 端口；本次网页模式退出。");
-            Console.WriteLine("[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。");
+            Console.WriteLine(CliText.Get("startup.service_running_no_port", "[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。"));
             return 1;
         }
         // web 模式同样执行更新事务启动收尾（defer 时退出由本模式专用退出端口处理）。
@@ -197,12 +197,12 @@ internal static class StartupPipeline
         if (web is null)
         {
             ClearServicePid();
-            Console.WriteLine("[错误] 无法启动 Web 服务（端口均被占用）。");
+            Console.WriteLine(CliText.Get("startup.web_unavailable", "[错误] 无法启动 Web 服务（端口均被占用）。"));
             return 1;
         }
         Bootstrap.AfterWebStarted(web);
         McpHost? mcp = Bootstrap.StartMcp();
-        Console.WriteLine($"Web 界面：http://127.0.0.1:{web.Port}/（按回车停止）");
+        Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
         if (ctx.Settings.AutoOpenBrowser)
         {
             try

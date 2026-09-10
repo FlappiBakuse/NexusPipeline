@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using NexusPipeline.Localization;
 using NexusPipeline.Plugin.Abstractions;
 
@@ -12,6 +13,9 @@ internal sealed class PluginLocalizationManifest
     private const int MaxKeys = 4096;
     private const int MaxKeyLength = 128;
     private const int MaxValueLength = 8192;
+    private static readonly Regex PlaceholderPattern = new(
+        @"\{([A-Za-z][A-Za-z0-9_.-]*)\}",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private PluginLocalizationManifest(
         string defaultLocale,
@@ -112,6 +116,26 @@ internal sealed class PluginLocalizationManifest
             error = "localization.defaultLocale 必须存在对应资源";
             return false;
         }
+        if (resources.Count > 1)
+        {
+            IReadOnlyDictionary<string, string> baseline = resources[defaultLocale];
+            foreach ((string locale, IReadOnlyDictionary<string, string> values) in resources)
+            {
+                if (!baseline.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(values.Keys))
+                {
+                    error = $"localization 资源 key 集合不一致：{locale}";
+                    return false;
+                }
+                foreach (string key in baseline.Keys)
+                {
+                    if (!ExtractPlaceholders(baseline[key]).SetEquals(ExtractPlaceholders(values[key])))
+                    {
+                        error = $"localization 资源占位符集合不一致：{locale}.{key}";
+                        return false;
+                    }
+                }
+            }
+        }
         localization = new PluginLocalizationManifest(defaultLocale, resources);
         return true;
     }
@@ -166,8 +190,11 @@ internal sealed class PluginLocalizationManifest
                 }
                 if (key.Length is < 1 or > MaxKeyLength
                     || value.Length > MaxValueLength
+                    || string.IsNullOrWhiteSpace(value)
                     || key.Any(char.IsControl)
                     || key.Any(char.IsWhiteSpace)
+                    || key.StartsWith("legacy.", StringComparison.OrdinalIgnoreCase)
+                    || !PluginLocalizationValidation.IsSafeKey(key, MaxKeyLength)
                     || value.Any(char.IsControl))
                 {
                     error = "localization key 或 value 超出范围";
@@ -185,6 +212,11 @@ internal sealed class PluginLocalizationManifest
         }
     }
 
+    public bool ContainsKey(string key)
+    {
+        return Resources.Values.Any(values => values.ContainsKey(key));
+    }
+
     private static bool IsSafeResourcePath(string value)
     {
         return value.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
@@ -193,6 +225,13 @@ internal sealed class PluginLocalizationManifest
             && !value.Contains(':', StringComparison.Ordinal)
             && !value.Split('/').Any(segment => string.IsNullOrWhiteSpace(segment) || segment is "." or ".."
                 || !segment.All(ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_' or '.'));
+    }
+
+    private static HashSet<string> ExtractPlaceholders(string value)
+    {
+        return PlaceholderPattern.Matches(value)
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
     }
 
     private static bool TryCanonicalLocale(string value, out string canonical)

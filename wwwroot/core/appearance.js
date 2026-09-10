@@ -50,9 +50,9 @@ function notifyAppearanceChanged() {
 }
 
 function validateTokens(tokens = {}) {
-  if (!tokens || typeof tokens !== "object") throw new TypeError(t("ui.theme_tokens_invalid"));
+  if (!tokens || typeof tokens !== "object") throw new TypeError(t("common.theme_tokens_invalid"));
   Object.entries(tokens).forEach(([name, value]) => {
-    if (!validTokenName(name) || !validTokenValue(value)) throw new TypeError(t("ui.theme_token_invalid", { name }));
+    if (!validTokenName(name) || !validTokenValue(value)) throw new TypeError(t("common.theme_token_invalid", { name }));
   });
 }
 
@@ -90,7 +90,7 @@ function clearWallpaperTokens() {
 
 function registerTheme(name, definition = {}) {
   const key = String(name || "").trim();
-  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(key)) throw new TypeError(t("ui.theme_name_invalid"));
+  if (!/^[a-zA-Z0-9_-]{1,64}$/.test(key)) throw new TypeError(t("common.theme_name_invalid"));
   const tokens = definition.tokens || definition;
   validateTokens(tokens);
   themes.set(key, { ...definition, tokens: { ...tokens } });
@@ -219,7 +219,7 @@ function rgbToHsl(r, g, b) {
 
 // 取缩略图平均色与主色的可读性推导；结果为普通实色 token，避免透明层叠造成文字边界不清。
 export async function derivePalette(blob) {
-  if (!(blob instanceof Blob)) throw new TypeError(t("ui.wallpaper_data_invalid"));
+  if (!(blob instanceof Blob)) throw new TypeError(t("common.wallpaper_data_invalid"));
   const bitmap = await createImageBitmap(blob);
   const canvas = document.createElement("canvas");
   const size = 64;
@@ -260,7 +260,7 @@ export async function derivePalette(blob) {
 
 async function fetchAssetBlob(asset) {
   const response = await fetch(asset.url, { headers: authHeaders(), cache: "no-store" });
-  if (!response.ok) throw new Error(t("ui.wallpaper_read_failed", { status: response.status }));
+  if (!response.ok) throw new Error(t("common.wallpaper_read_failed", { status: response.status }));
   return response.blob();
 }
 
@@ -318,7 +318,7 @@ async function refreshAppearance(caller = "", rotateOnStartup = false) {
   try {
     await applyServerSnapshot(effective, pluginName);
   } catch (error) {
-    console.warn("[NexusPipeline]", t("ui.wallpaper_apply_failed"), error);
+    console.warn("[NexusPipeline]", t("common.wallpaper_apply_failed"), error);
   }
   notifyWallpaperSubscribers(effective);
   return effective;
@@ -352,7 +352,7 @@ function createWallpaperStore(pluginName) {
     save: async config => {
       const patch = { ...config, provider: { ...(config?.provider || {}), pluginName: caller, enabled: config?.provider?.enabled !== false } };
       const snapshot = await api("PUT", "/api/appearance", patch);
-      await applyServerSnapshot(snapshot, caller).catch(error => console.warn("[NexusPipeline]", t("ui.wallpaper_refresh_failed"), error));
+      await applyServerSnapshot(snapshot, caller).catch(error => console.warn("[NexusPipeline]", t("common.error.wallpaper_refresh"), error));
       return snapshot;
     },
     savePalette: async (id, palette) => {
@@ -363,7 +363,7 @@ function createWallpaperStore(pluginName) {
     startup: () => api("POST", `/api/appearance/rotation/startup${query}`),
     refresh: () => refreshAppearance(caller),
     subscribe: callback => {
-      if (typeof callback !== "function") throw new TypeError(t("ui.wallpaper_subscription_handler_invalid"));
+      if (typeof callback !== "function") throw new TypeError(t("common.error.wallpaper_subscription"));
       wallpaperSubscribers.add(callback);
       startWallpaperPolling();
       return { dispose: () => wallpaperSubscribers.delete(callback) };
@@ -373,17 +373,17 @@ function createWallpaperStore(pluginName) {
 
 export async function setWallpaper(source) {
   if (source instanceof Blob) {
-    if (source.size > 20 * 1024 * 1024) throw new Error(t("ui.wallpaper_file_too_large"));
+    if (source.size > 20 * 1024 * 1024) throw new Error(t("common.error.wallpaper_file_size"));
     await storeWallpaper(source);
     applyWallpaperUrl(URL.createObjectURL(source));
     safeStorageSet(WALLPAPER_KEY, "indexeddb");
     return;
   }
   const url = String(source || "").trim();
-  if (!url || /[\u0000-\u001f]/.test(url)) throw new TypeError(t("ui.wallpaper_url_invalid"));
+  if (!url || /[\u0000-\u001f]/.test(url)) throw new TypeError(t("common.wallpaper_url_invalid"));
   let parsed;
-  try { parsed = new URL(url, location.href); } catch { throw new TypeError(t("ui.wallpaper_url_invalid")); }
-  if (!["http:", "https:", "blob:", "data:"].includes(parsed.protocol)) throw new TypeError(t("ui.wallpaper_url_protocol_unsupported"));
+  try { parsed = new URL(url, location.href); } catch { throw new TypeError(t("common.wallpaper_url_invalid")); }
+  if (!["http:", "https:", "blob:", "data:"].includes(parsed.protocol)) throw new TypeError(t("common.error.wallpaper_url_protocol"));
   applyWallpaperUrl(parsed.href);
   safeStorageSet(WALLPAPER_KEY, parsed.href);
 }

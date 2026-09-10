@@ -12,13 +12,13 @@ export function fmtTime(value) {
 }
 
 export function statusBadge(status) {
-  if (status === "success") return `<span class="badge ok">${t("ui.success")}</span>`;
-  if (status === "partial") return `<span class="badge warn">${t("ui.partially_failed")}</span>`;
-  if (status === "running") return `<span class="badge blue">${t("ui.running")}</span>`;
-  if (status === "cancelled") return `<span class="badge warn">${t("ui.cancelled")}</span>`;
-  if (status === "skipped") return `<span class="badge blue">${t("ui.skipped")}</span>`;
-  if (status === "error") return `<span class="badge bad">${t("ui.error")}</span>`;
-  return `<span class="badge bad">${t("ui.failed")}</span>`;
+  if (status === "success") return `<span class="badge ok">${t("common.success")}</span>`;
+  if (status === "partial") return `<span class="badge warn">${t("common.partially_failed")}</span>`;
+  if (status === "running") return `<span class="badge blue">${t("common.running")}</span>`;
+  if (status === "cancelled") return `<span class="badge warn">${t("common.cancelled")}</span>`;
+  if (status === "skipped") return `<span class="badge blue">${t("common.skipped")}</span>`;
+  if (status === "error") return `<span class="badge bad">${t("common.error")}</span>`;
+  return `<span class="badge bad">${t("common.failed")}</span>`;
 }
 
 /**
@@ -31,36 +31,36 @@ export function resultDetail(record) {
   const reason = args.reason || record?.resultDetail || "-";
   switch (record?.resultCode) {
     case "run.running":
-      return t("ui.running");
+      return t("common.running");
     case "run.success":
       return fallback;
     case "run.partial":
       return fallback;
     case "run.cancelled":
-      return fallback === "-" ? t("ui.run_cancelled") : fallback;
+      return fallback === "-" ? t("common.run_cancelled") : fallback;
     case "run.daily_cap":
-      return t("ui.the_daily_success_limit_was_reached_value_value_this_run_was_skipped", args);
+      return t("common.status.daily_limit_skipped", args);
     case "run.user_unavailable":
-      return t("ui.user_value_does_not_exist_or_is_disabled", args);
+      return t("common.error.user_unavailable", args);
     case "run.spec_failed":
       return fallback;
     case "run.config_selection_required":
-      return t("ui.multiple_configurations_exist_in_the_script_directory_choose_one_in_edit_configuration_before_running");
+      return t("common.configuration.multiple_select");
     case "run.user_config_load_failed":
-      return t("ui.failed_to_load_the_user_s_configuration_value", { reason });
+      return t("common.error.user_config_load", { reason });
     case "run.retry_prepare_failed":
-      return t("ui.configuration_swap_before_retry_failed_value", { reason });
+      return t("common.error.config_swap_failed", { reason });
     case "run.max_attempts":
-      return t("ui.the_maximum_number_of_attempts_value_failed_last_reason_value", {
+      return t("common.error.attempts_exhausted", {
         maximum: args.maximum || record?.maxAttempts || "-",
         reason,
       });
     case "run.script_missing":
-      return t("ui.the_script_instance_does_not_exist_or_was_deleted");
+      return t("common.error.script_instance_deleted");
     case "run.no_enabled_users":
-      return t("ui.no_enabled_users_are_configured_for_this_script_instance_skipped");
+      return t("common.status.no_enabled_users");
     case "run.plugin_unavailable":
-      return t("ui.the_bound_value_this_run_was_skipped", { reason });
+      return t("common.status.bound_skipped", { reason });
     case "run.host_error":
       return fallback;
     case "scheduler.trigger_failed":
@@ -111,9 +111,9 @@ export function scriptPluginUnavailableMessage(script, plugins = []) {
   const status = scriptPluginStatus(script, plugins);
   if (!status.specialized || status.available) return "";
   const reason = status.missing
-    ? t("ui.specialized_plugin_value_is_not_installed_install_it_first", { name: status.displayName })
-    : t("ui.specialized_plugin_value_is_unavailable_enable_it_first", { name: status.displayName });
-  return t("ui.value_bound_to_script_instance_value", { name: script?.name || "", reason });
+    ? t("common.plugin.not_installed", { name: status.displayName })
+    : t("common.plugin.unavailable", { name: status.displayName });
+  return t("common.binding.status", { name: script?.name || "", reason });
 }
 
 /** 脚本主程序图标加载失败时的通用占位图（内联 SVG，主题无关）。 */

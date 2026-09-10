@@ -19,22 +19,22 @@ export async function pageSettings(token) {
   navActive("settings"); setTopbarTitle(t("shell.settings", {}, "Settings"));
   let data;
   try { data = await api("GET", "/api/settings"); }
-  catch (error) { render(`<div class="empty"><strong>${t("ui.failed_to_load_settings")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("settings.error.load")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("settings", token)) return;
   state.settings = data.settings;
   const settings = data.settings;
   const remote = data.status && data.status.remote;
   const lanList = (remote && remote.lanAddresses && remote.lanAddresses.length)
-    ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">${t("ui.lan_address")}</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
+    ? remote.lanAddresses.map(addr => `<div class="kv"><span class="k">${t("settings.lan_address")}</span><span>http://${esc(addr)}:${settings.webPort}/</span></div>`).join("")
     : "";
   openSettingsPanel = "service";
-  render(pageHeader(t("settings.title", {}, "System settings"), t("shell.settings", {}, "Settings"), t("ui.manage_service_behavior_notifications_remote_access_proxy_and_update_settings_in_one_place")) + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
-    ${settingsCardMarkup("service", "ui.service_behavior", "ui.service_startup_history_and_log_options", serviceSettingsMarkup(settings), "service-settings")}
-    ${settingsCardMarkup("notifications", "ui.notification_channels", "ui.webhook_and_smtp_notification_settings", notificationSettingsMarkup(settings), "notification-settings")}
-    ${settingsCardMarkup("remote-mcp", "ui.remote_access_and_mcp", "ui.remote_management_entry_points_and_the_local_agent_service", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
-    ${settingsCardMarkup("network", "ui.network_proxy", "ui.host_external_http_https_requests", networkSettingsMarkup(settings), "network-settings")}
-    ${settingsCardMarkup("updates", "ui.update_settings", "ui.update_channel_checks_and_apply_actions", updateSectionMarkup(settings), "update-section")}
-    ${settingsCardMarkup("diagnostics", "ui.system_diagnostics", "ui.check_the_runtime_environment_recovery_state_and_plugin_status", diagnosticsSettingsMarkup(), "diagnostics-settings")}
+  render(pageHeader(t("settings.title", {}, "System settings"), t("shell.settings", {}, "Settings"), t("settings.page.help")) + restartNoticeMarkup(settings) + `<div class="settings-cards" data-testid="settings-cards">
+    ${settingsCardMarkup("service", "settings.service_behavior", "settings.service.options_help", serviceSettingsMarkup(settings), "service-settings")}
+    ${settingsCardMarkup("notifications", "settings.notification_channels", "settings.notification.channels_help", notificationSettingsMarkup(settings), "notification-settings")}
+    ${settingsCardMarkup("remote-mcp", "settings.remote_access.mcp", "settings.remote_access.management_help", remoteMcpSettingsMarkup(settings, lanList), "mcp-settings")}
+    ${settingsCardMarkup("network", "settings.network_proxy", "settings.network.external_requests", networkSettingsMarkup(settings), "network-settings")}
+    ${settingsCardMarkup("updates", "settings.update_settings", "settings.update.channel_help", updateSectionMarkup(settings), "update-section")}
+    ${settingsCardMarkup("diagnostics", "settings.system_diagnostics", "settings.diagnostics.check_help", diagnosticsSettingsMarkup(), "diagnostics-settings")}
     ${pluginSlotMarkup("settings.cards", "settings.cards", "settings-cards-plugin-slot", { mode: "settings" })}
   </div>${pluginSlotMarkup("settings.sections", "settings.sections", "settings-plugin-slot", { mode: "settings" })}`);
   await renderPluginSlots(document.querySelector("#view"));
@@ -85,49 +85,49 @@ function toggleSettingsPanel(panelId) {
 function restartNoticeMarkup(settings) {
   if (!restartRequired) return "";
   const disabled = settings.lightweightMode;
-  return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>${t("ui.settings_that_require_a_service_restart_have_been_saved")}</p>${disabled ? `<span class="muted">${t("ui.in_lightweight_mode_restart_the_program_manually")}</span>` : `<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">${t("ui.restart_service")}</button>`}</section>`;
+  return `<section id="restart-notice" class="dashboard-system-note" role="status" aria-live="polite"><p>${t("settings.service.restart_saved")}</p>${disabled ? `<span class="muted">${t("settings.service.lightweight_restart")}</span>` : `<button class="primary" type="button" data-action="restart-service" data-testid="restart-service">${t("settings.restart_service")}</button>`}</section>`;
 }
 
 function serviceSettingsMarkup(settings) {
   const locale = getLocale();
   const localeOptions = getLocaleOptions().map(item => ({ value: item.id, label: item.nativeName }));
   return `<div class="settings-list">
-    ${switchControl("st-autostart", t("ui.start_with_windows"), t("ui.register_in_the_current_user_s_startup_items"), settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
-    ${switchControl("st-lightweight", t("ui.lightweight_mode"), t("ui.do_not_start_the_web_service_takes_effect_after_restart"), settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
-    ${switchControl("st-browser", t("ui.open_browser"), t("ui.open_the_console_automatically_when_the_service_starts"), settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
-  </div><div class="settings-service-fields" data-help="${t("ui.log_level_changes_apply_immediately_web_port_changes_require_a_service_restart")}"><div class="form-grid settings-service-grid settings-service-grid-primary">${valueField("st-retention", t("ui.history_retention_days"), settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", t("ui.web_port"), settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", t("ui.log_level"), settings.logLevel || "info", [{ value: "debug", label: t("ui.log_level_debug") }, { value: "info", label: t("ui.log_level_info") }, { value: "warn", label: t("ui.log_level_warn") }, { value: "error", label: t("ui.log_level_error") }, { value: "fatal", label: t("ui.log_level_fatal") }])}</div><div class="form-grid settings-service-grid settings-service-grid-locale">${selectField("settings-locale", t("settings.language", {}, "Interface language"), locale, localeOptions, 'data-action="change-locale"', t("settings.language_help", {}, "Language preference is stored in this browser only"))}${selectField("st-host-locale", t("settings.host_language", {}, "Host language"), settings.hostLocale || "zh-CN", localeOptions, "", t("settings.host_language_help", {}, "Controls CLI, tray, notifications, and background logs."))}</div></div>${settings.lightweightMode ? `<p class="callout callout-warning">${t("ui.lightweight_mode_did_not_start_the_web_service_restart_manually")}</p>` : ""}`;
+    ${switchControl("st-autostart", t("settings.start_with_windows"), t("settings.service.startup_registration"), settings.autoStart, "toggle-st-flag", 'data-flag="st-autostart"')}
+    ${switchControl("st-lightweight", t("settings.lightweight_mode"), t("settings.service.web_disabled"), settings.lightweightMode, "toggle-st-flag", 'data-flag="st-lightweight" data-restart-required="true"')}
+    ${switchControl("st-browser", t("settings.open_browser"), t("settings.service.console_startup"), settings.autoOpenBrowser, "toggle-st-flag", 'data-flag="st-browser"')}
+  </div><div class="settings-service-fields" data-help="${t("settings.service.restart_requirements")}"><div class="form-grid settings-service-grid settings-service-grid-primary">${valueField("st-retention", t("settings.history_retention_days"), settings.historyRetentionDays, "number", 'min="1" max="180"')}${valueField("st-port", t("settings.web_port"), settings.webPort, "number", 'min="1024" max="65535"')}${selectField("st-loglevel", t("settings.log_level"), settings.logLevel || "info", [{ value: "debug", label: t("settings.log_level_debug") }, { value: "info", label: t("settings.log_level_info") }, { value: "warn", label: t("settings.log_level_warn") }, { value: "error", label: t("settings.log_level_error") }, { value: "fatal", label: t("settings.log_level_fatal") }])}</div><div class="form-grid settings-service-grid settings-service-grid-locale">${selectField("settings-locale", t("settings.language", {}, "Interface language"), locale, localeOptions, 'data-action="change-locale"', t("settings.language_help", {}, "Language preference is stored in this browser only"))}${selectField("st-host-locale", t("settings.host_language", {}, "Host language"), settings.hostLocale || "zh-CN", localeOptions, "", t("settings.host_language_help", {}, "Controls CLI, tray, notifications, and background logs."))}</div></div>${settings.lightweightMode ? `<p class="callout callout-warning">${t("settings.service.lightweight_not_started")}</p>` : ""}`;
 }
 
 function remoteMcpSettingsMarkup(settings, lanList) {
   const port = Number(settings.mcpPort) || 58732;
   return `<div class="settings-merged-content">
-    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", t("ui.remote_access"), t("ui.bind_to_all_network_interfaces_the_api_requires_an_access_token_while_local_127_0_0_1_requests_are_exempt"), settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}</div><div class="field-btn-row">${valueField("st-token", t("ui.access_token"), "", "password", `autocomplete="new-password" placeholder="${t("ui.leave_blank_to_keep")}"`, t("ui.leave_blank_to_keep_the_current_token"))}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">${t("ui.show")}</button><button type="button" class="ghost" data-action="copy-token">${t("ui.copy")}</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">${t("ui.generate_token")}</button></div><div id="remote-lan-list" class="detail"${settings.allowRemoteAccess ? ` data-help="${t("ui.lan_address_help")}"` : ""}>${lanList}</div><p class="callout callout-warning">${t("ui.remote_access_warning")}</p></section>
+    <section class="settings-subsection remote-settings"><div class="settings-list">${switchControl("st-remote", t("settings.remote_access"), t("settings.remote_access.bind_all_help"), settings.allowRemoteAccess, "toggle-st-flag", 'data-flag="st-remote" data-restart-required="true"')}</div><div class="field-btn-row">${valueField("st-token", t("settings.access_token"), "", "password", `autocomplete="new-password" placeholder="${t("common.leave_blank_to_keep")}"`, t("settings.remote_access.token_keep_help"))}<button type="button" class="ghost" data-action="toggle-token-visibility" data-testid="toggle-token-visibility" aria-pressed="false">${t("common.show")}</button><button type="button" class="ghost" data-action="copy-token">${t("settings.copy")}</button><button type="button" class="ghost" data-action="gen-token" data-testid="gen-token">${t("settings.generate_token")}</button></div><div id="remote-lan-list" class="detail"${settings.allowRemoteAccess ? ` data-help="${t("settings.remote_access.lan_help_short")}"` : ""}>${lanList}</div><p class="callout callout-warning">${t("settings.remote_access.warning")}</p></section>
     <section class="settings-subsection mcp-settings"><div class="settings-list">
-    ${switchControl("st-mcp-enabled", t("ui.enable_mcp_service"), t("ui.listen_on_the_local_mcp_endpoint_after_restart"), settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
-  </div><div class="form-grid settings-single-field" data-help="${t("ui.endpoint_http_127_0_0_1_value_mcp_port_and_tool_permission_changes_require_a_restart_if_the_port_is_occupied_mcp_remains_unavailable_while_the_control_api_continues_running", { port })}">${valueField("st-mcp-port", t("ui.mcp_port"), port, "number", 'min="1024" max="65535"')}</div></section>
+    ${switchControl("st-mcp-enabled", t("settings.enable_mcp_service"), t("settings.remote_access.mcp_listen_help"), settings.mcpEnabled, "toggle-st-flag", 'data-flag="st-mcp-enabled" data-restart-required="true"')}
+  </div><div class="form-grid settings-single-field" data-help="${t("settings.remote_access.mcp_endpoint_help", { port })}">${valueField("st-mcp-port", t("settings.mcp_port"), port, "number", 'min="1024" max="65535"')}</div></section>
   </div>`;
 }
 
 function networkSettingsMarkup(settings) {
   const mode = settings.proxyMode || "none";
   const customHidden = mode === "http" ? "" : " hidden";
-  return `<div class="network-settings" data-help="${t("ui.network_proxy_help")}">
-    ${selectField("st-proxy-mode", t("ui.proxy_mode"), mode, [{ value: "none", label: t("ui.no_proxy") }, { value: "system", label: t("ui.use_system_settings") }, { value: "http", label: t("ui.http_https_proxy") }], 'data-action="toggle-proxy-fields"')}
+  return `<div class="network-settings" data-help="${t("settings.network_proxy_help")}">
+    ${selectField("st-proxy-mode", t("settings.proxy_mode"), mode, [{ value: "none", label: t("settings.no_proxy") }, { value: "system", label: t("settings.use_system_settings") }, { value: "http", label: t("settings.http_https_proxy") }], 'data-action="toggle-proxy-fields"')}
     <div id="st-proxy-custom" class="proxy-custom-fields"${customHidden}>
-      ${valueField("st-proxy-url", t("ui.http_https_proxy_address"), settings.proxyUrl || "", "text", 'placeholder="http://127.0.0.1:7890"', t("ui.the_proxy_address_must_include_http_or_https"))}
-      ${valueField("st-proxy-user", t("ui.username_optional"), settings.proxyUsername || "")}
-      <div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_proxy_password")}"><label class="field-label" for="st-proxy-pwd">${t("ui.password_optional")} ${settings.proxyPassword ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-proxy-pwd" type="password" autocomplete="new-password" placeholder="${settings.proxyPassword ? t("ui.leave_blank_to_keep") : ""}"></div>
+      ${valueField("st-proxy-url", t("settings.http_https_proxy_address"), settings.proxyUrl || "", "text", 'placeholder="http://127.0.0.1:7890"', t("settings.validation.proxy_scheme"))}
+      ${valueField("st-proxy-user", t("settings.username_optional"), settings.proxyUsername || "")}
+      <div class="field" data-help="${t("settings.network.proxy_password_keep")}"><label class="field-label" for="st-proxy-pwd">${t("settings.password_optional")} ${settings.proxyPassword ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-proxy-pwd" type="password" autocomplete="new-password" placeholder="${settings.proxyPassword ? t("common.leave_blank_to_keep") : ""}"></div>
     </div>
   </div>`;
 }
 
 function notificationSettingsMarkup(settings) {
   const body = `<div class="notification-settings">
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook ${t("ui.notifications")}</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? t("ui.enabled") : t("ui.disabled")}</span></button>
-    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", t("ui.enable_webhook"), t("ui.send_run_status_to_the_webhook_service"), settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", t("ui.send_screenshots"), t("ui.script_completion_notifications_include_selected_screenshots_queue_summaries_do_not_include_screenshots"), settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", t("ui.webhook_type"), settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-webhook-fields"')} ${valueField("st-whtimeout", t("ui.timeout_seconds"), settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_webhook_url")}"><label class="field-label" for="st-whurl">${t("ui.webhook_address")} ${settings.webhookUrl ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? t("ui.leave_blank_to_keep") : "https://…"}"></div><div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_webhook_signing_secret")}"><label class="field-label" for="st-whsec">${t("ui.webhook_signing_secret")} ${settings.webhookSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div>${webhookAdvancedMarkup(settings)}<div id="st-whtpl-box" class="field" data-help="${t("ui.value_value_value_value_and_value_in_the_json_template_are_replaced_with_their_corresponding_values")}" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">${t("ui.generic_custom_template")}</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
-    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP ${t("ui.smtp_email_notifications")}</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? t("ui.enabled") : t("ui.disabled")}</span></button>
-    <div id="panel-smtp" class="panel-body" hidden><div class="settings-list">${switchControl("st-smtp-enabled", t("ui.enable_smtp"), t("ui.send_run_status_by_email"), settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}${switchControl("st-smtp-screenshot", t("ui.send_screenshots"), t("ui.script_completion_notifications_include_selected_screenshots_queue_summaries_do_not_include_screenshots"), settings.smtpScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-smtp-screenshot"')}</div><div class="form-grid three">${valueField("st-host", t("ui.smtp_server"), settings.smtpHost)}${valueField("st-port2", t("ui.port"), settings.smtpPort, "number")}${selectField("st-secure", t("ui.encryption"), settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", t("ui.account"), settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">${t("ui.smtp_password")} ${settings.smtpPassword ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? t("ui.leave_blank_to_keep") : ""}"></div></div><div class="form-grid">${valueField("st-to", t("ui.recipients_comma_separated"), settings.smtpTo)}${valueField("st-from", t("ui.from_address_blank_account"), settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", t("ui.subject_prefix"), settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", t("ui.timeout_seconds"), settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
-    <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">${t("ui.test_notifications")}</button></div>
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-wh" aria-expanded="true" aria-controls="panel-wh"><span class="panel-arrow" id="arrow-wh">▾</span><span class="panel-label">Webhook ${t("common.notifications")}</span><span class="badge ${settings.webhookEnabled ? "ok" : "muted"}">${settings.webhookEnabled ? t("common.enabled") : t("common.disabled")}</span></button>
+    <div id="panel-wh" class="panel-body"><div class="settings-list">${switchControl("st-wh-enabled", t("settings.enable_webhook"), t("settings.notification.webhook_status"), settings.webhookEnabled, "toggle-notify-flag", 'data-flag="st-wh-enabled"')}${switchControl("st-wh-screenshot", t("settings.send_screenshots"), t("settings.notification.screenshot_scope"), settings.webhookScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-wh-screenshot"')}</div><div class="form-grid">${selectField("st-whtype", t("settings.webhook_type"), settings.webhookType, [{ value: "feishu", label: "Feishu" }, { value: "dingtalk", label: "Dingtalk" }, { value: "wecom", label: "WeCom" }, { value: "slack", label: "Slack" }, { value: "discord", label: "Discord" }, { value: "generic", label: "Generic" }], 'data-action="toggle-webhook-fields"')} ${valueField("st-whtimeout", t("settings.timeout_seconds"), settings.webhookTimeout || 30, "number", 'min="1"')}</div><div class="form-grid"><div class="field" data-help="${t("settings.notification.webhook_url_keep")}"><label class="field-label" for="st-whurl">${t("settings.webhook_address")} ${settings.webhookUrl ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-whurl" type="text" placeholder="${settings.webhookUrl ? t("common.leave_blank_to_keep") : "https://…"}"></div><div class="field" data-help="${t("settings.notification.secret_keep")}"><label class="field-label" for="st-whsec">${t("settings.webhook_signing_secret")} ${settings.webhookSecret ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-whsec" type="password" placeholder="${settings.webhookSecret ? t("common.leave_blank_to_keep") : ""}"></div></div>${webhookAdvancedMarkup(settings)}<div id="st-whtpl-box" class="field" data-help="${t("settings.notification.template_help")}" ${settings.webhookType === "generic" ? "" : "hidden"}><label class="field-label" for="st-whtpl">${t("settings.notification.custom_template")}</label><textarea id="st-whtpl">${esc(settings.webhookTemplate || "")}</textarea></div></div>
+    <button class="panel-toggle" type="button" data-action="toggle-panel" data-panel="panel-smtp" aria-expanded="false" aria-controls="panel-smtp"><span class="panel-arrow" id="arrow-smtp">▸</span><span class="panel-label">SMTP ${t("settings.notification.smtp")}</span><span class="badge ${settings.smtpEnabled ? "ok" : "muted"}">${settings.smtpEnabled ? t("common.enabled") : t("common.disabled")}</span></button>
+    <div id="panel-smtp" class="panel-body" hidden><div class="settings-list">${switchControl("st-smtp-enabled", t("settings.enable_smtp"), t("settings.notification.email_status"), settings.smtpEnabled, "toggle-notify-flag", 'data-flag="st-smtp-enabled"')}${switchControl("st-smtp-screenshot", t("settings.send_screenshots"), t("settings.notification.screenshot_scope"), settings.smtpScreenshotEnabled, "toggle-notify-flag", 'data-flag="st-smtp-screenshot"')}</div><div class="form-grid three">${valueField("st-host", t("settings.smtp_server"), settings.smtpHost)}${valueField("st-port2", t("settings.port"), settings.smtpPort, "number")}${selectField("st-secure", t("settings.encryption"), settings.smtpSecure, ["auto", "ssl", "starttls", "none"])}</div><div class="form-grid">${valueField("st-user", t("common.account"), settings.smtpUser)}<div class="field"><label class="field-label" for="st-pwd">${t("settings.smtp_password")} ${settings.smtpPassword ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-pwd" type="password" placeholder="${settings.smtpPassword ? t("common.leave_blank_to_keep") : ""}"></div></div><div class="form-grid">${valueField("st-to", t("settings.notification.recipients_help"), settings.smtpTo)}${valueField("st-from", t("settings.from_address_blank_account"), settings.smtpFrom)}</div><div class="form-grid">${valueField("st-subject", t("settings.subject_prefix"), settings.smtpSubjectPrefix)}${valueField("st-smtp-timeout", t("settings.timeout_seconds"), settings.smtpTimeout || 30, "number", 'min="1"')}</div></div>
+    <div class="modal-footer-inline plain"><button class="ghost" type="button" data-action="test-notify">${t("settings.test_notifications")}</button></div>
   </div>`;
   return body.replaceAll("▾", icon("chevronDown", "icon panel-arrow-icon")).replaceAll("▸", icon("chevronRight", "icon panel-arrow-icon"));
 }
@@ -135,9 +135,9 @@ function notificationSettingsMarkup(settings) {
 function webhookAdvancedMarkup(settings) {
   const type = settings.webhookType || "feishu";
   const hidden = name => type === name ? "" : " hidden";
-  return `<div class="webhook-advanced-fields" data-webhook-advanced="feishu"${hidden("feishu")}><div class="form-grid">${valueField("st-feishu-appid", t("ui.feishu_app_id"), settings.feishuAppId || "", "text", "", t("ui.credentials_for_the_custom_app_used_to_upload_images"))}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_app_secret")}"><label class="field-label" for="st-feishu-secret">Feishu App Secret ${settings.feishuAppSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-feishu-secret" type="password" placeholder="${settings.feishuAppSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div></div>
-    <div class="webhook-advanced-fields" data-webhook-advanced="slack"${hidden("slack")}><div class="form-grid">${valueField("st-slack-channel", t("ui.slack_channel_id"), settings.slackChannelId || "", "text", "", t("ui.the_bot_must_already_be_a_member_of_this_channel"))}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_bot_token")}"><label class="field-label" for="st-slack-token">${t("ui.slack_bot_token")} ${settings.slackBotToken ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-slack-token" type="password" placeholder="${settings.slackBotToken ? t("ui.leave_blank_to_keep") : "xoxb-…"}"></div></div></div>
-    <div class="webhook-advanced-fields" data-webhook-advanced="dingtalk"${hidden("dingtalk")}><div class="form-grid">${valueField("st-dingtalk-key", t("ui.dingtalk_app_key"), settings.dingTalkAppKey || "")}${valueField("st-dingtalk-robot", t("ui.dingtalk_robot_code"), settings.dingTalkRobotCode || "")}</div><div class="form-grid">${valueField("st-dingtalk-conversation", t("ui.dingtalk_open_conversation_id"), settings.dingTalkOpenConversationId || "")}<div class="field" data-help="${t("ui.leave_blank_to_keep_the_saved_app_secret")}"><label class="field-label" for="st-dingtalk-secret">${t("ui.dingtalk_app_secret")} ${settings.dingTalkAppSecret ? `<span class="badge ok">${t("ui.set")}</span>` : ""}</label><input id="st-dingtalk-secret" type="password" placeholder="${settings.dingTalkAppSecret ? t("ui.leave_blank_to_keep") : ""}"></div></div></div>`;
+  return `<div class="webhook-advanced-fields" data-webhook-advanced="feishu"${hidden("feishu")}><div class="form-grid">${valueField("st-feishu-appid", t("settings.feishu_app_id"), settings.feishuAppId || "", "text", "", t("settings.notification.image_credentials"))}<div class="field" data-help="${t("settings.notification.app_secret_keep")}"><label class="field-label" for="st-feishu-secret">Feishu App Secret ${settings.feishuAppSecret ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-feishu-secret" type="password" placeholder="${settings.feishuAppSecret ? t("common.leave_blank_to_keep") : ""}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="slack"${hidden("slack")}><div class="form-grid">${valueField("st-slack-channel", t("settings.slack_channel_id"), settings.slackChannelId || "", "text", "", t("settings.notification.bot_member_help"))}<div class="field" data-help="${t("settings.notification.bot_token_keep")}"><label class="field-label" for="st-slack-token">${t("settings.slack_bot_token")} ${settings.slackBotToken ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-slack-token" type="password" placeholder="${settings.slackBotToken ? t("common.leave_blank_to_keep") : "xoxb-…"}"></div></div></div>
+    <div class="webhook-advanced-fields" data-webhook-advanced="dingtalk"${hidden("dingtalk")}><div class="form-grid">${valueField("st-dingtalk-key", t("settings.dingtalk_app_key"), settings.dingTalkAppKey || "")}${valueField("st-dingtalk-robot", t("settings.dingtalk_robot_code"), settings.dingTalkRobotCode || "")}</div><div class="form-grid">${valueField("st-dingtalk-conversation", t("settings.dingtalk_open_conversation_id"), settings.dingTalkOpenConversationId || "")}<div class="field" data-help="${t("settings.notification.app_secret_keep")}"><label class="field-label" for="st-dingtalk-secret">${t("settings.dingtalk_app_secret")} ${settings.dingTalkAppSecret ? `<span class="badge ok">${t("common.set")}</span>` : ""}</label><input id="st-dingtalk-secret" type="password" placeholder="${settings.dingTalkAppSecret ? t("common.leave_blank_to_keep") : ""}"></div></div></div>`;
 }
 
 /** 更新区：设置（自动检查/渠道/镜像源）与检查 / 下载 / 应用状态区。 */
@@ -146,16 +146,16 @@ function updateSectionMarkup(settings) {
   const autoEnabled = checkEnabled && settings.updateAutoApplyEnabled === true;
   const autoExtra = `data-flag="st-update-auto" aria-disabled="${checkEnabled ? "false" : "true"}"${checkEnabled ? "" : " disabled"}`;
   return `<div class="update-section">
-    <div class="settings-list">${switchControl("st-update-check", t("ui.check_for_updates_periodically"), t("ui.check_about_5_seconds_after_service_startup_then_every_12_hours"), checkEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}${switchControl("st-update-auto", t("ui.update_automatically_when_idle"), t("ui.download_new_versions_automatically_then_update_and_restart_when_the_host_is_idle_and_no_run_is_scheduled_within_the_next_5_minutes"), autoEnabled, "toggle-update-flag", autoExtra)}</div>
-    <div class="form-grid">${selectField("st-update-channel", t("ui.update_channel"), settings.updateChannel, [{ value: "prerelease", label: t("ui.pre_release") }, { value: "stable", label: t("ui.stable") }])}${valueField("st-update-source", t("ui.mirror_url"), settings.updateSourceUrl, "text", `placeholder="${t("ui.default_github")}"`, t("ui.leave_blank_to_use_the_default_github_update_source"))}</div>
+    <div class="settings-list">${switchControl("st-update-check", t("settings.update.periodic"), t("settings.update.check_schedule"), checkEnabled, "toggle-update-flag", 'data-flag="st-update-check"')}${switchControl("st-update-auto", t("settings.update_automatically_when_idle"), t("settings.update.auto_download_help"), autoEnabled, "toggle-update-flag", autoExtra)}</div>
+    <div class="form-grid">${selectField("st-update-channel", t("settings.update_channel"), settings.updateChannel, [{ value: "prerelease", label: t("settings.pre_release") }, { value: "stable", label: t("settings.stable") }])}${valueField("st-update-source", t("settings.mirror_url"), settings.updateSourceUrl, "text", `placeholder="${t("settings.default_github")}"`, t("settings.update.source_default_help"))}</div>
     <div id="update-status-box" class="update-status" data-testid="update-status"></div>
   </div>`;
 }
 
 function diagnosticsSettingsMarkup() {
   return `<div class="diagnostics-section">
-    <div class="row-actions"><button class="ghost" type="button" data-action="load-diagnostics" data-testid="load-diagnostics">${t("ui.refresh_diagnostics")}</button><button class="ghost" type="button" data-action="export-diagnostics" data-testid="export-diagnostics">${t("ui.export_redacted_diagnostics")}</button></div>
-    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite"><p class="muted">${t("ui.loading_diagnostics")}</p></div>
+    <div class="row-actions"><button class="ghost" type="button" data-action="load-diagnostics" data-testid="load-diagnostics">${t("settings.refresh_diagnostics")}</button><button class="ghost" type="button" data-action="export-diagnostics" data-testid="export-diagnostics">${t("settings.diagnostics.export_help")}</button></div>
+    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite"><p class="muted">${t("settings.loading_diagnostics")}</p></div>
   </div>`;
 }
 
@@ -204,8 +204,8 @@ function renderDiagnostics(data) {
   const overall = data?.overallStatus || "warn";
   const attentionCount = checks.filter(check => check?.status === "warn" || check?.status === "fail").length;
   const attentionText = attentionCount
-    ? t("ui.value_item_s_need_attention", { count: attentionCount })
-    : t("ui.all_passed_or_were_skipped_by_condition");
+    ? t("settings.diagnostics.attention_summary", { count: attentionCount })
+    : t("settings.diagnostics.all_passed_suffix");
   const rows = checks.map(check => {
     const summary = diagnosticMessage(check.summaryCode, check.summaryArgs, diagnosticStatusLabel(check.status));
     const detail = diagnosticMessage(check.detailCode, check.detailArgs, "");
@@ -216,7 +216,7 @@ function renderDiagnostics(data) {
       <div class="diagnostic-check-info" role="cell"><div class="diagnostic-check-summary"><span class="diagnostic-info-label">${esc(t("diagnostics.summary", {}, "Summary"))}</span><span>${esc(summary)}</span></div>${detail ? `<div class="diagnostic-check-detail"><span class="diagnostic-info-label">${esc(t("diagnostics.detail", {}, "Details"))}</span><span>${esc(detail)}</span></div>` : ""}${remediation ? `<div class="diagnostic-check-remediation"><span class="diagnostic-info-label">${esc(t("diagnostics.remediation", {}, "Recommendation"))}</span><span>${esc(remediation)}</span></div>` : ""}</div>
     </div>`;
   }).join("");
-  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">${esc(t("diagnostics.overall", {}, "Overall status"))}</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} ${t("ui.checks")}${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="${esc(t("ui.system_diagnostic_checks"))}"><div class="diagnostics-table-header" role="row"><span role="columnheader">${t("ui.check")}</span><span role="columnheader">${t("ui.status")}</span><span role="columnheader">${t("ui.diagnostics")}</span></div>${rows || `<div class="diagnostics-empty" role="row">${esc(t("diagnostics.empty", {}, "No diagnostic results"))}</div>`}</div>`;
+  box.innerHTML = `<div class="diagnostics-overview"><div class="diagnostics-overview-status"><span class="diagnostics-overview-label">${esc(t("diagnostics.overall", {}, "Overall status"))}</span><span class="badge ${diagnosticStatusClass(overall)}">${esc(diagnosticStatusLabel(overall))}</span><span class="muted">v${esc(data?.hostVersion || "")}</span></div><span class="muted diagnostics-overview-meta">${checks.length} ${t("settings.checks")}${attentionText}</span></div><div class="diagnostics-table" role="table" aria-label="${esc(t("settings.diagnostics.system_checks"))}"><div class="diagnostics-table-header" role="row"><span role="columnheader">${t("common.check")}</span><span role="columnheader">${t("common.status")}</span><span role="columnheader">${t("settings.diagnostics")}</span></div>${rows || `<div class="diagnostics-empty" role="row">${esc(t("diagnostics.empty", {}, "No diagnostic results"))}</div>`}</div>`;
   applyTranslations(box);
 }
 
@@ -229,7 +229,7 @@ async function loadDiagnostics(token = state.routeToken) {
     renderDiagnostics(data);
   } catch (error) {
     if (box) {
-      box.innerHTML = `<p class="callout callout-warning">${esc(error.message || t("ui.failed_to_load_diagnostics"))}</p>`;
+      box.innerHTML = `<p class="callout callout-warning">${esc(error.message || t("settings.diagnostics.load_failed"))}</p>`;
       applyTranslations(box);
     }
   }
@@ -238,7 +238,7 @@ async function loadDiagnostics(token = state.routeToken) {
 async function exportDiagnostics() {
   try {
     const result = await api("POST", "/api/diagnostics/export");
-    toast(t("ui.diagnostic_package_exported_value", { path: result.path || t("ui.generated") }));
+    toast(t("settings.diagnostics.exported", { path: result.path || t("settings.generated") }));
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -260,7 +260,7 @@ function notifyAutomaticUpdate(data) {
   const key = `${data.latest}|${data.channel || ""}`;
   if (key === updateAutoNoticeKey) return;
   updateAutoNoticeKey = key;
-  toast(t("ui.new_version_vvalue_available", { version: data.latest }));
+  toast(t("settings.update.version_available", { version: data.latest }));
 }
 
 function updateStatusPollDelay(data = {}) {
@@ -293,17 +293,17 @@ function renderUpdateStatus(data) {
   const box = $("#update-status-box");
   if (!box) return;
   if (!data) {
-    box.innerHTML = `<p class="muted update-state-copy">${t("ui.loading_update_status")}</p>`;
+    box.innerHTML = `<p class="muted update-state-copy">${t("settings.update.status_loading")}</p>`;
     applyTranslations(box);
     return;
   }
   const state = data.state || "idle";
   const current = data.current || "—";
-  const channelText = data.channel === "stable" ? t("ui.stable") : t("ui.pre_release");
+  const channelText = data.channel === "stable" ? t("settings.stable") : t("settings.pre_release");
   const actions = updateActionsMarkup(data);
   let progress = "";
   if (state === "downloading" && typeof data.progress === "number") {
-    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="${esc(t("ui.download_progress"))}"><div data-progress="${data.progress}"></div></div>`;
+    progress = `<div class="progress-line" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${data.progress}" aria-label="${esc(t("settings.download_progress"))}"><div data-progress="${data.progress}"></div></div>`;
   }
   let notes = "";
   if (data.notes) {
@@ -311,25 +311,25 @@ function renderUpdateStatus(data) {
     notes = `<p class="update-notes">${esc(text)}</p>`;
   }
   let stateText = "";
-  if (state === "checking") stateText = `<p class="muted update-state-copy">${t("ui.checking_for_updates_5d4de917")}</p>`;
-  else if (state === "downloading") stateText = `<p class="muted update-state-copy">${t(data.automation?.autoUpdateEnabled === true ? "ui.a_new_version_was_found_downloading_and_verifying_the_package_automatically" : "ui.downloading_and_verifying_the_package")}</p>`;
-  else if (state === "ready" && data.automation?.waitingForIdle === true) stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_ready_and_waiting_for_the_host_to_become_idle_before_applying")}</p>`;
-  else if (state === "ready") stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_ready_confirm_that_no_tasks_are_running_before_applying_it")}</p>`;
-  else if (state === "applypending") stateText = `<p class="muted update-state-copy">${t("ui.the_update_is_queued_and_will_be_applied_at_the_next_startup")}</p>`;
-  else if (state === "applying") stateText = `<p class="muted update-state-copy">${t("ui.applying_the_update_automatically_the_service_will_restart_soon")}</p>`;
-  else if (state === "recoverypending") stateText = `<p class="callout callout-warning">${t("ui.an_incomplete_update_recovery_state_was_found_restart_the_service_to_finish_recovery_then_check_again")}</p>`;
-  else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">${t("ui.new_version_vvaluevalue", { version: esc(data.latest), channel: data.prerelease ? t("ui.pre_release") : "" })}</p>`;
-  else if (state === "idle" && !data.checked && data.automation?.checkEnabled === true) stateText = `<p class="muted update-state-copy">${t("ui.waiting_for_the_first_automatic_check_which_runs_about_5_seconds_after_service_startup")}</p>`;
-  else if (state === "idle" && !data.checked) stateText = `<p class="muted update-state-copy">${t("ui.updates_have_not_been_checked_yet")}</p>`;
+  if (state === "checking") stateText = `<p class="muted update-state-copy">${t("settings.update.checking")}</p>`;
+  else if (state === "downloading") stateText = `<p class="muted update-state-copy">${t(data.automation?.autoUpdateEnabled === true ? "settings.update.download_starting" : "settings.update.downloading")}</p>`;
+  else if (state === "ready" && data.automation?.waitingForIdle === true) stateText = `<p class="muted update-state-copy">${t("settings.update.ready_idle")}</p>`;
+  else if (state === "ready") stateText = `<p class="muted update-state-copy">${t("settings.update.ready_confirm")}</p>`;
+  else if (state === "applypending") stateText = `<p class="muted update-state-copy">${t("settings.update.queued")}</p>`;
+  else if (state === "applying") stateText = `<p class="muted update-state-copy">${t("settings.update.applying")}</p>`;
+  else if (state === "recoverypending") stateText = `<p class="callout callout-warning">${t("settings.update.recovery_pending_help")}</p>`;
+  else if (state === "idle" && data.available) stateText = `<p class="muted update-state-copy">${t("settings.update.version", { version: esc(data.latest), channel: data.prerelease ? t("settings.pre_release") : "" })}</p>`;
+  else if (state === "idle" && !data.checked && data.automation?.checkEnabled === true) stateText = `<p class="muted update-state-copy">${t("settings.update.waiting_check")}</p>`;
+  else if (state === "idle" && !data.checked) stateText = `<p class="muted update-state-copy">${t("settings.update.not_checked")}</p>`;
   else if (state === "idle" && !data.available && data.errorCode) stateText = `<p class="callout callout-warning">${esc(t(`api.error.${data.errorCode}`, {}, data.errorCode))}</p>`;
-  else if (state === "idle") stateText = `<p class="muted update-state-copy">${t("ui.you_are_running_the_latest_version")}</p>`;
+  else if (state === "idle") stateText = `<p class="muted update-state-copy">${t("settings.update.latest")}</p>`;
   const idleReason = state === "ready" && data.automation?.waitingForIdle && data.automation.idleBlockCode
-    ? `<p class="muted update-state-copy">${t("ui.waiting_value", { reason: esc(t(`update.idle.${data.automation.idleBlockCode}`, {}, data.automation.idleBlockCode)) })}</p>`
+    ? `<p class="muted update-state-copy">${t("settings.update.waiting_reason", { reason: esc(t(`settings.update_idle.${data.automation.idleBlockCode}`, {}, data.automation.idleBlockCode)) })}</p>`
     : "";
   const backupWarning = state === "ready"
-    ? `<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">${t("ui.back_up_runtime_data_such_as_config_data_history_logs_plugins_and_nxp_before_applying_the_update")}</p>`
+    ? `<p class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">${t("settings.update.backup_help")}</p>`
     : "";
-  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">${t("ui.current_version")}</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">${t("ui.update_channel")}</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
+  box.innerHTML = `<div class="detail"><div class="kv"><span class="k">${t("common.current_version")}</span><span>v${esc(current)}</span></div><div class="kv"><span class="k">${t("settings.update_channel")}</span><span>${channelText}</span></div></div>${notes}${stateText}${idleReason}${backupWarning}${progress}<div class="modal-footer-inline plain update-actions">${actions}</div>`;
   applyTranslations(box);
   box.querySelectorAll("[data-progress]").forEach(element => {
     element.style.width = `${Math.max(0, Math.min(100, Number(element.dataset.progress) || 0))}%`;
@@ -357,7 +357,7 @@ function syncUpdateToggleState(settings = {}) {
     auto.setAttribute("aria-pressed", "false");
     auto.dataset.state = "off";
     const stateText = auto.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = t("ui.disabled");
+    if (stateText) stateText.textContent = t("common.disabled");
   }
 }
 
@@ -400,9 +400,9 @@ async function checkUpdate() {
     const result = await api("POST", "/api/update/check");
     updateStatus = result;
     renderUpdateStatus(result);
-    if (result.state === "checking") toast(t("ui.checking_for_updates"), "info");
-    else if (result.available) toast(t("ui.new_version_vvalue_available", { version: result.latest }));
-    else toast(t("ui.already_up_to_date"), "info");
+    if (result.state === "checking") toast(t("settings.checking_for_updates"), "info");
+    else if (result.available) toast(t("settings.update.version_available", { version: result.latest }));
+    else toast(t("common.already_up_to_date"), "info");
     scheduleUpdateStatusPoll(state.routeToken, result);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -417,17 +417,17 @@ async function startUpdateDownload() {
 async function cancelUpdateDownload() {
   try {
     await api("POST", "/api/update/cancel");
-    toast(t("ui.download_cancelled"));
+    toast(t("settings.download_cancelled"));
     await loadUpdateStatus();
   } catch (error) { toast(error.message, "error"); }
 }
 
 function confirmUpdateApply(defer) {
   const version = updateStatus?.latest ? ` v${esc(updateStatus.latest)}` : "";
-  const actionText = defer ? t("ui.apply_the_update_when_the_service_starts_next_time") : t("ui.apply_the_update_and_restart_the_service_now");
+  const actionText = defer ? t("settings.update.apply_next_start") : t("settings.update.apply_now");
   confirmModal(
-    defer ? t("ui.update_on_next_startup") : t("ui.update_now"),
-    t("ui.confirm_that_runtime_data_has_been_backed_up_valuevalue_the_update_backup_contains_only_program_files_and_wwwroot", { action: actionText, version }),
+    defer ? t("common.update_on_next_startup") : t("common.update_now"),
+    t("settings.update.backup_confirm", { action: actionText, version }),
     "update-apply-confirm",
     { defer: defer ? "true" : "false" },
   );
@@ -438,17 +438,17 @@ async function applyUpdate(defer) {
     const result = await api("POST", "/api/update/apply", { defer });
     if (result.error) {
       toast(result.error, "error");
-      if (result.code === "busy") toast(t("ui.wait_for_the_task_to_finish_or_choose_update_on_next_startup"), "info");
+      if (result.code === "busy") toast(t("settings.update.busy_help"), "info");
       await loadUpdateStatus();
       return;
     }
     if (result.deferred) {
-      toast(t("ui.queued_the_update_will_be_applied_at_the_next_service_startup"));
+      toast(t("settings.update.queued_service_start"));
       await loadUpdateStatus();
       return;
     }
     renderUpdateStatus({ ...(updateStatus || {}), state: "applying" });
-    showModal(modalShell(t("ui.applying_update"), `<p class="modal-copy">${t("ui.update_apply_started")}</p>`), false, true);
+    showModal(modalShell(t("settings.applying_update"), `<p class="modal-copy">${t("settings.update_apply_started")}</p>`), false, true);
     pollServiceRestart(Date.now() + 120000);
   } catch (error) { toast(error.message, "error"); }
 }
@@ -466,7 +466,7 @@ function pollServiceRestart(deadline) {
     if (Date.now() < deadline) pollServiceRestart(deadline);
     else {
       closeModal();
-      toast(t("ui.service_restart_timed_out_refresh_the_page_manually"), "error");
+      toast(t("settings.service.restart_timeout"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -573,7 +573,7 @@ function syncNotificationBadges(settings) {
     if (!badge) continue;
     badge.classList.toggle("ok", enabled);
     badge.classList.toggle("muted", !enabled);
-    badge.textContent = enabled ? t("ui.enabled") : t("ui.disabled");
+    badge.textContent = enabled ? t("common.enabled") : t("common.disabled");
   }
 }
 
@@ -581,7 +581,7 @@ async function testNotify() {
   await awaitNotifySaveSettled();
   try {
     const result = await api("POST", "/api/settings/test");
-    toast(result.ok ? t("ui.test_notification_sent_successfully") : t("ui.sending_failed_see_the_logs"), result.ok ? "info" : "error");
+    toast(result.ok ? t("settings.notification.test_success") : t("settings.notification.send_failed"), result.ok ? "info" : "error");
   } catch (error) { toast(error.message, "error"); }
 }
 
@@ -651,10 +651,10 @@ async function refreshLanList() {
     const lan = (data.status && data.status.remote && data.status.remote.lanAddresses) || [];
     const remoteEnabled = data.settings.allowRemoteAccess === true;
     box.innerHTML = remoteEnabled && lan.length
-      ? lan.map(addr => `<div class="kv"><span class="k">${t("ui.lan_address")}</span><span>http://${esc(addr)}:${data.settings.webPort}/</span></div>`).join("")
+      ? lan.map(addr => `<div class="kv"><span class="k">${t("settings.lan_address")}</span><span>http://${esc(addr)}:${data.settings.webPort}/</span></div>`).join("")
       : "";
     applyTranslations(box);
-    if (remoteEnabled) box.dataset.help = t("ui.other_devices_should_use_the_lan_address_localhost_and_0_0_0_0_point_only_to_this_machine_the_first_visit_requires_an_access_token");
+    if (remoteEnabled) box.dataset.help = t("settings.remote_access.lan_help");
     else delete box.dataset.help;
   } catch { /* 静默 */ }
 }
@@ -683,7 +683,7 @@ function bindSettingsFields(ids, handler) {
 /** 重启服务：等待挂起的自动保存完成后弹确认卡片（端口改动已即时保存，无需再校验）。 */
 export async function restartService() {
   await Promise.all([awaitSaveSettled(), awaitNotifySaveSettled(), awaitUpdateSaveSettled(), awaitNetworkSaveSettled()]);
-  confirmModal(t("ui.restart_service"), t("ui.restart_warning"), "restart-confirm");
+  confirmModal(t("settings.restart_service"), t("settings.restart_warning"), "restart-confirm");
 }
 
 export async function restartConfirmed() {
@@ -700,7 +700,7 @@ export async function restartConfirmed() {
   for (const port of [currentPort, newPort, newPort + 1]) {
     if (port > 0 && !candidates.includes(port)) candidates.push(port);
   }
-  showModal(modalShell(t("ui.service_restarting"), `<p class="modal-copy">${t("ui.service_restarting")}</p>`), false, true);
+  showModal(modalShell(t("settings.service_restarting"), `<p class="modal-copy">${t("settings.service_restarting")}</p>`), false, true);
   pollRestart(candidates, Date.now() + 60000);
 }
 
@@ -743,7 +743,7 @@ function pollRestart(candidates, deadline) {
       pollRestart(candidates, deadline);
     } else {
       closeModal();
-      toast(t("ui.service_restart_timed_out_refresh_the_page_manually"), "error");
+      toast(t("settings.service.restart_timeout"), "error");
     }
   }, 1000, "settings", state.routeToken);
 }
@@ -758,7 +758,7 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
+    if (stateText) stateText.textContent = pressed ? t("common.enabled") : t("common.disabled");
     if (target.dataset.restartRequired === "true" || ["st-lightweight", "st-remote", "st-mcp-enabled"].includes(target.dataset.flag)) markRestartRequired();
     autoSave();
   },
@@ -768,17 +768,17 @@ export const actions = {
     const visible = input.type === "password";
     input.type = visible ? "text" : "password";
     target.setAttribute("aria-pressed", String(visible));
-    target.textContent = visible ? t("ui.hide") : t("ui.show");
+    target.textContent = visible ? t("settings.hide") : t("common.show");
   },
   "copy-token": async target => {
     const input = $("#st-token");
     const value = input?.value?.trim();
-    if (!value) { toast(t("ui.there_is_no_token_to_copy"), "error"); return; }
+    if (!value) { toast(t("settings.there_is_no_token_to_copy"), "error"); return; }
     try {
       await navigator.clipboard.writeText(value);
-      toast(t("ui.access_token_copied"));
+      toast(t("settings.access_token_copied"));
     } catch (error) {
-      toast(t("ui.could_not_copy_the_access_token_copy_it_manually"), "error");
+      toast(t("settings.remote_access.copy_failed"), "error");
     }
   },
   "gen-token": () => {
@@ -790,8 +790,8 @@ export const actions = {
       input.value = hex;
       input.type = "password";
     }
-    toast(t("ui.random_token_generated_saving"));
-    void autoSave().then(() => toast(t("ui.access_token_saved")), () => {});
+    toast(t("settings.remote_access.token_generated"));
+    void autoSave().then(() => toast(t("settings.access_token_saved")), () => {});
   },
   "toggle-settings-panel": target => toggleSettingsPanel(target.dataset.panel),
   "change-locale": target => changeLocale(target),
@@ -825,14 +825,14 @@ export const actions = {
     btn.setAttribute("aria-pressed", pressed ? "true" : "false");
     btn.dataset.state = pressed ? "on" : "off";
     const stateText = btn.querySelector("[data-switch-state]");
-    if (stateText) stateText.textContent = pressed ? t("ui.enabled") : t("ui.disabled");
+    if (stateText) stateText.textContent = pressed ? t("common.enabled") : t("common.disabled");
     if (target.dataset.flag === "st-update-check" && !pressed) {
       const auto = $("#st-update-auto");
       if (auto) {
         auto.setAttribute("aria-pressed", "false");
         auto.dataset.state = "off";
         const autoState = auto.querySelector("[data-switch-state]");
-        if (autoState) autoState.textContent = t("ui.disabled");
+        if (autoState) autoState.textContent = t("common.disabled");
       }
     }
     syncUpdateToggleState({ updateCheckEnabled: pressed });

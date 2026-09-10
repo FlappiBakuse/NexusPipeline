@@ -12,7 +12,7 @@ export function pagerMarkup(key, page, pageSize, total) {
   for (let p = 1; p <= totalPages; p++) {
     pages += `<button type="button" class="sm ${p === page ? "pager-active" : ""}" data-action="pager-page" data-pager="${key}" data-page="${p}" ${p === page ? 'aria-current="page"' : ""}>${p}</button>`;
   }
-  return `<div class="pager" data-testid="pager-${key}" data-page-current="${page}" data-pages="${totalPages}"><span class="pager-info">${t("ui.value_itemsvalue", { total, range: total ? t("ui.value_value", { from, to }) : "" })}</span><button type="button" class="sm" data-action="pager-prev" data-pager="${key}" ${page <= 1 ? "disabled" : ""}>${t("ui.previous")}</button>${pages}<button type="button" class="sm" data-action="pager-next" data-pager="${key}" ${page >= totalPages ? "disabled" : ""}>${t("ui.next")}</button></div>`;
+  return `<div class="pager" data-testid="pager-${key}" data-page-current="${page}" data-pages="${totalPages}"><span class="pager-info">${t("common.pager.summary", { total, range: total ? t("common.pager.range", { from, to }) : "" })}</span><button type="button" class="sm" data-action="pager-prev" data-pager="${key}" ${page <= 1 ? "disabled" : ""}>${t("common.previous")}</button>${pages}<button type="button" class="sm" data-action="pager-next" data-pager="${key}" ${page >= totalPages ? "disabled" : ""}>${t("common.next")}</button></div>`;
 }
 
 export function registerPager(key, onChange) {

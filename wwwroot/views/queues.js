@@ -12,7 +12,7 @@ import { navActive, render, setFieldError, setFieldInvalid, setRequiredFieldErro
 import { initDndList } from "../core/dnd.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { durationClock } from "../core/duration.js";
-import { t } from "../core/i18n.js";
+import { formatList, t } from "../core/i18n.js";
 
 let queueDraft = null;
 let queuePage = 1;
@@ -37,21 +37,21 @@ if (typeof document !== "undefined") {
 
 export async function pageQueues(token) {
   if (!isCurrent("queues", token)) return;
-  navActive("queues"); setTopbarTitle(t("ui.schedule_queues"));
+  navActive("queues"); setTopbarTitle(t("common.schedule_queues"));
   let queues, scripts, status;
   try { [queues, scripts, status] = await Promise.all([api("GET", "/api/queues"), api("GET", "/api/scripts"), api("GET", "/api/status")]); }
-  catch (error) { render(`<div class="empty"><strong>${t("ui.failed_to_load_queues")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) { render(`<div class="empty"><strong>${t("queues.failed_to_load_queues")}</strong>${esc(error.message)}</div>`); return; }
   if (!isCurrent("queues", token)) return;
   state.queues = queues; state.scripts = scripts; state.plugins = status.plugins || [];
   const atLimit = !!(state.limits && queues.length >= state.limits.maxQueues);
-  const action = `<button class="primary" type="button" data-action="open-queue-modal" ${atLimit ? "disabled" : ""}>${t("ui.new_schedule_queue")}${atLimit ? `（${queues.length}/${state.limits.maxQueues}）` : ""}</button>`;
+  const action = `<button class="primary" type="button" data-action="open-queue-modal" ${atLimit ? "disabled" : ""}>${atLimit ? t("queues.action.create_count", { current: queues.length, maximum: state.limits.maxQueues }) : t("queues.new_schedule_queue")}</button>`;
   const totalPages = Math.max(1, Math.ceil(queues.length / QUEUE_PAGE_SIZE));
   if (queuePage > totalPages) queuePage = totalPages;
   const pageItems = queues.slice((queuePage - 1) * QUEUE_PAGE_SIZE, queuePage * QUEUE_PAGE_SIZE);
   const content = queues.length ? `<section class="card list-surface"><div class="script-grid">
     ${pageItems.map(queue => queueCardMarkup(queue, scripts)).join("")}
-    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : `<div class="empty"><strong>${t("ui.no_queues_yet")}</strong><span>${t("ui.turn_multiple_scripts_into_a_repeatable_workflow")}</span><a class="back-link" href="#/queues" data-action="open-queue-modal">${t("ui.new_schedule_queue")}</a></div>`;
-  render(pageHeader(t("ui.queue_management"), t("ui.schedule_queues"), t("ui.turn_multiple_scripts_into_a_repeatable_workflow"), action) + content);
+    </div>${pagerMarkup("queues", queuePage, QUEUE_PAGE_SIZE, queues.length)}</section>` : `<div class="empty"><strong>${t("queues.no_queues_yet")}</strong><span>${t("queues.page.help")}</span><a class="back-link" href="#/queues" data-action="open-queue-modal">${t("queues.new_schedule_queue")}</a></div>`;
+  render(pageHeader(t("queues.queue_management"), t("common.schedule_queues"), t("queues.page.help"), action) + content);
   await renderPluginSlots(document.querySelector("#view"));
   registerPager("queues", p => { queuePage = p; pageQueues(state.routeToken); });
   tickQueueNext();
@@ -76,7 +76,7 @@ async function reorderQueues(visibleIds) {
   const full = replacePageOrder(state.queues, queuePage, QUEUE_PAGE_SIZE, visibleIds);
   try {
     await api("PUT", "/api/queues/order", { ids: full.map(item => item.id) });
-    toast(t("ui.queue_order_saved"));
+    toast(t("queues.queue_order_saved"));
     await pageQueues(state.routeToken);
     restorePageScroll(pageScrollTop);
   } catch (error) {
@@ -105,29 +105,29 @@ function queueCardMarkup(queue, scripts) {
   const disabledScripts = unavailableScripts.filter(item => !item.status.missing);
   const unavailableBadge = [
     missingScripts.length
-      ? `<span class="badge bad" title="${esc(missingScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${t("ui.value_unknown_specialized_tasks", { count: missingScripts.length })}</span>`
+      ? `<span class="badge bad" title="${esc(formatList(missingScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || []))))}">${t("queues.plugin.unknown_count", { count: missingScripts.length })}</span>`
       : "",
     disabledScripts.length
-      ? `<span class="badge warn" title="${esc(disabledScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || [])).join("；"))}">${t("ui.value_unavailable_specialized_tasks", { count: disabledScripts.length })}</span>`
+      ? `<span class="badge warn" title="${esc(formatList(disabledScripts.map(item => scriptPluginUnavailableMessage(item.script, state.plugins || []))))}">${t("queues.plugin.unavailable_count", { count: disabledScripts.length })}</span>`
       : "",
   ].join("");
   const nextAt = queue.nextTrigger ? new Date(queue.nextTrigger).getTime() : 0;
   const timeBadge = queue.autoRunMode === "scheduled"
-    ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? t("ui.calculating_countdown") : t("ui.waiting_for_scheduled_trigger")}</span>`
+    ? `<span class="badge blue queue-next" data-next="${nextAt || ""}">${nextAt ? t("common.calculating_countdown") : t("queues.schedule.waiting")}</span>`
     : queue.autoRunMode === "startup"
-      ? `<span class="badge blue">${t("ui.runs_at_the_next_startup")}</span>`
-      : `<span class="badge blue" data-testid="queue-manual-badge">${t("ui.manual_only")}</span>`;
-  const notifyBadge = `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? t("ui.queue_notifications_enabled") : t("ui.queue_notifications_disabled")}</span>`;
+      ? `<span class="badge blue">${t("queues.schedule.startup")}</span>`
+      : `<span class="badge blue" data-testid="queue-manual-badge">${t("queues.manual_only")}</span>`;
+  const notifyBadge = `<span class="badge ${queue.notifyEnabled ? "ok" : "muted"}" data-testid="queue-notify">${queue.notifyEnabled ? t("queues.notification.enabled") : t("queues.notification.disabled")}</span>`;
   return `<article class="script-card queue-card" data-testid="queue-card" data-dnd-id="${esc(queue.id)}">
-    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("ui.drag_to_reorder_use_arrow_keys_to_adjust"))}" title="${esc(t("ui.drag_to_reorder"))}">${icon("grip")}</span>
+    <span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("common.reorder.keyboard_help"))}" title="${esc(t("common.drag_to_reorder"))}">${icon("grip")}</span>
     <img class="script-ico" src="${esc(scriptFallbackIcon)}" alt="" width="36" height="36" loading="lazy" data-icon-id="${firstScript ? esc(firstScript.id) : ""}">
     <div class="script-main">
-      <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="${esc(t("ui.edit_queue_value", { name: queue.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
-      <div class="meta-line queue-meta"><span class="badge muted">${t("ui.value_tasks", { count: (queue.tasks || []).length })}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? t("ui.after_completion_value", { action: t(queue.completionAction === "exit" ? "ui.exit_application" : queue.completionAction === "sleep" ? "ui.sleep" : queue.completionAction === "reboot" ? "ui.restart" : "ui.shut_down") }) : t("ui.no_action_after_completion")}</span>${unavailableBadge}${timeBadge}${notifyBadge}${pluginSlotMarkup("queues.list.badges", `queue-${queue.id}`, "queue-plugin-slot", { mode: "list", primaryId: queue.id })}</div>
+      <button class="entity-link" type="button" data-action="edit-queue" data-id="${esc(queue.id)}" aria-label="${esc(t("queues.editor.title", { name: queue.name }))}"><span class="scroll-text"><span class="scroll-inner">${esc(queue.name)}</span></span></button>
+      <div class="meta-line queue-meta"><span class="badge muted">${t("common.unit.tasks", { count: (queue.tasks || []).length })}</span><span class="badge muted">${queue.completionAction && queue.completionAction !== "none" ? t("queues.completion.label", { action: t(queue.completionAction === "exit" ? "common.exit_application" : queue.completionAction === "sleep" ? "common.sleep" : queue.completionAction === "reboot" ? "common.restart" : "common.shut_down") }) : t("queues.completion.none")}</span>${unavailableBadge}${timeBadge}${notifyBadge}${pluginSlotMarkup("queues.list.badges", `queue-${queue.id}`, "queue-plugin-slot", { mode: "list", primaryId: queue.id })}</div>
     </div>
     <div class="queue-ops row-actions entity-actions">
-      <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">${t("ui.edit_queue_button")}</button>
-      <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">${t("ui.delete_queue")}</button>
+      <button class="tertiary queue-edit" type="button" data-action="edit-queue-direct" data-id="${esc(queue.id)}">${t("queues.edit_queue_button")}</button>
+      <button class="danger" type="button" data-action="delete-queue" data-id="${esc(queue.id)}" data-name="${esc(queue.name)}">${t("queues.delete_queue")}</button>
     </div>
   </article>`;
 }
@@ -139,10 +139,10 @@ function tickQueueNext() {
     if (!target) return;
     const remain = target - now;
     if (remain <= 0) {
-      el.textContent = t("ui.about_to_run");
+      el.textContent = t("common.about_to_run");
       return;
     }
-    el.textContent = t("ui.starts_in_value", { duration: durationClock(Math.floor(remain / 1000)) });
+    el.textContent = t("queues.schedule.starts_in", { duration: durationClock(Math.floor(remain / 1000)) });
   });
 }
 
@@ -160,7 +160,7 @@ export async function openQueueModal(id = "") {
   let queue = id ? state.queues.find(item => item.id === id) : null;
   if (id && !queue) {
     try { state.queues = await api("GET", "/api/queues"); queue = state.queues.find(item => item.id === id); }
-    catch (error) { toast(t("ui.failed_to_load_queues_f4f44409") + error.message, "error"); return; }
+    catch (error) { toast(t("queues.error.load") + error.message, "error"); return; }
   }
   const value = queue || {};
   queueDraft = {
@@ -190,13 +190,13 @@ function syncQueueDraftFromDom() {
 }
 
 function queueTaskOptions(scripts) {
-  return [{ value: "", label: t("ui.select_a_script_instance_fc5e40d7") }, ...(scripts || []).map(script => {
+  return [{ value: "", label: t("common.select.script_instance_option") }, ...(scripts || []).map(script => {
     const pluginStatus = scriptPluginStatus(script, state.plugins || []);
     const unavailable = pluginStatus.specialized && !pluginStatus.available;
     const unavailableMessage = unavailable ? scriptPluginUnavailableMessage(script, state.plugins || []) : "";
     const suffix = unavailable
-      ? (pluginStatus.missing ? t("ui.unknown_specialized_plugin_c960d836") : t("ui.specialized_plugin_unavailable_faec8375"))
-      : (script.logStallTimeoutMinutes === -1 ? t("ui.long_running") : "");
+      ? (pluginStatus.missing ? t("common.plugin.unknown_label") : t("common.plugin.unavailable_label"))
+      : (script.logStallTimeoutMinutes === -1 ? t("common.long_running") : "");
     return {
       value: script.id,
       label: `${script.name}${suffix}`,
@@ -220,16 +220,16 @@ export function renderQueueModal(skipOpenCapture = false) {
   syncQueueDraftFromDom();
   const d = queueDraft;
   const scripts = state.scripts;
-  const days = [t("ui.sunday"), t("ui.monday"), t("ui.tuesday"), t("ui.wednesday"), t("ui.thursday"), t("ui.friday"), t("ui.saturday")];
-  const dayLetters = [t("ui.sun"), t("ui.mon"), t("ui.tue"), t("ui.wed"), t("ui.thu"), t("ui.fri"), t("ui.sat")];
+  const days = [t("queues.sunday"), t("queues.monday"), t("queues.tuesday"), t("queues.wednesday"), t("queues.thursday"), t("queues.friday"), t("queues.saturday")];
+  const dayLetters = [t("common.sun"), t("common.mon"), t("common.tue"), t("common.wed"), t("common.thu"), t("common.fri"), t("common.sat")];
   const l = state.limits || {};
   const timeSetAtLimit = !!(l.maxTimeSetsPerQueue && d.timeSets.length >= l.maxTimeSetsPerQueue);
-  const body = `${valueField("qm-name", `${t("ui.queue_name")} <span class='req'>*</span>`, d.name)}
-    <div class="form-grid">${selectField("qm-mode", t("ui.automatic_run_mode"), d.autoRunMode, [{ value: "none", label: t("ui.do_not_run") }, { value: "scheduled", label: t("ui.run_on_schedule") }, { value: "startup", label: t("ui.run_at_startup") }])}${selectField("qm-action", t("ui.completion_action"), d.completionAction, [{ value: "none", label: t("ui.no_action") }, { value: "exit", label: t("ui.exit_application") }, { value: "sleep", label: t("ui.sleep") }, { value: "reboot", label: t("ui.restart") }, { value: "shutdown", label: t("ui.shut_down") }])}</div>
-    <div>${switchControl("qm-notify", t("ui.queue_notifications"), t("ui.send_all_script_statuses_using_this_setting_overriding_instance_settings"), d.notifyEnabled, "toggle-qm-flag")}</div>
-      <div class="subsection"><div class="section-heading"><h3>${t("ui.schedules")}</h3><span class="muted">${t("ui.collapsed_by_default_expand_to_edit_days_and_time_then_drag_the_handle_to_reorder")}</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("ui.drag_to_reorder_use_arrow_keys_to_adjust"))}" title="${esc(t("ui.drag_to_reorder"))}">${icon("grip")}</span><strong>${t("ui.schedule_value", { index: index + 1 })}</strong><span class="muted">${esc(timeSet.time || t("ui.time_not_set"))} · ${timeSet.days.length ? t("ui.value_days", { count: timeSet.days.length }) : t("ui.no_days_selected")}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">${t("ui.run_days_multiple_selection")}</label><div class="days-btn-grid" role="group" aria-label="${esc(t("ui.execution_days"))}">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc(dayLetters[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">${t("ui.run_time")}</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, t("ui.run_time"))}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? t("ui.enabled") : t("ui.disabled")}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">${t("ui.delete_schedule")}</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>${t("ui.add_schedule")}${timeSetAtLimit ? `（${d.timeSets.length}/${l.maxTimeSetsPerQueue}）` : ""}</button></div>
-    <div class="subsection"><div class="section-heading"><h3>${t("ui.task_list")}</h3><span class="muted">${t("ui.run_in_order_drag_the_handle_to_reorder_long_running_and_standard_runs_cannot_be_mixed")}</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="${t("ui.drag_to_reorder_use_arrow_keys_to_adjust")}" title="${t("ui.drag_to_reorder")}">${icon("grip")}</span>${selectControlMarkup(`qm-task-${index}`, task.scriptInstanceId, queueTaskOptions(scripts), `data-task-idx="${index}"`, t("ui.task_value_script_instance", { index: index + 1 }))}<button class="sm danger" type="button" data-action="remove-task" data-index="${index}">${t("ui.delete")}</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">${t("ui.add_task")}</button></div>`;
-  showModal(modalShell(d.id ? t("ui.edit_queue") : t("ui.new_schedule_queue"), body + pluginSlotMarkup("queues.editor.sections", "queues.editor.sections", "queue-editor-plugin-slot", { mode: d.id ? "edit" : "create", primaryId: d.id || "" }), `<button class="ghost" type="button" data-action="close-modal">${t("ui.cancel")}</button><button class="primary" type="button" data-action="save-queue">${t("ui.save")}</button>`), true, true, true);
+  const body = `${valueField("qm-name", `${t("queues.queue_name")} <span class='req'>*</span>`, d.name)}
+    <div class="form-grid">${selectField("qm-mode", t("queues.automatic_run_mode"), d.autoRunMode, [{ value: "none", label: t("queues.do_not_run") }, { value: "scheduled", label: t("queues.run_on_schedule") }, { value: "startup", label: t("queues.run_at_startup") }])}${selectField("qm-action", t("common.completion_action"), d.completionAction, [{ value: "none", label: t("common.no_action") }, { value: "exit", label: t("common.exit_application") }, { value: "sleep", label: t("common.sleep") }, { value: "reboot", label: t("common.restart") }, { value: "shutdown", label: t("common.shut_down") }])}</div>
+    <div>${switchControl("qm-notify", t("queues.queue_notifications"), t("queues.notification.override_help"), d.notifyEnabled, "toggle-qm-flag")}</div>
+     <div class="subsection"><div class="section-heading"><h3>${t("queues.schedules")}</h3><span class="muted">${t("queues.schedule.collapsed_help")}</span></div><div id="qm-timesets" class="timeset-list">${d.timeSets.map((timeSet, index) => `<details class="timeset-card compact-card" data-dnd-id="${index}" data-ts-idx="${index}" ${((queueOpenTimeSets ? queueOpenTimeSets.has(timeSet) : index === 0) ? "open" : "")}><summary class="timeset-summary"><span class="timeset-summary-main"><span class="drag-handle" role="button" tabindex="0" aria-label="${esc(t("common.reorder.keyboard_help"))}" title="${esc(t("common.drag_to_reorder"))}">${icon("grip")}</span><strong>${t("queues.schedule.label", { index: index + 1 })}</strong><span class="muted">${esc(timeSet.time || t("queues.time_not_set"))} · ${timeSet.days.length ? t("common.unit.days", { count: timeSet.days.length }) : t("queues.no_days_selected")}</span></span><span class="timeset-summary-chevron" aria-hidden="true">⌄</span></summary><div class="timeset-details"><div class="timeset-body"><div class="timeset-layout"><div class="timeset-days"><label class="field-label">${t("queues.schedule.days_multiple")}</label><div class="days-btn-grid" role="group" aria-label="${esc(t("queues.execution_days"))}">${days.map((name, day) => `<button class="mode-toggle" type="button" data-action="toggle-ts-day" data-ts-days="${index}" data-day="${day}" aria-pressed="${timeSet.days.includes(day) ? "true" : "false"}" title="${esc(name)}" aria-label="${esc(name)}">${esc(dayLetters[day])}</button>`).join("")}</div></div><div class="timeset-time"><label class="field-label" for="ts-time-${index}">${t("queues.run_time")}</label>${timeControlMarkup(`ts-time-${index}`, timeSet.time, `data-ts-time="${index}"`, t("queues.run_time"))}</div></div><div class="timeset-actions"><button class="mode-toggle switch-control" type="button" data-action="toggle-ts-enable" data-ts-enable="${index}" data-toggle-text="false" aria-pressed="${timeSet.enabled ? "true" : "false"}" data-state="${timeSet.enabled ? "on" : "off"}"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="sr-only" data-switch-state>${timeSet.enabled ? t("common.enabled") : t("common.disabled")}</span></button><button class="tertiary" type="button" data-action="remove-time-set" data-index="${index}">${t("queues.delete_schedule")}</button></div></div></div></details>`).join("")}</div><button class="ghost" type="button" data-action="add-time-set" ${timeSetAtLimit ? "disabled" : ""}>${timeSetAtLimit ? t("queues.action.add_time_set", { current: d.timeSets.length, maximum: l.maxTimeSetsPerQueue }) : t("queues.add_schedule")}</button></div>
+    <div class="subsection"><div class="section-heading"><h3>${t("common.task_list")}</h3><span class="muted">${t("queues.task.order_help")}</span></div>${d.tasks.length ? `<div class="tasks-body"><div id="qm-tasks">${d.tasks.slice().sort((a, b) => a.index - b.index).map((task, index) => `<div class="list-item task-row" data-dnd-id="${index}"><span class="drag-handle" role="button" tabindex="0" aria-label="${t("common.reorder.keyboard_help")}" title="${t("common.drag_to_reorder")}">${icon("grip")}</span>${selectControlMarkup(`qm-task-${index}`, task.scriptInstanceId, queueTaskOptions(scripts), `data-task-idx="${index}"`, t("queues.task.script_instance", { index: index + 1 }))}<button class="sm danger" type="button" data-action="remove-task" data-index="${index}">${t("common.delete")}</button></div>`).join("")}</div></div>` : ""}<button class="ghost" type="button" data-action="add-task">${t("queues.add_task")}</button></div>`;
+  showModal(modalShell(d.id ? t("queues.edit_queue") : t("queues.new_schedule_queue"), body + pluginSlotMarkup("queues.editor.sections", "queues.editor.sections", "queue-editor-plugin-slot", { mode: d.id ? "edit" : "create", primaryId: d.id || "" }), `<button class="ghost" type="button" data-action="close-modal">${t("common.cancel")}</button><button class="primary" type="button" data-action="save-queue">${t("common.save")}</button>`), true, true, true);
   void renderPluginSlots(document);
   const restoreModalScroll = () => {
     if (!queueModalScroll) return;
@@ -282,7 +282,7 @@ export function queueAddTask() {
   const l = state.limits || {};
   const current = queueTotalUsers();
   if (l.maxQueueTotalUsers && current + 1 > l.maxQueueTotalUsers) {
-    toast(t("ui.the_total_enabled_users_in_the_task_list_reached_the_limit_value_value", { current, maximum: l.maxQueueTotalUsers }), "error");
+    toast(t("queues.validation.user_limit", { current, maximum: l.maxQueueTotalUsers }), "error");
     return;
   }
   queueDraft.tasks.push({ id: "", index: queueDraft.tasks.length, scriptInstanceId: "" }); renderQueueModal();
@@ -297,32 +297,32 @@ export async function saveQueue() {
   draft.timeSets = draft.timeSets.filter(timeSet => timeSet.days.length);
   draft.tasks = draft.tasks.map((task, index) => ({ ...task, index, scriptInstanceId: $(`[data-task-idx='${index}']`)?.value || task.scriptInstanceId })).filter(task => task.scriptInstanceId);
   queuePendingDuplicateMerged = mergeDuplicateTasks();
-  if (!draft.name) { setRequiredFieldError("qm-name"); toast(t("ui.queue_name_cannot_be_empty"), "error"); return; }
+  if (!draft.name) { setRequiredFieldError("qm-name"); toast(t("queues.validation.name_required"), "error"); return; }
   clearFieldError("qm-name");
-  if (!draft.tasks.length) { toast(t("ui.the_task_list_is_empty_add_at_least_one_script_task"), "error"); return; }
+  if (!draft.tasks.length) { toast(t("queues.validation.task_required"), "error"); return; }
   const unavailableScript = draft.tasks
     .map(task => state.scripts.find(script => script.id === task.scriptInstanceId))
     .find(script => script && scriptPluginStatus(script, state.plugins || []).specialized && !scriptPluginStatus(script, state.plugins || []).available);
   if (unavailableScript) {
-    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []) + t("ui.remove_this_task_before_saving_the_queue"), "error");
+    toast(scriptPluginUnavailableMessage(unavailableScript, state.plugins || []) + t("queues.validation.remove_before_save"), "error");
     return;
   }
   const l = state.limits || {};
   const nameBytes = new TextEncoder().encode(draft.name).length;
-  if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", t("ui.queue_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES })); toast(t("ui.queue_names_may_contain_at_most_value_bytes", { bytes: MAX_ENTITY_NAME_BYTES }), "error"); return; }
-  if (hasEntityNameConflict(state.queues, draft.name, draft.id)) { setFieldInvalid("qm-name"); toast(t("ui.that_queue_name_already_exists_choose_another_name"), "error"); return; }
-  if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(t("ui.the_schedule_limit_was_reached_value_value", { current: draft.timeSets.length, maximum: l.maxTimeSetsPerQueue }), "error"); return; }
+  if (nameBytes > MAX_ENTITY_NAME_BYTES) { setFieldError("qm-name", t("queues.validation.name_length", { bytes: MAX_ENTITY_NAME_BYTES })); toast(t("queues.validation.name_length", { bytes: MAX_ENTITY_NAME_BYTES }), "error"); return; }
+  if (hasEntityNameConflict(state.queues, draft.name, draft.id)) { setFieldInvalid("qm-name"); toast(t("queues.validation.name_duplicate"), "error"); return; }
+  if (l.maxTimeSetsPerQueue && draft.timeSets.length > l.maxTimeSetsPerQueue) { toast(t("queues.validation.schedule_limit", { current: draft.timeSets.length, maximum: l.maxTimeSetsPerQueue }), "error"); return; }
   const totalUsers = queueTotalUsers();
-  if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(t("ui.the_total_enabled_users_in_the_task_list_reached_the_limit_value_value", { current: totalUsers, maximum: l.maxQueueTotalUsers }), "error"); return; }
+  if (l.maxQueueTotalUsers && totalUsers > l.maxQueueTotalUsers) { toast(t("queues.validation.user_limit", { current: totalUsers, maximum: l.maxQueueTotalUsers }), "error"); return; }
   // 长时/普通混排拦截（与后端 CheckQueueMix 一致；长时脚本可能持续运行并阻塞队列后续任务）
   const taskScripts = draft.tasks.map(task => state.scripts.find(item => item.id === task.scriptInstanceId)).filter(Boolean);
   const hasLong = taskScripts.some(script => script.logStallTimeoutMinutes === -1);
   const hasNormal = taskScripts.some(script => script.logStallTimeoutMinutes !== -1);
-  if (hasLong && hasNormal) { toast(t("ui.a_queue_cannot_mix_long_running_scripts_log_inactivity_limit_1_with_standard_script_instances_create_separate_queues"), "error"); return; }
+  if (hasLong && hasNormal) { toast(t("queues.validation.mixed_types"), "error"); return; }
   const mergedCount = mergeTimeSets();
   queuePendingMerged = mergedCount > 0;
   if (hasTimeGap()) {
-    showModal(modalShell(t("ui.schedule_interval_warning"), `<p class="modal-copy">${t("ui.schedule_interval_warning_message")}</p>`, `<button class="primary" type="button" data-action="confirm-timegap-save">${t("ui.confirm")}</button><button class="ghost" type="button" data-action="cancel-timegap">${t("ui.cancel")}</button>`));
+    showModal(modalShell(t("queues.validation.interval_warning"), `<p class="modal-copy">${t("queues.validation.interval_help")}</p>`, `<button class="primary" type="button" data-action="confirm-timegap-save">${t("common.confirm")}</button><button class="ghost" type="button" data-action="cancel-timegap">${t("common.cancel")}</button>`));
     return;
   }
   await doSaveQueue(queuePendingMerged, queuePendingDuplicateMerged);
@@ -396,16 +396,16 @@ async function doSaveQueue(merged, duplicateMerged) {
     else await api("POST", "/api/queues", draft);
     closeModal();
     const messages = [];
-    if (duplicateMerged) messages.push(t("ui.duplicate_script_tasks_were_merged"));
-    if (merged) messages.push(t("ui.duplicate_schedules_were_merged"));
-    toast(messages.join("；") || t("ui.schedule_queue_saved"));
+    if (duplicateMerged) messages.push(t("queues.task.duplicates_merged"));
+    if (merged) messages.push(t("queues.schedule.duplicates_merged"));
+    toast(formatList(messages) || t("queues.schedule_queue_saved"));
     queuePendingMerged = false;
     queuePendingDuplicateMerged = false;
     await pageQueues(state.routeToken);
   } catch (error) {
     if (error?.code === "duplicate_name") {
       setFieldInvalid("qm-name");
-      toast(t("ui.that_queue_name_already_exists_choose_another_name"), "error");
+      toast(t("queues.validation.name_duplicate"), "error");
       return;
     }
     toast(error.message, "error");
@@ -413,11 +413,11 @@ async function doSaveQueue(merged, duplicateMerged) {
 }
 
 export function deleteQueue(id, name) {
-  confirmModal(`${t("ui.delete")}${t("ui.schedule_queues")}`, `${t("ui.confirm_queue_deletion")}「${esc(name)}」？`, "confirm-delete-queue", { id, name });
+  confirmModal(`${t("common.delete")}${t("common.schedule_queues")}`, `${t("queues.confirm_queue_deletion")}「${esc(name)}」？`, "confirm-delete-queue", { id, name });
 }
 
 export async function confirmDeleteQueue(id, name) {
-  try { await api("DELETE", "/api/queues/" + id); closeModal(); toast(t("ui.schedule_queue_deleted")); await pageQueues(state.routeToken); }
+  try { await api("DELETE", "/api/queues/" + id); closeModal(); toast(t("queues.schedule_queue_deleted")); await pageQueues(state.routeToken); }
   catch (error) { toast(error.message, "error"); }
 }
 

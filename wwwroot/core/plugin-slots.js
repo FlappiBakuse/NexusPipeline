@@ -14,7 +14,7 @@ export const pluginSlotNames = Object.freeze([
 const validSlots = new Set(pluginSlotNames);
 
 export function pluginSlotMarkup(slot, anchor = slot, className = "", context = {}) {
-  if (!validSlots.has(slot)) throw new TypeError(t("ui.plugin_slot_unsupported", { slot }));
+  if (!validSlots.has(slot)) throw new TypeError(t("common.plugin_slot_unsupported", { slot }));
   const contextAttributes = ["mode", "primaryId", "secondaryId"]
     .filter(key => context[key] !== undefined && context[key] !== null)
     .map(key => ` data-plugin-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}="${escapeAttribute(context[key])}"`)
@@ -112,7 +112,7 @@ function createInput(field, value, id) {
   } else {
     element = input = document.createElement("input");
   }
-  if (!input || !element) throw new Error(t("ui.plugin_field_render_failed", { key: field.key }));
+  if (!input || !element) throw new Error(t("common.plugin_field_render_failed", { key: field.key }));
   input.id = id;
   input.dataset.pluginFormField = field.key;
   input.dataset.pluginType = type;
@@ -134,7 +134,7 @@ function createInput(field, value, id) {
     input.value = value == null ? "" : String(value);
   }
   if (type === "secret" && value?.configured === true && !input.placeholder) {
-    input.placeholder = t("ui.configured_leave_empty_to_keep");
+    input.placeholder = t("common.configuration.keep_existing_hint");
   }
   return { element, input };
 }
@@ -190,7 +190,7 @@ function renderFormContribution(parent, contribution) {
     const markRequired = input => setRequiredFieldError(input.id);
     const clearRequired = input => clearFieldError(input.id);
     if (!validateRequiredPluginFields(form, fields, contribution.values || {}, "data-plugin-form-field", markRequired, clearRequired)) {
-      toast(t("ui.complete_the_required_plugin_settings"), "error");
+      toast(t("common.plugin.settings_required"), "error");
       return;
     }
     save.disabled = true;
@@ -199,7 +199,7 @@ function renderFormContribution(parent, contribution) {
         context: contribution.context,
         values: readFormValues(form),
       });
-      toast(t("ui.plugin_settings_saved"));
+      toast(t("common.plugin_settings_saved"));
     } catch (error) {
       toast(error.message, "error");
     } finally {

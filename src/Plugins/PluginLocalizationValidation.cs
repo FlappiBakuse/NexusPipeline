@@ -49,7 +49,7 @@ internal static class PluginLocalizationValidation
         return true;
     }
 
-    private static bool IsSafeKey(string? value, int maxLength)
+    internal static bool IsSafeKey(string? value, int maxLength)
     {
         return !string.IsNullOrWhiteSpace(value)
             && value.Length <= maxLength

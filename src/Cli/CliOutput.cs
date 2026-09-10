@@ -32,7 +32,7 @@ internal static class CliOutput
 
         if (!string.IsNullOrWhiteSpace(humanMessage))
         {
-            Console.WriteLine(HostLocalization.TranslateCli("ok", humanMessage, LocaleCatalog.HostLocale));
+            Console.WriteLine(CliText.Get("output.done", "[完成] {message}", ("message", humanMessage)));
         }
         if (data is not null)
         {
@@ -49,7 +49,7 @@ internal static class CliOutput
             {
                 ["ok"] = false,
                 ["code"] = code,
-                ["message"] = HostLocalization.TranslateCli(code, message, LocaleCatalog.HostLocale),
+                ["message"] = message,
             };
             if (data is not null)
             {
@@ -59,7 +59,7 @@ internal static class CliOutput
         }
         else
         {
-            Console.WriteLine($"[错误] {HostLocalization.TranslateCli(code, message, LocaleCatalog.HostLocale)}");
+            Console.WriteLine(CliText.Get("output.error", "[错误] {message}", ("message", message)));
         }
         return exitCode;
     }

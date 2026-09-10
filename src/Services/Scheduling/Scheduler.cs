@@ -199,7 +199,7 @@ internal sealed class Scheduler : IDisposable
             if (_runningQueueIds.Count > 0)
             {
                 return new AutoUpdateIdleBlocker(
-                    "running-scheduled-queue",
+                    "queue_running",
                     "存在正在运行的调度队列",
                     QueueName: null,
                     TriggerTime: null);
@@ -207,7 +207,7 @@ internal sealed class Scheduler : IDisposable
             if (_attemptingTriggers.Count > 0)
             {
                 return new AutoUpdateIdleBlocker(
-                    "attempting-scheduled-queue",
+                    "queue_attempting",
                     "存在正在准入的调度队列",
                     QueueName: null,
                     TriggerTime: null);
@@ -217,7 +217,7 @@ internal sealed class Scheduler : IDisposable
             if (pending is not null)
             {
                 return new AutoUpdateIdleBlocker(
-                    pending.Status == "Waiting" ? "waiting-scheduled-queue" : "pending-scheduled-queue",
+                    pending.Status == "Waiting" ? "queue_waiting" : "queue_pending",
                     pending.Status == "Waiting" ? "存在等待执行的调度队列" : "存在尚未准入的调度队列",
                     pending.QueueName,
                     pending.OriginalTriggerTime);
@@ -225,7 +225,7 @@ internal sealed class Scheduler : IDisposable
             if (!_startupRunsIssued && queues.Any(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0))
             {
                 return new AutoUpdateIdleBlocker(
-                    "startup-scheduled-queue",
+                    "queue_startup",
                     "存在尚未触发的启动队列",
                     queues.First(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0).Name,
                     null);
@@ -251,14 +251,14 @@ internal sealed class Scheduler : IDisposable
                 if (triggerTime <= now)
                 {
                     return new AutoUpdateIdleBlocker(
-                        "missed-scheduled-queue",
+                        "queue_missed",
                         "存在已到时但尚未处理的调度任务",
                         queue.Name,
                         triggerTime);
                 }
 
                 return new AutoUpdateIdleBlocker(
-                    "scheduled-soon",
+                    "queue_soon",
                     $"调度队列「{queue.Name}」将在 {FormatRemaining(triggerTime - now)} 后触发",
                     queue.Name,
                     triggerTime);

@@ -31,13 +31,18 @@ internal static class CliTransport
         {
             return existing;
         }
-        CliOutput.WriteDiagnostic($"[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...");
+        CliOutput.WriteDiagnostic(CliText.Get(
+            "transport.service_starting",
+            "[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...",
+            ("port", port)));
         try
         {
             string exePath = Environment.ProcessPath ?? "";
             if (string.IsNullOrWhiteSpace(exePath))
             {
-                CliOutput.WriteDiagnostic("[错误] 无法确定 NexusPipeline 程序路径");
+                CliOutput.WriteDiagnostic(CliText.Get(
+                    "transport.executable_missing",
+                    "[错误] 无法确定 NexusPipeline 程序路径"));
                 return null;
             }
             Process.Start(new ProcessStartInfo(exePath)
@@ -48,7 +53,10 @@ internal static class CliTransport
         }
         catch (Exception ex)
         {
-            CliOutput.WriteDiagnostic($"[错误] 自动拉起常驻服务失败：{ex.Message}");
+            CliOutput.WriteDiagnostic(CliText.Get(
+                "transport.start_failed",
+                "[错误] 自动拉起常驻服务失败：{detail}",
+                ("detail", ex.Message)));
             return null;
         }
         DateTime deadline = DateTime.Now.AddSeconds(30);
@@ -61,7 +69,9 @@ internal static class CliTransport
                 return discovered;
             }
         }
-        CliOutput.WriteDiagnostic("[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
+        CliOutput.WriteDiagnostic(CliText.Get(
+            "transport.connection_failed",
+            "[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。"));
         return null;
     }
 

@@ -27,7 +27,7 @@ function acquireNativeDialogLock() {
     nativeDialogLockElement = document.createElement("div");
     nativeDialogLockElement.className = "native-dialog-lock";
     nativeDialogLockElement.setAttribute("role", "status");
-    nativeDialogLockElement.setAttribute("aria-label", t("ui.path_picker_open"));
+    nativeDialogLockElement.setAttribute("aria-label", t("common.path_picker_open"));
     nativeDialogLockElement.innerHTML = '<span class="spinner" aria-hidden="true"></span>';
     shell?.setAttribute("inert", "");
     shell?.setAttribute("aria-busy", "true");
@@ -79,7 +79,7 @@ function dialogPathForTrigger(input, trigger) {
   return {
     initialPath: pathForDialog(rootInput?.value),
     requiresExistingDirectory: true,
-    invalidMessage: trigger.dataset.pathRootError || t("ui.script_root_error"),
+    invalidMessage: trigger.dataset.pathRootError || t("common.script_root_error"),
   };
 }
 
@@ -112,7 +112,7 @@ export async function pickPath(trigger) {
   try {
     const result = await api("POST", "/api/native-dialog", {
       kind,
-      title: trigger.dataset.pathTitle || t("ui.select_path"),
+      title: trigger.dataset.pathTitle || t("common.select_path"),
       initialPath: dialogPath.initialPath,
       filter: trigger.dataset.pathFilter || "",
       requireInitialDirectory: dialogPath.requiresExistingDirectory,
@@ -126,7 +126,7 @@ export async function pickPath(trigger) {
       input.dispatchEvent(new Event("change", { bubbles: true }));
     }
   } catch (error) {
-    toast(error.message || t("ui.unable_to_open_path_picker"), "error");
+    toast(error.message || t("common.path.picker_failed"), "error");
   } finally {
     releaseNativeDialogLock();
     trigger.disabled = wasDisabled;

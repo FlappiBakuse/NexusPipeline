@@ -21,7 +21,8 @@ internal static partial class CliCommandRouter
         CliApiResponse response = method == "POST"
             ? client.Post(path, body)
             : client.Put(path, body);
-        return ReturnApi(response, label + "已更新");
+        string localizedLabel = CliText.Label(label);
+        return ReturnApi(response, CliText.Get("success.updated", "{label}已更新", ("label", localizedLabel)));
     }
 
     private static int SendIds(CliApiClient client, CliArguments args, string path, string label)
@@ -30,17 +31,26 @@ internal static partial class CliCommandRouter
         {
             return CliExitCodes.For("invalid_arguments");
         }
-        if (!TryRequireOption(args, "ids", label + " ID 列表", out string raw, out int error))
+        if (!TryRequireOption(
+                args,
+                "ids",
+                CliText.Get("label.ids", "{label} ID 列表", ("label", CliText.Label(label))),
+                out string raw,
+                out int error))
         {
             return error;
         }
         string[] ids = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (ids.Length == 0 || ids.Any(string.IsNullOrWhiteSpace))
         {
-            return CliOutput.WriteFailure("invalid_arguments", "--ids 必须包含逗号分隔的完整 ID 列表");
+            return CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.invalid_ids", "--ids 必须包含逗号分隔的完整 ID 列表"));
         }
         var array = new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
-        return ReturnApi(client.Put(path, Object(("ids", array))), label + "顺序已更新");
+        return ReturnApi(
+            client.Put(path, Object(("ids", array))),
+            CliText.Get("success.reordered", "{label}顺序已更新", ("label", CliText.Label(label))));
     }
 
     private static int ReturnApi(CliApiResponse response, string? message = null)
@@ -59,7 +69,7 @@ internal static partial class CliCommandRouter
         }
         if (!string.IsNullOrWhiteSpace(message))
         {
-            CliOutput.WriteDiagnostic("[完成] " + message);
+            CliOutput.WriteDiagnostic(CliText.Get("output.done", "[完成] {message}", ("message", message)));
         }
         if (body is not null)
         {
@@ -85,7 +95,12 @@ internal static partial class CliCommandRouter
         }
         if (response.Body is not JsonArray array)
         {
-            error = CliOutput.WriteFailure("internal_error", $"服务返回的{label}列表格式无效");
+            error = CliOutput.WriteFailure(
+                "internal_error",
+                CliText.Get(
+                    "error.invalid_list",
+                    "服务返回的{label}列表格式无效",
+                    ("label", CliText.Label(label))));
             return false;
         }
         var candidates = array
@@ -111,10 +126,23 @@ internal static partial class CliCommandRouter
                     .Select(item => (JsonNode?)new JsonObject { ["id"] = item.Id, ["name"] = item.Name })
                     .ToArray()),
             };
-            error = CliOutput.WriteFailure("ambiguous_target", $"{label}名称匹配到多个对象：{reference}", data);
+            error = CliOutput.WriteFailure(
+                "ambiguous_target",
+                CliText.Get(
+                    "error.ambiguous_target",
+                    "{label}名称匹配到多个对象：{reference}",
+                    ("label", CliText.Label(label)),
+                    ("reference", reference)),
+                data);
             return false;
         }
-        error = CliOutput.WriteFailure("not_found", $"未找到{label}：{reference}");
+        error = CliOutput.WriteFailure(
+            "not_found",
+            CliText.Get(
+                "error.not_found",
+                "未找到{label}：{reference}",
+                ("label", CliText.Label(label)),
+                ("reference", reference)));
         return false;
     }
 
@@ -128,7 +156,9 @@ internal static partial class CliCommandRouter
         }
         if (node is not JsonObject json)
         {
-            error = CliOutput.WriteFailure("validation_error", "--file 内容必须是 JSON 对象");
+            error = CliOutput.WriteFailure(
+                "validation_error",
+                CliText.Get("error.invalid_json_object", "--file 内容必须是 JSON 对象"));
             return false;
         }
         objectNode = json;
@@ -151,19 +181,23 @@ internal static partial class CliCommandRouter
             node = JsonNode.Parse(text);
             if (node is null)
             {
-                error = CliOutput.WriteFailure("validation_error", "JSON 内容为空");
+                error = CliOutput.WriteFailure("validation_error", CliText.Get("error.empty_json", "JSON 内容为空"));
                 return false;
             }
             return true;
         }
         catch (JsonException ex)
         {
-            error = CliOutput.WriteFailure("validation_error", $"JSON 内容无效：{ex.Message}");
+            error = CliOutput.WriteFailure(
+                "validation_error",
+                CliText.Get("error.invalid_json", "JSON 内容无效：{detail}", ("detail", ex.Message)));
             return false;
         }
         catch (Exception ex)
         {
-            error = CliOutput.WriteFailure("validation_error", $"读取 JSON 文件失败：{ex.Message}");
+            error = CliOutput.WriteFailure(
+                "validation_error",
+                CliText.Get("error.read_json", "读取 JSON 文件失败：{detail}", ("detail", ex.Message)));
             return false;
         }
     }
@@ -178,7 +212,9 @@ internal static partial class CliCommandRouter
         }
         if (file == "-")
         {
-            error = CliOutput.WriteFailure("invalid_arguments", "二进制文件参数不支持使用 stdin（--file -）");
+            error = CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.stdin_binary", "二进制文件参数不支持使用 stdin（--file -）"));
             return false;
         }
         try
@@ -190,7 +226,9 @@ internal static partial class CliCommandRouter
         }
         catch (Exception ex)
         {
-            error = CliOutput.WriteFailure("validation_error", $"读取文件失败：{ex.Message}");
+            error = CliOutput.WriteFailure(
+                "validation_error",
+                CliText.Get("error.file_read", "读取文件失败：{detail}", ("detail", ex.Message)));
             return false;
         }
     }
@@ -200,7 +238,9 @@ internal static partial class CliCommandRouter
         value = "";
         if (args.Positionals.Count <= index || string.IsNullOrWhiteSpace(args.Positionals[index]))
         {
-            error = CliOutput.WriteFailure("invalid_arguments", $"缺少{label}");
+            error = CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get("error.missing", "缺少{label}", ("label", CliText.Label(label))));
             return false;
         }
         value = args.Positionals[index];
@@ -213,7 +253,13 @@ internal static partial class CliCommandRouter
         value = "";
         if (!args.TryGet(name, out string? raw) || raw is null || (name != "secret-value" && string.IsNullOrWhiteSpace(raw)))
         {
-            error = CliOutput.WriteFailure("invalid_arguments", $"缺少 --{name}（{label}）");
+            error = CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get(
+                    "error.missing_option",
+                    "缺少 --{name}（{label}）",
+                    ("name", name),
+                    ("label", CliText.Label(label))));
             return false;
         }
         value = raw;
@@ -228,7 +274,9 @@ internal static partial class CliCommandRouter
         {
             if (!accepted.Contains(option))
             {
-                CliOutput.WriteFailure("invalid_arguments", $"未知选项：--{option}");
+                CliOutput.WriteFailure(
+                    "invalid_arguments",
+                    CliText.Get("error.unknown_option", "未知选项：--{option}", ("option", option)));
                 return false;
             }
         }
@@ -250,7 +298,13 @@ internal static partial class CliCommandRouter
         value = "";
         if (!args.TryGet(name, out string? raw) || raw is null || (!allowEmpty && string.IsNullOrWhiteSpace(raw)))
         {
-            error = CliOutput.WriteFailure("invalid_arguments", $"缺少 --{name}（{label}）");
+            error = CliOutput.WriteFailure(
+                "invalid_arguments",
+                CliText.Get(
+                    "error.missing_option",
+                    "缺少 --{name}（{label}）",
+                    ("name", name),
+                    ("label", CliText.Label(label))));
             return false;
         }
         value = raw;
@@ -302,21 +356,15 @@ internal static partial class CliCommandRouter
 
     private static int WriteUsage()
     {
-        const string usage =
-            "用法：nexus-pipeline.exe <命令> [子命令] [参数]\n"
-            + "\n"
-            + "基础：status、doctor（含 export）\n"
-            + "资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n"
-            + "\n"
-            + "机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n"
-            + "目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n"
-            + "进程入口：manage、service、web、restart、register、unregister、apply-update。";
+        string usage = CliText.Get(
+            "help.usage",
+            "用法：nexus-pipeline.exe <命令> [子命令] [参数]\n\n基础：status、doctor（含 export）\n资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n\n机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n进程入口：manage、service、web、restart、register、unregister、apply-update。");
         if (CliOutput.MachineMode)
         {
             CliOutput.WriteSuccess(new JsonObject { ["usage"] = usage });
             return 0;
         }
-        Console.WriteLine("NexusPipeline 枢链");
+        Console.WriteLine(CliText.Get("help.title", "NexusPipeline 枢链"));
         Console.WriteLine(usage);
         return 0;
     }
@@ -331,7 +379,7 @@ internal static class CliRouterIntExtensions
     {
         if (!CliOutput.MachineMode)
         {
-            Console.WriteLine("使用 nexus-pipeline.exe --help 查看命令帮助。");
+            Console.WriteLine(CliText.Get("error.usage", "使用 nexus-pipeline.exe --help 查看命令帮助。"));
         }
         return result;
     }

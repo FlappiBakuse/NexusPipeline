@@ -97,7 +97,11 @@ internal static class Ui
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[错误] {what}保存失败：{ex.Message}（本次修改未落盘）");
+            Console.WriteLine(CliText.Get(
+                "error.save_failed",
+                "{what}保存失败：{detail}（本次修改未落盘）",
+                ("what", what),
+                ("detail", ex.Message)));
             return false;
         }
     }
@@ -116,7 +120,14 @@ internal static class Ui
     /// <summary>带默认值/取消的文本编辑：Esc=取消（返回 null），回车空=保持当前值。</summary>
     public static string? PromptText(string label, string current)
     {
-        (EditResult result, string value) = PromptEdit($"{label}（当前：{(string.IsNullOrWhiteSpace(current) ? "空" : current)}，回车=不变，Esc=取消）：");
+        string currentText = string.IsNullOrWhiteSpace(current)
+            ? CliText.Get("value.empty", "空")
+            : current;
+        (EditResult result, string value) = PromptEdit(CliText.Get(
+            "prompt.edit",
+            "{label}（当前：{current}，回车=不变，Esc=取消）：",
+            ("label", label),
+            ("current", currentText)));
         if (result == EditResult.Clear)
         {
             return null;
@@ -128,9 +139,18 @@ internal static class Ui
     {
         if (days.Count == 7)
         {
-            return "每天";
+            return CliText.Get("day.every", "每天");
         }
-        string[] names = { "周日", "周一", "周二", "周三", "周四", "周五", "周六" };
+        string[] names =
+        {
+            CliText.Get("day.sun", "周日"),
+            CliText.Get("day.mon", "周一"),
+            CliText.Get("day.tue", "周二"),
+            CliText.Get("day.wed", "周三"),
+            CliText.Get("day.thu", "周四"),
+            CliText.Get("day.fri", "周五"),
+            CliText.Get("day.sat", "周六"),
+        };
         return string.Join("/", days.OrderBy(day => day).Select(day => names[day]));
     }
 }

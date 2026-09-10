@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using NexusPipeline.Cli;
+using NexusPipeline.Localization;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
@@ -75,8 +76,8 @@ internal static class ApplicationHost
             {
                 string code = initializationResult == 2 ? "operation_forbidden" : "internal_error";
                 string message = initializationResult == 2
-                    ? "需要管理员权限才能执行 NexusPipeline CLI 命令"
-                    : "NexusPipeline 运行时初始化失败";
+                    ? CliText.Get("error.admin_required", "需要管理员权限才能执行 NexusPipeline CLI 命令")
+                    : CliText.Get("error.runtime_init_failed", "NexusPipeline 运行时初始化失败");
                 return CliOutput.WriteFailure(code, message);
             }
             return initializationResult;
@@ -134,7 +135,9 @@ internal static class ApplicationHost
         }
         if (string.IsNullOrWhiteSpace(staged))
         {
-            Console.WriteLine("[错误] 用法：nexus-pipeline.exe apply-update --staged <暂存目录>");
+            Console.WriteLine(CliText.Get(
+                "apply.usage",
+                "用法：nexus-pipeline.exe apply-update --staged <暂存目录>"));
             return 1;
         }
         try
@@ -143,7 +146,10 @@ internal static class ApplicationHost
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[错误] 更新应用失败：{ex.Message}");
+            Console.WriteLine(CliText.Get(
+                "apply.failed",
+                "更新应用失败：{detail}",
+                ("detail", ex.Message)));
             return 1;
         }
     }

@@ -5,21 +5,21 @@ import { isCurrent, schedule } from "../core/state.js";
 import { navActive, render, setTopbarTitle, startSystemActionCountdown } from "../core/ui.js";
 import { pluginSlotMarkup, renderPluginSlots } from "../core/plugin-slots.js";
 import { notifyPluginPageUpdated } from "../core/plugin-runtime.js";
-import { t } from "../core/i18n.js";
+import { formatList, t } from "../core/i18n.js";
 
 function runningMarkup(running) {
-  if (!running.length) return `<div class="empty"><strong>${t("ui.idle")}</strong><span>${t("ui.no_scripts_or_queues_are_running")}</span><a class="back-link" href="#/dispatch">${t("ui.go_to_dispatch")}</a></div>`;
+  if (!running.length) return `<div class="empty"><strong>${t("dashboard.idle")}</strong><span>${t("dashboard.running.empty")}</span><a class="back-link" href="#/dispatch">${t("dashboard.go_to_dispatch")}</a></div>`;
   const records = running.map(record => `<article class="running-record">
       <div class="running-record-head"><strong>${esc(record.targetName)}</strong>${statusBadge(record.status)}</div>
-      <div class="running-record-meta"><span>${t(record.kind === "queue" ? "ui.schedule_queues" : "ui.script_instance")}</span><span>${t(record.mode === "auto" ? "ui.automatic" : "ui.manual")}</span></div>
-      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${t("ui.attempt_value_value", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span>${record.persistenceWarning ? `<br><span class="badge warn">${t("ui.history_persistence_warning")}：${esc(record.persistenceWarning)}</span>` : ""}</div>
+      <div class="running-record-meta"><span>${t(record.kind === "queue" ? "common.schedule_queues" : "common.script_instance")}</span><span>${t(record.mode === "auto" ? "common.automatic" : "common.manual")}</span></div>
+      <div class="running-record-progress">${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${t("dashboard.running.attempt", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span>${record.persistenceWarning ? `<br><span class="badge warn">${esc(t("dashboard.persistence_warning", { label: t("common.history.persistence_warning"), warning: record.persistenceWarning }))}</span>` : ""}</div>
     </article>`).join("");
-  return `<div class="table-scroll running-table"><table class="data-table"><thead><tr><th scope="col">${t("ui.task")}</th><th scope="col">${t("ui.type")}</th><th scope="col">${t("ui.mode")}</th><th scope="col">${t("ui.progress")}</th><th scope="col">${t("ui.status")}</th></tr></thead><tbody>
+  return `<div class="table-scroll running-table"><table class="data-table"><thead><tr><th scope="col">${t("common.task")}</th><th scope="col">${t("dashboard.type")}</th><th scope="col">${t("dashboard.mode")}</th><th scope="col">${t("dashboard.progress")}</th><th scope="col">${t("common.status")}</th></tr></thead><tbody>
     ${running.map(record => `<tr>
       <td><strong>${esc(record.targetName)}</strong></td>
-      <td>${t(record.kind === "queue" ? "ui.schedule_queues" : "ui.script_instance")}</td>
-      <td>${t(record.mode === "auto" ? "ui.automatic" : "ui.manual")}</td>
-      <td>${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${t("ui.attempt_value_value", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span></td>
+      <td>${t(record.kind === "queue" ? "common.schedule_queues" : "common.script_instance")}</td>
+      <td>${t(record.mode === "auto" ? "common.automatic" : "common.manual")}</td>
+      <td>${esc(record.currentScriptName || "-")} ${esc(record.currentStatus || "")}<br><span class="muted">${t("dashboard.running.attempt", { attempt: record.currentAttempt, max: record.currentMaxAttempts })}</span></td>
       <td>${statusBadge(record.status)}</td>
     </tr>`).join("")}
   </tbody></table></div><div class="running-records">${records}</div>`;
@@ -28,16 +28,16 @@ function runningMarkup(running) {
 function pluginMarkup(status) {
   const disabled = (status.plugins || []).filter(plugin => !plugin.configuredEnabled);
   if (!disabled.length) return "";
-  return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${t("ui.value_plugin_s_are_currently_disabled", { count: disabled.length })}${disabled.map(plugin => esc(plugin.displayName)).join("、")}</p><a class="back-link" href="#/plugins">${t("ui.view_plugins")}</a></div>`;
+  return `<div class="dashboard-system-note" data-testid="plugin-health"><p>${t("dashboard.plugins.disabled_summary", { count: disabled.length, plugins: formatList(disabled.map(plugin => esc(plugin.displayName))) })}</p><a class="back-link" href="#/plugins">${t("dashboard.view_plugins")}</a></div>`;
 }
 
 function setVersionLabel(version) {
   const el = document.querySelector("#app-version");
-  if (el) el.textContent = `${t("ui.current_version")} · ${version || "0.0.0"}`;
+  if (el) el.textContent = `${t("common.current_version")} · ${version || "0.0.0"}`;
 }
 
 function runningPanelMarkup(status) {
-  return `<div class="section-heading"><h3>${t("ui.running")}</h3><span class="muted">${(status.running || []).length} ${t("ui.active_tasks")}</span></div>${runningMarkup(status.running || [])}`;
+  return `<div class="section-heading"><h3>${t("common.running")}</h3><span class="muted">${(status.running || []).length} ${t("dashboard.active_tasks")}</span></div>${runningMarkup(status.running || [])}`;
 }
 
 function pluginPanelMarkup(status) {
@@ -49,20 +49,20 @@ function statePanelMarkup(status) {
   const running = status.running || [];
   const active = running.length > 0;
   return `<section id="dashboard-state" class="dashboard-state ${active ? "running" : "idle"}" data-testid="dashboard-state" aria-live="polite">
-    <div class="dashboard-state-copy"><div class="state-label">${t(active ? "ui.running" : "ui.system_idle")}</div><h3>${t(active ? "ui.task_in_progress" : "ui.everything_is_ready")}</h3><p>${active ? t("ui.value_active_tasks_status_updates_automatically", { count: running.length }) : t("ui.there_are_no_active_tasks_start_a_script_or_queue_manually_from_dispatch")}</p></div>
+    <div class="dashboard-state-copy"><div class="state-label">${t(active ? "common.running" : "dashboard.system_idle")}</div><h3>${t(active ? "dashboard.task_in_progress" : "dashboard.everything_is_ready")}</h3><p>${active ? t("dashboard.running.summary", { count: running.length }) : t("dashboard.running.empty_help")}</p></div>
   </section>`;
 }
 
 export async function pageDashboard(token) {
   if (!isCurrent("dashboard", token)) return;
   navActive("dashboard");
-  setTopbarTitle(t("ui.dashboard"));
+  setTopbarTitle(t("dashboard.dashboard"));
   let status;
   try {
     status = await api("GET", "/api/status");
   } catch (error) {
     if (isCurrent("dashboard", token) && !document.querySelector('[data-testid="dashboard-state"]')) {
-      render(`<div class="empty"><strong>${t("ui.unable_to_connect_to_the_service")}</strong>${esc(error.message)}</div>`);
+      render(`<div class="empty"><strong>${t("dashboard.connection.unavailable")}</strong>${esc(error.message)}</div>`);
     }
     return;
   }
@@ -70,7 +70,7 @@ export async function pageDashboard(token) {
   setVersionLabel(status.version);
   const isInitialRender = !document.querySelector('[data-testid="dashboard-state"]');
   if (isInitialRender) {
-    render(pageHeader(t("ui.run_overview"), t("ui.dashboard"), t("ui.view_current_run_status_scheduling_overview_and_notification_capabilities"))
+    render(pageHeader(t("dashboard.run_overview"), t("dashboard.dashboard"), t("dashboard.overview.help"))
       + pluginSlotMarkup("dashboard.cards", "dashboard.cards")
       + statePanelMarkup(status)
       + `<div id="system-action-area">${systemActionCard(status.systemAction)}</div>
@@ -87,9 +87,9 @@ export async function pageDashboard(token) {
       const label = statePanel.querySelector(".state-label");
       const heading = statePanel.querySelector("h3");
       const copy = statePanel.querySelector("p");
-      if (label) label.textContent = t(active ? "ui.running" : "ui.system_idle");
-      if (heading) heading.textContent = t(active ? "ui.task_in_progress" : "ui.everything_is_ready");
-      if (copy) copy.textContent = active ? t("ui.value_active_tasks_status_updates_automatically", { count: (status.running || []).length }) : t("ui.there_are_no_active_tasks_start_a_script_or_queue_manually_from_dispatch");
+      if (label) label.textContent = t(active ? "common.running" : "dashboard.system_idle");
+      if (heading) heading.textContent = t(active ? "dashboard.task_in_progress" : "dashboard.everything_is_ready");
+      if (copy) copy.textContent = active ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help");
     }
     const sysArea = document.querySelector("#system-action-area");
     if (sysArea) sysArea.innerHTML = systemActionCard(status.systemAction);
