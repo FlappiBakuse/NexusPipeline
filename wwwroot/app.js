@@ -13,7 +13,7 @@ import { actions as historyActions, pageHistory } from "./views/history.js";
 import { actions as pluginsActions, pagePlugins } from "./views/plugins.js";
 import { actions as settingsActions, pageSettings } from "./views/settings.js";
 import { initAppearance } from "./core/appearance.js";
-import { initPluginRuntime, notifyPluginDispose, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, resolvePluginAction, resolvePluginRoute, syncPluginNavActive } from "./core/plugin-runtime.js";
+import { initPluginRuntime, notifyPluginDispose, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, resolvePluginRoute, syncPluginNavActive } from "./core/plugin-runtime.js";
 import { pickPath } from "./core/path-picker.js";
 import { getLocale, loadLocale, t } from "./core/i18n.js";
 
@@ -70,7 +70,7 @@ async function route() {
 }
 
 function actionHandler(actionName) {
-  return allActions[actionName] || resolvePluginAction(actionName);
+  return allActions[actionName];
 }
 
 document.addEventListener("click", event => {

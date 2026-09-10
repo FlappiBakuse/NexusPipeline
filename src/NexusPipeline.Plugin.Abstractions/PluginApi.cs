@@ -10,25 +10,18 @@ public static class PluginApiVersion
     public const int Minor = 5;
 }
 
-/// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本。</summary>
+/// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；v0.15.5 起要求精确版本匹配。</summary>
 public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 3;
+    public const int Minor = 4;
 
-    public const string Text = "1.3";
+    public const string Text = "1.4";
 
     public static bool IsCompatibleWith(string? value)
     {
-        string[] parts = (value ?? "").Trim().Split('.', StringSplitOptions.None);
-        return parts.Length == 2
-            && parts.All(part => part.Length > 0 && part.All(ch => ch is >= '0' and <= '9'))
-            && parts.All(part => part.Length == 1 || part[0] != '0')
-            && int.TryParse(parts[0], out int major)
-            && int.TryParse(parts[1], out int minor)
-            && major == Major
-            && minor <= Minor;
+        return string.Equals(value, Text, StringComparison.Ordinal);
     }
 }
 

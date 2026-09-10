@@ -1,0 +1,25 @@
+{
+  "name": "nexus-pipeline-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pinia": "4.0.3",
+    "vue": "3.5.42",
+    "vue-router": "5.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.8",
+    "@vue/test-utils": "2.5.0",
+    "jsdom": "30.0.1",
+    "typescript": "5.9.3",
+    "vite": "8.3.0",
+    "vitest": "5.0.0",
+    "vue-tsc": "3.3.11"
+  }
+}

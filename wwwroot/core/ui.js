@@ -8,7 +8,9 @@ import { durationClock } from "./duration.js";
 import { initTooltips } from "./tooltip.js";
 import { applyTranslations, t } from "./i18n.js";
 
-const view = $("#view");
+function currentView() {
+  return $("#view");
+}
 let toastTimer = null;
 let lastToastMessage = null;
 let lastToastAt = 0;
@@ -16,6 +18,8 @@ const SHAKE_WINDOW_MS = 2500;
 let noticeSequence = 0;
 
 export function render(html) {
+  const view = currentView();
+  if (!view) return;
   view.innerHTML = html;
   applyTranslations(view);
   initAutoScroll(view);
@@ -41,7 +45,8 @@ export function syncModeToggleText(btn) {
 }
 
 /** 同步根节点内全部切换按钮文字（render/showModal/点击切换后调用）。 */
-export function syncAllModeToggles(root = view) {
+export function syncAllModeToggles(root = currentView()) {
+  if (!root) return;
   root.querySelectorAll(".mode-toggle").forEach(syncModeToggleText);
 }
 
@@ -54,7 +59,8 @@ export function syncSwitchControl(btn) {
   if (stateText) stateText.textContent = on ? t("common.enabled") : t("common.disabled");
 }
 
-export function syncAllSwitchControls(root = view) {
+export function syncAllSwitchControls(root = currentView()) {
+  if (!root) return;
   root.querySelectorAll(".switch-control").forEach(syncSwitchControl);
 }
 
@@ -123,7 +129,8 @@ export function toggleMoreMenu(trigger) {
 }
 
 /** 长文本滚动：内容溢出容器时启用往返滚动（否则保持省略号兜底）。</summary> */
-export function initAutoScroll(root = view) {
+export function initAutoScroll(root = currentView()) {
+  if (!root) return;
   const applyHoverScroll = (el, inner, enabled = true) => {
     const width = inner.scrollWidth;
     if (!enabled || width <= el.clientWidth + 1) {

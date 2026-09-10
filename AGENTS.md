@@ -1,6 +1,6 @@
 # AGENTS.md
 
-NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C#/.NET 8 WinForms 托盘程序、HttpListener Web 服务和零构建静态 ES module 前端。核心代码位于 `src/`，用户界面位于 `wwwroot/`，运行时插件位于 `plugins/`，独立插件仓库位于相邻的 `NexusPipeline-Plugins/`，测试位于 `tests/`。
+NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C#/.NET 8 WinForms 托盘程序、HttpListener Web 服务和由 Vite 构建为静态资源的 Vue/TypeScript 前端。核心代码位于 `src/`，前端源码位于 `frontend/`，运行时插件位于 `plugins/`，独立插件仓库位于相邻的 `NexusPipeline-Plugins/`，测试位于 `tests/`。
 
 ## 权威文档路由
 
@@ -38,8 +38,10 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 ## 前端硬约束
 
-- `wwwroot/` 保持零构建、零 CDN、原生 ES modules；模块按 `app.js`、`core/`、`views/`、`effects/` 分层，视图通过 `actions` 注册表接入事件委托。
-- 可见交互控件使用 `wwwroot/core/controls.js` 的 NexusPipeline 自定义控件层、`data-action` 和稳定 `data-testid`；隐藏文件载体、系统取色载体与语义滑块保留为底层无障碍/浏览器接口。禁止 inline 事件、内联 style、散落颜色字面量和需要打包的依赖。
+- `frontend/` 是宿主前端源码的唯一入口，使用 Vue 3、TypeScript、Vite 和项目内 Nexus UI 组件；Node/npm 只用于开发与发布构建，运行时只托管构建生成的静态文件。
+- `frontend/dist/` 构建结果同步到发布包 `wwwroot/`；最终用户不需要 Node/npm。源码、构建产物和发布静态目录之间的同步由 `build.cmd` 负责。
+- 可复用交互控件优先使用 `frontend/src/ui/primitives/`，对插件开放的稳定控件以 `nxp-*` Native Custom Elements 注册。插件只能依赖 Frontend API 1.4、公开 slot 和这些公共元素，不得依赖 Vue 内部组件、宿主私有 class 或已移除的 `host.controls` / `host.actions`。
+- `wwwroot/` 中的遗留模块只允许作为迁移期间由 Vue 外壳导入的内部实现；新页面和插件不得新增对遗留 DOM factory、全局 action 注册表或复制 HTML 字符串的依赖。
 - 页面支持 360px、768px 和 1280px 视口，触控目标至少 40px；轮询经 `core/state.js` 管理并在路由离开时清理。
 - 主题、弹窗、Toast、焦点和无障碍行为遵循现有界面约束；新增样式复用 CSS 变量和既有紧凑列表模式。
 

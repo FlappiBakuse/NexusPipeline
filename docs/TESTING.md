@@ -8,7 +8,7 @@
 |---|---|---:|---:|---|
 | L1 Unit | `tests/NexusPipeline.Tests/` | 否 | 否 | 模型规则、状态机、解析、规划、重试和边界校验 |
 | L2 Component | `tests/NexusPipeline.Tests/` | 否 | 否 | 临时目录、仓储、配置事务、应用命令和外部端口替身 |
-| L3 Web Logic | `tests/web/` | 否 | 否 | 可独立导入的原生 ES module 纯函数和协议转换 |
+| L3 Web Logic | `tests/web/`、`frontend/src/**/*.test.ts` | 否 | 否 | 可独立导入的 ES module 纯函数、Vue 组件契约和协议转换 |
 | L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
 | L5 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
 
@@ -42,6 +42,7 @@ UI Smoke 断言用户可观察的结果和稳定业务状态。允许使用稳�
 ### Web Logic 与测试文件组织
 
 - Web Logic 只能导入生产 ES module 的纯函数；禁止读取生产源文本、按函数名切片、正则解析函数边界或把实现字符串当作行为证据。
+- `frontend/` 的 `npm run typecheck`、`npm run test` 和 `npm run build` 验证 Vue/TypeScript 组件、公共 `nxp-*` 元素和静态构建产物。
 - 前端候选配置请求由 `wwwroot/views/users/config-edit.js` 的 `buildConfigEditRequest` 负责构造，测试直接验证输入与输出。
 - xUnit 文件按子系统命名，例如 `ExecutionStateStoreTests.cs`、`PluginManagerTests.cs`、`ConfigSwapPrimitivesTests.cs` 和 `LogMonitorTests.cs`。禁止重新建立跨域的 `GovernanceUnitTests`、`BaselineReproductionTests` 或 `ExtensibilityCharacterizationTests` 容器。
 - 测试替身显式实现当前接口；接口移除默认实现后同步所有 fakes。测试不为旧接口、旧 overload、旧数据形态或历史恢复路径保留兼容断言。
@@ -60,6 +61,9 @@ UI Smoke 断言用户可观察的结果和稳定业务状态。允许使用稳�
 
 ```text
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo -m:1
+npm run typecheck --prefix frontend
+npm test --prefix frontend
+npm run build --prefix frontend
 node tests\run.mjs unit
 node tests\run.mjs web
 node tests\run.mjs docs

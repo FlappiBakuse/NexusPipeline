@@ -2,8 +2,14 @@
 setlocal
 cd /d "%~dp0"
 rem This produces the production release used by Administrator Gate; Codex Feedback builds a separate Test Host.
-rem Plugin repository is maintained separately; the source hash covers host src and static wwwroot is synced independently.
-rem .build-src-hash records the host source fingerprint used to skip unchanged publishes.
+rem Plugin repository is maintained separately; frontend source is built into static files before publishing.
+rem .build-src-hash records the host source and frontend source fingerprint used to skip unchanged publishes.
+call npm ci --prefix "%~dp0frontend" --no-audit --no-fund
+if errorlevel 1 goto frontend_failed
+call npm run typecheck --prefix "%~dp0frontend"
+if errorlevel 1 goto frontend_failed
+call npm run build --prefix "%~dp0frontend"
+if errorlevel 1 goto frontend_failed
 for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs"`) do set SRC_HASH=%%h
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
 if not exist "%~dp0.build-src-hash" goto do_publish
@@ -16,7 +22,7 @@ if errorlevel 1 goto build_failed
 > "%~dp0.build-src-hash" echo %SRC_HASH%
 :sync_web
 if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
-xcopy /e /i /y "%~dp0wwwroot" "%~dp0release\wwwroot" >nul
+xcopy /e /i /y "%~dp0frontend\dist" "%~dp0release\wwwroot" >nul
 mkdir "%~dp0release\plugins" >nul 2>nul
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
@@ -29,4 +35,9 @@ exit /b 0
 if exist "%~dp0build-tmp" rmdir /s /q "%~dp0build-tmp"
 echo.
 echo Build failed. See the command output above.
+exit /b 1
+
+:frontend_failed
+echo.
+echo Frontend build failed. See the command output above.
 exit /b 1

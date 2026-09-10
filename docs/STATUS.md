@@ -1,12 +1,13 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-08｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**更新日期**：2026-09-10｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
+- [ ] 完成 v0.15.5 其余业务页（History、Plugins、Queues、Scripts、Users、Dispatch、Settings）的 Vue feature 迁移，并删除 `LegacyPageHost`、旧 view HTML factory、全局 `data-action` 分发器和遗留组件样式；当前版本已完成 Vue App shell、Dashboard、Nexus UI primitives、Frontend API 1.4 slot surface 与两个官方前端插件迁移，尚未迁移页面仍由明确隔离的内部适配边界承载。
 
 ## 后续功能：插件生态扩展
 

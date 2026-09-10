@@ -214,8 +214,8 @@ body[data-wallpaper="on"] .topbar {
 .nav-backdrop { display: none; }
 .page-shell { min-height: 100vh; margin-left: var(--nav-width); }
 .topbar { display: none; }
-#view { width: min(100%, var(--content-max)); min-width: 0; margin: 0 auto; padding: clamp(24px, 4vw, 52px) clamp(16px, 4vw, 48px) 72px; container-type: inline-size; container-name: page-content; }
-#view:focus { outline: none; }
+#view, .view-root { width: min(100%, var(--content-max)); min-width: 0; margin: 0 auto; padding: clamp(24px, 4vw, 52px) clamp(16px, 4vw, 48px) 72px; container-type: inline-size; container-name: page-content; }
+#view:focus, .view-root:focus { outline: none; }
 .loading-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 40vh; color: var(--muted); font-size: 13px; }
 .spinner { width: 16px; height: 16px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

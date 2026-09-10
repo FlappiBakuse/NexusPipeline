@@ -1,6 +1,5 @@
 import { api } from "./api.js";
 import { appearance, createAppearanceHost, refreshAppearance } from "./appearance.js";
-import { colorControlMarkup, fileControlMarkup, numberControlMarkup, rangeControlMarkup, selectControlMarkup, timeControlMarkup } from "./controls.js";
 import { toast } from "./ui.js";
 import { captureExecutionPreview } from "./execution-preview.js";
 import { getLocale, t } from "./i18n.js";
@@ -27,7 +26,6 @@ const SLOT_NAMES = new Set([
 ]);
 
 const plugins = new Map();
-const actions = new Map();
 const routes = new Map();
 const navItems = new Map();
 const slotRenderers = new Map();
@@ -55,10 +53,6 @@ function normalizeRoute(route) {
   return String(route || "").trim().replace(/^\/+|\/+$/g, "");
 }
 
-function normalizeActionKey(value) {
-  return String(value || "").trim().toLowerCase();
-}
-
 function pluginKey(name, value) {
   return `${String(name || "").toLowerCase()}:${value}`;
 }
@@ -69,15 +63,6 @@ function pluginApiPath(name, route) {
     .filter(Boolean)
     .map(part => encodeURIComponent(part));
   return `/api/plugin-api/${encodeURIComponent(name)}${parts.length ? `/${parts.join("/")}` : ""}`;
-}
-
-function registerAction(descriptor, id, handler) {
-  if (!id || typeof handler !== "function") throw new TypeError(t("common.plugin_action_invalid"));
-  const actionId = `plugin:${descriptor.name}:${String(id).trim()}`;
-  const key = normalizeActionKey(actionId);
-  if (actions.has(key)) throw new Error(t("common.plugin_action_duplicate", { id: actionId }));
-  actions.set(key, { handler, plugin: descriptor.name });
-  return disposable(() => actions.delete(key));
 }
 
 function registerRoute(descriptor, route, handler) {
@@ -205,9 +190,6 @@ function createHost(descriptor) {
       patch: (route, body, signal) => api("PATCH", pluginApiPath(descriptor.name, route), body, signal),
       delete: (route, body, signal) => api("DELETE", pluginApiPath(descriptor.name, route), body, signal),
     },
-    actions: {
-      register: (id, handler) => registerAction(descriptor, id, handler),
-    },
     routes: {
       register: (route, handler) => registerRoute(descriptor, route, handler),
     },
@@ -231,20 +213,6 @@ function createHost(descriptor) {
         api("POST", `/api/plugin-contributions/ui/${encodeURIComponent(pluginName)}/${encodeURIComponent(contributionId)}/action/${encodeURIComponent(action)}`, { context, values }, signal),
       toast: (message, tone = "info") => toast(message, tone),
     },
-    controls: Object.freeze({
-      select: ({ id, value = "", options = [], extra = "", ariaLabel = "", multiple = false } = {}) =>
-        selectControlMarkup(id, value, options, extra, ariaLabel, multiple),
-      number: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
-        numberControlMarkup(id, value, extra, ariaLabel),
-      range: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
-        rangeControlMarkup(id, value, extra, ariaLabel),
-      time: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
-        timeControlMarkup(id, value, extra, ariaLabel),
-      file: ({ id, extra = "", accept = "", multiple = false, label = t("common.plugin_file_select") } = {}) =>
-        fileControlMarkup(id, extra, accept, multiple, label),
-      color: ({ id, value = "", extra = "", ariaLabel = "" } = {}) =>
-        colorControlMarkup(id, value, extra, ariaLabel),
-    }),
     executionPreview: {
       capture: (runId, signal) => captureExecutionPreview(runId, descriptor.name, signal),
     },
@@ -316,10 +284,6 @@ export async function refreshPluginRuntime() {
   }
 }
 
-export function resolvePluginAction(actionName) {
-  return actions.get(normalizeActionKey(actionName))?.handler || null;
-}
-
 export function resolvePluginRoute(segments) {
   if (!Array.isArray(segments) || segments.length < 3 || String(segments[0]).toLowerCase() !== "plugin") return null;
   let pluginName;
@@ -350,8 +314,19 @@ export async function renderFrontendSlots(container, slot, context = {}) {
   const registrations = slotRenderers.get(slot) || [];
   for (const registration of registrations.slice()) {
     try {
-      const result = await registration.renderer(container, { slot, ...context }, registration.host || plugins.get(registration.plugin)?.host);
+      const element = document.createElement("div");
+      element.className = "plugin-surface";
+      element.dataset.pluginName = registration.plugin;
+      element.dataset.pluginSlot = slot;
+      container.append(element);
+      const surface = {
+        element,
+        context: Object.freeze({ slot, ...context }),
+      };
+      const result = await registration.renderer(surface);
       if (typeof result === "function") cleanups.push(result);
+      else if (result && typeof result.dispose === "function") cleanups.push(() => result.dispose());
+      else if (result && typeof result.deactivate === "function") cleanups.push(() => result.deactivate());
     } catch (error) {
     console.warn(`[NexusPipeline] ${t("common.plugin_slot_render_failed", { plugin: registration.plugin, slot })}`, error);
     }

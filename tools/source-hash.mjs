@@ -4,14 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const inputRoots = ["src"];
+const inputRoots = ["src", "frontend"];
 
 function collectFiles(root) {
   const files = [];
   if (!fs.existsSync(root)) return files;
 
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    if (entry.name === "bin" || entry.name === "obj") continue;
+    if (entry.name === "bin" || entry.name === "obj" || entry.name === "node_modules" || entry.name === "dist") continue;
     const absolute = path.join(root, entry.name);
     if (entry.isDirectory()) {
       files.push(...collectFiles(absolute));

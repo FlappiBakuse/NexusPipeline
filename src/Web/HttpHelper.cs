@@ -41,7 +41,7 @@ internal static class HttpHelper
         };
         context.Response.ContentType = contentType;
         // （P13）：静态文件补安全头（nosniff / referrer 策略 / CSP——零 CDN 纯本地资源，img-src 允许 data:/blob: 图标）；
-        // 缓存保持 no-cache（零构建无版本号，浏览器每次校验）。
+        // 缓存保持 no-cache（管理页面发布为静态 bundle，服务重启后立即读取新资源）。
         // 重启服务需要跨端口探测；同时允许当前访问主机的任意端口，覆盖 LAN/主机名/IPv6 远程访问，
         // 不把 connect-src 扩大到任意主机。
         Uri? requestUrl = context.Request.Url;

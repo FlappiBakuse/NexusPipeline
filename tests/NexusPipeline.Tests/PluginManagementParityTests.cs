@@ -87,7 +87,7 @@ public sealed class PluginManagementParityTests
             "1.4",
             new[] { "frontend-module" },
             true,
-            "1.2");
+            "1.4");
         var ownership = new Dictionary<string, PluginOwnership>(StringComparer.OrdinalIgnoreCase)
         {
             ["fixture"] = new PluginOwnership { Name = "fixture", ArtifactName = "Fixture", Version = "1.2.3" },
@@ -100,7 +100,7 @@ public sealed class PluginManagementParityTests
         PluginManagementView view = PluginManagementView.Create(summary, manager, ownership, pending);
 
         Assert.Equal("Fixture", view.ArtifactName);
-        Assert.Equal("1.2", view.FrontendApiVersion);
+        Assert.Equal("1.4", view.FrontendApiVersion);
         Assert.True(view.HasFrontend);
         Assert.True(view.ManagedByStore);
         Assert.Equal("official-store", view.InstallationSource);

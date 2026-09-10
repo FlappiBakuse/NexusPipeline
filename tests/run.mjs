@@ -188,7 +188,7 @@ async function buildTestHost() {
     "--nologo",
   ]);
   if (code !== 0) return code;
-  fs.cpSync(path.join(projectRoot, "wwwroot"), path.join(testHostDir, "wwwroot"), { recursive: true });
+  fs.cpSync(path.join(projectRoot, "frontend", "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
   const pluginsDir = path.join(testHostDir, "plugins");
   fs.mkdirSync(pluginsDir, { recursive: true });
   console.error(`[Test Host] 构建完成：${path.join(testHostDir, "nexus-pipeline.exe")}`);

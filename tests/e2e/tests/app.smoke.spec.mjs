@@ -49,6 +49,9 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   });
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("dashboard-state")).toBeVisible();
+  await expect(page.getByTestId("nav-dashboard")).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("heading", { name: "仪表盘", exact: true })).toBeVisible();
+  await expect(page.locator("body")).not.toContainText("signal is aborted without reason");
   for (const route of ["users", "scripts", "queues", "dispatch", "history", "plugins", "settings"]) {
     await page.getByTestId(`nav-${route}`).click();
     await page.waitForFunction(expected => location.hash === `#/${expected}`, route);

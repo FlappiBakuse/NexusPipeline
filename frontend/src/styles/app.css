@@ -1,0 +1,18 @@
+.nxp-page-host {
+  min-width: 0;
+  display: contents;
+}
+
+.nxp-boot-error {
+  margin: 24px;
+}
+
+.nxp-boot-error strong,
+.nxp-boot-error span {
+  display: block;
+}
+
+.nxp-boot-error span {
+  margin-top: 8px;
+  color: var(--muted);
+}

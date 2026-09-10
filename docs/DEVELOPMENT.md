@@ -22,9 +22,9 @@
 |---|---|---|
 | Windows | 10/11 | 唯一支持平台（WinForms 托盘 + Win32 API） |
 | .NET SDK | 8.x | 编译与运行；部署机需要 .NET 8 Desktop Runtime |
-| Node.js | 20.x | Web Logic、System Smoke 和 Playwright 测试 |
+| Node.js | 24.x | 前端构建、Web Logic、System Smoke 和 Playwright 测试 |
 
-- 网页管理界面为纯静态 ES modules，浏览器直接加载；源码构建不需要前端打包链。
+- 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。
 - 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；Codex 本地 UI/System 反馈使用 `NexusTestHost=true` 的 Test Host，GitHub Administrator Gate 使用生产 release 并在 Administrator / High Integrity 或 System Integrity 下执行。
 - `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见 [TESTING.md](TESTING.md)。
 
@@ -45,7 +45,7 @@ release/
 └── plugins/              ← 用户插件运行目录（由插件管理器维护）
 ```
 
-构建脚本由 `build.cmd` 调用 `tools/source-hash.mjs` 计算宿主 `src/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`；插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
+构建脚本先安装并校验 `frontend/` 依赖，再生成 Vite 静态资源，将其同步到发布包 `release/wwwroot/`；随后调用 `tools/source-hash.mjs` 计算宿主 `src/` 与 `frontend/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`、`node_modules/` 和 `dist/`。插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
 
 重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
 

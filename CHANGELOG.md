@@ -2,6 +2,14 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.5（Pre-release）
+
+### 前端组件化与插件契约
+
+- 引入 Vue 3、TypeScript、Vite 和 Nexus UI 公共组件层；开发期构建，运行期继续托管静态资源。
+- Frontend API 升级到 1.4 并采用精确版本匹配，移除旧的 `host.controls`、`host.actions` 和 Frontend API 1.3 兼容路径。
+- 宿主外壳接入 Vue 路由/状态与公共 `nxp-*` Native Custom Elements，官方 CustomWallpaper、LiveScreenshot 插件迁移到 Vue 组件。
+
 ## v0.15.4（Pre-release）
 
 ### 国际化语义规范化
