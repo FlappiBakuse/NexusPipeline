@@ -18,6 +18,7 @@ import { setNavOpen } from "@legacy/core/ui.js";
 import { cycleTheme } from "@legacy/core/ui.js";
 import { enterPage } from "@legacy/core/state.js";
 import { isAbortError } from "@legacy/core/api.js";
+import { initAutoScroll } from "@legacy/core/ui.js";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import { installModalBehavior } from "../ui/modal";
@@ -41,6 +42,22 @@ const navigation = [
   ["settings", "settings", "shell.settings"],
 ] as const;
 let uninstallModalBehavior: (() => void) | null = null;
+let autoScrollObserver: MutationObserver | null = null;
+let autoScrollFrame: number | null = null;
+
+function scheduleAutoScroll() {
+  if (autoScrollFrame !== null) return;
+  const refresh = () => {
+    autoScrollFrame = null;
+    const pageShell = document.querySelector<HTMLElement>(".page-shell");
+    if (pageShell) initAutoScroll(pageShell);
+  };
+  if (typeof window.requestAnimationFrame === "function") {
+    autoScrollFrame = window.requestAnimationFrame(refresh);
+  } else {
+    refresh();
+  }
+}
 
 function closeOnBackdrop(event: Event) {
   const target = event.target instanceof Element ? event.target : null;
@@ -58,6 +75,13 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  autoScrollObserver?.disconnect();
+  autoScrollObserver = null;
+  if (autoScrollFrame !== null && typeof window.cancelAnimationFrame === "function") {
+    window.cancelAnimationFrame(autoScrollFrame);
+    autoScrollFrame = null;
+  }
+  window.removeEventListener("resize", scheduleAutoScroll);
   uninstallModalBehavior?.();
   uninstallModalBehavior = null;
   document.removeEventListener("click", closeOnBackdrop, true);
@@ -70,11 +94,19 @@ onMounted(async () => {
   closeOnDesktopResize();
   document.addEventListener("click", closeOnBackdrop, true);
   window.addEventListener("resize", closeOnDesktopResize);
+  window.addEventListener("resize", scheduleAutoScroll);
+  const pageShell = document.querySelector<HTMLElement>(".page-shell");
+  if (pageShell && typeof MutationObserver !== "undefined") {
+    autoScrollObserver = new MutationObserver(scheduleAutoScroll);
+    autoScrollObserver.observe(pageShell, { childList: true, subtree: true });
+  }
+  scheduleAutoScroll();
   try {
     const booted = await bootstrapFrontend();
     if (booted) {
       shell.markBooted();
       applyTranslations();
+      scheduleAutoScroll();
     }
   } catch (error) {
     if (!isAbortError(error)) shell.markBootError(error);

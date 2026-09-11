@@ -182,7 +182,6 @@ function servicePayload() {
   };
 }
 function saveService() {
-  markRestart();
   const value = token.value.trim();
   return queueSave(() =>
     persist(
@@ -191,6 +190,10 @@ function saveService() {
       value || undefined,
     ),
   );
+}
+function saveServiceWithRestart() {
+  markRestart();
+  return saveService();
 }
 function saveNotifications() {
   const payload = {
@@ -277,6 +280,9 @@ function onMcpChange(value: boolean) {
   settings.mcpEnabled = value;
   markRestart();
   void saveService();
+}
+function onLightweightChange() {
+  void saveServiceWithRestart();
 }
 function onUpdateCheck(value: boolean) {
   settings.updateCheckEnabled = value;
@@ -659,7 +665,7 @@ onBeforeUnmount(() => {
                   id="st-lightweight"
                   v-model="settings.lightweightMode"
                   :aria-label="t('settings.lightweight_mode')"
-                  @change="saveService"
+                  @change="onLightweightChange"
                 />
               </div>
               <div class="switch-row settings-option switch-card">
@@ -707,7 +713,7 @@ onBeforeUnmount(() => {
                     :min="1024"
                     :max="65535"
                     :aria-label="t('settings.web_port')"
-                    @change="saveService"
+                    @change="saveServiceWithRestart"
                   />
                 </div>
                 <div class="field">
@@ -726,7 +732,7 @@ onBeforeUnmount(() => {
               <div
                 class="form-grid settings-service-grid settings-service-grid-locale"
               >
-                <div class="field">
+                <div class="field" :data-help="t('settings.language_help', {}, 'Language preference is stored in this browser only')">
                   <label class="field-label" for="settings-locale-trigger">{{
                     t("settings.language", {}, "Interface language")
                   }}</label
@@ -738,7 +744,7 @@ onBeforeUnmount(() => {
                     @change="changeLocale"
                   />
                 </div>
-                <div class="field">
+                <div class="field" :data-help="t('settings.host_language_help', {}, 'Controls CLI, tray, notifications, and background logs.')">
                   <label class="field-label" for="st-host-locale-trigger">{{
                     t("settings.host_language", {}, "Host language")
                   }}</label
@@ -884,7 +890,7 @@ onBeforeUnmount(() => {
                   </div>
                 </div>
                 <div class="form-grid">
-                  <div class="field">
+                  <div class="field" :data-help="t('settings.notification.webhook_url_keep')">
                     <label class="field-label" for="st-whurl">{{
                       t("settings.webhook_address")
                     }}</label
@@ -900,7 +906,7 @@ onBeforeUnmount(() => {
                       @blur="saveNotifications"
                     />
                   </div>
-                  <div class="field">
+                  <div class="field" :data-help="t('settings.notification.secret_keep')">
                     <label class="field-label" for="st-whsec">{{
                       t("settings.webhook_signing_secret")
                     }}</label
@@ -912,7 +918,74 @@ onBeforeUnmount(() => {
                     />
                   </div>
                 </div>
-                <div class="field">
+                <div v-if="settings.webhookType === 'feishu'" class="webhook-advanced-fields">
+                  <div class="form-grid">
+                    <div class="field" :data-help="t('settings.notification.image_credentials')">
+                      <label class="field-label" for="st-feishu-appid">{{ t("settings.feishu_app_id") }}</label>
+                      <input id="st-feishu-appid" v-model="settings.feishuAppId" @blur="saveNotifications" />
+                    </div>
+                    <div class="field" :data-help="t('settings.notification.app_secret_keep')">
+                      <label class="field-label" for="st-feishu-secret">{{ t("settings.feishu_app_secret", {}, "Feishu App Secret") }}</label>
+                      <input
+                        id="st-feishu-secret"
+                        v-model="secretDraft.feishuAppSecret"
+                        type="password"
+                        :placeholder="settings.feishuAppSecret ? t('common.leave_blank_to_keep') : undefined"
+                        autocomplete="new-password"
+                        @blur="saveNotifications"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="settings.webhookType === 'slack'" class="webhook-advanced-fields">
+                  <div class="form-grid">
+                    <div class="field" :data-help="t('settings.notification.bot_member_help')">
+                      <label class="field-label" for="st-slack-channel">{{ t("settings.slack_channel_id") }}</label>
+                      <input id="st-slack-channel" v-model="settings.slackChannelId" @blur="saveNotifications" />
+                    </div>
+                    <div class="field" :data-help="t('settings.notification.bot_token_keep')">
+                      <label class="field-label" for="st-slack-token">{{ t("settings.slack_bot_token") }}</label>
+                      <input
+                        id="st-slack-token"
+                        v-model="secretDraft.slackBotToken"
+                        type="password"
+                        :placeholder="settings.slackBotToken ? t('common.leave_blank_to_keep') : 'xoxb-…'"
+                        autocomplete="new-password"
+                        @blur="saveNotifications"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div v-else-if="settings.webhookType === 'dingtalk'" class="webhook-advanced-fields">
+                  <div class="form-grid">
+                    <div class="field">
+                      <label class="field-label" for="st-dingtalk-key">{{ t("settings.dingtalk_app_key") }}</label>
+                      <input id="st-dingtalk-key" v-model="settings.dingTalkAppKey" @blur="saveNotifications" />
+                    </div>
+                    <div class="field">
+                      <label class="field-label" for="st-dingtalk-robot">{{ t("settings.dingtalk_robot_code") }}</label>
+                      <input id="st-dingtalk-robot" v-model="settings.dingTalkRobotCode" @blur="saveNotifications" />
+                    </div>
+                  </div>
+                  <div class="form-grid">
+                    <div class="field">
+                      <label class="field-label" for="st-dingtalk-conversation">{{ t("settings.dingtalk_open_conversation_id") }}</label>
+                      <input id="st-dingtalk-conversation" v-model="settings.dingTalkOpenConversationId" @blur="saveNotifications" />
+                    </div>
+                    <div class="field" :data-help="t('settings.notification.app_secret_keep')">
+                      <label class="field-label" for="st-dingtalk-secret">{{ t("settings.dingtalk_app_secret") }}</label>
+                      <input
+                        id="st-dingtalk-secret"
+                        v-model="secretDraft.dingTalkAppSecret"
+                        type="password"
+                        :placeholder="settings.dingTalkAppSecret ? t('common.leave_blank_to_keep') : undefined"
+                        autocomplete="new-password"
+                        @blur="saveNotifications"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div class="field" :data-help="t('settings.notification.template_help')">
                   <label class="field-label" for="st-whtpl">{{
                     t("settings.notification.custom_template")
                   }}</label
@@ -1152,7 +1225,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="field-btn-row">
-                <div class="field">
+                <div class="field" :data-help="t('settings.remote_access.token_keep_help')">
                   <label class="field-label" for="st-token">{{
                     t("settings.access_token")
                   }}</label
@@ -1225,7 +1298,10 @@ onBeforeUnmount(() => {
                   />
                 </div>
               </div>
-              <div class="form-grid settings-single-field">
+              <div
+                class="form-grid settings-single-field"
+                :data-help="t('settings.remote_access.mcp_endpoint_help', { port: Number(settings.mcpPort) || 58732 })"
+              >
                 <div class="field">
                   <label class="field-label" for="st-mcp-port">{{
                     t("settings.mcp_port")
@@ -1236,7 +1312,7 @@ onBeforeUnmount(() => {
                     :min="1024"
                     :max="65535"
                     :aria-label="t('settings.mcp_port')"
-                    @change="saveService"
+                    @change="saveServiceWithRestart"
                   />
                 </div>
               </div>
@@ -1279,7 +1355,7 @@ onBeforeUnmount(() => {
             class="settings-card-body"
             :hidden="!panelExpanded('network')"
           >
-            <div class="network-settings">
+            <div class="network-settings" :data-help="t('settings.network_proxy_help')">
               <div class="field">
                 <label class="field-label" for="st-proxy-mode-trigger">{{
                   t("settings.proxy_mode")
@@ -1297,7 +1373,7 @@ onBeforeUnmount(() => {
                 id="st-proxy-custom"
                 class="proxy-custom-fields"
               >
-                <div class="field">
+                <div class="field" :data-help="t('settings.validation.proxy_scheme')">
                   <label class="field-label" for="st-proxy-url">{{
                     t("settings.http_https_proxy_address")
                   }}</label
@@ -1318,7 +1394,7 @@ onBeforeUnmount(() => {
                     @blur="saveNetwork"
                   />
                 </div>
-                <div class="field">
+                <div class="field" :data-help="t('settings.network.proxy_password_keep')">
                   <label class="field-label" for="st-proxy-pwd">{{
                     t("settings.password_optional")
                   }}</label
@@ -1416,7 +1492,7 @@ onBeforeUnmount(() => {
                     @change="saveUpdates"
                   />
                 </div>
-                <div class="field">
+                <div class="field" :data-help="t('settings.update.source_default_help')">
                   <label class="field-label" for="st-update-source">{{
                     t("settings.mirror_url")
                   }}</label

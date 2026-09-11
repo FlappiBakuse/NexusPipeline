@@ -306,12 +306,9 @@ onMounted(() => {
     />
     <NxpEmptyState
       v-else-if="!queues.length"
-      :title="t('queues.no_queues_yet')"
-      :description="t('queues.page.help')"
-      ><a class="back-link" href="#/queues" @click.prevent="openEditor()">{{
-        t("queues.new_schedule_queue")
-      }}</a></NxpEmptyState
-    >
+        :title="t('queues.no_queues_yet')"
+        :description="t('queues.page.help')"
+      />
     <section v-else class="card list-surface">
       <div class="script-grid">
         <article

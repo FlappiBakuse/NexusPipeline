@@ -1176,10 +1176,7 @@ onBeforeUnmount(() => {
         v-if="!sortedUsers.length"
         :title="t('users.no_users_yet')"
         :description="t('users.page.empty_help')"
-        ><button class="back-link" type="button" @click="openNewUser">
-          {{ t("users.add_user") }}
-        </button></NxpEmptyState
-      >
+      />
       <section v-else class="card list-surface">
         <div class="script-grid global-user-list">
           <article
@@ -1327,7 +1324,7 @@ onBeforeUnmount(() => {
 
     <div v-if="globalDraft" class="modal-mask" role="presentation" data-locked>
       <section
-        class="modal secondary-surface"
+        class="modal wide secondary-surface"
         role="dialog"
         aria-modal="true"
         :aria-label="t('users.global.title')"
@@ -1432,7 +1429,7 @@ onBeforeUnmount(() => {
                     "
                 />
               </div>
-              <div class="field">
+              <div class="field" :data-help="t('users.global.notification.smtp_help')">
                 <label class="field-label" for="gm-notification-smtp">{{
                   t("users.smtp_recipients")
                 }}</label
@@ -1440,6 +1437,7 @@ onBeforeUnmount(() => {
                   id="gm-notification-smtp"
                   :value="globalDraft.settings.notification.smtpTo"
                   type="text"
+                  :placeholder="t('users.binding.smtp_inherit_help')"
                   @input="
                     setGlobalInput('notification', 'smtpTo', inputValue($event))
                   "
@@ -1639,12 +1637,9 @@ onBeforeUnmount(() => {
                 rows="3"
               ></textarea>
             </div>
-            <div class="user-avatar-setting">
-              <span class="muted">{{ userDraft.avatarUrl ? t("users.custom_avatar") : t("users.avatar_upload") }}</span>
-              <button class="tertiary" type="button" @click.stop="uploadAvatar(userDraft.id)">{{ t("users.avatar_upload") }}</button>
-              <template v-if="userDraft.avatarUrl">
+            <div v-if="userDraft.avatarUrl" class="user-avatar-setting">
+              <span class="muted">{{ t("users.custom_avatar") }}</span>
               <button class="tertiary" type="button" @click.stop="removeAvatar(userDraft.id)">{{ t("users.remove_custom_avatar") }}</button>
-              </template>
             </div>
           </section>
           <section
@@ -1888,7 +1883,7 @@ onBeforeUnmount(() => {
                       :disabled="binding.locks?.notification === true"
                       @update:model-value="setBindingValue(binding, 'notifyEnabled', $event)"
                     />
-                    <div class="field">
+                    <div class="field" :data-help="t('users.binding.smtp_help')">
                       <label
                         class="field-label"
                         :for="`um-${binding.scriptInstanceId}-smtp`"
@@ -2100,9 +2095,6 @@ onBeforeUnmount(() => {
 .users-page .modal-body {
   max-height: min(72vh, 760px);
   overflow: auto;
-}
-.users-page .modal {
-  width: min(960px, calc(100vw - 32px));
 }
 .users-page .plugin-contribution-fields {
   display: grid;

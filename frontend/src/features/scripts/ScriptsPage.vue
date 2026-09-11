@@ -478,10 +478,7 @@ onBeforeUnmount(() => {
         v-if="!scripts.length"
         :title="t('scripts.no_script_instances_yet')"
         :description="t('scripts.page.empty_help')"
-        ><button class="back-link" type="button" @click="openNew">
-          {{ t("scripts.new_script_instance") }}
-        </button></NxpEmptyState
-      >
+      />
       <section v-else class="card list-surface">
         <div class="script-grid">
           <article
@@ -598,7 +595,7 @@ onBeforeUnmount(() => {
         <div class="modal-header">
           <h2 class="modal-title">{{ t("scripts.new_script_instance") }}</h2>
           <button
-            class="modal-close"
+            class="icon-button modal-close"
             type="button"
             :aria-label="t('common.close', {}, 'Close')"
             @click.stop="chooserOpen = false"
@@ -623,11 +620,12 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, plugin.name || '')"
           >
-            <strong>{{
-              t("scripts.action.create_specialized", {
-                plugin: plugin.displayName || plugin.name || "",
-              })
-            }}</strong
+            <strong class="scroll-text"
+              ><span class="scroll-inner">{{
+                t("scripts.action.create_specialized", {
+                  plugin: plugin.displayName || plugin.name || "",
+                })
+              }}</span></strong
             ><span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
           </button>
         </div>
@@ -663,7 +661,7 @@ onBeforeUnmount(() => {
             }}
           </h2>
           <button
-            class="modal-close"
+            class="icon-button modal-close"
             type="button"
             :aria-label="t('common.close', {}, 'Close')"
             @click.stop="closeEditor"
@@ -760,7 +758,7 @@ onBeforeUnmount(() => {
               }}</span>
             </div>
             <div class="toggle-grid switch-grid">
-              <div class="switch-row settings-option switch-card">
+              <div class="switch-row settings-option switch-card" :data-tooltip="selfManagedPc ? t('scripts.editor.pc_client_disabled') : undefined">
                 <div>
                   <strong>{{ t("scripts.launch_game") }}</strong
                   ><span class="muted">{{
@@ -773,8 +771,10 @@ onBeforeUnmount(() => {
                 </div>
                 <NxpSwitch
                   id="sm-launch"
-                  v-model="draft.launchGame"
+                  :model-value="selfManagedPc ? false : draft.launchGame"
+                  :disabled="selfManagedPc"
                   :aria-label="t('scripts.launch_game')"
+                  @update:model-value="draft.launchGame = $event"
                 />
               </div>
               <div class="switch-row settings-option switch-card">
@@ -815,7 +815,10 @@ onBeforeUnmount(() => {
             </div>
             <div class="nested-panel">
               <div class="form-grid">
-                <div class="field">
+                <div
+                  class="field"
+                  :data-help="draft.gameMode === 'emulator' ? t('scripts.editor.adb_cleanup_help') : t('scripts.editor.game_path.cleanup_help')"
+                >
                   <label class="field-label" for="sm-game-exe">{{
                     draft.gameMode === "emulator"
                       ? t("scripts.emulator_adb_address")
@@ -837,7 +840,10 @@ onBeforeUnmount(() => {
                     :placeholder="t('scripts.emulator_adb_address')"
                   />
                 </div>
-                <div class="field">
+                <div
+                  class="field"
+                  :data-help="selfManagedPc ? t('scripts.editor.pc_client_disabled') : draft.gameMode === 'emulator' ? t('scripts.android.arguments_mode_help') : undefined"
+                >
                   <label class="field-label" for="sm-game-args">{{
                     t("scripts.script_startup_arguments")
                   }}</label
@@ -850,7 +856,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="form-grid">
-                <div class="field">
+                <div class="field" :data-help="t('scripts.select_game_start_mode')">
                   <label class="field-label" for="sm-mode-trigger">{{
                     t("scripts.startup_mode")
                   }}</label
@@ -862,7 +868,10 @@ onBeforeUnmount(() => {
                     :aria-label="t('scripts.startup_mode')"
                   />
                 </div>
-                <div class="field">
+                <div
+                  class="field"
+                  :data-help="selfManagedPc ? t('scripts.editor.pc_client_disabled') : t('scripts.editor.game_launch.wait_help')"
+                >
                   <label class="field-label" for="sm-game-wait">{{
                     t("scripts.wait_after_game_start")
                   }}</label
@@ -881,7 +890,7 @@ onBeforeUnmount(() => {
               <h3>{{ t("scripts.run_settings") }}</h3>
             </div>
             <div class="form-grid three">
-              <div class="field">
+              <div class="field" :data-help="t('scripts.editor.retry.attempts_help')">
                 <label class="field-label" for="sm-attempts"
                   >{{ t("scripts.editor.retry.attempts_label") }}
                   <span class="req">*</span></label
@@ -893,7 +902,7 @@ onBeforeUnmount(() => {
                   :aria-label="t('scripts.editor.retry.attempts_label')"
                 />
               </div>
-              <div class="field">
+              <div class="field" :data-help="t('scripts.editor.retry.stall_timeout_help')">
                 <label class="field-label" for="sm-stall"
                   >{{ t("scripts.log_stall_timeout_minutes") }}
                   <span class="req">*</span></label
@@ -905,7 +914,7 @@ onBeforeUnmount(() => {
                   :aria-label="t('scripts.log_stall_timeout_minutes')"
                 />
               </div>
-              <div class="field">
+              <div class="field" :data-help="t('scripts.validation.total_timeout_help')">
                 <label class="field-label" for="sm-total"
                   >{{ t("scripts.total_timeout_minutes") }}
                   <span class="req">*</span></label
@@ -952,7 +961,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <div v-show="draft.judgeScriptEnabled" id="sm-script-box">
-              <div class="field">
+              <div class="field" :data-help="t('scripts.judge.language_help')">
                 <label class="field-label" for="sm-judge-lang-trigger">{{
                   t("scripts.judge_script_language")
                 }}</label
@@ -1035,7 +1044,7 @@ onBeforeUnmount(() => {
         <div class="modal-header">
           <h2 class="modal-title">{{ t("scripts.delete_script_instance") }}</h2>
           <button
-            class="modal-close"
+            class="icon-button modal-close"
             type="button"
             :aria-label="t('common.close', {}, 'Close')"
             @click.stop="closeConfirm"

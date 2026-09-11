@@ -482,7 +482,7 @@ onBeforeUnmount(() => {
         </aside>
       </div>
       <div class="history-records-column">
-        <NxpButton v-if="detailVisible" class="history-detail-back ghost" type="button" @click="goBack">{{ t("history.back_to_user_list") }}</NxpButton>
+        <NxpButton v-if="selectedUserKey" class="history-detail-back ghost" type="button" @click="goBack">{{ t("history.back_to_user_list") }}</NxpButton>
         <section class="history-records-panel history-level-panel">
           <div class="history-panel-head"><NxpIcon :name="selectedUserKey ? 'queues' : selectedDate ? 'scripts' : 'history'" /><h3>{{ panelTitle }}</h3><span class="muted" data-testid="history-records-count">{{ panelCount }}</span><button class="history-refresh" type="button" :aria-label="t('history.refresh_records')" data-testid="history-refresh" @click="selectedUserKey ? loadRecords() : loadDates()"><NxpIcon name="refresh" /></button></div>
           <div class="history-entry-list history-level-list">
