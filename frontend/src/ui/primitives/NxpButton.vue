@@ -11,3 +11,11 @@ withDefaults(defineProps<{
 <template>
   <button class="nxp-button" :class="{ sm: size === 'sm', danger: tone === 'danger', ghost: variant === 'ghost' }" :type="type" :disabled="disabled"><slot /></button>
 </template>
+
+<style>
+:host {
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
+}
+</style>

@@ -5,7 +5,7 @@ function update(event: Event) { const value = (event.target as HTMLInputElement)
 function change(event: Event) { emit("change", (event.target as HTMLInputElement).value); }
 </script>
 
-<template><input class="nxp-input" :type="props.type" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" @input="update" @change="change" /></template>
+<template><input class="nxp-input" :type="props.type" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" @input.stop="update" @change.stop="change" /></template>
 
 <style>
 .nxp-input { width: 100%; min-height: var(--nx-control-height); border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); padding: 0 var(--nx-space-3); background: var(--input-bg, transparent); color: var(--nx-color-text); font: inherit; }

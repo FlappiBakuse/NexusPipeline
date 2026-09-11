@@ -1,6 +1,35 @@
 <script setup lang="ts">
-const props = withDefaults(defineProps<{ page?: number; totalPages?: number; total?: number; label?: string }>(), { page: 1, totalPages: 1, total: 0, label: "分页" });
+import { computed } from "vue";
+import { t } from "@legacy/core/i18n.js";
+
+const props = withDefaults(defineProps<{
+  page?: number;
+  totalPages?: number;
+  total?: number;
+  pageSize?: number;
+  label?: string;
+  previousLabel?: string;
+  nextLabel?: string;
+}>(), {
+  page: 1,
+  totalPages: 1,
+  total: 0,
+  pageSize: 20,
+  label: "分页",
+  previousLabel: "",
+  nextLabel: "",
+});
 const emit = defineEmits<{ pageChange: [page: number]; "update:page": [page: number] }>();
+
+const range = computed(() => {
+  if (!props.total) return "";
+  const from = (props.page - 1) * props.pageSize + 1;
+  const to = Math.min(props.total, props.page * props.pageSize);
+  return t("common.pager.range", { from, to });
+});
+const summary = computed(() => t("common.pager.summary", { total: props.total, range: range.value }));
+const previousText = computed(() => props.previousLabel || t("common.previous", {}, "Previous"));
+const nextText = computed(() => props.nextLabel || t("common.next", {}, "Next"));
 
 function go(page: number) {
   const next = Math.max(1, Math.min(props.totalPages, page));
@@ -11,16 +40,26 @@ function go(page: number) {
 </script>
 
 <template>
-  <nav class="nxp-pager" :aria-label="props.label">
-    <button type="button" :disabled="props.page <= 1" @click="go(props.page - 1)">‹</button>
-    <span aria-live="polite">{{ props.page }} / {{ props.totalPages }}<small v-if="props.total"> · {{ props.total }}</small></span>
-    <button type="button" :disabled="props.page >= props.totalPages" @click="go(props.page + 1)">›</button>
+  <nav v-if="props.totalPages > 1" class="pager nxp-pager" :aria-label="props.label" data-testid="nxp-pager" :data-page-current="props.page" :data-pages="props.totalPages">
+    <span class="pager-info" aria-live="polite">{{ summary }}</span>
+    <div class="nxp-pager-controls">
+      <button class="sm" type="button" :disabled="props.page <= 1" @click="go(props.page - 1)">{{ previousText }}</button>
+      <button
+        v-for="pageNumber in props.totalPages"
+        :key="pageNumber"
+        class="sm"
+        :class="{ 'pager-active': pageNumber === props.page }"
+        type="button"
+        :aria-current="pageNumber === props.page ? 'page' : undefined"
+        @click="go(pageNumber)"
+      >{{ pageNumber }}</button>
+      <button class="sm" type="button" :disabled="props.page >= props.totalPages" @click="go(props.page + 1)">{{ nextText }}</button>
+    </div>
   </nav>
 </template>
 
 <style>
-.nxp-pager { display: inline-flex; min-height: var(--nx-control-height); align-items: center; gap: var(--nx-space-2); color: var(--nx-color-muted); font-size: 12px; }
-.nxp-pager button { min-width: 36px; min-height: 36px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); background: transparent; color: var(--nx-color-text); font: inherit; cursor: pointer; }
-.nxp-pager button:disabled { opacity: .45; cursor: not-allowed; }
-.nxp-pager small { color: var(--nx-color-muted); }
+.nxp-pager { width: 100%; margin: 0; padding: var(--nx-space-3) var(--nx-space-4) var(--nx-space-4); border-top: 1px solid var(--nx-color-border); }
+.nxp-pager-controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--nx-space-2); }
+.nxp-pager button { min-width: 36px; }
 </style>

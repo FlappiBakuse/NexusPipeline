@@ -5,7 +5,7 @@ function update(event: Event) { emit("update:modelValue", (event.target as HTMLT
 function change(event: Event) { emit("change", (event.target as HTMLTextAreaElement).value); }
 </script>
 
-<template><textarea class="nxp-input nxp-textarea" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :rows="props.rows" @input="update" @change="change" /></template>
+<template><textarea class="nxp-input nxp-textarea" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :rows="props.rows" @input.stop="update" @change.stop="change" /></template>
 
 <style>
 .nxp-textarea { min-height: 96px; padding-block: var(--nx-space-3); resize: vertical; }

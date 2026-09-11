@@ -250,6 +250,7 @@ body[data-wallpaper="on"] :is(.card, .empty, .section-surface, .list-surface, .t
 .section-surface { padding: clamp(18px, 2.2vw, 24px); }
 .settings-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); margin-bottom: var(--space-5); }
 .settings-cards-plugin-slot.plugin-slot { display: contents; margin: 0; }
+.settings-cards-plugin-slot > .plugin-surface { display: contents; }
 .settings-card { min-width: 0; order: 0; margin: 0; padding: 0; overflow: hidden; }
 .settings-card.is-expanded { order: -1; border-color: var(--content-control-border); }
 .settings-card-toggle { display: flex; width: 100%; min-height: 72px; align-items: center; justify-content: space-between; gap: var(--space-4); padding: var(--space-4) var(--space-5); border: 0; border-radius: 0; background: transparent; color: var(--text); text-align: left; }
@@ -368,6 +369,8 @@ select option, select optgroup { background-color: var(--content-card); color: v
 select option:checked { background-color: var(--accent-soft); color: var(--accent); }
 input[type=time], input[type=date] { color-scheme: inherit; }
 .nxp-select { position: relative; min-width: 0; }
+nxp-button, nxp-file-picker, nxp-switch { display: inline-flex; min-width: 0; vertical-align: middle; }
+nxp-select, nxp-number-input, nxp-range { display: block; width: 100%; min-width: 0; }
 .nxp-select-trigger { display: flex; width: 100%; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border); border-radius: 8px; background: var(--content-control); color: var(--text); font-size: 13px; font-weight: 400; text-align: left; }
 .nxp-select-trigger:hover, .nxp-select-trigger[aria-expanded="true"] { border-color: var(--accent); background: var(--content-control-hover); }
 .nxp-select-trigger:disabled { cursor: not-allowed; opacity: .45; }
@@ -489,10 +492,11 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .task-row > button { width: 84px; min-width: 84px; min-height: 40px; margin-left: 0; padding: 0 8px; }
 .task-row > .drag-handle { width: 28px; min-height: 40px; margin-right: 0; }
 .timeset-list { display: flex; flex-direction: column; }
-.timeset-card { display: flex; gap: 10px; padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
+.timeset-card { display: block; padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 .timeset-card:hover { background: var(--content-card-hover); }
 .timeset-card:last-child { border-bottom: 0; }
-.timeset-card > .drag-handle { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; margin-right: 0; }
+.timeset-head { display: flex; align-items: flex-start; gap: 10px; }
+.timeset-head > .drag-handle { flex: 0 0 auto; align-self: flex-start; margin-top: 2px; margin-right: 0; }
 .timeset-body { flex: 1; min-width: 0; }
 .tasks-card { display: flex; gap: 10px; padding: var(--space-2) var(--space-4); }
 .tasks-body { flex: 1; min-width: 0; }
@@ -1348,14 +1352,14 @@ body[data-wallpaper="on"][data-theme="light"] {
 .advanced-section > summary:hover { color: var(--text); }
 .advanced-section[open] > summary { color: var(--text); }
 .compact-card { border-radius: var(--radius-md); }
-.timeset-card > summary { cursor: pointer; list-style: none; }
-.timeset-card > summary::-webkit-details-marker { display: none; }
-.timeset-summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.timeset-card > .timeset-head > .timeset-summary { cursor: pointer; width: 100%; min-width: 0; padding: 0; list-style: none; }
+.timeset-summary { display: flex; flex: 1 1 auto; align-items: center; justify-content: space-between; gap: var(--space-3); border: 0; border-radius: 0; background: transparent; color: inherit; text-align: left; box-shadow: none; }
+.timeset-summary:hover { background: transparent; }
 .timeset-summary-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
 .timeset-summary-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .timeset-summary-main .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .timeset-summary-chevron { color: var(--muted); font-size: 12px; }
-.timeset-card[open] .timeset-summary-chevron { transform: rotate(180deg); }
+.timeset-card.is-open .timeset-summary-chevron { transform: rotate(180deg); }
 .timeset-details { padding-top: 14px; }
 
 @media (max-width: 700px) {
@@ -1404,7 +1408,7 @@ body[data-wallpaper="on"][data-theme="light"] {
 .user-card .meta-line span { max-width: 260px; }
 .timeset-list { display: grid; gap: 0; }
 .timeset-card { display: block; padding: 0; }
-.timeset-card > summary { padding: 13px 0; }
+.timeset-card > .timeset-head { padding: 13px 0; }
 .timeset-card > .timeset-details { padding: 0 0 14px 34px; }
 .timeset-card .drag-handle { margin: 0; }
 .timeset-card .timeset-actions .switch-control { width: 56px; min-width: 56px; height: 40px; min-height: 40px; }
@@ -1973,7 +1977,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-binding-remove { display: none; flex: 0 0 auto; }
 .um-binding-bottom-arrow { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; margin-left: auto; color: var(--accent); }
 .um-binding-bottom-arrow .icon { width: 20px; height: 20px; }
-.um-binding-body { display: none; padding: var(--space-4); border-top: 1px solid var(--content-card-border); background: var(--content-card-soft); }
+.um-binding-body { display: block; padding: var(--space-4); border-top: 1px solid var(--content-card-border); background: var(--content-card-soft); }
 .um-binding-options { display: grid; gap: var(--space-4); }
 .um-binding-body .um-binding-option-section { padding: var(--space-3); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); }
 .um-binding-body .um-binding-option-section .section-heading { margin-bottom: var(--space-2); }
@@ -1987,7 +1991,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 /* 展开态：整卡为 1/1，头部显示参与运行/移除绑定，主体显示全部绑定选项 */
 .um-binding-card.is-expanded { grid-column: 1 / -1; border-color: var(--content-control-border); }
 .um-binding-card.is-expanded > .um-binding-head { display: flex; }
-.um-binding-card.is-expanded > .um-binding-body { display: block; }
 .um-binding-card.is-expanded .um-binding-toggle { cursor: pointer; }
 .user-binding-section.um-binding-editing .um-binding-remove { display: inline-flex; }
 .user-binding-section.um-binding-editing .um-binding-bottom-arrow { display: none; }
@@ -2040,6 +2043,8 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .global-management-plugin .section-heading { margin: 0; }
 .global-management-plugin h4 { margin: 0; font-size: 15px; }
 .plugin-contribution-fields { display: grid; gap: var(--space-3); }
+.plugin-contribution-fields > .switch-card { background: var(--content-card); border-color: var(--content-card-border); }
+.plugin-contribution-fields > .switch-card:hover { background: var(--content-card-hover); }
 .plugin-field-description { display: block; margin-top: 5px; line-height: 1.5; }
 .plugin-secret-row { display: flex; align-items: center; gap: var(--space-2); }
 .plugin-secret-row input { min-width: 0; flex: 1; }

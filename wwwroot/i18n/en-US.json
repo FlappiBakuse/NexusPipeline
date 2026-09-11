@@ -136,6 +136,7 @@
   "common.download_update": "Download update",
   "common.drag_to_reorder": "Drag to reorder",
   "common.enabled": "Enabled",
+  "common.enabled_status": "Enabled",
   "common.end": "End",
   "common.enter_token": "Enter token",
   "common.error": "Error",

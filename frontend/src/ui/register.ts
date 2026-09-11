@@ -56,6 +56,10 @@ export const NEXUS_PUBLIC_ELEMENTS = {
 export function registerNexusElements() {
   if (typeof customElements === "undefined") return;
   Object.entries(NEXUS_PUBLIC_ELEMENTS).forEach(([name, component]) => {
-    if (!customElements.get(name)) customElements.define(name, defineCustomElement(component));
+    if (!customElements.get(name)) {
+      // Public elements share the host page's design-token and legacy layout CSS.
+      // Keeping them in light DOM preserves that contract for official plugins.
+      customElements.define(name, defineCustomElement(component, { shadowRoot: false }));
+    }
   });
 }

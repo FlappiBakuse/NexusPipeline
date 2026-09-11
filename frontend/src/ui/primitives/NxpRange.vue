@@ -5,8 +5,13 @@ function update(event: Event) { emit("update:modelValue", Number((event.target a
 function change(event: Event) { emit("change", Number((event.target as HTMLInputElement).value)); }
 </script>
 
-<template><input class="nxp-range" type="range" :value="props.modelValue" :min="props.min" :max="props.max" :step="props.step" :disabled="props.disabled" :aria-label="props.ariaLabel || undefined" @input="update" @change="change" /></template>
+<template><input class="nxp-range" type="range" :value="props.modelValue" :min="props.min" :max="props.max" :step="props.step" :disabled="props.disabled" :aria-label="props.ariaLabel || undefined" @input.stop="update" @change.stop="change" /></template>
 
 <style>
+:host {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
 .nxp-range { width: 100%; min-height: var(--nx-control-height); accent-color: var(--nx-color-accent); }
 </style>

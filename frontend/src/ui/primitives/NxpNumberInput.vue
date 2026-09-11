@@ -57,8 +57,8 @@ function stepValue(direction: 1 | -1) {
       :placeholder="placeholder || undefined"
       :disabled="disabled"
       :aria-label="ariaLabel || undefined"
-      @input="update"
-      @change="change"
+      @input.stop="update"
+      @change.stop="change"
     />
     <span class="nxp-number-actions"
       ><button
@@ -85,6 +85,11 @@ function stepValue(direction: 1 | -1) {
 </template>
 
 <style>
+:host {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
 .nxp-number {
   display: grid;
   min-width: 0;

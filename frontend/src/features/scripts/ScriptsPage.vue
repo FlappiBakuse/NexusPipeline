@@ -484,12 +484,10 @@ onBeforeUnmount(() => {
       :closeable="false"
       :locked="true"
       :aria-label="t('scripts.new_script_instance')"
-      panel-class="modal secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
       data-locked
     >
-        <div class="modal-header">
+      <template #header>
           <h2 class="modal-title">{{ t("scripts.new_script_instance") }}</h2>
           <button
             class="icon-button modal-close"
@@ -499,8 +497,8 @@ onBeforeUnmount(() => {
           >
             <NxpIcon name="close" />
           </button>
-        </div>
-        <div class="modal-body new-script-chooser">
+      </template>
+      <div class="new-script-chooser">
           <button
             class="chooser-card"
             type="button"
@@ -526,24 +524,22 @@ onBeforeUnmount(() => {
             ><span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
           </button>
         </div>
-        <div class="modal-footer">
+      <template #footer>
           <button class="ghost" type="button" @click.stop="chooserOpen = false">
             {{ t("common.cancel") }}
           </button>
-        </div>
-
+      </template>
     </NxpModal>
     <NxpModal
       :open="editorOpen"
       :closeable="false"
       :locked="true"
       :aria-label="editing ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
-      panel-class="modal wide secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      size="wide"
       data-locked
     >
-        <div class="modal-header">
+      <template #header>
           <h2 class="modal-title">
             {{
               editing
@@ -563,8 +559,7 @@ onBeforeUnmount(() => {
           >
             <NxpIcon name="close" />
           </button>
-        </div>
-        <div class="modal-body">
+      </template>
           <div class="form-grid">
             <div class="field">
               <label class="field-label" for="sm-name"
@@ -914,21 +909,19 @@ onBeforeUnmount(() => {
             data-plugin-anchor="scripts.editor.sections"
             hidden
           ></div>
-        </div>
-        <div class="modal-footer">
+      <template #footer>
           <button class="ghost" type="button" @click.stop="closeEditor">
             {{ t("common.cancel") }}</button
           ><button class="primary" type="button" @click.stop="save">
             {{ t("common.save") }}
           </button>
-        </div>
-
+      </template>
     </NxpModal>
     <NxpModal
       :open="confirmOpen && Boolean(deleteTarget)"
       :title="t('scripts.delete_script_instance')"
-      panel-class="modal secondary-surface"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      :close-label="t('common.close', {}, 'Close')"
       @close="closeConfirm"
     >
       <p v-if="deleteTarget" class="modal-copy">

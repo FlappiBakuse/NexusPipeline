@@ -43,6 +43,7 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.details.recommendations",
   "common.diagnostic_check",
   "common.enter_token",
+  "common.enabled_status",
   "common.error.host_version_incompatible",
   "common.error.script_instance_missing",
   "common.features.controls_help",

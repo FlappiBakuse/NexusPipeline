@@ -159,5 +159,10 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+:host {
+  display: block;
+  min-width: 0;
+  width: 100%;
+}
 .nxp-select-menu { position: fixed !important; z-index: 1000; }
 </style>

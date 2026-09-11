@@ -17,8 +17,11 @@ import SystemActionCard from "../dashboard/SystemActionCard.vue";
 interface Plugin {
   name?: string;
   kind?: string;
+  capabilities?: string[];
+  configuredEnabled?: boolean;
   runtimeEnabled?: boolean;
   state?: string;
+  hasFrontend?: boolean;
 }
 interface Script {
   id: string;
@@ -77,6 +80,15 @@ let statusController: AbortController | null = null;
 let pageToken = 0;
 
 const running = computed(() => Array.isArray(status.value.running) ? status.value.running : []);
+const executionPreviewLayoutEnabled = computed(() =>
+  (status.value.plugins || []).some((plugin) =>
+    Array.isArray(plugin.capabilities)
+      && plugin.capabilities.some((capability) => String(capability || "").toLowerCase() === "execution-preview-client")
+      && plugin.configuredEnabled === true
+      && plugin.runtimeEnabled === true
+      && plugin.hasFrontend === true,
+  ),
+);
 const selectedScript = computed(() => scripts.value.find(item => item.id === scriptId.value));
 const scriptOptions = computed<NxpOption[]>(() => [
   { value: "", label: t("common.select.script_instance_option") },
@@ -291,7 +303,7 @@ onBeforeUnmount(() => {
       <div id="system-action-area"><SystemActionCard v-if="status.systemAction && status.systemAction.action !== 'exit'" :action="status.systemAction" @cancelled="refreshStatus" /></div>
       <section id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running"><div class="section-heading"><h3>{{ t("common.running") }} ({{ running.length }})</h3><span class="muted">{{ t("dispatch.updates_every_second") }}</span></div><div id="running-list">
         <NxpEmptyState v-if="!running.length" :title="t('dispatch.no_tasks_are_running')" :description="t('dispatch.running.select_help')" />
-        <article v-for="record in running" v-else :key="record.id" class="list-item running-item" :data-run-id="record.id"><div class="list-item-head"><div><div class="list-item-title"><strong>{{ record.targetName }}</strong><NxpBadge :tone="record.kind === 'queue' ? 'blue' : 'muted'">{{ recordKind(record) }}</NxpBadge><NxpBadge tone="muted">{{ recordMode(record) }}</NxpBadge><span v-if="record.kind === 'queue'" class="muted done-count">{{ t("dispatch.summary.items", { done: record.doneTasks || 0, total: record.totalTasks || 0 }) }}</span></div></div><NxpButton class="sm danger" type="button" :disabled="busy" @click="cancelRun(record.id)">{{ t("dispatch.cancel_run") }}</NxpButton></div><div class="qk-row">{{ t("dispatch.running.current_attempt", { script: record.currentScriptName || '-', status: record.currentStatus || '', attempt: record.currentAttempt || 0, max: record.currentMaxAttempts || 0 }) }}</div><div v-if="record.persistenceWarning" class="qk-row"><NxpBadge tone="warn">{{ t("common.history.persistence_warning") }}</NxpBadge> {{ record.persistenceWarning }}</div><div class="progress-line"><div :data-progress="progress(record)" :style="{ width: `${Math.max(0, Math.min(100, progress(record)))}%` }"></div></div><div class="running-item-content"><pre class="logbox run-log run-terminal"><span v-if="!recordLogs(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in recordLogs(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="logClass(entry.level)">{{ entry.text || "" }}</span></pre><div class="plugin-slot running-sidecar" data-plugin-slot="dispatch.running.sidecar" data-plugin-anchor="dispatch.running.sidecar" :data-plugin-mode="record.kind === 'queue' ? 'queue' : 'script'" :data-plugin-primary-id="record.id" hidden></div></div></article>
+        <article v-for="record in running" v-else :key="record.id" class="list-item running-item" :data-run-id="record.id"><div class="list-item-head"><div><div class="list-item-title"><strong>{{ record.targetName }}</strong><NxpBadge :tone="record.kind === 'queue' ? 'blue' : 'muted'">{{ recordKind(record) }}</NxpBadge><NxpBadge tone="muted">{{ recordMode(record) }}</NxpBadge><span v-if="record.kind === 'queue'" class="muted done-count">{{ t("dispatch.summary.items", { done: record.doneTasks || 0, total: record.totalTasks || 0 }) }}</span></div></div><NxpButton class="sm danger" type="button" :disabled="busy" @click="cancelRun(record.id)">{{ t("dispatch.cancel_run") }}</NxpButton></div><div class="qk-row">{{ t("dispatch.running.current_attempt", { script: record.currentScriptName || '-', status: record.currentStatus || '', attempt: record.currentAttempt || 0, max: record.currentMaxAttempts || 0 }) }}</div><div v-if="record.persistenceWarning" class="qk-row"><NxpBadge tone="warn">{{ t("common.history.persistence_warning") }}</NxpBadge> {{ record.persistenceWarning }}</div><div class="progress-line"><div :data-progress="progress(record)" :style="{ width: `${Math.max(0, Math.min(100, progress(record)))}%` }"></div></div><div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }"><pre class="logbox run-log run-terminal"><span v-if="!recordLogs(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in recordLogs(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="logClass(entry.level)">{{ entry.text || "" }}</span></pre><div class="plugin-slot running-sidecar" data-plugin-slot="dispatch.running.sidecar" data-plugin-anchor="dispatch.running.sidecar" :data-plugin-mode="record.kind === 'queue' ? 'queue' : 'script'" :data-plugin-primary-id="record.id" hidden></div></div></article>
       </div></section>
       <div class="plugin-slot" data-plugin-slot="dispatch.running.badges" data-plugin-anchor="dispatch.running.badges" hidden></div>
       <section class="content-section" aria-labelledby="dispatch-run-heading"><div class="section-heading"><h3 id="dispatch-run-heading">{{ t("dispatch.start_one_run") }}</h3><span class="muted">{{ t("dispatch.plan.target_help") }}</span></div><div class="dispatch-runbar"><div class="field"><label class="field-label" for="dc-kind-trigger">{{ t("dispatch.target_type") }}</label><NxpSelect id="dc-kind" :model-value="kind" :options="[{ value: 'script', label: t('common.script_instance') }, { value: 'queue', label: t('common.schedule_queues') }]" :aria-label="t('dispatch.target_type')" @update:model-value="onKindChange" /></div><div v-if="kind === 'script'" class="field" id="dc-script-wrap"><label class="field-label" for="dc-script-trigger">{{ t("common.script_instance") }}</label><NxpSelect id="dc-script" v-model="scriptId" :options="scriptOptions" :aria-label="t('common.script_instance')" /></div><div v-else class="field" id="dc-queue-wrap"><label class="field-label" for="dc-queue-trigger">{{ t("common.schedule_queues") }}</label><NxpSelect id="dc-queue" v-model="queueId" :options="queueOptions" :aria-label="t('common.schedule_queues')" /></div><div class="control-action"><NxpButton class="ghost" type="button" data-testid="dispatch-explain" :disabled="busy" @click="explainCurrent">{{ t("dispatch.check_run_plan") }}</NxpButton><NxpButton class="primary" type="button" data-testid="dispatch-run" :disabled="busy" @click="runCurrent">{{ t(kind === 'queue' ? 'dispatch.run_queue' : 'dispatch.run_script') }}</NxpButton></div></div></section>

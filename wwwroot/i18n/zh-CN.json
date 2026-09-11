@@ -136,6 +136,7 @@
   "common.download_update": "下载更新",
   "common.drag_to_reorder": "拖拽排序",
   "common.enabled": "是否启用",
+  "common.enabled_status": "已启用",
   "common.end": "结束",
   "common.enter_token": "请输入令牌",
   "common.error": "异常",

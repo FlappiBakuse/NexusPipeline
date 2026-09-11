@@ -23,6 +23,7 @@ import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpCollapseTransition from "../../ui/composites/NxpCollapseTransition.vue";
 
 type Settings = Record<string, any>;
 type UpdateStatus = Record<string, any>;
@@ -40,7 +41,7 @@ const loaded = ref(false);
 const loading = ref(true);
 const error = ref("");
 const openPanel = ref<string | null>("service");
-const openNotificationPanel = ref<"webhook" | "smtp">("webhook");
+const openNotificationPanel = ref<"webhook" | "smtp" | null>("webhook");
 const restartRequired = ref(false);
 const token = ref("");
 const tokenVisible = ref(false);
@@ -58,6 +59,8 @@ const diagnostics = ref<DiagnosticsData | null>(null);
 const diagnosticsLoading = ref(false);
 const saving = ref(false);
 const root = ref<HTMLElement | null>(null);
+const settingsPanelToggleEvent = "nxp-settings-panel-toggle";
+const settingsPanelStateEvent = "nxp-settings-panel-state";
 let disposed = false;
 let saveChain: Promise<void> = Promise.resolve();
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -127,8 +130,26 @@ const diagnosticAttentionCount = computed(
 function panelExpanded(id: string) {
   return openPanel.value === id;
 }
+function publishSettingsPanelState() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent(settingsPanelStateEvent, {
+      detail: { panelId: openPanel.value },
+    }),
+  );
+}
 function togglePanel(id: string) {
   openPanel.value = openPanel.value === id ? null : id;
+  publishSettingsPanelState();
+}
+function handleExternalSettingsPanelToggle(event: Event) {
+  const panelId = (event as CustomEvent<{ panelId?: unknown }>).detail?.panelId;
+  if (panelId !== null && typeof panelId !== "string") return;
+  openPanel.value = panelId;
+  publishSettingsPanelState();
+}
+function toggleNotificationPanel(id: "webhook" | "smtp") {
+  openNotificationPanel.value = openNotificationPanel.value === id ? null : id;
 }
 function notificationEnabled(key: string) {
   return Boolean(settings[key]);
@@ -533,6 +554,7 @@ async function disposePluginSlots() {
 
 onMounted(async () => {
   disposed = false;
+  window.addEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   setTopbarTitle(t("shell.settings", {}, "Settings"));
   try {
     const data = (await api("GET", "/api/settings")) as {
@@ -547,6 +569,7 @@ onMounted(async () => {
     loaded.value = true;
     loading.value = false;
     await paintPluginSlots();
+    publishSettingsPanelState();
     void loadUpdateStatus();
     void loadDiagnostics();
   } catch (reason) {
@@ -558,6 +581,7 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  window.removeEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   if (updateTimer) clearTimeout(updateTimer);
   void disposePluginSlots();
 });
@@ -634,11 +658,12 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-service"
-            class="settings-card-body"
-            :hidden="!panelExpanded('service')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-service"
+              class="settings-card-body"
+              v-show="panelExpanded('service')"
+            >
             <div class="settings-list">
               <div class="switch-row settings-option switch-card">
                 <div>
@@ -761,7 +786,8 @@ onBeforeUnmount(() => {
             <p v-if="settings.lightweightMode" class="callout callout-warning">
               {{ t("settings.service.lightweight_not_started") }}
             </p>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
 
         <section
@@ -796,20 +822,18 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-notifications"
-            class="settings-card-body"
-            :hidden="!panelExpanded('notifications')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-notifications"
+              class="settings-card-body"
+              v-show="panelExpanded('notifications')"
+            >
             <div class="notification-settings">
               <button
                 class="panel-toggle"
                 type="button"
                 :aria-expanded="openNotificationPanel === 'webhook'"
-                @click="
-                  openNotificationPanel =
-                    openNotificationPanel === 'webhook' ? 'smtp' : 'webhook'
-                "
+                @click="toggleNotificationPanel('webhook')"
               >
                 <span class="panel-arrow"
                   ><NxpIcon
@@ -825,16 +849,17 @@ onBeforeUnmount(() => {
                   :tone="notificationEnabled('webhookEnabled') ? 'ok' : 'muted'"
                   >{{
                     notificationEnabled("webhookEnabled")
-                      ? t("common.enabled")
+                      ? t("common.enabled_status")
                       : t("common.disabled")
                   }}</NxpBadge
                 >
               </button>
-              <div
-                v-show="openNotificationPanel === 'webhook'"
-                id="panel-wh"
-                class="panel-body"
-              >
+              <NxpCollapseTransition>
+                <div
+                  v-show="openNotificationPanel === 'webhook'"
+                  id="panel-wh"
+                  class="panel-body"
+                >
                 <div class="settings-list">
                   <div class="switch-row settings-option switch-card">
                     <div>
@@ -995,15 +1020,13 @@ onBeforeUnmount(() => {
                     @blur="saveNotifications"
                   ></textarea>
                 </div>
-              </div>
+                </div>
+              </NxpCollapseTransition>
               <button
                 class="panel-toggle"
                 type="button"
                 :aria-expanded="openNotificationPanel === 'smtp'"
-                @click="
-                  openNotificationPanel =
-                    openNotificationPanel === 'smtp' ? 'webhook' : 'smtp'
-                "
+                @click="toggleNotificationPanel('smtp')"
               >
                 <span class="panel-arrow"
                   ><NxpIcon
@@ -1014,21 +1037,22 @@ onBeforeUnmount(() => {
                     "
                     class-name="panel-arrow-icon" /></span
                 ><span class="panel-label"
-                  >SMTP {{ t("settings.notification.smtp") }}</span
+                  >{{ t("settings.notification.smtp") }}</span
                 ><NxpBadge
                   :tone="notificationEnabled('smtpEnabled') ? 'ok' : 'muted'"
                   >{{
                     notificationEnabled("smtpEnabled")
-                      ? t("common.enabled")
+                      ? t("common.enabled_status")
                       : t("common.disabled")
                   }}</NxpBadge
                 >
               </button>
-              <div
-                v-show="openNotificationPanel === 'smtp'"
-                id="panel-smtp"
-                class="panel-body"
-              >
+              <NxpCollapseTransition>
+                <div
+                  v-show="openNotificationPanel === 'smtp'"
+                  id="panel-smtp"
+                  class="panel-body"
+                >
                 <div class="settings-list">
                   <div class="switch-row settings-option switch-card">
                     <div>
@@ -1161,14 +1185,16 @@ onBeforeUnmount(() => {
                     />
                   </div>
                 </div>
-              </div>
+                </div>
+              </NxpCollapseTransition>
               <div class="modal-footer-inline plain">
                 <button class="ghost" type="button" @click="testNotifications">
                   {{ t("settings.test_notifications") }}
                 </button>
               </div>
             </div>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
 
         <section
@@ -1201,11 +1227,12 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-remote-mcp"
-            class="settings-card-body"
-            :hidden="!panelExpanded('remote-mcp')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-remote-mcp"
+              class="settings-card-body"
+              v-show="panelExpanded('remote-mcp')"
+            >
             <div class="settings-merged-content">
             <section class="settings-subsection remote-settings">
               <div class="settings-list">
@@ -1318,7 +1345,8 @@ onBeforeUnmount(() => {
               </div>
             </section>
             </div>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
 
         <section
@@ -1350,11 +1378,12 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-network"
-            class="settings-card-body"
-            :hidden="!panelExpanded('network')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-network"
+              class="settings-card-body"
+              v-show="panelExpanded('network')"
+            >
             <div class="network-settings" :data-help="t('settings.network_proxy_help')">
               <div class="field">
                 <label class="field-label" for="st-proxy-mode-trigger">{{
@@ -1407,7 +1436,8 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
 
         <section
@@ -1440,11 +1470,12 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-updates"
-            class="settings-card-body"
-            :hidden="!panelExpanded('updates')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-updates"
+              class="settings-card-body"
+              v-show="panelExpanded('updates')"
+            >
             <div class="update-section">
               <div class="settings-list">
                 <div class="switch-row settings-option switch-card">
@@ -1588,8 +1619,17 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
+
+        <div
+          class="plugin-slot settings-cards-plugin-slot"
+          data-plugin-slot="settings.cards"
+          data-plugin-anchor="settings.cards"
+          data-plugin-mode="settings"
+          hidden
+        ></div>
 
         <section
           class="settings-card section-surface"
@@ -1621,11 +1661,12 @@ onBeforeUnmount(() => {
                 class-name="settings-card-arrow-icon"
             /></span>
           </button>
-          <div
-            id="settings-panel-diagnostics"
-            class="settings-card-body"
-            :hidden="!panelExpanded('diagnostics')"
-          >
+          <NxpCollapseTransition>
+            <div
+              id="settings-panel-diagnostics"
+              class="settings-card-body"
+              v-show="panelExpanded('diagnostics')"
+            >
             <div class="diagnostics-section">
               <div class="row-actions">
                 <button
@@ -1781,15 +1822,9 @@ onBeforeUnmount(() => {
                 >
               </div>
             </div>
-          </div>
+            </div>
+          </NxpCollapseTransition>
         </section>
-        <div
-          class="plugin-slot settings-cards-plugin-slot"
-          data-plugin-slot="settings.cards"
-          data-plugin-anchor="settings.cards"
-          data-plugin-mode="settings"
-          hidden
-        ></div>
       </div>
       <div
         class="plugin-slot settings-plugin-slot"

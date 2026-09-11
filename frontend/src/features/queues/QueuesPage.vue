@@ -399,7 +399,7 @@ onBeforeUnmount(() => {
           @remove="askDelete"
         />
       </TransitionGroup>
-      <NxpPager v-model:page="queuePage" :total-pages="totalPages" :total="queues.length" :label="t('common.schedule_queues')" />
+      <NxpPager v-model:page="queuePage" :total-pages="totalPages" :total="queues.length" :page-size="QUEUE_PAGE_SIZE" :label="t('common.schedule_queues')" />
     </section>
 
     <QueueEditorModal
@@ -422,8 +422,8 @@ onBeforeUnmount(() => {
     <NxpModal
       :open="confirmOpen && Boolean(deleteTarget)"
       :title="t('common.delete') + t('common.schedule_queues')"
-      panel-class="modal secondary-surface"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      :close-label="t('common.close', {}, 'Close')"
       @close="confirmOpen = false"
     >
       <p v-if="deleteTarget" class="modal-copy">

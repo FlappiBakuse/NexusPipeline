@@ -52,8 +52,8 @@ function browse(
       :placeholder="props.placeholder"
       :disabled="props.disabled"
       :aria-label="props.ariaLabel"
-      @input="update"
-      @change="update"
+      @input.stop="update"
+      @change.stop="update"
     />
     <span
       v-if="props.kind === 'file-or-folder'"

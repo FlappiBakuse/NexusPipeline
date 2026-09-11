@@ -14,10 +14,15 @@ function changed(event: Event) {
 </script>
 
 <template>
-  <span class="nxp-file"><button type="button" class="ghost nxp-file-trigger" :disabled="disabled" @click="input?.click()">{{ props.label }}</button><span class="nxp-file-name">{{ fileName }}</span><input ref="input" class="sr-only" type="file" :accept="accept" :multiple="multiple" :disabled="disabled" @change="changed"></span>
+  <span class="nxp-file"><button type="button" class="ghost nxp-file-trigger" :disabled="disabled" @click="input?.click()">{{ props.label }}</button><span class="nxp-file-name">{{ fileName }}</span><input ref="input" class="sr-only" type="file" :accept="accept" :multiple="multiple" :disabled="disabled" @change.stop="changed"></span>
 </template>
 
 <style>
+:host {
+  display: inline-flex;
+  min-width: 0;
+  vertical-align: middle;
+}
 .nxp-file { display: inline-flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: var(--space-2, var(--nx-space-2)); }
 .nxp-file-trigger { flex: 0 0 auto; min-height: var(--control-height, var(--nx-control-height)); padding-inline: var(--space-3, var(--nx-space-3)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-sm, var(--nx-radius-sm)); background: var(--content-control, transparent); color: var(--nx-color-text); font: inherit; cursor: pointer; }
 .nxp-file-trigger:hover:not(:disabled) { border-color: var(--accent, var(--nx-color-accent)); background: var(--content-control-hover, transparent); }

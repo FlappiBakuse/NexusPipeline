@@ -47,3 +47,18 @@
 .dnd-active > [data-dnd-id] {
   transition: none !important;
 }
+
+.nxp-collapse-enter-active,
+.nxp-collapse-leave-active {
+  overflow: hidden;
+  max-height: 1800px;
+  will-change: max-height, opacity, transform;
+  transition: max-height var(--nx-motion-duration-normal) var(--nx-motion-ease), opacity var(--nx-motion-duration-normal) var(--nx-motion-ease), transform var(--nx-motion-duration-normal) var(--nx-motion-ease);
+}
+
+.nxp-collapse-enter-from,
+.nxp-collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+}

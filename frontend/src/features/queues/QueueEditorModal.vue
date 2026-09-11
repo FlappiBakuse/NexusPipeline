@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
@@ -49,6 +49,34 @@ const dayShortNames = computed(() => [
   props.translate("common.sat"),
 ]);
 
+const expandedTimeSetKeys = ref<string[]>([]);
+const timeSetKey = (timeSet: QueueDraft["timeSets"][number], index: number) =>
+  timeSet.id || `new-time-set-${index}`;
+const timeSetKeys = computed(() =>
+  props.draft.timeSets.map((timeSet, index) => timeSetKey(timeSet, index)),
+);
+
+function syncExpandedTimeSets() {
+  const validKeys = new Set(timeSetKeys.value);
+  const next = expandedTimeSetKeys.value.filter(key => validKeys.has(key));
+  if (!next.length && timeSetKeys.value.length) next.push(timeSetKeys.value[0]);
+  if (next.length !== expandedTimeSetKeys.value.length || next.some((key, index) => key !== expandedTimeSetKeys.value[index])) {
+    expandedTimeSetKeys.value = next;
+  }
+}
+
+function isTimeSetOpen(key: string) {
+  return expandedTimeSetKeys.value.includes(key);
+}
+
+function toggleTimeSet(key: string) {
+  expandedTimeSetKeys.value = isTimeSetOpen(key)
+    ? expandedTimeSetKeys.value.filter(item => item !== key)
+    : [...expandedTimeSetKeys.value, key];
+}
+
+watch(timeSetKeys, syncExpandedTimeSets, { immediate: true });
+
 function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
   timeSet.days = timeSet.days.includes(day)
     ? timeSet.days.filter(item => item !== day)
@@ -62,18 +90,17 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
     :title="title"
     size="wide"
     :locked="true"
-    panel-class="modal wide secondary-surface"
-    class="modal-mask"
+    panel-class="secondary-surface"
+    :close-label="translate('common.close', {}, 'Close')"
     data-locked
     @close="emit('close')"
   >
-    <div>
-      <div class="field">
+    <div class="field">
         <label class="field-label" for="qm-name"
           >{{ translate("queues.queue_name") }} <span class="req">*</span></label
         ><input id="qm-name" v-model="draft.name" type="text" />
-      </div>
-      <div class="form-grid">
+    </div>
+    <div class="form-grid">
         <div class="field">
           <label class="field-label" for="qm-mode-trigger">{{
             translate("queues.automatic_run_mode")
@@ -96,8 +123,8 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
             :aria-label="translate('common.completion_action')"
           />
         </div>
-      </div>
-      <div class="switch-row settings-option switch-card">
+    </div>
+    <div class="switch-row settings-option switch-card">
         <div class="switch-copy">
           <strong>{{ translate("queues.queue_notifications") }}</strong
           ><span class="muted">{{
@@ -109,8 +136,8 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
           v-model="draft.notifyEnabled"
           :aria-label="translate('queues.queue_notifications')"
         />
-      </div>
-      <div class="subsection">
+    </div>
+    <div class="subsection">
         <div class="section-heading">
           <h3>{{ translate("queues.schedules") }}</h3>
           <span class="muted">{{
@@ -122,22 +149,29 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
           v-sortable="{ onDrop: (ids: string[]) => emit('reorderTimeSets', ids) }"
           class="timeset-list"
         >
-          <details
+          <article
             v-for="(timeSet, index) in draft.timeSets"
-            :key="timeSet.id || 'new-time-set-' + index"
+            :key="timeSetKey(timeSet, index)"
             class="timeset-card compact-card"
-            :open="index === 0"
+            :class="{ 'is-open': isTimeSetOpen(timeSetKey(timeSet, index)) }"
             :data-dnd-id="String(index)"
           >
-            <summary class="timeset-summary">
-              <span class="timeset-summary-main"
-                ><span
-                  class="drag-handle"
-                  role="button"
-                  tabindex="0"
-                  :aria-label="translate('common.reorder.keyboard_help')"
-                  :title="translate('common.drag_to_reorder')"
-                  ><NxpIcon name="grip" /></span
+            <div class="timeset-head">
+              <span
+                class="drag-handle"
+                role="button"
+                tabindex="0"
+                :aria-label="translate('common.reorder.keyboard_help')"
+                :title="translate('common.drag_to_reorder')"
+                ><NxpIcon name="grip" /></span>
+              <button
+                class="timeset-summary"
+                type="button"
+                data-testid="queue-timeset-toggle"
+                :aria-expanded="isTimeSetOpen(timeSetKey(timeSet, index))"
+                @click="toggleTimeSet(timeSetKey(timeSet, index))"
+              >
+                <span class="timeset-summary-main"
                 ><strong>{{
                   translate("queues.schedule.label", { index: index + 1 })
                 }}</strong
@@ -151,9 +185,11 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                       : translate("queues.no_days_selected")
                   }}</span
                 ></span
-              ><span class="timeset-summary-chevron" aria-hidden="true">⌄</span>
-            </summary>
-            <div class="timeset-details">
+                ><span class="timeset-summary-chevron" aria-hidden="true">⌄</span>
+              </button>
+            </div>
+            <Transition name="nxp-collapse">
+              <div v-if="isTimeSetOpen(timeSetKey(timeSet, index))" class="timeset-details" data-testid="queue-timeset-body">
               <div class="timeset-body">
                 <div class="timeset-layout">
                   <div class="timeset-days">
@@ -203,8 +239,9 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                   </button>
                 </div>
               </div>
-            </div>
-          </details>
+              </div>
+            </Transition>
+          </article>
         </div>
         <NxpButton
           class="ghost"
@@ -220,8 +257,8 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
               : translate("queues.add_schedule")
           }}</NxpButton
         >
-      </div>
-      <div class="subsection">
+    </div>
+    <div class="subsection">
         <div class="section-heading">
           <h3>{{ translate("common.task_list") }}</h3>
           <span class="muted">{{ translate("queues.task.order_help") }}</span>
@@ -262,16 +299,15 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
         <NxpButton class="ghost" type="button" @click="emit('addTask')">{{
           translate("queues.add_task")
         }}</NxpButton>
-      </div>
-      <div
+    </div>
+    <div
         class="plugin-slot queue-editor-plugin-slot"
         data-plugin-slot="queues.editor.sections"
         data-plugin-anchor="queues.editor.sections"
         :data-plugin-mode="draft.id ? 'edit' : 'create'"
         :data-plugin-primary-id="draft.id"
         hidden
-      ></div>
-    </div>
+    ></div>
     <template #footer>
       <NxpButton class="ghost" type="button" @click="emit('close')">{{
         translate("common.cancel")

@@ -169,6 +169,7 @@ const configChooser = ref<{ userId: string; scriptId: string; userName: string; 
 const configCandidates = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; mode: string; inputName: string; candidates: string[] } | null>(null);
 let disposed = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
+const bindingMotionDuration = 180;
 
 const sortedUsers = computed(() =>
   users.value.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
@@ -695,18 +696,59 @@ async function browseBindingPath(binding: Binding, key: "preRunScript" | "postRu
   }
 }
 
-function toggleBinding(binding: Binding) {
+function captureBindingRects() {
+  const cards = root.value?.querySelectorAll<HTMLElement>('[data-testid="um-binding-card"]') || [];
+  return new Map(
+    Array.from(cards)
+      .map(card => [card.dataset.bindingId || "", card.getBoundingClientRect()] as const)
+      .filter(([id]) => Boolean(id)),
+  );
+}
+
+function playBindingLayoutTransition(previous: Map<string, DOMRect>) {
+  if (typeof requestAnimationFrame !== "function") return;
+  requestAnimationFrame(() => {
+    const cards = root.value?.querySelectorAll<HTMLElement>('[data-testid="um-binding-card"]') || [];
+    for (const card of cards) {
+      const id = card.dataset.bindingId || "";
+      const before = previous.get(id);
+      if (!before) continue;
+      const after = card.getBoundingClientRect();
+      const dx = before.left - after.left;
+      const dy = before.top - after.top;
+      const scaleX = after.width ? before.width / after.width : 1;
+      const scaleY = after.height ? before.height / after.height : 1;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5 && Math.abs(scaleX - 1) < 0.005 && Math.abs(scaleY - 1) < 0.005) continue;
+      card.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})` },
+          { transform: "translate(0, 0) scale(1, 1)" },
+        ],
+        {
+          duration: bindingMotionDuration,
+          easing: "cubic-bezier(.2,.8,.2,1)",
+          fill: "both",
+        },
+      );
+    }
+  });
+}
+
+async function toggleBinding(binding: Binding) {
   if (bindingEditMode.value) return;
   const unavailableMessage = bindingStatus(binding);
   if (unavailableMessage) {
     toast(unavailableMessage, "error");
     return;
   }
+  const previous = captureBindingRects();
   expandedBindingId.value =
     expandedBindingId.value === binding.scriptInstanceId
       ? null
       : binding.scriptInstanceId;
   addBindingOpen.value = false;
+  await nextTick();
+  playBindingLayoutTransition(previous);
   void paintBindingSlots();
 }
 
@@ -1170,12 +1212,10 @@ onBeforeUnmount(() => {
       :closeable="false"
       :locked="true"
       :aria-label="t('users.add_user')"
-      panel-class="modal secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
       data-locked
     >
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.add_user") }}</h3></div>
           <button
             class="icon-button modal-close"
@@ -1185,8 +1225,7 @@ onBeforeUnmount(() => {
           >
             <NxpIcon name="close" />
           </button>
-        </div>
-        <div class="modal-body">
+      </template>
           <div class="field">
             <label class="field-label" for="gu-name">{{
               t("users.user_name")
@@ -1194,8 +1233,7 @@ onBeforeUnmount(() => {
             ><input id="gu-name" v-model="newUserName" type="text" />
             <span class="muted">{{ t("users.username_case_insensitive") }}</span>
           </div>
-        </div>
-        <div class="modal-footer">
+      <template #footer>
           <button class="ghost" type="button" @click.stop="closeNewUser">
             {{ t("common.cancel") }}</button
           ><button
@@ -1206,21 +1244,18 @@ onBeforeUnmount(() => {
           >
             {{ t("common.save") }}
           </button>
-        </div>
-
+      </template>
     </NxpModal>
     <NxpModal
       :open="Boolean(globalDraft)"
       :closeable="false"
       :locked="true"
       :aria-label="t('users.global.title')"
-      panel-class="modal wide secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      size="wide"
       data-locked
     >
-      <template v-if="globalDraft">
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.global.title") }}</h3></div>
           <button
             class="icon-button modal-close"
@@ -1230,8 +1265,8 @@ onBeforeUnmount(() => {
           >
             <NxpIcon name="close" />
           </button>
-        </div>
-        <div class="modal-body">
+      </template>
+      <template v-if="globalDraft">
           <div class="global-management-grid">
             <section class="global-management-card">
               <div class="section-heading">
@@ -1435,46 +1470,40 @@ onBeforeUnmount(() => {
                     :disabled="field.readOnly"
                     @update:model-value="setContributionValue(contribution, field.key, $event)"
                   />
-                  <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field">
+                  <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <textarea :id="fieldId(contribution, field)" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setContributionValue(contribution, field.key, inputValue($event))"></textarea>
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div v-else-if="fieldType(field) === 'select'" class="field plugin-field">
+                  <div v-else-if="fieldType(field) === 'select'" class="field plugin-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <NxpSelect :id="fieldId(contribution, field)" :model-value="String(contributionValue(contribution, field.key) || '')" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field.key, $event)" />
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div v-else-if="fieldType(field) === 'multi-select'" class="field plugin-field">
+                  <div v-else-if="fieldType(field) === 'multi-select'" class="field plugin-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <NxpSelect :id="fieldId(contribution, field)" multiple :model-value="contributionMultiValue(contribution, field)" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field.key, $event)" />
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div v-else-if="fieldType(field) === 'path' || fieldType(field) === 'file' || fieldType(field) === 'folder'" class="field plugin-field">
+                  <div v-else-if="fieldType(field) === 'path' || fieldType(field) === 'file' || fieldType(field) === 'folder'" class="field plugin-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <NxpPathPicker :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field.key, $event)" @browse="browseContributionPath(contribution, field, $event)" />
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field">
+                  <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <div class="plugin-secret-row"><input :id="fieldId(contribution, field)" type="password" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" @input="setSecretValue(contribution, field, inputValue($event))"><button v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</button></div>
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div v-else-if="fieldType(field) === 'status'" class="field plugin-field">
+                  <div v-else-if="fieldType(field) === 'status'" class="field plugin-field" :data-help="field.description || undefined">
                     <span class="field-label">{{ field.label }}</span><span class="plugin-status-value">{{ String(contributionValue(contribution, field.key) || t('users.no_status')) }}</span>
                   </div>
-                  <div v-else class="field plugin-field">
+                  <div v-else class="field plugin-field" :data-help="field.description || undefined">
                     <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <input :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setContributionValue(contribution, field.key, inputValue($event))">
-                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
                 </template>
               </div>
             </article>
             <div ref="globalSlotRoot" class="plugin-slot global-management-plugin-slot" data-plugin-slot="users.global.sections" data-plugin-anchor="users.global.sections" data-plugin-mode="user" :data-plugin-primary-id="globalDraft.userId" hidden></div>
           </section>
-        </div>
-        <div class="modal-footer">
+      </template>
+      <template #footer>
           <button
             class="primary"
             type="button"
@@ -1488,8 +1517,6 @@ onBeforeUnmount(() => {
           >
             {{ t("common.cancel") }}
           </button>
-        </div>
-
       </template>
     </NxpModal>
     <NxpModal
@@ -1497,13 +1524,11 @@ onBeforeUnmount(() => {
       :closeable="false"
       :locked="true"
       :aria-label="t('users.user_management')"
-      panel-class="modal wide secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      size="wide"
       data-locked
     >
-      <template v-if="userDraft">
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.user_management") }}</h3></div>
           <button
             class="icon-button modal-close"
@@ -1513,8 +1538,8 @@ onBeforeUnmount(() => {
           >
             <NxpIcon name="close" />
           </button>
-        </div>
-        <div class="modal-body">
+      </template>
+      <template v-if="userDraft">
           <section class="user-management-settings">
             <div class="field">
               <label class="field-label" for="um-name"
@@ -1695,6 +1720,7 @@ onBeforeUnmount(() => {
                     {{ t("users.remove_binding") }}
                   </button>
                 </div>
+                <Transition name="nxp-collapse">
                 <div
                   v-if="expandedBindingId === binding.scriptInstanceId"
                   class="um-binding-body"
@@ -1838,6 +1864,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="plugin-slot user-binding-plugin-slot" data-plugin-slot="users.binding.sections" data-plugin-anchor="users.binding.sections" data-plugin-mode="binding" :data-plugin-primary-id="binding.scriptInstanceId" :data-plugin-secondary-id="userDraft.id" hidden></div>
                 </div>
+                </Transition>
               </article>
             </div>
             <NxpEmptyState
@@ -1846,8 +1873,8 @@ onBeforeUnmount(() => {
               :description="t('users.binding.add_help')"
             />
           </section>
-        </div>
-        <div class="modal-footer">
+      </template>
+      <template #footer>
           <button
             class="primary"
             type="button"
@@ -1862,8 +1889,6 @@ onBeforeUnmount(() => {
           >
             {{ t("common.cancel") }}
           </button>
-        </div>
-
       </template>
     </NxpModal>
     <NxpModal
@@ -1871,17 +1896,14 @@ onBeforeUnmount(() => {
       :closeable="false"
       :locked="true"
       :aria-label="t('users.first_edit') + ' ' + t('users.edit_configuration')"
-      panel-class="modal secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
       data-locked
     >
-      <template v-if="configChooser">
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.first_edit") }} {{ t("users.edit_configuration") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
-        </div>
-        <div class="modal-body">
+      </template>
+      <template v-if="configChooser">
           <p class="modal-copy">{{ t("users.config.edit_first", { script: configChooser.scriptName }) }}</p>
           <div class="first-edit-chooser">
             <button class="chooser-card" type="button" :disabled="!configChooser.freshAvailable" @click.stop="chooseConfigMode('fresh')">
@@ -1893,27 +1915,22 @@ onBeforeUnmount(() => {
               <span class="muted">{{ t("users.config.edit_existing") }}</span>
             </button>
           </div>
-        </div>
-        <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
-
       </template>
+      <template #footer><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></template>
     </NxpModal>
     <NxpModal
       :open="Boolean(configCandidates)"
       :closeable="false"
       :locked="true"
       :aria-label="t('users.take_over_configuration')"
-      panel-class="modal secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
       data-locked
     >
-      <template v-if="configCandidates">
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.take_over_configuration") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
-        </div>
-        <div class="modal-body">
+      </template>
+      <template v-if="configCandidates">
           <p class="modal-copy">{{ t("users.config.candidates_help") }}</p>
           <div class="first-edit-chooser">
             <button v-for="candidate in configCandidates.candidates" :key="candidate" class="chooser-card" type="button" @click.stop="chooseConfigCandidate(candidate)">
@@ -1921,41 +1938,34 @@ onBeforeUnmount(() => {
               <span class="muted">{{ t("users.config.candidate_used") }}</span>
             </button>
           </div>
-        </div>
-        <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
-
       </template>
+      <template #footer><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></template>
     </NxpModal>
     <NxpModal
       :open="Boolean(configEdit)"
       :closeable="false"
       :locked="true"
       :aria-label="t('users.config.edit_progress')"
-      panel-class="modal secondary-surface"
-      body-class="legacy-modal-body"
-      class="modal-mask"
+      panel-class="secondary-surface"
       data-locked
     >
-      <template v-if="configEdit">
-        <div class="modal-header">
+      <template #header>
           <div><h3 class="modal-title">{{ t("users.config.edit_progress") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="finishConfigEdit('cancel')"><NxpIcon name="close" /></button>
-        </div>
-        <div class="modal-body">
+      </template>
+      <template v-if="configEdit">
           <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>
-        </div>
-        <div class="modal-footer">
+      </template>
+      <template #footer>
           <button class="primary" type="button" @click.stop="finishConfigEdit('done')">{{ t("common.complete") }}</button>
           <button class="ghost" type="button" @click.stop="finishConfigEdit('cancel')">{{ t("common.cancel") }}</button>
-        </div>
-
       </template>
     </NxpModal>
     <NxpModal
       :open="Boolean(deleteTarget)"
       :title="t('users.delete_user')"
-      panel-class="modal secondary-surface"
-      class="modal-mask"
+      panel-class="secondary-surface"
+      :close-label="t('common.close', {}, 'Close')"
       @close="closeDelete"
     >
       <p v-if="deleteTarget" class="modal-copy">
@@ -1995,10 +2005,6 @@ onBeforeUnmount(() => {
 .users-page .global-user-next-run {
   white-space: nowrap;
 }
-.users-page .modal-body {
-  max-height: min(72vh, 760px);
-  overflow: auto;
-}
 .users-page .plugin-contribution-fields {
   display: grid;
   gap: var(--space-3);
@@ -2006,13 +2012,6 @@ onBeforeUnmount(() => {
 .users-page .plugin-field .muted {
   display: block;
   margin-top: var(--space-1);
-}
-.users-page .um-binding-card.is-expanded .um-binding-body {
-  display: block;
-}
-.users-page .um-binding-body {
-  display: block;
-  padding: var(--space-4);
 }
 .users-page .um-binding-options {
   display: grid;

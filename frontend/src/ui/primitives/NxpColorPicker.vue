@@ -18,7 +18,7 @@ function updatePicker(event: Event) { update((event.target as HTMLInputElement).
 </script>
 
 <template>
-  <div class="nxp-color"><div class="nxp-color-row"><input class="nxp-color-value" type="text" inputmode="text" :value="text" :disabled="disabled" :aria-label="ariaLabel" @input="updateText" @change="updateText"><button class="nxp-color-trigger" type="button" :disabled="disabled" :aria-label="t('common.open_color_picker')" @click="picker?.click()"><span class="nxp-color-swatch" :style="{ backgroundColor: normalized }" aria-hidden="true" /><span>{{ t("common.select_color") }}</span></button></div><input ref="picker" class="sr-only" type="color" :value="normalized" :disabled="disabled" @input="updatePicker" @change="updatePicker"></div>
+  <div class="nxp-color"><div class="nxp-color-row"><input class="nxp-color-value" type="text" inputmode="text" :value="text" :disabled="disabled" :aria-label="ariaLabel" @input.stop="updateText" @change.stop="updateText"><button class="nxp-color-trigger" type="button" :disabled="disabled" :aria-label="t('common.open_color_picker')" @click="picker?.click()"><span class="nxp-color-swatch" :style="{ backgroundColor: normalized }" aria-hidden="true" /><span>{{ t("common.select_color") }}</span></button></div><input ref="picker" class="sr-only" type="color" :value="normalized" :disabled="disabled" @input.stop="updatePicker" @change.stop="updatePicker"></div>
 </template>
 
 <style>
