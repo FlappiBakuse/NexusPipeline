@@ -49,10 +49,10 @@ const emit = defineEmits<{
         >
       </button>
       <div class="meta-line queue-meta">
-        <NxpBadge tone="muted">{{
+        <NxpBadge tone="muted" data-testid="queue-card-tasks-badge">{{
           translate("common.unit.tasks", { count: queue.tasks?.length || 0 })
         }}</NxpBadge
-        ><NxpBadge tone="muted">{{
+        ><NxpBadge tone="muted" data-testid="queue-card-completion-badge">{{
           queue.completionAction && queue.completionAction !== "none"
             ? translate("queues.completion.label", {
                 action: queue.completionAction,
@@ -64,12 +64,20 @@ const emit = defineEmits<{
           :tone="pluginIssue.tone"
           :title="pluginIssue.title"
           >{{ pluginIssue.label }}</NxpBadge
+        ><NxpBadge
+          v-if="queue.autoRunMode === 'none'"
+          tone="blue"
+          data-testid="queue-card-manual-badge"
+          >{{ translate("queues.manual_only") }}</NxpBadge
         ><NxpBadge tone="blue" data-testid="queue-next">{{ nextLabel }}</NxpBadge
-        ><NxpBadge :tone="queue.notifyEnabled ? 'ok' : 'muted'">{{
-          queue.notifyEnabled
-            ? translate("queues.notification.enabled")
-            : translate("queues.notification.disabled")
-        }}</NxpBadge
+        ><NxpBadge
+          :tone="queue.notifyEnabled ? 'ok' : 'muted'"
+          data-testid="queue-card-notify-badge"
+          >{{
+            queue.notifyEnabled
+              ? translate("queues.notification.enabled")
+              : translate("queues.notification.disabled")
+          }}</NxpBadge
         ><div
           class="plugin-slot queue-plugin-slot"
           data-plugin-slot="queues.list.badges"

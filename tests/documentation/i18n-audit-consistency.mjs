@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html"]);
+const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html", ".ts", ".vue"]);
 
 // 这些前缀对应运行时从 API 错误码、诊断结果或状态码动态选择的模板。
 // 新增动态资源时应先把调用契约写清楚，再把最小前缀加入这里。
@@ -43,7 +43,6 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.details.recommendations",
   "common.diagnostic_check",
   "common.enter_token",
-  "common.enabled_status",
   "common.error.host_version_incompatible",
   "common.error.script_instance_missing",
   "common.features.controls_help",
@@ -77,7 +76,6 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.status.all_passed_or_skipped",
   "common.system_settings",
   "common.unit.items",
-  "common.unknown",
   "common.unrecognized_specialized_script",
   "common.update.pre_release_available",
   "common.update.started",
@@ -86,9 +84,9 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.user.name_placeholder",
   "common.validation.specialized_response",
   "settings.checks",
+  "settings.host",
   "settings.language_en",
   "settings.language_zh",
-  "settings.host",
   "settings.network",
   "settings.other",
   "settings.service",
@@ -109,7 +107,6 @@ const REVIEWED_AMBIGUOUS_KEYS = new Set([
   "queues.edit_queue_button",
   "settings.there_is_no_token_to_copy",
   "users.deleted_user_value",
-  "users.next_queue_value",
   "users.user_management_button",
 ]);
 
@@ -124,7 +121,7 @@ function read(relativePath) {
 }
 
 function readLocaleIds() {
-  const registry = JSON.parse(read("wwwroot/i18n/locales.json"));
+  const registry = JSON.parse(read("frontend/public/i18n/locales.json"));
   const locales = Array.isArray(registry?.supported)
     ? registry.supported.map(item => typeof item === "string" ? item : item?.id).filter(Boolean)
     : [];
@@ -135,7 +132,7 @@ function readLocaleIds() {
 function readResources(locales) {
   return Object.fromEntries(locales.map(locale => [
     locale,
-    JSON.parse(read(`wwwroot/i18n/${locale}.json`)),
+    JSON.parse(read(`frontend/public/i18n/${locale}.json`)),
   ]));
 }
 
@@ -171,7 +168,7 @@ function usageRoles(source, index) {
   if (/data-i18n-placeholder|\bplaceholder\s*=/iu.test(context)) roles.add("placeholder");
   if (/data-i18n-title|\btitle\s*=/iu.test(context)) roles.add("title");
   if (/data-i18n-aria-label|\baria-label\s*=/iu.test(context)) roles.add("aria-label");
-  if (/class\s*=\s*["'][^"']*\bbadge\b/iu.test(context)) roles.add("badge");
+  if (/class\s*=\s*["'][^"']*\bbadge\b|\bNxpBadge\b/iu.test(context)) roles.add("badge");
   if (/data-help|\bhelp\b|\bdescription\b/iu.test(context)) roles.add("help");
   if (/\btoast\s*\(/u.test(context)) roles.add("toast");
   if (/\b(?:button|action|data-action)\b/iu.test(context)) roles.add("action");
@@ -202,7 +199,7 @@ function collectReferenceGraph(resources) {
     references.push(reference);
   }
 
-  for (const absolute of walkSources(path.join(ROOT, "wwwroot"))) {
+  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
     const source = fs.readFileSync(absolute, "utf8");
     const clean = stripComments(source);
     for (const match of clean.matchAll(/["']([A-Za-z][A-Za-z0-9_.-]*)["']/gu)) {

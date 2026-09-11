@@ -2,6 +2,30 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.7（Pre-release）
+
+### 迁移完整性
+
+- 恢复配置编辑事务会话：Users 页面加载后按用户绑定匹配进行中的编辑会话，重新进入锁定编辑弹窗，恢复失败保持页面可用。
+- 专项脚本根目录变化时即时探测：宿主按当前 profile 推导配置，失败以角落通知提示根目录或输入不可用。
+- 插件仓库刷新触发宿主 catalog cache 失效后强制重取 store 列表，刷新失败如实提示。
+- 更新状态为 `ready` 时常驻显示备份提醒，离开该状态自动消失。
+
+### 前端组件化
+
+- Users、Settings、Scripts、History 的复杂事务从页面 SFC 下沉到 feature 组件、composable、service 与 utils，页面保留请求调度、生命周期与高层编排职责。
+- 补齐脚本/队列卡片徽章、调度目标选择器和历史用户筛选返回的稳定定位符。
+
+### 迁移对照
+
+- 新增 [docs/frontend-migration-coverage.md](docs/frontend-migration-coverage.md) 作为全面迁移的发布硬门禁。
+- 删除已经确认不可达的旧 Web 入口、`wwwroot/views/**`、`wwwroot/i18n/**` 与无消费者 `wwwroot/core/*` 模块；`wwwroot/package.json` 与 `wwwroot/style.css` 按计划保留。
+- 宿主语言资源以 `frontend/public/i18n/` 为唯一源并移除失去消费者的资源键；文档一致性检查改为按当前 Vue 组件调用点与插件桥接源码校验。
+
+### 稳定性修复
+
+- 设置页更新状态恢复「取消下载」、通道启用状态与飞书 App Secret 字段的可见文案（此前引用缺失资源键）。
+
 ## v0.15.6（Pre-release）
 
 ### 前端行为与组件

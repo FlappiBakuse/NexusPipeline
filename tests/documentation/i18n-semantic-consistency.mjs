@@ -7,14 +7,14 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const LOCALES = ["zh-CN", "en-US"];
 const PLACEHOLDER = /\{([A-Za-z][A-Za-z0-9_.-]*)\}/gu;
-const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html"]);
+const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html", ".ts", ".vue"]);
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
 function readWebResources() {
-  return Object.fromEntries(LOCALES.map(locale => [locale, JSON.parse(read(`wwwroot/i18n/${locale}.json`))]));
+  return Object.fromEntries(LOCALES.map(locale => [locale, JSON.parse(read(`frontend/public/i18n/${locale}.json`))]));
 }
 
 function placeholders(value) {
@@ -34,13 +34,15 @@ function walkSources(directory) {
   return files;
 }
 
-function collectDirectReferences() {
+function collectDirectReferences(knownKeys) {
   const references = [];
-  const pattern = /\bt\([^\)\r\n]*?["']([A-Za-z][A-Za-z0-9_.-]*)["']/gu;
-  for (const absolute of walkSources(path.join(ROOT, "wwwroot"))) {
+  const quoted = /["']([A-Za-z][A-Za-z0-9_.-]*)["']/gu;
+  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
     const relativePath = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
     const source = fs.readFileSync(absolute, "utf8");
-    for (const match of source.matchAll(pattern)) references.push({ relativePath, key: match[1] });
+    for (const match of source.matchAll(quoted)) {
+      if (knownKeys.has(match[1])) references.push({ relativePath, key: match[1] });
+    }
   }
   return references;
 }
@@ -50,7 +52,7 @@ function registryIds(registry) {
 }
 
 test("host and web locale registries remain synchronized", () => {
-  const web = JSON.parse(read("wwwroot/i18n/locales.json"));
+  const web = JSON.parse(read("frontend/public/i18n/locales.json"));
   const host = JSON.parse(read("src/Localization/Resources/locales.json"));
   assert.equal(web.default, host.default);
   assert.deepEqual(registryIds(web), registryIds(host));
@@ -124,17 +126,17 @@ test("localized values are complete templates at fragment migration boundaries",
     }
   }
 
-  const directReferences = collectDirectReferences();
+  const directReferences = collectDirectReferences(new Set(Object.keys(resources[LOCALES[0]])));
   const requiredReferences = {
-    "wwwroot/views/dashboard.js": ["dashboard.active_tasks.count"],
-    "wwwroot/views/dispatch.js": [
+    "frontend/src/features/dashboard/DashboardPage.vue": ["dashboard.active_tasks.count"],
+    "frontend/src/features/dispatch/DispatchPage.vue": [
       "dispatch.summary.items",
       "dispatch.status_update_failed",
       "dispatch.plan.queue_required",
       "dispatch.plan.target_help",
     ],
-    "wwwroot/views/history.js": ["history.failure_reason", "history.log.lines_summary", "history.log.lines_summary.tail"],
-    "wwwroot/views/users/global-management.js": [
+    "frontend/src/features/history/components/HistoryDetailModal.vue": ["history.log.lines_summary", "history.log.lines_summary.tail"],
+    "frontend/src/features/users/components/GlobalManagementModal.vue": [
       "users.global.general.help",
       "users.global.notification.enabled_help",
       "users.global.notification.smtp_help",
@@ -143,8 +145,8 @@ test("localized values are complete templates at fragment migration boundaries",
       "users.global.saved",
       "users.global.title",
     ],
-    "wwwroot/views/users/shared.js": ["users.global.open_action", "users.global.title"],
-    "wwwroot/views/users/user-management.js": [
+    "frontend/src/features/users/GlobalUserCard.vue": ["users.global.open_action"],
+    "frontend/src/features/users/components/UserManagementModal.vue": [
       "users.binding.global_override.help",
       "users.binding.run_days.help",
       "common.plugin.unavailable_badge",
@@ -160,6 +162,6 @@ test("localized values are complete templates at fragment migration boundaries",
   }
 
   for (const key of ["settings.diagnostics.overview_attention", "settings.diagnostics.overview_clear"]) {
-    assert.match(read("wwwroot/views/settings.js"), new RegExp(`['"]${key.replaceAll(".", "\\.")}['"]`, "u"));
+    assert.match(read("frontend/src/features/settings/components/DiagnosticsSection.vue"), new RegExp(`['"]${key.replaceAll(".", "\\.")}['"]`, "u"));
   }
 });

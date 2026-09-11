@@ -73,12 +73,12 @@ const emit = defineEmits<{
         >
       </button>
       <div class="meta-line script-meta">
-        <NxpBadge :tone="script.pluginType && unavailableMessage ? 'warn' : 'muted'">{{
+        <NxpBadge :tone="script.pluginType && unavailableMessage ? 'warn' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{
           script.pluginType
             ? pluginLabel
             : translate("scripts.general_script")
         }}</NxpBadge
-        ><NxpBadge v-if="script.launchGame" tone="muted">{{
+        ><NxpBadge v-if="script.launchGame" tone="muted" data-testid="script-card-game-mode-badge">{{
           script.gameMode === "emulator"
             ? translate("scripts.android_emulator")
             : translate("scripts.pc_client")
@@ -86,14 +86,17 @@ const emit = defineEmits<{
         ><NxpBadge
           v-if="script.judgeScriptEnabled && script.judgeScript"
           tone="muted"
+          data-testid="script-card-judge-badge"
           >{{ translate("scripts.judge_script") }}</NxpBadge
         ><NxpBadge
           v-else-if="script.successKeywords || script.failureKeywords"
           tone="muted"
+          data-testid="script-card-judge-badge"
           >{{ translate("scripts.keyword_judge") }}</NxpBadge
         ><NxpBadge
           v-if="script.logStallTimeoutMinutes === -1"
           tone="warn"
+          data-testid="script-card-long-badge"
           >{{ translate("scripts.long_running_policy") }}</NxpBadge
         ><span
           class="plugin-slot script-plugin-slot"

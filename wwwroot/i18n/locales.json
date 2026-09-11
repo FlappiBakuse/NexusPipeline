@@ -1,7 +1,0 @@
-{
-  "default": "zh-CN",
-  "supported": [
-    { "id": "zh-CN", "nativeName": "简体中文" },
-    { "id": "en-US", "nativeName": "English" }
-  ]
-}

@@ -4,10 +4,9 @@ import {
   nextTick,
   onBeforeUnmount,
   onMounted,
-  reactive,
   ref,
 } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
+import { isAbortError } from "@legacy/core/api.js";
 import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
 import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
 import {
@@ -20,115 +19,25 @@ import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
-import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
-import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
-import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 import { vSortable } from "../../ui/sortable";
 import ScriptCard from "./ScriptCard.vue";
-
-interface Script {
-  id: string;
-  name: string;
-  pluginType?: string;
-  pluginInputs?: Record<string, unknown>;
-  rootPath?: string;
-  mainExe?: string;
-  args?: string;
-  configPath?: string;
-  logPath?: string;
-  launchGame?: boolean;
-  gameMode?: string;
-  gameExe?: string;
-  gameArgs?: string;
-  gameWaitSeconds?: number;
-  forceCloseGame?: boolean;
-  maxAttempts?: number;
-  logStallTimeoutMinutes?: number;
-  totalTimeoutMinutes?: number;
-  successKeywords?: string;
-  failureKeywords?: string;
-  judgeScriptEnabled?: boolean;
-  judgeScriptLanguage?: string;
-  judgeScript?: string;
-  autoUpdateConfig?: boolean;
-}
-interface Plugin {
-  name?: string;
-  displayName?: string;
-  kind?: string;
-  configuredEnabled?: boolean;
-  runtimeEnabled?: boolean;
-  state?: string;
-  supportsEmulator?: boolean;
-  selfManagedPcLaunch?: boolean;
-}
-interface Draft extends Script {
-  id: string;
-  name: string;
-  rootPath: string;
-  mainExe: string;
-  configPath: string;
-  logPath: string;
-  gameExe: string;
-  args: string;
-  gameArgs: string;
-  gameMode: string;
-  gameWaitSeconds: number;
-  maxAttempts: number;
-  logStallTimeoutMinutes: number;
-  totalTimeoutMinutes: number;
-  successKeywords: string;
-  failureKeywords: string;
-  judgeScript: string;
-  judgeScriptLanguage: string;
-  pluginInputs: Record<string, unknown>;
-  launchGame: boolean;
-  forceCloseGame: boolean;
-  judgeScriptEnabled: boolean;
-  autoUpdateConfig: boolean;
-}
+import ScriptEditorModal from "./ScriptEditorModal.vue";
+import { deleteScript, listScripts, getStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
+import type { Script, ScriptPlugin } from "./utils/scriptTypes";
 
 const scripts = ref<Script[]>([]);
-const plugins = ref<Plugin[]>([]);
+const plugins = ref<ScriptPlugin[]>([]);
 const loading = ref(true);
 const error = ref("");
 const editorOpen = ref(false);
 const chooserOpen = ref(false);
 const confirmOpen = ref(false);
 const editing = ref<Script | null>(null);
+const editorPlugin = ref("");
 const deleteTarget = ref<Script | null>(null);
 const root = ref<HTMLElement | null>(null);
-const listSlotRoot = ref<HTMLElement | null>(null);
-const editorSlotRoot = ref<HTMLElement | null>(null);
 let disposed = false;
 
-const draft = reactive<Draft>({
-  id: "",
-  name: "",
-  pluginType: "",
-  pluginInputs: {},
-  rootPath: "",
-  mainExe: "",
-  args: "",
-  configPath: "",
-  logPath: "",
-  launchGame: false,
-  gameMode: "pc",
-  gameExe: "",
-  gameArgs: "",
-  gameWaitSeconds: 30,
-  forceCloseGame: false,
-  maxAttempts: 3,
-  logStallTimeoutMinutes: 5,
-  totalTimeoutMinutes: 120,
-  successKeywords: "",
-  failureKeywords: "",
-  judgeScriptEnabled: false,
-  judgeScriptLanguage: "javascript",
-  judgeScript: "",
-  autoUpdateConfig: true,
-});
 const specializedPlugins = computed(() =>
   plugins.value.filter(
     (plugin) =>
@@ -139,75 +48,21 @@ const specializedPlugins = computed(() =>
   ),
 );
 const hasSpecialized = computed(() => specializedPlugins.value.length > 0);
-const gameModeOptions = computed<NxpOption[]>(() => [
-  { value: "pc", label: t("scripts.pc_client") },
-  { value: "emulator", label: t("scripts.android_emulator") },
-]);
-const judgeLanguageOptions = computed<NxpOption[]>(() => [
-  { value: "javascript", label: t("scripts.javascript_built_in_engine") },
-  { value: "python", label: t("scripts.python_system_interpreter") },
-]);
-const currentPlugin = computed(() =>
-  plugins.value.find(
-    (plugin) =>
-      String(plugin.name || "").toLowerCase() ===
-      String(draft.pluginType || "").toLowerCase(),
-  ),
-);
-const emulatorAllowed = computed(
-  () => !draft.pluginType || currentPlugin.value?.supportsEmulator === true,
-);
-const selfManagedPc = computed(
-  () =>
-    draft.gameMode !== "emulator" &&
-    currentPlugin.value?.selfManagedPcLaunch === true,
-);
 
-function resetDraft(script: Script | null = null, plugin = "") {
-  const value: Partial<Script> = script || {};
-  editing.value = script;
-  Object.assign(draft, {
-    id: value.id || "",
-    pluginType: value.pluginType || plugin,
-    name: value.name || "",
-    pluginInputs:
-      value.pluginInputs && typeof value.pluginInputs === "object"
-        ? { ...value.pluginInputs }
-        : {},
-    rootPath: value.rootPath || "",
-    mainExe: value.mainExe || "",
-    args: value.args || "",
-    configPath: value.configPath || "",
-    logPath: value.logPath || "",
-    launchGame: value.launchGame === true,
-    gameMode: value.gameMode === "emulator" ? "emulator" : "pc",
-    gameExe: value.gameExe || "",
-    gameArgs: value.gameArgs || "",
-    gameWaitSeconds: value.gameWaitSeconds ?? 30,
-    forceCloseGame: value.forceCloseGame ?? Boolean(value.pluginType),
-    maxAttempts: value.maxAttempts ?? 3,
-    logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
-    totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,
-    successKeywords: value.successKeywords || "",
-    failureKeywords: value.failureKeywords || "",
-    judgeScriptEnabled: value.judgeScriptEnabled === true,
-    judgeScriptLanguage: value.judgeScriptLanguage || "javascript",
-    judgeScript: value.judgeScript || "",
-    autoUpdateConfig: value.autoUpdateConfig !== false,
-  });
-}
 function openNew() {
   if (hasSpecialized.value) chooserOpen.value = true;
   else openEditor();
 }
 function openEditor(script: Script | null = null, plugin = "") {
   chooserOpen.value = false;
-  resetDraft(script, plugin);
+  editing.value = script;
+  editorPlugin.value = plugin;
   editorOpen.value = true;
 }
 function closeEditor() {
   editorOpen.value = false;
   editing.value = null;
+  editorPlugin.value = "";
 }
 function askDelete(script: Script) {
   deleteTarget.value = script;
@@ -217,78 +72,11 @@ function closeConfirm() {
   confirmOpen.value = false;
   deleteTarget.value = null;
 }
-function toggleJudge() {
-  draft.judgeScriptEnabled = !draft.judgeScriptEnabled;
-}
-function toggleField(
-  field: "launchGame" | "forceCloseGame" | "autoUpdateConfig",
-) {
-  draft[field] = !draft[field];
-}
-async function browseDraftPath(
-  field: "rootPath" | "mainExe" | "configPath" | "logPath" | "gameExe",
-  kind: "file" | "folder",
-) {
-  try {
-    const result = await api("POST", "/api/native-dialog", {
-      kind,
-      title: t("common.select_path"),
-      initialPath: draft.rootPath || undefined,
-      filter: "",
-    }) as { path?: string };
-    if (result?.path) draft[field] = result.path;
-  } catch (reason) {
-    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
-  }
-}
-function uploadJudgeScript() {
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = ".js,.py";
-  input.addEventListener("change", () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    if (file.size > 256 * 1024) {
-      toast(t("scripts.validation.file_size"), "error");
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      draft.judgeScript = String(reader.result || "");
-      draft.judgeScriptLanguage = file.name.toLowerCase().endsWith(".py") ? "python" : "javascript";
-      toast(t("scripts.status.loaded", { language: draft.judgeScriptLanguage === "python" ? "Python" : "JavaScript" }));
-    };
-    reader.onerror = () => toast(t("scripts.file.read_failed"), "error");
-    reader.readAsText(file, "utf-8");
-  }, { once: true });
-  input.click();
-}
-function stripQuotes(value: string) {
-  const trimmed = String(value || "").trim();
-  return trimmed.length >= 2 &&
-    ((trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-      (trimmed.startsWith("'") && trimmed.endsWith("'")))
-    ? trimmed.slice(1, -1).trim()
-    : trimmed;
-}
 function unavailable(script: Script) {
   return (
     scriptPluginStatus(script, plugins.value).specialized &&
     scriptPluginUnavailableMessage(script, plugins.value)
   );
-}
-async function reorderScripts(ids: string[]) {
-  const byId = new Map(scripts.value.map(script => [script.id, script]));
-  const next = ids.map(id => byId.get(id)).filter((script): script is Script => Boolean(script));
-  if (next.length !== scripts.value.length || next.every((script, index) => script.id === scripts.value[index]?.id)) return;
-  scripts.value = next;
-  try {
-    await api("PUT", "/api/scripts/order", { ids: next.map(item => item.id) });
-    toast(t("scripts.script_order_saved"));
-  } catch (reason) {
-    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
-    await load();
-  }
 }
 function pluginName(script: Script) {
   const plugin = plugins.value.find(
@@ -296,12 +84,7 @@ function pluginName(script: Script) {
       String(item.name || "").toLowerCase() ===
       String(script.pluginType || "").toLowerCase(),
   );
-  return (
-    plugin?.displayName ||
-    plugin?.name ||
-    script.pluginType ||
-    t("scripts.general_script")
-  );
+  return plugin?.displayName || plugin?.name || script.pluginType || t("scripts.general_script");
 }
 function openScript(script: Script) {
   const message = unavailable(script);
@@ -311,14 +94,27 @@ function openScript(script: Script) {
   }
   openEditor(script);
 }
+async function reorderScripts(ids: string[]) {
+  const byId = new Map(scripts.value.map(script => [script.id, script]));
+  const next = ids.map(id => byId.get(id)).filter((script): script is Script => Boolean(script));
+  if (next.length !== scripts.value.length || next.every((script, index) => script.id === scripts.value[index]?.id)) return;
+  scripts.value = next;
+  try {
+    await reorderScriptsRequest(next.map(item => item.id));
+    toast(t("scripts.script_order_saved"));
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+    await load();
+  }
+}
 async function load() {
   loading.value = true;
   error.value = "";
   try {
     const [scriptData, status] = (await Promise.all([
-      api("GET", "/api/scripts"),
-      api("GET", "/api/status"),
-    ])) as [Script[], { plugins?: Plugin[] }];
+      listScripts(),
+      getStatus(),
+    ])) as [Script[], { plugins?: ScriptPlugin[] }];
     if (disposed) return;
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
     plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
@@ -330,67 +126,11 @@ async function load() {
   }
   await paintListSlots();
 }
-async function save() {
-  const required = [draft.name, draft.rootPath, draft.gameExe, draft.maxAttempts, draft.logStallTimeoutMinutes, draft.totalTimeoutMinutes];
-  if (!draft.pluginType) required.push(draft.mainExe, draft.configPath, draft.logPath);
-  if (required.some((value) => !String(value || "").trim())) {
-    toast(t("scripts.validation.required_fields"), "error");
-    return;
-  }
-  if (new TextEncoder().encode(draft.name.trim()).length > 64) {
-    toast(t("scripts.validation.name_length", { bytes: 64 }), "error");
-    return;
-  }
-  if (draft.judgeScriptEnabled && !draft.judgeScript.trim()) {
-    toast(t("scripts.editor.judge_code_help"), "error");
-    return;
-  }
-  const payload = {
-    id: draft.id,
-    pluginType: draft.pluginType || "",
-    name: draft.name.trim(),
-    rootPath: stripQuotes(draft.rootPath),
-    pluginInputs: draft.pluginType ? { ...draft.pluginInputs } : {},
-    mainExe: draft.mainExe ? stripQuotes(draft.mainExe) : "",
-    args: draft.args.trim(),
-    configPath: draft.configPath ? stripQuotes(draft.configPath) : "",
-    logPath: draft.logPath ? stripQuotes(draft.logPath) : "",
-    launchGame: draft.launchGame,
-    gameMode: draft.gameMode,
-    gameExe: stripQuotes(draft.gameExe),
-    gameArgs: draft.gameArgs.trim(),
-    gameWaitSeconds: Number(draft.gameWaitSeconds) || 0,
-    forceCloseGame: draft.forceCloseGame,
-    maxAttempts: Number(draft.maxAttempts) || 3,
-    logStallTimeoutMinutes: Number(draft.logStallTimeoutMinutes) || 5,
-    totalTimeoutMinutes: Number(draft.totalTimeoutMinutes) || 120,
-    successKeywords: draft.successKeywords,
-    failureKeywords: draft.failureKeywords,
-    judgeScriptEnabled: draft.judgeScriptEnabled,
-    judgeScriptLanguage: draft.judgeScriptLanguage,
-    judgeScript: draft.judgeScript,
-    autoUpdateConfig: draft.autoUpdateConfig,
-  };
-  try {
-    await api(
-      draft.id ? "PUT" : "POST",
-      draft.id
-        ? `/api/scripts/${encodeURIComponent(draft.id)}`
-        : "/api/scripts",
-      payload,
-    );
-    closeEditor();
-    toast(t("scripts.script_instance_saved"));
-    await load();
-  } catch (reason) {
-    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
-  }
-}
 async function removeScript() {
   const target = deleteTarget.value;
   if (!target) return;
   try {
-    await api("DELETE", `/api/scripts/${encodeURIComponent(target.id)}`);
+    await deleteScript(target.id);
     closeConfirm();
     toast(t("scripts.script_instance_deleted"));
     await load();
@@ -408,14 +148,6 @@ async function paintListSlots() {
     await renderPluginSlot(slot, "scripts.list.badges", {
       mode: "list",
       primaryId: slot.dataset.pluginPrimaryId || "",
-    });
-}
-async function paintEditorSlot() {
-  await nextTick();
-  if (editorSlotRoot.value)
-    await renderPluginSlot(editorSlotRoot.value, "scripts.editor.sections", {
-      mode: draft.id ? "edit" : "create",
-      primaryId: draft.id,
     });
 }
 onMounted(() => {
@@ -530,393 +262,14 @@ onBeforeUnmount(() => {
           </button>
       </template>
     </NxpModal>
-    <NxpModal
-      :open="editorOpen"
-      :closeable="false"
-      :locked="true"
-      :aria-label="editing ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
-      panel-class="secondary-surface"
-      size="wide"
-      data-locked
-    >
-      <template #header>
-          <h2 class="modal-title">
-            {{
-              editing
-                ? t("scripts.edit_script_instance")
-                : draft.pluginType
-                  ? t("scripts.action.new_specialized", {
-                      plugin: pluginName(draft),
-                    })
-                  : t("scripts.new_general_script_instance")
-            }}
-          </h2>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close', {}, 'Close')"
-            @click.stop="closeEditor"
-          >
-            <NxpIcon name="close" />
-          </button>
-      </template>
-          <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="sm-name"
-                >{{ t("scripts.script_name") }}
-                <span class="req">*</span></label
-              ><input id="sm-name" v-model="draft.name" type="text" />
-            </div>
-            <div class="field">
-              <label class="field-label" for="sm-root"
-                >{{ t("scripts.script_root_directory") }}
-                <span class="req">*</span></label
-              ><NxpPathPicker
-                id="sm-root"
-                v-model="draft.rootPath"
-                kind="folder"
-                :placeholder="t('scripts.script_root_directory')"
-                :aria-label="t('scripts.script_root_directory')"
-                @browse="browseDraftPath('rootPath', $event)"
-              />
-            </div>
-          </div>
-          <template v-if="!draft.pluginType">
-            <div class="form-grid">
-              <div class="field">
-                <label class="field-label" for="sm-exe"
-                  >{{ t("scripts.main_program_path") }}
-                  <span class="req">*</span></label
-                ><NxpPathPicker
-                  id="sm-exe"
-                  v-model="draft.mainExe"
-                  kind="file"
-                  :disabled="!draft.rootPath"
-                  :placeholder="t('scripts.main_program_file')"
-                  :aria-label="t('scripts.main_program_path')"
-                  @browse="browseDraftPath('mainExe', $event)"
-                />
-              </div>
-              <div class="field">
-                <label class="field-label" for="sm-args">{{
-                  t("scripts.script_startup_arguments")
-                }}</label
-                ><input
-                  id="sm-args"
-                  v-model="draft.args"
-                  type="text"
-                  :disabled="!draft.rootPath"
-                  :placeholder="t('scripts.optional_startup_arguments')"
-                />
-              </div>
-            </div>
-            <div class="form-grid">
-              <div class="field">
-                <label class="field-label" for="sm-config"
-                  >{{ t("scripts.configuration_file_folder") }}
-                  <span class="req">*</span></label
-                ><NxpPathPicker
-                  id="sm-config"
-                  v-model="draft.configPath"
-                  kind="file-or-folder"
-                  :disabled="!draft.rootPath"
-                  :placeholder="t('scripts.editor.root_required')"
-                  :aria-label="t('scripts.configuration_file_folder')"
-                  @browse="browseDraftPath('configPath', $event)"
-                />
-              </div>
-              <div class="field">
-                <label class="field-label" for="sm-log"
-                  >{{ t("scripts.editor.log_path.help") }} <span class="req">*</span></label
-                ><NxpPathPicker
-                  id="sm-log"
-                  v-model="draft.logPath"
-                  kind="file-or-folder"
-                  :disabled="!draft.rootPath"
-                  :placeholder="t('scripts.log_file_path')"
-                  :aria-label="t('scripts.log_path')"
-                  @browse="browseDraftPath('logPath', $event)"
-                />
-              </div>
-            </div>
-          </template>
-          <div class="subsection">
-            <div class="section-heading">
-              <h3>{{ t("scripts.game_integration") }}</h3>
-              <span v-if="draft.pluginType" class="muted">{{
-                t("scripts.editor.path_adb_cleanup_help")
-              }}</span>
-            </div>
-            <div class="toggle-grid switch-grid">
-              <div class="switch-row settings-option switch-card" :data-tooltip="selfManagedPc ? t('scripts.editor.pc_client_disabled') : undefined">
-                <div>
-                  <strong>{{ t("scripts.launch_game") }}</strong
-                  ><span class="muted">{{
-                    t(
-                      "scripts.editor.game_launch.help",
-                      {},
-                      "Launch the game before running the script",
-                    )
-                  }}</span>
-                </div>
-                <NxpSwitch
-                  id="sm-launch"
-                  :model-value="selfManagedPc ? false : draft.launchGame"
-                  :disabled="selfManagedPc"
-                  :aria-label="t('scripts.launch_game')"
-                  @update:model-value="draft.launchGame = $event"
-                />
-              </div>
-              <div class="switch-row settings-option switch-card">
-                <div>
-                  <strong>{{ t("scripts.force_close") }}</strong
-                  ><span class="muted">{{
-                    t(
-                      "scripts.game.cleanup_help",
-                      {},
-                      "Close the game after the run",
-                    )
-                  }}</span>
-                </div>
-                <NxpSwitch
-                  id="sm-force"
-                  v-model="draft.forceCloseGame"
-                  :aria-label="t('scripts.force_close')"
-                />
-              </div>
-              <div class="switch-row settings-option switch-card">
-                <div>
-                  <strong>{{ t("scripts.editor.config_auto_update") }}</strong
-                  ><span class="muted">{{
-                    t(
-                      "scripts.editor.config_sync_help",
-                      {},
-                      "Keep configuration synchronized automatically",
-                    )
-                  }}</span>
-                </div>
-                <NxpSwitch
-                  id="sm-autoupdate"
-                  v-model="draft.autoUpdateConfig"
-                  :disabled="Boolean(draft.pluginType)"
-                  :aria-label="t('scripts.editor.config_auto_update')"
-                />
-              </div>
-            </div>
-            <div class="nested-panel">
-              <div class="form-grid">
-                <div
-                  class="field"
-                  :data-help="draft.gameMode === 'emulator' ? t('scripts.editor.adb_cleanup_help') : t('scripts.editor.game_path.cleanup_help')"
-                >
-                  <label class="field-label" for="sm-game-exe">{{
-                    draft.gameMode === "emulator"
-                      ? t("scripts.emulator_adb_address")
-                      : t("scripts.game_path")
-                  }} <span class="req">*</span></label
-                  ><NxpPathPicker
-                    v-if="draft.gameMode !== 'emulator'"
-                    id="sm-game-exe"
-                    v-model="draft.gameExe"
-                    kind="file"
-                    :placeholder="t('scripts.editor.game_path.placeholder')"
-                    :aria-label="t('scripts.game_path')"
-                    @browse="browseDraftPath('gameExe', $event)"
-                  /><input
-                    v-else
-                    id="sm-game-exe"
-                    v-model="draft.gameExe"
-                    type="text"
-                    :placeholder="t('scripts.emulator_adb_address')"
-                  />
-                </div>
-                <div
-                  class="field"
-                  :data-help="selfManagedPc ? t('scripts.editor.pc_client_disabled') : draft.gameMode === 'emulator' ? t('scripts.android.arguments_mode_help') : undefined"
-                >
-                  <label class="field-label" for="sm-game-args">{{
-                    t("scripts.script_startup_arguments")
-                  }}</label
-                  ><input
-                    id="sm-game-args"
-                    v-model="draft.gameArgs"
-                    type="text"
-                    :disabled="selfManagedPc"
-                  />
-                </div>
-              </div>
-              <div class="form-grid">
-                <div class="field" :data-help="t('scripts.select_game_start_mode')">
-                  <label class="field-label" for="sm-mode-trigger">{{
-                    t("scripts.startup_mode")
-                  }}</label
-                  ><NxpSelect
-                    id="sm-mode"
-                    v-model="draft.gameMode"
-                    :options="gameModeOptions"
-                    :disabled="!emulatorAllowed"
-                    :aria-label="t('scripts.startup_mode')"
-                  />
-                </div>
-                <div
-                  class="field"
-                  :data-help="selfManagedPc ? t('scripts.editor.pc_client_disabled') : t('scripts.editor.game_launch.wait_help')"
-                >
-                  <label class="field-label" for="sm-game-wait">{{
-                    t("scripts.wait_after_game_start")
-                  }}</label
-                  ><NxpNumberInput
-                    id="sm-game-wait"
-                    v-model.number="draft.gameWaitSeconds"
-                    :min="0"
-                    :aria-label="t('scripts.wait_after_game_start')"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="subsection">
-            <div class="section-heading">
-              <h3>{{ t("scripts.run_settings") }}</h3>
-            </div>
-            <div class="form-grid three">
-              <div class="field" :data-help="t('scripts.editor.retry.attempts_help')">
-                <label class="field-label" for="sm-attempts"
-                  >{{ t("scripts.editor.retry.attempts_label") }}
-                  <span class="req">*</span></label
-                ><NxpNumberInput
-                  id="sm-attempts"
-                  v-model.number="draft.maxAttempts"
-                  :min="1"
-                  :max="10"
-                  :aria-label="t('scripts.editor.retry.attempts_label')"
-                />
-              </div>
-              <div class="field" :data-help="t('scripts.editor.retry.stall_timeout_help')">
-                <label class="field-label" for="sm-stall"
-                  >{{ t("scripts.log_stall_timeout_minutes") }}
-                  <span class="req">*</span></label
-                ><NxpNumberInput
-                  id="sm-stall"
-                  v-model.number="draft.logStallTimeoutMinutes"
-                  :min="-1"
-                  :max="60"
-                  :aria-label="t('scripts.log_stall_timeout_minutes')"
-                />
-              </div>
-              <div class="field" :data-help="t('scripts.validation.total_timeout_help')">
-                <label class="field-label" for="sm-total"
-                  >{{ t("scripts.total_timeout_minutes") }}
-                  <span class="req">*</span></label
-                ><NxpNumberInput
-                  id="sm-total"
-                  v-model.number="draft.totalTimeoutMinutes"
-                  :min="-1"
-                  :max="720"
-                  :aria-label="t('scripts.total_timeout_minutes')"
-                />
-              </div>
-            </div>
-          </div>
-          <div v-if="!draft.pluginType" class="subsection judge-box">
-            <div class="section-heading">
-              <h3>{{ t("scripts.custom_completion_markers") }}</h3>
-            </div>
-            <div v-show="!draft.judgeScriptEnabled" id="sm-kw-box">
-              <div
-                class="field"
-                :data-help="t('scripts.success_keyword_help', {}, '')"
-              >
-                <label class="field-label" for="sm-succ-kw">{{
-                  t("scripts.success_keywords")
-                }}</label
-                ><textarea
-                  id="sm-succ-kw"
-                  v-model="draft.successKeywords"
-                  :placeholder="t('scripts.judge.keyword_syntax')"
-                ></textarea>
-              </div>
-              <div
-                class="field"
-                :data-help="t('scripts.failure_keyword_help', {}, '')"
-              >
-                <label class="field-label" for="sm-fail-kw">{{
-                  t("scripts.failure_keywords")
-                }}</label
-                ><textarea
-                  id="sm-fail-kw"
-                  v-model="draft.failureKeywords"
-                  :placeholder="t('scripts.judge.failure_marker')"
-                ></textarea>
-              </div>
-            </div>
-            <div v-show="draft.judgeScriptEnabled" id="sm-script-box">
-              <div class="field" :data-help="t('scripts.judge.language_help')">
-                <label class="field-label" for="sm-judge-lang-trigger">{{
-                  t("scripts.judge_script_language")
-                }}</label
-                ><NxpSelect
-                  id="sm-judge-lang"
-                  v-model="draft.judgeScriptLanguage"
-                  :options="judgeLanguageOptions"
-                  :aria-label="t('scripts.judge_script_language')"
-                />
-              </div>
-              <div
-                class="field"
-                :data-help="t('scripts.judge_script_input_output_help', {}, '')"
-              >
-                <label class="field-label" for="sm-judge-code"
-                  >{{ t("scripts.judge_script") }}
-                  {{ t("scripts.code", {}, "Code") }}</label
-                ><textarea
-                  id="sm-judge-code"
-                  v-model="draft.judgeScript"
-                  class="mono code-area"
-                  :placeholder="t('scripts.output_a_json_result')"
-                ></textarea>
-              </div>
-            </div>
-            <div class="judge-actions">
-              <button
-                v-show="draft.judgeScriptEnabled"
-                id="sm-upload-btn"
-                class="judge-upload-button"
-                type="button"
-                @click.stop="uploadJudgeScript"
-              >
-                {{ t("scripts.upload_script_file") }}</button
-              ><button
-                id="sm-mode-btn"
-                class="judge-mode-card mode-toggle"
-                type="button"
-                :aria-pressed="draft.judgeScriptEnabled"
-                :data-help="t('scripts.judge_script_mode_help', {}, '')"
-                :data-hint="t('scripts.script_takes_priority', {}, '')"
-                @click.stop="toggleJudge"
-              >
-                {{ t("scripts.use_judge_script")
-                }}<span class="judge-toggle-track" aria-hidden="true"
-                  ><span class="judge-toggle-thumb"></span
-                ></span>
-              </button>
-            </div>
-          </div>
-          <div
-            ref="editorSlotRoot"
-            class="plugin-slot script-editor-plugin-slot"
-            data-plugin-slot="scripts.editor.sections"
-            data-plugin-anchor="scripts.editor.sections"
-            hidden
-          ></div>
-      <template #footer>
-          <button class="ghost" type="button" @click.stop="closeEditor">
-            {{ t("common.cancel") }}</button
-          ><button class="primary" type="button" @click.stop="save">
-            {{ t("common.save") }}
-          </button>
-      </template>
-    </NxpModal>
+    <ScriptEditorModal
+      v-if="editorOpen"
+      :script="editing"
+      :plugin="editorPlugin"
+      :plugins="plugins"
+      @close="closeEditor"
+      @saved="load"
+    />
     <NxpModal
       :open="confirmOpen && Boolean(deleteTarget)"
       :title="t('scripts.delete_script_instance')"
@@ -936,7 +289,8 @@ onBeforeUnmount(() => {
           type="button"
           data-action="confirm-delete-script"
           @click="removeScript"
-          >{{ t("common.confirm") }}</NxpButton>
+          >{{ t("common.confirm") }}</NxpButton
+        >
       </template>
     </NxpModal>
   </main>

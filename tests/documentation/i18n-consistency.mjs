@@ -15,7 +15,7 @@ const FORBIDDEN_KEY_PATTERNS = [
   { pattern: /(?:_value){2,}/u, description: "duplicated value suffix" },
   { pattern: /[._][a-f0-9]{8}$/u, description: "hash-derived suffix" },
 ];
-const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html"]);
+const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".html", ".ts", ".vue"]);
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
@@ -35,7 +35,7 @@ function walkSources(directory) {
 function resourceData() {
   return RESOURCE_FILES.map(file => ({
     file,
-    values: JSON.parse(read(`wwwroot/i18n/${file}`)),
+    values: JSON.parse(read(`frontend/public/i18n/${file}`)),
   }));
 }
 
@@ -59,7 +59,7 @@ function collectSourceKeyReferences(text, relativePath) {
   for (const match of text.matchAll(direct)) {
     references.push({ key: match[1], line: lineNumber(text, match.index ?? 0), relativePath });
   }
-  const attributes = /data-i18n(?:-title|-aria-label|-placeholder)?=["']([^"']+)["']/gu;
+  const attributes = /(?<![:\w-])data-i18n(?:-title|-aria-label|-placeholder)?=["']([^"']+)["']/gu;
   for (const match of text.matchAll(attributes)) {
     references.push({ key: match[1], line: lineNumber(text, match.index ?? 0), relativePath });
   }
@@ -97,10 +97,10 @@ test("host locale resources use the same safe key and placeholder contract", () 
 });
 
 test("frontend translation references resolve to current host locale resources", () => {
-  const keys = new Set(Object.keys(JSON.parse(read("wwwroot/i18n/zh-CN.json"))));
+  const keys = new Set(Object.keys(JSON.parse(read("frontend/public/i18n/zh-CN.json"))));
   const missing = [];
   const dynamicPrefixes = [];
-  for (const absolute of walkSources(path.join(ROOT, "wwwroot"))) {
+  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
     const relative = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
     const text = fs.readFileSync(absolute, "utf8");
     for (const reference of collectSourceKeyReferences(text, relative)) {

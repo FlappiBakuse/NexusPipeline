@@ -7,7 +7,7 @@
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- v0.15.5 当前前端运行时已由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧页面宿主与全局事件桥接已从运行入口移除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用。
+- v0.15.7 起前端运行时由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧 Web 入口、`wwwroot/views/` 与旧资源副本已删除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用，其 TS 化收口列入 v0.15.8。
 
 ## 后续功能：插件生态扩展
 
