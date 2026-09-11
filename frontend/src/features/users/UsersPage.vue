@@ -14,8 +14,8 @@ import GlobalUserCard from "./GlobalUserCard.vue";
 import ConfigEditFlow from "./components/ConfigEditFlow.vue";
 import GlobalManagementModal from "./components/GlobalManagementModal.vue";
 import UserManagementModal from "./components/UserManagementModal.vue";
-import { findRestorableEditSession } from "./utils/editSession";
-import { listEditSessions, listUserBadges, listUsers, listScripts, getStatus, createUser as createUserRequest, deleteUser, reorderUsers as reorderUsersRequest, uploadAvatar as uploadAvatarRequest } from "./services/usersApi";
+import { useCountdownRefresh } from "./composables/useCountdownRefresh";
+import { listUserBadges, listUsers, listScripts, getStatus, createUser as createUserRequest, deleteUser, reorderUsers as reorderUsersRequest, uploadAvatar as uploadAvatarRequest } from "./services/usersApi";
 import type { Badge, Plugin, Script, User, UserBadges } from "./utils/userTypes";
 
 const users = ref<User[]>([]);
@@ -71,11 +71,19 @@ function remainingLabel(value: string) {
     : t("users.schedule.runs_in", { clock });
 }
 
+/** 倒计时到期后延迟刷新后端状态；同一批到期用户只安排一次刷新。 */
+const countdownRefresh = useCountdownRefresh({
+  onRefresh: async () => {
+    if (!disposed) await load();
+  },
+});
+
 function refreshCountdowns() {
   const next: Record<string, string> = {};
   for (const user of users.value)
     next[user.id] = remainingLabel(user.nextRunAt || "");
   countdownByUser.value = next;
+  countdownRefresh.tick(users.value);
 }
 async function reorderUsers(ids: string[]) {
   const byId = new Map(users.value.map(user => [user.id, user]));
@@ -137,14 +145,7 @@ function modalOpen() {
 async function restoreEditSessionCard() {
   if (restoreAttempted || modalOpen()) return;
   restoreAttempted = true;
-  try {
-    const sessions = await listEditSessions();
-    if (disposed || modalOpen()) return;
-    const matched = findRestorableEditSession(sessions, users.value, scripts.value);
-    if (matched) await configFlow.value?.restore(matched);
-  } catch {
-    // 恢复失败时保留页面，用户可从绑定卡片重新进入配置编辑。
-  }
+  await configFlow.value?.restoreExisting(users.value, scripts.value, () => !disposed && !modalOpen());
 }
 
 function openNewUser() {
@@ -287,6 +288,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   disposed = true;
   if (countdownTimer) clearInterval(countdownTimer);
+  countdownRefresh.dispose();
   const slots =
     root.value?.querySelectorAll<HTMLElement>("[data-plugin-slot]") || [];
   for (const slot of slots) void disposePluginSlot(slot);

@@ -10,7 +10,7 @@ describe("shouldProbeSpecializedRoot", () => {
   });
 });
 
-describe("createRootProbe", () => {
+describe("createRootProbe (production controller)", () => {
   it("skips the request when the editor is not a specialized script", async () => {
     const request = vi.fn().mockResolvedValue(undefined);
     const probe = createRootProbe({ request, onError: vi.fn() });
@@ -24,6 +24,26 @@ describe("createRootProbe", () => {
     const probe = createRootProbe({ request, onError: vi.fn() });
     await probe.probe("  hoyolab  ", "  D:/Game  ");
     expect(request).toHaveBeenCalledWith({ pluginType: "hoyolab", rootPath: "D:/Game", inputs: {} });
+  });
+
+  it("deduplicates repeated probes for the same plugin and root signature", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    const probe = createRootProbe({ request, onError: vi.fn() });
+    await probe.probe("hoyolab", "D:/Game");
+    await probe.probe("hoyolab", "D:/Game");
+    await probe.probe("hoyolab", "D:/Game");
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("probes again after invalidate or a different root", async () => {
+    const request = vi.fn().mockResolvedValue(undefined);
+    const probe = createRootProbe({ request, onError: vi.fn() });
+    await probe.probe("hoyolab", "D:/Game");
+    await probe.probe("hoyolab", "D:/Other");
+    expect(request).toHaveBeenCalledTimes(2);
+    probe.invalidate();
+    await probe.probe("hoyolab", "D:/Game");
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("only surfaces the failure of the latest change", async () => {

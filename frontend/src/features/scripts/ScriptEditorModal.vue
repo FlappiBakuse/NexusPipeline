@@ -12,6 +12,7 @@ import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 import { browseNativeDialog, createScript, probeScriptRoot, updateScript } from "./services/scriptsApi";
+import { createRootProbe } from "./utils/scriptProbe";
 import { emptyScriptDraft, scriptDraftFrom, scriptPayload, validateScriptDraft } from "./utils/scriptTypes";
 import type { Script, ScriptDraft, ScriptPlugin } from "./utils/scriptTypes";
 
@@ -50,10 +51,13 @@ const selfManagedPc = computed(
   () => draft.gameMode !== "emulator" && currentPlugin.value?.selfManagedPcLaunch === true,
 );
 
-let probeGeneration = 0;
-function invalidateProbe() {
-  probeGeneration += 1;
-}
+// 生产探测器：手工输入与原生目录选择统一走这一实例（含签名去重与过期响应抑制）。
+const rootProbe = createRootProbe({
+  request: (input) => probeScriptRoot(input),
+  onError: (reason) => {
+    toast(t("scripts.plugin.config_derive_failed", { reason: reason instanceof Error ? reason.message : String(reason) }), "error");
+  },
+});
 function pluginName(script: { pluginType?: string }) {
   const plugin = props.plugins.find(
     (item) =>
@@ -80,7 +84,10 @@ async function browseDraftPath(
       initialPath: draft.rootPath || undefined,
       filter: "",
     })) as { path?: string } | null;
-    if (result?.path) draft[field] = result.path;
+    if (result?.path) {
+      draft[field] = result.path;
+      if (field === "rootPath") await rootProbe.probe(draft.pluginType, result.path);
+    }
   } catch (reason) {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
   }
@@ -108,14 +115,7 @@ function uploadJudgeScript() {
   input.click();
 }
 async function probeRootPath(value: string) {
-  if (!draft.pluginType || !String(value || "").trim()) return;
-  const token = ++probeGeneration;
-  try {
-    await probeScriptRoot({ pluginType: String(draft.pluginType).trim(), rootPath: String(value).trim(), inputs: {} });
-  } catch (reason) {
-    if (token !== probeGeneration) return;
-    toast(t("scripts.plugin.config_derive_failed", { reason: reason instanceof Error ? reason.message : String(reason) }), "error");
-  }
+  await rootProbe.probe(draft.pluginType, value);
 }
 async function save() {
   const invalid = validateScriptDraft(draft);
@@ -144,7 +144,7 @@ async function paintEditorSlot() {
   }
 }
 function close() {
-  invalidateProbe();
+  rootProbe.invalidate();
   if (editorSlotRoot.value) void disposePluginSlot(editorSlotRoot.value);
   emit("close");
 }
@@ -152,7 +152,7 @@ function close() {
 watch(
   () => props.script,
   () => {
-    invalidateProbe();
+    rootProbe.invalidate();
     Object.assign(draft, scriptDraftFrom(props.script, props.plugin));
     void paintEditorSlot();
   },

@@ -3,8 +3,6 @@
 本文件是 v0.15.7「全面迁移」声明的硬门禁：只有矩阵无未解释项时，才能声明功能与 UI 全面迁移。
 `Status` 只允许 `migrated`、`v0.15.7-fix`、`v0.15.8-platform`、`intentionally-removed`、`not-applicable`。
 
-> v0.15.7 施工后复核：所有 `v0.15.7-fix` 项已回补并通过对应层级测试；矩阵无 `unknown`。
-
 - `v0.15.4 reference`：旧实现位置，仅作迁移完整性对照，不是要恢复的架构目标。
 - `Current implementation`：当前 Vue feature / 平台模块。
 - `v0.15.8-platform`：v0.15.7 期间仍由 `wwwroot` 迁移期平台模块承载，v0.15.8 完成 TS 化。
@@ -28,11 +26,11 @@
 | Users | 用户列表徽章 | `views/users/shared.js` | `features/users/UsersPage.vue` + badges 投影 | migrated | `GET /api/plugin-contributions/user-list-badges` | 异常隔离 | badge title | 360/768/1280 | — | scripts-users smoke |
 | Users | 用户排序 | `views/users/index.js` | `features/users/UsersPage.vue` `reorderUsers` | migrated | `PUT /api/users/order` | 失败回滚重载 | drag_to_reorder | 360/768/1280 | — | codex ui |
 | Users | 头像上传/移除 | `views/users/shared.js` | `features/users/UsersPage.vue` | migrated | `POST/DELETE /api/users/{id}/avatar` | 类型/大小 toast | — | 360/768/1280 | — | — |
-| Users | 倒计时 | `views/users/shared.js` | `features/users/UsersPage.vue` `refreshCountdowns` | migrated | `nextRunAt` 本地计算 | — | — | 360/768/1280 | — | — |
+| Users | 倒计时与到期刷新 | `views/users/shared.js` | `features/users/UsersPage.vue` `refreshCountdowns` + `composables/useCountdownRefresh.ts` | migrated | `nextRunAt` 本地计算；到期后延迟单次 `load()` 拉取新状态 | — | — | 360/768/1280 | — | vitest（`useCountdownRefresh.test.ts`） |
 | Users | config edit：choose | `views/users/config-edit.js` | `features/users/UsersPage.vue`（chooser 弹窗） | migrated | `GET .../edit-config` `hasSnapshot` | toast 错误 | edit_first copy | 360/768/1280 | — | codex ui |
 | Users | config edit：candidate | `views/users/config-edit.js` | `features/users/UsersPage.vue` `configCandidates` | migrated | `config_input_mismatch` 候选 | candidates_help | 360/768/1280 | — | web logic（`buildConfigEditRequest`） |
 | Users | config edit：edit/done/cancel | `views/users/config-edit.js` | `features/users/UsersPage.vue` `finishConfigEdit` | migrated | `POST .../edit-config {action}` | validation toasts | edit_progress copy | 360/768/1280 | — | codex ui |
-| Users | config edit：会话恢复 | `views/users/shared.js` `restoreEditSessionCard` | `features/users/UsersPage.vue` + `features/users/utils/editSession.ts` | v0.15.7-fix | `GET /api/scripts/edit-sessions` | 恢复失败静默 | — | 360/768/1280 | — | vitest（`editSession.test.ts`） |
+| Users | config edit：会话恢复 | `views/users/shared.js` `restoreEditSessionCard` | `features/users/UsersPage.vue` + `composables/useConfigEditFlow.ts` + `utils/editSession.ts` | migrated | `GET /api/scripts/edit-sessions`；恢复只还原锁定 UI，不重发 `action:start` | 恢复失败静默 | — | 360/768/1280 | — | vitest（`useConfigEditFlow.test.ts` + `editSession.test.ts`） |
 
 ## Scripts
 
@@ -40,14 +38,14 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | Scripts | CRUD | `views/scripts.js` | `features/scripts/ScriptsPage.vue` + `ScriptCard.vue` | migrated | `GET/POST/PUT/DELETE /api/scripts` | toast、必填校验 | 各字段 data-help | 360/768/1280 | `scripts.list.badges` | scripts-users smoke |
 | Scripts | 通用/专项选择 | `views/scripts.js` | `ScriptsPage.vue` chooser | migrated | 本地 | 空态 | config_auto copy | 360/768/1280 | — | codex ui |
-| Scripts | 专项 root probe | `views/scripts.js` `probeSpecialRoot` | `features/scripts/utils/scriptProbe.ts` | v0.15.7-fix | `POST /api/scripts/probe` | `scripts.plugin.config_derive_failed` toast | — | — | — | vitest（`scriptProbe.test.ts`） |
+| Scripts | 专项 root probe | `views/scripts.js` `probeSpecialRoot` | `ScriptEditorModal.vue`（手工输入与原生目录选择统一） + `utils/scriptProbe.ts` | migrated | `POST /api/scripts/probe`；同签名去重、过期响应抑制 | `scripts.plugin.config_derive_failed` toast | — | — | — | vitest（`ScriptEditorModal.test.ts` + `scriptProbe.test.ts`） |
 | Scripts | plugin inputs | `views/scripts.js` | `ScriptsPage.vue` `pluginInputs` 透传 | migrated | `pluginInputs` 落盘 | — | — | 360/768/1280 | `scripts.editor.sections` | codex ui |
 | Scripts | launch mode / 游戏集成 | `views/scripts.js` | `ScriptsPage.vue` 游戏集成区 | migrated | `launchGame`/`gameMode`/`gameExe` 等 | 必填校验 | data-help | 360/768/1280 | — | codex ui |
 | Scripts | judge / keyword | `views/scripts.js` | `ScriptsPage.vue` 判定区 | migrated | `judgeScript*`/`successKeywords` 等 | 判定脚本必填 toast | judge help | 360/768/1280 | — | codex ui |
 | Scripts | advanced fields | `views/scripts.js` | `ScriptsPage.vue` 运行设置区 | migrated | `maxAttempts`/超时/`autoUpdateConfig` | 范围校验 | retry help | 360/768/1280 | — | codex ui |
 | Scripts | 排序 | `views/scripts.js` | `ScriptsPage.vue` `reorderScripts` | migrated | `PUT /api/scripts/order` | 失败重载 | drag_to_reorder | 360/768/1280 | — | codex ui |
 | Scripts | 判定脚本文件上传 | `views/scripts.js` | `ScriptsPage.vue` `uploadJudgeScript` | migrated | 本地 FileReader | 大小/读取 toast | upload help | 360/768/1280 | — | — |
-| Scripts | 卡片徽章定位 | `views/scripts.js` | `ScriptCard.vue` | v0.15.7-fix | — | — | — | 360/768/1280 | `scripts.list.badges` | codex ui |
+| Scripts | 卡片徽章定位 | `views/scripts.js` | `ScriptCard.vue` | migrated | — | — | — | 360/768/1280 | `scripts.list.badges` | codex ui |
 
 ## Queues
 
@@ -56,14 +54,14 @@
 | Queues | CRUD | `views/queues.js` | `features/queues/QueuesPage.vue` + `QueueCard.vue` + `QueueEditorModal.vue` | migrated | `GET/POST/PUT/DELETE /api/queues` | toast、限额校验 | 各字段 data-help | 360/768/1280 | `queues.list.badges`、`queues.editor.sections` | queues smoke |
 | Queues | 定时/任务编辑 | `views/queues.js` | `QueueEditorModal.vue` | migrated | `timeSets`/`tasks` 重排 | 校验 toast | queue help | 360/768/1280 | `queues.editor.sections` | visual-contract |
 | Queues | 排序与分页 | `views/queues.js` | `QueuesPage.vue` + `NxpPager.vue` | migrated | `PUT /api/queues/order` | 失败重载 | drag_to_reorder | 360/768/1280 | — | codex ui |
-| Queues | 卡片徽章定位 | `views/queues.js` | `QueueCard.vue` | v0.15.7-fix | — | — | — | 360/768/1280 | `queues.list.badges` | visual-contract |
+| Queues | 卡片徽章定位 | `views/queues.js` | `QueueCard.vue` | migrated | — | — | — | 360/768/1280 | `queues.list.badges` | visual-contract |
 
 ## Dispatch
 
 | Domain | Surface | v0.15.4 reference | Current implementation | Status | API/Behavior | Error/Empty | Help/Tooltip | Responsive | Plugin slot | Test |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Dispatch | 运行中列表 | `views/dispatch.js` | `features/dispatch/DispatchPage.vue` | migrated | `GET /api/status` 1s 轮询 | 空态/状态更新失败 toast | updates_every_second | 360/768/1280 | `dispatch.running.badges`、`dispatch.running.sidecar` | queues smoke |
-| Dispatch | 目标选择与执行 | `views/dispatch.js` | `DispatchPage.vue` runbar | v0.15.7-fix | `POST /api/dispatch/{script\|queue}` | 未选目标 toast | target_help | 360/768/1280 | `dispatch.run.sections` | queues smoke |
+| Dispatch | 目标选择与执行 | `views/dispatch.js` | `DispatchPage.vue` runbar | migrated | `POST /api/dispatch/{script\|queue}` | 未选目标 toast | target_help | 360/768/1280 | `dispatch.run.sections` | queues smoke |
 | Dispatch | 执行计划检查 | `views/dispatch.js` | `DispatchPage.vue` explain | migrated | `POST /api/dispatch/explain/*` | 警告/失败码投影 | plan copy | 360/768/1280 | `dispatch.run.sections` | codex ui |
 | Dispatch | 系统操作倒计时 | `views/dispatch.js` | `SystemActionCard.vue` | migrated | `POST /api/system-action/*` | toast 错误 | data-help | 360/768/1280 | `dispatch.cards` | codex ui |
 | Dispatch | 插件卡片 | `views/dispatch.js` | `DispatchPage.vue` slot | migrated | — | — | — | 360/768/1280 | `dispatch.cards` | codex ui |
@@ -73,7 +71,7 @@
 | Domain | Surface | v0.15.4 reference | Current implementation | Status | API/Behavior | Error/Empty | Help/Tooltip | Responsive | Plugin slot | Test |
 |---|---|---|---|---|---|---|---|---|---|---|
 | History | 日期/用户筛选 | `views/history.js` | `features/history/HistoryPage.vue` | migrated | `GET /api/history/dates`、`/users` | 空态 | filter help | 360/768/1280 | — | codex ui |
-| History | 用户筛选返回 | `views/history.js` | `HistoryPage.vue` `goBack` | v0.15.7-fix | 本地 | — | — | 360/768/1280 | — | codex ui |
+| History | 用户筛选返回 | `views/history.js` | `HistoryPage.vue` `goBack` | migrated | 本地 | — | — | 360/768/1280 | — | codex ui |
 | History | 记录列表 | `views/history.js` | `HistoryPage.vue` | migrated | `GET /api/history?date&userKey` | 空态/错误态 | — | 360/768/1280 | `history.list.badges` | codex ui |
 | History | 详情（尝试/日志/截图） | `views/history.js` | `HistoryPage.vue` detail modal | migrated | `GET /api/history/detail`、`/image` | 详情错误态 | 日志 tail help | 360/768/1280 | `history.detail.sections` | codex ui |
 | History | 时间范围选择 | `views/history.js` | `HistoryPage.vue` range picker | migrated | 本地 | 日期约束 | date_help | 360/768/1280 | — | codex ui |
@@ -85,7 +83,7 @@
 |---|---|---|---|---|---|---|---|---|---|---|
 | Plugins | 本地列表 | `views/plugins.js` | `features/plugins/PluginsPage.vue` | migrated | `GET /api/plugins` | 加载/错误态 | reading_local copy | 360/768/1280 | — | visual-contract |
 | Plugins | store 列表 | `views/plugins.js` | `PluginsPage.vue` | migrated | `GET /api/plugins/store` | stale/unavailable 态 | catalog help | 360/768/1280 | — | visual-contract |
-| Plugins | store refresh | `views/plugins.js` `store-refresh` | `PluginsPage.vue` `refreshStoreRepository` | v0.15.7-fix | `POST /api/plugins/store/refresh` | 失败 toast 不伪装成功 | — | 360/768/1280 | — | vitest（`pluginsStoreRefresh.test.ts`） |
+| Plugins | store refresh | `views/plugins.js` `store-refresh` | `PluginsPage.vue` `refreshStoreAsync` + `utils/storeRefresh.ts` | migrated | `POST /api/plugins/store/refresh` → reload store | 失败 toast 不伪装成功 | — | 360/768/1280 | — | vitest（`storeRefresh.test.ts`） |
 | Plugins | update all | `views/plugins.js` | `PluginsPage.vue` `updateAllStorePlugins` | migrated | `POST /api/plugins/store/update-all` | 逐项失败摘要 | update_all copy | 360/768/1280 | — | codex ui |
 | Plugins | 详情（README/changelog） | `views/plugins.js` | `PluginsPage.vue` | migrated | `GET .../detail` | readme 错误码 | readme copy | 360/768/1280 | — | visual-contract |
 | Plugins | 启用/禁用/安装事务 | `views/plugins.js` | `PluginsPage.vue` `runPluginAction` | migrated | `POST /api/plugins/{name}/{action}` | pending/queued toast | action notice | 360/768/1280 | — | codex ui |
@@ -99,7 +97,7 @@
 | Settings | locale | `views/settings.js` | `SettingsPage.vue` | migrated | `PUT /api/settings` | — | language help | 360/768/1280 | `settings.sections` | settings-platform smoke |
 | Settings | remote access | `views/settings.js` | `SettingsPage.vue` | migrated | `PUT /api/settings` + token | 令牌校验 | token help | 360/768/1280 | `settings.sections` | settings-platform smoke |
 | Settings | MCP | `views/settings.js` | `SettingsPage.vue` | migrated | `PUT /api/settings` | — | mcp help | 360/768/1280 | `settings.sections` | settings-platform smoke |
-| Settings | update ready 备份提醒 | `views/settings.js` `update-backup-warning` | `SettingsPage.vue` | v0.15.7-fix | `GET /api/update/status` | — | `settings.update.backup_help` | 360/768/1280 | — | vitest（`updateStatusView.test.ts`） |
+| Settings | update ready 备份提醒 | `views/settings.js` `update-backup-warning` | `components/UpdateStatusCard.vue` + `utils/updateStatusView.ts` | migrated | `GET /api/update/status`；离开 ready 自动消失 | — | `settings.update.backup_help` | 360/768/1280 | — | vitest（`updateStatusView.test.ts`） |
 | Settings | update action/automation | `views/settings.js` | `SettingsPage.vue` | migrated | `POST /api/update/*` | 失败 toast | update help | 360/768/1280 | `settings.sections` | codex ui |
 | Settings | system actions | `views/settings.js` | `SettingsPage.vue` | migrated | `POST /api/system-action/*` | toast 错误 | data-help | 360/768/1280 | `settings.sections` | codex ui |
 | Settings | diagnostics | `views/settings.js` | `SettingsPage.vue` | migrated | `GET /api/diagnostics`、导出 | 失败 toast | attention copy | 360/768/1280 | `settings.cards` | codex ui |
