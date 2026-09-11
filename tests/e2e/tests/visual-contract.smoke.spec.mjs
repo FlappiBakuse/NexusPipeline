@@ -202,7 +202,7 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   await expect(userDialog.getByTestId("um-add-script")).not.toBeVisible();
   await expect(userDialog.getByRole("button", { name: "编辑绑定", exact: true })).not.toBeVisible();
   await expect(firstBinding.locator(".um-binding-bottom-arrow")).toHaveAttribute("data-direction", "down");
-  await expect(page).toHaveScreenshot("visual-users-expanded.png", screenshotOptions);
+  await expect(page).toHaveScreenshot("visual-users-expanded.png", userManagementScreenshotOptions);
 
   await firstBinding.locator('[data-action="toggle-um-binding"]').click();
   await userDialog.getByRole("button", { name: "编辑绑定", exact: true }).click();
@@ -211,21 +211,21 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   await expect(userDialog.locator(".um-binding-bottom-arrow").first()).not.toBeVisible();
   await expect(userDialog.locator(".um-binding-drag-handle").first()).toBeHidden();
   await expect(userDialog.getByTestId("um-add-script")).not.toBeVisible();
-  await expect(page).toHaveScreenshot("visual-users-editing.png", screenshotOptions);
+  await expect(page).toHaveScreenshot("visual-users-editing.png", userManagementScreenshotOptions);
 
   await userDialog.getByRole("button", { name: "完成编辑", exact: true }).click();
   await userDialog.getByRole("button", { name: "取消", exact: true }).click();
   await page.getByRole("button", { name: "全局管理", exact: true }).click();
   const globalDialog = page.getByRole("dialog", { name: "全局管理" });
   await expect(globalDialog).toBeVisible();
-  await expect(page).toHaveScreenshot("visual-users-global.png", screenshotOptions);
+  await expect(page).toHaveScreenshot("visual-users-global.png", userManagementScreenshotOptions);
   const helpTarget = globalDialog.locator(".global-management-card-wide .nxp-path").first();
   await expect(helpTarget).toHaveAttribute("data-help", /.+/);
   const helpInput = helpTarget.locator(".nxp-path-input");
   await helpInput.focus();
   await page.waitForTimeout(760);
   await expect(page.locator("body > .nxp-tooltip")).toBeVisible({ timeout: 1500 });
-  await expect(page).toHaveScreenshot("visual-users-tooltip.png", screenshotOptions);
+  await expect(page).toHaveScreenshot("visual-users-tooltip.png", userManagementScreenshotOptions);
   await page.keyboard.press("Escape");
   await expect(page.locator("body > .nxp-tooltip")).toBeHidden();
   await globalDialog.getByRole("button", { name: "取消", exact: true }).click();
