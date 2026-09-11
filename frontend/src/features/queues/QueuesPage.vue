@@ -1,60 +1,38 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api, isAbortError } from "@legacy/core/api.js";
 import { t } from "@legacy/core/i18n.js";
 import { setTopbarTitle, toast } from "@legacy/core/ui.js";
-import NxpBadge from "../../ui/primitives/NxpBadge.vue";
+import { disposePluginSlot, renderPluginSlot, queueRuntimeLimits, scriptPluginStatus, scriptPluginUnavailableMessage } from "../../compat/queueRuntime";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
-import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
-import NxpIcon from "../../ui/primitives/NxpIcon.vue";
-import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
-import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
-
-interface Script {
-  id: string;
-  name: string;
-}
-interface QueueTask {
-  id?: string;
-  index: number;
-  scriptInstanceId: string;
-}
-interface TimeSet {
-  id?: string;
-  enabled: boolean;
-  days: number[];
-  time: string;
-}
-interface Queue {
-  id: string;
-  name: string;
-  autoRunMode?: string;
-  completionAction?: string;
-  notifyEnabled?: boolean;
-  tasks?: QueueTask[];
-  timeSets?: TimeSet[];
-  nextTrigger?: string;
-}
-interface Draft {
-  id: string;
-  name: string;
-  autoRunMode: string;
-  completionAction: string;
-  notifyEnabled: boolean;
-  timeSets: TimeSet[];
-  tasks: QueueTask[];
-}
+import NxpLoadingState from "../../ui/composites/NxpLoadingState.vue";
+import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
+import NxpPager from "../../ui/primitives/NxpPager.vue";
+import NxpModal from "../../ui/primitives/NxpModal.vue";
+import { vSortable } from "../../ui/sortable";
+import { queueCountdown } from "./queueUtils";
+import QueueCard from "./QueueCard.vue";
+import QueueEditorModal from "./QueueEditorModal.vue";
+import type {
+  Plugin,
+  Queue,
+  QueueDraft,
+  QueueTask,
+  Script,
+  TimeSet,
+} from "./queueTypes";
+import type { QueueEditorOptions } from "./queueTypes";
 
 const queues = ref<Queue[]>([]);
 const scripts = ref<Script[]>([]);
+const plugins = ref<Plugin[]>([]);
 const loading = ref(true);
 const error = ref("");
 const modalOpen = ref(false);
 const confirmOpen = ref(false);
 const editing = ref<Queue | null>(null);
-const draft = reactive<Draft>({
+const draft = reactive<QueueDraft>({
   id: "",
   name: "",
   autoRunMode: "none",
@@ -64,9 +42,17 @@ const draft = reactive<Draft>({
   tasks: [],
 });
 const deleteTarget = ref<Queue | null>(null);
-const draggingQueueId = ref("");
-const draggingTimeSetIndex = ref<number | null>(null);
-const draggingTaskIndex = ref<number | null>(null);
+const queuePage = ref(1);
+const countdownByQueue = ref<Record<string, string>>({});
+const root = ref<HTMLElement | null>(null);
+const QUEUE_PAGE_SIZE = 20;
+const queueLimits = computed(() => queueRuntimeLimits());
+const totalPages = computed(() => Math.max(1, Math.ceil(queues.value.length / QUEUE_PAGE_SIZE)));
+const visibleQueues = computed(() => queues.value.slice((queuePage.value - 1) * QUEUE_PAGE_SIZE, queuePage.value * QUEUE_PAGE_SIZE));
+const queueAtLimit = computed(() => Boolean(queueLimits.value.maxQueues && queues.value.length >= queueLimits.value.maxQueues));
+const timeSetAtLimit = computed(() => Boolean(queueLimits.value.maxTimeSetsPerQueue && draft.timeSets.length >= queueLimits.value.maxTimeSetsPerQueue));
+let countdownTimer: ReturnType<typeof setInterval> | null = null;
+let disposed = false;
 
 function firstScriptId(queue: Queue) {
   return queue.tasks?.slice().sort((a, b) => a.index - b.index)[0]?.scriptInstanceId || "";
@@ -74,7 +60,19 @@ function firstScriptId(queue: Queue) {
 
 const scriptOptions = computed<NxpOption[]>(() => [
   { value: "", label: t("common.select.script_instance_option") },
-  ...scripts.value.map((script) => ({ value: script.id, label: script.name })),
+  ...scripts.value.map((script) => {
+    const pluginStatus = scriptPluginStatus(script, plugins.value);
+    const unavailable = pluginStatus.specialized && !pluginStatus.available;
+    const suffix = unavailable
+      ? (pluginStatus.missing ? t("common.plugin.unknown_label") : t("common.plugin.unavailable_label"))
+      : (script.logStallTimeoutMinutes === -1 ? t("common.long_running") : "");
+    return {
+      value: script.id,
+      label: `${script.name}${suffix}`,
+      disabled: unavailable,
+      title: unavailable ? scriptPluginUnavailableMessage(script, plugins.value) : undefined,
+    };
+  }),
 ]);
 const modeOptions = computed<NxpOption[]>(() => [
   { value: "none", label: t("queues.do_not_run") },
@@ -119,10 +117,32 @@ function resetDraft(queue: Queue | null = null) {
     }));
 }
 function openEditor(queue: Queue | null = null) {
+  if (!queue && queueAtLimit.value) {
+    toast(t("queues.action.create_count", { current: queues.value.length, maximum: queueLimits.value.maxQueues }), "error");
+    return;
+  }
   resetDraft(queue);
   modalOpen.value = true;
+  void paintEditorSlot();
+}
+function closeEditor() {
+  const slot = root.value?.querySelector<HTMLElement>('[data-plugin-slot="queues.editor.sections"]');
+  if (slot) void disposePluginSlot(slot);
+  modalOpen.value = false;
+}
+function queueTotalUsers(tasks: QueueTask[] = draft.tasks) {
+  return tasks.reduce((sum, task) => {
+    const script = scripts.value.find(item => item.id === task.scriptInstanceId);
+    return sum + Math.max(1, script?.users?.filter(user => user.enabled !== false).length || 0);
+  }, 0);
 }
 function addTask() {
+  const maximum = Number(queueLimits.value.maxQueueTotalUsers) || 0;
+  const current = queueTotalUsers();
+  if (maximum && current + 1 > maximum) {
+    toast(t("queues.validation.user_limit", { current, maximum }), "error");
+    return;
+  }
   draft.tasks.push({ id: "", index: draft.tasks.length, scriptInstanceId: "" });
 }
 function removeTask(index: number) {
@@ -132,6 +152,11 @@ function removeTask(index: number) {
   });
 }
 function addTimeSet() {
+  const maximum = Number(queueLimits.value.maxTimeSetsPerQueue) || 0;
+  if (maximum && draft.timeSets.length >= maximum) {
+    toast(t("queues.validation.schedule_limit", { current: draft.timeSets.length, maximum }), "error");
+    return;
+  }
   draft.timeSets.push({
     id: "",
     enabled: true,
@@ -142,66 +167,25 @@ function addTimeSet() {
 function removeTimeSet(index: number) {
   if (draft.timeSets.length > 1) draft.timeSets.splice(index, 1);
 }
-function toggleDay(timeSet: TimeSet, day: number) {
-  timeSet.days = timeSet.days.includes(day)
-    ? timeSet.days.filter((item) => item !== day)
-    : [...timeSet.days, day].sort((a, b) => a - b);
+function reorderTimeSets(ids: string[]) {
+  const current = draft.timeSets.slice();
+  const next = ids.map(id => current[Number(id)]).filter((item): item is TimeSet => Boolean(item));
+  if (next.length !== current.length || next.every((item, index) => item === current[index])) return;
+  draft.timeSets = next;
 }
-function startTimeSetDrag(event: DragEvent, index: number) {
-  draggingTimeSetIndex.value = index;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(index));
-  }
+function reorderTasks(ids: string[]) {
+  const current = draft.tasks.slice();
+  const next = ids.map(id => current[Number(id)]).filter((item): item is QueueTask => Boolean(item));
+  if (next.length !== current.length || next.every((item, index) => item === current[index])) return;
+  draft.tasks = next.map((task, index) => ({ ...task, index }));
 }
-function clearTimeSetDrag() {
-  draggingTimeSetIndex.value = null;
-}
-function dropTimeSet(targetIndex: number) {
-  const sourceIndex = draggingTimeSetIndex.value;
-  clearTimeSetDrag();
-  if (sourceIndex === null || sourceIndex === targetIndex || sourceIndex < 0 || sourceIndex >= draft.timeSets.length) return;
-  const [moved] = draft.timeSets.splice(sourceIndex, 1);
-  draft.timeSets.splice(targetIndex, 0, moved);
-}
-function startTaskDrag(event: DragEvent, index: number) {
-  draggingTaskIndex.value = index;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", String(index));
-  }
-}
-function clearTaskDrag() {
-  draggingTaskIndex.value = null;
-}
-function dropTask(targetIndex: number) {
-  const sourceIndex = draggingTaskIndex.value;
-  clearTaskDrag();
-  if (sourceIndex === null || sourceIndex === targetIndex || sourceIndex < 0 || sourceIndex >= draft.tasks.length) return;
-  const [moved] = draft.tasks.splice(sourceIndex, 1);
-  draft.tasks.splice(targetIndex, 0, moved);
-  draft.tasks.forEach((task, index) => { task.index = index; });
-}
-function startQueueDrag(event: DragEvent, id: string) {
-  draggingQueueId.value = id;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
-  }
-}
-function clearQueueDrag() {
-  draggingQueueId.value = "";
-}
-async function dropQueue(targetId: string) {
-  const sourceId = draggingQueueId.value;
-  clearQueueDrag();
-  if (!sourceId || sourceId === targetId) return;
+async function reorderQueues(ids: string[]) {
+  const currentPage = visibleQueues.value;
+  const byId = new Map(queues.value.map(queue => [queue.id, queue]));
+  const nextPage = ids.map(id => byId.get(id)).filter((queue): queue is Queue => Boolean(queue));
+  if (nextPage.length !== currentPage.length || nextPage.every((queue, index) => queue.id === currentPage[index]?.id)) return;
   const next = queues.value.slice();
-  const sourceIndex = next.findIndex(item => item.id === sourceId);
-  const targetIndex = next.findIndex(item => item.id === targetId);
-  if (sourceIndex < 0 || targetIndex < 0) return;
-  const [moved] = next.splice(sourceIndex, 1);
-  next.splice(targetIndex, 0, moved);
+  next.splice((queuePage.value - 1) * QUEUE_PAGE_SIZE, currentPage.length, ...nextPage);
   queues.value = next;
   try {
     await api("PUT", "/api/queues/order", { ids: next.map(item => item.id) });
@@ -212,21 +196,85 @@ async function dropQueue(targetId: string) {
   }
 }
 
+function queuePluginIssue(queue: Queue) {
+  const issues = (queue.tasks || []).map(task => {
+    const script = scripts.value.find(item => item.id === task.scriptInstanceId);
+    if (!script) return { missing: true, message: t("common.plugin.unknown_label") };
+    const status = scriptPluginStatus(script, plugins.value);
+    return status.specialized && !status.available
+      ? { missing: status.missing, message: scriptPluginUnavailableMessage(script, plugins.value) }
+      : null;
+  }).filter((item): item is { missing: boolean; message: string } => Boolean(item));
+  const missing = issues.filter(item => item.missing).length;
+  const unavailable = issues.length - missing;
+  if (!issues.length) return null;
+  return {
+    tone: (missing ? "bad" : "warn") as "bad" | "warn",
+    title: issues.map(item => item.message).join("；"),
+    label: missing
+      ? t("queues.plugin.unknown_count", { count: missing })
+      : t("queues.plugin.unavailable_count", { count: unavailable }),
+  };
+}
+
+function queueNextTriggerLabel(queue: Queue) {
+  if (queue.autoRunMode === "startup") return t("queues.schedule.startup");
+  if (queue.autoRunMode !== "scheduled") return t("queues.manual_only");
+  const countdown = queueCountdown(queue.nextTrigger);
+  if (countdown.kind === "about") return t("common.about_to_run");
+  if (countdown.kind === "countdown") return t("queues.schedule.starts_in", { duration: countdown.duration });
+  return t("queues.schedule.waiting");
+}
+function refreshCountdowns() {
+  const next: Record<string, string> = {};
+  for (const queue of queues.value) next[queue.id] = queueNextTriggerLabel(queue);
+  countdownByQueue.value = next;
+}
+
+async function paintListSlots() {
+  await nextTick();
+  const slots = root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="queues.list.badges"]') || [];
+  for (const slot of slots) {
+    await renderPluginSlot(slot, "queues.list.badges", {
+      mode: "list",
+      primaryId: slot.dataset.pluginPrimaryId || "",
+    });
+  }
+}
+async function paintEditorSlot() {
+  await nextTick();
+  const slot = root.value?.querySelector<HTMLElement>('[data-plugin-slot="queues.editor.sections"]');
+  if (slot) {
+    await renderPluginSlot(slot, "queues.editor.sections", {
+      mode: draft.id ? "edit" : "create",
+      primaryId: draft.id,
+    });
+  }
+}
+
 async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [queueData, scriptData] = await Promise.all([
+    const [queueData, scriptData, status] = await Promise.all([
       api("GET", "/api/queues"),
       api("GET", "/api/scripts"),
+      api("GET", "/api/status"),
     ]);
+    if (disposed) return;
     queues.value = Array.isArray(queueData) ? queueData : [];
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
+    plugins.value = Array.isArray((status as { plugins?: Plugin[] })?.plugins)
+      ? (status as { plugins: Plugin[] }).plugins
+      : [];
+    if (queuePage.value > totalPages.value) queuePage.value = totalPages.value;
+    refreshCountdowns();
   } catch (reason) {
-    if (!isAbortError(reason)) error.value = reason instanceof Error ? reason.message : String(reason);
+    if (!disposed && !isAbortError(reason)) error.value = reason instanceof Error ? reason.message : String(reason);
   } finally {
-    loading.value = false;
+    if (!disposed) loading.value = false;
   }
+  await paintListSlots();
 }
 async function save() {
   if (!draft.name.trim()) {
@@ -238,6 +286,17 @@ async function save() {
     .map((task, index) => ({ ...task, index }));
   if (!tasks.length) {
     toast(t("queues.validation.task_required"), "error");
+    return;
+  }
+  const maximumTimeSets = Number(queueLimits.value.maxTimeSetsPerQueue) || 0;
+  if (maximumTimeSets && draft.timeSets.length > maximumTimeSets) {
+    toast(t("queues.validation.schedule_limit", { current: draft.timeSets.length, maximum: maximumTimeSets }), "error");
+    return;
+  }
+  const maximumUsers = Number(queueLimits.value.maxQueueTotalUsers) || 0;
+  const totalUsers = queueTotalUsers(tasks);
+  if (maximumUsers && totalUsers > maximumUsers) {
+    toast(t("queues.validation.user_limit", { current: totalUsers, maximum: maximumUsers }), "error");
     return;
   }
   const payload = {
@@ -252,7 +311,7 @@ async function save() {
     if (draft.id)
       await api("PUT", `/api/queues/${encodeURIComponent(draft.id)}`, payload);
     else await api("POST", "/api/queues", payload);
-    modalOpen.value = false;
+    closeEditor();
     toast(t("queues.schedule_queue_saved"));
     await load();
   } catch (reason) {
@@ -278,13 +337,27 @@ async function removeQueue() {
 }
 
 onMounted(() => {
+  disposed = false;
   setTopbarTitle(t("common.schedule_queues"));
   void load();
+  refreshCountdowns();
+  countdownTimer = setInterval(refreshCountdowns, 1000);
+});
+watch(() => queues.value.length, () => {
+  if (queuePage.value > totalPages.value) queuePage.value = totalPages.value;
+  void paintListSlots();
+});
+watch(queuePage, () => { void paintListSlots(); });
+onBeforeUnmount(() => {
+  disposed = true;
+  if (countdownTimer) clearInterval(countdownTimer);
+  const slots = root.value?.querySelectorAll<HTMLElement>("[data-plugin-slot]") || [];
+  for (const slot of slots) void disposePluginSlot(slot);
 });
 </script>
 
 <template>
-  <main id="view" class="view-root" data-testid="main-view">
+  <main id="view" ref="root" class="view-root" data-testid="main-view">
     <header class="page-head">
       <div class="page-head-copy">
         <div class="eyebrow">{{ t("queues.queue_management") }}</div>
@@ -292,12 +365,14 @@ onMounted(() => {
         <p class="page-kicker">{{ t("queues.page.help") }}</p>
       </div>
       <div class="page-head-actions">
-        <NxpButton class="primary" type="button" @click="openEditor()">{{
-          t("queues.new_schedule_queue")
+        <NxpButton class="primary" type="button" :disabled="queueAtLimit" @click="openEditor()">{{
+          queueAtLimit
+            ? t("queues.action.create_count", { current: queues.length, maximum: queueLimits.maxQueues })
+            : t("queues.new_schedule_queue")
         }}</NxpButton>
       </div>
     </header>
-    <NxpEmptyState v-if="loading" :title="t('common.loading')" />
+    <NxpLoadingState v-if="loading" :title="t('common.loading')" test-id="queues-loading" />
     <NxpEmptyState
       v-else-if="error"
       :title="t('queues.load.failed')"
@@ -310,379 +385,62 @@ onMounted(() => {
         :description="t('queues.page.help')"
       />
     <section v-else class="card list-surface">
-      <div class="script-grid">
-        <article
-          v-for="queue in queues"
+      <TransitionGroup v-sortable="{ onDrop: reorderQueues }" name="nxp-card" tag="div" class="script-grid">
+        <QueueCard
+          v-for="queue in visibleQueues"
           :key="queue.id"
-          class="script-card queue-card"
-          data-testid="queue-card"
-          @dragover.prevent
-          @drop="dropQueue(queue.id)"
-        >
-          <span
-            class="drag-handle"
-            role="button"
-            tabindex="0"
-            :aria-label="t('common.reorder.keyboard_help')"
-            :title="t('common.drag_to_reorder')"
-            draggable="true"
-            @dragstart="startQueueDrag($event, queue.id)"
-            @dragend="clearQueueDrag"
-            ><NxpIcon name="grip" /></span
-          ><NxpEntityIcon :id="firstScriptId(queue)" />
-          <div class="script-main">
-            <button
-              class="entity-link"
-              type="button"
-              data-action="edit-queue"
-              :data-id="queue.id"
-              :aria-label="t('queues.editor.title', { name: queue.name })"
-              @click="openEditor(queue)"
-            >
-              <span class="scroll-text"
-                ><span class="scroll-inner">{{ queue.name }}</span></span
-              >
-            </button>
-            <div class="meta-line queue-meta">
-              <NxpBadge tone="muted">{{
-                t("common.unit.tasks", { count: queue.tasks?.length || 0 })
-              }}</NxpBadge
-              ><NxpBadge tone="muted">{{
-                queue.completionAction && queue.completionAction !== "none"
-                  ? t("queues.completion.label", {
-                      action: queue.completionAction,
-                    })
-                  : t("queues.completion.none")
-              }}</NxpBadge
-              ><NxpBadge tone="blue">{{
-                queue.autoRunMode === "scheduled"
-                  ? t("queues.schedule.waiting")
-                  : queue.autoRunMode === "startup"
-                    ? t("queues.schedule.startup")
-                    : t("queues.manual_only")
-              }}</NxpBadge
-              ><NxpBadge :tone="queue.notifyEnabled ? 'ok' : 'muted'">{{
-                queue.notifyEnabled
-                  ? t("queues.notification.enabled")
-                  : t("queues.notification.disabled")
-              }}</NxpBadge>
-            </div>
-          </div>
-          <div class="queue-ops row-actions entity-actions">
-            <button
-              class="tertiary queue-edit"
-              type="button"
-              data-action="edit-queue-direct"
-              :data-id="queue.id"
-              @click="openEditor(queue)"
-            >
-              {{ t("queues.edit_queue_button") }}</button
-            ><button
-              class="danger"
-              type="button"
-              data-action="delete-queue"
-              :data-id="queue.id"
-              :data-name="queue.name"
-              @click="askDelete(queue)"
-            >
-              {{ t("queues.delete_queue") }}
-            </button>
-          </div>
-        </article>
-      </div>
+          :queue="queue"
+          :data-dnd-id="queue.id"
+          :first-script-id="firstScriptId(queue)"
+          :next-label="countdownByQueue[queue.id] || queueNextTriggerLabel(queue)"
+          :plugin-issue="queuePluginIssue(queue)"
+          :translate="t"
+          @edit="openEditor"
+          @remove="askDelete"
+        />
+      </TransitionGroup>
+      <NxpPager v-model:page="queuePage" :total-pages="totalPages" :total="queues.length" :label="t('common.schedule_queues')" />
     </section>
 
-    <div v-if="modalOpen" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal wide secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="
-          editing ? t('queues.edit_queue') : t('queues.new_schedule_queue')
-        "
-      >
-        <div class="modal-header">
-          <div>
-            <h3 class="modal-title">
-              {{
-                editing
-                  ? t("queues.edit_queue")
-                  : t("queues.new_schedule_queue")
-              }}
-            </h3>
-          </div>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close')"
-            @click="modalOpen = false"
-          >
-            <NxpIcon name="close" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <div class="field">
-            <label class="field-label" for="qm-name"
-              >{{ t("queues.queue_name") }} <span class="req">*</span></label
-            ><input id="qm-name" v-model="draft.name" type="text" />
-          </div>
-          <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="qm-mode-trigger">{{
-                t("queues.automatic_run_mode")
-              }}</label
-              ><NxpSelect
-                id="qm-mode"
-                v-model="draft.autoRunMode"
-                :options="modeOptions"
-                :aria-label="t('queues.automatic_run_mode')"
-              />
-            </div>
-            <div class="field">
-              <label class="field-label" for="qm-action-trigger">{{
-                t("common.completion_action")
-              }}</label
-              ><NxpSelect
-                id="qm-action"
-                v-model="draft.completionAction"
-                :options="completionOptions"
-                :aria-label="t('common.completion_action')"
-              />
-            </div>
-          </div>
-          <div class="switch-row settings-option switch-card">
-            <div class="switch-copy">
-              <strong>{{ t("queues.queue_notifications") }}</strong
-              ><span class="muted">{{
-                t("queues.notification.override_help")
-              }}</span>
-            </div>
-            <NxpSwitch
-              id="qm-notify"
-              v-model="draft.notifyEnabled"
-              :aria-label="t('queues.queue_notifications')"
-            />
-          </div>
-          <div class="subsection">
-            <div class="section-heading">
-              <h3>{{ t("queues.schedules") }}</h3>
-              <span class="muted">{{
-                t("queues.schedule.collapsed_help")
-              }}</span>
-            </div>
-            <div id="qm-timesets" class="timeset-list">
-              <details
-                v-for="(timeSet, index) in draft.timeSets"
-                :key="index"
-                class="timeset-card compact-card"
-                :open="index === 0"
-                @dragover.prevent
-                @drop="dropTimeSet(index)"
-              >
-                <summary class="timeset-summary">
-                  <span class="timeset-summary-main"
-                    ><span
-                      class="drag-handle"
-                      role="button"
-                      tabindex="0"
-                      :aria-label="t('common.reorder.keyboard_help')"
-                      :title="t('common.drag_to_reorder')"
-                      draggable="true"
-                      @dragstart="startTimeSetDrag($event, index)"
-                      @dragend="clearTimeSetDrag"
-                      ><NxpIcon name="grip" /></span
-                    ><strong>{{
-                      t("queues.schedule.label", { index: index + 1 })
-                    }}</strong
-                    ><span class="muted"
-                      >{{ timeSet.time || t("queues.time_not_set") }} ·
-                      {{
-                        timeSet.days.length
-                          ? t("common.unit.days", {
-                              count: timeSet.days.length,
-                            })
-                          : t("queues.no_days_selected")
-                      }}</span
-                    ></span
-                  ><span class="timeset-summary-chevron" aria-hidden="true"
-                    >⌄</span
-                  >
-                </summary>
-                <div class="timeset-details">
-                  <div class="timeset-body">
-                    <div class="timeset-layout">
-                      <div class="timeset-days">
-                        <label class="field-label">{{
-                          t("queues.schedule.days_multiple")
-                        }}</label>
-                        <div
-                          class="days-btn-grid"
-                          role="group"
-                          :aria-label="t('queues.execution_days')"
-                        >
-                          <button
-                            v-for="(name, day) in [
-                              t('queues.sunday'),
-                              t('queues.monday'),
-                              t('queues.tuesday'),
-                              t('queues.wednesday'),
-                              t('queues.thursday'),
-                              t('queues.friday'),
-                              t('queues.saturday'),
-                            ]"
-                            :key="day"
-                            class="mode-toggle"
-                            type="button"
-                            :aria-pressed="timeSet.days.includes(day)"
-                            :title="name"
-                            :aria-label="name"
-                            @click="toggleDay(timeSet, day)"
-                          >
-                            {{
-                              [
-                                t("common.sun"),
-                                t("common.mon"),
-                                t("common.tue"),
-                                t("common.wed"),
-                                t("common.thu"),
-                                t("common.fri"),
-                                t("common.sat"),
-                              ][day]
-                            }}
-                          </button>
-                        </div>
-                      </div>
-                      <div class="timeset-time">
-                        <label class="field-label" :for="`ts-time-${index}`">{{
-                          t("queues.run_time")
-                        }}</label
-                        ><NxpTimePicker
-                          :id="`ts-time-${index}`"
-                          v-model="timeSet.time"
-                          :aria-label="t('queues.run_time')"
-                        />
-                      </div>
-                    </div>
-                    <div class="timeset-actions">
-                      <NxpSwitch
-                        v-model="timeSet.enabled"
-                        :aria-label="t('common.enabled')"
-                      /><button
-                        class="tertiary"
-                        type="button"
-                        @click="removeTimeSet(index)"
-                      >
-                        {{ t("queues.delete_schedule") }}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </details>
-            </div>
-            <NxpButton class="ghost" type="button" @click="addTimeSet">{{
-              t("queues.add_schedule")
-            }}</NxpButton>
-          </div>
-          <div class="subsection">
-            <div class="section-heading">
-              <h3>{{ t("common.task_list") }}</h3>
-              <span class="muted">{{ t("queues.task.order_help") }}</span>
-            </div>
-            <div v-if="draft.tasks.length" class="tasks-body">
-              <div id="qm-tasks">
-                <div
-                  v-for="(task, index) in draft.tasks"
-                  :key="index"
-                  class="list-item task-row"
-                  @dragover.prevent
-                  @drop="dropTask(index)"
-                >
-                  <span
-                    class="drag-handle"
-                    role="button"
-                    tabindex="0"
-                    :aria-label="t('common.reorder.keyboard_help')"
-                    draggable="true"
-                    @dragstart="startTaskDrag($event, index)"
-                    @dragend="clearTaskDrag"
-                    ><NxpIcon name="grip" /></span
-                  ><NxpSelect
-                    :id="`qm-task-${index}`"
-                    v-model="task.scriptInstanceId"
-                    :options="scriptOptions"
-                    :aria-label="
-                      t('queues.task.script_instance', { index: index + 1 })
-                    "
-                  /><NxpButton
-                    class="sm danger"
-                    type="button"
-                    @click="removeTask(index)"
-                    >{{ t("common.delete") }}</NxpButton
-                  >
-                </div>
-              </div>
-            </div>
-            <NxpButton class="ghost" type="button" @click="addTask">{{
-              t("queues.add_task")
-            }}</NxpButton>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <NxpButton class="ghost" type="button" @click="modalOpen = false">{{
-            t("common.cancel")
-          }}</NxpButton
-          ><NxpButton class="primary" type="button" @click="save">{{
-            t("common.save")
-          }}</NxpButton>
-        </div>
-      </section>
-    </div>
-    <div
-      v-if="confirmOpen && deleteTarget"
+    <QueueEditorModal
+      :open="modalOpen"
+      :title="editing ? t('queues.edit_queue') : t('queues.new_schedule_queue')"
+      :draft="draft"
+      :options="{ mode: modeOptions, completion: completionOptions, scripts: scriptOptions }"
+      :translate="t"
+      :max-time-sets-per-queue="queueLimits.maxTimeSetsPerQueue"
+      :time-set-at-limit="timeSetAtLimit"
+      @close="closeEditor"
+      @save="save"
+      @add-task="addTask"
+      @remove-task="removeTask"
+      @add-time-set="addTimeSet"
+      @remove-time-set="removeTimeSet"
+      @reorder-time-sets="reorderTimeSets"
+      @reorder-tasks="reorderTasks"
+    />
+    <NxpModal
+      :open="confirmOpen && Boolean(deleteTarget)"
+      :title="t('common.delete') + t('common.schedule_queues')"
+      panel-class="modal secondary-surface"
       class="modal-mask"
-      role="presentation"
+      @close="confirmOpen = false"
     >
-      <section
-        class="modal secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('common.delete')"
-      >
-        <div class="modal-header">
-          <div>
-            <h3 class="modal-title">
-              {{ t("common.delete") }}{{ t("common.schedule_queues") }}
-            </h3>
-          </div>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close')"
-            @click="confirmOpen = false"
-          >
-            <NxpIcon name="close" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-copy">
-            {{ t("queues.confirm_queue_deletion") }}「{{
-              deleteTarget.name
-            }}」？
-          </p>
-        </div>
-        <div class="modal-footer">
-          <NxpButton class="ghost" type="button" @click="confirmOpen = false">{{
-            t("common.cancel")
-          }}</NxpButton
-          ><NxpButton
-            class="danger solid"
-            type="button"
-            data-action="confirm-delete-queue"
-            @click="removeQueue"
-            >{{ t("common.confirm") }}</NxpButton
-          >
-        </div>
-      </section>
-    </div>
+      <p v-if="deleteTarget" class="modal-copy">
+        {{ t("queues.confirm_queue_deletion") }}「{{ deleteTarget.name }}」？
+      </p>
+      <template #footer>
+        <NxpButton class="ghost" type="button" @click="confirmOpen = false">{{
+          t("common.cancel")
+        }}</NxpButton
+        ><NxpButton
+          class="danger solid"
+          type="button"
+          data-action="confirm-delete-queue"
+          @click="removeQueue"
+          >{{ t("common.confirm") }}</NxpButton
+        >
+      </template>
+    </NxpModal>
   </main>
 </template>

@@ -17,6 +17,11 @@
   --nx-space-7: 40px;
   --nx-control-height: 40px;
   --nx-focus-ring: 0 0 0 3px color-mix(in srgb, var(--nx-color-accent) 28%, transparent);
+  --nx-motion-ease: cubic-bezier(.2, .8, .2, 1);
+  --nx-motion-duration-micro: 120ms;
+  --nx-motion-duration-fast: 160ms;
+  --nx-motion-duration-normal: 200ms;
+  --nx-motion-duration-page: 220ms;
 }
 
 * {
@@ -26,4 +31,13 @@
 :focus-visible {
   outline: 2px solid var(--nx-color-accent);
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --nx-motion-duration-micro: .001ms;
+    --nx-motion-duration-fast: .001ms;
+    --nx-motion-duration-normal: .001ms;
+    --nx-motion-duration-page: .001ms;
+  }
 }

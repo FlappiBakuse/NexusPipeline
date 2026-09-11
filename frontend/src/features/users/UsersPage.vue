@@ -12,10 +12,13 @@ import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
+import { vSortable } from "../../ui/sortable";
+import GlobalUserCard from "./GlobalUserCard.vue";
 
 interface BindingEffective {
   enabled?: boolean;
@@ -164,8 +167,6 @@ const secretActions = reactive<Record<string, "keep" | "set" | "clear">>({});
 const configEdit = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; mode: string } | null>(null);
 const configChooser = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; freshAvailable: boolean } | null>(null);
 const configCandidates = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; mode: string; inputName: string; candidates: string[] } | null>(null);
-const draggingUserId = ref("");
-const draggingBindingId = ref("");
 let disposed = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -271,26 +272,10 @@ function refreshCountdowns() {
     next[user.id] = remainingLabel(user.nextRunAt || "");
   countdownByUser.value = next;
 }
-function startUserDrag(event: DragEvent, id: string) {
-  draggingUserId.value = id;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
-  }
-}
-function clearUserDrag() {
-  draggingUserId.value = "";
-}
-async function dropUser(targetId: string) {
-  const sourceId = draggingUserId.value;
-  clearUserDrag();
-  if (!sourceId || sourceId === targetId) return;
-  const next = sortedUsers.value.slice();
-  const sourceIndex = next.findIndex(item => item.id === sourceId);
-  const targetIndex = next.findIndex(item => item.id === targetId);
-  if (sourceIndex < 0 || targetIndex < 0) return;
-  const [moved] = next.splice(sourceIndex, 1);
-  next.splice(targetIndex, 0, moved);
+async function reorderUsers(ids: string[]) {
+  const byId = new Map(users.value.map(user => [user.id, user]));
+  const next = ids.map(id => byId.get(id)).filter((user): user is User => Boolean(user));
+  if (next.length !== users.value.length || next.every((user, index) => user.id === sortedUsers.value[index]?.id)) return;
   users.value = next.map((item, index) => ({ ...item, index }));
   try {
     await api("PUT", "/api/users/order", { ids: next.map(item => item.id) });
@@ -734,31 +719,15 @@ function toggleBindingEdit() {
   }
   void paintBindingSlots();
 }
-function startBindingDrag(event: DragEvent, id: string) {
-  if (bindingEditMode.value || expandedBindingId.value) {
-    event.preventDefault();
-    return;
-  }
-  draggingBindingId.value = id;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
-  }
+function canReorderBindings() {
+  return !bindingEditMode.value && !expandedBindingId.value;
 }
-function clearBindingDrag() {
-  draggingBindingId.value = "";
-}
-async function dropBinding(targetId: string) {
+async function reorderBindings(ids: string[]) {
   const draft = userDraft.value;
-  const sourceId = draggingBindingId.value;
-  clearBindingDrag();
-  if (!draft || !sourceId || sourceId === targetId || bindingEditMode.value || expandedBindingId.value) return;
-  const next = (draft.bindings || []).slice();
-  const sourceIndex = next.findIndex(item => item.scriptInstanceId === sourceId);
-  const targetIndex = next.findIndex(item => item.scriptInstanceId === targetId);
-  if (sourceIndex < 0 || targetIndex < 0) return;
-  const [moved] = next.splice(sourceIndex, 1);
-  next.splice(targetIndex, 0, moved);
+  if (!draft || !canReorderBindings()) return;
+  const byId = new Map((draft.bindings || []).map(binding => [binding.scriptInstanceId, binding]));
+  const next = ids.map(id => byId.get(id)).filter((binding): binding is NonNullable<User["bindings"]>[number] => Boolean(binding));
+  if (next.length !== (draft.bindings || []).length || next.every((binding, index) => binding.scriptInstanceId === draft.bindings?.[index]?.scriptInstanceId)) return;
   draft.bindings = next;
   try {
     await api("PUT", `/api/users/${encodeURIComponent(draft.id)}/bindings/order`, { ids: next.map(item => item.scriptInstanceId) });
@@ -1178,115 +1147,34 @@ onBeforeUnmount(() => {
         :description="t('users.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <div class="script-grid global-user-list">
-          <article
+        <TransitionGroup v-sortable="{ onDrop: reorderUsers }" name="nxp-card" tag="div" class="script-grid global-user-list">
+          <GlobalUserCard
             v-for="user in sortedUsers"
             :key="user.id"
-            class="script-card global-user-card"
-            data-testid="global-user-card"
-            @dragover.prevent
-            @drop="dropUser(user.id)"
-          >
-            <span
-              class="drag-handle"
-              role="button"
-              tabindex="0"
-              :aria-label="t('users.global.order_help')"
-              :title="t('common.drag_to_reorder')"
-              draggable="true"
-              @dragstart="startUserDrag($event, user.id)"
-              @dragend="clearUserDrag"
-              ><NxpIcon name="grip"
-            /></span>
-            <button
-              class="global-user-avatar-button"
-              type="button"
-              :aria-label="t('users.avatar_upload_for_user', { name: user.name })"
-              :title="t('users.avatar_upload')"
-              @click.stop="uploadAvatar(user.id)"
-              ><img
-                v-if="user.avatarUrl"
-                class="global-user-avatar"
-                :src="user.avatarUrl"
-                alt=""
-                loading="lazy"
-              /><span
-                v-else
-                class="global-user-avatar global-user-avatar-fallback"
-                >{{ initials(user.name) }}</span
-              ><span class="global-user-avatar-mark" aria-hidden="true">+</span></button
-            >
-            <div class="script-main global-user-main">
-              <div class="script-name-row">
-                <strong class="global-user-name">{{ user.name }}</strong>
-              </div>
-              <div class="meta-line global-user-meta">
-                <NxpBadge tone="muted">{{
-                  t("users.binding.scripts_count", {
-                    count: user.bindingCount ?? (user.bindings || []).length,
-                  })
-                }}</NxpBadge
-                ><NxpBadge
-                  v-for="badge in badgesByUser.get(user.id) || []"
-                  :key="`${badge.pluginName}-${badge.id}`"
-                  :tone="
-                    badge.tone === 'ok' ||
-                    badge.tone === 'warn' ||
-                    badge.tone === 'bad' ||
-                    badge.tone === 'blue'
-                      ? badge.tone
-                      : 'muted'
-                  "
-                  data-testid="plugin-user-badge"
-                  :title="badge.title"
-                  >{{ badge.label }}</NxpBadge
-                ><span
-                  class="plugin-slot user-plugin-slot"
-                  data-plugin-slot="users.list.badges"
-                  data-plugin-anchor="users.list.badges"
-                  data-plugin-mode="list"
-                  :data-plugin-primary-id="user.id"
-                  hidden
-                ></span
-                ><NxpBadge tone="blue" class="global-user-next-run">{{
-                  countdownByUser[user.id] ||
-                  remainingLabel(user.nextRunAt || "")
-                }}</NxpBadge>
-              </div>
-            </div>
-            <div class="global-user-actions row-actions entity-actions">
-              <button
-                class="tertiary"
-                type="button"
-                @click.stop="openUserManagement(user)"
-              >
-                {{ t("users.user_management_button") }}</button
-              ><button
-                class="tertiary"
-                type="button"
-                @click.stop="openGlobalManagement(user)"
-              >
-                {{ t("users.global.open_action") }}</button
-              ><button
-                class="danger"
-                type="button"
-                @click.stop="askDelete(user)"
-              >
-                {{ t("users.delete_user") }}
-              </button>
-            </div>
-          </article>
-        </div>
+            :user="user"
+            :badges="badgesByUser.get(user.id) || []"
+            :next-label="countdownByUser[user.id] || remainingLabel(user.nextRunAt || '')"
+            :initials="initials(user.name)"
+            :translate="t"
+            @upload="uploadAvatar"
+            @manage="openUserManagement"
+            @global-manage="openGlobalManagement"
+            @remove="askDelete"
+          />
+        </TransitionGroup>
       </section>
     </template>
 
-    <div v-if="newUserOpen" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('users.add_user')"
-      >
+    <NxpModal
+      :open="newUserOpen"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.add_user')"
+      panel-class="modal secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.add_user") }}</h3></div>
           <button
@@ -1319,16 +1207,19 @@ onBeforeUnmount(() => {
             {{ t("common.save") }}
           </button>
         </div>
-      </section>
-    </div>
 
-    <div v-if="globalDraft" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal wide secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('users.global.title')"
-      >
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(globalDraft)"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.global.title')"
+      panel-class="modal wide secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
+      <template v-if="globalDraft">
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.global.title") }}</h3></div>
           <button
@@ -1598,16 +1489,20 @@ onBeforeUnmount(() => {
             {{ t("common.cancel") }}
           </button>
         </div>
-      </section>
-    </div>
 
-    <div v-if="userDraft" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal wide secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('users.user_management')"
-      >
+      </template>
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(userDraft)"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.user_management')"
+      panel-class="modal wide secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
+      <template v-if="userDraft">
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.user_management") }}</h3></div>
           <button
@@ -1731,7 +1626,7 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
-            <div v-if="userDraft.bindings?.length" class="um-bindings">
+            <div v-if="userDraft.bindings?.length" v-sortable="{ canDrag: canReorderBindings, onDrop: reorderBindings }" class="um-bindings">
               <article
                 v-for="binding in userDraft.bindings"
                 :key="binding.scriptInstanceId"
@@ -1742,9 +1637,8 @@ onBeforeUnmount(() => {
                   'is-unavailable': Boolean(bindingStatus(binding)),
                 }"
                 data-testid="um-binding-card"
+                :data-dnd-id="binding.scriptInstanceId"
                 :data-binding-id="binding.scriptInstanceId"
-                @dragover.prevent
-                @drop="dropBinding(binding.scriptInstanceId)"
               >
                 <div class="um-binding-head">
                   <span
@@ -1755,9 +1649,6 @@ onBeforeUnmount(() => {
                     :aria-hidden="bindingEditMode || expandedBindingId ? 'true' : undefined"
                     :aria-label="t('common.reorder.keyboard_help')"
                     :title="bindingEditMode || expandedBindingId ? undefined : t('common.drag_to_reorder')"
-                    :draggable="!bindingEditMode && !expandedBindingId"
-                    @dragstart="startBindingDrag($event, binding.scriptInstanceId)"
-                    @dragend="clearBindingDrag"
                     ><NxpIcon name="grip" /></span
                   ><button
                     class="um-binding-toggle"
@@ -1972,11 +1863,20 @@ onBeforeUnmount(() => {
             {{ t("common.cancel") }}
           </button>
         </div>
-      </section>
-    </div>
 
-    <div v-if="configChooser" class="modal-mask" role="presentation" data-locked>
-      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="`${t('users.first_edit')} ${t('users.edit_configuration')}`">
+      </template>
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(configChooser)"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.first_edit') + ' ' + t('users.edit_configuration')"
+      panel-class="modal secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
+      <template v-if="configChooser">
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.first_edit") }} {{ t("users.edit_configuration") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
@@ -1995,11 +1895,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
-      </section>
-    </div>
 
-    <div v-if="configCandidates" class="modal-mask" role="presentation" data-locked>
-      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="t('users.take_over_configuration')">
+      </template>
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(configCandidates)"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.take_over_configuration')"
+      panel-class="modal secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
+      <template v-if="configCandidates">
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.take_over_configuration") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
@@ -2014,11 +1923,20 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
-      </section>
-    </div>
 
-    <div v-if="configEdit" class="modal-mask" role="presentation" data-locked>
-      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="t('users.config.edit_progress')">
+      </template>
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(configEdit)"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('users.config.edit_progress')"
+      panel-class="modal secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
+      <template v-if="configEdit">
         <div class="modal-header">
           <div><h3 class="modal-title">{{ t("users.config.edit_progress") }}</h3></div>
           <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="finishConfigEdit('cancel')"><NxpIcon name="close" /></button>
@@ -2030,52 +1948,37 @@ onBeforeUnmount(() => {
           <button class="primary" type="button" @click.stop="finishConfigEdit('done')">{{ t("common.complete") }}</button>
           <button class="ghost" type="button" @click.stop="finishConfigEdit('cancel')">{{ t("common.cancel") }}</button>
         </div>
-      </section>
-    </div>
 
-    <div v-if="deleteTarget" class="modal-mask" role="presentation">
-      <section
-        class="modal secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('users.delete_user')"
-      >
-        <div class="modal-header">
-          <div><h3 class="modal-title">{{ t("users.delete_user") }}</h3></div>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close')"
-            @click.stop="closeDelete"
-          >
-            <NxpIcon name="close" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-copy">
-            {{ t("users.confirm.delete", { name: deleteTarget.name }) }}
-          </p>
-          <div class="field">
-            <label class="field-label" for="gu-delete-name">{{
-              t("users.confirm_username")
-            }}</label
-            ><input id="gu-delete-name" v-model="deleteName" type="text" />
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="ghost" type="button" @click.stop="closeDelete">
-            {{ t("common.cancel") }}</button
-          ><button
-            class="danger solid"
-            type="button"
-            data-testid="confirm-delete-global-user"
-            @click.stop="confirmDelete"
-          >
-            {{ t("common.confirm_deletion") }}
-          </button>
-        </div>
-      </section>
-    </div>
+      </template>
+    </NxpModal>
+    <NxpModal
+      :open="Boolean(deleteTarget)"
+      :title="t('users.delete_user')"
+      panel-class="modal secondary-surface"
+      class="modal-mask"
+      @close="closeDelete"
+    >
+      <p v-if="deleteTarget" class="modal-copy">
+        {{ t("users.confirm.delete", { name: deleteTarget.name }) }}
+      </p>
+      <div class="field">
+        <label class="field-label" for="gu-delete-name">{{
+          t("users.confirm_username")
+        }}</label
+        ><input id="gu-delete-name" v-model="deleteName" type="text" />
+      </div>
+      <template #footer>
+        <NxpButton class="ghost" type="button" @click="closeDelete">{{
+          t("common.cancel")
+        }}</NxpButton>
+        <NxpButton
+          class="danger solid"
+          type="button"
+          data-testid="confirm-delete-global-user"
+          @click="confirmDelete"
+          >{{ t("common.confirm_deletion") }}</NxpButton>
+      </template>
+    </NxpModal>
   </main>
 </template>
 

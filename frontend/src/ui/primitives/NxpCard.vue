@@ -1,10 +1,10 @@
 <script setup lang="ts">
-withDefaults(defineProps<{ tone?: "default" | "secondary" }>(), { tone: "default" });
+const props = withDefaults(defineProps<{ tone?: "default" | "secondary"; as?: "section" | "article"; unstyled?: boolean }>(), { tone: "default", as: "section", unstyled: false });
 </script>
 
-<template><section class="nxp-card" :class="`is-${tone}`"><slot /></section></template>
+<template><component :is="props.as" class="nxp-card" :class="[`is-${props.tone}`, { 'is-unstyled': props.unstyled }]" ><slot /></component></template>
 
 <style>
-.nxp-card { min-width: 0; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-lg); padding: var(--nx-space-5); background: var(--nx-color-surface); color: var(--nx-color-text); }
-.nxp-card.is-secondary { background: var(--secondary-surface, var(--nx-color-surface)); }
+:where(.nxp-card:not(.is-unstyled)) { min-width: 0; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-lg); padding: var(--nx-space-5); background: var(--nx-color-surface); color: var(--nx-color-text); }
+:where(.nxp-card.is-secondary:not(.is-unstyled)) { background: var(--secondary-surface, var(--nx-color-surface)); }
 </style>

@@ -2,6 +2,22 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.6（Pre-release）
+
+### 前端行为与组件
+
+- Scripts、Users、Queues 统一使用 Pointer Events 排序能力，恢复整卡拖动、键盘上下移动和队列编辑器内嵌列表排序。
+- Queues 恢复公开插件 slot、20 条固定分页、队列数量与编辑子项限制、专项插件可用性提示和下一次调度倒计时。
+- Queues、Scripts、Users 的列表卡片与队列编辑器拆分为 feature 组件，页面 SFC 回收到编排、请求和生命周期职责；Dispatch、History 的运行计划与详情弹窗统一接入 `NxpModal`。
+- 正式页面开始复用 `NxpModal`、`NxpPager` 与 `NxpLoadingState`；统一弹窗支持焦点进入、Tab 循环、Escape、遮罩关闭和 locked 语义。
+
+### 动效与测试
+
+- 增加统一 motion tokens、页面/卡片/弹窗过渡和 `prefers-reduced-motion` 支持。
+- Visual Contract 收敛到页面行为与稳定组件状态，业务页面改用语义断言；新增排序、队列倒计时和弹窗行为测试。
+- Frontend plugin conformance 实际执行 renderer 的挂载与清理生命周期，并修复 CustomWallpaper、LiveScreenshot 浏览器发行产物的 Vue 挂载问题。
+- UI Smoke 加入宿主内置的真实 Frontend API fixture，覆盖插件清单、模块激活、settings slot 渲染、页面离开清理与重新进入。
+
 ## v0.15.5（Pre-release）
 
 ### 前端组件化与插件契约

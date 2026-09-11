@@ -16,15 +16,16 @@ import {
 } from "@legacy/core/format.js";
 import { t } from "@legacy/core/i18n.js";
 import { setTopbarTitle, toast } from "@legacy/core/ui.js";
-import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
-import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
+import { vSortable } from "../../ui/sortable";
+import ScriptCard from "./ScriptCard.vue";
 
 interface Script {
   id: string;
@@ -100,7 +101,6 @@ const deleteTarget = ref<Script | null>(null);
 const root = ref<HTMLElement | null>(null);
 const listSlotRoot = ref<HTMLElement | null>(null);
 const editorSlotRoot = ref<HTMLElement | null>(null);
-const draggingScriptId = ref("");
 let disposed = false;
 
 const draft = reactive<Draft>({
@@ -277,26 +277,10 @@ function unavailable(script: Script) {
     scriptPluginUnavailableMessage(script, plugins.value)
   );
 }
-function startScriptDrag(event: DragEvent, id: string) {
-  draggingScriptId.value = id;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
-  }
-}
-function clearScriptDrag() {
-  draggingScriptId.value = "";
-}
-async function dropScript(targetId: string) {
-  const sourceId = draggingScriptId.value;
-  clearScriptDrag();
-  if (!sourceId || sourceId === targetId) return;
-  const next = scripts.value.slice();
-  const sourceIndex = next.findIndex(item => item.id === sourceId);
-  const targetIndex = next.findIndex(item => item.id === targetId);
-  if (sourceIndex < 0 || targetIndex < 0) return;
-  const [moved] = next.splice(sourceIndex, 1);
-  next.splice(targetIndex, 0, moved);
+async function reorderScripts(ids: string[]) {
+  const byId = new Map(scripts.value.map(script => [script.id, script]));
+  const next = ids.map(id => byId.get(id)).filter((script): script is Script => Boolean(script));
+  if (next.length !== scripts.value.length || next.every((script, index) => script.id === scripts.value[index]?.id)) return;
   scripts.value = next;
   try {
     await api("PUT", "/api/scripts/order", { ids: next.map(item => item.id) });
@@ -480,118 +464,31 @@ onBeforeUnmount(() => {
         :description="t('scripts.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <div class="script-grid">
-          <article
+        <TransitionGroup v-sortable="{ onDrop: reorderScripts }" name="nxp-card" tag="div" class="script-grid">
+          <ScriptCard
             v-for="script in scripts"
             :key="script.id"
-            class="script-card"
-            :class="{ 'is-unavailable': unavailable(script) }"
-            data-testid="script-card"
-            @dragover.prevent
-            @drop="dropScript(script.id)"
-          >
-            <span
-              class="drag-handle"
-              role="button"
-              tabindex="0"
-              :aria-label="t('common.reorder.keyboard_help')"
-              :title="t('common.drag_to_reorder')"
-              draggable="true"
-              @dragstart="startScriptDrag($event, script.id)"
-              @dragend="clearScriptDrag"
-              ><NxpIcon name="grip" /></span
-            ><NxpEntityIcon :id="script.id" />
-            <div class="script-main">
-              <button
-                class="entity-link"
-                type="button"
-                :disabled="Boolean(unavailable(script))"
-                :aria-label="
-                  t('scripts.accessibility.instance_action', {
-                    action: unavailable(script)
-                      ? t('common.error.specialized_script_instance')
-                      : t('scripts.edit_script_instance'),
-                    name: script.name,
-                  })
-                "
-                @click.stop="openScript(script)"
-              >
-                <span class="scroll-text"
-                  ><span class="scroll-inner">{{ script.name }}</span></span
-                >
-              </button>
-              <div class="meta-line script-meta">
-                <NxpBadge
-                  :tone="
-                    script.pluginType
-                      ? unavailable(script)
-                        ? 'warn'
-                        : 'muted'
-                      : 'muted'
-                  "
-                  >{{
-                    script.pluginType
-                      ? pluginName(script)
-                      : t("scripts.general_script")
-                  }}</NxpBadge
-                ><NxpBadge v-if="script.launchGame" tone="muted">{{
-                  script.gameMode === "emulator"
-                    ? t("scripts.android_emulator")
-                    : t("scripts.pc_client")
-                }}</NxpBadge
-                ><NxpBadge
-                  v-if="script.judgeScriptEnabled && script.judgeScript"
-                  tone="muted"
-                  >{{ t("scripts.judge_script") }}</NxpBadge
-                ><NxpBadge
-                  v-else-if="script.successKeywords || script.failureKeywords"
-                  tone="muted"
-                  >{{ t("scripts.keyword_judge") }}</NxpBadge
-                ><NxpBadge
-                  v-if="script.logStallTimeoutMinutes === -1"
-                  tone="warn"
-                  >{{ t("scripts.long_running_policy") }}</NxpBadge
-                ><span
-                  class="plugin-slot script-plugin-slot"
-                  data-plugin-slot="scripts.list.badges"
-                  data-plugin-anchor="scripts.list.badges"
-                  data-plugin-mode="list"
-                  :data-plugin-primary-id="script.id"
-                  hidden
-                ></span>
-              </div>
-            </div>
-            <div class="script-ops row-actions entity-actions">
-              <button
-                class="tertiary"
-                type="button"
-                :disabled="Boolean(unavailable(script))"
-                @click.stop="openScript(script)"
-              >
-                {{ t("scripts.edit_script") }}</button
-              ><button
-                class="danger"
-                type="button"
-                data-action="delete-script"
-                :data-id="script.id"
-                :data-name="script.name"
-                @click.stop="askDelete(script)"
-              >
-                {{ t("scripts.delete_script") }}
-              </button>
-            </div>
-          </article>
-        </div>
+            :script="script"
+            :plugin-label="pluginName(script)"
+            :unavailable-message="unavailable(script) || undefined"
+            :translate="t"
+            @edit="openScript"
+            @remove="askDelete"
+          />
+        </TransitionGroup>
       </section>
     </template>
 
-    <div v-if="chooserOpen" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('scripts.new_script_instance')"
-      >
+    <NxpModal
+      :open="chooserOpen"
+      :closeable="false"
+      :locked="true"
+      :aria-label="t('scripts.new_script_instance')"
+      panel-class="modal secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
         <div class="modal-header">
           <h2 class="modal-title">{{ t("scripts.new_script_instance") }}</h2>
           <button
@@ -634,20 +531,18 @@ onBeforeUnmount(() => {
             {{ t("common.cancel") }}
           </button>
         </div>
-      </section>
-    </div>
 
-    <div v-if="editorOpen" class="modal-mask" role="presentation" data-locked>
-      <section
-        class="modal wide secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="
-          editing
-            ? t('scripts.edit_script_instance')
-            : t('scripts.new_script_instance')
-        "
-      >
+    </NxpModal>
+    <NxpModal
+      :open="editorOpen"
+      :closeable="false"
+      :locked="true"
+      :aria-label="editing ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
+      panel-class="modal wide secondary-surface"
+      body-class="legacy-modal-body"
+      class="modal-mask"
+      data-locked
+    >
         <div class="modal-header">
           <h2 class="modal-title">
             {{
@@ -1027,53 +922,29 @@ onBeforeUnmount(() => {
             {{ t("common.save") }}
           </button>
         </div>
-      </section>
-    </div>
 
-    <div
-      v-if="confirmOpen && deleteTarget"
+    </NxpModal>
+    <NxpModal
+      :open="confirmOpen && Boolean(deleteTarget)"
+      :title="t('scripts.delete_script_instance')"
+      panel-class="modal secondary-surface"
       class="modal-mask"
-      role="presentation"
+      @close="closeConfirm"
     >
-      <section
-        class="modal secondary-surface"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('common.delete')"
-      >
-        <div class="modal-header">
-          <h2 class="modal-title">{{ t("scripts.delete_script_instance") }}</h2>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close', {}, 'Close')"
-            @click.stop="closeConfirm"
-          >
-            <NxpIcon name="close" />
-          </button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-copy">
-            {{
-              t("scripts.confirm_delete_script_instance", {
-                name: deleteTarget.name,
-              })
-            }}
-          </p>
-        </div>
-        <div class="modal-footer">
-          <button class="ghost" type="button" @click.stop="closeConfirm">
-            {{ t("common.cancel") }}</button
-          ><button
-            class="danger"
-            type="button"
-            data-action="confirm-delete-script"
-            @click.stop="removeScript"
-          >
-            {{ t("common.confirm") }}
-          </button>
-        </div>
-      </section>
-    </div>
+      <p v-if="deleteTarget" class="modal-copy">
+        {{ t("scripts.confirm_delete_script_instance", { name: deleteTarget.name }) }}
+      </p>
+      <template #footer>
+        <NxpButton class="ghost" type="button" @click="closeConfirm">{{
+          t("common.cancel")
+        }}</NxpButton>
+        <NxpButton
+          class="danger"
+          type="button"
+          data-action="confirm-delete-script"
+          @click="removeScript"
+          >{{ t("common.confirm") }}</NxpButton>
+      </template>
+    </NxpModal>
   </main>
 </template>

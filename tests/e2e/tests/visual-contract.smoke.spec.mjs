@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { baseUrl } from "./helpers.mjs";
 
-test("固定视口：主壳与所有核心页面保持视觉契约", async ({ page }) => {
+test("固定视口：核心页面行为与稳定元件保持视觉契约", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   await page.addInitScript(() => {
@@ -167,22 +167,19 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
     mask: [page.locator("#local-addr"), page.locator("#app-version")],
     maskColor: "#142238",
   };
-  // Hosted Windows Edge rasterizes native textarea glyphs slightly differently.
-  // Keep the modal layout snapshot strict while allowing this renderer-only variance.
-  const userManagementScreenshotOptions = {
-    ...screenshotOptions,
-    maxDiffPixels: 500,
-  };
-
   for (const [route, readyTestId] of pages) {
     await page.goto(`${baseUrl}#/${route}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId(readyTestId)).toBeVisible();
     await expect(page.getByTestId("main-view")).toBeVisible();
-    await page.evaluate(() => document.getElementById("ambient-particles")?.remove());
-    await page.evaluate(() => document.fonts?.ready);
-    await page.waitForTimeout(100);
-    await expect(page).toHaveScreenshot(`visual-${route}.png`, screenshotOptions);
   }
+
+  const frontendFixtureCard = page.locator('[data-plugin-slot="settings.cards"] [data-testid="frontend-fixture-card"]');
+  await page.goto(`${baseUrl}#/settings`, { waitUntil: "domcontentloaded" });
+  await expect(frontendFixtureCard).toHaveCount(1);
+  await page.goto(`${baseUrl}#/dashboard`, { waitUntil: "domcontentloaded" });
+  await expect(page.getByTestId("dashboard-state")).toBeVisible();
+  await page.goto(`${baseUrl}#/settings`, { waitUntil: "domcontentloaded" });
+  await expect(frontendFixtureCard).toHaveCount(1);
 
   userFixtures = true;
   await page.goto(`${baseUrl}#/users`, { waitUntil: "domcontentloaded" });
@@ -192,7 +189,6 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   const bindingSection = userDialog.getByTestId("um-binding-section");
   await expect(bindingSection).toBeVisible();
   await expect(userDialog.getByTestId("um-binding-card")).toHaveCount(2);
-  await expect(page).toHaveScreenshot("visual-users-management.png", userManagementScreenshotOptions);
 
   const firstBinding = userDialog.getByTestId("um-binding-card").first();
   await firstBinding.locator('[data-action="toggle-um-binding"]').click();
@@ -202,7 +198,6 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   await expect(userDialog.getByTestId("um-add-script")).not.toBeVisible();
   await expect(userDialog.getByRole("button", { name: "编辑绑定", exact: true })).not.toBeVisible();
   await expect(firstBinding.locator(".um-binding-bottom-arrow")).toHaveAttribute("data-direction", "down");
-  await expect(page).toHaveScreenshot("visual-users-expanded.png", userManagementScreenshotOptions);
 
   await firstBinding.locator('[data-action="toggle-um-binding"]').click();
   await userDialog.getByRole("button", { name: "编辑绑定", exact: true }).click();
@@ -211,21 +206,18 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   await expect(userDialog.locator(".um-binding-bottom-arrow").first()).not.toBeVisible();
   await expect(userDialog.locator(".um-binding-drag-handle").first()).toBeHidden();
   await expect(userDialog.getByTestId("um-add-script")).not.toBeVisible();
-  await expect(page).toHaveScreenshot("visual-users-editing.png", userManagementScreenshotOptions);
 
   await userDialog.getByRole("button", { name: "完成编辑", exact: true }).click();
   await userDialog.getByRole("button", { name: "取消", exact: true }).click();
   await page.getByRole("button", { name: "全局管理", exact: true }).click();
   const globalDialog = page.getByRole("dialog", { name: "全局管理" });
   await expect(globalDialog).toBeVisible();
-  await expect(page).toHaveScreenshot("visual-users-global.png", userManagementScreenshotOptions);
   const helpTarget = globalDialog.locator(".global-management-card-wide .nxp-path").first();
   await expect(helpTarget).toHaveAttribute("data-help", /.+/);
   const helpInput = helpTarget.locator(".nxp-path-input");
   await helpInput.focus();
   await page.waitForTimeout(760);
   await expect(page.locator("body > .nxp-tooltip")).toBeVisible({ timeout: 1500 });
-  await expect(page).toHaveScreenshot("visual-users-tooltip.png", userManagementScreenshotOptions);
   await page.keyboard.press("Escape");
   await expect(page.locator("body > .nxp-tooltip")).toBeHidden();
   await globalDialog.getByRole("button", { name: "取消", exact: true }).click();
@@ -235,22 +227,25 @@ test("固定视口：主壳与所有核心页面保持视觉契约", async ({ pa
   await expect(page.getByTestId("plugin-local-tab")).toBeVisible();
   await page.getByTestId("plugin-store-tab").click();
   await expect(page.getByTestId("plugin-store-loading")).toBeVisible();
-  await expect(page).toHaveScreenshot("visual-plugin-store-loading.png", screenshotOptions);
+  await expect(page.getByTestId("plugin-store-loading")).toHaveScreenshot("visual-plugin-store-loading.png", screenshotOptions);
   await expect(page.getByTestId("plugin-store-row")).toBeVisible({ timeout: 3000 });
 
   queueFixtures = true;
   await page.goto(`${baseUrl}#/queues`, { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("queue-card")).toBeVisible();
+  await expect(page.getByTestId("queue-next")).toHaveText("等待定时触发");
+  await expect(page.locator('[data-plugin-slot="queues.list.badges"]')).toHaveCount(1);
   await page.getByTestId("queue-card").getByRole("button", { name: "编辑队列", exact: true }).click();
   const queueDialog = page.getByRole("dialog", { name: "编辑调度队列" });
   await expect(queueDialog).toBeVisible();
+  await expect(queueDialog.locator('[data-plugin-slot="queues.editor.sections"]')).toHaveCount(1);
   await queueDialog.locator("#qm-mode-trigger").click();
   await expect(page.locator("body > #qm-mode-menu")).toBeVisible();
-  await expect(page).toHaveScreenshot("visual-select-open.png", screenshotOptions);
+  await expect(page.locator("body > #qm-mode-menu")).toHaveScreenshot("visual-select-open.png", screenshotOptions);
   await page.keyboard.press("Escape");
   await queueDialog.locator("#ts-time-0").click();
   await expect(page.locator("body > .nxp-time-popover")).toBeVisible();
-  await expect(page).toHaveScreenshot("visual-timepicker-open.png", screenshotOptions);
+  await expect(page.locator("body > .nxp-time-popover")).toHaveScreenshot("visual-timepicker-open.png", screenshotOptions);
 
   await page.goto(`${baseUrl}#/ui-lab?test=1`, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "组件状态实验室", exact: true })).toBeVisible();

@@ -9,6 +9,7 @@ import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpModal from "../../ui/primitives/NxpModal.vue";
 
 interface HistoryDate { date: string; count: number }
 interface HistoryUser { userKey?: string; userId?: string; userName?: string; count?: number }
@@ -157,6 +158,7 @@ function moveCalendar(offset: number) {
 const selectedUser = computed(() => selectedUserName.value || t("history.no_user_specified"));
 const panelTitle = computed(() => selectedUserKey.value ? `${selectedUser.value} · ${t("history.run_records")}` : t("history.run_records"));
 const panelCount = computed(() => selectedUserKey.value ? t("history.records.count", { count: records.value.length }) : t("history.choose_user"));
+const detailTitle = computed(() => detail.value ? `${detail.value.scriptName || t("history.run_records")} ${t("history.run_details")}` : t("history.run_details"));
 const detailVisible = computed(() => mobile.value && Boolean(selectedUserKey.value));
 
 function updateMobile() {
@@ -491,13 +493,15 @@ onBeforeUnmount(() => {
             <button v-for="record in records" v-else :key="record.id || `${record.startTime}-${record.scriptName}`" class="history-entry" :class="`history-status-${record.status || 'failed'}`" type="button" data-testid="history-entry" @click="openDetail(record)"><span class="history-entry-bar" aria-hidden="true"></span><span class="history-entry-main"><span class="history-entry-title"><strong>{{ formatDateTime(record.startTime) }} · {{ record.scriptName || "-" }}<template v-if="record.queueName"> · {{ record.queueName }}</template></strong><NxpBadge :tone="statusTone(record.status)">{{ statusLabel(record.status) }}</NxpBadge><NxpBadge v-for="badge in historyBadges(record)" :key="badge.key" :tone="badge.tone" :title="badge.title">{{ badge.label }}</NxpBadge><span class="plugin-slot history-plugin-slot" data-plugin-slot="history.list.badges" data-plugin-anchor="history.list.badges" data-plugin-mode="list" :data-plugin-primary-id="record.id || ''" hidden></span></span><span class="history-entry-path">{{ [historyDir, selectedDate, record.historyDirectory, record.logFile].filter(Boolean).join("\\") }}</span></span><span class="history-entry-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span></button>
           </div>
         </section>
-        <div v-if="detail" class="modal-mask" role="presentation">
-          <section class="modal wide secondary-surface" role="dialog" aria-modal="true" :aria-label="t('history.run_details')">
-            <div class="modal-header">
-              <div><h3 class="modal-title">{{ detail.scriptName || t("history.run_records") }} {{ t("history.run_details") }}</h3></div>
-              <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeDetail"><NxpIcon name="close" /></button>
-            </div>
-            <div class="modal-body history-detail-body">
+        <NxpModal
+          :open="Boolean(detail)"
+          :title="detailTitle"
+          size="wide"
+          panel-class="secondary-surface"
+          body-class="history-detail-body"
+          @close="closeDetail"
+        >
+          <template v-if="detail">
               <NxpEmptyState v-if="detailLoading" :title="t('common.loading')" />
               <NxpEmptyState v-else-if="detailError" :title="t('history.run_details')" :description="detailError" tone="danger" />
               <template v-else-if="detailData && detailData.record">
@@ -541,10 +545,11 @@ onBeforeUnmount(() => {
                   <NxpEmptyState v-if="!(detailData.record.attemptDetails || []).length" :title="t('history.attempts')" :description="t('history.no_script_log')" />
                 </div>
               </template>
-            </div>
-            <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeDetail">{{ t("common.close") }}</button></div>
-          </section>
-        </div>
+          </template>
+          <template #footer>
+            <NxpButton class="ghost" type="button" @click.stop="closeDetail">{{ t("common.close") }}</NxpButton>
+          </template>
+        </NxpModal>
         <Teleport to="body">
           <div v-if="lightbox" class="history-image-lightbox" role="dialog" aria-modal="true" :aria-label="t('history.view_run_screenshot')" @click.self="lightbox = null">
             <div class="history-image-lightbox-backdrop" @click="lightbox = null"></div>

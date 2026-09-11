@@ -66,7 +66,11 @@ export function setupRuntime() {
   if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} ui`);
   copyReleaseArtifacts(releaseDir, runtimeDir);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
-  if (fs.existsSync(repositoryPlugins)) fs.cpSync(repositoryPlugins, path.join(runtimeDir, "plugins"), { recursive: true });
+  const runtimePlugins = path.join(runtimeDir, "plugins");
+  fs.mkdirSync(runtimePlugins, { recursive: true });
+  if (fs.existsSync(repositoryPlugins)) fs.cpSync(repositoryPlugins, runtimePlugins, { recursive: true });
+  const frontendFixture = path.join(__dirname, "fixtures", "frontend-plugin");
+  if (fs.existsSync(frontendFixture)) fs.cpSync(frontendFixture, path.join(runtimePlugins, "FrontendFixture"), { recursive: true });
 
   installEmulatorStubs(runtimeDir, path.join(__dirname, "fixtures"));
 }

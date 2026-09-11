@@ -1,0 +1,10 @@
+{
+  "require": [
+    { "var": "main", "file": "FrontendFixture.exe" }
+  ],
+  "paths": {
+    "mainExe": "{main}",
+    "configPath": "config.json",
+    "logPath": "log.txt"
+  }
+}

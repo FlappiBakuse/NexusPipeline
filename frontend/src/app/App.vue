@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
 import { useRoute } from "vue-router";
 import { useShellStore } from "../stores/shell";
 import PluginRouteHost from "./PluginRouteHost";
@@ -31,6 +31,27 @@ const segments = computed(() => {
   const path = String(route.path || "/dashboard").replace(/^\/+|\/+$/g, "");
   return (path || "dashboard").split("/").filter(Boolean);
 });
+const currentPage = computed<Component | null>(() => {
+  if (!shell.booted) return shell.bootError ? null : BootLoadingState;
+  switch (segments.value[0]) {
+    case "dashboard": return DashboardPage;
+    case "history": return HistoryPage;
+    case "plugins": return PluginsPage;
+    case "queues": return QueuesPage;
+    case "dispatch": return DispatchPage;
+    case "settings": return SettingsPage;
+    case "ui-lab": return route.query.test === "1" ? UiLab : null;
+    case "scripts": return ScriptsPage;
+    case "users": return UsersPage;
+    case "plugin": return PluginRouteHost;
+    default: return null;
+  }
+});
+const currentPageProps = computed<Record<string, unknown>>(() =>
+  segments.value[0] === "plugin"
+    ? { segments: segments.value, ready: shell.booted }
+    : {},
+);
 const navigation = [
   ["dashboard", "dashboard", "shell.dashboard"],
   ["users", "users", "shell.users"],
@@ -142,17 +163,9 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <DashboardPage v-if="shell.booted && segments[0] === 'dashboard'" />
-      <HistoryPage v-else-if="shell.booted && segments[0] === 'history'" />
-      <PluginsPage v-else-if="shell.booted && segments[0] === 'plugins'" />
-      <QueuesPage v-else-if="shell.booted && segments[0] === 'queues'" />
-      <DispatchPage v-else-if="shell.booted && segments[0] === 'dispatch'" />
-      <SettingsPage v-else-if="shell.booted && segments[0] === 'settings'" />
-      <UiLab v-else-if="shell.booted && segments[0] === 'ui-lab' && route.query.test === '1'" />
-      <ScriptsPage v-else-if="shell.booted && segments[0] === 'scripts'" />
-      <UsersPage v-else-if="shell.booted && segments[0] === 'users'" />
-      <PluginRouteHost v-else-if="shell.booted && segments[0] === 'plugin'" :segments="segments" :ready="shell.booted" />
-      <BootLoadingState v-else-if="!shell.bootError" />
+      <Transition name="nxp-page" mode="out-in" appear>
+        <component :is="currentPage" v-if="currentPage" :key="`${route.fullPath}:${shell.booted ? 'ready' : 'boot'}`" v-bind="currentPageProps" />
+      </Transition>
     </div>
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

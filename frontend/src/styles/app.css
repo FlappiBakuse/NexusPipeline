@@ -16,3 +16,34 @@
   margin-top: 8px;
   color: var(--muted);
 }
+
+.nxp-page-enter-active,
+.nxp-page-leave-active {
+  transition: opacity var(--nx-motion-duration-page) var(--nx-motion-ease), transform var(--nx-motion-duration-page) var(--nx-motion-ease);
+}
+
+.nxp-page-enter-from,
+.nxp-page-leave-to {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
+.nxp-card-enter-active,
+.nxp-card-leave-active,
+.nxp-card-move {
+  transition: opacity var(--nx-motion-duration-normal) var(--nx-motion-ease), transform var(--nx-motion-duration-normal) var(--nx-motion-ease);
+}
+
+.nxp-card-enter-from,
+.nxp-card-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.nxp-card-leave-active {
+  position: absolute;
+}
+
+.dnd-active > [data-dnd-id] {
+  transition: none !important;
+}
