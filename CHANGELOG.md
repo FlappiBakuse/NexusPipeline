@@ -21,6 +21,13 @@
 - 删除 `@legacy` alias、`wwwroot/package.json`、`wwwroot/style.css` 与全部遗留平台模块；发布包 Web 静态资源只来自 `frontend/dist`。
 - 清理失去消费者的宿主语言资源键，并把 Web Logic 用例统一迁入 frontend Vitest。
 
+### 路由集成与双仓门禁
+
+- `PluginRouteHost` 直接读取当前路由取得 route segment，不再依赖上游注入的 `ready`/`segments`；插件 route 首次进入、直接访问、插件间切换与回退 Dashboard 的行为恢复。
+- 新增真实 Router 装配集成测试，覆盖 route handler 的 token 与 segments、`onPageEnter`/`onPageUpdated`、插件 route 与宿主 route 之间的 leave/dispose 次数、无效 route 回退，以及 query 变化时的页面代际语义。
+- 宿主 CI 增加官方插件 Frontend API 契约 step；`docs/TESTING.md` 与迁移对照表改为真实测试分工。
+- 修复设置页通知 section 未导入 `NxpBadge` 导致 Webhook/SMTP 通道状态徽标不渲染的问题。
+
 ## v0.15.7（Pre-release）
 
 ### 迁移完整性

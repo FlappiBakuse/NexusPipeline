@@ -105,13 +105,13 @@
 | Settings | update action/automation | `views/settings.js` | `SettingsPage.vue` + `components/UpdateStatusCard.vue` | migrated | `POST /api/update/*` | 失败 toast | update help | 360/768/1280 | `settings.sections` | codex ui |
 | Settings | 服务保存后重启 | `views/settings.js` | `SettingsPage.vue` `saveServiceWithRestart`/`restartService` | migrated | `PUT /api/settings`、`POST /api/settings/restart` | 失败 toast | `settings.service.restart_requirements` | 360/768/1280 | `settings.sections` | settings-platform smoke |
 | Settings | diagnostics | `views/settings.js` | `SettingsPage.vue` + `components/DiagnosticsSection.vue` | migrated | `GET /api/diagnostics`、导出 | 失败 toast | attention copy | 360/768/1280 | `settings.cards` | codex ui |
-| Settings | notifications | `views/settings.js` | `SettingsPage.vue` + `components/SettingsNotificationsSection.vue` | migrated | `PUT /api/settings` + secret | 失败 toast | smtp help | 360/768/1280 | `settings.sections` | settings-platform smoke |
+| Settings | notifications | `views/settings.js` | `SettingsPage.vue` + `components/SettingsNotificationsSection.vue` | migrated | `PUT /api/settings` + secret；Webhook/SMTP 折叠面板按通道开关显示启用徽标 | 失败 toast | smtp help | 360/768/1280 | `settings.sections` | vitest（`features/settings/components/SettingsNotificationsSection.test.ts`）、settings-platform smoke |
 
 ## Shell / 平台
 
 | Domain | Surface | v0.15.4 reference | Current implementation | Status | API/Behavior | Error/Empty | Help/Tooltip | Responsive | Plugin slot | Test |
 |---|---|---|---|---|---|---|---|---|---|---|
-| Shell | nav / mobile nav | `app.js` | `app/App.vue` + `router.ts` + `platform/shell.ts` | migrated | hash 路由 + `<RouterView>`；`setNavOpen`/`setTopbarTitle` | — | — | 360/768/1280 | `shell.nav` | app smoke、vitest（`router.test.ts`） |
+| Shell | nav / mobile nav | `app.js` | `app/App.vue` + `router.ts` + `platform/shell.ts` | migrated | hash 路由 + `<RouterView :key="route.fullPath">` 页面代际；`setNavOpen`/`setTopbarTitle` | — | — | 360/768/1280 | `shell.nav` | app smoke、vitest（`router.test.ts`、`router.integration.test.ts`） |
 | Shell | theme / appearance | `core/appearance.js` | `platform/shell.ts`（主题循环/顶栏/导航态）+ `platform/appearance.ts`（token/壁纸/插件主题） | migrated | `initTheme`/`cycleTheme`/`applyThemeValue`；`host.appearance` | 外观加载失败保留当前主题 | `shell.theme_toggle` | — | — | codex ui、`plugin-bridge/contract.test.ts` |
 | Shell | toast / topbar | `core/ui.js` | `platform/toast.ts`（toast 与字段必填/清除错误）+ `platform/shell.ts` | migrated | `toast`/`setRequiredFieldError`/`clearFieldError` | error toast 重复抖动提示 | — | — | — | codex ui |
 | Shell | auth / boot error | `core/modal.js`、`legacy/auth.ts` | `platform/auth.ts` + `app/bootstrap.ts` + `app/TokenPrompt.vue` | migrated | `GET /api/status` 401 重认证；`ensureAccessToken`/`installReauthEntry` | boot error 态（`shell.boot.error_details`） | — | — | — | app smoke、settings-platform smoke |
@@ -124,7 +124,7 @@
 | Shell | 悬停滚动 / 输入提示 | `core/dom.js`、`core/forms.js` | `platform/auto-scroll.ts` | migrated | 溢出悬停滚动与 `input-scroll-hint` 显隐 | — | — | — | — | codex ui |
 | Plugin bridge | slot / 控件 / 字段渲染 | `core/plugin-slots.js`、`core/controls.js`、`core/plugin-fields.js` | `plugin-bridge/index.ts` facade + `slots.ts`、`controls.ts`、`plugin-fields.ts`、`host-adapter.ts` | migrated | 18 个公开 slot 渲染与 dispose；插件控件与多选字段 | 未支持 slot 抛 `TypeError` | 字段 help/description | 360/768/1280 | 18 个公开 slot | vitest（`plugin-bridge/contract.test.ts`、`plugin-bridge/controls.test.ts`、`plugin-bridge/plugin-fields.test.ts`、`platform/format.test.ts`） |
 | Plugin bridge | Frontend API 1.4 运行时 | `core/plugin-runtime.js` | `plugin-bridge/runtime.ts` + `plugin-bridge/types.ts` | migrated | 精确版本 1.4、`host.*` 能力面、route/nav/lifecycle 注册与释放；平台服务只经 `host-adapter.ts` 注入 | 版本不匹配拒绝加载 | — | — | `shell.nav` | `plugin-bridge/contract.test.ts` |
-| Plugin route | mount/leave/dispose | `app.js` | `app/PluginRouteHost.vue` | migrated | route token + 插件生命周期与导航态同步 | 无效路由回退 `#/dashboard` | — | — | — | vitest（`router.test.ts`）、codex ui |
+| Plugin route | mount/leave/dispose | `app.js` | `app/PluginRouteHost.vue`（`useRoute()` 读取当前 route segment） | migrated | route token + 插件生命周期与导航态同步 | 无效路由回退 `#/dashboard` | — | — | — | vitest（`router.integration.test.ts` 真实 Router/RouterView 集成、`router.test.ts` 路由表）、codex ui |
 
 路由表在 `frontend/src/router.ts`：宿主页面组件全部懒加载，`frontend/src/ui/UiLabPage.vue`（组件实验室，`#/ui-lab`）为入口 chunk 内联导入，其样式资源随 entry chunk 保留。
 

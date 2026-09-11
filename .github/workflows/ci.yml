@@ -21,7 +21,7 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 检出官方插件仓库（UI Smoke 夹具）
+      - name: 检出官方插件仓库（UI Smoke 夹具 + Frontend API 契约）
         uses: actions/checkout@v4
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
@@ -59,6 +59,11 @@ jobs:
       - name: 前端组件测试
         shell: cmd
         run: npm ci --prefix frontend && npm test --prefix frontend
+
+      - name: 官方 Frontend API 插件契约
+        shell: cmd
+        working-directory: NexusPipeline-Plugins
+        run: npm ci && node tools\Test-FrontendPlugins.mjs
 
       - name: Administrator 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
         shell: cmd

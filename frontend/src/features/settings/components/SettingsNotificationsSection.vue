@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { api, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
+import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";

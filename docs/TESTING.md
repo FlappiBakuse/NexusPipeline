@@ -48,7 +48,9 @@ UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳�
 - Web Logic 只能导入生产 ES module 的纯函数；禁止读取生产源文本、按函数名切片、正则解析函数边界或把实现字符串当作行为证据。
 - `frontend/` 的 `npm run typecheck`、`npm run test` 和 `npm run build` 验证 Vue/TypeScript 组件、公共 `nxp-*` 元素和静态构建产物。
 - Frontend API 1.4 的宿主外部契约由 `frontend/src/plugin-bridge/contract.test.ts` 覆盖：精确版本匹配、`host.*` 能力面、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
-- 宿主路由与插件 route 生命周期契约由 `frontend/src/router.test.ts` 和 `frontend/src/platform/page-state.test.ts` 覆盖；页面/插件行为沿用 `codex ui` 的浏览器验收。
+- 宿主路由表结构由 `frontend/src/router.test.ts` 覆盖：宿主页面路由、插件 catch-all 路由、空 fallback 与按需加载方式。
+- 页面 route token、定时器与 `AbortController` 生命周期由 `frontend/src/platform/page-state.test.ts` 覆盖。
+- 插件 route 的真实装配与生命周期由 `frontend/src/router.integration.test.ts` 覆盖：经真实 `vue-router` 实例、`router.push()` 与 `RouterView` 驱动 `/plugin/:pathMatch(.*)*`，断言 `PluginRouteHost` 挂载、`resolvePluginRoute` 收到的 route segment、route handler 的 token 与 segments、`onPageEnter`/`onPageUpdated`、插件 route → 宿主 route 与插件 route → 插件 route 的 leave/dispose 次数、无效 route 回退 Dashboard，以及 query 变化时的页面代际语义。该文件只替换 `@bridge/index` facade 与 `plugin-bridge/host-adapter` 两个宿主边界，路由表、`RouterView`、`PluginRouteHost`、页面状态与启动编排使用生产实现。
 - 前端候选配置请求由 `frontend/src/features/users/utils/configEditRequest.ts` 的 `buildConfigEditRequest` 负责构造，Vitest 直接验证输入与输出。
 - 宿主语言资源以 `frontend/public/i18n/` 为唯一源；文档一致性检查按该资源校验资源键、调用点语境和宿主注册表，扫描范围为 `frontend/src` 的生产源码。
 - xUnit 文件按子系统命名，例如 `ExecutionStateStoreTests.cs`、`PluginManagerTests.cs`、`ConfigSwapPrimitivesTests.cs` 和 `LogMonitorTests.cs`。禁止重新建立跨域的 `GovernanceUnitTests`、`BaselineReproductionTests` 或 `ExtensibilityCharacterizationTests` 容器。
@@ -109,7 +111,8 @@ Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
 1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、Visual Contract 和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`。
 3. 发布前由 CI 在管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`。
-4. 两仓库的宿主—插件契约发生变化时，同时执行 `NexusPipeline-Plugins/tools/Test-Repository.ps1`，并核对两仓库文档、manifest 和测试。
+4. 两仓库的宿主—插件契约发生变化时，同时执行 `NexusPipeline-Plugins/tools/Test-Repository.ps1` 和 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`，并核对两仓库文档、manifest 和测试。
+5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`。插件仓库 CI 按 `host.lock.json` 锁定的宿主 commit 验证该脚本，宿主 CI 以独立 step 用当前 `main` 验证同一脚本，两侧共同覆盖官方插件与宿主前端契约的双向兼容。
 
 构建、测试和发布命令保持实时输出；失败时保留失败项、原因摘要和必要的 runtime 证据。长任务不使用无反馈的超长等待。
 
