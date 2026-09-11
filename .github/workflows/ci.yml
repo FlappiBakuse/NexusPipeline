@@ -58,7 +58,7 @@ jobs:
 
       - name: 前端组件测试
         shell: cmd
-        run: npm test --prefix frontend
+        run: npm ci --prefix frontend && npm test --prefix frontend
 
       - name: Administrator 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
         shell: cmd

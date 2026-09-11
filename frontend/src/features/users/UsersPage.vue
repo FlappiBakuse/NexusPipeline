@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { api, isAbortError } from "@legacy/core/api.js";
+import { scriptPluginStatus, scriptPluginUnavailableMessage } from "@legacy/core/format.js";
 import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
 import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
 import { t } from "@legacy/core/i18n.js";
@@ -8,7 +9,9 @@ import { setTopbarTitle, toast } from "@legacy/core/ui.js";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 
@@ -20,6 +23,8 @@ interface BindingEffective {
   postRunScript?: string;
   runDays?: number;
   maxSuccessfulRunsPerDay?: number;
+  preRunOnceOnly?: boolean;
+  postRunOnFinalOnly?: boolean;
 }
 
 interface BindingLocks {
@@ -43,6 +48,7 @@ interface Binding {
   configInputs?: Record<string, unknown>;
   effective?: BindingEffective;
   locks?: BindingLocks;
+  pluginType?: string;
 }
 
 interface User {
@@ -92,6 +98,7 @@ interface GlobalField {
   required?: boolean;
   readOnly?: boolean;
   maxLength?: number;
+  pattern?: string;
 }
 
 interface Contribution {
@@ -140,7 +147,6 @@ const loading = ref(true);
 const error = ref("");
 const newUserOpen = ref(false);
 const newUserName = ref("");
-const newUserRemark = ref("");
 const globalDraft = ref<GlobalDraft | null>(null);
 const userDraft = ref<User | null>(null);
 const expandedBindingId = ref<string | null>(null);
@@ -150,6 +156,13 @@ const selectedBindingIds = ref<string[]>([]);
 const deleteTarget = ref<User | null>(null);
 const deleteName = ref("");
 const root = ref<HTMLElement | null>(null);
+const globalSlotRoot = ref<HTMLElement | null>(null);
+const secretActions = reactive<Record<string, "keep" | "set" | "clear">>({});
+const configEdit = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; mode: string } | null>(null);
+const configChooser = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; freshAvailable: boolean } | null>(null);
+const configCandidates = ref<{ userId: string; scriptId: string; userName: string; scriptName: string; mode: string; inputName: string; candidates: string[] } | null>(null);
+const draggingUserId = ref("");
+const draggingBindingId = ref("");
 let disposed = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -168,6 +181,26 @@ const availableBindingScripts = computed(() => {
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const errorText = (reason: unknown) =>
   reason instanceof Error ? reason.message : String(reason);
+
+const fieldKey = (contribution: Contribution, field: GlobalField) =>
+  `${contribution.pluginName || "plugin"}::${contribution.id || "settings"}::${field.key}`;
+const fieldId = (contribution: Contribution, field: GlobalField) =>
+  `gm-plugin-${fieldKey(contribution, field).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+const fieldType = (field: GlobalField) => String(field.type || "text").toLowerCase();
+const PRE_ONLY_MARKER = "%FIRST%";
+const POST_FINAL_MARKER = "%LAST%";
+
+function encodePrePost(marker: string, onceOnly: unknown, value: unknown) {
+  return `${onceOnly === true ? `${marker} ` : ""}${String(value || "")}`;
+}
+
+function splitPrePost(marker: string, value: unknown) {
+  const text = String(value || "").trim();
+  return {
+    onceOnly: text.startsWith(marker),
+    value: text.replace(new RegExp(`^${marker}\\s*`), ""),
+  };
+}
 
 function normalizeGlobalSettings(value: any): GlobalSettings {
   const general = value?.general || {};
@@ -228,6 +261,35 @@ function refreshCountdowns() {
     next[user.id] = remainingLabel(user.nextRunAt || "");
   countdownByUser.value = next;
 }
+function startUserDrag(event: DragEvent, id: string) {
+  draggingUserId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+}
+function clearUserDrag() {
+  draggingUserId.value = "";
+}
+async function dropUser(targetId: string) {
+  const sourceId = draggingUserId.value;
+  clearUserDrag();
+  if (!sourceId || sourceId === targetId) return;
+  const next = sortedUsers.value.slice();
+  const sourceIndex = next.findIndex(item => item.id === sourceId);
+  const targetIndex = next.findIndex(item => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  users.value = next.map((item, index) => ({ ...item, index }));
+  try {
+    await api("PUT", "/api/users/order", { ids: next.map(item => item.id) });
+    toast(t("users.user_order_saved"));
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+    await load();
+  }
+}
 
 async function load() {
   loading.value = true;
@@ -262,7 +324,6 @@ async function load() {
 
 function openNewUser() {
   newUserName.value = "";
-  newUserRemark.value = "";
   newUserOpen.value = true;
 }
 
@@ -276,11 +337,16 @@ async function createUser() {
     toast(t("users.validation.username_required"), "error");
     return;
   }
+  if (new TextEncoder().encode(name).length > 64) {
+    toast(t("users.validation.username_length", { bytes: 64 }), "error");
+    return;
+  }
+  if (users.value.some(user => user.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    toast(t("users.validation.username_duplicate"), "error");
+    return;
+  }
   try {
-    await api("POST", "/api/users", {
-      name,
-      remark: newUserRemark.value.trim(),
-    });
+    await api("POST", "/api/users", { name });
     closeNewUser();
     toast(t("users.user_created"));
     await load();
@@ -302,6 +368,7 @@ async function loadGlobalManagement(user: User) {
         `/api/plugin-contributions/user-global/${encodeURIComponent(user.id)}`,
       ),
     ]);
+    secretActionsReset();
     globalDraft.value = {
       userId: user.id,
       settings: normalizeGlobalSettings(settings),
@@ -309,13 +376,26 @@ async function loadGlobalManagement(user: User) {
         ? clone(contributionData)
         : [],
     };
+    await nextTick();
+    if (globalSlotRoot.value) {
+      await renderPluginSlot(globalSlotRoot.value, "users.global.sections", {
+        mode: "user",
+        primaryId: user.id,
+      });
+    }
   } catch (reason) {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
   }
 }
 
 function closeGlobalManagement() {
+  if (globalSlotRoot.value) void disposePluginSlot(globalSlotRoot.value);
   globalDraft.value = null;
+  secretActionsReset();
+}
+
+function secretActionsReset() {
+  Object.keys(secretActions).forEach(key => delete secretActions[key]);
 }
 
 function setGlobalSwitch(
@@ -338,6 +418,28 @@ function setGlobalInput(
   (draft.settings[section] as Record<string, unknown>)[key] = value;
 }
 
+function setGlobalPath(key: "preRunScript" | "postRunScript", value: string) {
+  const parsed = splitPrePost(key === "preRunScript" ? PRE_ONLY_MARKER : POST_FINAL_MARKER, value);
+  setGlobalInput("advanced", key, parsed.value);
+  setGlobalSwitch("advanced", key === "preRunScript" ? "preRunOnceOnly" : "postRunOnFinalOnly", parsed.onceOnly);
+}
+
+async function browseGlobalPath(key: "preRunScript" | "postRunScript", kind: "file" | "folder") {
+  const draft = globalDraft.value;
+  if (!draft) return;
+  try {
+    const result = await api("POST", "/api/native-dialog", {
+      kind,
+      title: key === "preRunScript" ? t("users.before_task_script_path") : t("users.after_task_script_path"),
+      initialPath: String(draft.settings.advanced[key] || "") || undefined,
+      filter: "",
+    }) as { path?: string };
+    if (result?.path) setGlobalPath(key, result.path);
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
 function contributionValue(contribution: Contribution, key: string) {
   return contribution.values?.[key];
 }
@@ -352,6 +454,71 @@ function setContributionValue(
 function inputValue(event: Event) {
   return (event.target as HTMLInputElement | HTMLTextAreaElement).value;
 }
+
+function contributionStringValue(contribution: Contribution, field: GlobalField) {
+  const value = contributionValue(contribution, field.key);
+  return fieldType(field) === "secret" && value && typeof value === "object"
+    ? ""
+    : String(value ?? "");
+}
+
+function secretIsConfigured(contribution: Contribution, field: GlobalField) {
+  const value = contributionValue(contribution, field.key);
+  return Boolean(value && typeof value === "object" && (value as { configured?: boolean }).configured === true);
+}
+
+function setSecretValue(contribution: Contribution, field: GlobalField, value: string) {
+  const key = fieldKey(contribution, field);
+  secretActions[key] = value ? "set" : (secretIsConfigured(contribution, field) ? "keep" : "set");
+  setContributionValue(contribution, field.key, value);
+}
+
+function clearSecret(contribution: Contribution, field: GlobalField) {
+  secretActions[fieldKey(contribution, field)] = "clear";
+  setContributionValue(contribution, field.key, "");
+}
+
+function contributionValuesForSave(contribution: Contribution) {
+  const values: Record<string, unknown> = {};
+  for (const field of contribution.fields || []) {
+    const type = fieldType(field);
+    const value = contributionValue(contribution, field.key);
+    if (type === "secret") {
+      const action = secretActions[fieldKey(contribution, field)] || (secretIsConfigured(contribution, field) ? "keep" : "set");
+      values[field.key] = action === "set" ? { action, value: String(value || "") } : { action };
+    } else if (type === "multi-select") {
+      values[field.key] = Array.isArray(value) ? value.map(String) : [];
+    } else {
+      values[field.key] = value;
+    }
+  }
+  return values;
+}
+
+function validateContributionFields(contribution: Contribution) {
+  for (const field of contribution.fields || []) {
+    if (!field.required || field.readOnly || fieldType(field) === "status") continue;
+    const value = contributionValue(contribution, field.key);
+    if (fieldType(field) === "secret" && secretIsConfigured(contribution, field) && secretActions[fieldKey(contribution, field)] !== "clear") continue;
+    const empty = fieldType(field) === "multi-select" ? !Array.isArray(value) || !value.length : !String(value ?? "").trim();
+    if (empty) return false;
+  }
+  return true;
+}
+
+async function browseContributionPath(contribution: Contribution, field: GlobalField, kind: "file" | "folder") {
+  try {
+    const result = await api("POST", "/api/native-dialog", {
+      kind,
+      title: field.label,
+      initialPath: contributionStringValue(contribution, field),
+      filter: "",
+    }) as { path?: string };
+    if (result?.path) setContributionValue(contribution, field.key, result.path);
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
 function contributionOptions(field: GlobalField): NxpOption[] {
   return (field.options || []).map((option) =>
     typeof option === "string"
@@ -363,10 +530,19 @@ function contributionOptions(field: GlobalField): NxpOption[] {
   );
 }
 
+function contributionMultiValue(contribution: Contribution, field: GlobalField): string[] {
+  const value = contributionValue(contribution, field.key);
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
 async function saveGlobalManagement() {
   const draft = globalDraft.value;
   if (!draft) return;
   try {
+    if (draft.contributions.some(contribution => !validateContributionFields(contribution))) {
+      toast(t("common.plugin.settings_required"), "error");
+      return;
+    }
     await api(
       "PUT",
       `/api/users/${encodeURIComponent(draft.userId)}/global-settings`,
@@ -376,7 +552,7 @@ async function saveGlobalManagement() {
       await api(
         "PUT",
         `/api/plugin-contributions/user-global/${encodeURIComponent(draft.userId)}/${encodeURIComponent(contribution.pluginName || "")}/${encodeURIComponent(contribution.id || "")}`,
-        { values: contribution.values || {} },
+        { values: contributionValuesForSave(contribution) },
       );
     }
     closeGlobalManagement();
@@ -393,9 +569,12 @@ function openUserManagement(user: User) {
   bindingEditMode.value = false;
   addBindingOpen.value = false;
   selectedBindingIds.value = [];
+  void paintBindingSlots();
 }
 
 function closeUserManagement() {
+  const slots = root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="users.binding.sections"]') || [];
+  for (const slot of slots) void disposePluginSlot(slot);
   userDraft.value = null;
   expandedBindingId.value = null;
   addBindingOpen.value = false;
@@ -409,6 +588,28 @@ function bindingName(binding: Binding) {
       ?.name ||
     t("users.script_instance_not_found")
   );
+}
+
+function bindingStatus(binding: Binding) {
+  const script = scripts.value.find(item => item.id === binding.scriptInstanceId);
+  return script ? scriptPluginUnavailableMessage(script, plugins.value) : "";
+}
+
+function bindingDays(binding: Binding) {
+  const value = bindingValue(binding, "runDays");
+  return typeof value === "number" ? value : -1;
+}
+
+function bindingDaysLabel(binding: Binding) {
+  const days = bindingDays(binding);
+  if (days === 0) return t("users.run_stopped");
+  if (days > 0) return t("users.schedule.days_left", { days });
+  return t("users.run_indefinitely");
+}
+
+function bindingDaysTone(binding: Binding): "muted" | "blue" | "warn" {
+  const days = bindingDays(binding);
+  return days === 0 ? "warn" : days > 0 ? "blue" : "muted";
 }
 
 function bindingValue(binding: Binding, field: keyof BindingEffective) {
@@ -444,13 +645,74 @@ function setBindingValue(
   (binding as unknown as Record<string, unknown>)[field] = value;
 }
 
+function setBindingPath(binding: Binding, key: "preRunScript" | "postRunScript", value: string) {
+  const parsed = splitPrePost(key === "preRunScript" ? PRE_ONLY_MARKER : POST_FINAL_MARKER, value);
+  setBindingValue(binding, key, parsed.value);
+  setBindingValue(binding, key === "preRunScript" ? "preRunOnceOnly" : "postRunOnFinalOnly", parsed.onceOnly);
+}
+
+async function browseBindingPath(binding: Binding, key: "preRunScript" | "postRunScript", kind: "file" | "folder") {
+  if (!userDraft.value) return;
+  try {
+    const result = await api("POST", "/api/native-dialog", {
+      kind,
+      title: key === "preRunScript" ? t("users.before_task_script_path") : t("users.after_task_script_path"),
+      initialPath: String(bindingValue(binding, key) || "") || undefined,
+      filter: "",
+    }) as { path?: string };
+    if (result?.path) setBindingPath(binding, key, result.path);
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
 function toggleBinding(binding: Binding) {
   if (bindingEditMode.value) return;
+  const unavailableMessage = bindingStatus(binding);
+  if (unavailableMessage) {
+    toast(unavailableMessage, "error");
+    return;
+  }
   expandedBindingId.value =
     expandedBindingId.value === binding.scriptInstanceId
       ? null
       : binding.scriptInstanceId;
   addBindingOpen.value = false;
+  void paintBindingSlots();
+}
+function startBindingDrag(event: DragEvent, id: string) {
+  if (bindingEditMode.value || expandedBindingId.value) {
+    event.preventDefault();
+    return;
+  }
+  draggingBindingId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+}
+function clearBindingDrag() {
+  draggingBindingId.value = "";
+}
+async function dropBinding(targetId: string) {
+  const draft = userDraft.value;
+  const sourceId = draggingBindingId.value;
+  clearBindingDrag();
+  if (!draft || !sourceId || sourceId === targetId || bindingEditMode.value || expandedBindingId.value) return;
+  const next = (draft.bindings || []).slice();
+  const sourceIndex = next.findIndex(item => item.scriptInstanceId === sourceId);
+  const targetIndex = next.findIndex(item => item.scriptInstanceId === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  draft.bindings = next;
+  try {
+    await api("PUT", `/api/users/${encodeURIComponent(draft.id)}/bindings/order`, { ids: next.map(item => item.scriptInstanceId) });
+    toast(t("users.bound_script_order_saved"));
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+    await refreshUserDraft(draft.id);
+  }
 }
 
 function toggleAddBindings() {
@@ -495,6 +757,7 @@ async function addBindings() {
     addBindingOpen.value = false;
     selectedBindingIds.value = [];
     toast(t("users.script_binding_added"));
+    await paintBindingSlots();
   } catch (reason) {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
   }
@@ -520,6 +783,200 @@ async function removeBinding(binding: Binding) {
   }
 }
 
+async function paintBindingSlots() {
+  await nextTick();
+  const slots = root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="users.binding.sections"]') || [];
+  for (const slot of slots) {
+    await renderPluginSlot(slot, "users.binding.sections", {
+      mode: "binding",
+      primaryId: slot.dataset.pluginPrimaryId || "",
+      secondaryId: userDraft.value?.id || "",
+    });
+  }
+}
+
+async function refreshUserDraft(userId: string) {
+  if (userDraft.value?.id !== userId) {
+    await load();
+    return;
+  }
+  try {
+    userDraft.value = clone(await api("GET", `/api/users/${encodeURIComponent(userId)}`) as User);
+    await load();
+    await paintBindingSlots();
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
+async function uploadAvatar(userId: string) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/png,image/jpeg,image/webp";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      toast(t("users.validation.avatar_type"), "error");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast(t("users.validation.avatar_size"), "error");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const dataUrl = String(reader.result || "");
+        await api("POST", `/api/users/${encodeURIComponent(userId)}/avatar`, { mimeType: file.type, data: dataUrl.split(",", 2)[1] || "" });
+        toast(t("users.avatar_updated"));
+        await refreshUserDraft(userId);
+      } catch (reason) {
+        if (!isAbortError(reason)) toast(errorText(reason), "error");
+      }
+    };
+    reader.readAsDataURL(file);
+  }, { once: true });
+  input.click();
+}
+
+async function removeAvatar(userId: string) {
+  try {
+    await api("DELETE", `/api/users/${encodeURIComponent(userId)}/avatar`);
+    toast(t("users.avatar.default_restored"));
+    await refreshUserDraft(userId);
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
+async function openConfigEdit(binding: Binding) {
+  const user = userDraft.value;
+  if (!user) return;
+  const unavailableMessage = bindingStatus(binding);
+  if (unavailableMessage) {
+    toast(unavailableMessage, "error");
+    return;
+  }
+  try {
+    const status = await api("GET", `/api/users/${encodeURIComponent(user.id)}/bindings/${encodeURIComponent(binding.scriptInstanceId)}/edit-config`) as { hasSnapshot?: boolean };
+    const details = {
+      userId: user.id,
+      scriptId: binding.scriptInstanceId,
+      userName: user.name,
+      scriptName: bindingName(binding),
+    };
+    if (status?.hasSnapshot) {
+      await beginConfigEdit({ ...details, mode: "normal" });
+      return;
+    };
+    const script = scripts.value.find(item => item.id === binding.scriptInstanceId);
+    const plugin = plugins.value.find(item => item.name === script?.pluginType) as (Plugin & { noFreshConfig?: boolean }) | undefined;
+    configChooser.value = { ...details, freshAvailable: plugin?.noFreshConfig !== true };
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
+function configEditEndpoint(item: { userId: string; scriptId: string }) {
+  return `/api/users/${encodeURIComponent(item.userId)}/bindings/${encodeURIComponent(item.scriptId)}/edit-config`;
+}
+
+function configEditErrorData(reason: unknown) {
+  const value = reason as { code?: string; data?: { inputName?: string; candidates?: unknown[] } } | null;
+  return value?.code === "config_input_mismatch" && Array.isArray(value.data?.candidates)
+    ? { inputName: String(value.data?.inputName || ""), candidates: value.data.candidates.map(item => String(item || "")).filter(Boolean) }
+    : null;
+}
+
+function createRequesterWindowToken() {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    const bytes = new Uint8Array(8);
+    cryptoApi.getRandomValues(bytes);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
+  }
+  return Math.random().toString(36).slice(2, 18).padEnd(16, "0");
+}
+
+function waitForRequesterTitlePaint() {
+  return new Promise<void>(resolve => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+async function beginConfigEdit(item: { userId: string; scriptId: string; userName: string; scriptName: string; mode: string }, inputOverride?: { name: string; value: string }) {
+  const requesterWindowToken = createRequesterWindowToken();
+  const previousTitle = document.title;
+  document.title = `${t("users.nexuspipeline_core")} · ${requesterWindowToken}`;
+  try {
+    const request: Record<string, unknown> = { action: "start", mode: item.mode };
+    if (inputOverride) {
+      request.configInputName = inputOverride.name;
+      request.configInputValue = inputOverride.value;
+    }
+    request.requesterWindowToken = requesterWindowToken;
+    await waitForRequesterTitlePaint();
+    await api("POST", configEditEndpoint(item), request);
+    configChooser.value = null;
+    configCandidates.value = null;
+    configEdit.value = item;
+  } catch (reason) {
+    const candidateData = configEditErrorData(reason);
+    if (candidateData) {
+      if (!candidateData.inputName) {
+        toast(t("users.config.input_missing"), "error");
+        return;
+      }
+      configChooser.value = null;
+      configCandidates.value = { ...item, inputName: candidateData.inputName, candidates: candidateData.candidates };
+      return;
+    }
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  } finally {
+    document.title = previousTitle;
+  }
+}
+
+async function chooseConfigMode(mode: "fresh" | "reuse") {
+  const chooser = configChooser.value;
+  if (!chooser || (mode === "fresh" && !chooser.freshAvailable)) return;
+  await beginConfigEdit({ ...chooser, mode });
+}
+
+async function chooseConfigCandidate(candidate: string) {
+  const chooser = configCandidates.value;
+  if (!chooser) return;
+  configCandidates.value = null;
+  await beginConfigEdit({ userId: chooser.userId, scriptId: chooser.scriptId, userName: chooser.userName, scriptName: chooser.scriptName, mode: chooser.mode }, { name: chooser.inputName, value: candidate });
+}
+
+async function finishConfigEdit(action: "done" | "cancel") {
+  const edit = configEdit.value;
+  if (!edit) return;
+  try {
+    const result = await api("POST", configEditEndpoint(edit), { action }) as { validation?: { toasts?: Array<{ message?: string; kind?: string }> } };
+    configEdit.value = null;
+    toast(action === "done"
+      ? (edit.mode === "fresh" ? t("users.config.snapshot_saved") : t("users.user_configuration_saved", { user: edit.userName }))
+      : (edit.mode === "reuse" ? t("common.cancelled") : t("users.config.cancelled_restored")));
+    for (const item of result?.validation?.toasts || []) if (item.message) toast(item.message, item.kind || "info");
+    await refreshUserDraft(edit.userId);
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(errorText(reason), "error");
+  }
+}
+
+function closeConfigEdit() {
+  configEdit.value = null;
+  configChooser.value = null;
+  configCandidates.value = null;
+}
+
 async function saveUserManagement() {
   const draft = userDraft.value;
   if (!draft) return;
@@ -528,10 +985,23 @@ async function saveUserManagement() {
     toast(t("users.validation.username_required"), "error");
     return;
   }
+  if (new TextEncoder().encode(name).length > 64) {
+    toast(t("users.validation.username_length", { bytes: 64 }), "error");
+    return;
+  }
+  if (users.value.some(user => user.id !== draft.id && user.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    toast(t("users.validation.username_duplicate"), "error");
+    return;
+  }
+  const remark = String(draft.remark || "").trim();
+  if (new TextEncoder().encode(remark).length > 512) {
+    toast(t("users.validation.remark_length", { bytes: 512 }), "error");
+    return;
+  }
   try {
     await api("PUT", `/api/users/${encodeURIComponent(draft.id)}`, {
       name,
-      remark: String(draft.remark || "").trim(),
+      remark,
     });
     for (const binding of draft.bindings || []) {
       await api(
@@ -663,6 +1133,8 @@ onBeforeUnmount(() => {
             :key="user.id"
             class="script-card global-user-card"
             data-testid="global-user-card"
+            @dragover.prevent
+            @drop="dropUser(user.id)"
           >
             <span
               class="drag-handle"
@@ -670,9 +1142,17 @@ onBeforeUnmount(() => {
               tabindex="0"
               :aria-label="t('users.global.order_help')"
               :title="t('common.drag_to_reorder')"
+              draggable="true"
+              @dragstart="startUserDrag($event, user.id)"
+              @dragend="clearUserDrag"
               ><NxpIcon name="grip"
             /></span>
-            <span class="global-user-avatar-button" aria-hidden="true"
+            <button
+              class="global-user-avatar-button"
+              type="button"
+              :aria-label="t('users.avatar_upload_for_user', { name: user.name })"
+              :title="t('users.avatar_upload')"
+              @click.stop="uploadAvatar(user.id)"
               ><img
                 v-if="user.avatarUrl"
                 class="global-user-avatar"
@@ -683,7 +1163,7 @@ onBeforeUnmount(() => {
                 v-else
                 class="global-user-avatar global-user-avatar-fallback"
                 >{{ initials(user.name) }}</span
-              ><span class="global-user-avatar-mark" aria-hidden="true">+</span></span
+              ><span class="global-user-avatar-mark" aria-hidden="true">+</span></button
             >
             <div class="script-main global-user-main">
               <div class="script-name-row">
@@ -749,7 +1229,7 @@ onBeforeUnmount(() => {
       </section>
     </template>
 
-    <div v-if="newUserOpen" class="modal-mask" role="presentation">
+    <div v-if="newUserOpen" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal secondary-surface"
         role="dialog"
@@ -771,18 +1251,9 @@ onBeforeUnmount(() => {
           <div class="field">
             <label class="field-label" for="gu-name">{{
               t("users.user_name")
-            }}</label
+            }} <span class="req">*</span></label
             ><input id="gu-name" v-model="newUserName" type="text" />
-          </div>
-          <div class="field">
-            <label class="field-label" for="gu-remark">{{
-              t("users.remark")
-            }}</label
-            ><textarea
-              id="gu-remark"
-              v-model="newUserRemark"
-              rows="3"
-            ></textarea>
+            <span class="muted">{{ t("users.username_case_insensitive") }}</span>
           </div>
         </div>
         <div class="modal-footer">
@@ -800,7 +1271,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="globalDraft" class="modal-mask" role="presentation">
+    <div v-if="globalDraft" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal secondary-surface"
         role="dialog"
@@ -860,11 +1331,14 @@ onBeforeUnmount(() => {
                   :value="globalDraft.settings.general.runDays"
                   type="number"
                   min="-1"
+                  max="365"
+                  step="1"
+                  :placeholder="t('users.global.run_days.placeholder')"
                   @input="
                     setGlobalInput(
                       'general',
                       'runDays',
-                      Number(inputValue($event)) || -1,
+                      Number.isFinite(Number(inputValue($event))) ? Number(inputValue($event)) : -1,
                     )
                   "
                 />
@@ -878,11 +1352,14 @@ onBeforeUnmount(() => {
                   :value="globalDraft.settings.general.maxSuccessfulRunsPerDay"
                   type="number"
                   min="-1"
+                  max="10"
+                  step="1"
+                  :placeholder="t('users.unlimited_placeholder')"
                   @input="
                     setGlobalInput(
                       'general',
                       'maxSuccessfulRunsPerDay',
-                      Number(inputValue($event)) || -1,
+                      Number.isFinite(Number(inputValue($event))) ? Number(inputValue($event)) : -1,
                     )
                   "
                 />
@@ -962,35 +1439,31 @@ onBeforeUnmount(() => {
                 <label class="field-label" for="gm-advanced-pre">{{
                   t("users.before_task_script_path")
                 }}</label
-                ><input
+                ><NxpPathPicker
                   id="gm-advanced-pre"
-                  :value="globalDraft.settings.advanced.preRunScript"
-                  type="text"
-                  @input="
-                    setGlobalInput(
-                      'advanced',
-                      'preRunScript',
-                      inputValue($event),
-                    )
-                  "
+                  :model-value="encodePrePost(PRE_ONLY_MARKER, globalDraft.settings.advanced.preRunOnceOnly, globalDraft.settings.advanced.preRunScript)"
+                  kind="file"
+                  :placeholder="t('users.pre_task_placeholder')"
+                  :aria-label="t('users.before_task_script_path')"
+                  @update:model-value="setGlobalPath('preRunScript', $event)"
+                  @browse="browseGlobalPath('preRunScript', $event)"
                 />
+                <span class="muted">{{ t("users.pre_task_help") }}</span>
               </div>
               <div class="field">
                 <label class="field-label" for="gm-advanced-post">{{
                   t("users.after_task_script_path")
                 }}</label
-                ><input
+                ><NxpPathPicker
                   id="gm-advanced-post"
-                  :value="globalDraft.settings.advanced.postRunScript"
-                  type="text"
-                  @input="
-                    setGlobalInput(
-                      'advanced',
-                      'postRunScript',
-                      inputValue($event),
-                    )
-                  "
+                  :model-value="encodePrePost(POST_FINAL_MARKER, globalDraft.settings.advanced.postRunOnFinalOnly, globalDraft.settings.advanced.postRunScript)"
+                  kind="file"
+                  :placeholder="t('users.post_task_placeholder')"
+                  :aria-label="t('users.after_task_script_path')"
+                  @update:model-value="setGlobalPath('postRunScript', $event)"
+                  @browse="browseGlobalPath('postRunScript', $event)"
                 />
+                <span class="muted">{{ t("users.post_task_help") }}</span>
               </div>
             </section>
           </div>
@@ -1031,119 +1504,48 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="plugin-contribution-fields">
-                <template
-                  v-for="field in contribution.fields || []"
-                  :key="field.key"
-                  ><div
-                    v-if="
-                      String(field.type || 'text').toLowerCase() === 'switch'
-                    "
-                    class="switch-row plugin-field"
-                  >
-                    <span class="field-label">{{ field.label }}</span
-                    ><NxpSwitch
-                      :model-value="
-                        contributionValue(contribution, field.key) === true
-                      "
-                      semantic-role="button"
-                      :aria-label="field.label"
-                      :disabled="field.readOnly"
-                      @update:model-value="
-                        setContributionValue(contribution, field.key, $event)
-                      "
-                    />
+                <template v-for="field in contribution.fields || []" :key="field.key">
+                  <div v-if="fieldType(field) === 'switch'" class="switch-row plugin-field">
+                    <span class="field-label">{{ field.label }}<span v-if="field.required" class="req"> *</span></span>
+                    <NxpSwitch :model-value="contributionValue(contribution, field.key) === true" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field.key, $event)" />
                   </div>
-                  <div
-                    v-else-if="
-                      String(field.type || 'text').toLowerCase() === 'textarea'
-                    "
-                    class="field plugin-field"
-                  >
-                    <label
-                      class="field-label"
-                      :for="`gm-plugin-${field.key}`"
-                      >{{ field.label }}</label
-                    ><textarea
-                      :id="`gm-plugin-${field.key}`"
-                      :value="
-                        String(contributionValue(contribution, field.key) || '')
-                      "
-                      :readonly="field.readOnly"
-                      @input="
-                        setContributionValue(
-                          contribution,
-                          field.key,
-                          inputValue($event),
-                        )
-                      "
-                    ></textarea
-                    ><span v-if="field.description" class="muted">{{
-                      field.description
-                    }}</span>
+                  <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field">
+                    <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <textarea :id="fieldId(contribution, field)" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setContributionValue(contribution, field.key, inputValue($event))"></textarea>
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div
-                    v-else-if="
-                      String(field.type || 'text').toLowerCase() === 'select'
-                    "
-                    class="field plugin-field"
-                  >
-                    <label class="field-label">{{ field.label }}</label
-                    ><NxpSelect
-                      :model-value="
-                        String(contributionValue(contribution, field.key) || '')
-                      "
-                      :options="contributionOptions(field)"
-                      :disabled="field.readOnly"
-                      :aria-label="field.label"
-                      @update:model-value="
-                        setContributionValue(contribution, field.key, $event)
-                      "
-                    />
+                  <div v-else-if="fieldType(field) === 'select'" class="field plugin-field">
+                    <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <NxpSelect :id="fieldId(contribution, field)" :model-value="String(contributionValue(contribution, field.key) || '')" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field.key, $event)" />
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
                   </div>
-                  <div
-                    v-else-if="
-                      String(field.type || 'text').toLowerCase() === 'status'
-                    "
-                    class="field plugin-field"
-                  >
-                    <span class="field-label">{{ field.label }}</span
-                    ><span class="plugin-status-value">{{
-                      String(
-                        contributionValue(contribution, field.key) ||
-                          t("users.no_status"),
-                      )
-                    }}</span>
+                  <div v-else-if="fieldType(field) === 'multi-select'" class="field plugin-field">
+                    <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <NxpSelect :id="fieldId(contribution, field)" multiple :model-value="contributionMultiValue(contribution, field)" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field.key, $event)" />
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
+                  </div>
+                  <div v-else-if="fieldType(field) === 'path' || fieldType(field) === 'file' || fieldType(field) === 'folder'" class="field plugin-field">
+                    <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <NxpPathPicker :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field.key, $event)" @browse="browseContributionPath(contribution, field, $event)" />
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
+                  </div>
+                  <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field">
+                    <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <div class="plugin-secret-row"><input :id="fieldId(contribution, field)" type="password" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" @input="setSecretValue(contribution, field, inputValue($event))"><button v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</button></div>
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
+                  </div>
+                  <div v-else-if="fieldType(field) === 'status'" class="field plugin-field">
+                    <span class="field-label">{{ field.label }}</span><span class="plugin-status-value">{{ String(contributionValue(contribution, field.key) || t('users.no_status')) }}</span>
                   </div>
                   <div v-else class="field plugin-field">
-                    <label
-                      class="field-label"
-                      :for="`gm-plugin-${field.key}`"
-                      >{{ field.label }}</label
-                    ><input
-                      :id="`gm-plugin-${field.key}`"
-                      :type="
-                        String(field.type || 'text').toLowerCase() === 'secret'
-                          ? 'password'
-                          : 'text'
-                      "
-                      :value="
-                        String(contributionValue(contribution, field.key) || '')
-                      "
-                      :readonly="field.readOnly"
-                      @input="
-                        setContributionValue(
-                          contribution,
-                          field.key,
-                          inputValue($event),
-                        )
-                      "
-                    /><span v-if="field.description" class="muted">{{
-                      field.description
-                    }}</span>
-                  </div></template
-                >
+                    <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
+                    <input :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setContributionValue(contribution, field.key, inputValue($event))">
+                    <span v-if="field.description" class="muted">{{ field.description }}</span>
+                  </div>
+                </template>
               </div>
             </article>
+            <div ref="globalSlotRoot" class="plugin-slot global-management-plugin-slot" data-plugin-slot="users.global.sections" data-plugin-anchor="users.global.sections" data-plugin-mode="user" :data-plugin-primary-id="globalDraft.userId" hidden></div>
           </section>
         </div>
         <div class="modal-footer">
@@ -1164,7 +1566,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="userDraft" class="modal-mask" role="presentation">
+    <div v-if="userDraft" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal wide secondary-surface"
         role="dialog"
@@ -1193,12 +1595,16 @@ onBeforeUnmount(() => {
               <label class="field-label" for="um-remark">{{
                 t("users.remark")
               }}</label
-              ><textarea
+            ><textarea
                 id="um-remark"
                 class="form-textarea"
                 v-model="userDraft.remark"
                 rows="3"
               ></textarea>
+            </div>
+            <div v-if="userDraft.avatarUrl" class="user-avatar-setting">
+              <span class="muted">{{ t("users.custom_avatar") }}</span>
+              <button class="tertiary" type="button" @click.stop="removeAvatar(userDraft.id)">{{ t("users.remove_custom_avatar") }}</button>
             </div>
           </section>
           <section class="subsection user-binding-section">
@@ -1252,7 +1658,7 @@ onBeforeUnmount(() => {
                     @click.stop="toggleSelectedBinding(script.id)"
                   >
                     <span class="um-add-item-copy"
-                      ><strong>{{ script.name }}</strong></span
+                    ><NxpEntityIcon :id="script.id" /><strong>{{ script.name }}</strong></span
                     ><span aria-hidden="true">✓</span>
                   </button>
                 </div>
@@ -1290,6 +1696,8 @@ onBeforeUnmount(() => {
                 }"
                 data-testid="um-binding-card"
                 :data-binding-id="binding.scriptInstanceId"
+                @dragover.prevent
+                @drop="dropBinding(binding.scriptInstanceId)"
               >
                 <div class="um-binding-head">
                   <span
@@ -1298,6 +1706,9 @@ onBeforeUnmount(() => {
                     tabindex="0"
                     :aria-label="t('common.reorder.keyboard_help')"
                     :title="t('common.drag_to_reorder')"
+                    draggable="true"
+                    @dragstart="startBindingDrag($event, binding.scriptInstanceId)"
+                    @dragend="clearBindingDrag"
                     ><NxpIcon name="grip" /></span
                   ><button
                     class="um-binding-toggle"
@@ -1308,8 +1719,7 @@ onBeforeUnmount(() => {
                     "
                     @click.stop="toggleBinding(binding)"
                   >
-                    <span class="script-ico um-binding-ico" aria-hidden="true"
-                      ><NxpIcon name="script" /></span><span class="um-binding-copy"
+                    <NxpEntityIcon class="um-binding-ico" :id="binding.scriptInstanceId" /><span class="um-binding-copy"
                       ><strong class="um-binding-name">{{
                         bindingName(binding)
                       }}</strong
@@ -1325,11 +1735,7 @@ onBeforeUnmount(() => {
                               ? t("users.enabled_badge")
                               : t("common.disabled")
                           }}</NxpBadge
-                        ><NxpBadge tone="muted">{{
-                          bindingValue(binding, "runDays") === 0
-                            ? t("users.run_stopped")
-                            : t("users.run_indefinitely")
-                        }}</NxpBadge></span
+                        ><NxpBadge :tone="bindingDaysTone(binding)">{{ bindingDaysLabel(binding) }}</NxpBadge></span
                       ></span
                     ><span class="um-binding-bottom-arrow" aria-hidden="true"
                       ><NxpIcon name="chevronRight"
@@ -1347,6 +1753,9 @@ onBeforeUnmount(() => {
                   v-if="expandedBindingId === binding.scriptInstanceId"
                   class="um-binding-body"
                 >
+                  <button class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
+                    <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
+                  </button>
                   <section class="um-binding-option-section">
                     <div class="section-heading">
                       <div>
@@ -1465,37 +1874,34 @@ onBeforeUnmount(() => {
                       <label class="field-label">{{
                         t("users.before_task_script_path")
                       }}</label
-                      ><input
-                        :value="bindingValue(binding, 'preRunScript') || ''"
-                        type="text"
+                      ><NxpPathPicker
+                        :model-value="encodePrePost(PRE_ONLY_MARKER, bindingValue(binding, 'preRunOnceOnly'), bindingValue(binding, 'preRunScript'))"
+                        kind="file"
+                        :placeholder="t('users.pre_task_placeholder')"
+                        :aria-label="t('users.before_task_script_path')"
                         :disabled="binding.locks?.advanced === true"
-                        @input="
-                          setBindingValue(
-                            binding,
-                            'preRunScript',
-                            inputValue($event),
-                          )
-                        "
+                        @update:model-value="setBindingPath(binding, 'preRunScript', $event)"
+                        @browse="browseBindingPath(binding, 'preRunScript', $event)"
                       />
+                      <span class="muted">{{ t("users.pre_task_help") }}</span>
                     </div>
                     <div class="field">
                       <label class="field-label">{{
                         t("users.after_task_script_path")
                       }}</label
-                      ><input
-                        :value="bindingValue(binding, 'postRunScript') || ''"
-                        type="text"
+                      ><NxpPathPicker
+                        :model-value="encodePrePost(POST_FINAL_MARKER, bindingValue(binding, 'postRunOnFinalOnly'), bindingValue(binding, 'postRunScript'))"
+                        kind="file"
+                        :placeholder="t('users.post_task_placeholder')"
+                        :aria-label="t('users.after_task_script_path')"
                         :disabled="binding.locks?.advanced === true"
-                        @input="
-                          setBindingValue(
-                            binding,
-                            'postRunScript',
-                            inputValue($event),
-                          )
-                        "
+                        @update:model-value="setBindingPath(binding, 'postRunScript', $event)"
+                        @browse="browseBindingPath(binding, 'postRunScript', $event)"
                       />
+                      <span class="muted">{{ t("users.post_task_help") }}</span>
                     </div>
                   </section>
+                  <div class="plugin-slot user-binding-plugin-slot" data-plugin-slot="users.binding.sections" data-plugin-anchor="users.binding.sections" data-plugin-mode="binding" :data-plugin-primary-id="binding.scriptInstanceId" :data-plugin-secondary-id="userDraft.id" hidden></div>
                 </div>
               </article>
             </div>
@@ -1521,6 +1927,64 @@ onBeforeUnmount(() => {
           >
             {{ t("common.cancel") }}
           </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="configChooser" class="modal-mask" role="presentation" data-locked>
+      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="`${t('users.first_edit')} ${t('users.edit_configuration')}`">
+        <div class="modal-header">
+          <div><h3 class="modal-title">{{ t("users.first_edit") }} {{ t("users.edit_configuration") }}</h3></div>
+          <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-copy">{{ t("users.config.edit_first", { script: configChooser.scriptName }) }}</p>
+          <div class="first-edit-chooser">
+            <button class="chooser-card" type="button" :disabled="!configChooser.freshAvailable" @click.stop="chooseConfigMode('fresh')">
+              <strong>{{ t("users.fresh_configuration_file") }}</strong>
+              <span class="muted">{{ configChooser.freshAvailable ? t("users.config.generated") : t("users.config.unavailable") }}</span>
+            </button>
+            <button class="chooser-card" type="button" @click.stop="chooseConfigMode('reuse')">
+              <strong>{{ t("users.reuse_configuration_file") }}</strong>
+              <span class="muted">{{ t("users.config.edit_existing") }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
+      </section>
+    </div>
+
+    <div v-if="configCandidates" class="modal-mask" role="presentation" data-locked>
+      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="t('users.take_over_configuration')">
+        <div class="modal-header">
+          <div><h3 class="modal-title">{{ t("users.take_over_configuration") }}</h3></div>
+          <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="closeConfigEdit"><NxpIcon name="close" /></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-copy">{{ t("users.config.candidates_help") }}</p>
+          <div class="first-edit-chooser">
+            <button v-for="candidate in configCandidates.candidates" :key="candidate" class="chooser-card" type="button" @click.stop="chooseConfigCandidate(candidate)">
+              <strong class="scroll-text"><span class="scroll-inner">{{ candidate }}</span></strong>
+              <span class="muted">{{ t("users.config.candidate_used") }}</span>
+            </button>
+          </div>
+        </div>
+        <div class="modal-footer"><button class="ghost" type="button" @click.stop="closeConfigEdit">{{ t("common.cancel") }}</button></div>
+      </section>
+    </div>
+
+    <div v-if="configEdit" class="modal-mask" role="presentation" data-locked>
+      <section class="modal secondary-surface" role="dialog" aria-modal="true" :aria-label="t('users.config.edit_progress')">
+        <div class="modal-header">
+          <div><h3 class="modal-title">{{ t("users.config.edit_progress") }}</h3></div>
+          <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="finishConfigEdit('cancel')"><NxpIcon name="close" /></button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="primary" type="button" @click.stop="finishConfigEdit('done')">{{ t("common.complete") }}</button>
+          <button class="ghost" type="button" @click.stop="finishConfigEdit('cancel')">{{ t("common.cancel") }}</button>
         </div>
       </section>
     </div>

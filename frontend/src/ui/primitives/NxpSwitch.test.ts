@@ -17,6 +17,7 @@ describe("Nexus UI primitives", () => {
 
   it("projects options and emits the selected value", async () => {
     const wrapper = mount(NxpSelect, {
+      attachTo: document.body,
       props: {
         modelValue: "one",
         options: [
@@ -25,10 +26,12 @@ describe("Nexus UI primitives", () => {
         ],
       },
     });
-    expect(wrapper.findAll("[role=option]").map(option => option.find("span").text())).toEqual(["One", "Two"]);
+    const options = () => [...document.body.querySelectorAll<HTMLElement>("[role=option]")];
+    expect(options().map(option => option.querySelector("span")?.textContent || "")).toEqual(["One", "Two"]);
     await wrapper.get(".nxp-select-trigger").trigger("click");
-    await wrapper.findAll("[role=option]")[1].trigger("click");
+    await options()[1].click();
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["two"]);
     expect(wrapper.emitted("change")?.[0]).toEqual(["two"]);
+    wrapper.unmount();
   });
 });

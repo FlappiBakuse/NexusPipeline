@@ -20,6 +20,7 @@ import { enterPage } from "@legacy/core/state.js";
 import { isAbortError } from "@legacy/core/api.js";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
+import { installModalBehavior } from "../ui/modal";
 
 const route = useRoute();
 const shell = useShellStore();
@@ -38,6 +39,7 @@ const navigation = [
   ["plugins", "plugins", "shell.plugins"],
   ["settings", "settings", "shell.settings"],
 ] as const;
+let uninstallModalBehavior: (() => void) | null = null;
 
 function closeOnBackdrop(event: Event) {
   const target = event.target instanceof Element ? event.target : null;
@@ -55,12 +57,15 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  uninstallModalBehavior?.();
+  uninstallModalBehavior = null;
   document.removeEventListener("click", closeOnBackdrop, true);
   window.removeEventListener("resize", closeOnDesktopResize);
   setNavOpen(false);
 });
 
 onMounted(async () => {
+  uninstallModalBehavior = installModalBehavior();
   closeOnDesktopResize();
   document.addEventListener("click", closeOnBackdrop, true);
   window.addEventListener("resize", closeOnDesktopResize);

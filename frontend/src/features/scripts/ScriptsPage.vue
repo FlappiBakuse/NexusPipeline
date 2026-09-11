@@ -19,6 +19,7 @@ import { setTopbarTitle, toast } from "@legacy/core/ui.js";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
@@ -99,6 +100,7 @@ const deleteTarget = ref<Script | null>(null);
 const root = ref<HTMLElement | null>(null);
 const listSlotRoot = ref<HTMLElement | null>(null);
 const editorSlotRoot = ref<HTMLElement | null>(null);
+const draggingScriptId = ref("");
 let disposed = false;
 
 const draft = reactive<Draft>({
@@ -223,6 +225,44 @@ function toggleField(
 ) {
   draft[field] = !draft[field];
 }
+async function browseDraftPath(
+  field: "rootPath" | "mainExe" | "configPath" | "logPath" | "gameExe",
+  kind: "file" | "folder",
+) {
+  try {
+    const result = await api("POST", "/api/native-dialog", {
+      kind,
+      title: t("common.select_path"),
+      initialPath: draft.rootPath || undefined,
+      filter: "",
+    }) as { path?: string };
+    if (result?.path) draft[field] = result.path;
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+  }
+}
+function uploadJudgeScript() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".js,.py";
+  input.addEventListener("change", () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 256 * 1024) {
+      toast(t("scripts.validation.file_size"), "error");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      draft.judgeScript = String(reader.result || "");
+      draft.judgeScriptLanguage = file.name.toLowerCase().endsWith(".py") ? "python" : "javascript";
+      toast(t("scripts.status.loaded", { language: draft.judgeScriptLanguage === "python" ? "Python" : "JavaScript" }));
+    };
+    reader.onerror = () => toast(t("scripts.file.read_failed"), "error");
+    reader.readAsText(file, "utf-8");
+  }, { once: true });
+  input.click();
+}
 function stripQuotes(value: string) {
   const trimmed = String(value || "").trim();
   return trimmed.length >= 2 &&
@@ -236,6 +276,35 @@ function unavailable(script: Script) {
     scriptPluginStatus(script, plugins.value).specialized &&
     scriptPluginUnavailableMessage(script, plugins.value)
   );
+}
+function startScriptDrag(event: DragEvent, id: string) {
+  draggingScriptId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+}
+function clearScriptDrag() {
+  draggingScriptId.value = "";
+}
+async function dropScript(targetId: string) {
+  const sourceId = draggingScriptId.value;
+  clearScriptDrag();
+  if (!sourceId || sourceId === targetId) return;
+  const next = scripts.value.slice();
+  const sourceIndex = next.findIndex(item => item.id === sourceId);
+  const targetIndex = next.findIndex(item => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  scripts.value = next;
+  try {
+    await api("PUT", "/api/scripts/order", { ids: next.map(item => item.id) });
+    toast(t("scripts.script_order_saved"));
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+    await load();
+  }
 }
 function pluginName(script: Script) {
   const plugin = plugins.value.find(
@@ -278,14 +347,8 @@ async function load() {
   await paintListSlots();
 }
 async function save() {
-  const required = [
-    draft.name,
-    draft.rootPath,
-    draft.mainExe,
-    draft.configPath,
-    draft.logPath,
-    draft.gameExe,
-  ];
+  const required = [draft.name, draft.rootPath, draft.gameExe, draft.maxAttempts, draft.logStallTimeoutMinutes, draft.totalTimeoutMinutes];
+  if (!draft.pluginType) required.push(draft.mainExe, draft.configPath, draft.logPath);
   if (required.some((value) => !String(value || "").trim())) {
     toast(t("scripts.validation.required_fields"), "error");
     return;
@@ -427,6 +490,8 @@ onBeforeUnmount(() => {
             class="script-card"
             :class="{ 'is-unavailable': unavailable(script) }"
             data-testid="script-card"
+            @dragover.prevent
+            @drop="dropScript(script.id)"
           >
             <span
               class="drag-handle"
@@ -434,10 +499,11 @@ onBeforeUnmount(() => {
               tabindex="0"
               :aria-label="t('common.reorder.keyboard_help')"
               :title="t('common.drag_to_reorder')"
+              draggable="true"
+              @dragstart="startScriptDrag($event, script.id)"
+              @dragend="clearScriptDrag"
               ><NxpIcon name="grip" /></span
-            ><span class="script-ico" aria-hidden="true"
-              ><NxpIcon name="script"
-            /></span>
+            ><NxpEntityIcon :id="script.id" />
             <div class="script-main">
               <button
                 class="entity-link"
@@ -522,7 +588,7 @@ onBeforeUnmount(() => {
       </section>
     </template>
 
-    <div v-if="chooserOpen" class="modal-mask" role="presentation">
+    <div v-if="chooserOpen" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal secondary-surface"
         role="dialog"
@@ -573,7 +639,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="editorOpen" class="modal-mask" role="presentation">
+    <div v-if="editorOpen" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal wide secondary-surface"
         role="dialog"
@@ -623,6 +689,7 @@ onBeforeUnmount(() => {
                 kind="folder"
                 :placeholder="t('scripts.script_root_directory')"
                 :aria-label="t('scripts.script_root_directory')"
+                @browse="browseDraftPath('rootPath', $event)"
               />
             </div>
           </div>
@@ -639,6 +706,7 @@ onBeforeUnmount(() => {
                   :disabled="!draft.rootPath"
                   :placeholder="t('scripts.main_program_file')"
                   :aria-label="t('scripts.main_program_path')"
+                  @browse="browseDraftPath('mainExe', $event)"
                 />
               </div>
               <div class="field">
@@ -666,6 +734,7 @@ onBeforeUnmount(() => {
                   :disabled="!draft.rootPath"
                   :placeholder="t('scripts.editor.root_required')"
                   :aria-label="t('scripts.configuration_file_folder')"
+                  @browse="browseDraftPath('configPath', $event)"
                 />
               </div>
               <div class="field">
@@ -678,6 +747,7 @@ onBeforeUnmount(() => {
                   :disabled="!draft.rootPath"
                   :placeholder="t('scripts.log_file_path')"
                   :aria-label="t('scripts.log_path')"
+                  @browse="browseDraftPath('logPath', $event)"
                 />
               </div>
             </div>
@@ -758,6 +828,7 @@ onBeforeUnmount(() => {
                     kind="file"
                     :placeholder="t('scripts.editor.game_path.placeholder')"
                     :aria-label="t('scripts.game_path')"
+                    @browse="browseDraftPath('gameExe', $event)"
                   /><input
                     v-else
                     id="sm-game-exe"
@@ -913,6 +984,7 @@ onBeforeUnmount(() => {
                 id="sm-upload-btn"
                 class="judge-upload-button"
                 type="button"
+                @click.stop="uploadJudgeScript"
               >
                 {{ t("scripts.upload_script_file") }}</button
               ><button

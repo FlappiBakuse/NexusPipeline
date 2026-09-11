@@ -6,6 +6,7 @@ import { setTopbarTitle, toast } from "@legacy/core/ui.js";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
@@ -63,6 +64,13 @@ const draft = reactive<Draft>({
   tasks: [],
 });
 const deleteTarget = ref<Queue | null>(null);
+const draggingQueueId = ref("");
+const draggingTimeSetIndex = ref<number | null>(null);
+const draggingTaskIndex = ref<number | null>(null);
+
+function firstScriptId(queue: Queue) {
+  return queue.tasks?.slice().sort((a, b) => a.index - b.index)[0]?.scriptInstanceId || "";
+}
 
 const scriptOptions = computed<NxpOption[]>(() => [
   { value: "", label: t("common.select.script_instance_option") },
@@ -138,6 +146,70 @@ function toggleDay(timeSet: TimeSet, day: number) {
   timeSet.days = timeSet.days.includes(day)
     ? timeSet.days.filter((item) => item !== day)
     : [...timeSet.days, day].sort((a, b) => a - b);
+}
+function startTimeSetDrag(event: DragEvent, index: number) {
+  draggingTimeSetIndex.value = index;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+}
+function clearTimeSetDrag() {
+  draggingTimeSetIndex.value = null;
+}
+function dropTimeSet(targetIndex: number) {
+  const sourceIndex = draggingTimeSetIndex.value;
+  clearTimeSetDrag();
+  if (sourceIndex === null || sourceIndex === targetIndex || sourceIndex < 0 || sourceIndex >= draft.timeSets.length) return;
+  const [moved] = draft.timeSets.splice(sourceIndex, 1);
+  draft.timeSets.splice(targetIndex, 0, moved);
+}
+function startTaskDrag(event: DragEvent, index: number) {
+  draggingTaskIndex.value = index;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+}
+function clearTaskDrag() {
+  draggingTaskIndex.value = null;
+}
+function dropTask(targetIndex: number) {
+  const sourceIndex = draggingTaskIndex.value;
+  clearTaskDrag();
+  if (sourceIndex === null || sourceIndex === targetIndex || sourceIndex < 0 || sourceIndex >= draft.tasks.length) return;
+  const [moved] = draft.tasks.splice(sourceIndex, 1);
+  draft.tasks.splice(targetIndex, 0, moved);
+  draft.tasks.forEach((task, index) => { task.index = index; });
+}
+function startQueueDrag(event: DragEvent, id: string) {
+  draggingQueueId.value = id;
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", id);
+  }
+}
+function clearQueueDrag() {
+  draggingQueueId.value = "";
+}
+async function dropQueue(targetId: string) {
+  const sourceId = draggingQueueId.value;
+  clearQueueDrag();
+  if (!sourceId || sourceId === targetId) return;
+  const next = queues.value.slice();
+  const sourceIndex = next.findIndex(item => item.id === sourceId);
+  const targetIndex = next.findIndex(item => item.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+  const [moved] = next.splice(sourceIndex, 1);
+  next.splice(targetIndex, 0, moved);
+  queues.value = next;
+  try {
+    await api("PUT", "/api/queues/order", { ids: next.map(item => item.id) });
+    toast(t("queues.queue_order_saved"));
+  } catch (reason) {
+    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+    await load();
+  }
 }
 
 async function load() {
@@ -247,6 +319,8 @@ onMounted(() => {
           :key="queue.id"
           class="script-card queue-card"
           data-testid="queue-card"
+          @dragover.prevent
+          @drop="dropQueue(queue.id)"
         >
           <span
             class="drag-handle"
@@ -254,10 +328,11 @@ onMounted(() => {
             tabindex="0"
             :aria-label="t('common.reorder.keyboard_help')"
             :title="t('common.drag_to_reorder')"
+            draggable="true"
+            @dragstart="startQueueDrag($event, queue.id)"
+            @dragend="clearQueueDrag"
             ><NxpIcon name="grip" /></span
-          ><span class="script-ico" aria-hidden="true"
-            ><NxpIcon name="script"
-          /></span>
+          ><NxpEntityIcon :id="firstScriptId(queue)" />
           <div class="script-main">
             <button
               class="entity-link"
@@ -320,7 +395,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <div v-if="modalOpen" class="modal-mask" role="presentation">
+    <div v-if="modalOpen" class="modal-mask" role="presentation" data-locked>
       <section
         class="modal wide secondary-surface"
         role="dialog"
@@ -404,6 +479,8 @@ onMounted(() => {
                 :key="index"
                 class="timeset-card compact-card"
                 :open="index === 0"
+                @dragover.prevent
+                @drop="dropTimeSet(index)"
               >
                 <summary class="timeset-summary">
                   <span class="timeset-summary-main"
@@ -413,6 +490,9 @@ onMounted(() => {
                       tabindex="0"
                       :aria-label="t('common.reorder.keyboard_help')"
                       :title="t('common.drag_to_reorder')"
+                      draggable="true"
+                      @dragstart="startTimeSetDrag($event, index)"
+                      @dragend="clearTimeSetDrag"
                       ><NxpIcon name="grip" /></span
                     ><strong>{{
                       t("queues.schedule.label", { index: index + 1 })
@@ -517,12 +597,17 @@ onMounted(() => {
                   v-for="(task, index) in draft.tasks"
                   :key="index"
                   class="list-item task-row"
+                  @dragover.prevent
+                  @drop="dropTask(index)"
                 >
                   <span
                     class="drag-handle"
                     role="button"
                     tabindex="0"
                     :aria-label="t('common.reorder.keyboard_help')"
+                    draggable="true"
+                    @dragstart="startTaskDrag($event, index)"
+                    @dragend="clearTaskDrag"
                     ><NxpIcon name="grip" /></span
                   ><NxpSelect
                     :id="`qm-task-${index}`"
