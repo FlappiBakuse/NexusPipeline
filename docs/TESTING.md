@@ -9,8 +9,9 @@
 | L1 Unit | `tests/NexusPipeline.Tests/` | 否 | 否 | 模型规则、状态机、解析、规划、重试和边界校验 |
 | L2 Component | `tests/NexusPipeline.Tests/` | 否 | 否 | 临时目录、仓储、配置事务、应用命令和外部端口替身 |
 | L3 Web Logic | `tests/web/`、`frontend/src/**/*.test.ts` | 否 | 否 | 可独立导入的 ES module 纯函数、Vue 组件契约和协议转换 |
-| L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
-| L5 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
+| L4 Visual Contract | `tests/e2e/tests/*.smoke.spec.mjs` 的 screenshot contract | 是 | 是 | 固定视口下的关键 shell/page 视觉基线 |
+| L5 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
+| L6 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
 
 `tests/stress/` 是按需运行的压力与诊断资产，不参与默认发布门禁。历史测试容器已删除；需要追溯行为时使用 CHANGELOG 和 Git 历史。
 
@@ -27,17 +28,18 @@
 
 ### UI Smoke 配额
 
-当前 UI Smoke 保留 10 个用例，硬上限 12 个：
+当前浏览器验收保留 11 个用例，硬上限 12 个；其中 10 个是用户工作流，1 个是视觉契约：
 
 ```text
 tests/e2e/tests/
 ├── app.smoke.spec.mjs                 2
 ├── scripts-users.smoke.spec.mjs       2
 ├── queues.smoke.spec.mjs              2
-└── settings-platform.smoke.spec.mjs   4
+├── settings-platform.smoke.spec.mjs   4
+└── visual-contract.smoke.spec.mjs     1
 ```
 
-UI Smoke 断言用户可观察的结果和稳定业务状态。允许使用稳定的 `data-testid`、`data-action`、ARIA 状态和业务 ID；不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。
+UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳定的 `data-testid`、ARIA 状态和业务 ID；少量现有迁移用例仍可读取 `data-action` 作为定位属性，但它不再是运行时行为契约。Visual Contract 使用固定视口的 `toHaveScreenshot` 锁定 shell/page 视觉基线，并遮罩地址、版本等运行时动态值。业务行为不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。
 
 ### Web Logic 与测试文件组织
 
@@ -85,11 +87,19 @@ node tests\run.mjs admin system
 node tests\run.mjs admin all
 ```
 
+视觉契约需要在明确确认基线变化后刷新：
+
+```powershell
+$env:NEXUS_UPDATE_SNAPSHOTS = "1"
+node tests\run.mjs codex ui
+Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
+```
+
 `codex` 使用 `NexusTestHost=true` 的 `asInvoker` Test Host；`admin` 使用生产 release，并要求 Administrator / High Integrity 或 System Integrity。权限不足返回 exit code `2`，不降级运行。
 
 ## 质量门禁顺序
 
-1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax 和 `build.cmd` 的适用组合。
+1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、Visual Contract 和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`。
 3. 发布前由 CI 在管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`。
 4. 两仓库的宿主—插件契约发生变化时，同时执行 `NexusPipeline-Plugins/tools/Test-Repository.ps1`，并核对两仓库文档、manifest 和测试。

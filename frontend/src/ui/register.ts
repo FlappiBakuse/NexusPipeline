@@ -21,6 +21,7 @@ import Tooltip from "./primitives/NxpTooltip.vue";
 import Pager from "./primitives/NxpPager.vue";
 import Modal from "./primitives/NxpModal.vue";
 import Toast from "./primitives/NxpToast.vue";
+import Icon from "./primitives/NxpIcon.vue";
 
 export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-button": Button,
@@ -45,6 +46,7 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-pager": Pager,
   "nxp-modal": Modal,
   "nxp-toast": Toast,
+  "nxp-icon": Icon,
 } as const;
 
 export function registerNexusElements() {

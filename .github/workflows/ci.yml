@@ -56,6 +56,10 @@ jobs:
         shell: cmd
         run: npm ci
 
+      - name: 前端组件测试
+        shell: cmd
+        run: npm test --prefix frontend
+
       - name: Administrator 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
         shell: cmd
         run: node tests\run.mjs admin default

@@ -1,4 +1,4 @@
-import { api } from "./api.js";
+import { api, isAbortError } from "./api.js";
 import { createColorControl, createNumberControl, createSelectControl } from "./controls.js";
 import { validateRequiredPluginFields } from "./plugin-fields.js";
 import { disposePluginSlot, queryContributions, renderFrontendSlots } from "./plugin-runtime.js";
@@ -201,7 +201,7 @@ function renderFormContribution(parent, contribution) {
       });
       toast(t("common.plugin_settings_saved"));
     } catch (error) {
-      toast(error.message, "error");
+      if (!isAbortError(error)) toast(error.message, "error");
     } finally {
       save.disabled = false;
     }

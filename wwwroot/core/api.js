@@ -11,6 +11,25 @@ function apiError(message, status, data) {
   return error;
 }
 
+/**
+ * 浏览器、WebView 和不同 fetch 实现对 AbortController 的错误消息并不一致。
+ * 统一通过 name/code/message 判断，避免把页面生命周期取消误报成业务错误。
+ */
+export function isAbortError(reason) {
+  if (!reason) return false;
+  if (reason.name === "AbortError" || reason.name === "CanceledError" || reason.code === 20) return true;
+  const message = typeof reason.message === "string" ? reason.message : String(reason);
+  return /\b(?:abort|aborted|cancell?ed)\b/i.test(message);
+}
+
+function normalizeAbortError(reason, signal) {
+  if (!signal?.aborted && !isAbortError(reason)) return reason;
+  if (typeof DOMException === "function") return new DOMException("", "AbortError");
+  const error = new Error();
+  error.name = "AbortError";
+  return error;
+}
+
 function formatApiError(data, status) {
   const code = data?.code;
   if (code) {
@@ -88,6 +107,8 @@ export async function apiBlob(path, signal) {
     const data = await response.json().catch(() => null);
     if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
     throw apiError(formatApiError(data, response.status), response.status, data);
+  } catch (reason) {
+    throw normalizeAbortError(reason, signal);
   } finally {
     if (controller) releaseController(controller);
   }
@@ -111,6 +132,8 @@ export async function api(method, path, body, signal) {
       throw apiError(formatApiError(data, response.status), response.status, data);
     }
     return data;
+  } catch (reason) {
+    throw normalizeAbortError(reason, signal);
   } finally {
     if (controller) releaseController(controller);
   }

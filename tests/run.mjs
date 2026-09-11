@@ -226,7 +226,9 @@ async function runUi(mode, args) {
   });
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   try {
-    return await runProcess(nodeCommand, [playwrightCli, "test"], { cwd: e2eDir, env });
+    const playwrightArgs = [playwrightCli, "test"];
+    if (process.env.NEXUS_UPDATE_SNAPSHOTS === "1") playwrightArgs.push("--update-snapshots");
+    return await runProcess(nodeCommand, playwrightArgs, { cwd: e2eDir, env });
   } finally {
     if (mode === "codex") cleanTestHost();
   }

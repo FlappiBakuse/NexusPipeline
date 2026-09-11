@@ -1,11 +1,31 @@
 <script setup lang="ts">
-const props = withDefaults(defineProps<{ modelValue?: string; placeholder?: string; disabled?: boolean; ariaLabel?: string }>(), {
-  modelValue: "",
-  placeholder: "",
-  disabled: false,
-  ariaLabel: "路径",
-});
-const emit = defineEmits<{ "update:modelValue": [value: string]; change: [value: string]; browse: [] }>();
+import NxpIcon from "./NxpIcon.vue";
+
+const props = withDefaults(
+  defineProps<{
+    id?: string;
+    modelValue?: string;
+    placeholder?: string;
+    disabled?: boolean;
+    ariaLabel?: string;
+    kind?: "file" | "folder" | "file-or-folder";
+    filter?: string;
+  }>(),
+  {
+    id: "",
+    modelValue: "",
+    placeholder: "",
+    disabled: false,
+    ariaLabel: "路径",
+    kind: "file",
+    filter: "",
+  },
+);
+const emit = defineEmits<{
+  "update:modelValue": [value: string];
+  change: [value: string];
+  browse: [kind: "file" | "folder"];
+}>();
 
 function update(event: Event) {
   const value = (event.target as HTMLInputElement).value;
@@ -13,21 +33,115 @@ function update(event: Event) {
   emit("change", value);
 }
 
-function browse() {
-  emit("browse");
+function browse(
+  kind: "file" | "folder" = props.kind === "folder" ? "folder" : "file",
+) {
+  emit("browse", kind);
 }
 </script>
 
 <template>
-  <div class="nxp-path-picker">
-    <input class="nxp-input" type="text" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :aria-label="props.ariaLabel" @input="update" @change="update" />
-    <button class="nxp-path-picker-button" type="button" :disabled="props.disabled" :aria-label="`${props.ariaLabel}浏览`" @click="browse">…</button>
+  <div class="nxp-path">
+    <input
+      :id="props.id || undefined"
+      class="nxp-path-input"
+      type="text"
+      :value="props.modelValue"
+      :placeholder="props.placeholder"
+      :disabled="props.disabled"
+      :aria-label="props.ariaLabel"
+      @input="update"
+      @change="update"
+    />
+    <span
+      v-if="props.kind === 'file-or-folder'"
+      class="nxp-path-actions"
+      role="group"
+      :aria-label="`${props.ariaLabel}选择`"
+    >
+      <button
+        class="nxp-path-trigger nxp-path-choice"
+        type="button"
+        :disabled="props.disabled"
+        :aria-label="`${props.ariaLabel}选择文件`"
+        @click="browse('file')"
+      >
+        <NxpIcon name="file" />
+      </button>
+      <button
+        class="nxp-path-trigger nxp-path-choice"
+        type="button"
+        :disabled="props.disabled"
+        :aria-label="`${props.ariaLabel}选择文件夹`"
+        @click="browse('folder')"
+      >
+        <NxpIcon name="folder" />
+      </button>
+    </span>
+    <button
+      v-else
+      class="nxp-path-trigger"
+      type="button"
+      :disabled="props.disabled"
+      :aria-label="`${props.ariaLabel}浏览`"
+      @click="browse()"
+    >
+      <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" />
+    </button>
   </div>
 </template>
 
 <style>
-.nxp-path-picker { display: flex; min-width: 0; gap: var(--nx-space-2); }
-.nxp-path-picker .nxp-input { min-width: 0; flex: 1 1 auto; }
-.nxp-path-picker-button { min-width: var(--nx-control-height); min-height: var(--nx-control-height); border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); background: transparent; color: var(--nx-color-text); font: inherit; cursor: pointer; }
-.nxp-path-picker-button:disabled { opacity: .5; cursor: not-allowed; }
+.nxp-path {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+}
+.nxp-path-input {
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: var(--nx-control-height);
+  padding: 0 12px;
+  border: 1px solid var(--content-control-border, var(--nx-color-border));
+  border-radius: 8px 0 0 8px;
+  background: var(--content-control, transparent);
+  color: var(--nx-color-text);
+  font: inherit;
+}
+.nxp-path-trigger {
+  display: inline-flex;
+  width: var(--field-action-width, 40px);
+  min-width: var(--field-action-width, 40px);
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0 8px 8px 0;
+  color: var(--muted, var(--nx-color-muted));
+  font: inherit;
+}
+.nxp-path-trigger:hover:not(:disabled) {
+  border-color: var(--accent, var(--nx-color-accent));
+  background: var(--content-control-hover, transparent);
+  color: var(--nx-color-text);
+}
+.nxp-path-trigger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.nxp-path-trigger .nxp-icon {
+  width: 18px;
+  height: 18px;
+}
+.nxp-path-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+}
+.nxp-path-actions .nxp-path-choice {
+  border-radius: 0;
+}
+.nxp-path-actions .nxp-path-choice:last-child {
+  border-radius: 0 8px 8px 0;
+}
 </style>

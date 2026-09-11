@@ -25,8 +25,9 @@ describe("Nexus UI primitives", () => {
         ],
       },
     });
-    expect(wrapper.findAll("option").map(option => option.text())).toEqual(["One", "Two"]);
-    await wrapper.get("select").setValue("two");
+    expect(wrapper.findAll("[role=option]").map(option => option.find("span").text())).toEqual(["One", "Two"]);
+    await wrapper.get(".nxp-select-trigger").trigger("click");
+    await wrapper.findAll("[role=option]")[1].trigger("click");
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["two"]);
     expect(wrapper.emitted("change")?.[0]).toEqual(["two"]);
   });

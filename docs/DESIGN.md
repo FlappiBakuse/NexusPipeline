@@ -585,15 +585,15 @@ NexusPipeline/
 │   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
 ├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.5（无宿主业务引用）
 ├── frontend/           Vue/TypeScript/Vite 前端源码、路由、状态和 Nexus UI 组件
-│   ├── src/app/        App shell、迁移适配器和启动流程
+│   ├── src/app/        App shell、插件 route 生命周期和启动流程
 │   ├── src/features/   按业务域组织的 Vue 页面
 │   ├── src/ui/         Nexus UI primitives 与公开 nxp-* Custom Elements
 │   ├── src/stores/     Pinia 全局状态
 │   └── public/i18n/    宿主 zh-CN/en-US 词典
-├── wwwroot/            迁移期间由 frontend 导入的内部平台/旧页面模块，不作为发布入口
+├── wwwroot/            由 frontend 复用的内部平台服务与历史测试模块，不作为发布入口
 │   ├── core/           API、外观、插件运行时与其他迁移适配服务
 │   ├── i18n/           兼容性测试与迁移资源副本
-│   ├── views/          尚未迁移的业务域实现
+│   ├── views/          旧 Web Logic 测试与迁移参考源码，不作为 Vue 发布入口
 │   └── effects/        迁移期间复用的独立视觉效果
 ├── release/wwwroot/    Vite 构建后的发布静态 Web 资源
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
@@ -753,7 +753,7 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 
 ```
 frontend/src/app/App.vue → router/stores/features/ui
-                         └→ frontend/src/legacy/* → wwwroot/core/* / wwwroot/views/*（当前迁移适配边界）
+                         └→ frontend/src/legacy/* → wwwroot/core/*（平台服务与插件运行时）
 ```
 
 | 模块 | 职责 |
@@ -762,29 +762,29 @@ frontend/src/app/App.vue → router/stores/features/ui
 | `frontend/src/features/dashboard/DashboardPage.vue` | Vue 仪表盘、状态轮询和 dashboard plugin slots |
 | `frontend/src/ui/primitives/` | 类型化 Nexus UI primitives，并注册为插件可消费的 `nxp-*` Custom Elements |
 | `frontend/src/router.ts` / `frontend/src/stores/` | 保持 hash URL 的 Vue Router 与 Pinia shell 状态 |
-| `frontend/src/legacy/bootstrap.ts` | 迁移期间复用的 locale、主题、外观、认证和限制初始化服务 |
-| `frontend/src/legacy/event-bridge.ts` | 尚未迁移页面的临时事件边界；新 Vue 页面不得新增依赖 |
-| `frontend/src/app/LegacyPageHost.ts` | 尚未迁移业务域的生命周期适配器；最终页面迁移完成后删除 |
-| `wwwroot/core/api.js` | 迁移期间复用的请求封装（JSON/错误/AbortController 生命周期联动） |
+| `frontend/src/legacy/bootstrap.ts` | Vue shell 使用的 locale、主题、外观、认证、限制和插件 runtime 初始化服务 |
+| `frontend/src/legacy/auth.ts` | 远程访问令牌探测、提示和运行期间 401 重新认证入口 |
+| `frontend/src/app/PluginRouteHost.ts` | 插件 route 的 mount、leave、dispose 生命周期边界 |
+| `wwwroot/core/api.js` | Vue 页面和插件复用的请求封装（JSON/错误/AbortController 生命周期联动） |
 | `wwwroot/core/plugin-runtime.js` | Frontend API 1.4：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API、本地化、外观与运行预览宿主访问 |
-| `wwwroot/core/controls.js` | 旧页面迁移适配器；新页面和插件使用 `frontend/src/ui` 与 `nxp-*` 元素 |
-| `wwwroot/core/modal.js` / `wwwroot/core/ui.js` | 尚未迁移页面复用的弹窗、主题、Toast 与生命周期服务 |
+| `wwwroot/core/controls.js` | 历史 Web Logic 测试和旧资源辅助；新页面和插件使用 `frontend/src/ui` 与 `nxp-*` 元素 |
+| `wwwroot/core/modal.js` / `wwwroot/core/ui.js` | Vue shell 与插件边界复用的弹窗、主题、Toast、顶部标题和导航服务 |
 | `wwwroot/core/duration.js` | `HH:MM:SS` 倒计时格式化 |
 | `wwwroot/core/prepost.js` | `%FIRST%` / `%LAST%` 路径前缀的编码与拆分 |
 | `wwwroot/core/i18n.js` | 浏览器本地语言偏好、宿主 zh-CN/en-US 词典、动态页面文案和日期/数字格式化 |
 | `wwwroot/core/plugin-slots.js` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染和清理 |
 | `wwwroot/core/appearance.js` | 主题 token、插件主题注册、服务端壁纸加载/轮换和配色 |
-| `wwwroot/core/state.js` | 旧页面路由生命周期和跨域缓存；新 Vue 页面使用组件生命周期与 Pinia |
-| `wwwroot/core/limits.js` | 跨视图共享的约束警告层；迁移完成后由 Vue service/store 接管 |
-| `wwwroot/core/dnd.js` | 尚未迁移列表的拖拽适配器；新 Vue 列表使用组件事件和类型化状态 |
+| `wwwroot/core/state.js` | 插件 route/page token 与请求取消状态；页面自身仍使用 Vue 生命周期 |
+| `wwwroot/core/limits.js` | shell 启动时的约束警告服务 |
+| `wwwroot/core/dnd.js` | 历史列表拖拽辅助；新 Vue 列表使用组件事件和类型化状态 |
 
 新增交互的落点：
 
 1. 新业务页面放在 `frontend/src/features/<domain>/`，通过 `api` service、Pinia 或组件本地状态获取数据，不直接操作页面外部 DOM。
 2. 可复用控件优先放入 `frontend/src/ui/primitives/` 或 composite 目录；视觉变体使用类型化 props，插件边界使用公开 `nxp-*` 元素。
 3. Vue 页面使用明确的 props/emits、`data-testid` 业务定位和 `onBeforeUnmount` 清理轮询/订阅；路由保持现有 hash URL。
-4. 尚未迁移页面的 bug 修复只允许在对应 `wwwroot/views/` 与 `frontend/src/legacy/` 适配边界内完成；不得把新的业务逻辑扩展到旧 `data-action` 注册表。
-5. 页面迁移完成后删除相应旧 view、DOM factory、全局 action 和测试重复实现；不要保留第二套长期 UI runtime。
+4. 已迁移页面的业务逻辑必须落在对应 `frontend/src/features/<domain>/`，通过组件事件、service 和 page-local state 管理交互；不得把新的业务逻辑扩展到旧 `data-action` 注册表。
+5. `wwwroot/views/` 与旧 DOM factory 只可作为现有逻辑测试和迁移参考，不能成为发布入口或新页面依赖；新功能继续使用 Vue feature 与 Nexus UI。
 
 ### 10.8 插件扩展指南
 
@@ -844,10 +844,8 @@ Capability 扩展约束：
 | 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
 | 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
-| 已迁移页面渲染/表单 | `frontend/src/features/` 与 `frontend/src/ui/` 对应域和组件 |
-| 尚未迁移页面渲染/表单 | `wwwroot/views/` 对应域文件，由 `frontend/src/app/LegacyPageHost.ts` 在迁移边界内承载 |
-| 已迁移前端交互绑定 | Vue props/emits、组件事件与 feature composable |
-| 尚未迁移前端交互绑定 | 遗留 view 的 `actions` → `frontend/src/legacy/event-bridge.ts`；新代码禁止扩展该分发器 |
+| Vue 页面渲染/表单 | `frontend/src/features/` 对应域文件与 `frontend/src/ui/` 组件 |
+| 页面前端交互绑定 | Vue props/emits、组件事件与 feature composable；现存 `data-action` 属性不再由全局运行时读取，新交互不得依赖它 |
 | 配置读写/加密 | `src/Persistence/ConfigStore.cs`、`src/Persistence/ConfigLoadMode.cs`、`src/Persistence/SecretStore.cs`；公共初始化使用 `ReadOnly`，宿主所有权建立后使用 `Repair` |
 | 历史记录格式 | `src/Services/History/HistoryService.cs`、`src/Models/RunRecord.cs` |
 

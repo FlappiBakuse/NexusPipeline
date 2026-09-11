@@ -1,6 +1,6 @@
-import test from "node:test";
 import assert from "node:assert/strict";
-import { apiBlob } from "../../wwwroot/core/api.js";
+import test from "node:test";
+import { apiBlob, isAbortError } from "../../wwwroot/core/api.js";
 
 test("apiBlob sends the bearer token for protected image resources", async () => {
   const previousFetch = globalThis.fetch;
@@ -27,4 +27,11 @@ test("apiBlob sends the bearer token for protected image resources", async () =>
     if (previousStorage === undefined) delete globalThis.localStorage;
     else globalThis.localStorage = previousStorage;
   }
+});
+
+test("api abort detection normalizes browser-specific cancellation messages", () => {
+  assert.equal(isAbortError({ name: "AbortError", message: "The operation was aborted." }), true);
+  assert.equal(isAbortError(new Error("signal is aborted without reason")), true);
+  assert.equal(isAbortError({ name: "TypeError", message: "Failed to fetch" }), false);
+  assert.equal(isAbortError(null), false);
 });

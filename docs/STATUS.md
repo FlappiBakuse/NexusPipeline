@@ -7,7 +7,7 @@
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- [ ] 完成 v0.15.5 其余业务页（History、Plugins、Queues、Scripts、Users、Dispatch、Settings）的 Vue feature 迁移，并删除 `LegacyPageHost`、旧 view HTML factory、全局 `data-action` 分发器和遗留组件样式；当前版本已完成 Vue App shell、Dashboard、Nexus UI primitives、Frontend API 1.4 slot surface 与两个官方前端插件迁移，尚未迁移页面仍由明确隔离的内部适配边界承载。
+- v0.15.5 当前前端运行时已由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧页面宿主与全局事件桥接已从运行入口移除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用。
 
 ## 后续功能：插件生态扩展
 

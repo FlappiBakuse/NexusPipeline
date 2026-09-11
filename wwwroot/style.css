@@ -360,8 +360,8 @@ button.sm, .btn.sm { min-height: 40px; padding: 0 11px; border-radius: 6px; font
 .row.four, .form-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 label, .field-label { display: block; margin: 13px 0 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
 .field-label:first-child { margin-top: 0; }
-input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], select, textarea { width: 100%; min-width: 0; padding: 0 12px; border: 1px solid var(--content-control-border); border-radius: 8px; outline: none; background-color: var(--content-control); color: var(--text); font-size: 13px; transition: border-color .15s, background .15s; }
-input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], select { height: 40px; }
+input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], input[type=url], input[type=email], input[type=tel], select, textarea { width: 100%; min-width: 0; padding: 0 12px; border: 1px solid var(--content-control-border); border-radius: 8px; outline: none; background-color: var(--content-control); color: var(--text); font-size: 13px; transition: border-color .15s, background .15s; }
+input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], input[type=url], input[type=email], input[type=tel], select { height: 40px; }
 select { appearance: none; -webkit-appearance: none; padding-right: 34px; background-image: var(--select-arrow); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 8px; }
 select:focus { border-color: var(--accent); }
 select option, select optgroup { background-color: var(--content-card); color: var(--text); }
@@ -525,7 +525,8 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .script-card:hover { background: var(--content-card-hover); }
 .entity-title-row { min-height: 24px; }
 .entity-meta-row { min-height: 24px; margin-top: var(--space-1); }
-.script-ico { flex: 0 0 auto; width: 36px; height: 36px; border-radius: 6px; border: 1px solid var(--content-card-border); background: var(--content-card); object-fit: contain; }
+.script-ico { display: inline-flex; flex: 0 0 auto; width: 36px; height: 36px; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--content-card-border); background: color-mix(in srgb, #000 7%, var(--content-card)); color: rgba(0, 0, 0, .38); object-fit: contain; }
+.script-ico .nxp-icon { width: 24px; height: 24px; }
 .script-main { flex: 1 1 auto; min-width: 0; }
 .script-name-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 8px; }
 .script-name-row strong { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 16px; text-overflow: ellipsis; white-space: nowrap; }

@@ -19,7 +19,12 @@ export async function pageSettings(token) {
   navActive("settings"); setTopbarTitle(t("shell.settings", {}, "Settings"));
   let data;
   try { data = await api("GET", "/api/settings"); }
-  catch (error) { render(`<div class="empty"><strong>${t("settings.error.load")}</strong>${esc(error.message)}</div>`); return; }
+  catch (error) {
+    if (isCurrent("settings", token) && String(location.hash || "").split("?", 1)[0] === "#/settings") {
+      render(`<div class="empty"><strong>${t("settings.error.load")}</strong>${esc(error.message)}</div>`);
+    }
+    return;
+  }
   if (!isCurrent("settings", token)) return;
   state.settings = data.settings;
   const settings = data.settings;

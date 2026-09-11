@@ -1,6 +1,6 @@
 import { $, $$ } from "./dom.js";
 import { registerInterval } from "./state.js";
-import { api } from "./api.js";
+import { api, isAbortError } from "./api.js";
 import { icon } from "./icons.js";
 import { systemActionCard } from "./forms.js";
 import { applyThemeValue, cycleThemeValue, initThemeValue } from "./appearance.js";
@@ -327,7 +327,7 @@ export async function cancelSystemAction() {
       startSystemActionCountdown();
     }
   } catch (error) {
-    toast(error.message, "error");
+    if (!isAbortError(error)) toast(error.message, "error");
   }
 }
 
