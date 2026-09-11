@@ -89,7 +89,7 @@ const toastVisible = ref(true);
   </main>
 </template>
 
-<style scoped>
+<style>
 .ui-lab { min-width: 0; }
 .ui-lab-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
 .ui-lab h3 { margin: 0 0 var(--space-3); }

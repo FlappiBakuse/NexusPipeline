@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { t } from "@legacy/core/i18n.js";
-import { toast } from "@legacy/core/ui.js";
+import { t } from "../../../platform/i18n";
+import { toast } from "../../../platform/toast";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import { editConfig, getEditConfigStatus, listEditSessions } from "../services/usersApi";

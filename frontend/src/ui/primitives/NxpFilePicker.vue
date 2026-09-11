@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 
 const props = withDefaults(defineProps<{ accept?: string; multiple?: boolean; disabled?: boolean; label?: string }>(), { accept: "", multiple: false, disabled: false, label: "选择文件" });
 const emit = defineEmits<{ change: [files: File[]] }>();

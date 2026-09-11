@@ -7,8 +7,7 @@
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- 下一版本（v0.15.8）计划：先建立插件桥接层边界与 contract tests，再迁移 i18n/API/page-state/shell/auth 等宿主基础设施，切换到真实 Vue Router，最后完成 legacy CSS 单轨化并删除 `@legacy` 与遗留平台模块。
-- v0.15.7 起前端运行时由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧 Web 入口、`wwwroot/views/` 与旧资源副本已删除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用。
+- 前端架构现状以 [DESIGN.md](DESIGN.md) 第 10.7 节和 [frontend-migration-coverage.md](frontend-migration-coverage.md) 为准；插件契约调整以 [PLUGIN_API.md](PLUGIN_API.md) 为准。
 
 ## 后续功能：插件生态扩展
 

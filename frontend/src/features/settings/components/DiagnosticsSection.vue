@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { t } from "@legacy/core/i18n.js";
-import { toast } from "@legacy/core/ui.js";
+import { api, isAbortError } from "../../../platform/api";
+import { t } from "../../../platform/i18n";
+import { toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import type { DiagnosticsData } from "../utils/settingsTypes";
 

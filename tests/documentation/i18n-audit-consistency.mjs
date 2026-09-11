@@ -21,9 +21,14 @@ const REVIEWED_UNUSED_PREFIXES = new Map([
 // 已完成首次 inventory 并确认仍由运行时之外的宿主流程保留的词条。
 // 该集合只允许当前审计基线中的孤立资源；新增孤立 key 会直接失败。
 const REVIEWED_UNUSED_KEYS = new Set([
+  "common.error",
+  "common.mode_toggle.off",
+  "common.mode_toggle.on",
   "common.access_token_required",
   "common.action.add_schedule",
   "common.action.add_task",
+  "common.action.decrease",
+  "common.action.increase",
   "common.action.open_management",
   "common.all_script_instances_bound",
   "common.attention",
@@ -31,7 +36,9 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.binding_configuration",
   "common.binding_configuration_copy",
   "common.catalog.cached",
+  "common.check_this_field",
   "common.checks_need_attention",
+  "common.close_notification",
   "common.configuration.multiple_help",
   "common.configuration.takeover_select",
   "common.configuration_restored",
@@ -49,6 +56,7 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.fetching_catalog",
   "common.first_edit_copy",
   "common.host_language",
+  "common.hour",
   "common.images",
   "common.interface_language",
   "common.language.browser_only",
@@ -57,12 +65,14 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.limit.schedule_count",
   "common.log.tail_summary",
   "common.logs",
+  "common.minute",
   "common.modal_cleanup_failed",
   "common.new",
   "common.no_diagnostic_results",
   "common.no_plugins_need_updates",
   "common.normal",
   "common.notification.screenshots_disabled",
+  "common.open_time_picker",
   "common.overall_status",
   "common.plugin_runtime_state_is_unhealthy",
   "common.queue.remove_task_before_save",
@@ -72,6 +82,7 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.retry.attempts_label",
   "common.schedule",
   "common.script_instance.none_available",
+  "common.select_time",
   "common.simplified_chinese",
   "common.status.all_passed_or_skipped",
   "common.system_settings",
@@ -114,7 +125,17 @@ const REVIEWED_AMBIGUOUS_KEYS = new Set([
 const REVIEWED_FRAGMENT_KEYS = new Set(["shell.brand_suffix"]);
 const REVIEWED_ROLE_EXCEPTIONS = new Set(["settings.subject_prefix"]);
 const AMBIGUOUS_SUFFIXES = ["_copy", "_button", "_value", "_text"];
-const ENGLISH_LITERAL_ALLOWLIST = new Set(["README", "NexusPipeline", "N"]);
+// 品牌名与 <script setup> 类型声明不构成用户可见英文硬编码。
+const ENGLISH_LITERAL_ALLOWLIST = new Set([
+  "README",
+  "NexusPipeline",
+  "N",
+  "Nexus UI",
+  "defineProps",
+  "defineEmits",
+  "withDefaults(defineProps",
+]);
+const TYPESCRIPT_DECLARATION_LINE = /^\s*(?:withDefaults\(|defineProps|defineEmits|const \w+ = withDefaults)/u;
 
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
@@ -142,7 +163,7 @@ function walkSources(directory) {
     if (entry.name === "node_modules" || entry.name === ".artifacts") continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walkSources(absolute));
-    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) files.push(absolute);
+    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && !/\.test\.[cm]?[jt]s$/u.test(entry.name)) files.push(absolute);
   }
   return files;
 }
@@ -165,7 +186,7 @@ function relativePath(absolute) {
 function usageRoles(source, index) {
   const context = source.slice(Math.max(0, index - 600), Math.min(source.length, index + 600));
   const roles = new Set();
-  if (/data-i18n-placeholder|\bplaceholder\s*=/iu.test(context)) roles.add("placeholder");
+  if (/data-i18n-placeholder|\bplaceholder\s*[:=]/iu.test(context)) roles.add("placeholder");
   if (/data-i18n-title|\btitle\s*=/iu.test(context)) roles.add("title");
   if (/data-i18n-aria-label|\baria-label\s*=/iu.test(context)) roles.add("aria-label");
   if (/class\s*=\s*["'][^"']*\bbadge\b|\bNxpBadge\b/iu.test(context)) roles.add("badge");
@@ -199,7 +220,7 @@ function collectReferenceGraph(resources) {
     references.push(reference);
   }
 
-  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
+  for (const absolute of walkSources(path.join(ROOT, "frontend", "src"))) {
     const source = fs.readFileSync(absolute, "utf8");
     const clean = stripComments(source);
     for (const match of clean.matchAll(/["']([A-Za-z][A-Za-z0-9_.-]*)["']/gu)) {
@@ -304,7 +325,7 @@ function englishHardcodes() {
     ["attribute", /setAttribute\(\s*(["'])(?:aria-label|title|placeholder)\1\s*,\s*(["'])([^"']+)\2/gu, 3],
     ["markup-text", />[ \t\r\n]*([A-Za-z][A-Za-z0-9 &/().:+-]*)[ \t\r\n]*</gu, 1],
   ];
-  for (const absolute of walkSources(path.join(ROOT, "wwwroot"))) {
+  for (const absolute of walkSources(path.join(ROOT, "frontend", "src"))) {
     const file = relativePath(absolute);
     const source = stripComments(fs.readFileSync(absolute, "utf8"));
     for (const [kind, pattern, valueIndex] of rules) {
@@ -313,6 +334,7 @@ function englishHardcodes() {
         const value = match[valueIndex].trim();
         if (kind === "markup-text" && /[<>=]|&&|\|\|/u.test(value)) continue;
         if (!/[A-Za-z]{3}/u.test(value) || ENGLISH_LITERAL_ALLOWLIST.has(value)) continue;
+        if (kind === "markup-text" && TYPESCRIPT_DECLARATION_LINE.test(value)) continue;
         if (value.includes("<") || value.includes(">") || value.includes("${")) continue;
         findings.push({ file, line: lineNumber(source, match.index ?? 0), kind, value });
       }

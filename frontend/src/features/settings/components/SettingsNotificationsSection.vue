@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { t } from "@legacy/core/i18n.js";
-import { toast } from "@legacy/core/ui.js";
+import { api, isAbortError } from "../../../platform/api";
+import { t } from "../../../platform/i18n";
+import { toast } from "../../../platform/toast";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";

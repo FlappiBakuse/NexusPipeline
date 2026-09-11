@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 const props = withDefaults(defineProps<{ id?: string; modelValue?: boolean; disabled?: boolean; label?: string; ariaLabel?: string; semanticRole?: "switch" | "button" }>(), { id: "", modelValue: false, disabled: false, label: "", ariaLabel: "", semanticRole: "button" });
 const emit = defineEmits<{ "update:modelValue": [value: boolean]; change: [value: boolean] }>();
 function toggle() { if (props.disabled) return; const value = !props.modelValue; emit("update:modelValue", value); emit("change", value); }

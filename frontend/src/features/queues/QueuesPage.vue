@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { t } from "@legacy/core/i18n.js";
-import { setTopbarTitle, toast } from "@legacy/core/ui.js";
-import { disposePluginSlot, renderPluginSlot, queueRuntimeLimits, scriptPluginStatus, scriptPluginUnavailableMessage } from "../../compat/queueRuntime";
+import { api, isAbortError } from "../../platform/api";
+import { t } from "../../platform/i18n";
+import { setTopbarTitle } from "../../platform/shell";
+import { toast } from "../../platform/toast";
+import { disposePluginSlot, renderPluginSlot } from "@bridge/index";
+import { queueRuntimeLimits } from "../../platform/queue-runtime";
+import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../scripts/utils/pluginStatus";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpLoadingState from "../../ui/composites/NxpLoadingState.vue";

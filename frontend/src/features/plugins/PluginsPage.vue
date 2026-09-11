@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { filterAndSortPlugins, defaultPluginViewState, isPluginViewStateActive } from "@legacy/core/plugin-list.js";
-import { renderMarkdown } from "@legacy/core/markdown.js";
-import { t } from "@legacy/core/i18n.js";
-import { setTopbarTitle, toast } from "@legacy/core/ui.js";
+import { api, isAbortError } from "../../platform/api";
+import { filterAndSortPlugins, defaultPluginViewState, isPluginViewStateActive } from "../../platform/plugin-list";
+import { renderMarkdown } from "../../platform/markdown";
+import { t } from "../../platform/i18n";
+import { setTopbarTitle } from "../../platform/shell";
+import { toast } from "../../platform/toast";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
@@ -138,7 +139,7 @@ async function loadList(tab: Tab, force = false) {
   list[tab].loading = true;
   list[tab].error = "";
   try {
-    const data = await api("GET", tab === "store" ? "/api/plugins/store" : "/api/plugins");
+    const data = await api<any>("GET", tab === "store" ? "/api/plugins/store" : "/api/plugins");
     if (id !== listSerial.value || activeTab.value !== tab) return;
     const plugins = (tab === "store" ? (data?.plugins || []) : data) as Plugin[];
     list[tab].plugins = Array.isArray(plugins) ? plugins : [];

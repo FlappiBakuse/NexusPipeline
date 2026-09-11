@@ -585,14 +585,14 @@ NexusPipeline/
 │   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
 ├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.5（无宿主业务引用）
 ├── frontend/           Vue/TypeScript/Vite 前端源码、路由、状态和 Nexus UI 组件
-│   ├── src/app/        App shell、插件 route 生命周期和启动流程
+│   ├── src/app/        App shell、启动编排、令牌提示和插件 route 生命周期
+│   ├── src/platform/   宿主平台服务（i18n、API、页面状态、外观、shell、工具提示等）
+│   ├── src/plugin-bridge/ Frontend API 1.4 插件桥接实现与宿主依赖边界
 │   ├── src/features/   按业务域组织的 Vue 页面、feature 组件、composable、service 与 utils
 │   ├── src/ui/         Nexus UI primitives 与公开 nxp-* Custom Elements
+│   ├── src/styles/     设计 token、基础元素样式与布局/shell 样式
 │   ├── src/stores/     Pinia 全局状态
 │   └── public/i18n/    宿主 zh-CN/en-US 词典（唯一资源源）
-├── wwwroot/            由 frontend 复用的内部平台服务（迁移期），不作为发布入口
-│   ├── core/           API、外观、插件运行时与其他迁移适配服务
-│   └── effects/        迁移期间复用的独立视觉效果
 ├── release/wwwroot/    Vite 构建后的发布静态 Web 资源
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
@@ -750,37 +750,45 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 ### 10.7 前端分层
 
 ```
-frontend/src/app/App.vue → router/stores/features/ui
-                         └→ frontend/src/legacy/* → wwwroot/core/*（平台服务与插件运行时）
+frontend/src/app/App.vue → router / stores / features / ui
+                         → app/bootstrap.ts → platform/*（平台服务）
+                         → plugin-bridge/index.ts → plugin-bridge/*（插件运行时，经 host-adapter 使用 platform/*）
 ```
 
 | 模块 | 职责 |
 |---|---|
-| `frontend/src/app/App.vue` | Vue shell、导航、响应式抽屉、Toast/通知容器与页面装配 |
-| `frontend/src/features/<domain>/<Domain>Page.vue` | 页面级请求调度、route/page 生命周期与高层数据编排；复杂事务进入同域 `components/`、与服务进入 `services/`、纯转换进入 `utils/` |
+| `frontend/src/app/App.vue` | Vue shell、导航、响应式抽屉、Toast/通知容器与 `RouterView` 页面装配 |
+| `frontend/src/router.ts` | 正式路由表：宿主页面按需加载，`/plugin/:pathMatch(.*)*` 交给插件 route 宿主，未知路径保持空 shell |
+| `frontend/src/features/<domain>/<Domain>Page.vue` | 页面级请求调度、route/page 生命周期与高层数据编排；复杂事务进入同域 `components/`、请求进入 `services/`、纯转换进入 `utils/` |
 | `frontend/src/ui/primitives/` | 类型化 Nexus UI primitives，并注册为插件可消费的 `nxp-*` Custom Elements |
-| `frontend/src/router.ts` / `frontend/src/stores/` | 保持 hash URL 的 Vue Router 与 Pinia shell 状态 |
-| `frontend/src/legacy/bootstrap.ts` | Vue shell 使用的 locale、主题、外观、认证、限制和插件 runtime 初始化服务 |
-| `frontend/src/legacy/auth.ts` | 远程访问令牌探测、提示和运行期间 401 重新认证入口 |
-| `frontend/src/app/PluginRouteHost.ts` | 插件 route 的 mount、leave、dispose 生命周期边界 |
-| `wwwroot/core/api.js` | Vue 页面和插件复用的请求封装（JSON/错误/AbortController 生命周期联动） |
-| `wwwroot/core/plugin-runtime.js` | Frontend API 1.4：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API、本地化、外观与运行预览宿主访问 |
-| `wwwroot/core/controls.js` | 插件表单控件的桥接实现；宿主新页面使用 `frontend/src/ui` 与 `nxp-*` 元素 |
-| `wwwroot/core/modal.js` / `wwwroot/core/ui.js` | Vue shell 与插件边界复用的弹窗、主题、Toast、顶部标题和导航服务 |
-| `wwwroot/core/duration.js` | `HH:MM:SS` 倒计时格式化 |
-| `wwwroot/core/i18n.js` | 浏览器本地语言偏好、宿主 zh-CN/en-US 词典、动态页面文案和日期/数字格式化；唯一资源源为 `frontend/public/i18n/` |
-| `wwwroot/core/plugin-slots.js` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染和清理 |
-| `wwwroot/core/appearance.js` | 主题 token、插件主题注册、服务端壁纸加载/轮换和配色 |
-| `wwwroot/core/state.js` | 插件 route/page token 与请求取消状态；页面自身仍使用 Vue 生命周期 |
-| `wwwroot/core/limits.js` | shell 启动时的约束警告服务 |
+| `frontend/src/stores/` | Pinia shell 状态（boot、导航抽屉、令牌提示） |
+| `frontend/src/app/bootstrap.ts` | shell 启动编排：locale、主题、认证、外观、限制、particles 与插件运行时初始化 |
+| `frontend/src/app/TokenPrompt.vue` | 远程访问令牌提示与运行期间 401 重新认证入口 |
+| `frontend/src/app/PluginRouteHost.vue` | 插件 route 的 mount、leave、dispose 生命周期边界 |
+| `frontend/src/platform/i18n.ts` | 浏览器本地语言偏好、宿主词典、动态页面文案和日期/数字/列表格式化；唯一资源源为 `frontend/public/i18n/` |
+| `frontend/src/platform/api.ts` | 宿主请求封装（bearer 头、`X-Nexus-Locale`、JSON/blob、错误码投影、AbortController 生命周期联动） |
+| `frontend/src/platform/page-state.ts` | 页面 route token、定时器与在途请求的代际管理 |
+| `frontend/src/platform/shell.ts` / `platform/toast.ts` | 顶部标题、导航态、主题切换以及 Toast、通知与字段错误状态 |
+| `frontend/src/platform/appearance.ts` | 主题 token、插件主题注册、服务端壁纸加载/轮换和配色 |
+| `frontend/src/platform/tooltip.ts` / `platform/auto-scroll.ts` | 延迟气泡提示与长文本滚动辅助 |
+| `frontend/src/platform/auth.ts` | 访问令牌探测、令牌校验与重新认证入口 |
+| `frontend/src/platform/limits.ts` | shell 启动时的约束警告层与完成操作提示卡片 |
+| `frontend/src/platform/markdown.ts` / `platform/format.ts` / `platform/plugin-list.ts` | README 渲染、状态与结果码投影、插件浏览筛选排序 |
+| `frontend/src/platform/execution-preview.ts` | 插件运行预览捕获（受控截图） |
+| `frontend/src/plugin-bridge/index.ts` | 宿主侧桥接 facade：`renderPluginSlot`、`disposePluginSlot`、`initPluginRuntime` 与插件 route/nav/lifecycle 接入 |
+| `frontend/src/plugin-bridge/runtime.ts` | Frontend API 1.4：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API、本地化、外观与运行预览宿主访问 |
+| `frontend/src/plugin-bridge/slots.ts` / `controls.ts` / `plugin-fields.ts` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染与清理，以及插件表单控件 |
+| `frontend/src/plugin-bridge/host-adapter.ts` | 桥接层唯一的宿主依赖边界；平台模块迁移只改这里的实现来源 |
+
+样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供布局、shell 与插件 surface 样式，Nexus UI 元件样式保留在组件 SFC 中。
 
 新增交互的落点：
 
-1. 新业务页面放在 `frontend/src/features/<domain>/`，通过 `api` service、Pinia 或组件本地状态获取数据，不直接操作页面外部 DOM。
+1. 新业务页面放在 `frontend/src/features/<domain>/`，通过 platform service、Pinia 或组件本地状态获取数据，不直接操作页面外部 DOM。
 2. 可复用控件优先放入 `frontend/src/ui/primitives/` 或 composite 目录；视觉变体使用类型化 props，插件边界使用公开 `nxp-*` 元素。
-3. Vue 页面使用明确的 props/emits、`data-testid` 业务定位和 `onBeforeUnmount` 清理轮询/订阅；路由保持现有 hash URL。
+3. Vue 页面使用明确的 props/emits、`data-testid` 业务定位和 `onBeforeUnmount` 清理轮询/订阅；路由使用 `router.ts` 的 hash URL 路由表。
 4. 已迁移页面的业务逻辑必须落在对应 `frontend/src/features/<domain>/`，通过组件事件、service 和 page-local state 管理交互；不得把新的业务逻辑扩展到旧 `data-action` 注册表。
-5. `wwwroot/core/` 迁移期平台模块只作为 Vue 外壳与插件桥接的内部实现；旧页面与 `wwwroot/views/` 已删除，不得恢复 HTML 字符串页面架构。
+5. 宿主 `app/**`、`features/**`、`ui/**` 与 `platform/**` 不引用 `plugin-bridge/` 内部实现，也不引用 `wwwroot/`；插件能力经 `@bridge/index` facade 与 host-adapter 边界提供，不得恢复 HTML 字符串页面架构。
 
 ### 10.8 插件扩展指南
 

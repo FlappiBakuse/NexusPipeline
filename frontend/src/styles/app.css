@@ -62,3 +62,40 @@
   opacity: 0;
   transform: translateY(-4px);
 }
+
+
+/* 基础元素样式：先于布局与组件样式加载，供 Nexus UI 元件类选择器按层叠规则覆盖。 */
+button, input, select, textarea {font: inherit;}
+button, a, input, select, textarea {-webkit-tap-highlight-color: transparent;}
+button {cursor: pointer;}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {outline: none; box-shadow: var(--focus);}
+a {color: inherit;}
+button, .btn {display: inline-flex; align-items: center; justify-content: center; min-height: var(--control-height); padding: 0 15px; border: 1px solid var(--content-control-border); border-radius: var(--radius-md); background: transparent; color: var(--text); font-size: 13px; font-weight: 650; line-height: 1; white-space: nowrap; transition: background .15s, border-color .15s, color .15s;}
+button:hover, .btn:hover {filter: none; background: var(--content-control-hover);}
+button:active, .btn:active {filter: none;}
+button.busy {cursor: wait; opacity: .65;}
+button.busy::after {content: ""; width: 12px; height: 12px; margin-left: 8px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite;}
+button.primary, .btn.primary {border-color: var(--accent-strong); background: var(--accent-strong); color: var(--on-accent);}
+button.primary:hover, .btn.primary:hover {border-color: var(--accent); background: var(--accent); color: var(--on-accent);}
+button.ghost, .btn.ghost {border-color: var(--content-control-border); background: var(--content-control); color: var(--muted);}
+button.ghost:hover, .btn.ghost:hover {background: var(--content-control-hover); filter: none;}
+button.danger, .btn.danger {border-color: var(--bad-border); background: var(--bad-soft); color: var(--bad);}
+button.danger:hover, .btn.danger:hover {border-color: var(--bad); background: var(--bad-soft); filter: none;}
+button.danger.solid, .btn.danger.solid {border-color: var(--bad); background: var(--bad); color: var(--on-accent);}
+button.sm, .btn.sm {min-height: 40px; padding: 0 11px; border-radius: 6px; font-size: 12px;}
+input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], input[type=url], input[type=email], input[type=tel], select, textarea {width: 100%; min-width: 0; padding: 0 12px; border: 1px solid var(--content-control-border); border-radius: 8px; outline: none; background-color: var(--content-control); color: var(--text); font-size: 13px; transition: border-color .15s, background .15s;}
+input:not([type]), input[type=text], input[type=search], input[type=number], input[type=password], input[type=time], input[type=date], input[type=url], input[type=email], input[type=tel], select {height: 40px;}
+select {appearance: none; -webkit-appearance: none; padding-right: 34px; background-image: var(--select-arrow); background-repeat: no-repeat; background-position: right 12px center; background-size: 12px 8px;}
+select:focus {border-color: var(--accent);}
+input[type=time], input[type=date] {color-scheme: inherit;}
+input::placeholder, textarea::placeholder {color: var(--faint);}
+input:disabled, select:disabled, textarea:disabled {cursor: not-allowed; opacity: .45;}
+textarea {min-height: 92px; padding: 11px 12px; resize: vertical; font-family: Consolas, monospace;}
+button.switch-control {display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 52px; min-width: 52px; height: 30px; min-height: 30px; padding: 0; border: 1px solid var(--content-control-border); border-radius: 999px; background: var(--content-control); color: transparent; box-shadow: none;}
+button.switch-control:hover {background: var(--content-control-hover);}
+button.switch-control:focus-visible {outline: 2px solid var(--accent); outline-offset: 2px;}
+button.switch-control[data-state="on"] .switch-track {background: var(--accent);}
+button.switch-control[data-state="on"] .switch-thumb {transform: translateX(22px);}
+button.switch-control:disabled, button.switch-control[aria-disabled="true"] {cursor: not-allowed; opacity: .45;}
+button.switch-control:disabled:hover, button.switch-control[aria-disabled="true"]:hover {background: var(--content-control);}
+button.switch-control:disabled:focus-visible, button.switch-control[aria-disabled="true"]:focus-visible {outline: none;}

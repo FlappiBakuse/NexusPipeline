@@ -29,7 +29,7 @@ function walkSources(directory) {
     if (entry.name === "node_modules" || entry.name === ".artifacts") continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walkSources(absolute));
-    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) files.push(absolute);
+    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && !/\.test\.[cm]?[jt]s$/u.test(entry.name)) files.push(absolute);
   }
   return files;
 }
@@ -37,7 +37,7 @@ function walkSources(directory) {
 function collectDirectReferences(knownKeys) {
   const references = [];
   const quoted = /["']([A-Za-z][A-Za-z0-9_.-]*)["']/gu;
-  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
+  for (const absolute of walkSources(path.join(ROOT, "frontend", "src"))) {
     const relativePath = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
     const source = fs.readFileSync(absolute, "utf8");
     for (const match of source.matchAll(quoted)) {

@@ -27,7 +27,7 @@ function walkSources(directory) {
     if (entry.name === "node_modules" || entry.name === ".artifacts") continue;
     const absolute = path.join(directory, entry.name);
     if (entry.isDirectory()) files.push(...walkSources(absolute));
-    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) files.push(absolute);
+    else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()) && !/\.test\.[cm]?[jt]s$/u.test(entry.name)) files.push(absolute);
   }
   return files;
 }
@@ -100,7 +100,7 @@ test("frontend translation references resolve to current host locale resources",
   const keys = new Set(Object.keys(JSON.parse(read("frontend/public/i18n/zh-CN.json"))));
   const missing = [];
   const dynamicPrefixes = [];
-  for (const absolute of [...walkSources(path.join(ROOT, "frontend", "src")), ...walkSources(path.join(ROOT, "wwwroot"))]) {
+  for (const absolute of walkSources(path.join(ROOT, "frontend", "src"))) {
     const relative = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
     const text = fs.readFileSync(absolute, "utf8");
     for (const reference of collectSourceKeyReferences(text, relative)) {
@@ -115,15 +115,18 @@ test("frontend translation references resolve to current host locale resources",
   assert.deepEqual(dynamicPrefixes, [], `missing dynamic frontend locale prefixes:\n${dynamicPrefixes.join("\n")}`);
 });
 
-test("frontend sources have no legacy ui namespace or hardcoded localized list punctuation", () => {
+test("host platform and plugin bridge sources follow the i18n source contract", () => {
   const failures = [];
-  for (const absolute of walkSources(path.join(ROOT, "wwwroot"))) {
-    const relative = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
-    const text = fs.readFileSync(absolute, "utf8");
-    if (/\bui\.(?!js\b)/u.test(text)) failures.push(`${relative}: legacy ui namespace`);
-    if (/\.join\(\s*["'](?:、|；|，|：)["']\s*\)/u.test(text)) failures.push(`${relative}: hardcoded localized list punctuation`);
-    if (/^(?:const|let)\s+\w+\s*=\s*t\(/mu.test(text)) failures.push(`${relative}: module-level translation cache`);
-    if (CJK.test(withoutComments(text))) failures.push(`${relative}: hardcoded CJK outside comments`);
+  const roots = [path.join(ROOT, "frontend", "src", "platform"), path.join(ROOT, "frontend", "src", "plugin-bridge")];
+  for (const root of roots) {
+    for (const absolute of walkSources(root)) {
+      const relative = path.relative(ROOT, absolute).replaceAll(path.sep, "/");
+      const text = fs.readFileSync(absolute, "utf8");
+      if (/\bui\.(?!js\b)/u.test(text)) failures.push(`${relative}: legacy ui namespace`);
+      if (/\.join\(\s*["'](?:、|；|，|：)["']\s*\)/u.test(text)) failures.push(`${relative}: hardcoded localized list punctuation`);
+      if (/^(?:const|let)\s+\w+\s*=\s*t\(/mu.test(text)) failures.push(`${relative}: module-level translation cache`);
+      if (CJK.test(withoutComments(text))) failures.push(`${relative}: hardcoded CJK outside comments`);
+    }
   }
   assert.deepEqual(failures, [], `i18n source contract failures:\n${failures.join("\n")}`);
 });

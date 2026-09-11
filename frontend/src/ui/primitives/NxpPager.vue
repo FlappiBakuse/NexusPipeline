@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 
 const props = withDefaults(defineProps<{
   page?: number;
@@ -25,9 +25,9 @@ const range = computed(() => {
   if (!props.total) return "";
   const from = (props.page - 1) * props.pageSize + 1;
   const to = Math.min(props.total, props.page * props.pageSize);
-  return t("common.pager.range", { from, to });
+  return t("common.pager.range", { from, to }, `, ${from}-${to}`);
 });
-const summary = computed(() => t("common.pager.summary", { total: props.total, range: range.value }));
+const summary = computed(() => t("common.pager.summary", { total: props.total, range: range.value }, `${props.total}`));
 const previousText = computed(() => props.previousLabel || t("common.previous", {}, "Previous"));
 const nextText = computed(() => props.nextLabel || t("common.next", {}, "Next"));
 

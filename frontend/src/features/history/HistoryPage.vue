@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { getLocale, t } from "@legacy/core/i18n.js";
-import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
-import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
-import { setTopbarTitle } from "@legacy/core/ui.js";
+import { api, isAbortError } from "../../platform/api";
+import { getLocale, t } from "../../platform/i18n";
+import { disposePluginSlot } from "@bridge/index";
+import { renderPluginSlot } from "@bridge/index";
+import { setTopbarTitle } from "../../platform/shell";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";

@@ -1,4 +1,4 @@
-import { api } from "@legacy/core/api.js";
+import { api } from "../../../platform/api";
 
 /** Scripts 域的请求封装。 */
 export function listScripts(): Promise<any> {

@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
-import { isAbortError } from "@legacy/core/api.js";
-import { state } from "@legacy/core/state.js";
-import { scriptPluginStatus, scriptPluginUnavailableMessage } from "@legacy/core/format.js";
-import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
-import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
-import { t } from "@legacy/core/i18n.js";
-import { toast } from "@legacy/core/ui.js";
+import { isAbortError } from "../../../platform/api";
+import { state } from "../../../platform/page-state";
+import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../../scripts/utils/pluginStatus";
+import { renderPluginSlot } from "@bridge/index";
+import { disposePluginSlot } from "@bridge/index";
+import { t } from "../../../platform/i18n";
+import { toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../../ui/primitives/NxpEntityIcon.vue";

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { toast } from "@legacy/core/ui.js";
-import { t } from "@legacy/core/i18n.js";
+import { api, isAbortError } from "../../platform/api";
+import { toast } from "../../platform/toast";
+import { t } from "../../platform/i18n";
 
 interface SystemAction {
   action?: string;

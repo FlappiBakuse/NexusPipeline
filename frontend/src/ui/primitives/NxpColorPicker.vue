@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 
 const props = withDefaults(defineProps<{ modelValue?: string; disabled?: boolean; ariaLabel?: string }>(), { modelValue: "#76a7ff", disabled: false, ariaLabel: "颜色" });
 const emit = defineEmits<{ "update:modelValue": [value: string]; change: [value: string] }>();

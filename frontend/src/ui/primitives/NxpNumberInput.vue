@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 
 const props = withDefaults(
   defineProps<{

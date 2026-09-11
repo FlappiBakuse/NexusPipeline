@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref } from "vue";
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../platform/i18n";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
 
 export interface NxpOption { value: string; label: string; disabled?: boolean; title?: string }

@@ -257,6 +257,9 @@ test("固定视口：核心页面行为与稳定元件保持视觉契约", async
 
   await page.goto(`${baseUrl}#/ui-lab?test=1`, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: "组件状态实验室", exact: true })).toBeVisible();
+  // 元件实验室由路由按需加载，需等宿主平台与 Nexus UI 元件样式生效后再取基线。
+  await expect(page.getByRole("button", { name: "主要操作", exact: true })).toBeVisible();
+  await expect(page.locator(".nxp-field-label", { hasText: "文本输入" })).toBeVisible();
   await expect(page.locator(".ui-lab-grid")).toBeVisible();
   await page.evaluate(() => document.getElementById("ambient-particles")?.remove());
   await page.evaluate(() => document.fonts?.ready);

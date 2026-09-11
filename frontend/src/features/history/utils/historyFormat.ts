@@ -1,4 +1,4 @@
-import { getLocale, t } from "@legacy/core/i18n.js";
+import { getLocale, t } from "../../../platform/i18n";
 import type { HistoryRecord } from "./historyTypes";
 
 export function formatDateTime(value?: string) {

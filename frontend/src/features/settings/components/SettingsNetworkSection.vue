@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { t } from "@legacy/core/i18n.js";
+import { t } from "../../../platform/i18n";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
 import NxpCollapseTransition from "../../../ui/composites/NxpCollapseTransition.vue";

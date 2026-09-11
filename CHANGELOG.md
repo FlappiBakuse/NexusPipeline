@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.8（Pre-release）
+
+### 插件桥接与外部契约
+
+- 插件桥接实现迁入 `frontend/src/plugin-bridge/`，宿主平台服务经单一 host adapter 注入，桥接层不再直接引用宿主内部模块。
+- 宿主侧补齐 Frontend API 1.4 contract tests：精确版本匹配、`host.*` 能力面、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
+
+### 宿主平台迁移
+
+- 宿主 i18n、API client、page state、shell 与 toast、认证、外观、tooltip、限制、markdown、particles 与启动编排迁入 `frontend/src/platform/` 与 `frontend/src/app/`，`frontend/src` 对旧 `wwwroot/` 源码零依赖。
+- 认证提示与远程重新认证改用 Nexus UI 弹窗；插件 route、宿主弹窗与页面字段错误行为保持不变。
+- 宿主页面切换到真实 Vue Router 路由表与懒加载，保留 route token、离页轮询清理、弹窗与监听清理、插件 route 生命周期与导航态同步。
+
+### 样式与静态资源
+
+- 样式收敛为 token、基础元素、布局/shell 与组件四层：`styles/app.css` 承载基础元素样式，`styles/shell.css` 承载布局与插件 surface 样式，Nexus UI 元件样式保留在组件 SFC 中。
+- 删除 `@legacy` alias、`wwwroot/package.json`、`wwwroot/style.css` 与全部遗留平台模块；发布包 Web 静态资源只来自 `frontend/dist`。
+- 清理失去消费者的宿主语言资源键，并把 Web Logic 用例统一迁入 frontend Vitest。
+
 ## v0.15.7（Pre-release）
 
 ### 迁移完整性

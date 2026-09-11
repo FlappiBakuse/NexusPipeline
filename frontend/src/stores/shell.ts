@@ -5,6 +5,7 @@ export const useShellStore = defineStore("shell", {
     booted: false,
     bootError: "",
     navOpen: false,
+    tokenPromptOpen: false,
   }),
   actions: {
     markBooted() {

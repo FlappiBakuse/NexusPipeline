@@ -41,11 +41,11 @@ build.cmd
 ```text
 release/
 ├── nexus-pipeline.exe   ← 框架依赖的单文件、requireAdministrator
-├── wwwroot/              ← 纯静态网页
+├── wwwroot/              ← 由 frontend/dist 同步的纯静态网页
 └── plugins/              ← 用户插件运行目录（由插件管理器维护）
 ```
 
-构建脚本先安装并校验 `frontend/` 依赖，再生成 Vite 静态资源，将其同步到发布包 `release/wwwroot/`；随后调用 `tools/source-hash.mjs` 计算宿主 `src/` 与 `frontend/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`、`node_modules/` 和 `dist/`。插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
+构建脚本先安装并校验 `frontend/` 依赖，再生成 Vite 静态资源，将其同步到发布包 `release/wwwroot/`；随后调用 `tools/source-hash.mjs` 计算宿主 `src/` 与 `frontend/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`、`node_modules/` 和 `dist/`。仓库根目录没有 `wwwroot/` 源码目录：宿主前端源码唯一入口是 `frontend/`。插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
 
 重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
 

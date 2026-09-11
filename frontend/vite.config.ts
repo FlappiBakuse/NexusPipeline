@@ -11,7 +11,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.join(frontendRoot, "src"),
-      "@legacy": path.join(frontendRoot, "..", "wwwroot"),
+      "@platform": path.join(frontendRoot, "src", "platform"),
+      "@bridge": path.join(frontendRoot, "src", "plugin-bridge"),
     },
   },
   server: {

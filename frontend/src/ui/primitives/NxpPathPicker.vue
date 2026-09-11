@@ -64,6 +64,8 @@ function browse(
       <button
         class="nxp-path-trigger nxp-path-choice"
         type="button"
+        data-path-trigger
+        data-testid="path-picker-file"
         :disabled="props.disabled"
         :aria-label="`${props.ariaLabel}选择文件`"
         @click="browse('file')"
@@ -73,6 +75,8 @@ function browse(
       <button
         class="nxp-path-trigger nxp-path-choice"
         type="button"
+        data-path-trigger
+        data-testid="path-picker-folder"
         :disabled="props.disabled"
         :aria-label="`${props.ariaLabel}选择文件夹`"
         @click="browse('folder')"
@@ -84,6 +88,8 @@ function browse(
       v-else
       class="nxp-path-trigger"
       type="button"
+      data-path-trigger
+      data-testid="path-picker"
       :disabled="props.disabled"
       :aria-label="`${props.ariaLabel}浏览`"
       @click="browse()"

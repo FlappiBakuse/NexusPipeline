@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import { apiBlob, isAbortError } from "@legacy/core/api.js";
+import { apiBlob, isAbortError } from "../../platform/api";
 import NxpIcon from "./NxpIcon.vue";
 
 const props = withDefaults(
@@ -60,7 +60,7 @@ onBeforeUnmount(() => {
   </span>
 </template>
 
-<style scoped>
+<style>
 .nxp-entity-icon img {
   width: 100%;
   height: 100%;

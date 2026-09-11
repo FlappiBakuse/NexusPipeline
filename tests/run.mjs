@@ -80,12 +80,11 @@ function runCmdFile(filePath, args = [], options = {}) {
 
 function webTestFiles() {
   const directory = path.join(projectRoot, "tests", "web");
-  const files = fs.readdirSync(directory)
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory)
     .filter(name => name.endsWith(".test.mjs"))
     .sort()
     .map(name => path.join(directory, name));
-  if (files.length === 0) throw new Error("未找到 Web Logic 测试文件");
-  return files;
 }
 
 function syntaxTestFiles() {
@@ -140,7 +139,12 @@ async function runUnit() {
 }
 
 async function runWeb() {
-  return runProcess(nodeCommand, ["--test", ...webTestFiles()]);
+  const files = webTestFiles();
+  if (files.length === 0) {
+    console.error("[Web Logic] 当前 Web Logic 用例由 frontend Vitest 承载，本步骤无独立 Node 用例。");
+    return 0;
+  }
+  return runProcess(nodeCommand, ["--test", ...files]);
 }
 
 async function runDocs() {

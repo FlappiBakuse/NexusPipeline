@@ -1,28 +1,19 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from "vue";
-import { useRoute } from "vue-router";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { RouterView, useRoute } from "vue-router";
 import { useShellStore } from "../stores/shell";
-import PluginRouteHost from "./PluginRouteHost";
 import BootLoadingState from "./BootLoadingState.vue";
-import DashboardPage from "../features/dashboard/DashboardPage.vue";
-import HistoryPage from "../features/history/HistoryPage.vue";
-import PluginsPage from "../features/plugins/PluginsPage.vue";
-import QueuesPage from "../features/queues/QueuesPage.vue";
-import DispatchPage from "../features/dispatch/DispatchPage.vue";
-import SettingsPage from "../features/settings/SettingsPage.vue";
-import ScriptsPage from "../features/scripts/ScriptsPage.vue";
-import UsersPage from "../features/users/UsersPage.vue";
-import { bootstrapFrontend } from "../legacy/bootstrap";
-import { applyTranslations, t } from "@legacy/core/i18n.js";
-import { setNavOpen } from "@legacy/core/ui.js";
-import { cycleTheme } from "@legacy/core/ui.js";
-import { enterPage } from "@legacy/core/state.js";
-import { isAbortError } from "@legacy/core/api.js";
-import { initAutoScroll } from "@legacy/core/ui.js";
+import TokenPrompt from "./TokenPrompt.vue";
+import { bootstrapFrontend } from "./bootstrap";
+import { applyTranslations, t } from "../platform/i18n";
+import { setNavOpen } from "../platform/shell";
+import { cycleTheme } from "../platform/shell";
+import { enterPage } from "../platform/page-state";
+import { isAbortError } from "../platform/api";
+import { initAutoScroll } from "../platform/auto-scroll";
+import { registerTokenPromptRenderer } from "../platform/auth";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
-import { installModalBehavior } from "../ui/modal";
-import UiLab from "../ui/UiLab.vue";
 
 const route = useRoute();
 const shell = useShellStore();
@@ -31,27 +22,6 @@ const segments = computed(() => {
   const path = String(route.path || "/dashboard").replace(/^\/+|\/+$/g, "");
   return (path || "dashboard").split("/").filter(Boolean);
 });
-const currentPage = computed<Component | null>(() => {
-  if (!shell.booted) return shell.bootError ? null : BootLoadingState;
-  switch (segments.value[0]) {
-    case "dashboard": return DashboardPage;
-    case "history": return HistoryPage;
-    case "plugins": return PluginsPage;
-    case "queues": return QueuesPage;
-    case "dispatch": return DispatchPage;
-    case "settings": return SettingsPage;
-    case "ui-lab": return route.query.test === "1" ? UiLab : null;
-    case "scripts": return ScriptsPage;
-    case "users": return UsersPage;
-    case "plugin": return PluginRouteHost;
-    default: return null;
-  }
-});
-const currentPageProps = computed<Record<string, unknown>>(() =>
-  segments.value[0] === "plugin"
-    ? { segments: segments.value, ready: shell.booted }
-    : {},
-);
 const navigation = [
   ["dashboard", "dashboard", "shell.dashboard"],
   ["users", "users", "shell.users"],
@@ -62,7 +32,6 @@ const navigation = [
   ["plugins", "plugins", "shell.plugins"],
   ["settings", "settings", "shell.settings"],
 ] as const;
-let uninstallModalBehavior: (() => void) | null = null;
 let autoScrollObserver: MutationObserver | null = null;
 let autoScrollFrame: number | null = null;
 
@@ -90,6 +59,7 @@ function closeOnDesktopResize() {
   if (window.innerWidth > 820 && shell.navOpen) closeNav();
 }
 
+// 路由提交后终止上一页面的轮询/请求代际，并关闭移动端抽屉。
 watch(() => route.fullPath, () => {
   enterPage(segments.value[0] || "dashboard");
   if (shell.navOpen) closeNav();
@@ -103,15 +73,16 @@ onBeforeUnmount(() => {
     autoScrollFrame = null;
   }
   window.removeEventListener("resize", scheduleAutoScroll);
-  uninstallModalBehavior?.();
-  uninstallModalBehavior = null;
   document.removeEventListener("click", closeOnBackdrop, true);
   window.removeEventListener("resize", closeOnDesktopResize);
+  registerTokenPromptRenderer(null);
   setNavOpen(false);
 });
 
 onMounted(async () => {
-  uninstallModalBehavior = installModalBehavior();
+  registerTokenPromptRenderer(() => {
+    shell.tokenPromptOpen = true;
+  });
   closeOnDesktopResize();
   document.addEventListener("click", closeOnBackdrop, true);
   window.addEventListener("resize", closeOnDesktopResize);
@@ -164,11 +135,13 @@ function openNav() {
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
       <Transition name="nxp-page" mode="out-in" appear>
-        <component :is="currentPage" v-if="currentPage" :key="`${route.fullPath}:${shell.booted ? 'ready' : 'boot'}`" v-bind="currentPageProps" />
+        <RouterView v-if="shell.booted" :key="route.fullPath" />
+        <BootLoadingState v-else-if="!shell.bootError" />
       </Transition>
     </div>
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="notice-stack" aria-live="polite" :aria-label="t('shell.page_notifications')" data-i18n-aria-label="shell.page_notifications"></div>
-  <div v-if="shell.bootError" class="empty nxp-boot-error" role="alert"><strong>页面加载失败</strong><span>{{ shell.bootError }}</span></div>
+  <div v-if="shell.bootError" class="empty nxp-boot-error" role="alert"><strong>{{ t("shell.boot.error_details") }}</strong><span>{{ shell.bootError }}</span></div>
+  <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
 </template>

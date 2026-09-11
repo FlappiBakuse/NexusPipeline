@@ -9,7 +9,9 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      "@legacy": path.join(frontendRoot, "..", "wwwroot"),
+      "@": path.join(frontendRoot, "src"),
+      "@platform": path.join(frontendRoot, "src", "platform"),
+      "@bridge": path.join(frontendRoot, "src", "plugin-bridge"),
     },
   },
   test: {

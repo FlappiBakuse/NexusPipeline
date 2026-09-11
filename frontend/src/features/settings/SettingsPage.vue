@@ -7,16 +7,17 @@ import {
   reactive,
   ref,
 } from "vue";
-import { api, isAbortError } from "@legacy/core/api.js";
-import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
-import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
+import { api, isAbortError } from "../../platform/api";
+import { renderPluginSlot } from "@bridge/index";
+import { disposePluginSlot } from "@bridge/index";
 import {
   getLocale,
   getLocaleOptions,
   setLocale,
   t,
-} from "@legacy/core/i18n.js";
-import { setTopbarTitle, toast } from "@legacy/core/ui.js";
+} from "../../platform/i18n";
+import { setTopbarTitle } from "../../platform/shell";
+import { toast } from "../../platform/toast";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
@@ -227,7 +228,7 @@ function saveUpdates() {
 }
 async function refreshRemote() {
   try {
-    const data = await api("GET", "/api/settings");
+    const data = await api<any>("GET", "/api/settings");
     applyResponse(data);
     remoteAddresses.value = Array.isArray(data?.status?.remote?.lanAddresses)
       ? data.status.remote.lanAddresses
@@ -289,7 +290,7 @@ async function changeLocale(value: string | string[]) {
 async function testNotifications() {
   await saveChain;
   try {
-    const result = await api("POST", "/api/settings/test");
+    const result = await api<any>("POST", "/api/settings/test");
     toast(
       result?.ok
         ? t("settings.notification.test_success")

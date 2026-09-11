@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { api, apiBlob, isAbortError } from "@legacy/core/api.js";
-import { t } from "@legacy/core/i18n.js";
-import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
-import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
+import { api, apiBlob, isAbortError } from "../../../platform/api";
+import { t } from "../../../platform/i18n";
+import { renderPluginSlot } from "@bridge/index";
+import { disposePluginSlot } from "@bridge/index";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";

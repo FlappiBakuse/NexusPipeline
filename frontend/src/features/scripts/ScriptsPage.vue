@@ -6,15 +6,16 @@ import {
   onMounted,
   ref,
 } from "vue";
-import { isAbortError } from "@legacy/core/api.js";
-import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
-import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
+import { isAbortError } from "../../platform/api";
+import { renderPluginSlot } from "@bridge/index";
+import { disposePluginSlot } from "@bridge/index";
 import {
   scriptPluginStatus,
   scriptPluginUnavailableMessage,
-} from "@legacy/core/format.js";
-import { t } from "@legacy/core/i18n.js";
-import { setTopbarTitle, toast } from "@legacy/core/ui.js";
+} from "../scripts/utils/pluginStatus";
+import { t } from "../../platform/i18n";
+import { setTopbarTitle } from "../../platform/shell";
+import { toast } from "../../platform/toast";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";

@@ -18,13 +18,16 @@ vi.mock("./services/scriptsApi", () => ({
   updateScript: (id: string, input: unknown) => updateScript(id, input),
 }));
 
-vi.mock("@legacy/core/ui.js", () => ({
+vi.mock("../../platform/toast", () => ({
   toast: (...args: unknown[]) => toast(...args),
+}));
+vi.mock("../../platform/shell", () => ({
   setTopbarTitle: vi.fn(),
 }));
-
-vi.mock("@legacy/core/plugin-slots.js", () => ({ renderPluginSlot: vi.fn() }));
-vi.mock("@legacy/core/plugin-runtime.js", () => ({ disposePluginSlot: vi.fn() }));
+vi.mock("@bridge/index", () => ({
+  renderPluginSlot: vi.fn(),
+  disposePluginSlot: vi.fn(),
+}));
 
 import ScriptEditorModal from "./ScriptEditorModal.vue";
 
