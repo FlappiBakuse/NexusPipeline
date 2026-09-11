@@ -8,10 +8,12 @@ const props = withDefaults(
     min?: number;
     max?: number;
     step?: number;
+    placeholder?: string;
+    help?: string;
     disabled?: boolean;
     ariaLabel?: string;
   }>(),
-  { id: "", modelValue: "", disabled: false, step: 1, ariaLabel: "" },
+  { id: "", modelValue: "", disabled: false, step: 1, placeholder: "", help: "", ariaLabel: "" },
 );
 const emit = defineEmits<{
   "update:modelValue": [value: number | string];
@@ -41,7 +43,7 @@ function stepValue(direction: 1 | -1) {
 </script>
 
 <template>
-  <div class="nxp-number" data-nxp-number>
+  <div class="nxp-number" data-nxp-number :data-help="props.help || undefined">
     <input
       :id="props.id || undefined"
       class="nxp-number-input"
@@ -52,6 +54,7 @@ function stepValue(direction: 1 | -1) {
       :min="min"
       :max="max"
       :step="step"
+      :placeholder="placeholder || undefined"
       :disabled="disabled"
       :aria-label="ariaLabel || undefined"
       @input="update"

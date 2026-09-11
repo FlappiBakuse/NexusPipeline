@@ -22,6 +22,8 @@ import Pager from "./primitives/NxpPager.vue";
 import Modal from "./primitives/NxpModal.vue";
 import Toast from "./primitives/NxpToast.vue";
 import Icon from "./primitives/NxpIcon.vue";
+import SwitchSetting from "./composites/NxpSwitchSetting.vue";
+import LoadingState from "./composites/NxpLoadingState.vue";
 
 export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-button": Button,
@@ -47,6 +49,8 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-modal": Modal,
   "nxp-toast": Toast,
   "nxp-icon": Icon,
+  "nxp-switch-setting": SwitchSetting,
+  "nxp-loading-state": LoadingState,
 } as const;
 
 export function registerNexusElements() {

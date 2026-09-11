@@ -1,3 +1,5 @@
+import { hideTooltip } from "@legacy/core/tooltip.js";
+
 type ModalMask = HTMLElement;
 
 function topModalMask() {
@@ -55,6 +57,7 @@ export function installModalBehavior() {
     if (!modal) return;
     if (event.key === "Escape") {
       if (isLocked(mask)) {
+        hideTooltip();
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
@@ -105,7 +108,8 @@ export function installModalBehavior() {
       if (returnFocus && document.contains(returnFocus)) returnFocus.focus({ preventScroll: true });
       returnFocus = null;
     } else if (mask) {
-      queueFocus();
+      const modal = mask.querySelector<HTMLElement>("[role='dialog'], .modal");
+      if (modal && !modal.contains(document.activeElement)) queueFocus();
     }
     hadModal = Boolean(mask);
   });

@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { api, isAbortError } from "@legacy/core/api.js";
 import { scriptPluginStatus, scriptPluginUnavailableMessage } from "@legacy/core/format.js";
+import { state } from "@legacy/core/state.js";
 import { renderPluginSlot } from "@legacy/core/plugin-slots.js";
 import { disposePluginSlot } from "@legacy/core/plugin-runtime.js";
 import { t } from "@legacy/core/i18n.js";
@@ -12,8 +13,9 @@ import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
+import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
+import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
 
 interface BindingEffective {
   enabled?: boolean;
@@ -66,6 +68,7 @@ interface User {
 interface Script {
   id: string;
   name: string;
+  index?: number;
   pluginType?: string;
 }
 interface Plugin {
@@ -175,7 +178,14 @@ const availableBindingScripts = computed(() => {
       (binding) => binding.scriptInstanceId,
     ),
   );
-  return scripts.value.filter((script) => !bound.has(script.id));
+  return scripts.value
+    .slice()
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .filter((script) => {
+      if (bound.has(script.id)) return false;
+      const status = scriptPluginStatus(script, plugins.value);
+      return !status.specialized || status.available;
+    });
 });
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -432,7 +442,7 @@ async function browseGlobalPath(key: "preRunScript" | "postRunScript", kind: "fi
       kind,
       title: key === "preRunScript" ? t("users.before_task_script_path") : t("users.after_task_script_path"),
       initialPath: String(draft.settings.advanced[key] || "") || undefined,
-      filter: "",
+      filter: t("users.script_file_filter"),
     }) as { path?: string };
     if (result?.path) setGlobalPath(key, result.path);
   } catch (reason) {
@@ -577,6 +587,7 @@ function closeUserManagement() {
   for (const slot of slots) void disposePluginSlot(slot);
   userDraft.value = null;
   expandedBindingId.value = null;
+  bindingEditMode.value = false;
   addBindingOpen.value = false;
   selectedBindingIds.value = [];
 }
@@ -593,6 +604,39 @@ function bindingName(binding: Binding) {
 function bindingStatus(binding: Binding) {
   const script = scripts.value.find(item => item.id === binding.scriptInstanceId);
   return script ? scriptPluginUnavailableMessage(script, plugins.value) : "";
+}
+
+function bindingPluginStatus(binding: Binding) {
+  const script = scripts.value.find(item => item.id === binding.scriptInstanceId);
+  return script ? scriptPluginStatus(script, plugins.value) : null;
+}
+
+function bindingEnabled(binding: Binding) {
+  return bindingValue(binding, "enabled") !== false && bindingDays(binding) !== 0;
+}
+
+function numericValue(value: unknown, fallback = -1) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function maxRunDays() {
+  const limits = (state as typeof state & { limits?: { maxRunDays?: number } }).limits;
+  return Number(limits?.maxRunDays ?? 365);
+}
+
+function maxSuccessfulRunsPerDay() {
+  const limits = (state as typeof state & { limits?: { maxSuccessfulRunsPerDay?: number } }).limits;
+  return Number(limits?.maxSuccessfulRunsPerDay ?? 10);
+}
+
+function bindingOverrideHelp(binding: Binding, category: keyof BindingLocks) {
+  return binding.locks?.[category]
+    ? t("users.binding.global_override.help", {
+        global: t("users.global.title"),
+        script: t("common.script_instance"),
+      })
+    : "";
 }
 
 function bindingDays(binding: Binding) {
@@ -658,7 +702,7 @@ async function browseBindingPath(binding: Binding, key: "preRunScript" | "postRu
       kind,
       title: key === "preRunScript" ? t("users.before_task_script_path") : t("users.after_task_script_path"),
       initialPath: String(bindingValue(binding, key) || "") || undefined,
-      filter: "",
+      filter: t("users.script_file_filter"),
     }) as { path?: string };
     if (result?.path) setBindingPath(binding, key, result.path);
   } catch (reason) {
@@ -678,6 +722,16 @@ function toggleBinding(binding: Binding) {
       ? null
       : binding.scriptInstanceId;
   addBindingOpen.value = false;
+  void paintBindingSlots();
+}
+
+function toggleBindingEdit() {
+  bindingEditMode.value = !bindingEditMode.value;
+  if (bindingEditMode.value) {
+    expandedBindingId.value = null;
+    addBindingOpen.value = false;
+    selectedBindingIds.value = [];
+  }
   void paintBindingSlots();
 }
 function startBindingDrag(event: DragEvent, id: string) {
@@ -1299,69 +1353,53 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="settings-list">
-                <div class="switch-row">
-                  <span class="field-label">{{
-                    t("users.sync_general_settings")
-                  }}</span
-                  ><NxpSwitch
-                    :model-value="globalDraft.settings.general.syncEnabled"
-                    :aria-label="t('users.sync_general_settings')"
-                    @update:model-value="
+                <NxpSwitchSetting
+                  :label="t('users.sync_general_settings')"
+                  :description="t('users.global.general_override_help')"
+                  :model-value="globalDraft.settings.general.syncEnabled"
+                  :aria-label="t('users.sync_general_settings')"
+                  @update:model-value="
                       setGlobalSwitch('general', 'syncEnabled', $event)
                     "
-                  />
-                </div>
-                <div class="switch-row">
-                  <span class="field-label">{{ t("common.enabled") }}</span
-                  ><NxpSwitch
-                    :model-value="globalDraft.settings.general.enabled"
-                    :aria-label="t('common.enabled')"
-                    @update:model-value="
+                />
+                <NxpSwitchSetting
+                  :label="t('common.enabled')"
+                  :description="t('users.binding.run_days.zero_help')"
+                  :model-value="globalDraft.settings.general.enabled"
+                  :aria-label="t('common.enabled')"
+                  @update:model-value="
                       setGlobalSwitch('general', 'enabled', $event)
                     "
-                  />
-                </div>
+                />
               </div>
               <div class="field">
                 <label class="field-label" for="gm-general-run-days">{{
                   t("common.run_days")
-                }}</label
-                ><input
+                }}</label>
+                <NxpNumberInput
                   id="gm-general-run-days"
-                  :value="globalDraft.settings.general.runDays"
-                  type="number"
-                  min="-1"
-                  max="365"
-                  step="1"
+                  :model-value="globalDraft.settings.general.runDays"
+                  :min="-1"
+                  :max="maxRunDays()"
                   :placeholder="t('users.global.run_days.placeholder')"
-                  @input="
-                    setGlobalInput(
-                      'general',
-                      'runDays',
-                      Number.isFinite(Number(inputValue($event))) ? Number(inputValue($event)) : -1,
-                    )
-                  "
+                  :help="t('users.global.run_days.help')"
+                  :aria-label="t('common.run_days')"
+                  @update:model-value="setGlobalInput('general', 'runDays', numericValue($event))"
                 />
               </div>
               <div class="field">
                 <label class="field-label" for="gm-general-max-success">{{
                   t("users.maximum_successful_runs")
-                }}</label
-                ><input
+                }}</label>
+                <NxpNumberInput
                   id="gm-general-max-success"
-                  :value="globalDraft.settings.general.maxSuccessfulRunsPerDay"
-                  type="number"
-                  min="-1"
-                  max="10"
-                  step="1"
+                  :model-value="globalDraft.settings.general.maxSuccessfulRunsPerDay"
+                  :min="-1"
+                  :max="maxSuccessfulRunsPerDay()"
                   :placeholder="t('users.unlimited_placeholder')"
-                  @input="
-                    setGlobalInput(
-                      'general',
-                      'maxSuccessfulRunsPerDay',
-                      Number.isFinite(Number(inputValue($event))) ? Number(inputValue($event)) : -1,
-                    )
-                  "
+                  :help="t('users.binding.daily_limit.help')"
+                  :aria-label="t('users.maximum_successful_runs')"
+                  @update:model-value="setGlobalInput('general', 'maxSuccessfulRunsPerDay', numericValue($event))"
                 />
               </div>
             </section>
@@ -1373,32 +1411,26 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="settings-list">
-                <div class="switch-row">
-                  <span class="field-label">{{
-                    t("users.binding.sync_notifications")
-                  }}</span
-                  ><NxpSwitch
-                    :model-value="globalDraft.settings.notification.syncEnabled"
-                    :aria-label="t('users.binding.sync_notifications')"
-                    @update:model-value="
+                <NxpSwitchSetting
+                  :label="t('users.binding.sync_notifications')"
+                  :description="t('users.global.notification_override_help')"
+                  :model-value="globalDraft.settings.notification.syncEnabled"
+                  :aria-label="t('users.binding.sync_notifications')"
+                  @update:model-value="
                       setGlobalSwitch('notification', 'syncEnabled', $event)
                     "
-                  />
-                </div>
-                <div class="switch-row">
-                  <span class="field-label">{{
-                    t("users.enable_notifications")
-                  }}</span
-                  ><NxpSwitch
-                    :model-value="
+                />
+                <NxpSwitchSetting
+                  :label="t('users.enable_notifications')"
+                  :description="t('users.global.notification.enabled_help')"
+                  :model-value="
                       globalDraft.settings.notification.notifyEnabled
                     "
                     :aria-label="t('users.enable_notifications')"
                     @update:model-value="
                       setGlobalSwitch('notification', 'notifyEnabled', $event)
                     "
-                  />
-                </div>
+                />
               </div>
               <div class="field">
                 <label class="field-label" for="gm-notification-smtp">{{
@@ -1422,18 +1454,15 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="settings-list">
-                <div class="switch-row">
-                  <span class="field-label">{{
-                    t("users.sync_advanced_settings")
-                  }}</span
-                  ><NxpSwitch
-                    :model-value="globalDraft.settings.advanced.syncEnabled"
-                    :aria-label="t('users.sync_advanced_settings')"
-                    @update:model-value="
+                <NxpSwitchSetting
+                  :label="t('users.sync_advanced_settings')"
+                  :description="t('users.global.advanced_override_help')"
+                  :model-value="globalDraft.settings.advanced.syncEnabled"
+                  :aria-label="t('users.sync_advanced_settings')"
+                  @update:model-value="
                       setGlobalSwitch('advanced', 'syncEnabled', $event)
                     "
-                  />
-                </div>
+                />
               </div>
               <div class="field">
                 <label class="field-label" for="gm-advanced-pre">{{
@@ -1445,10 +1474,11 @@ onBeforeUnmount(() => {
                   kind="file"
                   :placeholder="t('users.pre_task_placeholder')"
                   :aria-label="t('users.before_task_script_path')"
+                  :filter="t('users.script_file_filter')"
+                  :help="t('users.pre_task_help')"
                   @update:model-value="setGlobalPath('preRunScript', $event)"
                   @browse="browseGlobalPath('preRunScript', $event)"
                 />
-                <span class="muted">{{ t("users.pre_task_help") }}</span>
               </div>
               <div class="field">
                 <label class="field-label" for="gm-advanced-post">{{
@@ -1460,10 +1490,11 @@ onBeforeUnmount(() => {
                   kind="file"
                   :placeholder="t('users.post_task_placeholder')"
                   :aria-label="t('users.after_task_script_path')"
+                  :filter="t('users.script_file_filter')"
+                  :help="t('users.post_task_help')"
                   @update:model-value="setGlobalPath('postRunScript', $event)"
                   @browse="browseGlobalPath('postRunScript', $event)"
                 />
-                <span class="muted">{{ t("users.post_task_help") }}</span>
               </div>
             </section>
           </div>
@@ -1505,10 +1536,16 @@ onBeforeUnmount(() => {
               </div>
               <div class="plugin-contribution-fields">
                 <template v-for="field in contribution.fields || []" :key="field.key">
-                  <div v-if="fieldType(field) === 'switch'" class="switch-row plugin-field">
-                    <span class="field-label">{{ field.label }}<span v-if="field.required" class="req"> *</span></span>
-                    <NxpSwitch :model-value="contributionValue(contribution, field.key) === true" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field.key, $event)" />
-                  </div>
+                  <NxpSwitchSetting
+                    v-if="fieldType(field) === 'switch'"
+                    class="plugin-field"
+                    :label="`${field.label}${field.required ? ' *' : ''}`"
+                    :description="field.description"
+                    :model-value="contributionValue(contribution, field.key) === true"
+                    :aria-label="field.label"
+                    :disabled="field.readOnly"
+                    @update:model-value="setContributionValue(contribution, field.key, $event)"
+                  />
                   <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field">
                     <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
                     <textarea :id="fieldId(contribution, field)" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setContributionValue(contribution, field.key, inputValue($event))"></textarea>
@@ -1602,12 +1639,22 @@ onBeforeUnmount(() => {
                 rows="3"
               ></textarea>
             </div>
-            <div v-if="userDraft.avatarUrl" class="user-avatar-setting">
-              <span class="muted">{{ t("users.custom_avatar") }}</span>
+            <div class="user-avatar-setting">
+              <span class="muted">{{ userDraft.avatarUrl ? t("users.custom_avatar") : t("users.avatar_upload") }}</span>
+              <button class="tertiary" type="button" @click.stop="uploadAvatar(userDraft.id)">{{ t("users.avatar_upload") }}</button>
+              <template v-if="userDraft.avatarUrl">
               <button class="tertiary" type="button" @click.stop="removeAvatar(userDraft.id)">{{ t("users.remove_custom_avatar") }}</button>
+              </template>
             </div>
           </section>
-          <section class="subsection user-binding-section">
+          <section
+            class="subsection user-binding-section"
+            :class="{
+              'um-section-expanding': Boolean(expandedBindingId),
+              'um-binding-editing': bindingEditMode,
+            }"
+            data-testid="um-binding-section"
+          >
             <div class="section-heading um-binding-section-heading">
               <div>
                 <h3>{{ t("users.bound_script_instances") }}</h3>
@@ -1617,7 +1664,8 @@ onBeforeUnmount(() => {
                 class="ghost sm um-binding-edit-toggle"
                 type="button"
                 :aria-pressed="bindingEditMode"
-                @click.stop="bindingEditMode = !bindingEditMode"
+                :hidden="Boolean(expandedBindingId)"
+                @click.stop="toggleBindingEdit"
               >
                 {{
                   bindingEditMode
@@ -1657,9 +1705,12 @@ onBeforeUnmount(() => {
                     :aria-pressed="selectedBindingIds.includes(script.id)"
                     @click.stop="toggleSelectedBinding(script.id)"
                   >
-                    <span class="um-add-item-copy"
-                    ><NxpEntityIcon :id="script.id" /><strong>{{ script.name }}</strong></span
-                    ><span aria-hidden="true">✓</span>
+                    <NxpEntityIcon :id="script.id" />
+                    <span class="um-add-item-copy">
+                      <strong>{{ script.name }}</strong>
+                      <span v-if="script.pluginType" class="muted">{{ t("users.specialized_script") }}</span>
+                    </span>
+                    <span class="um-add-item-mark" aria-hidden="true"><NxpIcon name="check" /></span>
                   </button>
                 </div>
                 <NxpEmptyState
@@ -1693,6 +1744,7 @@ onBeforeUnmount(() => {
                 :class="{
                   'is-expanded': expandedBindingId === binding.scriptInstanceId,
                   'is-binding-editing': bindingEditMode,
+                  'is-unavailable': Boolean(bindingStatus(binding)),
                 }"
                 data-testid="um-binding-card"
                 :data-binding-id="binding.scriptInstanceId"
@@ -1703,17 +1755,23 @@ onBeforeUnmount(() => {
                   <span
                     class="drag-handle um-binding-drag-handle"
                     role="button"
-                    tabindex="0"
+                    :tabindex="bindingEditMode || expandedBindingId ? -1 : 0"
+                    :aria-disabled="bindingEditMode || expandedBindingId ? 'true' : 'false'"
+                    :aria-hidden="bindingEditMode || expandedBindingId ? 'true' : undefined"
                     :aria-label="t('common.reorder.keyboard_help')"
-                    :title="t('common.drag_to_reorder')"
-                    draggable="true"
+                    :title="bindingEditMode || expandedBindingId ? undefined : t('common.drag_to_reorder')"
+                    :draggable="!bindingEditMode && !expandedBindingId"
                     @dragstart="startBindingDrag($event, binding.scriptInstanceId)"
                     @dragend="clearBindingDrag"
                     ><NxpIcon name="grip" /></span
                   ><button
                     class="um-binding-toggle"
+                    :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }"
                     type="button"
                     data-action="toggle-um-binding"
+                    :disabled="bindingEditMode || Boolean(bindingStatus(binding))"
+                    :aria-disabled="bindingEditMode || Boolean(bindingStatus(binding)) ? 'true' : undefined"
+                    :title="bindingStatus(binding) || undefined"
                     :aria-expanded="
                       expandedBindingId === binding.scriptInstanceId
                     "
@@ -1725,20 +1783,22 @@ onBeforeUnmount(() => {
                       }}</strong
                       ><span class="um-binding-badges"
                         ><NxpBadge
-                          :tone="
-                            bindingValue(binding, 'enabled') !== false
-                              ? 'ok'
-                              : 'muted'
-                          "
-                          >{{
-                            bindingValue(binding, "enabled") !== false
-                              ? t("users.enabled_badge")
-                              : t("common.disabled")
-                          }}</NxpBadge
-                        ><NxpBadge :tone="bindingDaysTone(binding)">{{ bindingDaysLabel(binding) }}</NxpBadge></span
+                          v-if="bindingPluginStatus(binding)?.missing"
+                          tone="bad"
+                          >{{ t("common.plugin.unknown") }}</NxpBadge
+                        ><NxpBadge
+                          v-else-if="bindingPluginStatus(binding)?.specialized && !bindingPluginStatus(binding)?.available"
+                          tone="warn"
+                          >{{ t("common.plugin.unavailable_badge") }}</NxpBadge
+                        ><NxpBadge
+                          :tone="bindingEnabled(binding) ? 'ok' : 'muted'"
+                          >{{ bindingEnabled(binding) ? t("users.enabled_badge") : t("common.disabled") }}</NxpBadge
+                        ><NxpBadge :tone="bindingDaysTone(binding)">{{ bindingDaysLabel(binding) }}</NxpBadge
+                        ></span
                       ></span
                     ><span class="um-binding-bottom-arrow" aria-hidden="true"
-                      ><NxpIcon name="chevronRight"
+                      :data-direction="expandedBindingId === binding.scriptInstanceId ? 'down' : 'right'"
+                      ><NxpIcon :name="expandedBindingId === binding.scriptInstanceId ? 'chevronDown' : 'chevronRight'"
                     /></span></button
                   ><button
                     class="danger um-binding-remove"
@@ -1753,6 +1813,7 @@ onBeforeUnmount(() => {
                   v-if="expandedBindingId === binding.scriptInstanceId"
                   class="um-binding-body"
                 >
+                  <div class="um-binding-options">
                   <button class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
                   </button>
@@ -1765,61 +1826,50 @@ onBeforeUnmount(() => {
                         </p>
                       </div>
                     </div>
-                    <div class="switch-row">
-                      <span class="field-label">{{ t("common.enabled") }}</span
-                      ><NxpSwitch
-                        :model-value="
-                          bindingValue(binding, 'enabled') !== false
-                        "
-                        :aria-label="t('common.enabled')"
-                        :disabled="binding.locks?.general === true"
-                        @update:model-value="
-                          setBindingValue(binding, 'enabled', $event)
-                        "
-                      />
-                    </div>
+                    <NxpSwitchSetting
+                      :label="t('common.enabled')"
+                      :description="t('users.binding.run_days.zero_help')"
+                      :model-value="bindingValue(binding, 'enabled') !== false"
+                      :aria-label="t('common.enabled')"
+                      :disabled="binding.locks?.general === true"
+                      @update:model-value="setBindingValue(binding, 'enabled', $event)"
+                    />
                     <div class="field">
                       <label
                         class="field-label"
                         :for="`um-${binding.scriptInstanceId}-run-days`"
-                        >{{ t("common.run_days") }}</label
-                      ><input
+                        >{{ t("common.run_days") }}</label>
+                      <NxpNumberInput
                         :id="`um-${binding.scriptInstanceId}-run-days`"
-                        :value="bindingValue(binding, 'runDays')"
-                        type="number"
-                        min="-1"
+                        :model-value="numericValue(bindingValue(binding, 'runDays'))"
+                        :min="-1"
+                        :max="maxRunDays()"
+                        :placeholder="t('users.binding.run_days.input_help')"
+                        :help="t('users.binding.run_days.help')"
+                        :aria-label="t('common.run_days')"
                         :disabled="binding.locks?.general === true"
-                        @input="
-                          setBindingValue(
-                            binding,
-                            'runDays',
-                            Number(inputValue($event)) || -1,
-                          )
-                        "
+                        @update:model-value="setBindingValue(binding, 'runDays', numericValue($event))"
                       />
                     </div>
                     <div class="field">
                       <label
                         class="field-label"
                         :for="`um-${binding.scriptInstanceId}-max-success`"
-                        >{{ t("users.maximum_successful_runs") }}</label
-                      ><input
+                        >{{ t("users.maximum_successful_runs") }}</label>
+                      <NxpNumberInput
                         :id="`um-${binding.scriptInstanceId}-max-success`"
-                        :value="
-                          bindingValue(binding, 'maxSuccessfulRunsPerDay')
-                        "
-                        type="number"
-                        min="-1"
+                        :model-value="numericValue(bindingValue(binding, 'maxSuccessfulRunsPerDay'))"
+                        :min="-1"
+                        :max="maxSuccessfulRunsPerDay()"
+                        :placeholder="t('users.unlimited_placeholder')"
+                        :help="t('users.binding.daily_limit.help')"
+                        :aria-label="t('users.maximum_successful_runs')"
                         :disabled="binding.locks?.general === true"
-                        @input="
-                          setBindingValue(
-                            binding,
-                            'maxSuccessfulRunsPerDay',
-                            Number(inputValue($event)) || -1,
-                          )
-                        "
+                        @update:model-value="setBindingValue(binding, 'maxSuccessfulRunsPerDay', numericValue($event))"
                       />
                     </div>
+                    <p class="muted helper-copy">{{ t("users.binding.daily_limit.policy_help") }}</p>
+                    <p v-if="bindingOverrideHelp(binding, 'general')" class="muted helper-copy um-override-helper">{{ bindingOverrideHelp(binding, 'general') }}</p>
                   </section>
                   <section class="um-binding-option-section">
                     <div class="section-heading">
@@ -1830,21 +1880,14 @@ onBeforeUnmount(() => {
                         </p>
                       </div>
                     </div>
-                    <div class="switch-row">
-                      <span class="field-label">{{
-                        t("users.enable_notifications")
-                      }}</span
-                      ><NxpSwitch
-                        :model-value="
-                          bindingValue(binding, 'notifyEnabled') !== false
-                        "
-                        :aria-label="t('users.enable_notifications')"
-                        :disabled="binding.locks?.notification === true"
-                        @update:model-value="
-                          setBindingValue(binding, 'notifyEnabled', $event)
-                        "
-                      />
-                    </div>
+                    <NxpSwitchSetting
+                      :label="t('users.enable_notifications')"
+                      :description="t('users.binding.status_notification_help')"
+                      :model-value="bindingValue(binding, 'notifyEnabled') !== false"
+                      :aria-label="t('users.enable_notifications')"
+                      :disabled="binding.locks?.notification === true"
+                      @update:model-value="setBindingValue(binding, 'notifyEnabled', $event)"
+                    />
                     <div class="field">
                       <label
                         class="field-label"
@@ -1855,11 +1898,13 @@ onBeforeUnmount(() => {
                         :value="bindingValue(binding, 'smtpTo') || ''"
                         type="text"
                         :disabled="binding.locks?.notification === true"
+                        :placeholder="t('users.binding.smtp_inherit_help')"
                         @input="
                           setBindingValue(binding, 'smtpTo', inputValue($event))
                         "
                       />
                     </div>
+                    <p v-if="bindingOverrideHelp(binding, 'notification')" class="muted helper-copy um-override-helper">{{ bindingOverrideHelp(binding, 'notification') }}</p>
                   </section>
                   <section class="um-binding-option-section">
                     <div class="section-heading">
@@ -1879,11 +1924,12 @@ onBeforeUnmount(() => {
                         kind="file"
                         :placeholder="t('users.pre_task_placeholder')"
                         :aria-label="t('users.before_task_script_path')"
+                        :filter="t('users.script_file_filter')"
+                        :help="t('users.pre_task_help')"
                         :disabled="binding.locks?.advanced === true"
                         @update:model-value="setBindingPath(binding, 'preRunScript', $event)"
                         @browse="browseBindingPath(binding, 'preRunScript', $event)"
                       />
-                      <span class="muted">{{ t("users.pre_task_help") }}</span>
                     </div>
                     <div class="field">
                       <label class="field-label">{{
@@ -1894,13 +1940,16 @@ onBeforeUnmount(() => {
                         kind="file"
                         :placeholder="t('users.post_task_placeholder')"
                         :aria-label="t('users.after_task_script_path')"
+                        :filter="t('users.script_file_filter')"
+                        :help="t('users.post_task_help')"
                         :disabled="binding.locks?.advanced === true"
                         @update:model-value="setBindingPath(binding, 'postRunScript', $event)"
                         @browse="browseBindingPath(binding, 'postRunScript', $event)"
                       />
-                      <span class="muted">{{ t("users.post_task_help") }}</span>
                     </div>
+                    <p v-if="bindingOverrideHelp(binding, 'advanced')" class="muted helper-copy um-override-helper">{{ bindingOverrideHelp(binding, 'advanced') }}</p>
                   </section>
+                  </div>
                   <div class="plugin-slot user-binding-plugin-slot" data-plugin-slot="users.binding.sections" data-plugin-anchor="users.binding.sections" data-plugin-mode="binding" :data-plugin-primary-id="binding.scriptInstanceId" :data-plugin-secondary-id="userDraft.id" hidden></div>
                 </div>
               </article>
@@ -2067,9 +2116,12 @@ onBeforeUnmount(() => {
   display: block;
 }
 .users-page .um-binding-body {
+  display: block;
+  padding: var(--space-4);
+}
+.users-page .um-binding-options {
   display: grid;
   gap: var(--space-4);
-  padding: var(--space-4);
 }
 .users-page .um-binding-toggle {
   min-width: 0;

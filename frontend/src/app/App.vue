@@ -21,6 +21,7 @@ import { isAbortError } from "@legacy/core/api.js";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import { installModalBehavior } from "../ui/modal";
+import UiLab from "../ui/UiLab.vue";
 
 const route = useRoute();
 const shell = useShellStore();
@@ -115,6 +116,7 @@ function openNav() {
       <QueuesPage v-else-if="shell.booted && segments[0] === 'queues'" />
       <DispatchPage v-else-if="shell.booted && segments[0] === 'dispatch'" />
       <SettingsPage v-else-if="shell.booted && segments[0] === 'settings'" />
+      <UiLab v-else-if="shell.booted && segments[0] === 'ui-lab' && route.query.test === '1'" />
       <ScriptsPage v-else-if="shell.booted && segments[0] === 'scripts'" />
       <UsersPage v-else-if="shell.booted && segments[0] === 'users'" />
       <PluginRouteHost v-else-if="shell.booted && segments[0] === 'plugin'" :segments="segments" :ready="shell.booted" />

@@ -5,6 +5,7 @@ import { initPluginRuntime } from "@legacy/core/plugin-runtime.js";
 import { initTheme } from "@legacy/core/ui.js";
 import { getLocale, loadLocale, t } from "@legacy/core/i18n.js";
 import { ensureAccessToken } from "./auth";
+import { initTooltips } from "@legacy/core/tooltip.js";
 
 async function updateLocalAddress() {
   const element = document.querySelector<HTMLElement>("#local-addr");
@@ -25,6 +26,7 @@ export async function bootstrapFrontend() {
   await loadLocale();
   initTheme();
   if (!(await ensureAccessToken())) return false;
+  initTooltips();
   await initAppearance();
   updateLocalAddress();
   initParticles();

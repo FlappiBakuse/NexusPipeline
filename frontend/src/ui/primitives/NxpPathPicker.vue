@@ -8,6 +8,7 @@ const props = withDefaults(
     placeholder?: string;
     disabled?: boolean;
     ariaLabel?: string;
+    help?: string;
     kind?: "file" | "folder" | "file-or-folder";
     filter?: string;
   }>(),
@@ -17,6 +18,7 @@ const props = withDefaults(
     placeholder: "",
     disabled: false,
     ariaLabel: "路径",
+    help: "",
     kind: "file",
     filter: "",
   },
@@ -41,7 +43,7 @@ function browse(
 </script>
 
 <template>
-  <div class="nxp-path">
+  <div class="nxp-path" :data-help="props.help || undefined">
     <input
       :id="props.id || undefined"
       class="nxp-path-input"
