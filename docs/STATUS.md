@@ -1,13 +1,14 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-10｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
+**更新日期**：2026-09-12｜**发布模式**：v1.0.0 前一律 Pre-release、直接 push main；v1.0.0 起仅 PR 合入
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- v0.15.7 起前端运行时由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧 Web 入口、`wwwroot/views/` 与旧资源副本已删除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用，其 TS 化收口列入 v0.15.8。
+- 下一版本（v0.15.8）计划：先建立插件桥接层边界与 contract tests，再迁移 i18n/API/page-state/shell/auth 等宿主基础设施，切换到真实 Vue Router，最后完成 legacy CSS 单轨化并删除 `@legacy` 与遗留平台模块。
+- v0.15.7 起前端运行时由 Vue feature 页面、Nexus UI primitives 和插件 route/slot 生命周期组成；旧 Web 入口、`wwwroot/views/` 与旧资源副本已删除。`wwwroot/core/` 仍提供 API、外观、插件运行时、i18n 与限制服务，供 Vue 页面和插件契约复用。
 
 ## 后续功能：插件生态扩展
 
