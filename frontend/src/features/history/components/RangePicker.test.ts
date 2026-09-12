@@ -8,7 +8,8 @@ describe("RangePicker", () => {
       props: { open: true, from: "2026-08-14", to: "2026-09-12" },
     });
 
-    expect(wrapper.get("[role='dialog']").attributes("aria-label")).toBe("history.choose_time_range");
-    expect(wrapper.find(".nxp-dialog-popover-close").exists()).toBe(false);
+    const dialog = wrapper.get("[role='dialog']");
+    expect(dialog.attributes("aria-label")).toBe("history.choose_time_range");
+    expect(dialog.findAll("button[aria-label='common.close']")).toHaveLength(0);
   });
 });
