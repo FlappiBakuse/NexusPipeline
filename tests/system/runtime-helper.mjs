@@ -191,6 +191,163 @@ export async function waitForService(url = null, timeoutMs = 30000) {
   throw new Error(`System Smoke 服务未启动：${url}；尝试 ${attempts} 次；${lastError}\n${runtimeDiagnostic()}`);
 }
 
+const restartServiceName = "NexusPipeline";
+const restartObservationLimit = 8;
+
+function normalizePort(value) {
+  const port = Number(value);
+  return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : null;
+}
+
+function normalizePorts(values) {
+  return [...new Set(values.map(normalizePort).filter(port => port !== null))];
+}
+
+function restartStatusUrl(baseUrl, port = null) {
+  const target = new URL(baseUrl);
+  if (port !== null) target.port = String(port);
+  target.pathname = "/";
+  target.search = "";
+  target.hash = "";
+  return new URL("api/status", target).toString();
+}
+
+function rememberRestartObservation(observations, observation) {
+  observations.push(observation);
+  if (observations.length > restartObservationLimit) observations.shift();
+}
+
+function formatRestartObservation(observation) {
+  return [
+    `+${observation.elapsedMs}ms`,
+    `target=${observation.target}`,
+    `http=${observation.httpStatus ?? "-"}`,
+    `service=${observation.service || "-"}`,
+    `instance=${observation.instanceId || "-"}`,
+    `handoff=${observation.restartHandoffId || "-"}`,
+    `actualPort=${observation.actualPort || "-"}`,
+    `result=${observation.result || "-"}`,
+  ].join(" ");
+}
+
+/**
+ * 等待本次重启交接的新服务实例，不把旧实例的 HTTP 200 当作恢复完成。
+ * 成功必须同时满足 NexusPipeline 身份、新 instanceId、本次 handoffId，以及（如提供）候选端口约束。
+ */
+export async function waitForRestartedService(options = {}) {
+  const previousInstanceId = String(options.previousInstanceId || "");
+  const expectedHandoffId = String(options.expectedHandoffId || "");
+  if (!previousInstanceId || !expectedHandoffId) {
+    throw new Error("System Smoke 重启等待必须提供 previousInstanceId 和 expectedHandoffId");
+  }
+
+  const timeoutValue = Number(options.timeoutMs);
+  const intervalValue = Number(options.intervalMs);
+  const timeoutMs = Number.isFinite(timeoutValue) && timeoutValue > 0 ? timeoutValue : 30000;
+  const intervalMs = Number.isFinite(intervalValue) && intervalValue > 0 ? intervalValue : 250;
+  const expectedPorts = normalizePorts([
+    ...(Array.isArray(options.candidatePorts) ? options.candidatePorts : []),
+    options.expectedPort,
+  ]);
+  const startedAt = Date.now();
+  const deadline = startedAt + timeoutMs;
+  const observations = [];
+  let attempts = 0;
+  let lastError = "";
+
+  while (Date.now() < deadline) {
+    attempts++;
+    const baseUrl = options.url ?? serviceUrl();
+    const targets = expectedPorts.length > 0
+      ? expectedPorts.map(port => restartStatusUrl(baseUrl, port))
+      : [restartStatusUrl(baseUrl)];
+    const remainingMs = Math.max(1, deadline - Date.now());
+    const results = await Promise.all(targets.map(async target => {
+      const observation = {
+        elapsedMs: Date.now() - startedAt,
+        target,
+        httpStatus: null,
+        service: "",
+        instanceId: "",
+        restartHandoffId: "",
+        actualPort: "",
+        result: "",
+        payload: null,
+        matched: false,
+      };
+      try {
+        const requestTimeoutMs = Math.min(3000, remainingMs);
+        const response = await fetchWithTimeout(target, {}, requestTimeoutMs);
+        observation.httpStatus = response.status;
+        const body = await response.text();
+        if (!response.ok) {
+          observation.result = `HTTP ${response.status}`;
+          return observation;
+        }
+
+        let payload;
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          observation.result = "响应不是 JSON";
+          return observation;
+        }
+        const status = payload && typeof payload === "object" ? payload : {};
+        observation.service = String(status.service || "");
+        observation.instanceId = String(status.instanceId || "");
+        observation.restartHandoffId = String(status.restartHandoffId || "");
+        observation.actualPort = String(status.actualPort || "");
+        const actualPort = normalizePort(status.actualPort);
+        const serviceMatches = observation.service === restartServiceName;
+        const instanceMatches = Boolean(observation.instanceId)
+          && observation.instanceId !== previousInstanceId;
+        const handoffMatches = observation.restartHandoffId === expectedHandoffId;
+        const portMatches = expectedPorts.length === 0
+          || (actualPort !== null && expectedPorts.includes(actualPort));
+        observation.matched = serviceMatches && instanceMatches && handoffMatches && portMatches;
+        observation.payload = payload;
+        observation.result = observation.matched
+          ? "匹配本次重启的新实例"
+          : "服务身份或重启交接标识未匹配";
+        return observation;
+      } catch (error) {
+        observation.result = error?.message || String(error);
+        return observation;
+      }
+    }));
+
+    for (const observation of results) {
+      rememberRestartObservation(observations, observation);
+      lastError = observation.result;
+      if (observation.matched) return observation.payload;
+    }
+
+    const waitMs = deadline - Date.now();
+    if (waitMs > 0) await sleep(Math.min(intervalMs, waitMs));
+  }
+
+  const latest = observations.at(-1) || {};
+  const expectedPortText = expectedPorts.length > 0 ? expectedPorts.join(",") : "任意有效端口";
+  const observationText = observations.length > 0
+    ? observations.map(formatRestartObservation).join("\n")
+    : "（无响应观察记录）";
+  throw new Error([
+    `System Smoke 未确认本次重启的新服务实例：尝试 ${attempts} 次；已耗时 ${Date.now() - startedAt}ms；${lastError}`,
+    `previous instanceId: ${previousInstanceId}`,
+    `expected handoffId: ${expectedHandoffId}`,
+    `expected actualPort: ${expectedPortText}`,
+    `observed instanceId: ${latest.instanceId || "unknown"}`,
+    `observed restartHandoffId: ${latest.restartHandoffId || "unknown"}`,
+    `observed actualPort: ${latest.actualPort || "unknown"}`,
+    `observed HTTP status: ${latest.httpStatus ?? "unknown"}`,
+    `service.pid: ${readPidFile(servicePidPath) ?? "unknown"}`,
+    `current PID: ${child?.pid ?? "unknown"}`,
+    "recent observations:",
+    observationText,
+    runtimeDiagnostic(),
+  ].join("\n"));
+}
+
 export async function waitFor(predicate, timeoutMs = 30000, intervalMs = 250) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

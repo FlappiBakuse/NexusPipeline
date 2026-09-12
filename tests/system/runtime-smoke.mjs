@@ -23,6 +23,7 @@ import {
   startRuntime,
   stopRuntime,
   serviceUrl,
+  waitForRestartedService,
   waitForService,
   writeBatch,
 } from "./runtime-helper.mjs";
@@ -529,11 +530,18 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     const settingsPayload = JSON.parse(settingsBody);
     assert.equal(settingsPayload.code, "host_maintenance");
 
-    await new Promise(resolve => setTimeout(resolve, 2500));
-    await waitForService();
-    const restartedResponse = await fetchWithTimeout(serviceUrl() + "api/status");
-    assert.equal(restartedResponse.status, 200);
-    const restarted = await restartedResponse.json();
+    const configuredPort = Number(restartPayload.newPort);
+    const candidatePorts = Number.isInteger(configuredPort) && configuredPort >= 1024
+      ? Array.from({ length: 20 }, (_, offset) => configuredPort + offset)
+        .filter(port => port <= 65535)
+      : [];
+    const restarted = await waitForRestartedService({
+      previousInstanceId,
+      expectedHandoffId: restartPayload.handoffId,
+      candidatePorts,
+      timeoutMs: 30000,
+    });
+    assert.equal(restarted.service, "NexusPipeline");
     assert.notEqual(restarted.instanceId, previousInstanceId, "重启后必须由新的进程实例提供服务");
     assert.equal(restarted.restartHandoffId, restartPayload.handoffId, "新实例必须携带本次重启的交接标识");
   } finally {
