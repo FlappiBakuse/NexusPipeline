@@ -11,13 +11,12 @@
 | L3 Web Logic | `frontend/src/**/*.test.ts` | 否 | 否 | 可独立导入的 ES module 纯函数、Vue 组件契约和协议转换 |
 
 L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 Node 用例，`node tests\run.mjs web` 会提示该情况并以 `0` 结束。
-| L4 Visual Contract | `tests/e2e/tests/*.smoke.spec.mjs` 的 screenshot contract | 是 | 是 | 固定视口下的关键 shell/page 视觉基线 |
-| L5 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
-| L6 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
+| L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
+| L5 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
 
 `tests/stress/` 是按需运行的压力与诊断资产，不参与默认发布门禁。历史测试容器已删除；需要追溯行为时使用 CHANGELOG 和 Git 历史。
 
-文档一致性检查独立于 L1–L5：`tests/documentation/documentation-consistency.mjs` 检查 Markdown 本地链接、CHANGELOG 标题唯一性、README 导航、当前版本和已删除路径引用。
+文档一致性检查独立于 L1–L5：`tests/documentation/documentation-consistency.mjs` 检查 Markdown 本地链接、CHANGELOG 标题唯一性、README 导航、当前版本和已删除路径引用；`tests/documentation/test-policy-consistency.mjs` 检查持久化测试中是否出现截图匹配器、视觉回归套件和快照基线。
 
 ## 测试归属与写法
 
@@ -30,18 +29,19 @@ L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 N
 
 ### UI Smoke 配额
 
-当前浏览器验收保留 11 个用例，硬上限 12 个；其中 10 个是用户工作流，1 个是视觉契约：
+当前浏览器验收保留 10 个用户工作流，硬上限 12 个：
 
 ```text
 tests/e2e/tests/
 ├── app.smoke.spec.mjs                 2
 ├── scripts-users.smoke.spec.mjs       2
 ├── queues.smoke.spec.mjs              2
-├── settings-platform.smoke.spec.mjs   4
-└── visual-contract.smoke.spec.mjs     1
+└── settings-platform.smoke.spec.mjs   4
 ```
 
-UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳定的 `data-testid`、ARIA 状态和业务 ID；少量现有迁移用例仍可读取 `data-action` 作为定位属性，但它不再是运行时行为契约。Visual Contract 使用固定视口的 `toHaveScreenshot` 锁定 shell/page 视觉基线，并遮罩地址、版本等运行时动态值。业务行为不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。
+UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳定的 `data-testid`、ARIA 状态和业务 ID；少量现有迁移用例仍可读取 `data-action` 作为定位属性，但它不再是运行时行为契约。业务行为不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。
+
+LLM 与自动化代理不得新增持久化视觉回归测试、截图基线或像素/布局断言。临时浏览器验证脚本只能放在操作系统临时目录，验证结束后删除且不得加入 Git。持久化 UI 测试只覆盖功能结果、ARIA、焦点、状态、提交、路由、API 效果和生命周期；策略检查由文档门禁自动执行。
 
 ### Web Logic 与测试文件组织
 
@@ -109,19 +109,11 @@ node tests\run.mjs codex system [runtime|execution|emulator|update] [--realtime]
 
 可以列出多个分组，也可以用 `--group <名称>` 重复指定；省略分组等于全部 suite。未知分组会打印可用分组并以 exit code 2 退出。`--dry` 只列出将要执行的 suite，不构建也不启动运行时。
 
-视觉契约需要在明确确认基线变化后刷新：
-
-```powershell
-$env:NEXUS_UPDATE_SNAPSHOTS = "1"
-node tests\run.mjs codex ui
-Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
-```
-
 `codex` 使用 `NexusTestHost=true` 的 `asInvoker` Test Host；`admin` 使用生产 release，并要求 Administrator / High Integrity 或 System Integrity。权限不足返回 exit code `2`，不降级运行。
 
 ## 质量门禁顺序
 
-1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、Visual Contract 和 `build.cmd` 的适用组合。
+1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、UI Smoke（适用时）和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`。
 3. 发布前由 CI 在管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`。
 4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。

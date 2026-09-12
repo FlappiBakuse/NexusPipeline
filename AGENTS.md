@@ -26,6 +26,8 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 - 修改行为前阅读 DESIGN（模块边界与代码定位见其第 10 节），修改测试前阅读 TESTING，修改插件前阅读 `docs/PLUGIN_API.md`，发布前阅读 DEVELOPMENT 的发布流程章节。
 - 新增或修改可管理能力时核对并更新 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)，为 Web、CLI、MCP 记录明确状态、风险边界和对应测试。
 - 新增 UI 行为时先评估 Unit、Component、Web Logic 或 System Smoke 的覆盖位置；UI Smoke 只保留无法由低层稳定证明的核心工作流。
+- LLM 或自动化代理不得新增持久化视觉回归测试、截图基线或像素/布局断言；临时浏览器或手工验证脚本只能放在操作系统临时目录，验证结束后删除且不得加入 Git。持久化 UI 测试只覆盖功能结果、ARIA、焦点、状态、提交、路由、API 效果和生命周期。
+- 提交代码时按功能边界拆分为可独立验证、审查和回退的变更单元，并在获得提交授权后分别提交；禁止把无关功能、测试和文档累积为一个 mega commit。
 - 测试失败时保留失败证据并修复根因；禁止通过自动重试、跳过失败或静默重定向掩盖失败。完整测试命令只维护在 `docs/TESTING.md`。
 
 ## Windows 与工具链注意事项
