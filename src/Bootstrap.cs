@@ -209,8 +209,7 @@ internal static class Bootstrap
 
     private static bool RequestRestartExit()
     {
-        System.Windows.Forms.Application.Exit();
-        return true;
+        return StartupPipeline.TryRequestServiceExit();
     }
 
     /// <summary>

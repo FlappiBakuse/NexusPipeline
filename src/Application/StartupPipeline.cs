@@ -10,6 +10,8 @@ namespace NexusPipeline;
 
 internal static class StartupPipeline
 {
+    private static Control? _serviceExitDispatcher;
+
     internal static void RunService()
     {
         using Mutex? mutex = AcquireSingleInstanceMutex();
@@ -24,47 +26,77 @@ internal static class StartupPipeline
             return;
         }
 
-        RuntimeContext ctx = RuntimeContext.Instance;
-        if (!HostedRuntimeInitializer.Initialize(ctx))
-        {
-            ClearServicePid();
-            return;
-        }
-        Bootstrap.StartServices();
-
-        WebServerOptions webOptions = WebServerOptions.FromSettings(
-            ctx.Settings.LightweightMode,
-            ctx.Settings.AllowRemoteAccess);
-        WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort, webOptions);
-        if (web is not null)
-        {
-            Bootstrap.AfterWebStarted(web);
-            if (webOptions.ServeWebUi && ctx.Settings.AutoOpenBrowser)
-            {
-                TrayApp.OpenWeb(web.Port);
-            }
-        }
-        McpHost? mcp = web is null ? null : Bootstrap.StartMcp();
-        if (!webOptions.ServeWebUi)
-        {
-            Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
-        }
-        if (web is null)
-        {
-            Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
-            Bootstrap.Shutdown(null, mcp);
-            ClearServicePid();
-            return;
-        }
-
-#if NEXUS_TEST_HOST
-        StartTestHostExitMonitor();
-#endif
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new TrayApp());
+        using var exitDispatcher = new Control();
+        _ = exitDispatcher.Handle;
+        Volatile.Write(ref _serviceExitDispatcher, exitDispatcher);
+        try
+        {
+            RuntimeContext ctx = RuntimeContext.Instance;
+            if (!HostedRuntimeInitializer.Initialize(ctx))
+            {
+                ClearServicePid();
+                return;
+            }
+            Bootstrap.StartServices();
 
-        ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
+            WebServerOptions webOptions = WebServerOptions.FromSettings(
+                ctx.Settings.LightweightMode,
+                ctx.Settings.AllowRemoteAccess);
+            WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort, webOptions);
+            if (web is not null)
+            {
+                Bootstrap.AfterWebStarted(web);
+                if (webOptions.ServeWebUi && ctx.Settings.AutoOpenBrowser)
+                {
+                    TrayApp.OpenWeb(web.Port);
+                }
+            }
+            McpHost? mcp = web is null ? null : Bootstrap.StartMcp();
+            if (!webOptions.ServeWebUi)
+            {
+                Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
+            }
+            if (web is null)
+            {
+                Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
+                Bootstrap.Shutdown(null, mcp);
+                ClearServicePid();
+                return;
+            }
+
+#if NEXUS_TEST_HOST
+            StartTestHostExitMonitor();
+#endif
+            Application.Run(new TrayApp());
+            ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _serviceExitDispatcher, null, exitDispatcher);
+        }
+    }
+
+    /// <summary>将后台请求投递到承载 WinForms 消息循环的宿主线程，确保服务能正常退出并执行关闭清理。</summary>
+    internal static bool TryRequestServiceExit()
+    {
+        Control? dispatcher = Volatile.Read(ref _serviceExitDispatcher);
+        if (dispatcher is null || dispatcher.IsDisposed)
+        {
+            Logger.Warn("[退出] 宿主 STA dispatcher 尚未就绪，无法提交服务退出请求。");
+            return false;
+        }
+        try
+        {
+            dispatcher.BeginInvoke((MethodInvoker)Application.Exit);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.Warn($"[退出] 投递宿主 STA 退出请求失败：{ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
