@@ -98,10 +98,12 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
     private const int MaxScopeLength = 512;
     private const int MaxScopeSegments = 8;
     private readonly string _pluginName;
+    private readonly string _root;
 
     public PluginScopedDataStore(string pluginName)
     {
         _pluginName = ValidateSegment(pluginName, "插件名", 64);
+        _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", pluginName, "scopes"));
     }
 
     public ValueTask<T?> ReadAsync<T>(string scope, CancellationToken cancellationToken = default)
@@ -261,9 +263,8 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
     private string ScopePath(string scope)
     {
         string[] segments = NormalizeScope(scope);
-        string root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", _pluginName, "scopes"));
-        string path = Path.GetFullPath(Path.Combine(new[] { root }.Concat(segments[..^1]).Append(segments[^1] + ".json").ToArray()));
-        string prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string path = Path.GetFullPath(Path.Combine(new[] { _root }.Concat(segments[..^1]).Append(segments[^1] + ".json").ToArray()));
+        string prefix = _root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("插件作用域路径越界", nameof(scope));
@@ -271,7 +272,18 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
         return path;
     }
 
-    private static string[] NormalizeScope(string scope)
+    internal static string[] NormalizeScope(string scope)
+    {
+        return NormalizeScopeSegments(scope);
+    }
+
+    /// <summary>校验并返回 scope 的规范文本形式（以 / 连接），供资产存储等其它插件端口复用。</summary>
+    internal static string NormalizeScopeText(string scope)
+    {
+        return string.Join('/', NormalizeScopeSegments(scope));
+    }
+
+    private static string[] NormalizeScopeSegments(string scope)
     {
         if (string.IsNullOrWhiteSpace(scope) || scope.Length > MaxScopeLength
             || Path.IsPathRooted(scope) || scope.Contains('\\', StringComparison.Ordinal))
@@ -286,7 +298,7 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
         return segments;
     }
 
-    private static string ValidateSegment(string value, string label, int maxLength)
+    internal static string ValidateSegment(string value, string label, int maxLength)
     {
         if (!IsSafeSegment(value, maxLength))
         {
@@ -295,7 +307,7 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
         return value;
     }
 
-    private static bool IsSafeSegment(string? value, int maxLength)
+    internal static bool IsSafeSegment(string? value, int maxLength)
     {
         return !string.IsNullOrWhiteSpace(value)
             && value.Length <= maxLength

@@ -297,6 +297,7 @@ internal static class ApiPluginsHandler
             {
                 ok = true,
                 pending = true,
+                restartRequired = true,
                 action = operation.Action,
                 name = operation.Name,
                 version = operation.Version,

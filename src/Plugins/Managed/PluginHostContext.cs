@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_4
+internal sealed class PluginHostContext : IPluginHostContextV1_6
 {
     public PluginHostContext(
         string pluginName,
@@ -38,6 +38,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_4
         Http = new PluginHttpClientFactory(http);
         _ui = new PluginUiContributionAdapter(ui, pluginName, pluginDisplayName);
         ScopedData = new PluginScopedDataStore(pluginName);
+        Assets = new PluginAssetStore(pluginName);
         _webApi = new PluginWebApiAdapter(webApi, pluginName);
         _history = new PluginHistoryContributionAdapter(history, pluginName, pluginDisplayName);
         I18n = new PluginLocalizationService(localization);
@@ -74,6 +75,8 @@ internal sealed class PluginHostContext : IPluginHostContextV1_4
     public IPluginHistoryContributionRegistry History => _history;
 
     public IPluginLocalization I18n { get; }
+
+    public IPluginAssetStore Assets { get; }
 
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
 

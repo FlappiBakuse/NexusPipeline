@@ -1,5 +1,7 @@
 using NexusPipeline.Plugin.Abstractions;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json.Nodes;
 
 namespace NexusPipeline.TestPlugin;
 
@@ -16,18 +18,23 @@ public sealed class FixtureState
 
 public sealed class TestPlugin : INexusPlugin
 {
+    private readonly List<IDisposable> _registrations = new();
+
     private IPluginHostContext? _context;
-    private IDisposable? _badgeRegistration;
 
     public async ValueTask InitializeAsync(IPluginHostContext context, CancellationToken cancellationToken)
     {
         _context = context;
         if (context is IPluginHostContextV1_2 v12)
         {
-            _badgeRegistration = v12.UserListBadges.Register(new PluginUserListBadgeContribution(
+            _registrations.Add(v12.UserListBadges.Register(new PluginUserListBadgeContribution(
                 "fixture-badge",
                 10,
-                (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("Fixture 徽章", "blue", "Fixture"))));
+                (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("Fixture 徽章", "blue", "Fixture")))));
+        }
+        if (context is IPluginHostContextV1_3 v13)
+        {
+            RegisterWebApi(v13);
         }
         await SetStateAsync(state => state.Initialized = true, cancellationToken).ConfigureAwait(false);
         try
@@ -53,9 +60,57 @@ public sealed class TestPlugin : INexusPlugin
 
     public ValueTask StopAsync(CancellationToken cancellationToken)
     {
-        _badgeRegistration?.Dispose();
-        _badgeRegistration = null;
+        foreach (IDisposable registration in _registrations)
+        {
+            registration.Dispose();
+        }
+        _registrations.Clear();
         return SetStateAsync(state => state.Stopped = true, cancellationToken);
+    }
+
+    /// <summary>注册宿主 Web API 传输契约所需的固定路由：JSON 回显、二进制请求回显与受限类型响应。</summary>
+    private void RegisterWebApi(IPluginHostContextV1_3 context)
+    {
+        _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
+            "PUT",
+            "json/echo",
+            (request, _) => ValueTask.FromResult(PluginWebApiResponse.Json(new JsonObject
+            {
+                ["jsonBody"] = request.JsonBody,
+                ["contentType"] = request.ContentType,
+                ["contentLength"] = request.ContentLength,
+            })))));
+        _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
+            "POST",
+            "binary/echo",
+            async (request, token) =>
+            {
+                if (request.OpenBodyStream is null)
+                {
+                    return PluginWebApiResponse.Json(new JsonObject { ["error"] = "missing-body" });
+                }
+                using var buffer = new MemoryStream();
+                using Stream body = await request.OpenBodyStream(token).ConfigureAwait(false);
+                await body.CopyToAsync(buffer, token).ConfigureAwait(false);
+                return PluginWebApiResponse.Json(new JsonObject
+                {
+                    ["length"] = buffer.Length,
+                    ["text"] = Encoding.UTF8.GetString(buffer.ToArray()),
+                    ["contentType"] = request.ContentType,
+                });
+            })));
+        _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
+            "GET",
+            "binary/image",
+            (_, _) => ValueTask.FromResult(PluginWebApiResponse.Binary(
+                new MemoryStream(Encoding.UTF8.GetBytes("fixture-binary-payload")),
+                "image/png")))));
+        _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
+            "GET",
+            "binary/document",
+            (_, _) => ValueTask.FromResult(PluginWebApiResponse.Binary(
+                new MemoryStream(Encoding.UTF8.GetBytes("<html>fixture</html>")),
+                "text/html")))));
     }
 
     private async ValueTask RunJobAsync(CancellationToken cancellationToken)

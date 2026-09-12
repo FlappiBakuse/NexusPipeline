@@ -30,13 +30,13 @@ public sealed class PluginExtensionContractTests
         Assert.False(PluginFrontendManifest.IsPublicFrontendPath("web/config.json"));
         Assert.False(PluginFrontendManifest.IsPublicFrontendPath("web/data/secrets.json"));
         Assert.False(FrontendApiVersion.IsCompatibleWith("01.0"));
-        Assert.False(FrontendApiVersion.IsCompatibleWith("1.3"));
-        Assert.True(FrontendApiVersion.IsCompatibleWith("1.4"));
-        Assert.False(FrontendApiVersion.IsCompatibleWith("1.5"));
-        Assert.False(FrontendApiVersion.IsCompatibleWith("1.04"));
+        Assert.False(FrontendApiVersion.IsCompatibleWith("1.4"));
+        Assert.True(FrontendApiVersion.IsCompatibleWith("1.5"));
+        Assert.False(FrontendApiVersion.IsCompatibleWith("1.6"));
+        Assert.False(FrontendApiVersion.IsCompatibleWith("1.05"));
         Assert.False(FrontendApiVersion.IsCompatibleWith("2.0"));
-        Assert.False(FrontendApiVersion.IsCompatibleWith(" 1.4"));
-        Assert.False(FrontendApiVersion.IsCompatibleWith("1.4 "));
+        Assert.False(FrontendApiVersion.IsCompatibleWith(" 1.5"));
+        Assert.False(FrontendApiVersion.IsCompatibleWith("1.5 "));
 
         ((JsonObject)root["frontend"]!)["entry"] = "plugin.json";
         Assert.False(PluginFrontendManifest.TryParse(root, capabilities, out _, out string? invalidPathError));

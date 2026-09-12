@@ -39,8 +39,6 @@ internal class RuntimeContext
             users => DataStore.SaveUsers(users)).DecrementDaily);
         collection.AddSingleton<ISettingsProvider>(_ => new RuntimeSettingsProvider(() => Settings));
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(() => Settings));
-        collection.AddSingleton<AppearanceService>(provider => new AppearanceService(
-            () => provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<HistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
             () => Settings,

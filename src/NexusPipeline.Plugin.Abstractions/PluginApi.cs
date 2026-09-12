@@ -2,22 +2,22 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.5）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.6）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 5;
+    public const int Minor = 6;
 }
 
-/// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；v0.15.5 起要求精确版本匹配。</summary>
+/// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
 public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 4;
+    public const int Minor = 5;
 
-    public const string Text = "1.4";
+    public const string Text = "1.5";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -136,6 +136,67 @@ public interface IPluginHostContextV1_3 : IPluginHostContextV1_2
 public interface IPluginHostContextV1_4 : IPluginHostContextV1_3
 {
     IPluginLocalization I18n { get; }
+}
+
+/// <summary>Plugin API v1.6 的通用二进制资产端口；资产按插件命名空间隔离，宿主不解释资产业务含义。</summary>
+public interface IPluginHostContextV1_6 : IPluginHostContextV1_4
+{
+    IPluginAssetStore Assets { get; }
+}
+
+/// <summary>插件二进制资产元数据。Id 为内容 SHA256 的小写十六进制，相同内容重复写入返回同一 Id。</summary>
+public sealed record PluginAssetInfo(
+    string Id,
+    string Scope,
+    string Extension,
+    long SizeBytes,
+    DateTimeOffset CreatedAt);
+
+/// <summary>插件二进制资产读取句柄；Content 由调用方负责释放。</summary>
+public sealed class PluginAssetContent : IDisposable
+{
+    public PluginAssetContent(PluginAssetInfo info, Stream content)
+    {
+        Info = info ?? throw new ArgumentNullException(nameof(info));
+        Content = content ?? throw new ArgumentNullException(nameof(content));
+    }
+
+    public PluginAssetInfo Info { get; }
+
+    public Stream Content { get; }
+
+    public void Dispose() => Content.Dispose();
+}
+
+/// <summary>
+/// 按插件命名空间与逻辑 scope 隔离的二进制资产存储。宿主要负责路径逃逸防护、原子写入和宿主级绝对上限，
+/// 业务配额、去重策略与资产含义由插件自行决定。
+/// </summary>
+public interface IPluginAssetStore
+{
+    /// <summary>写入资产；返回的 Id 是内容 SHA256。scope 与 extension 由宿主校验。</summary>
+    ValueTask<PluginAssetInfo> WriteAsync(
+        string scope,
+        string extension,
+        Stream content,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>按 Id 打开资产；不存在时返回 null。</summary>
+    ValueTask<PluginAssetContent?> OpenAsync(
+        string scope,
+        string assetId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>删除资产；返回是否存在并已删除。</summary>
+    ValueTask<bool> DeleteAsync(
+        string scope,
+        string assetId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>枚举 scope 内的资产元数据，按创建时间与 Id 稳定排序。</summary>
+    ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(
+        string scope,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>插件文案的语义引用；Fallback 用于语言资源缺失时的安全回退。</summary>
@@ -305,13 +366,69 @@ public sealed record PluginWebApiRequest(
     string Method,
     string Route,
     IReadOnlyDictionary<string, string> Query,
-    string? JsonBody);
+    string? JsonBody)
+{
+    /// <summary>请求 Content-Type（小写、去掉参数）；没有请求体时为空字符串。</summary>
+    public string ContentType { get; init; } = "";
+
+    /// <summary>请求体字节数；长度未知时为 -1。</summary>
+    public long ContentLength { get; init; } = -1;
+
+    /// <summary>打开原始请求体流；没有请求体时为 null。流由宿主在本次调用期间持有，调用方不需要释放。</summary>
+    public Func<CancellationToken, ValueTask<Stream>>? OpenBodyStream { get; init; }
+}
 
 public sealed record PluginWebApiResponse(int StatusCode, JsonNode? JsonBody)
 {
+    /// <summary>二进制响应体；由调用方创建，宿主读取后负责释放。</summary>
+    public Stream? BinaryBody { get; init; }
+
+    /// <summary>二进制响应的 Content-Type；必须属于 <see cref="PluginWebApiContentTypes.AllowedBinary"/>。</summary>
+    public string ContentType { get; init; } = "";
+
+    /// <summary>二进制响应字节数；未知时为 -1，由宿主按流长度决定。</summary>
+    public long ContentLength { get; init; } = -1;
+
     public static PluginWebApiResponse Json(JsonNode? body, int statusCode = 200) => new(statusCode, body);
 
     public static PluginWebApiResponse Empty(int statusCode = 204) => new(statusCode, null);
+
+    /// <summary>构造二进制响应。contentType 不在宿主允许集合内时，宿主按插件错误处理。</summary>
+    public static PluginWebApiResponse Binary(
+        Stream content,
+        string contentType,
+        int statusCode = 200,
+        long contentLength = -1) =>
+        new(statusCode, null)
+        {
+            BinaryBody = content ?? throw new ArgumentNullException(nameof(content)),
+            ContentType = contentType ?? "",
+            ContentLength = contentLength,
+        };
+}
+
+/// <summary>插件 Web API 二进制响应的类型约束；宿主只回传图片与通用二进制流。</summary>
+public static class PluginWebApiContentTypes
+{
+    /// <summary>宿主允许插件回传的二进制 Content-Type（同源环境下不提供可执行文档类型）。</summary>
+    public static IReadOnlySet<string> AllowedBinary { get; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/png",
+        "image/jpeg",
+        "image/webp",
+        "image/gif",
+        "image/avif",
+        "application/octet-stream",
+    };
+
+    /// <summary>去掉参数并转为小写；无效输入返回空字符串。</summary>
+    public static string Normalize(string? contentType)
+    {
+        string value = (contentType ?? "").Split(';')[0].Trim().ToLowerInvariant();
+        return value.Length > 128 ? "" : value;
+    }
+
+    public static bool IsAllowedBinary(string? contentType) => AllowedBinary.Contains(Normalize(contentType));
 }
 
 /// <summary>运行历史落盘前的插件展示贡献。该端口不能改变运行结果或阻断执行。</summary>

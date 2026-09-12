@@ -92,13 +92,13 @@ public class ConfigWorkDirMaintenanceTests
     [Fact]
     public void SweepRuntimeStaging_RemovesLeftoverUploads()
     {
-        Directory.CreateDirectory(AppPaths.AppearanceStagingDir);
-        string leftover = Path.Combine(AppPaths.AppearanceStagingDir, "upload.abc.tmp");
+        Directory.CreateDirectory(AppPaths.RuntimeStagingDir);
+        string leftover = Path.Combine(AppPaths.RuntimeStagingDir, "upload.abc.tmp");
         File.WriteAllText(leftover, "partial");
 
         ConfigWorkDirMaintenance.SweepRuntimeStaging();
 
-        Assert.False(Directory.Exists(AppPaths.AppearanceStagingDir));
+        Assert.False(Directory.Exists(AppPaths.RuntimeStagingDir));
     }
 
     [Fact]

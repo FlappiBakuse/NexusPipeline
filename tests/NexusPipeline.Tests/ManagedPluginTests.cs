@@ -150,7 +150,7 @@ public sealed class ManagedPluginTests
         }
         string capabilities = frontend ? "[\"background-jobs\", \"frontend-module\"]" : "[\"background-jobs\"]";
         string frontendSection = frontend
-            ? ",\n  \"frontend\": {\n    \"apiVersion\": \"1.4\",\n    \"entry\": \"web/main.js\",\n    \"styles\": []\n  }"
+            ? ",\n  \"frontend\": {\n    \"apiVersion\": \"1.5\",\n    \"entry\": \"web/main.js\",\n    \"styles\": []\n  }"
             : "";
         string manifest = $$"""
         {

@@ -33,9 +33,10 @@ internal static class AppPaths
 
     public static readonly string UserAssetsDir = Path.Combine(AppRoot, "user-assets");
 
-    /// <summary>服务端同步的外观配置与壁纸资产目录。</summary>
+    /// <summary>旧宿主外观配置路径；仅由一次性格式搬迁读取，搬迁完成后不再有生产写入方。</summary>
     public static readonly string AppearanceConfigPath = Path.Combine(ConfigDir, "appearance.json");
 
+    /// <summary>旧宿主壁纸资产目录；仅由一次性格式搬迁读取。</summary>
     public static readonly string AppearanceAssetsDir = Path.Combine(UserAssetsDir, "appearance", "wallpapers");
 
     /// <summary>NexusPipeline 内部运行时目录；普通运行状态集中放置于此，避免散落在安装根目录。</summary>
@@ -62,13 +63,11 @@ internal static class AppPaths
 
     public static readonly string PluginBackupDir = Path.Combine(PluginStateDir, "backup");
 
+    /// <summary>旧宿主外观轮换状态路径；仅由一次性格式搬迁读取。</summary>
     public static readonly string AppearanceRuntimePath = Path.Combine(StateDir, "appearance-runtime.json");
 
     /// <summary>可重建的进程内暂存区（上传/校验临时文件），启动时整体清扫。</summary>
     public static readonly string RuntimeStagingDir = Path.Combine(RuntimeDir, "staging");
-
-    /// <summary>壁纸上传暂存目录（校验 SHA256 后移入 AppearanceAssetsDir；残留由启动清扫移除）。</summary>
-    public static readonly string AppearanceStagingDir = Path.Combine(RuntimeStagingDir, "appearance");
 
     /// <summary>常驻 Web 服务实际监听端口（服务启动时写入，停止时删除；CLI 用于复用端口漂移后的服务）。</summary>
     public static readonly string WebPortPath = Path.Combine(RuntimeDir, "web.port");
