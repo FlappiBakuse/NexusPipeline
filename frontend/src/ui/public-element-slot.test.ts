@@ -96,7 +96,8 @@ describe("public element slot contract", () => {
     expect(container.querySelector("nxp-badge .badge")?.classList.contains("muted")).toBe(true);
   });
 
-  it("keeps the plugin settings card intact across state updates", async () => {    registerNexusElements();
+  it("keeps the plugin settings card intact across state updates", async () => {
+    registerNexusElements();
     // 复刻插件卡片的更新方式：状态发布后徽章文案、缩略图与列表一起重渲染。
     const status = ref("已启用");
     const assets = ref([{ id: "a", thumbnails: false as const }, { id: "b", thumbnails: true as const }]);
@@ -105,7 +106,7 @@ describe("public element slot contract", () => {
         h("span", { class: "cw-muted" }, "服务端同步"),
         h("nxp-badge", { tone: status.value === "已启用" ? "ok" : "muted" }, status.value),
       ]),
-      h("div", { class: "cw-switch-list" }, [
+      h("nxp-switch-list", null, [
         h("nxp-switch-setting", { key: "enabled", label: "启用自定义壁纸", modelValue: true }),
         h("nxp-switch-setting", { key: "secondary", label: "透明度运用于非主页面", modelValue: false }),
       ]),

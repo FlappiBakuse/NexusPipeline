@@ -4,7 +4,7 @@ import { isPluginViewStateActive, type PluginViewState } from "../../../platform
 import NxpDialogPopover from "../../../ui/composites/NxpDialogPopover.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 
-/** 插件页筛选与排序浮层：二级页面语义的 `role="dialog"`，关闭入口由 NxpDialogPopover 提供。 */
+/** 插件页筛选与排序浮层：二级页面语义的 `role="dialog"`，由触发器和 Escape 关闭。 */
 
 defineProps<{
   open: boolean;
@@ -24,7 +24,7 @@ const emit = defineEmits<{
     id="plugin-filter-popover"
     class="plugin-filter-popover"
     :aria-label="t('plugins.plugin_filters_and_sorting')"
-    :close-label="t('common.close')"
+    :closeable="false"
     @close="emit('close')"
   >
     <fieldset class="plugin-filter-section">

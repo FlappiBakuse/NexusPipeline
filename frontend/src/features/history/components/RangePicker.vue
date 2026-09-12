@@ -118,7 +118,7 @@ watch(() => props.open, value => {
         id="history-range-popover"
         class="history-range-popover secondary-surface"
         :aria-label="t('history.choose_time_range')"
-        :close-label="t('common.close')"
+        :closeable="false"
         @close="emit('close')"
       >
         <div class="history-calendar-toolbar">

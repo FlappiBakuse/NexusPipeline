@@ -15,17 +15,20 @@
 .nxp-switch-list > nxp-switch-setting {
   display: contents;
 }
-.nxp-switch-list > .switch-card {
+.nxp-switch-list > .switch-card,
+.nxp-switch-list > nxp-switch-setting > .switch-card {
   min-height: 64px;
   border: 0;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   background: transparent;
 }
-.nxp-switch-list > .switch-card:hover {
+.nxp-switch-list > .switch-card:hover,
+.nxp-switch-list > nxp-switch-setting:hover > .switch-card {
   background: var(--content-card-hover);
 }
-.nxp-switch-list > .switch-card:last-child {
+.nxp-switch-list > .switch-card:last-child,
+.nxp-switch-list > nxp-switch-setting:last-child > .switch-card {
   border-bottom: 0;
 }
 </style>
