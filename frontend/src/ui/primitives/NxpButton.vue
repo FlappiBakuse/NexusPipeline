@@ -5,11 +5,13 @@ withDefaults(defineProps<{
   size?: "sm" | "md";
   type?: "button" | "submit" | "reset";
   disabled?: boolean;
-}>(), { tone: "default", variant: "solid", size: "md", type: "button", disabled: false });
+  /** 按钮文案；自定义元素消费方优先使用该属性，插槽内容作为替代写法。 */
+  label?: string;
+}>(), { tone: "default", variant: "solid", size: "md", type: "button", disabled: false, label: "" });
 </script>
 
 <template>
-  <button class="nxp-button" :class="{ sm: size === 'sm', danger: tone === 'danger', ghost: variant === 'ghost' }" :type="type" :disabled="disabled"><slot /></button>
+  <button class="nxp-button" :class="{ sm: size === 'sm', danger: tone === 'danger', ghost: variant === 'ghost' }" :type="type" :disabled="disabled"><slot>{{ label }}</slot></button>
 </template>
 
 <style>

@@ -331,6 +331,10 @@ select option:checked { background-color: var(--accent-soft); color: var(--accen
 .nxp-select { position: relative; min-width: 0; }
 nxp-button, nxp-file-picker, nxp-switch { display: inline-flex; min-width: 0; vertical-align: middle; }
 nxp-select, nxp-number-input, nxp-range { display: block; width: 100%; min-width: 0; }
+nxp-switch-list { display: block; min-width: 0; }
+/* 结构卡片在 light DOM 下不产生额外布局盒：插件卡片因此与宿主卡片一样直接参与
+   `.settings-cards` 的栅格与展开置顶规则（`.settings-card.is-expanded { order: -1 }`）。 */
+nxp-collapsible-card, nxp-section-card { display: contents; }
 .nxp-select-trigger { display: flex; width: 100%; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border); border-radius: 8px; background: var(--content-control); color: var(--text); font-size: 13px; font-weight: 400; text-align: left; }
 .nxp-select-trigger:hover, .nxp-select-trigger[aria-expanded="true"] { border-color: var(--accent); background: var(--content-control-hover); }
 .nxp-select-trigger:disabled { cursor: not-allowed; opacity: .45; }

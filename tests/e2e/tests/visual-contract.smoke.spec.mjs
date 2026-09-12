@@ -174,12 +174,14 @@ test("固定视口：核心页面行为与稳定元件保持视觉契约", async
   }
 
   const frontendFixtureCard = page.locator('[data-plugin-slot="settings.cards"] [data-testid="frontend-fixture-card"]');
+  // 插件前端模块在页面加载后异步载入，首次进入设置页需要等待插件槽位渲染完成。
+  const fixtureTimeout = { timeout: 20_000 };
   await page.goto(`${baseUrl}#/settings`, { waitUntil: "domcontentloaded" });
-  await expect(frontendFixtureCard).toHaveCount(1);
+  await expect(frontendFixtureCard).toHaveCount(1, fixtureTimeout);
   await page.goto(`${baseUrl}#/dashboard`, { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("dashboard-state")).toBeVisible();
   await page.goto(`${baseUrl}#/settings`, { waitUntil: "domcontentloaded" });
-  await expect(frontendFixtureCard).toHaveCount(1);
+  await expect(frontendFixtureCard).toHaveCount(1, fixtureTimeout);
 
   userFixtures = true;
   await page.goto(`${baseUrl}#/users`, { waitUntil: "domcontentloaded" });
