@@ -59,7 +59,6 @@ vi.mock("./plugin-bridge/host-adapter", () => ({
   api: async () => null,
   apiBlob: async () => new Blob(),
   isAbortError: () => false,
-  formatCompactList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatDate: (value: unknown) => String(value ?? ""),
   formatList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatNumber: (value: unknown) => String(value ?? ""),

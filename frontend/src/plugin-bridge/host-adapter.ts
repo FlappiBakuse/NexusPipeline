@@ -10,7 +10,6 @@
  */
 import { api, apiBlob, apiUpload, isAbortError } from "../platform/api";
 import {
-  formatCompactList,
   formatDate,
   formatList,
   formatNumber,
@@ -37,7 +36,6 @@ export {
   apiBlob,
   apiUpload,
   isAbortError,
-  formatCompactList,
   formatDate,
   formatList,
   formatNumber,

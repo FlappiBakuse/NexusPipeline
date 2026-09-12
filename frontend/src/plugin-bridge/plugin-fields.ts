@@ -1,55 +1,46 @@
+import type { PluginFieldControl } from "./controls";
 import type { PluginField } from "./types";
 
-function selectedValuesFromCarrier(element: Element | null): string[] {
-  const carrier = element?.matches?.("[data-nxp-select-value]")
-    ? (element as HTMLInputElement)
-    : element?.querySelector?.<HTMLInputElement>("[data-nxp-select-value]");
-  if (!carrier) return [];
-  if (!carrier.dataset.nxpSelectMultiple) return carrier.value ? [String(carrier.value)] : [];
-  try {
-    const values = JSON.parse(carrier.value || "[]");
-    return Array.isArray(values) ? values.map(value => String(value)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function requiredPluginFieldIsEmpty(field: PluginField, element: Element | null, initialValue: unknown): boolean {
+/** 必填字段是否仍为空值；switch 与 status 不参与必填校验。 */
+function requiredFieldIsEmpty(field: PluginField, control: PluginFieldControl, initialValue: unknown): boolean {
   const type = String(field?.type || "text").toLowerCase();
   if (type === "switch" || type === "status") return false;
-  if (type === "multi-select") return selectedValuesFromCarrier(element).length === 0;
-  if (type === "secret" && (initialValue as { configured?: boolean } | undefined)?.configured === true) return false;
-  return !String((element as HTMLInputElement | null)?.value ?? "").trim();
+  if (type === "secret") {
+    // 已配置的密钥保持原值时视为已填写，只有显式清空后才要求重新输入。
+    if ((initialValue as { configured?: boolean } | undefined)?.configured === true) return false;
+    const value = control.value() as { action?: string } | null;
+    return value?.action !== "set";
+  }
+  if (type === "multi-select") {
+    const value = control.value();
+    return !Array.isArray(value) || value.length === 0;
+  }
+  return !String(control.value() ?? "").trim();
 }
 
-/** 返回声明式插件必填字段状态；调用方负责应用统一的字段标红样式。 */
+/**
+ * 校验声明式插件表单的必填字段；调用方负责应用统一的字段标红样式。
+ * 取值来自桥接层的控件对象，不读取控件内部 DOM。
+ */
 export function validateRequiredPluginFields(
-  container: Element | null,
+  controls: Map<string, PluginFieldControl>,
   fields: PluginField[],
   initialValues: Record<string, unknown> = {},
-  attribute = "data-plugin-field",
-  onInvalid: (input: HTMLElement) => void = () => {},
-  onValid: (input: HTMLElement) => void = () => {},
+  onInvalid: (control: PluginFieldControl) => void = () => {},
+  onValid: (control: PluginFieldControl) => void = () => {},
 ): boolean {
   let valid = true;
   for (const field of Array.isArray(fields) ? fields : []) {
-    if (!field?.required || field.readOnly || String(field.type || "").toLowerCase() === "status") continue;
+    if (!field?.required || field.readOnly) continue;
+    if (String(field.type || "").toLowerCase() === "status") continue;
     const key = String(field.key || "");
-    if (!key || !container) continue;
-    const selector = `[${attribute}="${CSS.escape(key)}"]`;
-    const element = container.querySelector<HTMLElement>(selector);
-    if (!element) continue;
-    const input = element.matches("[data-nxp-select-value]")
-      ? element
-      : String(field.type || "").toLowerCase() === "multi-select"
-        ? element.querySelector<HTMLElement>("[data-nxp-select-value]") || element
-        : element;
-    if (!input?.id) continue;
-    if (requiredPluginFieldIsEmpty(field, element, initialValues?.[key])) {
-      onInvalid(input);
+    const control = key ? controls.get(key) : null;
+    if (!control) continue;
+    if (requiredFieldIsEmpty(field, control, initialValues?.[key])) {
+      onInvalid(control);
       valid = false;
     } else {
-      onValid(input);
+      onValid(control);
     }
   }
   return valid;

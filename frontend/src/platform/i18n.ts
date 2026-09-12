@@ -197,11 +197,6 @@ export function formatList(values: unknown, options: Intl.ListFormatOptions = {}
   }
 }
 
-/** 紧凑列表格式，适合按钮摘要、标签和短提示。 */
-export function formatCompactList(values: unknown): string {
-  return formatList(values, { style: "short" });
-}
-
 export function applyTranslations(root: ParentNode | null = typeof document !== "undefined" ? document : null): void {
   if (!root?.querySelectorAll) return;
   root.querySelectorAll<HTMLElement>("[data-i18n]").forEach(element => {

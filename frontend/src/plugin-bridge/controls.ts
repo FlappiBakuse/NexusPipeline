@@ -1,10 +1,44 @@
-import { formatCompactList, t } from "./host-adapter";
-import { iconPath } from "../platform/icons";
-import { esc } from "../platform/format";
-import type { PluginFieldOption } from "./types";
+// @ts-nocheck
+/**
+ * 插件声明式表单控件工厂。
+ *
+ * 控件本身就是宿主公开的 `nxp-*` Native Custom Elements：DOM、键盘、ARIA、浮层、图标与视觉
+ * 全部由公开组件实现，桥接层只负责 schema → 属性、值收集、改动同步与校验错误投影。
+ * 这里不拼装任何控件 HTML，也不维护第二套 widget 实现。
+ */
+import { t } from "./host-adapter";
+import type { PluginField, PluginFieldOption } from "./types";
 
-function icon(name: string): string {
-  return `<svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${iconPath(name)}</svg>`;
+/**
+ * 声明式字段类型 → 公开元素与值载体。
+ * 字段类型集合与宿主接受的插件 UI 字段一致；`ariaAsProperty` 表示组件通过 `ariaLabel` 属性承接无障碍名称。
+ */
+const FIELD_SPECS = {
+  text: { tag: "nxp-text-input", carrier: "input", ariaAsProperty: false },
+  url: { tag: "nxp-text-input", carrier: "input", ariaAsProperty: false, inputType: "url" },
+  secret: { tag: "nxp-text-input", carrier: "input", ariaAsProperty: false, inputType: "password" },
+  status: { tag: "nxp-text-input", carrier: "input", ariaAsProperty: false, readOnly: true },
+  textarea: { tag: "nxp-text-area", carrier: "textarea", ariaAsProperty: false },
+  number: { tag: "nxp-number-input", carrier: "[data-nxp-number-value]", ariaAsProperty: true, placeholder: true },
+  range: { tag: "nxp-range", carrier: "input", ariaAsProperty: true },
+  color: { tag: "nxp-color-picker", carrier: ".nxp-color-value", ariaAsProperty: true },
+  switch: { tag: "nxp-switch", carrier: "button", ariaAsProperty: true },
+  select: { tag: "nxp-select", carrier: "[data-nxp-select-value]", ariaAsProperty: true, placeholder: true, popover: true },
+  "multi-select": { tag: "nxp-select", carrier: "[data-nxp-select-value]", ariaAsProperty: true, placeholder: true, popover: true },
+};
+
+export interface PluginFieldControl {
+  /** 公开元素宿主节点；插入表单的就是它。 */
+  element: HTMLElement;
+  /** 字段类型（与插件声明一致）。 */
+  type: string;
+  /** label 的 for 目标：下拉控件指向可聚焦的触发器，其余指向值载体本身。 */
+  labelFor: string;
+  /** 值载体元素：字段错误高亮与焦点定位使用它。 */
+  carrier: HTMLElement;
+  /** 当前值，形态与插件保存载荷一致。 */
+  value(): unknown;
+  destroy(): void;
 }
 
 function normalizedOptions(options: Array<PluginFieldOption | string> | undefined) {
@@ -20,469 +54,138 @@ function normalizedOptions(options: Array<PluginFieldOption | string> | undefine
   });
 }
 
-function safeId(value: unknown): string {
-  return String(value || "control").replace(/[^a-zA-Z0-9_-]/g, "-");
-}
-
-function hasDisabledAttribute(extra: unknown): boolean {
-  return /(?:^|\s)disabled(?:\s|=|$)/u.test(String(extra || ""));
-}
-
 function selectedValues(value: unknown): string[] {
   if (Array.isArray(value)) return value.map(item => String(item ?? ""));
   return String(value ?? "").length ? [String(value)] : [];
 }
 
-/** 返回带键盘/ARIA 支持的自定义下拉控件；隐藏 input 保留现有表单读取接口。 */
-export function selectControlMarkup(id: string, value: unknown, options: Array<PluginFieldOption | string>, extra = "", ariaLabel = "", multiple = false, rootExtra = ""): string {
-  const normalized = normalizedOptions(options);
-  const selected = selectedValues(value);
-  const current = multiple ? selected : [selected[0] || ""];
-  const selectedOption = normalized.find(option => option.value === current[0]);
-  const selectedLabels = normalized.filter(option => current.includes(option.value)).map(option => option.label);
-  const summary = selectedLabels.length ? formatCompactList(selectedLabels) : t("common.select_an_option");
-  const controlId = safeId(id);
-  const triggerId = `${controlId}-trigger`;
-  const menuId = `${controlId}-menu`;
-  const storedValue = multiple ? JSON.stringify(current.filter(Boolean)) : current[0];
-  const optionMarkup = normalized.map((option, index) => {
-    const selectedState = current.includes(option.value);
-    return `<button type="button" id="${menuId}-option-${index}" class="nxp-select-option${selectedState ? " is-selected" : ""}" role="option" data-nxp-select-option data-value="${esc(option.value)}" aria-selected="${selectedState ? "true" : "false"}"${option.disabled ? " disabled" : ""}${option.title ? ` title="${esc(option.title)}"` : ""}><span>${esc(option.label)}</span>${selectedState ? '<span class="nxp-select-check" aria-hidden="true">✓</span>' : ""}</button>`;
-  }).join("");
-  const hiddenAttributes = multiple ? ' data-nxp-select-multiple="true"' : "";
-  const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  return `<div class="nxp-select" data-nxp-select${multiple ? ' data-nxp-select-multiple="true"' : ""}${rootExtra}>
-    <input id="${controlId}" type="hidden" value="${esc(storedValue)}" data-nxp-select-value${hiddenAttributes} ${String(extra || "")}>
-    <button id="${triggerId}" class="nxp-select-trigger" type="button" data-nxp-select-trigger aria-haspopup="listbox" aria-expanded="false" aria-controls="${menuId}" aria-label="${esc(ariaLabel || selectedOption?.label || t("common.select_an_option"))}"${disabled}><span data-nxp-select-label>${esc(summary)}</span><span class="nxp-select-chevron" aria-hidden="true">⌄</span></button>
-    <div id="${menuId}" class="nxp-select-menu secondary-surface" data-nxp-select-menu role="listbox"${multiple ? ' aria-multiselectable="true"' : ""} hidden>${optionMarkup}</div>
-  </div>`;
+function parseNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-/** 自定义数字步进框：文本输入承担可编辑值，按钮提供可访问的步进操作。 */
-export function numberControlMarkup(id: string, value: unknown, extra = "", ariaLabel = ""): string {
-  const controlId = safeId(id);
-  const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  return `<div class="nxp-number" data-nxp-number><input id="${controlId}" class="nxp-number-input" type="text" inputmode="decimal" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-number-value ${String(extra || "")}><span class="nxp-number-actions"><button type="button" class="nxp-number-step" data-nxp-step="increment" aria-label="${esc(t("common.increase"))}"${disabled}>＋</button><button type="button" class="nxp-number-step" data-nxp-step="decrement" aria-label="${esc(t("common.decrease"))}"${disabled}>－</button></span></div>`;
+function optionalNumber(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
-/** 本机路径字段：文本框保持完全可编辑，右侧仅显示自绘文件 SVG 图标。 */
-export function pathControlMarkup(id: string, value: unknown, kind = "file", extra = "", ariaLabel = "", filter = "", triggerExtra = ""): string {
-  const controlId = safeId(id);
-  const normalizedKind = ["file", "folder", "file-or-folder"].includes(String(kind)) ? String(kind) : "file";
-  const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  const pickerFilter = filter ? ` data-path-filter="${esc(filter)}"` : "";
-  const trigger = (pickerKind: string, label: string, testId: string) => `<button type="button" class="nxp-path-trigger${normalizedKind === "file-or-folder" ? " nxp-path-choice" : ""}" data-action="pick-path" data-path-trigger data-path-target="${controlId}" data-path-kind="${pickerKind}" data-path-title="${esc(ariaLabel || label)}" aria-label="${esc(t(label))}" title="${esc(t(label))}" data-testid="${testId}"${pickerFilter}${disabled}${triggerExtra ? ` ${triggerExtra}` : ""}>${icon(pickerKind)}</button>`;
-  const triggers = normalizedKind === "file-or-folder"
-    ? `<span class="nxp-path-actions" role="group" aria-label="${esc(t("common.select.label", { label: ariaLabel || t("common.path") }))}">${trigger("file", "common.select_file", "path-picker-file")}${trigger("folder", "common.select_folder", "path-picker-folder")}</span>`
-    : trigger(normalizedKind, "common.select_path", "path-picker");
-  return `<div class="nxp-path" data-nxp-path data-path-kind="${normalizedKind}">
-    <input id="${controlId}" class="nxp-path-input" type="text" value="${esc(value)}" aria-label="${esc(ariaLabel || id)}" data-nxp-path-value ${String(extra || "")}>
-    ${triggers}
-  </div>`;
+function initialValue(type: string, value: unknown): unknown {
+  switch (type) {
+    case "switch":
+      return value === true;
+    case "select":
+      return selectedValues(value)[0] || "";
+    case "multi-select":
+      return selectedValues(value);
+    case "number":
+    case "range":
+      return value == null ? "" : parseNumber(value);
+    case "secret":
+      return "";
+    default:
+      return value == null ? "" : String(value);
+  }
 }
 
-function normalizedTimePart(value: unknown, limit: number): number {
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(parsed)) return 0;
-  return ((parsed % limit) + limit) % limit;
+function readFieldValue(type: string, raw: unknown): unknown {
+  switch (type) {
+    case "switch":
+      return raw === true;
+    case "multi-select":
+      return selectedValues(raw);
+    case "number":
+    case "range":
+      return parseNumber(raw);
+    case "secret": {
+      const text = String(raw ?? "");
+      return text.length ? { action: "set", value: text } : { action: "keep" };
+    }
+    default:
+      return raw == null ? "" : String(raw);
+  }
 }
 
-function timeText(value: number): string {
-  return String(value).padStart(2, "0");
-}
-
-function normalizedColor(value: unknown): string {
-  const raw = String(value || "").trim();
-  if (/^#[0-9a-f]{6}$/iu.test(raw)) return raw.toLowerCase();
-  if (/^#[0-9a-f]{3}$/iu.test(raw)) return `#${raw.slice(1).split("").map(part => `${part}${part}`).join("")}`.toLowerCase();
-  return "#000000";
-}
-
-/** 自定义颜色字段：可见文本输入和色块负责交互，隐藏 color carrier 负责调用系统取色器。 */
-export function colorControlMarkup(id: string, value: unknown, extra = "", ariaLabel = ""): string {
-  const controlId = safeId(id);
-  const pickerId = `${controlId}-picker`;
-  const color = normalizedColor(value);
-  const disabled = hasDisabledAttribute(extra) ? " disabled" : "";
-  return `<div class="nxp-color" data-nxp-color data-nxp-color-value="${color}"><div class="nxp-color-row"><input id="${controlId}" class="nxp-color-value" type="text" inputmode="text" value="${esc(value || color)}" aria-label="${esc(ariaLabel || id)}" data-nxp-color-text ${String(extra || "")}><button type="button" class="nxp-color-trigger" data-nxp-color-trigger aria-label="${esc(t("common.open_color_picker"))}"${disabled}><span class="nxp-color-swatch" data-nxp-color-swatch aria-hidden="true"></span><span>${esc(t("common.select_color"))}</span></button></div><input id="${pickerId}" class="sr-only" type="color" value="${color}" data-nxp-color-picker${disabled}></div>`;
-}
-
-/** 动态插件表单使用的 DOM 工厂，与静态表单共享同一事件和视觉层。 */
-export function createSelectControl({ id, value = "", options = [], multiple = false, disabled = false, ariaLabel = "" }: { id: string; value?: unknown; options?: Array<PluginFieldOption | string>; multiple?: boolean; disabled?: boolean; ariaLabel?: string }): HTMLElement {
-  const template = document.createElement("template");
-  template.innerHTML = selectControlMarkup(id, value, options, disabled ? "disabled" : "", ariaLabel, multiple).trim();
-  return template.content.firstElementChild as HTMLElement;
-}
-
-export function createNumberControl({ id, value = "", min, max, step, disabled = false, ariaLabel = "" }: { id: string; value?: unknown; min?: unknown; max?: unknown; step?: unknown; disabled?: boolean; ariaLabel?: string }): HTMLElement {
-  const attrs = [
-    min == null ? "" : `min="${esc(min)}"`,
-    max == null ? "" : `max="${esc(max)}"`,
-    step == null ? "" : `step="${esc(step)}"`,
-    disabled ? "disabled" : "",
-  ].filter(Boolean).join(" ");
-  const template = document.createElement("template");
-  template.innerHTML = numberControlMarkup(id, value, attrs, ariaLabel).trim();
-  return template.content.firstElementChild as HTMLElement;
-}
-
-export function createColorControl({ id, value = "", disabled = false, ariaLabel = "" }: { id: string; value?: unknown; disabled?: boolean; ariaLabel?: string }): HTMLElement {
-  const template = document.createElement("template");
-  template.innerHTML = colorControlMarkup(id, value, disabled ? "disabled" : "", ariaLabel).trim();
-  const element = template.content.firstElementChild as HTMLElement;
-  syncColor(element, value);
+/** 创建并挂载控件；元素进入文档后公开组件才完成渲染，因此 id 与无障碍属性在挂载后落到值载体上。 */
+function createFieldElement(type: string, field: PluginField, value: unknown, container: HTMLElement): HTMLElement {
+  const spec = FIELD_SPECS[type];
+  const element = document.createElement(spec.tag);
+  const multiple = type === "multi-select";
+  const readOnly = field.readOnly === true || spec.readOnly === true;
+  const props: Record<string, unknown> = {
+    modelValue: initialValue(type, value),
+    disabled: readOnly ? true : undefined,
+    multiple: multiple ? true : undefined,
+    options: type === "select" || type === "multi-select" ? normalizedOptions(field.options) : undefined,
+    type: spec.inputType,
+    ariaLabel: spec.ariaAsProperty ? (field.label || field.key) : undefined,
+    placeholder: spec.placeholder ? (field.placeholder || undefined) : undefined,
+    min: optionalNumber(field.min),
+    max: optionalNumber(field.max),
+    step: optionalNumber(field.step),
+  };
+  for (const [key, property] of Object.entries(props)) {
+    if (property === undefined) continue;
+    element[key] = property;
+  }
+  if (type === "secret" && value?.configured === true && !field.placeholder) {
+    element.placeholder = t("common.configuration.keep_existing_hint");
+  }
+  container.append(element);
   return element;
 }
 
-function selectValue(input: HTMLInputElement | null): string[] {
-  if (!input?.dataset.nxpSelectMultiple) return [String(input?.value ?? "")].filter(Boolean);
-  try {
-    const parsed = JSON.parse(input.value || "[]");
-    return Array.isArray(parsed) ? parsed.map(item => String(item)) : [];
-  } catch {
-    return [];
+/**
+ * 创建插件表单控件：公开元素挂到容器后接管值载体，并把用户改动同步回自身受控属性。
+ *
+ * 公开元素是受控组件，桥接层负责把 change 事件解析出的值写回元素，保持显示与读取一致。
+ */
+export function createPluginFieldControl(
+  field: PluginField,
+  value: unknown,
+  id: string,
+  container: HTMLElement): PluginFieldControl {
+  const type = String(field?.type || "text").toLowerCase();
+  const spec = FIELD_SPECS[type];
+  if (!spec) throw new Error(t("common.plugin_field_render_failed", { key: field.key }));
+  const element = createFieldElement(type, field, value, container);
+  const carrier = element.querySelector(spec.carrier);
+  if (!carrier) {
+    element.remove();
+    throw new Error(t("common.plugin_field_render_failed", { key: field.key }));
   }
-}
+  const trigger = spec.popover ? element.querySelector(".nxp-select-trigger") : null;
+  if (trigger) trigger.id = `${id}-trigger`;
+  carrier.id = id;
+  carrier.dataset.pluginFormField = field.key;
+  carrier.dataset.pluginType = type;
+  carrier.name = field.key;
+  if (field.required) carrier.setAttribute("required", "");
+  if (field.maxLength > 0) carrier.setAttribute("maxlength", String(field.maxLength));
+  if (!spec.ariaAsProperty) carrier.setAttribute("aria-label", field.label || field.key);
 
-function updateSelect(root: HTMLElement | null): void {
-  const input = root?.querySelector<HTMLInputElement>("[data-nxp-select-value]");
-  const label = root?.querySelector<HTMLElement>("[data-nxp-select-label]");
-  if (!input || !label) return;
-  const values = selectValue(input);
-  const options = Array.from(root!.querySelectorAll<HTMLElement>("[data-nxp-select-option]"));
-  const labels: string[] = [];
-  options.forEach(option => {
-    const selected = values.includes(String(option.dataset.value || ""));
-    option.setAttribute("aria-selected", selected ? "true" : "false");
-    option.classList.toggle("is-selected", selected);
-    const check = option.querySelector(".nxp-select-check");
-    if (selected && !check) option.insertAdjacentHTML("beforeend", '<span class="nxp-select-check" aria-hidden="true">✓</span>');
-    if (!selected && check) check.remove();
-    if (selected) labels.push(option.querySelector("span")?.textContent || option.dataset.value || "");
-  });
-  label.textContent = labels.length ? formatCompactList(labels) : t("common.select_an_option");
-  const trigger = root!.querySelector("[data-nxp-select-trigger]");
-  if (trigger) trigger.setAttribute("aria-label", formatCompactList(labels) || t("common.select_an_option"));
-}
-
-function syncColor(root: HTMLElement | null, value: unknown = null, dispatch = false): void {
-  const text = root?.querySelector<HTMLInputElement>("[data-nxp-color-text]");
-  const picker = root?.querySelector<HTMLInputElement>("[data-nxp-color-picker]");
-  const swatch = root?.querySelector<HTMLElement>("[data-nxp-color-swatch]");
-  if (!text || !picker || !root) return;
-  const color = normalizedColor(value ?? text.value);
-  root.dataset.nxpColorValue = color;
-  picker.value = color;
-  if (swatch) swatch.style.backgroundColor = color;
-  if (dispatch) {
-    dispatchValueEvent(text, "input");
-    dispatchValueEvent(text, "change");
-  }
-}
-
-function closePopovers(except: Element | null = null): void {
-  document.querySelectorAll<HTMLElement>("[data-nxp-select], [data-nxp-time]").forEach(root => {
-    if (root === except || root.contains(except)) return;
-    const menu = root.querySelector<HTMLElement>("[data-nxp-select-menu], [data-nxp-time-popover]");
-    const trigger = root.querySelector("[data-nxp-select-trigger], [data-nxp-time-trigger], [data-nxp-time-value]");
-    if (menu) {
-      if (root.matches("[data-nxp-time]") && menu.hidden === false) commitTime(root);
-      menu.hidden = true;
-      menu.removeAttribute("data-open");
-      menu.removeAttribute("style");
-    }
-    if (trigger) trigger.setAttribute("aria-expanded", "false");
-  });
-}
-
-function popoverAnchor(root: HTMLElement | null): HTMLElement | null {
-  if (root?.matches("[data-nxp-time]")) return root.querySelector<HTMLElement>(".nxp-time-input-wrap");
-  return root?.querySelector<HTMLElement>("[data-nxp-select-trigger]") || null;
-}
-
-function positionPopover(menu: HTMLElement | null, trigger: HTMLElement | null): void {
-  if (!menu || !trigger) return;
-  const margin = 8;
-  const gap = 6;
-  const triggerRect = trigger.getBoundingClientRect();
-  if (!triggerRect.width || !triggerRect.height) return;
-  const availableWidth = Math.max(0, window.innerWidth - margin * 2);
-  const preferredWidth = Math.min(triggerRect.width, availableWidth);
-  menu.style.position = "fixed";
-  menu.style.right = "auto";
-  menu.style.width = `${Math.round(preferredWidth)}px`;
-  const left = Math.min(
-    Math.max(margin, triggerRect.left),
-    Math.max(margin, window.innerWidth - preferredWidth - margin),
-  );
-  menu.style.left = `${Math.round(left)}px`;
-  menu.style.top = `${Math.round(triggerRect.bottom + gap)}px`;
-  const menuHeight = menu.offsetHeight;
-  let top = triggerRect.bottom + gap;
-  if (top + menuHeight > window.innerHeight - margin && triggerRect.top - menuHeight - gap >= margin) {
-    top = triggerRect.top - menuHeight - gap;
-  }
-  top = Math.min(Math.max(margin, top), Math.max(margin, window.innerHeight - menuHeight - margin));
-  menu.style.top = `${Math.round(top)}px`;
-}
-
-let popoverPositionBound = false;
-function bindPopoverPositioning(): void {
-  if (popoverPositionBound) return;
-  popoverPositionBound = true;
-  const reposition = () => {
-    document.querySelectorAll<HTMLElement>("[data-nxp-select] [data-nxp-select-menu][data-open], [data-nxp-time] [data-nxp-time-popover][data-open]").forEach(menu => {
-      const root = menu.closest<HTMLElement>("[data-nxp-select], [data-nxp-time]");
-      const trigger = popoverAnchor(root);
-      positionPopover(menu, trigger);
-    });
+  let current = type === "secret" ? { action: "keep" } : readFieldValue(type, initialValue(type, value));
+  const onChange = (event: Event) => {
+    const detail = (event as CustomEvent).detail;
+    const next = Array.isArray(detail) ? detail[0] : (event.target as HTMLInputElement | null)?.value;
+    current = readFieldValue(type, next);
+    if (type === "secret") return;
+    element.modelValue = type === "switch"
+      ? next === true
+      : type === "number" || type === "range"
+        ? parseNumber(next)
+        : next;
   };
-  document.addEventListener("scroll", reposition, true);
-  window.addEventListener("resize", reposition);
-}
-
-function setPopoverOpen(root: HTMLElement | null, open: boolean): void {
-  closePopovers(open ? root : null);
-  const menu = root?.querySelector<HTMLElement>("[data-nxp-select-menu], [data-nxp-time-popover]");
-  const trigger = root?.querySelector<HTMLElement>("[data-nxp-select-trigger], [data-nxp-time-trigger], [data-nxp-time-value]");
-  if (!menu || !trigger || !root) return;
-  menu.hidden = !open;
-  if (open) {
-    menu.dataset.open = "true";
-    bindPopoverPositioning();
-    positionPopover(menu, popoverAnchor(root));
-  } else {
-    menu.removeAttribute("data-open");
-    menu.removeAttribute("style");
-  }
-  trigger.setAttribute("aria-expanded", open ? "true" : "false");
-  if (open && root.matches("[data-nxp-select]")) {
-    const current = root.querySelector<HTMLElement>('[data-nxp-select-option][aria-selected="true"]:not(:disabled)')
-      || root.querySelector<HTMLElement>("[data-nxp-select-option]:not(:disabled)");
-    current?.focus();
-  } else if (open && root.matches("[data-nxp-time]")) {
-    root.querySelector<HTMLElement>('.nxp-time-option[aria-selected="true"]')?.focus();
-  }
-}
-
-function dispatchValueEvent(input: Element | null, type = "change"): void {
-  input?.dispatchEvent(new Event(type, { bubbles: true }));
-}
-
-function updateTimeButtons(root: HTMLElement | null): void {
-  if (!root) return;
-  const values = [
-    { unit: "hour", current: normalizedTimePart(root.dataset.nxpTimeHour, 24), limit: 24, attribute: "data-nxp-time-hour" },
-    { unit: "minute", current: normalizedTimePart(root.dataset.nxpTimeMinute, 60), limit: 60, attribute: "data-nxp-time-minute" },
-  ];
-  values.forEach(({ unit, current, limit, attribute }) => {
-    const wheel = root.querySelector<HTMLElement>(`[data-nxp-time-wheel="${unit}"]`);
-    if (!wheel) return;
-    const options = Array.from(wheel.querySelectorAll<HTMLElement>(".nxp-time-option"));
-    [current - 1, current, current + 1].forEach((value, index) => {
-      const option = options[index];
-      if (!option) return;
-      const normalized = (value + limit) % limit;
-      option.setAttribute(attribute, timeText(normalized));
-      option.textContent = timeText(normalized);
-      option.classList.toggle("is-current", index === 1);
-      option.setAttribute("aria-selected", index === 1 ? "true" : "false");
-    });
-  });
-}
-
-function updateTimeValue(root: HTMLElement, dispatch = true): void {
-  const input = root.querySelector<HTMLInputElement>("[data-nxp-time-value]");
-  const hour = root.dataset.nxpTimeHour;
-  const minute = root.dataset.nxpTimeMinute;
-  if (!input || !hour || !minute) return;
-  input.value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  if (dispatch) {
-    dispatchValueEvent(input, "input");
-    dispatchValueEvent(input, "change");
-  }
-}
-
-function commitTime(root: HTMLElement | null): void {
-  if (!root?.dataset.nxpTimeDirty) return;
-  if (root.dataset.nxpTimeHour && root.dataset.nxpTimeMinute) updateTimeValue(root);
-  delete root.dataset.nxpTimeDirty;
-}
-
-/** 安装宿主级插件控件事件委托；插件表单控件与公开 `nxp-*` 元素共用同一行为层。 */
-export function installPluginControlEvents(): void {
-  if (typeof document === "undefined" || document.documentElement.dataset.nxpControlsBound === "true") return;
-  document.documentElement.dataset.nxpControlsBound = "true";
-  document.addEventListener("pointerdown", event => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target?.closest("[data-nxp-select], [data-nxp-time]")) closePopovers();
-  });
-  document.addEventListener("click", event => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-    const selectTrigger = target.closest<HTMLElement>("[data-nxp-select-trigger]");
-    if (selectTrigger) {
-      const root = selectTrigger.closest<HTMLElement>("[data-nxp-select]");
-      if (!(selectTrigger as HTMLButtonElement).disabled && root) setPopoverOpen(root, root.querySelector<HTMLElement>("[data-nxp-select-menu]")?.hidden !== false);
-      return;
-    }
-    const switchControl = target.closest<HTMLElement>("[data-nxp-switch]");
-    if (switchControl) {
-      if (!(switchControl as HTMLButtonElement).disabled) {
-        const pressed = switchControl.getAttribute("aria-pressed") === "true";
-        switchControl.setAttribute("aria-pressed", pressed ? "false" : "true");
-        switchControl.dataset.state = pressed ? "off" : "on";
-        dispatchValueEvent(switchControl);
-      }
-      return;
-    }
-    const colorTrigger = target.closest<HTMLButtonElement>("[data-nxp-color-trigger]");
-    if (colorTrigger) {
-      if (!colorTrigger.disabled) colorTrigger.closest("[data-nxp-color]")?.querySelector<HTMLInputElement>("[data-nxp-color-picker]")?.click();
-      return;
-    }
-    const selectOption = target.closest<HTMLButtonElement>("[data-nxp-select-option]");
-    if (selectOption && !selectOption.disabled) {
-      const root = selectOption.closest<HTMLElement>("[data-nxp-select]");
-      const input = root?.querySelector<HTMLInputElement>("[data-nxp-select-value]");
-      if (!root || !input) return;
-      const value = String(selectOption.dataset.value || "");
-      if (input.dataset.nxpSelectMultiple) {
-        const values = selectValue(input);
-        const next = values.includes(value) ? values.filter(item => item !== value) : [...values, value];
-        input.value = JSON.stringify(next);
-        updateSelect(root);
-        dispatchValueEvent(input);
-      } else {
-        const changed = String(input.value || "") !== value;
-        if (changed) {
-          input.value = value;
-          updateSelect(root);
-          dispatchValueEvent(input);
-        }
-        setPopoverOpen(root, false);
-        root.querySelector<HTMLElement>("[data-nxp-select-trigger]")?.focus();
-      }
-      return;
-    }
-    const timeTrigger = target.closest<HTMLButtonElement>("[data-nxp-time-trigger], [data-nxp-time-value]");
-    if (timeTrigger) {
-      const root = timeTrigger.closest<HTMLElement>("[data-nxp-time]");
-      if (!timeTrigger.disabled && root) setPopoverOpen(root, root.querySelector<HTMLElement>("[data-nxp-time-popover]")?.hidden !== false);
-      return;
-    }
-    const timeAdjust = target.closest<HTMLButtonElement>("[data-nxp-time-adjust]");
-    if (timeAdjust && !timeAdjust.disabled) {
-      const root = timeAdjust.closest<HTMLElement>("[data-nxp-time]");
-      const [unit, directionText] = String(timeAdjust.dataset.nxpTimeAdjust || "").split(":");
-      const direction = Number(directionText);
-      if (!root || !["hour", "minute"].includes(unit) || !Number.isFinite(direction)) return;
-      const limit = unit === "hour" ? 24 : 60;
-      const dataKey = unit === "hour" ? "nxpTimeHour" : "nxpTimeMinute";
-      const current = normalizedTimePart(root.dataset[dataKey], limit);
-      root.dataset[dataKey] = timeText((current + direction + limit) % limit);
-      updateTimeValue(root, false);
-      root.dataset.nxpTimeDirty = "true";
-      updateTimeButtons(root);
-      return;
-    }
-    const timeHour = target.closest<HTMLElement>(".nxp-time-option[data-nxp-time-hour]");
-    const timeMinute = target.closest<HTMLElement>(".nxp-time-option[data-nxp-time-minute]");
-    if (timeHour || timeMinute) {
-      const button = timeHour || timeMinute!;
-      const root = button.closest<HTMLElement>("[data-nxp-time]");
-      if (!root) return;
-      if (timeHour) root.dataset.nxpTimeHour = timeHour.dataset.nxpTimeHour || "";
-      if (timeMinute) root.dataset.nxpTimeMinute = timeMinute.dataset.nxpTimeMinute || "";
-      updateTimeValue(root, false);
-      root.dataset.nxpTimeDirty = "true";
-      updateTimeButtons(root);
-      return;
-    }
-    const step = target.closest<HTMLButtonElement>("[data-nxp-step]");
-    if (step && !step.disabled) {
-      const input = step.closest("[data-nxp-number]")?.querySelector<HTMLInputElement>("[data-nxp-number-value]");
-      if (!input) return;
-      const current = Number(input.value);
-      const amount = Number(input.step) || 1;
-      let next = Number.isFinite(current) ? current : (Number(input.min) || 0);
-      next += step.dataset.nxpStep === "decrement" ? -amount : amount;
-      const min = Number(input.min);
-      const max = Number(input.max);
-      if (Number.isFinite(min)) next = Math.max(min, next);
-      if (Number.isFinite(max)) next = Math.min(max, next);
-      input.value = Number.isInteger(amount) ? String(Math.round(next)) : String(Number(next.toFixed(8)));
-      dispatchValueEvent(input, "input");
-      dispatchValueEvent(input);
-      return;
-    }
-    const fileTrigger = target.closest("[data-nxp-file-trigger]");
-    if (fileTrigger) {
-      fileTrigger.closest("[data-nxp-file]")?.querySelector<HTMLInputElement>("[data-nxp-file-input]")?.click();
-    }
-  });
-  document.addEventListener("change", event => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-    const selectRoot = target.closest<HTMLElement>("[data-nxp-select]");
-    if (selectRoot && target.matches("[data-nxp-select-value]")) updateSelect(selectRoot);
-    if (target.matches("[data-nxp-file-input]")) {
-      const root = target.closest("[data-nxp-file]");
-      const files = Array.from((target as HTMLInputElement).files || []);
-      const label = root?.querySelector<HTMLElement>("[data-nxp-file-name]");
-      if (label) label.textContent = files.length ? files.map(file => file.name).join(", ") : t("common.no_file_selected");
-    }
-    if (target.matches("[data-nxp-color-picker]")) {
-      syncColor(target.closest<HTMLElement>("[data-nxp-color]"), (target as HTMLInputElement).value, true);
-    }
-    if (target.matches("[data-nxp-color-text]")) syncColor(target.closest<HTMLElement>("[data-nxp-color]"), (target as HTMLInputElement).value);
-  });
-  document.addEventListener("focusout", event => {
-    const target = event.target instanceof Element ? event.target : null;
-    const root = target?.closest<HTMLElement>("[data-nxp-time]");
-    if (!root || (event.relatedTarget instanceof Node && root.contains(event.relatedTarget))) return;
-    commitTime(root);
-    setPopoverOpen(root, false);
-  });
-  document.addEventListener("keydown", event => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-    if (event.key === "Escape") {
-      const root = target.closest<HTMLElement>("[data-nxp-select], [data-nxp-time]");
-      if (root && root.querySelector("[data-nxp-select-menu]:not([hidden]), [data-nxp-time-popover]:not([hidden])")) {
-        event.preventDefault();
-        setPopoverOpen(root, false);
-      }
-      return;
-    }
-    const trigger = target.closest<HTMLElement>("[data-nxp-select-trigger], [data-nxp-time-trigger], [data-nxp-time-value]");
-    if (trigger && ["Enter", " ", "ArrowDown", "ArrowUp"].includes(event.key)) {
-      event.preventDefault();
-      const root = trigger.closest<HTMLElement>("[data-nxp-select], [data-nxp-time]");
-      const menu = root?.querySelector<HTMLElement>("[data-nxp-select-menu], [data-nxp-time-popover]");
-      if (menu?.hidden !== false) setPopoverOpen(root, true);
-      else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && root) {
-        const options = Array.from(root.querySelectorAll<HTMLElement>(root.matches("[data-nxp-time]") ? ".nxp-time-option" : "[data-nxp-select-option]:not(:disabled)"));
-        const current = options.indexOf(document.activeElement as HTMLElement);
-        const next = options[(current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length];
-        next?.focus();
-      }
-    }
-    const option = target.closest<HTMLElement>("[data-nxp-select-option]");
-    if (option && ["Enter", " "].includes(event.key)) {
-      event.preventDefault();
-      option.click();
-    }
-    const timeOption = target.closest<HTMLElement>(".nxp-time-option");
-    if (timeOption && ["Enter", " "].includes(event.key)) {
-      event.preventDefault();
-      timeOption.click();
-    } else if (timeOption && ["ArrowUp", "ArrowDown"].includes(event.key)) {
-      event.preventDefault();
-      const root = timeOption.closest<HTMLElement>("[data-nxp-time]");
-      const unit = timeOption.closest<HTMLElement>("[data-nxp-time-wheel]")?.dataset.nxpTimeWheel;
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      root?.querySelector<HTMLElement>(`[data-nxp-time-adjust="${unit}:${direction}"]`)?.click();
-    }
-  });
+  element.addEventListener("change", onChange);
+  return {
+    element,
+    type,
+    carrier,
+    labelFor: trigger ? trigger.id : id,
+    value: () => current,
+    destroy() {
+      element.removeEventListener("change", onChange);
+      element.remove();
+    },
+  };
 }

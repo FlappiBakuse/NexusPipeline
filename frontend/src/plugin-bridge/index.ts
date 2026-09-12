@@ -7,9 +7,6 @@
  */
 import { disposePluginSlot, initPluginRuntime } from "./runtime";
 import { renderPluginSlot } from "./slots";
-import { installPluginControlEvents } from "./controls";
-
-installPluginControlEvents();
 
 export {
   disposePluginSlot,

@@ -28,7 +28,8 @@ export function toast(message: string, kind: ToastKind = "info"): void {
 /** 字段错误：高亮输入框，并把错误写入预留的稳定位置。 */
 function visualFieldElement(element: HTMLElement): HTMLElement {
   if (!element?.matches?.("[data-nxp-select-value]")) return element;
-  return element.closest<HTMLElement>("[data-nxp-select]")?.querySelector<HTMLElement>("[data-nxp-select-trigger]") || element;
+  // 下拉控件的可视焦点在触发器上，值载体只是隐藏 input。
+  return element.closest<HTMLElement>(".nxp-select")?.querySelector<HTMLElement>(".nxp-select-trigger") || element;
 }
 
 function eachFieldElement(element: HTMLElement, callback: (element: HTMLElement) => void): HTMLElement {

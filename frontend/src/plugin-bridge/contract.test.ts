@@ -29,7 +29,6 @@ vi.mock("./host-adapter", () => ({
     return { ok: true };
   },
   isAbortError: () => false,
-  formatCompactList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatDate: (value: unknown) => String(value ?? ""),
   formatList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatNumber: (value: unknown) => String(value ?? ""),

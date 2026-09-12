@@ -1,28 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { validateRequiredPluginFields } from "./plugin-fields";
+import type { PluginFieldControl } from "./controls";
 
-/** 声明式多选字段：隐藏值载体保存 JSON 数组，字段根元素本身不是载体。 */
-function multiSelectElement(carrierValue: string): Element {
-  const carrier = { dataset: { nxpSelectMultiple: "true" }, value: carrierValue, id: "games" };
+/** 校验只读取桥接层控件对象，因此用例用最小控件替身覆盖取值形态。 */
+function control(value: unknown, id = "field"): PluginFieldControl {
   return {
-    matches: () => false,
-    querySelector: () => carrier,
-    id: "games",
-    value: "",
-  } as unknown as Element;
+    element: document.createElement("div"),
+    type: "text",
+    labelFor: id,
+    carrier: { id } as unknown as HTMLElement,
+    value: () => value,
+    destroy: () => {},
+  };
 }
 
 describe("plugin declarative fields", () => {
   it("reports required declarative fields that still hold no value", () => {
-    const container = { querySelector: () => multiSelectElement("[]") } as unknown as Element;
+    const controls = new Map([["games", control([], "games")]]);
 
     const invalid: string[] = [];
     const valid = validateRequiredPluginFields(
-      container,
+      controls,
       [{ key: "games", type: "multi-select", required: true, label: "签到游戏" }],
       {},
-      "data-plugin-field",
-      input => invalid.push(input.id),
+      item => invalid.push(item.carrier.id),
       () => {},
     );
 
@@ -30,17 +31,16 @@ describe("plugin declarative fields", () => {
     expect(invalid).toEqual(["games"]);
   });
 
-  it("accepts a required multi-select whose value carrier holds selections", () => {
-    const container = { querySelector: () => multiSelectElement('["gi","hsr"]') } as unknown as Element;
+  it("accepts a required multi-select whose control holds selections", () => {
+    const controls = new Map([["games", control(["gi", "hsr"], "games")]]);
 
     const checked: string[] = [];
     const valid = validateRequiredPluginFields(
-      container,
+      controls,
       [{ key: "games", type: "multi-select", required: true, label: "签到游戏" }],
       {},
-      "data-plugin-field",
       () => {},
-      input => checked.push(input.id),
+      item => checked.push(item.carrier.id),
     );
 
     expect(valid).toBe(true);
@@ -48,13 +48,40 @@ describe("plugin declarative fields", () => {
   });
 
   it("accepts a required secret that is already configured", () => {
-    const element = { id: "token", value: "", matches: () => false } as unknown as Element;
-    const container = { querySelector: () => element } as unknown as Element;
+    const controls = new Map([["token", control({ action: "keep" }, "token")]]);
     const valid = validateRequiredPluginFields(
-      container,
+      controls,
       [{ key: "token", type: "secret", required: true, label: "令牌" }],
       { token: { configured: true } },
     );
+    expect(valid).toBe(true);
+  });
+
+  it("requires a new value when a configured secret was cleared", () => {
+    const controls = new Map([["token", control({ action: "keep" }, "token")]]);
+    expect(validateRequiredPluginFields(
+      controls,
+      [{ key: "token", type: "secret", required: true, label: "令牌" }],
+      { token: { configured: false } },
+    )).toBe(false);
+    expect(validateRequiredPluginFields(
+      new Map([["token", control({ action: "set", value: "abc" }, "token")]]),
+      [{ key: "token", type: "secret", required: true, label: "令牌" }],
+      { token: { configured: false } },
+    )).toBe(true);
+  });
+
+  it("ignores switch, status and read-only fields", () => {
+    const controls = new Map([
+      ["enabled", control(false, "enabled")],
+      ["state", control("", "state")],
+      ["note", control("", "note")],
+    ]);
+    const valid = validateRequiredPluginFields(controls, [
+      { key: "enabled", type: "switch", required: true, label: "启用" },
+      { key: "state", type: "status", required: true, label: "状态" },
+      { key: "note", type: "text", required: true, readOnly: true, label: "备注" },
+    ]);
     expect(valid).toBe(true);
   });
 });

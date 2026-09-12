@@ -11,13 +11,28 @@ import {
   t,
   toast,
 } from "./host-adapter";
-import { createColorControl, createNumberControl, createSelectControl } from "./controls";
+import { createPluginFieldControl, type PluginFieldControl } from "./controls";
 import { validateRequiredPluginFields } from "./plugin-fields";
 import { PLUGIN_SLOT_NAMES, disposePluginSlot, queryContributions, renderFrontendSlots } from "./runtime";
 
 export const pluginSlotNames = PLUGIN_SLOT_NAMES;
 
 const validSlots = new Set(pluginSlotNames);
+
+/** 槽位内声明的表单控件：重新渲染槽位时统一注销，避免遗留事件监听与浮层。 */
+const slotFormControls = new WeakMap<Element, PluginFieldControl[]>();
+
+function disposeSlotForms(container) {
+  const controls = slotFormControls.get(container) || [];
+  slotFormControls.delete(container);
+  controls.forEach(control => {
+    try {
+      control.destroy();
+    } catch {
+      // 单个控件注销失败不影响槽位重建。
+    }
+  });
+}
 
 function textElement(tag, text, className = "") {
   const element = document.createElement(tag);
@@ -58,97 +73,11 @@ function renderFields(parent, values) {
   });
 }
 
-function createInput(field, value, id) {
-  const type = String(field.type || "text").toLowerCase();
-  let element;
-  let input;
-  if (type === "textarea") {
-    element = input = document.createElement("textarea");
-  } else if (type === "select" || type === "multi-select") {
-    element = createSelectControl({
-      id,
-      value,
-      options: field.options,
-      multiple: type === "multi-select",
-      disabled: field.readOnly === true,
-      ariaLabel: field.label || field.key,
-    });
-    input = element.querySelector("[data-nxp-select-value]");
-  } else if (type === "number") {
-    element = createNumberControl({
-      id,
-      value: value == null ? "" : value,
-      min: field.min,
-      max: field.max,
-      step: field.step,
-      disabled: field.readOnly === true,
-      ariaLabel: field.label || field.key,
-    });
-    input = element.querySelector("[data-nxp-number-value]");
-  } else if (type === "color") {
-    element = createColorControl({
-      id,
-      value: value == null ? "" : value,
-      disabled: field.readOnly === true,
-      ariaLabel: field.label || field.key,
-    });
-    input = element.querySelector("[data-nxp-color-text]");
-  } else if (type === "switch") {
-    element = input = document.createElement("button");
-    input.type = "button";
-    input.className = "mode-toggle switch-control";
-    input.setAttribute("aria-label", field.label || field.key);
-    input.setAttribute("aria-pressed", value === true ? "true" : "false");
-    input.dataset.state = value === true ? "on" : "off";
-    input.dataset.nxpSwitch = "true";
-    input.innerHTML = '<span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>';
-  } else {
-    element = input = document.createElement("input");
-  }
-  if (!input || !element) throw new Error(t("common.plugin_field_render_failed", { key: field.key }));
-  input.id = id;
-  input.dataset.pluginFormField = field.key;
-  input.dataset.pluginType = type;
-  input.name = field.key;
-  input.disabled = field.readOnly === true;
-  if (field.required) input.required = true;
-  if (field.placeholder) input.placeholder = field.placeholder;
-  if (field.maxLength > 0) input.maxLength = field.maxLength;
-  if (type === "range") {
-    input.type = type;
-    input.classList.add("nxp-range");
-    input.dataset.nxpRange = "true";
-    if (field.min != null) input.min = field.min;
-    if (field.max != null) input.max = field.max;
-    if (field.step != null) input.step = field.step;
-  } else if (type === "secret") input.type = "password";
-  else if (type === "url") input.type = "url";
-  if (type !== "select" && type !== "multi-select" && type !== "number" && type !== "range" && type !== "color" && type !== "switch" && type !== "secret") {
-    input.value = value == null ? "" : String(value);
-  }
-  if (type === "secret" && value?.configured === true && !input.placeholder) {
-    input.placeholder = t("common.configuration.keep_existing_hint");
-  }
-  return { element, input };
-}
-
-function readFormValues(form) {
+/** 收集表单当前值：形态与插件保存载荷一致，读取来源是桥接层控件而不是控件内部 DOM。 */
+function readFormValues(controls) {
   const values = {};
-  form.querySelectorAll("[data-plugin-form-field]").forEach(input => {
-    const type = input.dataset.pluginType;
-    if (type === "switch") values[input.dataset.pluginFormField] = input.getAttribute("aria-pressed") === "true";
-    else if (type === "multi-select" && input.dataset.nxpSelectMultiple) {
-      try {
-        const parsed = JSON.parse(input.value || "[]");
-        values[input.dataset.pluginFormField] = Array.isArray(parsed) ? parsed.map(String) : [];
-      } catch {
-        values[input.dataset.pluginFormField] = [];
-      }
-    }
-    else if (type === "multi-select") values[input.dataset.pluginFormField] = Array.from(input.selectedOptions).map(option => option.value);
-    else if (type === "number" || type === "range") values[input.dataset.pluginFormField] = Number(input.value);
-    else if (type === "secret") values[input.dataset.pluginFormField] = input.value ? { action: "set", value: input.value } : { action: "keep" };
-    else values[input.dataset.pluginFormField] = input.value;
+  controls.forEach((control, key) => {
+    if (key) values[key] = control.value();
   });
   return values;
 }
@@ -158,31 +87,41 @@ function renderFormContribution(parent, contribution) {
   form.className = "plugin-contribution-form";
   form.noValidate = true;
   form.dataset.pluginForm = `${contribution.pluginName}/${contribution.id}`;
+  // 先挂载表单：公开元素接入文档后才渲染出内部控件，字段控件必须在其之后创建。
+  parent.append(form);
   const fields = Array.isArray(contribution.fields) ? contribution.fields : [];
-  fields.forEach(field => {
-    const wrapper = document.createElement("div");
-    wrapper.className = "field plugin-field";
-    const label = textElement("label", `${field.label || field.key}${field.required ? " *" : ""}`, "field-label");
-    const controlId = `plugin-${contribution.pluginName}-${contribution.id}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
-    const control = createInput(field, contribution.values?.[field.key], controlId);
-    const labelTarget = control.element.querySelector?.("[data-nxp-select-trigger], [data-nxp-time-trigger]") || control.input;
-    label.htmlFor = labelTarget.id || controlId;
-    wrapper.append(label, control.element);
-    if (field.description) wrapper.dataset.help = field.description;
-    form.append(wrapper);
-  });
+  const controls = new Map();
+  try {
+    fields.forEach(field => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "field plugin-field";
+      if (field.description) wrapper.dataset.help = field.description;
+      const label = textElement("label", `${field.label || field.key}${field.required ? " *" : ""}`, "field-label");
+      wrapper.append(label);
+      form.append(wrapper);
+      const controlId = `plugin-${contribution.pluginName}-${contribution.id}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
+      const control = createPluginFieldControl(field, contribution.values?.[field.key], controlId, wrapper);
+      label.htmlFor = control.labelFor;
+      controls.set(String(field.key || ""), control);
+    });
+  } catch (error) {
+    disposeSlotForms(form);
+    form.remove();
+    throw error;
+  }
   const footer = document.createElement("div");
   footer.className = "row-actions";
   const save = textElement("button", "Save");
   save.type = "submit";
   footer.append(save);
   form.append(footer);
+  slotFormControls.set(parent, [...(slotFormControls.get(parent) || []), ...controls.values()]);
   form.addEventListener("submit", async event => {
     event.preventDefault();
     if (save.disabled) return;
-    const markRequired = input => setRequiredFieldError(input.id);
-    const clearRequired = input => clearFieldError(input.id);
-    if (!validateRequiredPluginFields(form, fields, contribution.values || {}, "data-plugin-form-field", markRequired, clearRequired)) {
+    const markRequired = control => setRequiredFieldError(control.carrier.id);
+    const clearRequired = control => clearFieldError(control.carrier.id);
+    if (!validateRequiredPluginFields(controls, fields, contribution.values || {}, markRequired, clearRequired)) {
       toast(t("common.plugin.settings_required"), "error");
       return;
     }
@@ -190,7 +129,7 @@ function renderFormContribution(parent, contribution) {
     try {
       await api("PUT", `/api/plugin-contributions/ui/${encodeURIComponent(contribution.pluginName)}/${encodeURIComponent(contribution.id)}`, {
         context: contribution.context,
-        values: readFormValues(form),
+        values: readFormValues(controls),
       });
       toast(t("common.plugin_settings_saved"));
     } catch (error) {
@@ -199,7 +138,6 @@ function renderFormContribution(parent, contribution) {
       save.disabled = false;
     }
   });
-  parent.append(form);
 }
 
 function renderDeclarativeContribution(parent, contribution) {
@@ -234,6 +172,7 @@ function renderDeclarativeContribution(parent, contribution) {
 async function paintPluginSlot(container, slot, context, contributions = null) {
   if (!container || !validSlots.has(slot)) return;
   await disposePluginSlot(container);
+  disposeSlotForms(container);
   container.replaceChildren();
   let rendered = await renderFrontendSlots(container, slot, context);
   (contributions || [])
