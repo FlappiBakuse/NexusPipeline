@@ -123,6 +123,16 @@ function clamp(value: unknown, min: number, max: number, fallback: number): numb
   return Math.max(min, Math.min(max, number));
 }
 
+/**
+ * 释放不再使用的背景地址：Blob 地址由外观表面托管，只有替换为新地址或清除背景时才回收，
+ * 避免多次切换壁纸累积失效的 Object URL。
+ */
+function releaseBackgroundUrl(keep: string | null): void {
+  if (backgroundUrl && backgroundUrl !== keep && backgroundUrl.startsWith("blob:")) {
+    URL.revokeObjectURL(backgroundUrl);
+  }
+}
+
 /** 应用背景图片与显示效果；url 为空或协议不安全时按非法参数拒绝。 */
 export function setBackgroundSurface(surface: BackgroundSurface): void {
   const url = String(surface?.url || "").trim();
@@ -130,6 +140,7 @@ export function setBackgroundSurface(surface: BackgroundSurface): void {
   let parsed: URL;
   try { parsed = new URL(url, location.href); } catch { throw new TypeError(t("common.appearance_url_invalid")); }
   if (!["http:", "https:", "blob:", "data:"].includes(parsed.protocol)) throw new TypeError(t("common.error.appearance_url_protocol"));
+  releaseBackgroundUrl(parsed.href);
   backgroundUrl = parsed.href;
   const blur = clamp(surface?.blurPx, 0, 40, 0);
   const dim = clamp(surface?.dimPercent, 0, 80, 0);
