@@ -26,7 +26,10 @@ jobs:
       docs: ${{ steps.domains.outputs.docs }}
       plugin: ${{ steps.domains.outputs.plugin }}
       ui: ${{ steps.domains.outputs.ui }}
-      system: ${{ steps.domains.outputs.system }}
+      system_runtime: ${{ steps.domains.outputs.system_runtime }}
+      system_execution: ${{ steps.domains.outputs.system_execution }}
+      system_emulator: ${{ steps.domains.outputs.system_emulator }}
+      system_update: ${{ steps.domains.outputs.system_update }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -37,6 +40,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: 校验影响域映射
+        run: node --test tests/tools/ci-domains.test.mjs
 
       - name: 计算影响域
         id: domains
@@ -227,7 +233,7 @@ jobs:
   system-runtime-mcp:
     name: Gate F System Runtime/MCP
     needs: changes
-    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_runtime == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -279,7 +285,7 @@ jobs:
   system-execution:
     name: Gate F System Execution
     needs: changes
-    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_execution == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -331,7 +337,7 @@ jobs:
   system-emulator:
     name: Gate F System Emulator
     needs: changes
-    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_emulator == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -383,7 +389,7 @@ jobs:
   system-update:
     name: Gate F System Update
     needs: changes
-    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_update == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:

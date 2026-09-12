@@ -170,6 +170,10 @@ async function runDocs() {
   return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs"]);
 }
 
+async function runTooling() {
+  return runProcess(nodeCommand, ["--test", "tests\\tools\\ci-domains.test.mjs"]);
+}
+
 async function runSyntax() {
   const files = syntaxTestFiles();
   if (files.length === 0) throw new Error("未找到 UI Smoke 语法检查文件");
@@ -186,7 +190,7 @@ async function runBuild() {
 
 async function runDefault(mode, { permissionChecked = false } = {}) {
   if (mode === "admin" && !permissionChecked && !requireAdmin("管理员默认门禁", "admin default")) return 2;
-  for (const step of [runUnit, runWeb, runDocs, runSyntax, runBuild]) {
+  for (const step of [runUnit, runWeb, runDocs, runTooling, runSyntax, runBuild]) {
     const code = await step();
     if (code !== 0) return code;
   }
@@ -366,7 +370,7 @@ function printUsage() {
   console.error("  node tests\\run.mjs codex <default|ui|system|all> [--realtime]");
   console.error("  node tests\\run.mjs admin <default|ui|system|all> [--realtime]");
   console.error(`  node tests\\run.mjs <codex|admin> system [${SYSTEM_GROUP_NAMES.join("|")}] [--realtime] [--dry]`);
-  console.error("  node tests\\run.mjs unit|web|docs|syntax|build");
+  console.error("  node tests\\run.mjs unit|web|docs|tooling|syntax|build");
   console.error("system 省略分组时运行全部 suite；指定分组时按影响域运行，可用 --group <分组> 重复指定。");
   console.error("system --dry 只列出将要执行的 suite，不构建也不启动运行时。");
   console.error("正式组合入口必须显式指定 codex 或 admin；default/ui/system/all 不能省略模式。");
@@ -406,6 +410,9 @@ try {
       break;
     case "docs":
       exitCode = await runDocs();
+      break;
+    case "tooling":
+      exitCode = await runTooling();
       break;
     case "syntax":
       exitCode = await runSyntax();

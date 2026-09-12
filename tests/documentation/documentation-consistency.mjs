@@ -268,7 +268,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
     assert.doesNotThrow(() => globToRegExp(pattern), `共享路径无法编译：${pattern}`);
   }
 
-  // 影响域判定对示例改动给出预期结果。
+  // 影响域判定对示例改动给出预期结果：插件 SDK 只影响宿主与插件契约，不额外启动 System 作业。
   const sample = evaluateDomains([
     "docs/TESTING.md",
     "frontend/src/plugin-bridge/contract.test.ts",
@@ -276,13 +276,27 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
   ]).domains;
   assert.deepEqual(
     Object.fromEntries(Object.entries(sample).map(([key, value]) => [key, value.affected])),
-    { frontend: true, host: true, docs: true, plugin: true, ui: true, system: true },
+    {
+      frontend: true,
+      host: true,
+      docs: true,
+      plugin: true,
+      ui: true,
+      system_runtime: false,
+      system_execution: false,
+      system_emulator: false,
+      system_update: false,
+    },
     "示例改动的影响域判定与预期不一致",
   );
+  // 逐域映射由 tests/tools/ci-domains.test.mjs 覆盖，这里只核对文档改动不牵连任何 System 作业。
   const docsOnly = evaluateDomains(["docs/STATUS.md"]).domains;
   assert.equal(docsOnly.docs.affected, true);
   assert.equal(docsOnly.frontend.affected, false);
-  assert.equal(docsOnly.system.affected, false);
+  assert.equal(docsOnly.system_runtime.affected, false);
+  assert.equal(docsOnly.system_execution.affected, false);
+  assert.equal(docsOnly.system_emulator.affected, false);
+  assert.equal(docsOnly.system_update.affected, false);
   const unknownOnly = evaluateDomains(["SECURITY.md"]);
   assert.equal(unknownOnly.failOpen, true, "未命中影响域的改动需要按全量门禁处理");
   const sharedOnly = evaluateDomains([".github/workflows/ci.yml"]);
@@ -290,7 +304,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
 
   // run.mjs 的 System Smoke 影响域分组与 CI 作业引用的入口必须一致且指向真实 suite 文件。
   const workflow = read(".github/workflows/ci.yml");
-  const outputs = [...workflow.matchAll(/^ {6}([a-z]+): \$\{\{ steps\.domains\.outputs\.\1 \}\}$/gmu)]
+  const outputs = [...workflow.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.domains\.outputs\.\1 \}\}$/gmu)]
     .map(match => match[1])
     .sort();
   assert.deepEqual(outputs, [...domainKeys].sort(), "ci.yml 影响域输出与 tools/ci-domains.mjs 不一致");
