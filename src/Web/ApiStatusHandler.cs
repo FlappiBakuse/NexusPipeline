@@ -19,10 +19,10 @@ internal static class ApiStatusHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(context, BuildStatus()).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, BuildStatus(context.Request.Locale)).ConfigureAwait(false);
     }
 
-    private static object BuildStatus()
+    private static object BuildStatus(string locale)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         AppSettings settings = ctx.Settings;
@@ -79,7 +79,7 @@ internal static class ApiStatusHandler
                     logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };
             }),
-            plugins = ctx.Plugins.PluginManagementViews,
+            plugins = ctx.Plugins.GetLocalizedPluginManagementViews(locale),
         };
     }
 

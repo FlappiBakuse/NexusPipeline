@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, useAttrs, watch } from "vue";
 import NxpIcon from "./NxpIcon.vue";
+import NxpScrollArea from "./NxpScrollArea.vue";
 
 const attrs = useAttrs();
 const props = withDefaults(defineProps<{
@@ -111,7 +112,7 @@ onBeforeUnmount(() => {
           <slot name="header"><h2 v-if="title" class="modal-title">{{ title }}</h2></slot>
           <button v-if="closeable" class="icon-button modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" /></button>
         </header>
-        <div class="nxp-modal-body modal-body" :class="props.bodyClass"><slot /></div>
+        <NxpScrollArea class="nxp-modal-body modal-body" :class="props.bodyClass"><slot /></NxpScrollArea>
         <footer v-if="$slots.footer" class="nxp-modal-footer modal-footer"><slot name="footer" /></footer>
       </section>
     </div>
@@ -127,7 +128,7 @@ onBeforeUnmount(() => {
 .nxp-modal-header h2 { margin: 0; font-size: 19px; }
 .nxp-modal-header button { flex: 0 0 auto; }
 .nxp-modal-header button .nxp-icon { width: 18px; height: 18px; }
-.nxp-modal-body { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 0 clamp(18px, 3vw, 30px) var(--nx-space-4); overscroll-behavior: contain; }
+.nxp-modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) var(--nx-space-4); }
 .nxp-modal-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--nx-space-3); margin: 0; padding: var(--nx-space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--nx-color-border); border-bottom: 0; }
 .nxp-modal:focus, .nxp-modal-panel:focus { outline: none; }
 .nxp-modal-enter-active,

@@ -4,6 +4,7 @@ import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import HistoryDetailModal from "./HistoryDetailModal.vue";
 import { formatDateTime, historyBadges, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryRecord } from "../utils/historyTypes";
@@ -50,7 +51,7 @@ function recordPath(record: HistoryRecord) {
           <NxpIcon name="refresh" />
         </button>
       </div>
-      <div class="history-entry-list history-level-list">
+      <NxpScrollArea class="history-entry-list history-level-list" :aria-label="panelTitle">
         <div v-if="!props.selectedUserKey" class="history-empty-message">
           <strong>{{ t("history.choose_run_users") }}</strong>
           <span>{{ t("history.filter.user_day_help") }}</span>
@@ -85,7 +86,7 @@ function recordPath(record: HistoryRecord) {
           </span>
           <span class="history-entry-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
         </button>
-      </div>
+      </NxpScrollArea>
     </section>
     <HistoryDetailModal :record="props.detail" :fallback-user="props.selectedUserName" @close="emit('closeDetail')" />
   </div>

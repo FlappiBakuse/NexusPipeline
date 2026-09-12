@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { api, isAbortError } from "../../platform/api";
 import { t } from "../../platform/i18n";
 import { setTopbarTitle } from "../../platform/shell";
-import { toast } from "../../platform/toast";
+import { clearFieldError, setRequiredFieldError, toast } from "../../platform/toast";
 import { disposePluginSlot, renderPluginSlot } from "@bridge/index";
 import { queueRuntimeLimits } from "../../platform/queue-runtime";
 import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../scripts/utils/pluginStatus";
@@ -280,7 +280,29 @@ async function load() {
   }
   await paintListSlots();
 }
+
+function validateQueueFields() {
+  const fields = [
+    { id: "qm-name", value: draft.name },
+    ...draft.tasks.map((task, index) => ({ id: `qm-task-${index}`, value: task.scriptInstanceId })),
+  ];
+  fields.forEach(field => clearFieldError(field.id));
+  let firstInvalidId: string | null = null;
+  for (const field of fields) {
+    if (String(field.value || "").trim()) continue;
+    setRequiredFieldError(field.id, false);
+    if (!firstInvalidId) firstInvalidId = field.id;
+  }
+  if (firstInvalidId) setRequiredFieldError(firstInvalidId);
+  return firstInvalidId;
+}
+
 async function save() {
+  const invalidId = validateQueueFields();
+  if (invalidId) {
+    toast(invalidId === "qm-name" ? t("queues.validation.name_required") : t("queues.validation.task_required"), "error");
+    return;
+  }
   if (!draft.name.trim()) {
     toast(t("queues.validation.name_required"), "error");
     return;

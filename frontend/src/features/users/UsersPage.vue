@@ -5,7 +5,7 @@ import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
 import { setTopbarTitle } from "../../platform/shell";
-import { toast } from "../../platform/toast";
+import { clearFieldError, setRequiredFieldError, toast } from "../../platform/toast";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
@@ -161,15 +161,19 @@ function closeNewUser() {
 
 async function createUser() {
   const name = newUserName.value.trim();
+  clearFieldError("gu-name");
   if (!name) {
+    setRequiredFieldError("gu-name");
     toast(t("users.validation.username_required"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > 64) {
+    setRequiredFieldError("gu-name");
     toast(t("users.validation.username_length", { bytes: 64 }), "error");
     return;
   }
   if (users.value.some(user => user.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    setRequiredFieldError("gu-name");
     toast(t("users.validation.username_duplicate"), "error");
     return;
   }
@@ -363,7 +367,7 @@ onBeforeUnmount(() => {
         <label class="field-label" for="gu-name">{{
           t("users.user_name")
         }} <span class="req">*</span></label>
-        <NxpTextInput id="gu-name" v-model="newUserName" :aria-label="t('users.user_name')" />
+        <NxpTextInput id="gu-name" v-model="newUserName" :aria-label="t('users.user_name')" @update:model-value="clearFieldError('gu-name')" />
         <span class="muted">{{ t("users.username_case_insensitive") }}</span>
       </div>
       <template #footer>

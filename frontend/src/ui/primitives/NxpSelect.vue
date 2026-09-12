@@ -2,6 +2,8 @@
 import { nextTick, onBeforeUnmount, ref } from "vue";
 import { t } from "../../platform/i18n";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
+import NxpIcon from "./NxpIcon.vue";
+import NxpScrollArea from "./NxpScrollArea.vue";
 
 export interface NxpOption { value: string; label: string; disabled?: boolean; title?: string }
 
@@ -146,13 +148,15 @@ onBeforeUnmount(() => {
   <div ref="root" class="nxp-select">
     <input :id="props.id || undefined" type="hidden" :value="serialized()" data-nxp-select-value :data-nxp-select-multiple="multiple ? 'true' : undefined">
     <button ref="trigger" :id="props.id ? `${props.id}-trigger` : undefined" class="nxp-select-trigger" type="button" :disabled="disabled" :aria-label="ariaLabel || summary()" aria-haspopup="listbox" :aria-expanded="open" :aria-controls="menuId" @click="setOpen(!open)" @keydown="onTriggerKeydown">
-      <span data-nxp-select-label>{{ summary() }}</span><span class="nxp-select-chevron" aria-hidden="true">⌄</span>
+      <span data-nxp-select-label>{{ summary() }}</span><span class="nxp-select-chevron" aria-hidden="true"><NxpIcon name="chevronDown" className="nxp-select-chevron-icon" /></span>
     </button>
     <Teleport to="body">
       <div ref="menu" v-show="open" :id="menuId" class="nxp-select-menu secondary-surface" role="listbox" :aria-multiselectable="multiple || undefined">
-        <button v-for="(option, index) in options" :key="option.value" class="nxp-select-option" :class="{ 'is-selected': selected().includes(String(option.value)) }" type="button" role="option" data-nxp-select-option :data-value="option.value" :data-option-index="index" :disabled="option.disabled" :aria-selected="selected().includes(String(option.value))" :title="option.title || undefined" @click="choose(option)" @keydown="onOptionKeydown($event, index)">
-          <span>{{ option.label }}</span><span v-if="selected().includes(String(option.value))" class="nxp-select-check" aria-hidden="true">✓</span>
-        </button>
+        <NxpScrollArea class="nxp-select-menu-scroll" direction="vertical" :aria-label="ariaLabel || summary()">
+          <button v-for="(option, index) in options" :key="option.value" class="nxp-select-option" :class="{ 'is-selected': selected().includes(String(option.value)) }" type="button" role="option" data-nxp-select-option :data-value="option.value" :data-option-index="index" :disabled="option.disabled" :aria-selected="selected().includes(String(option.value))" :title="option.title || undefined" @click="choose(option)" @keydown="onOptionKeydown($event, index)">
+            <span>{{ option.label }}</span><span v-if="selected().includes(String(option.value))" class="nxp-select-check" aria-hidden="true">✓</span>
+          </button>
+        </NxpScrollArea>
       </div>
     </Teleport>
   </div>

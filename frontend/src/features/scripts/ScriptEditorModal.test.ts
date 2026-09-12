@@ -20,6 +20,17 @@ vi.mock("./services/scriptsApi", () => ({
 
 vi.mock("../../platform/toast", () => ({
   toast: (...args: unknown[]) => toast(...args),
+  clearFieldError: (id: string) => {
+    const element = document.getElementById(id);
+    element?.classList.remove("field-error");
+    element?.removeAttribute("aria-invalid");
+  },
+  setRequiredFieldError: (id: string, focus = true) => {
+    const element = document.getElementById(id);
+    element?.classList.add("field-error");
+    element?.setAttribute("aria-invalid", "true");
+    if (focus) element?.focus();
+  },
 }));
 vi.mock("../../platform/shell", () => ({
   setTopbarTitle: vi.fn(),
@@ -37,6 +48,7 @@ function mountEditor(script: { id: string; name: string; pluginType?: string } |
   return mount(ScriptEditorModal, {
     props: { script, plugin: pluginName, plugins: [plugin] },
     global: { stubs: { Teleport: true } },
+    attachTo: document.body,
   });
 }
 
@@ -126,5 +138,21 @@ describe("ScriptEditorModal root probe", () => {
     await cancel!.trigger("click");
     expect(cancelWrapper.emitted("close")).toHaveLength(1);
     cancelWrapper.unmount();
+  });
+
+  it("marks every missing required field and clears its error after editing", async () => {
+    const wrapper = mountEditor(null, "hoyolab");
+    const save = wrapper.find(".modal-footer .primary");
+    expect(save).toBeTruthy();
+    await save!.trigger("click");
+
+    expect(wrapper.find("#sm-name").classes()).toContain("field-error");
+    expect(wrapper.find("#sm-root").classes()).toContain("field-error");
+    expect(wrapper.find("#sm-game-exe").classes()).toContain("field-error");
+    expect(wrapper.find("#sm-name").attributes("aria-invalid")).toBe("true");
+
+    await wrapper.find("#sm-name").setValue("Alice");
+    expect(wrapper.find("#sm-name").classes()).not.toContain("field-error");
+    wrapper.unmount();
   });
 });

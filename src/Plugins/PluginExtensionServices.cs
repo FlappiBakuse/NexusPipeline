@@ -102,8 +102,8 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
 
     public PluginScopedDataStore(string pluginName)
     {
-        _pluginName = ValidateSegment(pluginName, "插件名", 64);
-        _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", pluginName, "scopes"));
+        _pluginName = ValidateSegment(PluginNameMigration.Canonicalize(pluginName), "插件名", 64);
+        _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", _pluginName, "scopes"));
     }
 
     public ValueTask<T?> ReadAsync<T>(string scope, CancellationToken cancellationToken = default)

@@ -139,8 +139,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     internal string LocalizePluginDisplayName(string pluginName, string fallback, string? locale)
     {
+        string lookupName = ResolveLoadedPluginName(pluginName);
         PluginSummary? summary = PluginSummaries.FirstOrDefault(item =>
-            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(item.Name, lookupName, StringComparison.OrdinalIgnoreCase));
         return summary is null
             ? fallback
             : PluginMetadataLocalization.DisplayName(summary.Locales, fallback, locale);
@@ -255,6 +256,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         IReadOnlyList<PluginInputDeclaration> declarations,
         string? locale)
     {
+        pluginName = ResolveLoadedPluginName(pluginName);
         DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
             string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
         return plugin?.LocalizeInputDeclarations(declarations, locale) ?? declarations;
@@ -288,6 +290,21 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 return _pluginManagementViewsCache;
             }
         }
+    }
+
+    /// <summary>按请求语言投影控制面插件元数据，确保状态页与插件页使用同一份本地化结果。</summary>
+    internal IReadOnlyList<PluginManagementView> GetLocalizedPluginManagementViews(string? locale)
+    {
+        return PluginManagementViews
+            .Select(view => view with
+            {
+                DisplayName = PluginMetadataLocalization.DisplayName(view.Locales, view.DisplayName, locale),
+                GameName = PluginMetadataLocalization.GameName(view.Locales, view.GameName, locale),
+                Description = PluginMetadataLocalization.Description(view.Locales, view.Description, locale),
+                Tags = PluginMetadataLocalization.Tags(view.Locales, view.Tags, locale),
+                Changelog = PluginMetadataLocalization.Changelog(view.Locales, view.Changelog, locale),
+            })
+            .ToArray();
     }
 
     private static string ReadManagementStateFingerprint()
@@ -552,6 +569,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         out string? filePath)
     {
         filePath = null;
+        pluginName = ResolveLoadedPluginName(pluginName);
         if (!IsRuntimeEnabled(pluginName)
             || !PluginFrontendManifest.IsPublicFrontendPath(relativePath))
         {
@@ -616,7 +634,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     public bool HasCapability(string pluginName, string capabilityKey)
     {
-        return _capabilities.HasKey(pluginName, capabilityKey, IsRuntimeEnabled);
+        return _capabilities.HasKey(ResolveLoadedPluginName(pluginName), capabilityKey, IsRuntimeEnabled);
     }
 
     public IReadOnlyList<T> GetCapabilities<T>() where T : class, IPluginCapability
@@ -631,6 +649,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             return null;
         }
+        pluginName = ResolveLoadedPluginName(pluginName);
         IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsRuntimeEnabled);
         if (resolver is null)
         {
@@ -660,6 +679,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             return null;
         }
+        pluginName = ResolveLoadedPluginName(pluginName);
         IProfileResolver? resolver = _capabilities.Get<IProfileResolver>(pluginName, IsRuntimeEnabled);
         if (resolver is not DataSpecializedPlugin plugin
             || !plugin.TryDiscoverConfigInputCandidates(rootPath.Trim(), out ConfigInputCandidateSet? candidates))
@@ -673,6 +693,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     internal bool TryGetConfigValidator(string pluginName, out ConfigValidatorDescriptor? descriptor)
     {
         descriptor = null;
+        pluginName = ResolveLoadedPluginName(pluginName);
         DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
             string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
         if (plugin is null || !IsRuntimeEnabled(plugin.Name) || !plugin.HasConfigValidator)
@@ -687,6 +708,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     internal bool TryGetConfigEditor(string pluginName, out ConfigEditorDescriptor? descriptor)
     {
         descriptor = null;
+        pluginName = ResolveLoadedPluginName(pluginName);
         DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
             string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
         if (plugin is null || !IsRuntimeEnabled(plugin.Name) || !plugin.HasConfigEditor)
@@ -791,38 +813,41 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     public bool IsEnabled(string name)
     {
-        return IsRuntimeEnabled(name);
+        return IsRuntimeEnabled(ResolveLoadedPluginName(name));
     }
 
     /// <summary>配置开关状态；保存后运行态保持原状，下一次加载才应用。</summary>
     public bool IsConfiguredEnabled(string name)
     {
-        return _configuredEnabled.TryGetValue(name, out bool enabled)
+        string lookupName = ResolveLoadedPluginName(name);
+        return _configuredEnabled.TryGetValue(lookupName, out bool enabled)
             ? enabled
-            : IsKnownPlugin(name) && ReadConfiguredEnabled(name, IsManagedCode(name));
+            : IsKnownPlugin(lookupName) && ReadConfiguredEnabled(lookupName, IsManagedCode(lookupName));
     }
 
     public string GetRuntimeState(string name)
     {
-        return _runtimeStates.TryGetValue(name, out PluginRuntimeState state)
+        string lookupName = ResolveLoadedPluginName(name);
+        return _runtimeStates.TryGetValue(lookupName, out PluginRuntimeState state)
             ? state.ToString()
             : PluginRuntimeState.Discovered.ToString();
     }
 
     public string? GetRuntimeError(string name)
     {
-        return _runtimeErrors.TryGetValue(name, out string? error) ? error : null;
+        return _runtimeErrors.TryGetValue(ResolveLoadedPluginName(name), out string? error) ? error : null;
     }
 
     public bool IsKnownPlugin(string name)
     {
-        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
-            || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
+        string lookupName = ResolveLoadedPluginName(name);
+        return HasActualPluginName(lookupName);
     }
 
     public bool IsDataSpecializedPlugin(string name)
     {
-        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        string lookupName = ResolveLoadedPluginName(name);
+        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, lookupName, StringComparison.OrdinalIgnoreCase));
     }
 
     public bool SetEnabled(string name, bool enabled, string source = Audit.System)
@@ -832,7 +857,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     public bool SetEnabled(string name, bool enabled, string source, out string? failureCode)
     {
-        if (!IsKnownPlugin(name))
+        string lookupName = ResolveLoadedPluginName(name);
+        if (!IsKnownPlugin(lookupName))
         {
             Logger.Warn($"[插件] 插件「{name}」不存在，已忽略启用开关操作。");
             failureCode = "not_found";
@@ -844,7 +870,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 AppSettings settings = _settings();
                 settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
-                string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, name, StringComparison.OrdinalIgnoreCase)) ?? name;
+                string key = settings.PluginPreferences.Keys.FirstOrDefault(item => string.Equals(item, lookupName, StringComparison.OrdinalIgnoreCase)) ?? lookupName;
                 settings.PluginPreferences[key] = new PluginPreference
                 {
                     Enabled = enabled,
@@ -857,22 +883,24 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             failureCode = "host_maintenance";
             return false;
         }
-        _configuredEnabled[name] = enabled;
+        _configuredEnabled[lookupName] = enabled;
         InvalidateManagementSnapshot();
-        Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", name);
-        Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{name}（重启后生效）。");
+        Audit.Log(source, $"{(enabled ? "启用" : "禁用")}插件", lookupName);
+        Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{lookupName}（重启后生效）。");
         failureCode = null;
         return true;
     }
 
     internal bool HasFrontend(string name)
     {
+        name = ResolveLoadedPluginName(name);
         return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase) && plugin.Frontend is not null)
             || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase) && plugin.Manifest.Frontend is not null);
     }
 
     internal bool TryGetPluginDirectory(string name, out string? directory)
     {
+        name = ResolveLoadedPluginName(name);
         directory = _dataPlugins
             .FirstOrDefault(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
             ?.PluginDirectory;
@@ -973,6 +1001,30 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             _runtimeErrors[name] = ex.Message;
             Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」初始化失败：{ex.Message}");
         }
+    }
+
+    private bool ResolveLoadedPluginNameHasActual(string name)
+    {
+        return _dataPlugins.Any(plugin => string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase))
+            || _managedPlugins.Any(plugin => string.Equals(plugin.Manifest.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string ResolveLoadedPluginName(string name)
+    {
+        string canonical = PluginNameMigration.Canonicalize(name);
+        if (ResolveLoadedPluginNameHasActual(canonical))
+        {
+            return canonical;
+        }
+        string? legacy = PluginNameMigration.LegacyNameFor(canonical);
+        return legacy is not null && ResolveLoadedPluginNameHasActual(legacy)
+            ? legacy
+            : canonical;
+    }
+
+    private bool HasActualPluginName(string name)
+    {
+        return ResolveLoadedPluginNameHasActual(name);
     }
 
     private bool IsRuntimeEnabled(string name)

@@ -16,17 +16,26 @@ internal static partial class UserCommands
         string source = Audit.Web)
     {
         UserBindingOverrides normalized = UserBindingOverrideResolver.Normalize(candidate);
-        if (ValidateRunDays(normalized.General.RunDays) is string runDaysError)
+        if (normalized.General.SyncEnabled
+            && ValidateRunDays(normalized.General.RunDays) is string runDaysError)
         {
-            return Validation<UserBindingOverrides>(runDaysError);
+            return Validation<UserBindingOverrides>(
+                "global_run_days_invalid",
+                runDaysError,
+                new Dictionary<string, object?> { ["value"] = normalized.General.RunDays });
         }
-        if (ValidateMaxSuccessfulRunsPerDay(normalized.General.MaxSuccessfulRunsPerDay) is string maxSuccessfulRunsError)
+        if (normalized.General.SyncEnabled
+            && ValidateMaxSuccessfulRunsPerDay(normalized.General.MaxSuccessfulRunsPerDay) is string maxSuccessfulRunsError)
         {
-            return Validation<UserBindingOverrides>(maxSuccessfulRunsError);
+            return Validation<UserBindingOverrides>(
+                "global_max_success_invalid",
+                maxSuccessfulRunsError,
+                new Dictionary<string, object?> { ["value"] = normalized.General.MaxSuccessfulRunsPerDay });
         }
-        if (ValidateSmtp(normalized.Notification.SmtpTo) is string smtpError)
+        if (normalized.Notification.SyncEnabled
+            && ValidateSmtp(normalized.Notification.SmtpTo) is string smtpError)
         {
-            return Validation<UserBindingOverrides>(smtpError);
+            return Validation<UserBindingOverrides>("global_smtp_invalid", smtpError);
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;

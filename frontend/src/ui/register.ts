@@ -22,6 +22,7 @@ import Pager from "./primitives/NxpPager.vue";
 import Modal from "./primitives/NxpModal.vue";
 import Toast from "./primitives/NxpToast.vue";
 import Icon from "./primitives/NxpIcon.vue";
+import ScrollArea from "./primitives/NxpScrollArea.vue";
 import SwitchSetting from "./composites/NxpSwitchSetting.vue";
 import SwitchList from "./composites/NxpSwitchList.vue";
 import LoadingState from "./composites/NxpLoadingState.vue";
@@ -52,6 +53,7 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-modal": Modal,
   "nxp-toast": Toast,
   "nxp-icon": Icon,
+  "nxp-scroll-area": ScrollArea,
   "nxp-switch-setting": SwitchSetting,
   "nxp-switch-list": SwitchList,
   "nxp-loading-state": LoadingState,

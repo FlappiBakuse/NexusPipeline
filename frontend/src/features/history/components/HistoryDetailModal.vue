@@ -9,6 +9,7 @@ import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { badgeTone, formatDateTime, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryAttempt, HistoryDetailPayload, HistoryLog, HistoryRecord, HistoryScreenshot } from "../utils/historyTypes";
 
@@ -195,16 +196,16 @@ onBeforeUnmount(() => {
             <div v-if="attemptLog(attempt.number)" class="history-log" data-history-log>
               <div class="qk-row">{{ attemptLogIsTail(attempt.number) ? t("history.log.lines_summary.tail", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) : t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) }}</div>
               <div v-if="attemptLogIsTail(attempt.number)" class="history-log-actions"><span class="muted">{{ t("history.log.tail_only") }}</span><NxpButton class="ghost sm" type="button" @click.stop="loadFullLog(attempt.number)">{{ t("history.view_full_log") }}</NxpButton></div>
-              <pre class="logbox" data-history-log-body>{{ attemptLogText(attempt.number) }}</pre>
+              <NxpScrollArea class="history-log-scroll" direction="both" :aria-label="t('history.log.attempt', { attempt: attempt.number })"><pre class="logbox" data-history-log-body>{{ attemptLogText(attempt.number) }}</pre></NxpScrollArea>
             </div>
             <div v-if="attemptScreenshots(attempt).length" class="history-attempt-screenshots" data-testid="history-attempt-screenshots">
               <div class="qk-row">{{ t("history.screenshots.summary", { count: attemptScreenshots(attempt).length }) }}</div>
-              <div class="history-screenshot-strip" role="list" :aria-label="t('history.screenshot.attempt_summary', { attempt: attempt.number })">
+              <NxpScrollArea class="history-screenshot-strip" direction="horizontal" role="list" :aria-label="t('history.screenshot.attempt_summary', { attempt: attempt.number })">
                 <button v-for="(screenshot, index) in attemptScreenshots(attempt)" :key="screenshot.id || index" class="history-screenshot-thumb" type="button" :aria-label="t('history.screenshot.item', { attempt: attempt.number, index: index + 1 })" @click.stop="openImage(attempt, screenshot, index)">
                   <img :src="imageUrls[detailImageKey(attempt, screenshot, index)] || undefined" :alt="t('history.screenshot.item', { attempt: attempt.number, index: index + 1 })" loading="lazy">
                   <span class="history-screenshot-index">{{ index + 1 }}</span>
                 </button>
-              </div>
+              </NxpScrollArea>
             </div>
           </section>
           <NxpEmptyState v-if="!(detailData.record.attemptDetails || []).length" :title="t('history.attempts')" :description="t('history.no_script_log')" />

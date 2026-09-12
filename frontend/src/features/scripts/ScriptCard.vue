@@ -75,7 +75,7 @@ const emit = defineEmits<{
       <div class="meta-line script-meta">
         <NxpBadge :tone="script.pluginType && unavailableMessage ? 'warn' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{
           script.pluginType
-            ? pluginLabel
+            ? translate("scripts.specialized_badge", { name: pluginLabel })
             : translate("scripts.general_script")
         }}</NxpBadge
         ><NxpBadge v-if="script.launchGame" tone="muted" data-testid="script-card-game-mode-badge">{{

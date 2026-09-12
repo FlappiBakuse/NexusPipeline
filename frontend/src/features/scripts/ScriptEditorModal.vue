@@ -4,7 +4,7 @@ import { isAbortError } from "../../platform/api";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
-import { toast } from "../../platform/toast";
+import { clearFieldError, setRequiredFieldError, toast } from "../../platform/toast";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSwitchGrid from "../../ui/composites/NxpSwitchGrid.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
@@ -89,6 +89,7 @@ async function browseDraftPath(
     })) as { path?: string } | null;
     if (result?.path) {
       draft[field] = result.path;
+      clearFieldError(scriptFieldId(field));
       if (field === "rootPath") await rootProbe.probe(draft.pluginType, result.path);
     }
   } catch (reason) {
@@ -120,12 +121,68 @@ function uploadJudgeScript() {
 async function probeRootPath(value: string) {
   await rootProbe.probe(draft.pluginType, value);
 }
+
+function scriptFieldId(field: string) {
+  return ({
+    name: "sm-name",
+    rootPath: "sm-root",
+    mainExe: "sm-exe",
+    configPath: "sm-config",
+    logPath: "sm-log",
+    gameExe: "sm-game-exe",
+    maxAttempts: "sm-attempts",
+    logStallTimeoutMinutes: "sm-stall",
+    totalTimeoutMinutes: "sm-total",
+    judgeScript: "sm-judge-code",
+  } as Record<string, string>)[field] || field;
+}
+
+function hasRequiredValue(value: unknown) {
+  if (typeof value === "number") return Number.isFinite(value) && value !== 0;
+  return String(value ?? "").trim().length > 0;
+}
+
+function syncScriptFieldErrors(invalid: { key: string } | null) {
+  const requiredFields = [
+    { id: "sm-name", value: draft.name },
+    { id: "sm-root", value: draft.rootPath },
+    { id: "sm-game-exe", value: draft.gameExe },
+    { id: "sm-attempts", value: draft.maxAttempts },
+    { id: "sm-stall", value: draft.logStallTimeoutMinutes },
+    { id: "sm-total", value: draft.totalTimeoutMinutes },
+    ...(!draft.pluginType
+      ? [
+          { id: "sm-exe", value: draft.mainExe },
+          { id: "sm-config", value: draft.configPath },
+          { id: "sm-log", value: draft.logPath },
+        ]
+      : []),
+  ];
+  const allFieldIds = [
+    "sm-name", "sm-root", "sm-exe", "sm-config", "sm-log", "sm-game-exe",
+    "sm-attempts", "sm-stall", "sm-total", "sm-judge-code",
+  ];
+  allFieldIds.forEach(clearFieldError);
+  let firstInvalidId: string | null = null;
+  for (const field of requiredFields) {
+    if (hasRequiredValue(field.value)) continue;
+    setRequiredFieldError(field.id, false);
+    if (!firstInvalidId) firstInvalidId = field.id;
+  }
+  if (invalid?.key === "scripts.validation.name_length") firstInvalidId = "sm-name";
+  if (invalid?.key === "scripts.editor.judge_code_help") firstInvalidId = "sm-judge-code";
+  if (firstInvalidId) setRequiredFieldError(firstInvalidId);
+  return firstInvalidId;
+}
+
 async function save() {
   const invalid = validateScriptDraft(draft);
   if (invalid) {
+    syncScriptFieldErrors(invalid);
     toast(invalid.args ? t(invalid.key, invalid.args) : t(invalid.key), "error");
     return;
   }
+  syncScriptFieldErrors(null);
   try {
     const payload = scriptPayload(draft);
     if (draft.id) await updateScript(draft.id, payload);
@@ -186,7 +243,7 @@ watch(
             <label class="field-label" for="sm-name"
               >{{ t("scripts.script_name") }}
               <span class="req">*</span></label
-            ><NxpTextInput id="sm-name" v-model="draft.name" :aria-label="t('scripts.script_name')" />
+            ><NxpTextInput id="sm-name" v-model="draft.name" :aria-label="t('scripts.script_name')" @update:model-value="clearFieldError('sm-name')" />
           </div>
           <div class="field">
             <label class="field-label" for="sm-root"
@@ -199,6 +256,7 @@ watch(
               :placeholder="t('scripts.script_root_directory')"
               :aria-label="t('scripts.script_root_directory')"
               @change="probeRootPath"
+              @update:model-value="clearFieldError('sm-root')"
               @browse="browseDraftPath('rootPath', $event)"
             />
           </div>
@@ -216,6 +274,7 @@ watch(
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.main_program_file')"
                 :aria-label="t('scripts.main_program_path')"
+                @update:model-value="clearFieldError('sm-exe')"
                 @browse="browseDraftPath('mainExe', $event)"
               />
             </div>
@@ -245,6 +304,7 @@ watch(
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.editor.root_required')"
                 :aria-label="t('scripts.configuration_file_folder')"
+                @update:model-value="clearFieldError('sm-config')"
                 @browse="browseDraftPath('configPath', $event)"
               />
             </div>
@@ -258,6 +318,7 @@ watch(
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.log_file_path')"
                 :aria-label="t('scripts.log_path')"
+                @update:model-value="clearFieldError('sm-log')"
                 @browse="browseDraftPath('logPath', $event)"
               />
             </div>
@@ -315,6 +376,7 @@ watch(
                   kind="file"
                   :placeholder="t('scripts.editor.game_path.placeholder')"
                   :aria-label="t('scripts.game_path')"
+                  @update:model-value="clearFieldError('sm-game-exe')"
                   @browse="browseDraftPath('gameExe', $event)"
                 /><NxpTextInput
                   v-else
@@ -323,6 +385,7 @@ watch(
                   type="text"
                   :aria-label="t('scripts.emulator_adb_address')"
                   :placeholder="t('scripts.emulator_adb_address')"
+                  @update:model-value="clearFieldError('sm-game-exe')"
                 />
               </div>
               <div
@@ -386,6 +449,7 @@ watch(
                 :min="1"
                 :max="10"
                 :aria-label="t('scripts.editor.retry.attempts_label')"
+                @update:model-value="clearFieldError('sm-attempts')"
               />
             </div>
             <div class="field" :data-help="t('scripts.editor.retry.stall_timeout_help')">
@@ -398,6 +462,7 @@ watch(
                 :min="-1"
                 :max="60"
                 :aria-label="t('scripts.log_stall_timeout_minutes')"
+                @update:model-value="clearFieldError('sm-stall')"
               />
             </div>
             <div class="field" :data-help="t('scripts.validation.total_timeout_help')">
@@ -410,6 +475,7 @@ watch(
                 :min="-1"
                 :max="720"
                 :aria-label="t('scripts.total_timeout_minutes')"
+                @update:model-value="clearFieldError('sm-total')"
               />
             </div>
           </div>
@@ -464,12 +530,13 @@ watch(
             >
               <label class="field-label" for="sm-judge-code"
                 >{{ t("scripts.judge_script") }}
-                {{ t("scripts.code", {}, "Code") }}</label
+                {{ t("scripts.code", {}, "Code") }}<span v-if="draft.judgeScriptEnabled" class="req"> *</span></label
               ><NxpTextArea
                 id="sm-judge-code"
                 v-model="draft.judgeScript"
                 class="mono code-area"
                 :placeholder="t('scripts.output_a_json_result')"
+                @update:model-value="clearFieldError('sm-judge-code')"
               />
             </div>
           </div>

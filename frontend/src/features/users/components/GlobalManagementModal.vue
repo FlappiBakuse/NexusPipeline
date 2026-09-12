@@ -5,7 +5,7 @@ import { state } from "../../../platform/page-state";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../../platform/i18n";
-import { toast } from "../../../platform/toast";
+import { clearFieldError, setRequiredFieldError, toast } from "../../../platform/toast";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
@@ -63,6 +63,10 @@ function setValue(contribution: Contribution, key: string, next: unknown) {
   contribution.values ||= {};
   contribution.values[key] = next;
 }
+function setContributionValue(contribution: Contribution, field: GlobalField, next: unknown) {
+  setValue(contribution, field.key, next);
+  clearFieldError(fieldId(contribution, field));
+}
 function contributionStringValue(contribution: Contribution, field: GlobalField) {
   const current = value(contribution, field.key);
   return fieldType(field) === "secret" && current && typeof current === "object" ? "" : String(current ?? "");
@@ -73,11 +77,11 @@ function secretIsConfigured(contribution: Contribution, field: GlobalField) {
 }
 function setSecretValue(contribution: Contribution, field: GlobalField, next: string) {
   secretActions.value[fieldKey(contribution, field)] = next ? "set" : (secretIsConfigured(contribution, field) ? "keep" : "set");
-  setValue(contribution, field.key, next);
+  setContributionValue(contribution, field, next);
 }
 function clearSecret(contribution: Contribution, field: GlobalField) {
   secretActions.value[fieldKey(contribution, field)] = "clear";
-  setValue(contribution, field.key, "");
+  setContributionValue(contribution, field, "");
 }
 function contributionValuesForSave(contribution: Contribution) {
   const values: Record<string, unknown> = {};
@@ -106,15 +110,37 @@ function contributionMultiValue(contribution: Contribution, field: GlobalField):
   const current = value(contribution, field.key);
   return Array.isArray(current) ? current.map(String) : [];
 }
-function validateContributionFields(contribution: Contribution) {
+function validateContributionFields(contribution: Contribution): string | null {
+  let firstInvalidId: string | null = null;
   for (const field of contribution.fields || []) {
     if (!field.required || field.readOnly || fieldType(field) === "status") continue;
     const current = value(contribution, field.key);
-    if (fieldType(field) === "secret" && secretIsConfigured(contribution, field) && secretActions.value[fieldKey(contribution, field)] !== "clear") continue;
-    const empty = fieldType(field) === "multi-select" ? !Array.isArray(current) || !current.length : !String(current ?? "").trim();
-    if (empty) return false;
+    const id = fieldId(contribution, field);
+    if (fieldType(field) === "secret" && secretIsConfigured(contribution, field) && secretActions.value[fieldKey(contribution, field)] !== "clear") {
+      clearFieldError(id);
+      continue;
+    }
+    const empty = fieldType(field) === "multi-select"
+      ? !Array.isArray(current) || !current.length
+      : !contributionStringValue(contribution, field).trim();
+    if (empty) {
+      setRequiredFieldError(id, false);
+      if (!firstInvalidId) firstInvalidId = id;
+      continue;
+    }
+    clearFieldError(id);
   }
-  return true;
+  return firstInvalidId;
+}
+
+function validateAllContributionFields() {
+  let firstInvalidId: string | null = null;
+  for (const contribution of contributions.value) {
+    const invalidId = validateContributionFields(contribution);
+    if (!firstInvalidId && invalidId) firstInvalidId = invalidId;
+  }
+  if (firstInvalidId) setRequiredFieldError(firstInvalidId);
+  return !firstInvalidId;
 }
 
 function setGlobalSwitch(section: keyof GlobalSettings, key: string, next: boolean) {
@@ -154,7 +180,7 @@ async function browseContributionPath(contribution: Contribution, field: GlobalF
       initialPath: contributionStringValue(contribution, field),
       filter: "",
     })) as { path?: string } | null;
-    if (result?.path) setValue(contribution, field.key, result.path);
+    if (result?.path) setContributionValue(contribution, field, result.path);
   } catch (reason) {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
   }
@@ -176,7 +202,7 @@ async function load() {
 
 async function save() {
   try {
-    if (contributions.value.some((contribution) => !validateContributionFields(contribution))) {
+    if (!validateAllContributionFields()) {
       toast(t("common.plugin.settings_required"), "error");
       return;
     }
@@ -389,23 +415,23 @@ watch(
               :model-value="value(contribution, field.key) === true"
               :aria-label="field.label"
               :disabled="field.readOnly"
-              @update:model-value="setValue(contribution, field.key, $event)"
+              @update:model-value="setContributionValue(contribution, field, $event)"
             />
             <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpTextArea :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
+              <NxpTextArea :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'select'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpSelect :id="fieldId(contribution, field)" :model-value="String(value(contribution, field.key) || '')" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
+              <NxpSelect :id="fieldId(contribution, field)" :model-value="String(value(contribution, field.key) || '')" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'multi-select'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpSelect :id="fieldId(contribution, field)" multiple :model-value="contributionMultiValue(contribution, field)" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
+              <NxpSelect :id="fieldId(contribution, field)" multiple :model-value="contributionMultiValue(contribution, field)" :options="contributionOptions(field)" :disabled="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'path' || fieldType(field) === 'file' || fieldType(field) === 'folder'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpPathPicker :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setValue(contribution, field.key, $event)" @browse="browseContributionPath(contribution, field, $event)" />
+              <NxpPathPicker :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field, $event)" @browse="browseContributionPath(contribution, field, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
@@ -416,7 +442,7 @@ watch(
             </div>
             <div v-else class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpTextInput :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
+              <NxpTextInput :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setContributionValue(contribution, field, $event)" />
             </div>
           </template>
         </div>

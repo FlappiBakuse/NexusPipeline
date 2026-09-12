@@ -355,7 +355,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 ## 判断脚本
 
-- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），输出 stdout 尾行 `{"status":"success|partial|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；`partial` 只能由判断脚本主动返回，属于终局结果且不触发重试、不计入每日成功次数；`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
+- 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），包含宿主当前 `locale`（规范化 BCP 47 语言标识），输出 stdout 尾行 `{"status":"success|partial|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；`partial` 只能由判断脚本主动返回，属于终局结果且不触发重试、不计入每日成功次数；`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
 
 ### 判断脚本截图

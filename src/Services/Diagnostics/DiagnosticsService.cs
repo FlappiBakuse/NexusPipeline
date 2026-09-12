@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Localization;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services.Execution;
@@ -111,7 +112,7 @@ internal sealed class DiagnosticsService
         string temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            IReadOnlyList<PluginManagementView> plugins = ReadPluginViews();
+            IReadOnlyList<PluginManagementView> plugins = _plugins.GetLocalizedPluginManagementViews(LocaleCatalog.HostLocale);
             UpdateStatusSnapshot update = _updates.GetStatus();
             ExecutionStateSnapshot execution = _executionState.SnapshotState();
             (string QueueName, DateTime TriggerTime)? next = _scheduler.NextTrigger();

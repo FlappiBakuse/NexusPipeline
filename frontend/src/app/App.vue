@@ -14,6 +14,7 @@ import { initAutoScroll } from "../platform/auto-scroll";
 import { registerTokenPromptRenderer } from "../platform/auth";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
+import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
 
 const route = useRoute();
 const shell = useShellStore();
@@ -134,10 +135,12 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <Transition name="nxp-page" mode="out-in" appear>
-        <RouterView v-if="shell.booted" :key="route.fullPath" />
-        <BootLoadingState v-else-if="!shell.bootError" />
-      </Transition>
+      <NxpScrollArea class="page-main-scroll" :aria-label="t('shell.main_content')">
+        <Transition name="nxp-page" mode="out-in" appear>
+          <RouterView v-if="shell.booted" :key="route.fullPath" />
+          <BootLoadingState v-else-if="!shell.bootError" />
+        </Transition>
+      </NxpScrollArea>
     </div>
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

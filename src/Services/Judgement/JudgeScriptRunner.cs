@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Jint;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Utilities;
@@ -175,6 +176,7 @@ internal static class JudgeScriptRunner
             }).ToArray(),
             log = logText,
             logTruncated,
+            locale = LocaleCatalog.HostLocale,
             timeScale = TestHooks.TimeScale,
         });
     }

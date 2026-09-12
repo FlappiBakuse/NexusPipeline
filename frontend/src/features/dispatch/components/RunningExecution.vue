@@ -3,6 +3,7 @@ import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import SystemActionCard from "../../dashboard/SystemActionCard.vue";
 import { runningLogClass, runningLogEntries, runningProgress, type DispatchRunningRecord, type DispatchSystemAction } from "../utils/dispatchTypes";
 
@@ -56,7 +57,7 @@ function recordMode(record: DispatchRunningRecord) {
           <div :data-progress="runningProgress(record)" :style="{ width: `${Math.max(0, Math.min(100, runningProgress(record)))}%` }"></div>
         </div>
         <div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }">
-          <pre class="logbox run-log run-terminal"><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || "" }}</span></pre>
+          <NxpScrollArea class="run-log run-terminal" direction="both" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || "" }}</span></pre></NxpScrollArea>
           <div class="plugin-slot running-sidecar" data-plugin-slot="dispatch.running.sidecar" data-plugin-anchor="dispatch.running.sidecar" :data-plugin-mode="record.kind === 'queue' ? 'queue' : 'script'" :data-plugin-primary-id="record.id" hidden></div>
         </div>
       </article>

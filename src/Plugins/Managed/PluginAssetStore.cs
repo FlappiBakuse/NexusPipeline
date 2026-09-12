@@ -29,7 +29,7 @@ internal sealed class PluginAssetStore : IPluginAssetStore
 
     public PluginAssetStore(string pluginName)
     {
-        _pluginName = PluginScopedDataStore.ValidateSegment(pluginName, "插件名", 64);
+        _pluginName = PluginScopedDataStore.ValidateSegment(PluginNameMigration.Canonicalize(pluginName), "插件名", 64);
         _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", _pluginName, "assets"));
     }
 

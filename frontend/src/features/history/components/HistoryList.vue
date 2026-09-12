@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { formatHistoryDate } from "../utils/historyFormat";
 import type { HistoryDate, HistoryUser } from "../utils/historyTypes";
 
@@ -34,7 +35,7 @@ function usersOf(date: string) {
         <NxpIcon name="calendar" /><h3>{{ t("history.date_list") }}</h3>
         <span class="muted">{{ dates.length }} {{ t("history.days") }}</span>
       </div>
-      <div class="history-dates-list">
+      <NxpScrollArea class="history-dates-list" :aria-label="t('history.date_list')">
         <div
           v-for="item in dates"
           :key="item.date"
@@ -85,6 +86,6 @@ function usersOf(date: string) {
           <strong>{{ t("history.records.empty_range") }}</strong>
           <span>{{ t("history.filter.date_range_retry") }}</span>
         </div>
-      </div>
+      </NxpScrollArea>
   </aside>
 </template>

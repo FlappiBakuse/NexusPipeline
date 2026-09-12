@@ -1,6 +1,7 @@
 using NexusPipeline.App;
 using NexusPipeline.App.Contracts;
 using NexusPipeline.App.Queries;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
@@ -84,7 +85,7 @@ internal sealed class McpToolContext
                 pending.Deadline,
             },
             running = Runtime.Center.Active.Select(item => McpRunView.From(item.Snapshot(), includeRecords: false)).ToList(),
-            plugins = Runtime.Plugins.PluginManagementViews,
+            plugins = Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleCatalog.HostLocale),
         };
     }
 

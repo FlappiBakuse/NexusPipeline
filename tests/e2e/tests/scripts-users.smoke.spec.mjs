@@ -48,6 +48,34 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
   }
 });
 
+test("表单校验：脚本实例与调度队列标记空必填项", async ({ page }) => {
+  await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
+  await page.getByTestId("new-script").click();
+  let modal = page.locator(".modal");
+  await expect(modal).toBeVisible();
+  const genericChooser = modal.getByRole("button", { name: /新建通用脚本实例/ });
+  if (await genericChooser.count()) await genericChooser.click();
+  modal = page.locator(".modal").last();
+  await modal.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(modal.locator("#sm-name")).toHaveClass(/field-error/);
+  await expect(modal.locator("#sm-root")).toHaveClass(/field-error/);
+  await expect(modal.locator("#sm-name")).toHaveAttribute("aria-invalid", "true");
+  await expect(modal.locator("#sm-name")).toBeFocused();
+  await modal.locator("#sm-name").fill("Smoke 校验脚本");
+  await expect(modal.locator("#sm-name")).not.toHaveClass(/field-error/);
+  await modal.locator(".modal-close").last().click();
+
+  await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
+  await page.getByRole("button", { name: "新建调度队列", exact: true }).click();
+  modal = page.locator(".modal").last();
+  await modal.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(modal.locator("#qm-name")).toHaveClass(/field-error/);
+  await expect(modal.locator("#qm-name")).toHaveAttribute("aria-invalid", "true");
+  await modal.locator("#qm-name").fill("Smoke 校验队列");
+  await expect(modal.locator("#qm-name")).not.toHaveClass(/field-error/);
+  await modal.locator(".modal-close").click();
+});
+
 test("用户管理：修改插件字段并保存用户绑定", async ({ page }) => {
   const suffix = Date.now();
   const fixture = makeScriptDir(`smoke-user-binding-${suffix}`);

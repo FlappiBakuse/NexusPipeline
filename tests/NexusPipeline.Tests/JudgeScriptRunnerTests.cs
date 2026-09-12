@@ -1,5 +1,6 @@
 using System.Text.Json;
 using NexusPipeline.App.Abstractions;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
@@ -90,6 +91,7 @@ public sealed class JudgeScriptRunnerTests : IDisposable
         Assert.Equal("当前尝试日志", root.GetProperty("log").GetString());
         Assert.False(root.GetProperty("logTruncated").GetBoolean());
         Assert.Equal(_scriptDir, root.GetProperty("scriptDir").GetString());
+        Assert.Equal(LocaleCatalog.HostLocale, root.GetProperty("locale").GetString());
         Assert.True(root.GetProperty("files").GetArrayLength() >= 2);
         Assert.Equal(0, root.GetProperty("screenshots").GetArrayLength());
     }

@@ -381,7 +381,7 @@ flowchart LR
 
 ### 5.2 判断脚本输入与触发
 
-- **输入 JSON**：脚本字段 + 用户 + `config`（运行时生效配置，只读）与 `script` 目录（可读写）全递归文件清单 + `scriptDir` + **本次尝试日志段**（按尝试切片，上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 `logTruncated=true`）。
+- **输入 JSON**：脚本字段 + 用户 + `config`（运行时生效配置，只读）与 `script` 目录（可读写）全递归文件清单 + `scriptDir` + `locale`（宿主当前规范化语言标识）+ **本次尝试日志段**（按尝试切片，上次尝试的失败/成功行不跨尝试污染判定；超过 4MB 仅提供尾部并置 `logTruncated=true`）。
 - **触发时机**：① 每次日志新增批次触发一次（串行不叠加）；② 日志阻塞（进程存活、已有日志但 30 秒无新内容）周期触发一次（不重置无更新超时）；③ 主进程退出且本次尝试无判定结果时**最终触发一次**（日志超时/未找到日志文件失败路径同样补最终触发，判断脚本可借此返回替换配置再重试）。
 - **输出契约**：stdout 尾行 JSON `{"status":"success|partial|failed","reason":"必填","notifyText":"可选","notifyScreenshotId":"可选","replaceConfigs":[...]}`；无输出/非 JSON/缺字段 = 继续运行；单次执行 30 秒上限；执行错误 = 警告 + 继续运行。`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。
 - **截图契约**：输入 `screenshots` 提供当前 Attempt 内的元数据；JS 可调用 `nexus.captureScreenshot()`，Python 使用本次调用临时提供的 loopback `screenshotApi`；每次 Attempt 最多保留 8 张，截图保持游戏客户区/模拟器原始像素宽高并编码为高质量 JPEG。PC 目标由宿主维护约 1 秒间隔的最近有效帧，当前窗口消失时允许回退到不超过 2 秒的缓存帧；缓存按 Attempt 隔离并在运行结束释放。空 `notifyScreenshotId` 选择最终 Attempt 仍保留的最新截图，指定无效 ID 时不附图；自动截图在首次接受关键字或判断脚本 success/partial/failed 结果时触发。

@@ -6,7 +6,7 @@ import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../../script
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../../platform/i18n";
-import { toast } from "../../../platform/toast";
+import { clearFieldError, setRequiredFieldError, toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../../ui/primitives/NxpEntityIcon.vue";
@@ -326,15 +326,19 @@ async function save() {
   const current = draft.value;
   if (!current) return;
   const name = current.name.trim();
+  clearFieldError("um-name");
   if (!name) {
+    setRequiredFieldError("um-name");
     toast(t("users.validation.username_required"), "error");
     return;
   }
   if (new TextEncoder().encode(name).length > 64) {
+    setRequiredFieldError("um-name");
     toast(t("users.validation.username_length", { bytes: 64 }), "error");
     return;
   }
   if (props.users.some((user) => user.id !== current.id && user.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    setRequiredFieldError("um-name");
     toast(t("users.validation.username_duplicate"), "error");
     return;
   }
@@ -382,7 +386,7 @@ onMounted(() => {
       <section class="user-management-settings">
         <div class="field">
           <label class="field-label" for="um-name">{{ t("users.user_name") }} <span class="req">*</span></label>
-          <NxpTextInput id="um-name" v-model="draft.name" :aria-label="t('users.user_name')" />
+          <NxpTextInput id="um-name" v-model="draft.name" :aria-label="t('users.user_name')" @update:model-value="clearFieldError('um-name')" />
         </div>
         <div class="field">
           <label class="field-label" for="um-remark">{{ t("users.remark") }}</label>

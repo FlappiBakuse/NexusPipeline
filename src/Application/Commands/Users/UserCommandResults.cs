@@ -11,6 +11,17 @@ internal static partial class UserCommands
     private static OperationResult<T> Validation<T>(string message) =>
         OperationResult<T>.Failure("validation_error", message, OperationErrorKind.Validation);
 
+    private static OperationResult<T> Validation<T>(
+        string code,
+        string message,
+        IReadOnlyDictionary<string, object?>? messageArgs = null) =>
+        OperationResult<T>.Failure(
+            code,
+            message,
+            OperationErrorKind.Validation,
+            messageKey: $"api.error.{code}",
+            messageArgs: messageArgs);
+
     private static OperationResult<T> NotFound<T>(string message) =>
         OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
 

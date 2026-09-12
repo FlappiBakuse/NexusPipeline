@@ -4,6 +4,7 @@ import { renderMarkdown } from "../../../platform/markdown";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { authorName, pluginKindLabel, pluginKindTone, pluginStatusView, pluginTags, storeActionNotice, storeActions, type PluginViewPlugin, type PluginViewTab } from "../utils/pluginStatusView";
 
 /** 插件详情栏：README、changelog、元数据与商店动作。页面负责请求与动作执行。 */
@@ -35,7 +36,7 @@ function actions(plugin: PluginViewPlugin) {
     <button v-if="detailVisibleMobile" class="plugin-detail-back ghost" type="button" @click="emit('backToList')">
       {{ t("plugins.back_to_plugin_list") }}
     </button>
-    <section class="plugin-detail-pane" data-testid="plugin-detail">
+    <NxpScrollArea class="plugin-detail-pane" data-testid="plugin-detail" :aria-label="t('plugins.plugin_details')">
       <NxpLoadingState
         v-if="loading && !plugin"
         class="plugin-detail-loading"
@@ -119,7 +120,7 @@ function actions(plugin: PluginViewPlugin) {
           <div v-else class="empty compact-empty"><span>{{ t("plugins.no_changelog_entries") }}</span></div>
         </section>
       </div>
-    </section>
+    </NxpScrollArea>
     <div v-if="props.tab === 'store'" class="plugin-browser-footer">
       <span class="muted">{{ fetchedAt ? t("plugins.catalog.updated", { time: fetchedAt }) : "" }}</span>
       <span class="plugin-browser-footer-actions">

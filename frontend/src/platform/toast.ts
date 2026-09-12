@@ -39,9 +39,9 @@ function eachFieldElement(element: HTMLElement, callback: (element: HTMLElement)
   return visual;
 }
 
-function markFieldInvalid(id: string, required: boolean): void {
+function markFieldInvalid(id: string, required: boolean, focus = true): HTMLElement | null {
   const element = document.getElementById(id);
-  if (!element) return;
+  if (!element) return null;
   const visual = eachFieldElement(element, item => {
     item.classList.add("field-error");
     item.setAttribute("aria-invalid", "true");
@@ -58,12 +58,13 @@ function markFieldInvalid(id: string, required: boolean): void {
     if (describedBy.length) visual.setAttribute("aria-describedby", describedBy.join(" "));
     else visual.removeAttribute("aria-describedby");
   }
-  visual.focus({ preventScroll: true });
+  if (focus) visual.focus({ preventScroll: true });
+  return visual;
 }
 
 /** 必填空值错误：保留红色边框与可访问性状态，不在字段下方显示红色文案。 */
-export function setRequiredFieldError(id: string): void {
-  markFieldInvalid(id, true);
+export function setRequiredFieldError(id: string, focus = true): void {
+  markFieldInvalid(id, true, focus);
 }
 
 /** 清除字段内联错误（无错误时无操作）。 */

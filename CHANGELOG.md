@@ -2,6 +2,25 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.11（Pre-release）
+
+### 国际化与插件契约
+
+- 补齐宿主前端、API 状态投影、插件判断脚本和官方专项插件资源的中英文语义覆盖；统一插件判断输入中的运行语言。
+- 全局管理设置的同步校验返回稳定错误码，并按已启用的同步类别执行对应校验。
+- MaaStellaSora 的机器 ID 更新为 `maas`，启动时迁移插件偏好、脚本绑定、作用域数据和 managed-code 配置文件，保留历史运行记录事实。
+
+### 前端交互与布局
+
+- 新增 `NxpScrollArea` 悬浮滚动区域并接入弹窗、下拉菜单、日志、历史、插件列表、详情和表格等滚动内容；原生滚动条隐藏，轨道支持拖拽、键盘和无障碍语义。
+- 全局管理表单的必填字段在保存时标红并聚焦首个空字段，用户输入后即时清除错误状态。
+- 专项徽章、插件名称裁切、运行计划与系统诊断布局、选择框箭头和 CustomWallpaper 拖拽预览完成统一调整。
+
+### 官方插件
+
+- 统一 BAAH、BetterGI、MaaEnd、MaaStellaSora、March7thAssistant 和 ZenlessZoneZeroOneDragon 的机器 ID、ArtifactName、DisplayName、商店文案与版本元数据。
+- CustomWallpaper 升级到 0.2.3，拖拽把手会带动整张壁纸卡片进行排序。
+
 ## v0.15.10（Pre-release）
 
 ### 前端组件与交互

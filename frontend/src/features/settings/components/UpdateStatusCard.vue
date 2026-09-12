@@ -5,6 +5,7 @@ import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpConfirmDialog from "../../../ui/composites/NxpConfirmDialog.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { updateStatusView as updateStatusViewFor } from "../utils/updateStatusView";
 import type { UpdateStatus } from "../utils/settingsTypes";
 
@@ -146,7 +147,7 @@ defineExpose({ reload: loadUpdateStatus });
     <p v-if="updateStatusView.showBackupWarning" class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">
       {{ t("settings.update.backup_help") }}
     </p>
-    <div v-if="updateStatus?.notes" class="update-notes">{{ String(updateStatus.notes).slice(0, 300) }}</div>
+    <NxpScrollArea v-if="updateStatus?.notes" class="update-notes" :aria-label="t('settings.update_notes')">{{ String(updateStatus.notes).slice(0, 300) }}</NxpScrollArea>
     <div
       v-if="updateStatus?.state === 'downloading' && typeof updateStatus.progress === 'number'"
       class="progress-line"

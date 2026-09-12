@@ -3,6 +3,7 @@ import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
+import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { pluginKindLabel, pluginKindTone, pluginStatusView, type PluginViewPlugin, type PluginViewTab } from "../utils/pluginStatusView";
 
 /** 插件列表栏：加载态、仓库不可用、错误与列表行。选中与加载由页面驱动。 */
@@ -35,7 +36,7 @@ function description(plugin: PluginViewPlugin) {
 </script>
 
 <template>
-  <section class="plugin-list-pane" :data-testid="listTestId()">
+  <NxpScrollArea class="plugin-list-pane" :data-testid="listTestId()" :aria-label="tab === 'store' ? t('plugins.plugin_repository') : t('plugins.local_plugins')">
     <NxpLoadingState
       v-if="loading && !loaded"
       :title="tab === 'store' ? t('plugins.loading_plugin_repository') : t('plugins.loading_local_plugins')"
@@ -82,5 +83,5 @@ function description(plugin: PluginViewPlugin) {
       </button>
       <NxpEmptyState v-if="!plugins.length" :title="t('plugins.no_matching_plugins')" :description="t('plugins.search.no_match_help')" />
     </div>
-  </section>
+  </NxpScrollArea>
 </template>

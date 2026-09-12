@@ -2,6 +2,7 @@ using NexusPipeline.Persistence;
 using NexusPipeline.App.Commands;
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
+using NexusPipeline.Plugins;
 
 namespace NexusPipeline;
 
@@ -16,6 +17,7 @@ internal static class HostedRuntimeInitializer
         {
             ctx.ReloadSettings(ConfigLoadMode.Repair);
             ctx.ReloadData();
+            PluginNameMigration.Apply(ctx);
             RuntimeDataReconciler.Reconcile(ctx);
 
             // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底）。

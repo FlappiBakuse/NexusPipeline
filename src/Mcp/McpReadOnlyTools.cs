@@ -2,6 +2,7 @@ using System.ComponentModel;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using NexusPipeline.App.Contracts;
+using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
@@ -166,7 +167,7 @@ internal sealed class McpReadOnlyTools
     [Description("列出插件元数据、能力、配置启用状态和运行状态。")]
     public CallToolResult ListPlugins()
     {
-        return McpToolResult.Success(_context.Runtime.Plugins.PluginManagementViews);
+        return McpToolResult.Success(_context.Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleCatalog.HostLocale));
     }
 
     [McpServerTool(Name = "get_settings", Title = "获取脱敏设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]

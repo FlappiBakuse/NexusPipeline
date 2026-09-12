@@ -8,6 +8,7 @@ import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
+import { clearFieldError } from "../../platform/toast";
 import { vSortable } from "../../ui/sortable";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
 
@@ -99,7 +100,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
     <div class="field">
         <label class="field-label" for="qm-name"
           >{{ translate("queues.queue_name") }} <span class="req">*</span></label
-        ><NxpTextInput id="qm-name" v-model="draft.name" :aria-label="translate('queues.queue_name')" />
+        ><NxpTextInput id="qm-name" v-model="draft.name" :aria-label="translate('queues.queue_name')" @update:model-value="clearFieldError('qm-name')" />
     </div>
     <div class="form-grid">
         <div class="field">
@@ -282,6 +283,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 :aria-label="
                   translate('queues.task.script_instance', { index: index + 1 })
                 "
+                @update:model-value="clearFieldError(`qm-task-${index}`)"
               /><NxpButton
                 class="sm danger"
                 type="button"
