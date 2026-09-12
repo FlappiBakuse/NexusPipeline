@@ -189,7 +189,7 @@ internal static class Bootstrap
         return result;
     }
 
-    private static bool LaunchRestartChild()
+    private static bool LaunchRestartChild(string handoffId)
     {
         string exePath = Environment.ProcessPath ?? "";
         if (string.IsNullOrWhiteSpace(exePath))
@@ -199,7 +199,8 @@ internal static class Bootstrap
         }
         Process? child = Process.Start(new ProcessStartInfo(exePath)
         {
-            Arguments = "restart",
+            // 交接标识随启动参数传给子进程，前端据此确认应答来自本次重启的新实例。
+            Arguments = $"restart --handoff {handoffId}",
             UseShellExecute = false,
             CreateNoWindow = true,
         });

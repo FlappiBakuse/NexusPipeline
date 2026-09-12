@@ -104,7 +104,14 @@ internal static class ApiSettingsHandler
                 return;
             }
             // 接受重启前已经取得维护租约，后台生命周期不会再重新做一次易竞态的状态检查。
-            await HttpHelper.WriteJsonAsync(context, new { ok = true, newPort }).ConfigureAwait(false);
+            // 交接标识与当前实例标识供前端确认新实例接管，newPort 只是新实例优先尝试的配置端口。
+            await HttpHelper.WriteJsonAsync(context, new
+            {
+                ok = true,
+                newPort,
+                handoffId = restart.HandoffId,
+                instanceId = HostInstance.Id,
+            }).ConfigureAwait(false);
             return;
         }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);

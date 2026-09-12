@@ -122,9 +122,11 @@ internal static class StartupPipeline
     }
 
     /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
-    /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。</summary>
-    internal static int RunRestart()
+    /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
+    /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
+    internal static int RunRestart(string? handoffId = null)
     {
+        HostInstance.AdoptRestartHandoff(handoffId);
         Logger.Info("[重启] 正在等待旧进程退出...");
         try
         {

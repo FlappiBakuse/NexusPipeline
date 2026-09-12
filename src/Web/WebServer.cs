@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -410,11 +410,20 @@ internal sealed class WebServer : IDisposable
             }
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             {
-                if (!IsAllowedOrigin(context, out string? originDetail))
+                if (!IsAllowedOrigin(context, method, path, out string? originDetail, out string? allowedOrigin))
                 {
                     Logger.Debug($"[安全] 拒绝跨源请求：{originDetail}");
                     await HttpHelper.ErrorAsync(context, "origin_forbidden", 403).ConfigureAwait(false);
                     return;
+                }
+                if (allowedOrigin is not null)
+                {
+                    ApplyCorsHeaders(context, allowedOrigin);
+                    if (method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await HttpHelper.NoContentAsync(context, CorsPreflightHeaders()).ConfigureAwait(false);
+                        return;
+                    }
                 }
                 if (!AuthorizeRequest(context, out string? authDetail))
                 {
@@ -457,9 +466,17 @@ internal sealed class WebServer : IDisposable
     }
 
     /// <summary>跨站请求防护：带 Origin 头的浏览器请求必须来自合法源（回环或本机局域网地址、且与请求 Host 端口一致），
-    /// 阻止任意网页触发的 CSRF 简单请求与 DNS rebinding；无 Origin 的非浏览器请求（CLI/curl）不受限——它们无法自动携带认证凭证。</summary>
-    private static bool IsAllowedOrigin(HttpListenerContext context, out string? detail)
+    /// 阻止任意网页触发的 CSRF 简单请求与 DNS rebinding；无 Origin 的非浏览器请求（CLI/curl）不受限——它们无法自动携带认证凭证。
+    /// 服务重启恢复需要旧页面读取新实例状态：只读的 `/api/status` 额外放行同一主机的其他端口，并返回可读的 CORS 应答；
+    /// 其余接口保持同源要求，避免任一本地端口上的页面触发有副作用的请求。</summary>
+    private static bool IsAllowedOrigin(
+        HttpListenerContext context,
+        string method,
+        string path,
+        out string? detail,
+        out string? allowedOrigin)
     {
+        allowedOrigin = null;
         string? origin = context.Request.Headers["Origin"];
         if (string.IsNullOrEmpty(origin))
         {
@@ -490,14 +507,54 @@ internal sealed class WebServer : IDisposable
             detail = $"Origin 主机非法（{uri.Host}）";
             return false;
         }
-        if (!string.Equals(uri.Authority, host, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(uri.Authority, host, StringComparison.OrdinalIgnoreCase))
         {
-            detail = $"Origin 与 Host 不一致（{origin} vs {host}）";
-            return false;
+            detail = null;
+            return true;
         }
-        detail = null;
-        return true;
+        if (IsStatusProbe(method, path)
+            && string.Equals(uri.Host, HostNameOf(host), StringComparison.OrdinalIgnoreCase))
+        {
+            allowedOrigin = origin;
+            detail = null;
+            return true;
+        }
+        detail = $"Origin 与 Host 不一致（{origin} vs {host}）";
+        return false;
     }
+
+    /// <summary>只读状态查询：服务重启恢复用它确认新实例已经接管，请求本身不改变宿主状态。</summary>
+    private static bool IsStatusProbe(string method, string path) =>
+        (method.Equals("GET", StringComparison.OrdinalIgnoreCase) || method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+        && path.Equals("/api/status", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>取出 Host 头中的主机名部分（去掉端口，兼容 IPv6 方括号写法）。</summary>
+    private static string HostNameOf(string authority)
+    {
+        string value = authority.Trim();
+        if (value.StartsWith("[", StringComparison.Ordinal))
+        {
+            int end = value.IndexOf(']');
+            return end > 0 ? value[..(end + 1)] : value;
+        }
+        int separator = value.LastIndexOf(':');
+        return separator > 0 ? value[..separator] : value;
+    }
+
+    private static void ApplyCorsHeaders(HttpListenerContext context, string allowedOrigin)
+    {
+        context.Response.Headers["Access-Control-Allow-Origin"] = allowedOrigin;
+        context.Response.Headers["Vary"] = "Origin";
+        // 认证失败标记需要显式暴露，跨端口读取状态的页面才能区分 401 与业务错误。
+        context.Response.Headers["Access-Control-Expose-Headers"] = "X-Nexus-Auth";
+    }
+
+    private static Dictionary<string, string> CorsPreflightHeaders() => new()
+    {
+        ["Access-Control-Allow-Methods"] = "GET, OPTIONS",
+        ["Access-Control-Allow-Headers"] = "Authorization, X-Nexus-Locale",
+        ["Access-Control-Max-Age"] = "600",
+    };
 
     /// <summary>远程访问认证：未开启远程或本地请求（127.0.0.1/::1）豁免；远程请求需 Bearer 访问令牌；
     /// 连续失败达到阈值后按远端 IP 锁定一段时间（防爆破）。返回是否放行，拒绝时输出判定详情。</summary>

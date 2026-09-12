@@ -3,11 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useShellStore } from "../stores/shell";
 import { t } from "../platform/i18n";
 import { api } from "../platform/api";
-import { restartService } from "../platform/service-restart";
+import { restartService, type ServiceRestartHandoff } from "../platform/service-restart";
 
 const shell = useShellStore();
 const lightweight = ref(false);
 const showRetry = ref(false);
+/** 已提交的重启交接信息：重试时复用，避免对已经退出的旧实例再次提交重启请求。 */
+const pendingHandoff = ref<ServiceRestartHandoff | null>(null);
 
 /** 轻量模式不启动 Web 服务，此时只提示手动重启，不显示不可执行的按钮。 */
 async function loadServiceMode() {
@@ -33,7 +35,13 @@ async function triggerRestart() {
   if (!window.confirm(t("settings.restart_warning"))) return;
   showRetry.value = false;
   shell.beginRestart();
-  const outcome = await restartService({ timeoutMs: 40_000 });
+  const outcome = await restartService({
+    timeoutMs: 40_000,
+    handoff: pendingHandoff.value || undefined,
+    onHandoff: handoff => {
+      pendingHandoff.value = handoff;
+    },
+  });
   if (outcome === "ready") return;
   showRetry.value = true;
   shell.failRestart(outcome === "timeout"

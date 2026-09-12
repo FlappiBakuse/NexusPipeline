@@ -48,7 +48,8 @@ function formatApiError(data: unknown, status: number): string {
   return t("api.error.http", { status }, `HTTP ${status}`);
 }
 
-function readAuthToken(): string | null {
+/** 读取已保存的访问令牌；跨端口的服务状态探测直接复用同一份令牌来源。 */
+export function readAuthToken(): string | null {
   try {
     return localStorage.getItem("nexus-token");
   } catch {

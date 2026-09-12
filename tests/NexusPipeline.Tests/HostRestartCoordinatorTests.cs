@@ -13,7 +13,7 @@ public sealed class HostRestartCoordinatorTests
         Action? scheduled = null;
         var coordinator = CreateCoordinator(
             store,
-            launchChild: () => true,
+            launchChild: _ => true,
             requestExit: () => true,
             schedule: work => scheduled = work);
 
@@ -38,13 +38,37 @@ public sealed class HostRestartCoordinatorTests
     }
 
     [Fact]
+    public void Accepted_restart_hands_a_fresh_identifier_to_the_launched_child()
+    {
+        var store = new ExecutionStateStore();
+        var handoffs = new List<string>();
+        Action? scheduled = null;
+        var coordinator = CreateCoordinator(
+            store,
+            launchChild: handoffId =>
+            {
+                handoffs.Add(handoffId);
+                return true;
+            },
+            requestExit: () => true,
+            schedule: work => scheduled = work);
+
+        RestartRequestResult result = coordinator.Request("test", 58731);
+        scheduled!.Invoke();
+
+        Assert.True(result.Accepted);
+        Assert.Matches("^[0-9a-f]{32}$", result.HandoffId);
+        Assert.Equal(new[] { result.HandoffId }, handoffs);
+    }
+
+    [Fact]
     public void Child_launch_failure_releases_maintenance_lease()
     {
         var store = new ExecutionStateStore();
         Action? scheduled = null;
         var coordinator = CreateCoordinator(
             store,
-            launchChild: () => false,
+            launchChild: _ => false,
             requestExit: () => true,
             schedule: work => scheduled = work);
 
@@ -72,7 +96,7 @@ public sealed class HostRestartCoordinatorTests
         Action? scheduled = null;
         var coordinator = CreateCoordinator(
             store,
-            launchChild: () => true,
+            launchChild: _ => true,
             requestExit: () => false,
             schedule: work => scheduled = work);
 
@@ -88,7 +112,7 @@ public sealed class HostRestartCoordinatorTests
         var store = new ExecutionStateStore();
         var coordinator = CreateCoordinator(
             store,
-            launchChild: () => true,
+            launchChild: _ => true,
             requestExit: () => true,
             schedule: _ => throw new InvalidOperationException("scheduler unavailable"));
 
@@ -96,12 +120,13 @@ public sealed class HostRestartCoordinatorTests
 
         Assert.False(result.Accepted);
         Assert.Equal("service_busy", result.Code);
+        Assert.Equal(string.Empty, result.HandoffId);
         Assert.Equal(ExecutionGroupState.Open, store.GroupState);
     }
 
     private static HostRestartCoordinator CreateCoordinator(
         ExecutionStateStore store,
-        Func<bool> launchChild,
+        Func<string, bool> launchChild,
         Func<bool> requestExit,
         Action<Action> schedule)
     {

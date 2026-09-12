@@ -4,10 +4,10 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Services;
 
 /// <summary>统一的宿主重启请求结果；控制面适配层据此映射各自协议状态。</summary>
-internal sealed record RestartRequestResult(bool Accepted, string Code, string Message)
+internal sealed record RestartRequestResult(bool Accepted, string Code, string Message, string HandoffId = "")
 {
-    public static RestartRequestResult Success() =>
-        new(true, "ok", "服务重启请求已提交");
+    public static RestartRequestResult Success(string handoffId) =>
+        new(true, "ok", "服务重启请求已提交", handoffId);
 
     public static RestartRequestResult Failure(string code, string message) =>
         new(false, code, message);
@@ -17,12 +17,13 @@ internal sealed record RestartRequestResult(bool Accepted, string Code, string M
 /// 宿主重启生命周期协调器。
 /// 维护租约在接受请求时原子取得，并一直持有到子进程拉起且当前进程退出；
 /// 这样重启等待期间新的运行和配置编辑都会立即收到宿主维护错误。
+/// 每次接受的重启请求都会生成重启交接标识，由子进程在启动参数中接管。
 /// </summary>
 internal sealed class HostRestartCoordinator
 {
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
 
-    private readonly Func<bool> _launchChild;
+    private readonly Func<string, bool> _launchChild;
 
     private readonly Func<bool> _requestExit;
 
@@ -34,7 +35,7 @@ internal sealed class HostRestartCoordinator
 
     public HostRestartCoordinator(
         Func<(HostMaintenanceLease? Lease, string? Reason)> acquireMaintenance,
-        Func<bool> launchChild,
+        Func<string, bool> launchChild,
         Func<bool> requestExit,
         Action<Action>? schedule = null,
         Action<TimeSpan>? delay = null,
@@ -61,10 +62,11 @@ internal sealed class HostRestartCoordinator
                     string.IsNullOrWhiteSpace(reason) ? "服务当前不满足安全重启条件" : reason);
             }
 
+            string handoffId = Guid.NewGuid().ToString("N");
             Audit.Log(auditSource, "重启服务", $"端口 {newPort}");
             HostMaintenanceLease acceptedLease = lease;
-            _schedule(() => RunRestart(acceptedLease));
-            return RestartRequestResult.Success();
+            _schedule(() => RunRestart(acceptedLease, handoffId));
+            return RestartRequestResult.Success(handoffId);
         }
         catch (Exception ex)
         {
@@ -74,13 +76,13 @@ internal sealed class HostRestartCoordinator
         }
     }
 
-    private void RunRestart(HostMaintenanceLease lease)
+    private void RunRestart(HostMaintenanceLease lease, string handoffId)
     {
         bool childLaunched = false;
         try
         {
             _delay(_launchDelay);
-            childLaunched = _launchChild();
+            childLaunched = _launchChild(handoffId);
             if (!childLaunched)
             {
                 Logger.Error("[重启] 无法拉起新进程，已释放宿主维护租约。");

@@ -105,7 +105,7 @@ internal static class ApplicationHost
             case "web":
                 return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
             case "restart":
-                return StartupPipeline.RunRestart();
+                return StartupPipeline.RunRestart(ReadRestartHandoff(args));
             case "apply-update":
                 return RunUpdateApplyCli(args.Skip(1).ToArray());
             case "recover-update":
@@ -119,6 +119,19 @@ internal static class ApplicationHost
             default:
                 return CliCommandRouter.Run(args);
         }
+    }
+
+    /// <summary>读取重启交接标识；旧进程未传该参数时为空，按普通重启启动。</summary>
+    private static string? ReadRestartHandoff(string[] args)
+    {
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i].Equals("--handoff", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
+            {
+                return args[i + 1];
+            }
+        }
+        return null;
     }
 
     /// <summary>更新工作进程入口，仅由宿主更新流程拉起。</summary>

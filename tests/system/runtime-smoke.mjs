@@ -111,6 +111,9 @@ test("当前隔离宿主启动并提供 status API", { skip }, async () => {
   assert.equal(status.controlApiVersion, 1);
   assert.match(status.version, /^\d+\.\d+\.\d+$/);
   assert.ok(status.actualPort >= 1024 && status.actualPort <= 65535);
+  // 重启恢复协议依赖实例标识区分重启前后的服务；普通启动的进程没有交接标识。
+  assert.match(status.instanceId, /^[0-9a-f]{32}$/);
+  assert.equal(status.restartHandoffId, "");
   assert.ok(Array.isArray(status.running));
 });
 
@@ -509,6 +512,10 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     assert.equal(restart.status, 200, `提交重启失败：HTTP ${restart.status} ${restartBody}`);
     const restartPayload = JSON.parse(restartBody);
     assert.equal(restartPayload.ok, true);
+    // 交接标识由旧实例生成并传给新实例，前端据此确认应答来自本次重启。
+    assert.match(restartPayload.handoffId, /^[0-9a-f]{32}$/);
+    assert.match(restartPayload.instanceId, /^[0-9a-f]{32}$/);
+    const previousInstanceId = restartPayload.instanceId;
 
     const run = await api("POST", "/api/dispatch/script", { scriptId, mode: "manual", userName });
     const runBody = await run.text();
@@ -524,6 +531,11 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
 
     await new Promise(resolve => setTimeout(resolve, 2500));
     await waitForService();
+    const restartedResponse = await fetchWithTimeout(serviceUrl() + "api/status");
+    assert.equal(restartedResponse.status, 200);
+    const restarted = await restartedResponse.json();
+    assert.notEqual(restarted.instanceId, previousInstanceId, "重启后必须由新的进程实例提供服务");
+    assert.equal(restarted.restartHandoffId, restartPayload.handoffId, "新实例必须携带本次重启的交接标识");
   } finally {
     if (scriptId) await deleteScript(scriptId);
     await stopRuntime();

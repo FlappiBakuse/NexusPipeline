@@ -36,6 +36,10 @@ internal static class ApiStatusHandler
         {
             service = ControlApiContract.ServiceName,
             controlApiVersion = ControlApiContract.Version,
+            // 实例标识：每次进程启动重新生成，重启恢复据此区分重启前后的服务实例。
+            instanceId = HostInstance.Id,
+            // 本次进程由重启交接拉起时携带的交接标识；控制面前端用它确认应答来自本次重启的新实例。
+            restartHandoffId = HostInstance.RestartHandoffId,
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,
