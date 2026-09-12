@@ -48,6 +48,8 @@ UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳�
 - Web Logic 只能导入生产 ES module 的纯函数；禁止读取生产源文本、按函数名切片、正则解析函数边界或把实现字符串当作行为证据。
 - `frontend/` 的 `npm run typecheck`、`npm run test` 和 `npm run build` 验证 Vue/TypeScript 组件、公共 `nxp-*` 元素和静态构建产物。
 - Frontend API 1.5 的宿主外部契约由 `frontend/src/plugin-bridge/contract.test.ts` 覆盖：精确版本匹配、`host.*` 能力面（含二进制 `api.blob` / `api.upload`）、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
+- 声明式插件表单控件由 `frontend/src/plugin-bridge/controls.test.ts` 表驱动覆盖：字段类型到公开 `nxp-*` 元素的映射、初始值与约束传递、单选与多选交互、开关载荷、必填错误投影与清理；实现边界由 `frontend/src/plugin-bridge/component-reuse.test.ts` 静态校验（桥接目录不得拼装控件 DOM、平台依赖只经 host adapter、字段类型必须映射到公开元素）。
+- 服务重启恢复协议由 `frontend/src/platform/service-restart.test.ts` 覆盖：旧实例与无关 HTTP 服务被拒绝、同端口等待新实例、端口漂移与配置端口被占用时跳转到实际监听端口、超时与重试复用交接信息；背景表面的 Blob URL 归属由 `frontend/src/platform/appearance.test.ts` 覆盖。
 - 宿主路由表结构由 `frontend/src/router.test.ts` 覆盖：宿主页面路由、插件 catch-all 路由、空 fallback 与按需加载方式。
 - 页面 route token、定时器与 `AbortController` 生命周期由 `frontend/src/platform/page-state.test.ts` 覆盖。
 - 插件 route 的真实装配与生命周期由 `frontend/src/router.integration.test.ts` 覆盖：经真实 `vue-router` 实例、`router.push()` 与 `RouterView` 驱动 `/plugin/:pathMatch(.*)*`，断言 `PluginRouteHost` 挂载、`resolvePluginRoute` 收到的 route segment、route handler 的 token 与 segments、`onPageEnter`/`onPageUpdated`、插件 route → 宿主 route 与插件 route → 插件 route 的 leave/dispose 次数、无效 route 回退 Dashboard，以及 query 变化时的页面代际语义。该文件只替换 `@bridge/index` facade 与 `plugin-bridge/host-adapter` 两个宿主边界，路由表、`RouterView`、`PluginRouteHost`、页面状态与启动编排使用生产实现。
@@ -76,9 +78,12 @@ npm run build --prefix frontend
 node tests\run.mjs unit
 node tests\run.mjs web
 node tests\run.mjs docs
+node tests\run.mjs tooling
 node tests\run.mjs syntax
 node tests\run.mjs build
 ```
+
+`tooling` 运行 `tests/tools/ci-domains.test.mjs`，校验 CI 影响域清单与四个 System 分组的映射关系；`changes` 作业在判定影响域之前执行同一用例。
 
 `codex all` 不执行 frontend Vitest；每次修改前端源码都必须显式运行 `npm test --prefix frontend`。
 
@@ -122,7 +127,7 @@ Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
 4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。
 5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`。该脚本使用 mock host 运行插件入口，不读取宿主检出；插件仓库 CI 的 plugin-frontend Gate 不检出宿主，元素白名单在无宿主检出时使用脚本内维护的清单。宿主 CI 的插件契约 Gate 检出官方插件仓库并在宿主工作区内运行同一脚本，元素白名单来自同级宿主检出的 `NEXUS_PUBLIC_ELEMENTS`。managed-code 构建与打包使用 `host.lock.json` 锁定的宿主 commit。
 
-   脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件、渲染必须挂载 `nxp-collapsible-card` 与既有必需控件、卸载后不得残留定时器与 window 监听。
+   脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件、渲染必须挂载 `nxp-collapsible-card` 与既有必需控件、卸载后不得残留定时器与 window 监听。CustomWallpaper 额外覆盖插件级壁纸运行时：激活即应用背景与配色、离开设置页面保留全局外观、页面访问不触发随机轮换、按时间轮换在无设置页面时继续生效、只有插件停用才清理外观与计时器。
 
 构建、测试和发布命令保持实时输出；失败时保留失败项、原因摘要和必要的 runtime 证据。长任务不使用无反馈的超长等待。
 
@@ -130,8 +135,8 @@ Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
 
 CI 不创建临时测试账户、不写入测试账户密码、不使用令牌降级启动器，也不把日志、配置、密钥或运行产物加入版本库。Playwright 失败结果保留在 `tests/e2e/test-results/` 供同一 step 上传，测试结束后按项目 AGENTS.md 的精确清单清理。
 
-`.github/workflows/ci.yml` 按影响域拆成六个 Gate：前端 Unit（ubuntu：`npm ci`、typecheck、Vitest、构建）、宿主 Core（windows：编译加 `node tests\run.mjs unit`）、文档与 i18n（ubuntu：`node tests\run.mjs docs`）、插件契约（windows：Plugin API 编译、`unit`、plugin-bridge 契约用例，并检出官方插件仓库运行 `node tools\Test-FrontendPlugins.mjs`）、管理员 UI Smoke（windows：`node tests\run.mjs admin ui`）、System Runtime 四域（windows：`node tests\run.mjs admin system runtime|execution|emulator|update`）。
+`.github/workflows/ci.yml` 按影响域拆成六个 Gate：前端 Unit（ubuntu：`npm ci`、typecheck、Vitest、构建）、宿主 Core（windows：编译加 `node tests\run.mjs unit`）、文档与 i18n（ubuntu：`node tests\run.mjs docs`）、插件契约（windows：Plugin API 编译、`unit`、plugin-bridge 契约用例，并检出官方插件仓库运行 `node tools\Test-FrontendPlugins.mjs`）、管理员 UI Smoke（windows：`node tests\run.mjs admin ui`）、System 四域（windows：`node tests\run.mjs admin system runtime|execution|emulator|update`）。
 
-影响域路径清单维护在 `tools/ci-domains.mjs`，判定脚本 `tools/ci-changes.mjs` 输出六个域布尔值。改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。每周 `schedule`（`17 3 * * 1`）与手动 `workflow_dispatch` 运行 `node tests\run.mjs admin all` 全量回归。
+影响域路径清单维护在 `tools/ci-domains.mjs`，判定脚本 `tools/ci-changes.mjs` 输出九个域布尔值（`frontend`、`host`、`docs`、`plugin`、`ui` 与 `system_runtime`、`system_execution`、`system_emulator`、`system_update`）。四个 System 域各自只覆盖对应的运行时路径，横切文件（宿主入口与启动、持久化、Web 控制面、插件加载、构建与测试入口）显式列入多个域。改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。映射关系由 `tests/tools/ci-domains.test.mjs` 固定，`changes` 作业在判定前运行该用例。每周 `schedule`（`17 3 * * 1`）与手动 `workflow_dispatch` 运行 `node tests\run.mjs admin all` 全量回归。
 
 `tests/stress/diagnostics/flake-monitor.mjs` 仅在专项诊断需要时运行；新的 regression 直接进入当前 L1–L5 层级并补充对应文档事实。

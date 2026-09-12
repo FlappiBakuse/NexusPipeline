@@ -747,6 +747,8 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 
 重启请求从 Web handler 或 CLI 进入 `Bootstrap.RequestRestart`，再由 `HostRestartCoordinator` 取得 `DispatchCenter` 提供的 `HostMaintenanceLease`。租约与 `ExecutionStateStore` 的执行、编辑、宿主配置变更协调锁共享同一准入域；CLI 通过 `/api/settings/restart` 复用该入口。`run_queue` 额外使用 `McpPolicy.ValidateQueueExecution` 复核已有队列的完成操作，因此队列创建来源不会改变 MCP 执行护栏。
 
+重启恢复使用实例身份协议：`HostInstance` 为每个进程生成一次 `instanceId`，接受重启的旧实例生成 `handoffId` 并随 `nexus-pipeline.exe restart --handoff <id>` 交给子进程，子进程在 `StartupPipeline.RunRestart` 中接管。`GET /api/status` 暴露 `instanceId`、`restartHandoffId` 与 `actualPort`，`POST /api/settings/restart` 返回 `newPort`、`handoffId` 与旧实例 `instanceId`。控制面前端按配置端口与宿主顺延端口逐个读取 `/api/status`，只接受携带本次 `handoffId` 且 `instanceId` 不同于旧实例的应答，再跳转到 `actualPort`；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。只读的 `GET /api/status` 因此放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
+
 ### 10.7 前端分层
 
 ```
@@ -770,8 +772,8 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/platform/api.ts` | 宿主请求封装（bearer 头、`X-Nexus-Locale`、JSON/blob、错误码投影、AbortController 生命周期联动） |
 | `frontend/src/platform/page-state.ts` | 页面 route token、定时器与在途请求的代际管理 |
 | `frontend/src/platform/shell.ts` / `platform/toast.ts` | 顶部标题、导航态、主题切换以及 Toast、通知与字段错误状态 |
-| `frontend/src/platform/appearance.ts` | 主题 token 校验、插件主题注册、通用背景表面与外观变更广播 |
-| `frontend/src/platform/service-restart.ts` | 服务重启编排：请求新端口、按当前地址构造跳转目标、退避探测服务恢复与顶层跳转 |
+| `frontend/src/platform/appearance.ts` | 主题 token 校验、插件主题注册、通用背景表面与外观变更广播；背景地址由外观表面托管，替换或清除时回收上一个 Blob Object URL |
+| `frontend/src/platform/service-restart.ts` | 服务重启编排：提交或复用重启交接信息、按实例身份与候选端口确认新实例、跳转到实际监听端口 |
 | `frontend/src/platform/tooltip.ts` / `platform/auto-scroll.ts` | 延迟气泡提示与长文本滚动辅助 |
 | `frontend/src/platform/auth.ts` | 访问令牌探测、令牌校验与重新认证入口 |
 | `frontend/src/platform/limits.ts` | shell 启动时的约束警告层与完成操作提示卡片 |
@@ -779,7 +781,7 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/platform/execution-preview.ts` | 插件运行预览捕获（受控截图） |
 | `frontend/src/plugin-bridge/index.ts` | 宿主侧桥接 facade：`renderPluginSlot`、`disposePluginSlot`、`initPluginRuntime` 与插件 route/nav/lifecycle 接入 |
 | `frontend/src/plugin-bridge/runtime.ts` | Frontend API 1.5：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API（含二进制 API）、本地化、外观与运行预览宿主访问 |
-| `frontend/src/plugin-bridge/slots.ts` / `controls.ts` / `plugin-fields.ts` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染与清理，以及插件表单控件 |
+| `frontend/src/plugin-bridge/slots.ts` / `controls.ts` / `plugin-fields.ts` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染与清理；声明式表单控件直接实例化公开 `nxp-*` 元素，桥接层只负责属性映射、值收集、改动同步与必填校验 |
 | `frontend/src/plugin-bridge/host-adapter.ts` | 桥接层唯一的宿主依赖边界；平台模块迁移只改这里的实现来源 |
 
 样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供布局、shell 与插件 surface 样式，Nexus UI 元件样式保留在组件 SFC 中。

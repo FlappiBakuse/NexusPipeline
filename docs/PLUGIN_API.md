@@ -95,6 +95,8 @@ settings.sections               shell.nav
 
 每个贡献包含稳定 `id`、`slot`、`kind`、标题、说明、排序值和可选字段。字段类型包括 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`，以及 v1.3 的 `number`、`color`、`range`、`url`。上下文使用 `PluginUiContext(Slot, Mode, PrimaryId, SecondaryId)`；例如脚本编辑器可用 `PrimaryId` 表示脚本实例，用户绑定设置可同时传入用户和脚本 ID。
 
+宿主按公开元素渲染声明式字段，插件无需自带控件：`text`/`url`/`secret`/`status` → `nxp-text-input`，`textarea` → `nxp-text-area`，`number` → `nxp-number-input`，`range` → `nxp-range`，`color` → `nxp-color-picker`，`switch` → `nxp-switch`，`select` 与 `multi-select` → `nxp-select`。字段的 `min`、`max`、`step`、`options`、`placeholder`、`maxLength`、`readOnly` 与 `required` 映射到对应公开属性；保存载荷沿用字段类型语义：`switch` 为布尔、`multi-select` 为字符串数组、`number` 与 `range` 为数值、`secret` 为 `{action:"keep"|"set"|"clear"}`。
+
 宿主提供通用 HTTP 投影：
 
 - `POST /api/plugin-contributions/ui/query`：body 为 `{ "slot": "settings.sections", "contexts": [...] }`，批量读取指定 slot 的贡献；
@@ -241,7 +243,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
-外观表面使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`setTokens` 的 token 名必须匹配 `--[A-Za-z0-9_-]{1,96}`，值不超过 4096 字符且不含控制字符；token 应用在 `body` 上，因此优先于主题 token 并跨主题切换保持有效，直到 `clearTokens()` 或替换新集合。`setBackground(surface)` 接受 `url`（仅 `http`、`https`、`blob` 和 `data` 协议，其余拒绝）、`blurPx`（0–40）、`dimPercent`（0–80）、`surfaceTransparencyPercent`（0–50）与 `secondarySurfaceTransparency`（布尔，默认 `true`）。外观变化继续广播 `nexus:appearance-changed`；`createAppearanceHost()` 不接收插件名参数。
+外观表面使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`setTokens` 的 token 名必须匹配 `--[A-Za-z0-9_-]{1,96}`，值不超过 4096 字符且不含控制字符；token 应用在 `body` 上，因此优先于主题 token 并跨主题切换保持有效，直到 `clearTokens()` 或替换新集合。`setBackground(surface)` 接受 `url`（仅 `http`、`https`、`blob` 和 `data` 协议，其余拒绝）、`blurPx`（0–40）、`dimPercent`（0–80）、`surfaceTransparencyPercent`（0–50）与 `secondarySurfaceTransparency`（布尔，默认 `true`）。背景地址在交给 `setBackground` 后由外观表面托管：替换新地址或调用 `clearBackground()` 时宿主回收上一个 `blob:` Object URL，插件无需重复释放。外观变化继续广播 `nexus:appearance-changed`；`createAppearanceHost()` 不接收插件名参数。
 
 壁纸配置、配额、文件校验、去重、轮换、配色与持久化属于插件业务，由插件通过自己的资产 scope、插件 Web API 与前端模块实现；宿主只提供通用资产存储、二进制 Web API 与通用外观表面。旧宿主壁纸数据的搬迁见上文「旧外观数据搬迁」。
 

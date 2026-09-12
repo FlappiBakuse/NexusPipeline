@@ -27,18 +27,30 @@
 ### 服务重启与外观细节
 
 - 重启状态迁入 shell store（`restartRequired`、`restartReasons`、`restarting`、`restartError`），由 `ServiceRestartNotice` 在全局页面 shell 渲染；插件安装、更新、卸载、启用、禁用与批量更新成功后立即出现重启入口。
-- 重启流程改为平台 helper：请求重启后读取新端口、按协议/主机/新端口/当前路径与 hash 构造地址、有限次数退避探测服务恢复（连续两次成功）、再顶层跳转；超时显示“服务仍在启动”与手动重试，并阻止重复点击。
+- 重启恢复改为实例身份协议：`/api/status` 暴露进程实例标识 `instanceId` 与本次重启交接标识 `restartHandoffId`，重启接口返回 `handoffId`、旧实例 `instanceId` 与候选端口；请求重启的进程为子进程生成交接标识并随 `restart --handoff` 传入。
+- 前端按配置端口与宿主顺延端口逐个探测 `/api/status`，只接受携带本次交接标识且实例标识不同于旧实例的应答，再跳转到新实例上报的实际监听端口并保留路径与 hash；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转，超时保留交接信息并提供重试。
+- 只读的 `GET /api/status` 放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
+- `host.appearance.setBackground` 在替换背景时回收上一个 Blob Object URL，`clearBackground` 回收当前地址；插件多次轮换壁纸不再累积失效的 Object URL。
 - 环境粒子增强为 36/56/80 三档密度、点透明度 0.2、连线透明度 0.08、连接阈值 104px，连线改为双层索引循环；`prefers-reduced-motion`、页面隐藏暂停、resize、DPR 上限与外观变更重绘保持不变。
+
+### 插件桥接组件化
+
+- 声明式插件表单控件改为直接实例化宿主公开的 `nxp-*` 元素：`text`/`url`/`secret`/`status` → `nxp-text-input`，`textarea` → `nxp-text-area`，`number` → `nxp-number-input`，`range` → `nxp-range`，`color` → `nxp-color-picker`，`switch` → `nxp-switch`，`select`/`multi-select` → `nxp-select`。
+- 桥接层只保留 schema → 属性、值收集、改动同步与校验错误投影；删除自行拼装的 Select/Number/Color 控件 DOM、宿主级控件事件委托与 `platform/icons`、`platform/format` 直接依赖，公开组件修复会自动作用于声明式插件表单。
+- 新增表驱动的控件验收用例（元素映射、初始值、约束、单选与多选、开关、错误投影与清理）与静态实现边界用例（禁止拼装控件 DOM、平台依赖必须经 host adapter、字段类型必须映射到公开元素）。
 
 ### CI 影响域治理
 
-- 宿主 CI 拆分为影响域 Gate（前端 Unit、宿主 Core、文档/i18n、插件契约、管理员 UI Smoke、System Runtime 四域），普通前端或文档改动不再触发 Windows System Smoke；每周定时与手动 `workflow_dispatch` 保留 `admin all` 全量回归，判定失败时按全量门禁执行。
+- 宿主 CI 拆分为影响域 Gate（前端 Unit、宿主 Core、文档/i18n、插件契约、管理员 UI Smoke、System 四域），普通前端或文档改动不再触发 Windows System Smoke；每周定时与手动 `workflow_dispatch` 保留 `admin all` 全量回归，判定失败时按全量门禁执行。
+- System 影响域按 suite 细分为 `system_runtime`、`system_execution`、`system_emulator`、`system_update`：MCP 与运行时生命周期、执行与判定、模拟器驱动、更新事务各自只触发对应作业，横切文件显式列入多个域，不再使用 `src/**` 作为共同触发源。
+- 新增 `tests/tools/ci-domains.test.mjs`（16 个用例，含「宿主源码逐文件命中至少一个 System 域」）与 `tests/run.mjs` 的 `tooling` 入口；CI 的 `changes` 作业先校验映射再做判定。
 - `tests/run.mjs` 增加 `system` 分组入口（`runtime`、`execution`、`emulator`、`update`）与 `--dry` 列表模式，CI 不再复制 System Smoke 运行逻辑。
 - 插件仓库 CI 拆分为 plugin-source、plugin-frontend、plugin-managed、plugin-package 四个 Gate，发布与每周审计工作流保持完整校验。
 
 ### 双仓插件门禁
 
 - `Test-FrontendPlugins.mjs` 强化为 Frontend API 1.5 conformance：精确版本校验、宿主私有 class 拒绝、公开 `nxp-*` 元素白名单（宿主检出可用时直接读取 `NEXUS_PUBLIC_ELEMENTS`）、禁止复制 Nexus UI 组件、折叠卡片挂载断言，以及卸载后定时器与 window 监听不残留。
+- 插件前端 conformance 增加 CustomWallpaper 生命周期回归：激活即应用背景与配色（不依赖设置页面）、离开设置页面保留背景与配色、页面访问不触发随机轮换、按时间轮换在无设置页面时继续生效、只有插件停用才清理全局外观与计时器。
 - 宿主 `NxpModal` 锁定语义、公开元素注册与新公共组件契约均有对应组件测试；新增插件资产存储、二进制传输、旧数据搬迁与插件业务用例。
 
 ## v0.15.8（Pre-release）
