@@ -175,12 +175,17 @@ export async function waitForRestartedService(options: ServiceRecoveryOptions): 
   if (ports.length === 0) return null;
   const deadline = Date.now() + timeoutMs;
   let delay = baseInterval;
+  let firstProbe = true;
   while (Date.now() < deadline) {
-    try {
-      await sleep(delay, options.signal);
-    } catch {
-      return null;
+    if (options.signal?.aborted) return null;
+    if (!firstProbe) {
+      try {
+        await sleep(delay, options.signal);
+      } catch {
+        return null;
+      }
     }
+    firstProbe = false;
     const results = await Promise.all(ports.map(async port => {
       const target = restartProbeUrl(options.href, port);
       try {

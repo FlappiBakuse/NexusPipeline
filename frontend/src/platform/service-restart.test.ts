@@ -167,6 +167,31 @@ describe("service restart orchestration", () => {
     expect(navigated).toEqual(["http://127.0.0.1:58001/#/queues"]);
   });
 
+  it("probes immediately before applying the retry interval", async () => {
+    const probe = vi.fn(async () => ({
+      instanceId: "instance-new",
+      restartHandoffId: handoff.handoffId,
+      actualPort: 58001,
+    }));
+
+    await expect(waitForRestartedService({
+      href: "http://127.0.0.1:58000/#/settings",
+      handoff,
+      timeoutMs: 4000,
+      intervalMs: 800,
+      portScanLimit: 0,
+      probe,
+    })).resolves.toEqual({
+      url: "http://127.0.0.1:58001/#/settings",
+      instance: {
+        instanceId: "instance-new",
+        restartHandoffId: handoff.handoffId,
+        actualPort: 58001,
+      },
+    });
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+
   it("covers the ports the host may fall back to", () => {
     expect(restartCandidatePorts("http://127.0.0.1:58000/#/", handoff, 3))
       .toEqual([58001, 58002, 58003, 58004]);
