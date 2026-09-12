@@ -1,32 +1,184 @@
 name: CI
 
-on:
+"on":
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # 每周一 03:17 UTC 全量回归，覆盖本轮改动未触及的 Gate。
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-and-test:
-    name: 构建 + 分层测试
-    runs-on: windows-latest
-    timeout-minutes: 20
-    env:
-      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+  # 影响域判定：见 tools/ci-domains.mjs（分组与触发路径的唯一来源）。
+  # 改动未命中任何目录、包含共享路径（CI 工作流与影响域清单本身）或改动列表不可用时按全量门禁处理。
+  changes:
+    name: 影响域判定
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.domains.outputs.frontend }}
+      host: ${{ steps.domains.outputs.host }}
+      docs: ${{ steps.domains.outputs.docs }}
+      plugin: ${{ steps.domains.outputs.plugin }}
+      ui: ${{ steps.domains.outputs.ui }}
+      system: ${{ steps.domains.outputs.system }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
 
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 计算影响域
+        id: domains
+        shell: pwsh
+        run: |
+          if ('${{ github.event_name }}' -eq 'pull_request') {
+            node tools/ci-changes.mjs --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.sha }}' --github-output "$env:GITHUB_OUTPUT"
+          } elseif ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+            node tools/ci-changes.mjs --all --github-output "$env:GITHUB_OUTPUT"
+          } else {
+            node tools/ci-changes.mjs --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$env:GITHUB_OUTPUT"
+          }
+
+  # Gate A：前端单元与静态构建，纯 Node 工具链。
+  frontend-unit:
+    name: Gate A 前端 Unit + Build
+    needs: changes
+    if: ${{ needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
 
-      - name: 检出官方插件仓库（UI Smoke 夹具 + Frontend API 契约）
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 依赖安装 + 类型检查 + Vitest + 静态构建
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm test
+          npm run build
+
+  # Gate B：宿主 C# 单元与组件门禁；编译校验覆盖生产工程，测试工程随 dotnet test 一起编译。
+  host-core:
+    name: Gate B 宿主 Unit + Component
+    needs: changes
+    if: ${{ needs.changes.outputs.host == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 宿主编译校验
+        shell: pwsh
+        run: dotnet build src\NexusPipeline.csproj -c Release --nologo
+
+      - name: 宿主 Unit + Component
+        shell: pwsh
+        run: node tests\run.mjs unit
+
+  # Gate C：文档与 i18n 一致性，只需要 Node。
+  docs-i18n:
+    name: Gate C 文档 + i18n
+    needs: changes
+    if: ${{ needs.changes.outputs.docs == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 文档与 i18n 一致性
+        run: node tests/run.mjs docs
+
+  # Gate D：宿主 Plugin API、公共 nxp-* 控件与官方插件 Frontend API 契约。
+  plugin-contract:
+    name: Gate D 插件契约
+    needs: changes
+    if: ${{ needs.changes.outputs.plugin == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出宿主代码
+        uses: actions/checkout@v4
+
+      - name: 检出官方插件仓库（Frontend API 契约夹具）
         uses: actions/checkout@v4
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: main
           path: NexusPipeline-Plugins
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Plugin API 编译校验与契约测试
+        shell: pwsh
+        run: |
+          dotnet build src\NexusPipeline.Plugin.Abstractions\NexusPipeline.Plugin.Abstractions.csproj -c Release --nologo
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests\run.mjs unit
+
+      - name: Frontend API 契约（含 plugin-bridge 契约用例）
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm test
+
+      - name: 官方插件 Frontend API 契约
+        working-directory: NexusPipeline-Plugins
+        run: |
+          npm ci --no-audit --no-fund
+          node tools\Test-FrontendPlugins.mjs
+
+  # Gate E：管理员 UI Smoke，保留完整性自检、NEXUS_TIME_SCALE 与失败产物上传。
+  ui-smoke:
+    name: Gate E 管理员 UI Smoke
+    needs: changes
+    if: ${{ needs.changes.outputs.ui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -56,19 +208,6 @@ jobs:
         shell: cmd
         run: npm ci
 
-      - name: 前端组件测试
-        shell: cmd
-        run: npm ci --prefix frontend && npm test --prefix frontend
-
-      - name: 官方 Frontend API 插件契约
-        shell: cmd
-        working-directory: NexusPipeline-Plugins
-        run: npm ci && node tools\Test-FrontendPlugins.mjs
-
-      - name: Administrator 默认门禁（Unit + Component + Web + Docs + Syntax + Build）
-        shell: cmd
-        run: node tests\run.mjs admin default
-
       - name: Administrator Playwright UI Smoke
         shell: cmd
         env:
@@ -84,11 +223,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  system-tests:
-    name: Windows System Smoke
+  # Gate F：System Runtime 按影响域拆成独立作业，各自调用 tests\run.mjs 的正式分域入口。
+  system-runtime-mcp:
+    name: Gate F System Runtime/MCP
+    needs: changes
+    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
-
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58831"
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -116,17 +259,229 @@ jobs:
           }
           Write-Output "[权限] 已确认 High/System Integrity。"
 
-      - name: Administrator System Smoke
+      - name: Administrator System Smoke（Runtime / MCP）
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: node tests\run.mjs admin system
+        run: node tests\run.mjs admin system runtime
 
       - name: 上传 System Smoke 失败诊断
         if: ${{ failure() }}
         uses: actions/upload-artifact@v4
         with:
-          name: system-smoke-results
+          name: system-smoke-runtime-results
+          path: |
+            tests/system/runtime-*
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  system-execution:
+    name: Gate F System Execution
+    needs: changes
+    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58832"
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
+
+      - name: Administrator System Smoke（Execution）
+        shell: cmd
+        env:
+          NEXUS_TIME_SCALE: "10"
+        run: node tests\run.mjs admin system execution
+
+      - name: 上传 System Smoke 失败诊断
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-smoke-execution-results
+          path: |
+            tests/system/runtime-*
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  system-emulator:
+    name: Gate F System Emulator
+    needs: changes
+    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58833"
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
+
+      - name: Administrator System Smoke（Emulator / ADB）
+        shell: cmd
+        env:
+          NEXUS_TIME_SCALE: "10"
+        run: node tests\run.mjs admin system emulator
+
+      - name: 上传 System Smoke 失败诊断
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-smoke-emulator-results
+          path: |
+            tests/system/runtime-*
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  system-update:
+    name: Gate F System Update
+    needs: changes
+    if: ${{ needs.changes.outputs.system == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58834"
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
+
+      - name: Administrator System Smoke（Startup / Update）
+        shell: cmd
+        env:
+          NEXUS_TIME_SCALE: "10"
+        run: node tests\run.mjs admin system update
+
+      - name: 上传 System Smoke 失败诊断
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: system-smoke-update-results
+          path: |
+            tests/system/runtime-*
+            tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # 每周计划与手动触发执行完整管理员门禁：Unit + Component + Web + Docs + Syntax + Build + UI + 全部 System suite。
+  full-regression:
+    name: 全量回归（计划 / 手动）
+    needs: changes
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
+
+      - name: 安装 Playwright 依赖
+        working-directory: tests/e2e
+        shell: cmd
+        run: npm ci
+
+      - name: Administrator 全部门禁
+        shell: cmd
+        env:
+          NEXUS_TIME_SCALE: "10"
+        run: node tests\run.mjs admin all
+
+      - name: 上传全量回归失败诊断
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-regression-results
           path: |
             tests/system/runtime-*
             tests/e2e/test-results

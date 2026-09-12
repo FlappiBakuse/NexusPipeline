@@ -12,6 +12,25 @@ const nodeCommand = process.execPath;
 const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
+// System Smoke 影响域分组：CI 按改动范围选择分组，每个分组复用同一份 suite 定义。
+const SYSTEM_SUITE_GROUPS = [
+  ["runtime", [
+    ["runtime-mcp", "mcp-smoke.mjs"],
+    ["runtime-runtime", "runtime-smoke.mjs"],
+  ]],
+  ["execution", [
+    ["runtime-judge", "judge-smoke.mjs"],
+    ["runtime-execution-resilience", "execution-resilience.mjs"],
+  ]],
+  ["emulator", [
+    ["runtime-emulator", "emulator-smoke.mjs"],
+  ]],
+  ["update", [
+    ["runtime-startup-update", "startup-update-smoke.mjs"],
+    ["runtime-update", "update-smoke.mjs"],
+  ]],
+];
+const SYSTEM_GROUP_NAMES = SYSTEM_SUITE_GROUPS.map(([group]) => group);
 
 function runProcess(command, args, options = {}) {
   return new Promise(resolve => {
@@ -238,7 +257,69 @@ async function runUi(mode, args) {
   }
 }
 
+function parseSystemGroups(args) {
+  const groups = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--realtime" || arg === "--dry") continue;
+    if (arg === "--group") {
+      const value = args[index + 1]?.toLowerCase();
+      if (!value || value.startsWith("--")) return { error: "--group 缺少分组名" };
+      groups.push(value);
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--group=")) {
+      const value = arg.slice("--group=".length).toLowerCase();
+      if (!value) return { error: "--group 缺少分组名" };
+      groups.push(value);
+      continue;
+    }
+    if (arg.startsWith("--")) return { error: `未知参数：${arg}` };
+    groups.push(arg.toLowerCase());
+  }
+
+  const unknown = groups.filter(group => !SYSTEM_GROUP_NAMES.includes(group));
+  if (unknown.length > 0) {
+    const lines = [
+      `未知 System Smoke 分组：${unknown.join(", ")}`,
+      `可用分组：${SYSTEM_GROUP_NAMES.join(" | ")}`,
+    ];
+    for (const [group, suites] of SYSTEM_SUITE_GROUPS) {
+      lines.push(`  ${group}：${suites.map(([runtimeName]) => runtimeName).join(", ")}`);
+    }
+    lines.push("用法：node tests\\run.mjs <codex|admin> system [分组...] [--realtime] [--dry]");
+    return { error: lines.join("\n") };
+  }
+  return { groups };
+}
+
+function selectSystemSuites(groups) {
+  const selectedGroups = groups.length > 0 ? new Set(groups) : null;
+  const suites = [];
+  for (const [group, groupSuites] of SYSTEM_SUITE_GROUPS) {
+    if (selectedGroups && !selectedGroups.has(group)) continue;
+    for (const [runtimeName, fileName] of groupSuites) {
+      suites.push({ group, runtimeName, file: path.join(systemDir, fileName) });
+    }
+  }
+  return suites;
+}
+
 async function runSystem(mode, args) {
+  const parsed = parseSystemGroups(args);
+  if (parsed.error) {
+    console.error(parsed.error);
+    return 2;
+  }
+  const suites = selectSystemSuites(parsed.groups);
+  if (args.includes("--dry")) {
+    console.error(`[System Smoke] 干跑模式：共 ${suites.length} 个 suite，未启动构建与运行时。`);
+    for (const suite of suites) {
+      console.error(`[System Smoke] 影响域 ${suite.group} | ${suite.runtimeName} | ${suite.file}`);
+    }
+    return 0;
+  }
   if (mode === "admin" && !requireAdmin("管理员 System Smoke", "admin system")) return 2;
   const buildCode = await runBuild();
   if (buildCode !== 0) return buildCode;
@@ -253,18 +334,9 @@ async function runSystem(mode, args) {
     NEXUS_SYSTEM_WEB_PORT: process.env.NEXUS_SYSTEM_WEB_PORT || "58831",
   };
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
-  const suites = [
-    ["runtime-mcp", "mcp-smoke.mjs"],
-    ["runtime-runtime", "runtime-smoke.mjs"],
-    ["runtime-judge", "judge-smoke.mjs"],
-    ["runtime-execution-resilience", "execution-resilience.mjs"],
-    ["runtime-emulator", "emulator-smoke.mjs"],
-    ["runtime-startup-update", "startup-update-smoke.mjs"],
-    ["runtime-update", "update-smoke.mjs"],
-  ];
   const suiteTimeoutMs = 5 * 60 * 1000;
   try {
-    for (const [runtimeName, file] of suites) {
+    for (const { group, runtimeName, file } of suites) {
       const suiteEnv = {
         ...env,
         NEXUS_SYSTEM_RUNTIME_NAME: runtimeName,
@@ -272,12 +344,12 @@ async function runSystem(mode, args) {
           ? { NEXUS_TEST_HOST_EXIT_FILE: path.join(systemDir, runtimeName, ".nxp", "test-host.exit") }
           : {}),
       };
-      const label = `${runtimeName} (${file})`;
+      const label = `${group}/${runtimeName} (${path.basename(file)})`;
       console.error(`[System Smoke] 开始 ${label}`);
       const startedAt = Date.now();
       const code = await runProcess(
         nodeCommand,
-        ["--test", "--test-concurrency=1", path.join(systemDir, file)],
+        ["--test", "--test-concurrency=1", file],
         { env: suiteEnv, timeoutMs: suiteTimeoutMs },
       );
       console.error(`[System Smoke] 结束 ${label}：exit=${code}，耗时 ${Date.now() - startedAt}ms`);
@@ -293,7 +365,10 @@ function printUsage() {
   console.error("用法：");
   console.error("  node tests\\run.mjs codex <default|ui|system|all> [--realtime]");
   console.error("  node tests\\run.mjs admin <default|ui|system|all> [--realtime]");
+  console.error(`  node tests\\run.mjs <codex|admin> system [${SYSTEM_GROUP_NAMES.join("|")}] [--realtime] [--dry]`);
   console.error("  node tests\\run.mjs unit|web|docs|syntax|build");
+  console.error("system 省略分组时运行全部 suite；指定分组时按影响域运行，可用 --group <分组> 重复指定。");
+  console.error("system --dry 只列出将要执行的 suite，不构建也不启动运行时。");
   console.error("正式组合入口必须显式指定 codex 或 admin；default/ui/system/all 不能省略模式。");
 }
 

@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { CI_DOMAINS, CI_SHARED_PATHS } from "../../tools/ci-domains.mjs";
+import { evaluateDomains, globToRegExp } from "../../tools/ci-changes.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SKIP_DIRECTORIES = new Set([
@@ -246,4 +248,93 @@ test("dual-mode production contracts stay on data files and behavior", () => {
     2,
     "bare default must require an explicit codex/admin mode",
   );
+});
+
+test("CI impact domains match the System Smoke groups and workflow gates", () => {
+  const domainKeys = CI_DOMAINS.map(domain => domain.key);
+  assert.deepEqual(
+    new Set(domainKeys).size,
+    domainKeys.length,
+    `影响域 key 重复：${domainKeys.join(", ")}`,
+  );
+  for (const domain of CI_DOMAINS) {
+    assert.ok(domain.paths.length > 0, `${domain.key} 缺少触发路径`);
+    for (const pattern of domain.paths) {
+      assert.doesNotMatch(pattern, /\\|[?[\]{}]/u, `${domain.key} 触发路径格式无效：${pattern}`);
+      assert.doesNotThrow(() => globToRegExp(pattern), `${domain.key} 触发路径无法编译：${pattern}`);
+    }
+  }
+  for (const pattern of CI_SHARED_PATHS) {
+    assert.doesNotThrow(() => globToRegExp(pattern), `共享路径无法编译：${pattern}`);
+  }
+
+  // 影响域判定对示例改动给出预期结果。
+  const sample = evaluateDomains([
+    "docs/TESTING.md",
+    "frontend/src/plugin-bridge/contract.test.ts",
+    "src/NexusPipeline.Plugin.Abstractions/PluginApi.cs",
+  ]).domains;
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(sample).map(([key, value]) => [key, value.affected])),
+    { frontend: true, host: true, docs: true, plugin: true, ui: true, system: true },
+    "示例改动的影响域判定与预期不一致",
+  );
+  const docsOnly = evaluateDomains(["docs/STATUS.md"]).domains;
+  assert.equal(docsOnly.docs.affected, true);
+  assert.equal(docsOnly.frontend.affected, false);
+  assert.equal(docsOnly.system.affected, false);
+  const unknownOnly = evaluateDomains(["SECURITY.md"]);
+  assert.equal(unknownOnly.failOpen, true, "未命中影响域的改动需要按全量门禁处理");
+  const sharedOnly = evaluateDomains([".github/workflows/ci.yml"]);
+  assert.equal(sharedOnly.failOpen, true, "共享路径改动需要按全量门禁处理");
+
+  // run.mjs 的 System Smoke 影响域分组与 CI 作业引用的入口必须一致且指向真实 suite 文件。
+  const workflow = read(".github/workflows/ci.yml");
+  const outputs = [...workflow.matchAll(/^ {6}([a-z]+): \$\{\{ steps\.domains\.outputs\.\1 \}\}$/gmu)]
+    .map(match => match[1])
+    .sort();
+  assert.deepEqual(outputs, [...domainKeys].sort(), "ci.yml 影响域输出与 tools/ci-domains.mjs 不一致");
+  for (const key of domainKeys) {
+    assert.match(
+      workflow,
+      new RegExp(`needs\\.changes\\.outputs\\.${key} == 'true'`, "u"),
+      `ci.yml 没有作业按影响域 ${key} 触发`,
+    );
+  }
+
+  const dryRun = spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "--dry"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  assert.equal(dryRun.status, 0, `admin system --dry 退出码异常：${dryRun.stderr}`);
+  const listedSuites = [...dryRun.stderr.matchAll(/\[System Smoke\] 影响域 (\S+) \| (\S+) \| (.+)$/gmu)]
+    .map(match => ({ group: match[1], runtimeName: match[2], file: match[3].trim() }));
+  assert.ok(listedSuites.length > 0, "admin system --dry 未列出任何 suite");
+  const groupNames = [...new Set(listedSuites.map(suite => suite.group))];
+  const systemDir = path.join(ROOT, "tests", "system");
+  for (const suite of listedSuites) {
+    assert.equal(path.dirname(suite.file), systemDir, `suite 文件不在 tests/system：${suite.file}`);
+    assert.ok(fs.existsSync(suite.file), `suite 文件不存在：${suite.file}`);
+  }
+  const workflowGroups = [...new Set(
+    [...workflow.matchAll(/node tests\\run\.mjs admin system ([\w-]+)/gu)].map(match => match[1]),
+  )];
+  assert.deepEqual(workflowGroups.sort(), groupNames.slice().sort(), "ci.yml 的 System Smoke 分组与 run.mjs 声明的分组不一致");
+  for (const group of workflowGroups) {
+    const groupArgs = spawnSync(
+      process.execPath,
+      [path.join(ROOT, "tests", "run.mjs"), "admin", "system", group, "--dry"],
+      { cwd: ROOT, encoding: "utf8" },
+    );
+    assert.equal(groupArgs.status, 0, `admin system ${group} --dry 退出码异常：${groupArgs.stderr}`);
+  }
+
+  const unknownGroup = spawnSync(
+    process.execPath,
+    [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "not-a-group"],
+    { cwd: ROOT, encoding: "utf8" },
+  );
+  assert.equal(unknownGroup.status, 2, "未知 System Smoke 分组必须以 exit code 2 拒绝");
+  assert.match(unknownGroup.stderr, /未知 System Smoke 分组/u);
+  assert.match(unknownGroup.stderr, new RegExp(`可用分组：${groupNames.join(" \\| ")}`, "u"));
 });
