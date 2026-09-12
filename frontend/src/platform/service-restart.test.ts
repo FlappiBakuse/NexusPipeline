@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  applyRestartNavigation,
   probeServiceInstance,
   requestServiceRestart,
   restartCandidatePorts,
+  restartProbeUrl,
   restartService,
   restartTargetUrl,
   waitForRestartedService,
@@ -44,6 +46,42 @@ describe("service restart orchestration", () => {
   it("keeps the current address when the port is unknown", () => {
     expect(restartTargetUrl("http://127.0.0.1:8080/#/settings", 0))
       .toBe("http://127.0.0.1:8080/#/settings");
+  });
+
+  it("probes the service origin without the page path or hash route", async () => {
+    expect(restartProbeUrl("http://127.0.0.1:58000/#/settings", 58001)).toBe("http://127.0.0.1:58001/");
+
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return new Response(JSON.stringify(statusPayload()), { status: 200 });
+    }));
+
+    await probeServiceInstance("http://127.0.0.1:58001/#/settings", handoff);
+
+    expect(requested).toEqual(["http://127.0.0.1:58001/api/status"]);
+  });
+
+  it("reloads the page when the restarted service keeps the same address", () => {
+    const reload = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal("location", { href: "http://127.0.0.1:58001/#/settings", reload, replace });
+
+    applyRestartNavigation("http://127.0.0.1:58001/#/settings", "http://127.0.0.1:58001/#/settings");
+
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it("navigates to the new port when the restarted service moved", () => {
+    const reload = vi.fn();
+    const replace = vi.fn();
+    vi.stubGlobal("location", { href: "http://127.0.0.1:58000/#/settings", reload, replace });
+
+    applyRestartNavigation("http://127.0.0.1:58002/#/settings", "http://127.0.0.1:58000/#/settings");
+
+    expect(replace).toHaveBeenCalledWith("http://127.0.0.1:58002/#/settings");
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it("reads the restart handoff from the host reply", async () => {

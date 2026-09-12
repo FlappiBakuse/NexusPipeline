@@ -69,6 +69,16 @@ export function restartTargetUrl(href: string, port: number): string {
   return url.toString();
 }
 
+/** 按端口构造探测根地址：只保留协议与主机，避免把页面路径与 hash 路由带进 API 请求。 */
+export function restartProbeUrl(href: string, port: number): string {
+  const url = new URL(href);
+  if (port > 0) url.port = String(port);
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 function statusPayload(value: unknown): ServiceInstanceProbe | null {
   const payload = value as { service?: unknown; instanceId?: unknown; restartHandoffId?: unknown; actualPort?: unknown } | null;
   if (!payload || typeof payload !== "object") return null;
@@ -83,7 +93,10 @@ function statusPayload(value: unknown): ServiceInstanceProbe | null {
   };
 }
 
-/** 读取目标地址的状态；应答不是 NexusPipeline、或不是本次重启拉起的新实例时返回 null。 */
+/**
+ * 读取目标主机端口的服务状态；应答不是 NexusPipeline、或不是本次重启拉起的新实例时返回 null。
+ * 探测地址只使用协议与主机，页面路径与 hash 路由不会进入 API 请求。
+ */
 export async function probeServiceInstance(
   url: string,
   handoff: ServiceRestartHandoff,
@@ -95,8 +108,12 @@ export async function probeServiceInstance(
     ? AbortSignal.any([signal, timeout])
     : signal || timeout;
   const token = readAuthToken();
+  const origin = new URL(url, location.href);
+  origin.pathname = "/";
+  origin.search = "";
+  origin.hash = "";
   try {
-    const response = await fetch(`${url.replace(/\/+$/u, "")}/api/status`, {
+    const response = await fetch(new URL("api/status", origin).toString(), {
       method: "GET",
       cache: "no-store",
       signal: combined,
@@ -165,7 +182,7 @@ export async function waitForRestartedService(options: ServiceRecoveryOptions): 
       return null;
     }
     const results = await Promise.all(ports.map(async port => {
-      const target = restartTargetUrl(options.href, port);
+      const target = restartProbeUrl(options.href, port);
       try {
         return { port, target, instance: await probe(target, options.handoff, options.signal) };
       } catch {
@@ -192,6 +209,25 @@ export interface RestartServiceOptions extends Omit<ServiceRecoveryOptions, "hre
 }
 
 /**
+ * 跳转到重启后的服务地址：地址与当前页面完全一致时执行刷新。
+ * 同地址的 `location.replace` 被浏览器视为同文档导航，页面不会重新加载。
+ */
+export function applyRestartNavigation(url: string, current: string): void {
+  let target: URL;
+  try {
+    target = new URL(url, current);
+  } catch {
+    window.location.reload();
+    return;
+  }
+  if (target.href === new URL(current).href) {
+    window.location.reload();
+    return;
+  }
+  window.location.replace(target.href);
+}
+
+/**
  * 完整重启流程：提交重启（或复用已有交接信息）→ 探测新实例 → 顶层跳转到实际监听端口。
  * 超时返回 timeout，由调用方保留交接信息并提供重试入口。
  */
@@ -208,7 +244,7 @@ export async function restartService(options: RestartServiceOptions = {}): Promi
   const href = options.href || window.location.href;
   const recovered = await waitForRestartedService({ ...options, href, handoff });
   if (!recovered) return "timeout";
-  const navigate = options.navigate || ((url: string) => window.location.replace(url));
+  const navigate = options.navigate || ((url: string) => applyRestartNavigation(url, href));
   navigate(recovered.url);
   return "ready";
 }
