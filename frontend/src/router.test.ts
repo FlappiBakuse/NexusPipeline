@@ -9,9 +9,10 @@ describe("host route table", () => {
   const byPath = new Map(routes.map(route => [String(route.path), route]));
 
   it("covers every host page with a dedicated route", () => {
-    for (const path of ["/dashboard", "/users", "/scripts", "/queues", "/dispatch", "/history", "/plugins", "/settings", "/ui-lab"]) {
+    for (const path of ["/dashboard", "/users", "/scripts", "/queues", "/dispatch", "/history", "/plugins", "/settings"]) {
       expect(byPath.has(path), `缺少路由 ${path}`).toBe(true);
     }
+    expect(byPath.has("/ui-lab")).toBe(import.meta.env.DEV);
   });
 
   it("registers the plugin route with a catch-all segment matcher", () => {
@@ -33,10 +34,9 @@ describe("host route table", () => {
     }
   });
 
-  it("keeps the component laboratory styles in the entry chunk", () => {
-    // 组件状态实验室只服务元件状态检查，样式留在入口分块以保证与布局样式的层叠顺序稳定。
-    const component = byPath.get("/ui-lab")!.component as unknown;
-    expect(typeof component).toBe("object");
+  it("loads the component laboratory only in development", () => {
+    const component = byPath.get("/ui-lab")?.component as unknown;
+    expect(import.meta.env.DEV ? typeof component : component).toBe(import.meta.env.DEV ? "function" : undefined);
   });
 
   it("redirects the root path to the dashboard", () => {

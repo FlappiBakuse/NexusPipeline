@@ -101,7 +101,6 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "settings.network",
   "settings.other",
   "settings.service",
-  "settings.service_restart",
   "settings.settings",
   "shell.close_nav",
   "shell.open_nav",

@@ -167,7 +167,7 @@ async function runWeb() {
 }
 
 async function runDocs() {
-  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs"]);
+  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs", "tests\\documentation\\test-policy-consistency.mjs"]);
 }
 
 async function runTooling() {
@@ -254,7 +254,6 @@ async function runUi(mode, args) {
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   try {
     const playwrightArgs = [playwrightCli, "test"];
-    if (process.env.NEXUS_UPDATE_SNAPSHOTS === "1") playwrightArgs.push("--update-snapshots");
     return await runProcess(nodeCommand, playwrightArgs, { cwd: e2eDir, env });
   } finally {
     if (mode === "codex") cleanTestHost();
