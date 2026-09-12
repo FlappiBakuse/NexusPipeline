@@ -32,7 +32,7 @@ jobs:
       system_update: ${{ steps.domains.outputs.system_update }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 20
 
@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -89,7 +89,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -118,7 +118,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -137,10 +137,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: 检出宿主代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 检出官方插件仓库（Frontend API 契约夹具）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: main
@@ -184,7 +184,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -240,7 +240,7 @@ jobs:
       NEXUS_SYSTEM_WEB_PORT: "58831"
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -292,7 +292,7 @@ jobs:
       NEXUS_SYSTEM_WEB_PORT: "58832"
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -344,7 +344,7 @@ jobs:
       NEXUS_SYSTEM_WEB_PORT: "58833"
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -396,7 +396,7 @@ jobs:
       NEXUS_SYSTEM_WEB_PORT: "58834"
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -447,7 +447,7 @@ jobs:
     timeout-minutes: 120
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
