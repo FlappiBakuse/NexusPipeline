@@ -3,12 +3,17 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
+import NxpConfirmDialog from "../../../ui/composites/NxpConfirmDialog.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import { updateStatusView as updateStatusViewFor } from "../utils/updateStatusView";
 import type { UpdateStatus } from "../utils/settingsTypes";
 
 /** 更新状态卡片：独立承担更新状态轮询、检查/下载/取消/应用事务与 ready 常驻备份提醒。 */
 
 const updateStatus = ref<UpdateStatus | null>(null);
+const applyDialogOpen = ref(false);
+const applyDialogDefer = ref(false);
+const applyDialogBusy = ref(false);
 let disposed = false;
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -82,18 +87,23 @@ async function cancelUpdate() {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
   }
 }
-async function applyUpdate(defer: boolean) {
-  if (
-    !window.confirm(
-      t("settings.update.backup_confirm", {
-        action: defer ? t("settings.update.apply_next_start") : t("settings.update.apply_now"),
-        version: updateStatus.value?.latest ? ` v${updateStatus.value.latest}` : "",
-      }),
-    )
-  )
-    return;
+function requestApplyUpdate(defer: boolean) {
+  if (applyDialogBusy.value) return;
+  applyDialogDefer.value = defer;
+  applyDialogOpen.value = true;
+}
+const applyDialogMessage = computed(() => t("settings.update.backup_confirm", {
+  action: applyDialogDefer.value ? t("settings.update.apply_next_start") : t("settings.update.apply_now"),
+  version: updateStatus.value?.latest ? ` v${updateStatus.value.latest}` : "",
+}));
+function closeApplyDialog() {
+  if (!applyDialogBusy.value) applyDialogOpen.value = false;
+}
+async function confirmApplyUpdate() {
+  if (applyDialogBusy.value) return;
+  applyDialogBusy.value = true;
   try {
-    const result = (await api("POST", "/api/update/apply", { defer })) as { error?: string; deferred?: boolean } | null;
+    const result = (await api("POST", "/api/update/apply", { defer: applyDialogDefer.value })) as { error?: string; deferred?: boolean } | null;
     if (result?.error) {
       toast(result.error, "error");
       return;
@@ -102,6 +112,9 @@ async function applyUpdate(defer: boolean) {
     await loadUpdateStatus();
   } catch (reason) {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
+  } finally {
+    applyDialogBusy.value = false;
+    applyDialogOpen.value = false;
   }
 }
 
@@ -145,22 +158,38 @@ defineExpose({ reload: loadUpdateStatus });
       <div :style="{ width: `${updateStatus.progress}%` }"></div>
     </div>
     <div class="modal-footer-inline plain update-actions">
-      <button
+      <NxpButton
         class="ghost"
         type="button"
         :disabled="updateStatus?.state === 'checking' || updateStatus?.state === 'downloading' || updateStatus?.state === 'ready'"
         @click="checkUpdate"
       >
-        {{ t("common.check_for_updates") }}</button
-      ><button v-if="updateStatus?.state === 'downloading'" class="ghost" type="button" @click="cancelUpdate">
-        {{ t("common.cancel_download") }}</button
-      ><button v-else-if="updateStatus?.state === 'idle' && updateStatus?.available" class="ghost" type="button" @click="downloadUpdate">
-        {{ t("common.download_update") }}</button
-      ><button v-if="updateStatus?.state === 'ready'" class="primary" type="button" @click="applyUpdate(false)">
-        {{ t("common.update_now") }}</button
-      ><button v-if="updateStatus?.state === 'ready'" class="ghost" type="button" @click="applyUpdate(true)">
+        {{ t("common.check_for_updates") }}
+      </NxpButton>
+      <NxpButton v-if="updateStatus?.state === 'downloading'" class="ghost" type="button" @click="cancelUpdate">
+        {{ t("common.cancel_download") }}
+      </NxpButton>
+      <NxpButton v-else-if="updateStatus?.state === 'idle' && updateStatus?.available" class="ghost" type="button" @click="downloadUpdate">
+        {{ t("common.download_update") }}
+      </NxpButton>
+      <NxpButton v-if="updateStatus?.state === 'ready'" class="primary" type="button" @click="requestApplyUpdate(false)">
+        {{ t("common.update_now") }}
+      </NxpButton>
+      <NxpButton v-if="updateStatus?.state === 'ready'" class="ghost" type="button" @click="requestApplyUpdate(true)">
         {{ t("common.update_on_next_startup") }}
-      </button>
+      </NxpButton>
     </div>
   </div>
+  <NxpConfirmDialog
+    :open="applyDialogOpen"
+    :title="t('settings.update_settings')"
+    :message="applyDialogMessage"
+    :confirm-label="applyDialogDefer ? t('common.update_on_next_startup') : t('common.update_now')"
+    :cancel-label="t('common.cancel')"
+    confirm-tone="primary"
+    :busy="applyDialogBusy"
+    @confirm="confirmApplyUpdate"
+    @cancel="closeApplyDialog"
+    @close="closeApplyDialog"
+  />
 </template>

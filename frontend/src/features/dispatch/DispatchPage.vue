@@ -10,6 +10,7 @@ import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
+import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import RunPlanModal from "./components/RunPlanModal.vue";
@@ -35,6 +36,8 @@ const loading = ref(true);
 const error = ref("");
 const busy = ref(false);
 const plan = ref<PlanResult | null>(null);
+const cancelConfirmRunId = ref<string | null>(null);
+const cancelConfirmBusy = ref(false);
 const root = ref<HTMLElement | null>(null);
 let disposed = false;
 let requestSerial = 0;
@@ -183,14 +186,26 @@ async function explainCurrent() {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
   }
 }
-async function cancelRun(runId: string) {
-  if (!window.confirm(t("dispatch.cancel.confirm"))) return;
+function requestCancelRun(runId: string) {
+  if (cancelConfirmBusy.value) return;
+  cancelConfirmRunId.value = runId;
+}
+function closeCancelConfirm() {
+  if (!cancelConfirmBusy.value) cancelConfirmRunId.value = null;
+}
+async function confirmCancelRun() {
+  const runId = cancelConfirmRunId.value;
+  if (!runId || cancelConfirmBusy.value) return;
+  cancelConfirmBusy.value = true;
   try {
     await api("POST", "/api/cancel", { runId });
     toast(t("dispatch.cancellation_requested"));
     await refreshStatus();
   } catch (reason) {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    cancelConfirmBusy.value = false;
+    cancelConfirmRunId.value = null;
   }
 }
 function explainQueueClass(value?: string) {
@@ -240,7 +255,7 @@ onBeforeUnmount(() => {
         :system-action="status.systemAction || null"
         :busy="busy"
         :execution-preview-layout-enabled="executionPreviewLayoutEnabled"
-        @cancel="cancelRun"
+        @cancel="requestCancelRun"
         @cancelled="refreshStatus"
       />
       <div class="plugin-slot" data-plugin-slot="dispatch.running.badges" data-plugin-anchor="dispatch.running.badges" hidden></div>
@@ -288,5 +303,17 @@ onBeforeUnmount(() => {
       <RunPlanModal :plan="plan" @close="plan = null" />
       <div class="plugin-slot" data-plugin-slot="dispatch.run.sections" data-plugin-anchor="dispatch.run.sections" hidden></div>
     </template>
+    <NxpConfirmDialog
+      :open="cancelConfirmRunId !== null"
+      :title="t('dispatch.cancel_run')"
+      :message="t('dispatch.cancel.confirm')"
+      :confirm-label="t('dispatch.cancel_run')"
+      :cancel-label="t('common.cancel')"
+      confirm-tone="danger"
+      :busy="cancelConfirmBusy"
+      @confirm="confirmCancelRun"
+      @cancel="closeCancelConfirm"
+      @close="closeCancelConfirm"
+    />
   </main>
 </template>

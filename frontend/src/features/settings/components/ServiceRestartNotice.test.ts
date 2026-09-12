@@ -58,40 +58,37 @@ describe("service restart notice", () => {
   });
 
   it("restarts through the platform helper after confirmation", async () => {
-    vi.stubGlobal("confirm", vi.fn(() => true));
     const shell = useShellStore();
     const wrapper = await mountNotice();
     shell.markRestartRequired("plugin.install");
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
+    await wrapper.get(".modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(restartServiceMock).toHaveBeenCalledTimes(1);
     expect(shell.restartRequired).toBe(true);
     expect(shell.restartError).toBe("");
-    vi.unstubAllGlobals();
     wrapper.unmount();
   });
 
   it("keeps the request pending when the user cancels the confirmation", async () => {
-    vi.stubGlobal("confirm", vi.fn(() => false));
     const shell = useShellStore();
     const wrapper = await mountNotice();
     shell.markRestartRequired("plugin.install");
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
+    await wrapper.get(".modal-footer .ghost").trigger("click");
     await flushPromises();
 
     expect(restartServiceMock).not.toHaveBeenCalled();
     expect(shell.restarting).toBe(false);
-    vi.unstubAllGlobals();
     wrapper.unmount();
   });
 
   it("hides the restart action while the restart is in progress", async () => {
-    vi.stubGlobal("confirm", vi.fn(() => true));
     let resolveRestart: (outcome: "ready" | "timeout" | "failed") => void = () => {};
     restartServiceMock.mockImplementation(() => new Promise(resolve => {
       resolveRestart = resolve;
@@ -102,6 +99,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
+    await wrapper.get(".modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(shell.restarting).toBe(true);
@@ -112,11 +110,9 @@ describe("service restart notice", () => {
     await flushPromises();
     expect(shell.restarting).toBe(true);
     wrapper.unmount();
-    vi.unstubAllGlobals();
   });
 
   it("offers the same restart action again after a timeout", async () => {
-    vi.stubGlobal("confirm", vi.fn(() => true));
     restartServiceMock.mockResolvedValue("timeout");
     const shell = useShellStore();
     const wrapper = await mountNotice();
@@ -124,11 +120,11 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
+    await wrapper.get(".modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(shell.restartError).toBe("settings.service.restart_timeout");
     expect(wrapper.get("[data-testid='restart-service']").text()).toBe("settings.restart_service");
-    vi.unstubAllGlobals();
     wrapper.unmount();
   });
 
