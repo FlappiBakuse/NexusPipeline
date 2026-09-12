@@ -234,7 +234,11 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.5` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
 
-公开元素注册表位于 `frontend/src/ui/register.ts` 的 `NEXUS_PUBLIC_ELEMENTS`，插件只应使用该注册表登记的元素。当前包含 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-section-card`、`nxp-collapsible-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-switch-setting`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner`、`nxp-empty-state`、`nxp-icon` 和 `nxp-loading-state`，共 27 个。
+公开元素注册表位于 `frontend/src/ui/register.ts` 的 `NEXUS_PUBLIC_ELEMENTS`，插件只应使用该注册表登记的元素。当前包含 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-section-card`、`nxp-collapsible-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-switch-setting`、`nxp-switch-list`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner`、`nxp-empty-state`、`nxp-icon` 和 `nxp-loading-state`，共 28 个。
+
+元素在 light DOM 下渲染，自身不产生额外布局盒：插件的结构卡片（`nxp-collapsible-card`、`nxp-section-card`）与宿主卡片一样直接参与设置页卡片栅格，展开态因此按同一规则置顶。`nxp-switch-list` 把多个 `nxp-switch-setting` 组成与设置页一致的开关列表。
+
+文本类元素（`nxp-button`、`nxp-badge`）通过 `label` 属性接收文案：属性写法不产生插槽子节点，父级重渲染不会影响元素自身的 DOM 与交互；插槽内容（`<nxp-button>删除</nxp-button>`）继续作为替代写法，元素在父级重新渲染后仍保留自身结构与样式。
 
 - `nxp-section-card`：props 为 `title`、`description` 和 `variant`（`primary` 或 `secondary`，默认 `primary`）；默认插槽为 body，具名插槽为 `header`、`description` 和 `actions`。
 - `nxp-collapsible-card`：props 为 `title`、`description`、`expanded`（布尔，默认 `false`）和 `panel-id`；展开状态由调用方受控，展开变化时 emit `toggle`，事件负载在 `CustomEvent.detail[0]`；`panel-id` 同时用于 `aria-controls` 与 body 的 id；body 为默认插槽，header 右侧为 `actions` 具名插槽。

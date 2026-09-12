@@ -762,12 +762,12 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/app/App.vue` | Vue shell、导航、响应式抽屉、Toast/通知容器与 `RouterView` 页面装配 |
 | `frontend/src/router.ts` | 正式路由表：宿主页面按需加载，`/plugin/:pathMatch(.*)*` 交给插件 route 宿主，未知路径保持空 shell |
 | `frontend/src/features/<domain>/<Domain>Page.vue` | 页面级请求调度、route/page 生命周期与高层数据编排；复杂事务进入同域 `components/`、请求进入 `services/`、纯转换进入 `utils/` |
-| `frontend/src/ui/primitives/` | 类型化 Nexus UI primitives，并注册为插件可消费的 `nxp-*` Custom Elements |
+| `frontend/src/ui/primitives/` | 类型化 Nexus UI primitives，并注册为插件可消费的 `nxp-*` Custom Elements；文本类元素（`nxp-button`、`nxp-badge`）通过 `label` 属性接收文案 |
 | `frontend/src/stores/` | Pinia shell 状态（boot、导航抽屉、令牌提示） |
 | `frontend/src/app/bootstrap.ts` | shell 启动编排：locale、主题、认证、外观、限制、particles 与插件运行时初始化 |
 | `frontend/src/app/TokenPrompt.vue` | 远程访问令牌提示与运行期间 401 重新认证入口 |
 | `frontend/src/app/PluginRouteHost.vue` | 插件 route 的 mount、leave、dispose 生命周期边界 |
-| `frontend/src/app/ServiceRestartNotice.vue` | 全局页面 shell 的重启提示、重启入口、进行中禁用与超时手动重试 |
+| `frontend/src/features/settings/components/ServiceRestartNotice.vue` | 设置页面卡片上方的重启提示、重启入口、进行中禁用与超时手动重试 |
 | `frontend/src/platform/i18n.ts` | 浏览器本地语言偏好、宿主词典、动态页面文案和日期/数字/列表格式化；唯一资源源为 `frontend/public/i18n/` |
 | `frontend/src/platform/api.ts` | 宿主请求封装（bearer 头、`X-Nexus-Locale`、JSON/blob、错误码投影、AbortController 生命周期联动） |
 | `frontend/src/platform/page-state.ts` | 页面 route token、定时器与在途请求的代际管理 |

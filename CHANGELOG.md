@@ -26,9 +26,9 @@
 
 ### 服务重启与外观细节
 
-- 重启状态迁入 shell store（`restartRequired`、`restartReasons`、`restarting`、`restartError`），由 `ServiceRestartNotice` 在全局页面 shell 渲染；插件安装、更新、卸载、启用、禁用与批量更新成功后立即出现重启入口。
-- 重启恢复改为实例身份协议：`/api/status` 暴露进程实例标识 `instanceId` 与本次重启交接标识 `restartHandoffId`，重启接口返回 `handoffId`、旧实例 `instanceId` 与候选端口；请求重启的进程为子进程生成交接标识并随 `restart --handoff` 传入。
-- 前端按配置端口与宿主顺延端口逐个探测 `/api/status`，只接受携带本次交接标识且实例标识不同于旧实例的应答，再跳转到新实例上报的实际监听端口并保留路径与 hash；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转，超时保留交接信息并提供重试。
+- 重启提示回到设置页面卡片上方：`ServiceRestartNotice` 由设置页渲染，插件安装、更新、卸载、启用、禁用与批量更新成功后进入设置页即可重启，其他页面不再固定显示该提示条；重启进行中只显示进度文案，恢复成功后页面自动刷新。
+- 重启恢复按实例身份确认：`/api/status` 暴露进程实例标识 `instanceId` 与本次重启交接标识 `restartHandoffId`，重启接口返回 `handoffId`、旧实例 `instanceId` 与候选端口；请求重启的进程为子进程生成交接标识并随 `restart --handoff` 传入。
+- 前端按配置端口与宿主顺延端口探测服务状态：探测地址只使用协议与主机（不携带页面路径与 hash 路由），只接受携带本次交接标识且实例标识不同于旧实例的应答；目标地址与当前页面一致时执行刷新，端口变化时跳转到新实例上报的实际监听端口并保留路径与 hash。无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。
 - 只读的 `GET /api/status` 放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
 - `host.appearance.setBackground` 在替换背景时回收上一个 Blob Object URL，`clearBackground` 回收当前地址；插件多次轮换壁纸不再累积失效的 Object URL。
 - 环境粒子增强为 36/56/80 三档密度、点透明度 0.2、连线透明度 0.08、连接阈值 104px，连线改为双层索引循环；`prefers-reduced-motion`、页面隐藏暂停、resize、DPR 上限与外观变更重绘保持不变。
@@ -37,7 +37,10 @@
 
 - 声明式插件表单控件改为直接实例化宿主公开的 `nxp-*` 元素：`text`/`url`/`secret`/`status` → `nxp-text-input`，`textarea` → `nxp-text-area`，`number` → `nxp-number-input`，`range` → `nxp-range`，`color` → `nxp-color-picker`，`switch` → `nxp-switch`，`select`/`multi-select` → `nxp-select`。
 - 桥接层只保留 schema → 属性、值收集、改动同步与校验错误投影；删除自行拼装的 Select/Number/Color 控件 DOM、宿主级控件事件委托与 `platform/icons`、`platform/format` 直接依赖，公开组件修复会自动作用于声明式插件表单。
-- 新增表驱动的控件验收用例（元素映射、初始值、约束、单选与多选、开关、错误投影与清理）与静态实现边界用例（禁止拼装控件 DOM、平台依赖必须经 host adapter、字段类型必须映射到公开元素）。
+- 新公开 `nxp-switch-list` 开关分组元素，插件用它把多个 `nxp-switch-setting` 组成与设置页一致的开关列表；结构卡片在 light DOM 下不产生额外布局盒，插件卡片的展开置顶与宿主卡片使用同一规则。
+- `nxp-button` 与 `nxp-badge` 新增 `label` 属性：自定义元素消费方用属性传文案，元素不依赖插槽子节点即可渲染，父级重渲染不会影响元素自身的 DOM 与交互；插槽内容继续作为替代写法。
+- 公开元素的插槽文本在父级应用重渲染后保持有效：父级把自定义元素当普通元素写入 `textContent` 时，节点重新作为插槽内容挂载，元素自身的 DOM、样式与交互不再被抹掉。
+- 新增表驱动的控件验收用例（元素映射、初始值、约束、单选与多选、开关、错误投影与清理）、公开元素插槽契约用例与静态实现边界用例（禁止拼装控件 DOM、平台依赖必须经 host adapter、字段类型必须映射到公开元素）。
 
 ### CI 影响域治理
 
