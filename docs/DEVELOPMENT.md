@@ -278,7 +278,8 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 更新引擎可见性自检：
 
 - Release 必须同时具备 zip 与 sha256 资产；缺少任一项时更新清单会跳过该版本；
-- 上传后在本机设置页点击「检查更新」，或调用 `POST /api/update/check`，确认 `available=true` 且版本为刚发布的 tag；
+- 上传后在本机设置页点击「检查更新」，或调用 `POST /api/update/check`，确认更新源识别到刚发布的 tag 与两项资产；
+- 无法以管理员上下文启动宿主时，用 `python tools/update-visibility-check.py` 按同一契约核对默认更新源的发布列表、tag 解析、资产命名、下载主机白名单与资产哈希；
 - 如果检查不到，先核对 `gh release view vX.Y.Z` 的资产列表、资产命名和 zip 根布局。
 
 ### 9.5 Release Notes 格式
