@@ -130,11 +130,11 @@ test("localized values are complete templates at fragment migration boundaries",
   const requiredReferences = {
     "frontend/src/features/dashboard/DashboardPage.vue": ["dashboard.active_tasks.count"],
     "frontend/src/features/dispatch/DispatchPage.vue": [
-      "dispatch.summary.items",
       "dispatch.status_update_failed",
       "dispatch.plan.queue_required",
       "dispatch.plan.target_help",
     ],
+    "frontend/src/features/dispatch/components/RunningExecution.vue": ["dispatch.summary.items"],
     "frontend/src/features/history/components/HistoryDetailModal.vue": ["history.log.lines_summary", "history.log.lines_summary.tail"],
     "frontend/src/features/users/components/GlobalManagementModal.vue": [
       "users.global.general.help",

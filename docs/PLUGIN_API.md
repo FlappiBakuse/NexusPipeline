@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.5 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.6 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -26,11 +26,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.5）
+## managed-code C# 插件（Plugin API v1.6）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.5`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.5` 插件可加载，`2.0` 插件会被拒绝。
+宿主当前 API 版本为 `1.6`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.6` 插件可加载，`2.0` 插件会被拒绝。
 
 ```text
 plugins/GameCheckIn/
@@ -47,12 +47,12 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.5",
+  "apiVersion": "1.6",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
   "frontend": {
-    "apiVersion": "1.4",
+    "apiVersion": "1.5",
     "entry": "web/main.js",
     "styles": ["web/style.css"]
   }
@@ -61,7 +61,7 @@ plugins/GameCheckIn/
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要 v1.5 本地化端口的插件应检查 `context is IPluginHostContextV1_4`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要 v1.5 本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
@@ -137,14 +137,77 @@ managed-code 插件可以在 `plugin.json` 声明：
 
 资源文件是有限大小的扁平 JSON 对象，所有 locale 的 key 集合必须一致；资源路径必须位于插件目录的 `i18n/` 下。声明式 UI、用户列表徽章和历史展示可以用 `PluginLocalizedText(Key, Fallback)` 携带语义引用，宿主按请求语言投影展示值，历史落盘保存引用和回退文本。
 
-### 前端插件运行时（Frontend API 1.4）
+### v1.6 二进制资产存储
+
+`IPluginHostContextV1_6.Assets` 提供按插件命名空间与逻辑 scope 隔离的二进制资产存储。宿主负责路径逃逸防护、原子写入和宿主级绝对上限；资产的业务配额、去重策略与语义由插件自行决定。
+
+```csharp
+ValueTask<PluginAssetInfo> WriteAsync(string scope, string extension, Stream content, CancellationToken cancellationToken = default);
+ValueTask<PluginAssetContent?> OpenAsync(string scope, string assetId, CancellationToken cancellationToken = default);
+ValueTask<bool> DeleteAsync(string scope, string assetId, CancellationToken cancellationToken = default);
+ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationToken cancellationToken = default);
+```
+
+- `PluginAssetInfo(Id, Scope, Extension, SizeBytes, CreatedAt)` 描述单个资产；`ListAsync` 按创建时间与 Id 稳定排序。
+- `PluginAssetContent` 暴露 `Info` 与 `Content` 流；调用方负责释放该流。
+- 资产 Id 是内容 SHA256 的小写十六进制（64 字符）。相同内容重复写入返回同一 Id，写入是内容寻址且幂等的。
+- `extension` 接受 1–12 位 ASCII 字母数字，可带前导点；落盘统一转为小写。扩展名仅用于标识资产格式，宿主不校验实际内容。
+- 资产落盘位置为 `config/plugins/{插件名}/assets/{scope}/{sha256}.{extension}`；scope 规则与 `IPluginScopedDataStore` 一致（最多 8 段、每段不超过 128 字符且仅允许 `A-Za-z0-9._-`、总长不超过 512），路径逃逸请求被拒绝。
+- 宿主级绝对上限：单资产 16 MiB、单 scope 512 个资产、单 scope 512 MiB。写入使用同目录临时文件加原子替换，失败时不留 `.part` 残留。
+- 插件应自行实现业务配额、清理策略与资产语义；卸载插件不自动删除其资产。
+
+### v1.6 二进制 Web API 传输
+
+插件 Web API 的请求与响应在 JSON 之外支持二进制传输。
+
+- `PluginWebApiRequest` 增加 `ContentType`、`ContentLength` 与 `OpenBodyStream`。`ContentType` 为小写且去掉参数；没有请求体时 `OpenBodyStream` 为 `null`，有请求体时宿主在本次调用期间持有该流。JSON 请求体仍投影为 `JsonBody`。
+- `PluginWebApiResponse.Binary(Stream content, string contentType, int statusCode = 200, long contentLength = -1)` 构造二进制响应；宿主读取后负责释放流。
+- `PluginWebApiContentTypes.AllowedBinary` 允许 `image/png`、`image/jpeg`、`image/webp`、`image/gif`、`image/avif`、`application/octet-stream`。`Normalize` 去掉参数并转小写，`IsAllowedBinary` 判断是否在白名单内；白名单之外的响应类型按插件错误处理。
+- 传输上限：请求体 16 MiB、JSON 响应 2 MiB、二进制响应 16 MiB。二进制响应附带 `X-Content-Type-Options: nosniff` 与 `Cache-Control: no-store`。
+- 路由仍位于 `/api/plugin-api/{插件名}/{route}`，按 method 与完整 route 精确匹配；查询参数通过 `Query` 传递。
+
+### 旧外观数据搬迁
+
+宿主启动时执行一次性格式搬迁：读取旧外观配置、`user-assets/appearance/wallpapers/` 目录与旧轮换游标，把资产导入旧配置记录的原提供方插件命名空间（资产 scope 为 `wallpapers`），再把搬迁载荷原子写入该插件的 `legacy-appearance-import` 作用域数据。成功后写入标记 `.nxp/state/appearance-migration.json`；任一步失败都不写标记，下一次启动按同一入口重试。旧文件由宿主保留，插件是这些旧数据的唯一消费者。
+
+搬迁载荷结构如下，其中 `id`、`order`、`selectedId` 与 `currentId` 已经是新的资产 Id：
+
+```json
+{
+  "schemaVersion": 1,
+  "migratedAt": "2026-09-12T00:00:00.0000000+00:00",
+  "settings": {
+    "selectedId": "<资产 Id>",
+    "order": ["<资产 Id>"],
+    "rotation": { "mode": "off|timer|startup", "intervalMinutes": 30, "epochUnixMs": 0 },
+    "effects": { "blurPx": 0, "dimPercent": 20, "surfaceTransparencyPercent": 0, "applyTransparencyToSecondarySurfaces": true },
+    "providerEnabled": false,
+    "currentId": "<资产 Id，可选>"
+  },
+  "assets": [
+    {
+      "id": "<资产 Id>",
+      "extension": "png",
+      "originalName": "wallpaper.png",
+      "mimeType": "image/png",
+      "sizeBytes": 102400,
+      "createdAt": "2026-09-12T00:00:00.0000000+00:00",
+      "palette": { "--accent": "#62a0ff" }
+    }
+  ]
+}
+```
+
+搬迁载荷中的 `currentId` 仅在旧轮换游标存在时出现，代表旧实现记录的当前壁纸，是否沿用由插件决定。插件应在初始化时消费该作用域记录，导入完成后删除该记录。
+
+### 前端插件运行时（Frontend API 1.5）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.4",
+  "apiVersion": "1.5",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -153,26 +216,34 @@ managed-code 插件可以在 `plugin.json` 声明：
 入口 ES module 必须导出 `activate(host)`。宿主通过 `GET /api/plugin-runtime/frontend` 发布已启用、API 兼容的安全描述，动态加载入口并按需注入样式。插件 host 提供：
 
 - `host.plugin`：当前插件的 manifest 描述（含 `name`、`displayName`、`version`、`frontendApiVersion`），冻结只读；
-- `host.api.get/post/put/patch/delete(route, body, signal)`：访问插件自己的 `/api/plugin-api/` 命名空间；
+- `host.api.get/post/put/patch/delete(route, body, signal)`：以 JSON 语义访问插件自己的 `/api/plugin-api/` 命名空间；
+- `host.api.blob(route, { query?, signal? })`：以 `GET` 读取二进制响应，返回 `Blob`；查询参数经 `query` 传入；
+- `host.api.upload(route, body, { method?, contentType?, query?, signal? })`：发送二进制请求体并读取 JSON 响应；`method` 缺省 `POST`，`contentType` 缺省取 `body.type`，再回退到 `application/octet-stream`；
 - `host.routes.register(route, handler)`：注册 `#/plugin/<name>/<route>` 页面路由；
 - `host.nav.register({ id, title, route, icon, order })`：向 `shell.nav` 增加导航项；
 - `host.slots.register(slot, renderer)`：接入稳定 UI slot。renderer 接收 `{ element, context }`，在自己的 surface 中挂载内容并返回清理函数；
 - `host.ui.query/save/action(...)`：使用声明式 UI 贡献接口；`host.ui.toast(message, tone)` 显示宿主提示；
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
-- `host.appearance`：注册主题、设置 CSS token、应用主题和访问外观服务。
-- `host.appearance.wallpaperStore`：按当前插件身份读取、上传、删除服务端壁纸，保存轮换与效果设置，保存自动配色并订阅跨浏览器变化。
+- `host.appearance`：通用外观表面，提供 `registerTheme(name, definition)`、`applyTheme(name)`、`setTokens(tokens)`、`clearTokens()`、`setBackground(surface)` 和 `clearBackground()`。
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。该接口用于运行预览，不等同于判断脚本的运行期通知截图。
 - `host.i18n`：读取插件 manifest 中的本地化资源，提供 `locale`、`defaultLocale`、`t(key, args, fallback)` 和本地化日期/时间/数字格式化；资源仅属于当前插件。
 
-稳定的外部契约包括 Frontend API `1.4` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
+稳定的外部契约包括 Frontend API `1.5` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
 
-前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。v0.15.5 起 Frontend API 采用精确版本匹配：只有 `1.4` 被接受，`1.3`、`1.5` 和其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner` 和 `nxp-empty-state` 等公共 Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
+前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.5` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
+
+公开元素注册表位于 `frontend/src/ui/register.ts` 的 `NEXUS_PUBLIC_ELEMENTS`，插件只应使用该注册表登记的元素。当前包含 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-section-card`、`nxp-collapsible-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-switch-setting`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner`、`nxp-empty-state`、`nxp-icon` 和 `nxp-loading-state`，共 27 个。
+
+- `nxp-section-card`：props 为 `title`、`description` 和 `variant`（`primary` 或 `secondary`，默认 `primary`）；默认插槽为 body，具名插槽为 `header`、`description` 和 `actions`。
+- `nxp-collapsible-card`：props 为 `title`、`description`、`expanded`（布尔，默认 `false`）和 `panel-id`；展开状态由调用方受控，展开变化时 emit `toggle`，事件负载在 `CustomEvent.detail[0]`；`panel-id` 同时用于 `aria-controls` 与 body 的 id；body 为默认插槽，header 右侧为 `actions` 具名插槽。
+
+设置页的折叠卡片由宿主统一协调，插件可以接入同一协议：插件展开自己的卡片时向 window 派发 `nxp-settings-panel-toggle`（`detail` 为 `{ panelId }`，收起时 `panelId` 为 `null`），并监听 `nxp-settings-panel-state`（`detail` 为 `{ panelId }`）以收起其它卡片。字段帮助文案使用宿主工具提示约定：在控件容器上设置 `data-help="说明文字"`。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
-外观 API 使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`wallpaperStore` 的壁纸文件由宿主保存到 `user-assets/appearance/wallpapers/`，配置保存到 `config/appearance.json`，轮换游标保存到 `.nxp/state/appearance-runtime.json`。单张壁纸上限 8192 KB，最多 32 张且总容量上限 256 MiB；允许 JPEG、PNG、WebP，上传时校验 MIME、文件头和 SHA256。浏览器只缓存当前显示 Blob，服务端配置由宿主统一同步。
+外观表面使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`setTokens` 的 token 名必须匹配 `--[A-Za-z0-9_-]{1,96}`，值不超过 4096 字符且不含控制字符；token 应用在 `body` 上，因此优先于主题 token 并跨主题切换保持有效，直到 `clearTokens()` 或替换新集合。`setBackground(surface)` 接受 `url`（仅 `http`、`https`、`blob` 和 `data` 协议，其余拒绝）、`blurPx`（0–40）、`dimPercent`（0–80）、`surfaceTransparencyPercent`（0–50）与 `secondarySurfaceTransparency`（布尔，默认 `true`）。外观变化继续广播 `nexus:appearance-changed`；`createAppearanceHost()` 不接收插件名参数。
 
-`wallpaperStore` 的 `get()` 返回 `revision`、`provider`、`assets`、`order`、`selectedId`、`currentId`、`rotation`、`effects` 和 `nextSwitchAt`。轮换模式为 `off`、`timer`、`startup`；`timer` 按间隔轮换，`startup` 在每次 Web 初始化时推进一次游标。自定义壁纸启用后仍保留宿主内置主题切换；插件应使用 `derivePalette(blob)` 生成完整实色 CSS token，并通过 `savePalette` 持久化。
+壁纸配置、配额、文件校验、去重、轮换、配色与持久化属于插件业务，由插件通过自己的资产 scope、插件 Web API 与前端模块实现；宿主只提供通用资产存储、二进制 Web API 与通用外观表面。旧宿主壁纸数据的搬迁见上文「旧外观数据搬迁」。
 
 `capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 

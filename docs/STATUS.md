@@ -7,7 +7,7 @@
 ## 当前未完成事项
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- 前端架构现状以 [DESIGN.md](DESIGN.md) 第 10.7 节和 [frontend-migration-coverage.md](frontend-migration-coverage.md) 为准；插件契约调整以 [PLUGIN_API.md](PLUGIN_API.md) 为准。
+- 前端架构现状以 [DESIGN.md](DESIGN.md) 第 10.7 节为准；插件契约调整以 [PLUGIN_API.md](PLUGIN_API.md) 为准。
 
 ## 后续功能：插件生态扩展
 

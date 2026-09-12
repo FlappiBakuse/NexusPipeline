@@ -47,7 +47,7 @@ UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳�
 
 - Web Logic 只能导入生产 ES module 的纯函数；禁止读取生产源文本、按函数名切片、正则解析函数边界或把实现字符串当作行为证据。
 - `frontend/` 的 `npm run typecheck`、`npm run test` 和 `npm run build` 验证 Vue/TypeScript 组件、公共 `nxp-*` 元素和静态构建产物。
-- Frontend API 1.4 的宿主外部契约由 `frontend/src/plugin-bridge/contract.test.ts` 覆盖：精确版本匹配、`host.*` 能力面、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
+- Frontend API 1.5 的宿主外部契约由 `frontend/src/plugin-bridge/contract.test.ts` 覆盖：精确版本匹配、`host.*` 能力面（含二进制 `api.blob` / `api.upload`）、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
 - 宿主路由表结构由 `frontend/src/router.test.ts` 覆盖：宿主页面路由、插件 catch-all 路由、空 fallback 与按需加载方式。
 - 页面 route token、定时器与 `AbortController` 生命周期由 `frontend/src/platform/page-state.test.ts` 覆盖。
 - 插件 route 的真实装配与生命周期由 `frontend/src/router.integration.test.ts` 覆盖：经真实 `vue-router` 实例、`router.push()` 与 `RouterView` 驱动 `/plugin/:pathMatch(.*)*`，断言 `PluginRouteHost` 挂载、`resolvePluginRoute` 收到的 route segment、route handler 的 token 与 segments、`onPageEnter`/`onPageUpdated`、插件 route → 宿主 route 与插件 route → 插件 route 的 leave/dispose 次数、无效 route 回退 Dashboard，以及 query 变化时的页面代际语义。该文件只替换 `@bridge/index` facade 与 `plugin-bridge/host-adapter` 两个宿主边界，路由表、`RouterView`、`PluginRouteHost`、页面状态与启动编排使用生产实现。
@@ -96,6 +96,14 @@ node tests\run.mjs admin system
 node tests\run.mjs admin all
 ```
 
+System Smoke 支持按影响域分组运行，便于 CI 与本地只跑受影响的 suite：
+
+```text
+node tests\run.mjs codex system [runtime|execution|emulator|update] [--realtime] [--dry]
+```
+
+可以列出多个分组，也可以用 `--group <名称>` 重复指定；省略分组等于全部 suite。未知分组会打印可用分组并以 exit code 2 退出。`--dry` 只列出将要执行的 suite，不构建也不启动运行时。
+
 视觉契约需要在明确确认基线变化后刷新：
 
 ```powershell
@@ -111,13 +119,19 @@ Remove-Item Env:NEXUS_UPDATE_SNAPSHOTS
 1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、Visual Contract 和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`。
 3. 发布前由 CI 在管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`。
-4. 两仓库的宿主—插件契约发生变化时，同时执行 `NexusPipeline-Plugins/tools/Test-Repository.ps1` 和 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`，并核对两仓库文档、manifest 和测试。
-5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`。插件仓库 CI 按 `host.lock.json` 锁定的宿主 commit 验证该脚本，宿主 CI 以独立 step 用当前 `main` 验证同一脚本，两侧共同覆盖官方插件与宿主前端契约的双向兼容。
+4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。
+5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`。该脚本使用 mock host 运行插件入口，不读取宿主检出；插件仓库 CI 的 plugin-frontend Gate 不检出宿主，元素白名单在无宿主检出时使用脚本内维护的清单。宿主 CI 的插件契约 Gate 检出官方插件仓库并在宿主工作区内运行同一脚本，元素白名单来自同级宿主检出的 `NEXUS_PUBLIC_ELEMENTS`。managed-code 构建与打包使用 `host.lock.json` 锁定的宿主 commit。
+
+   脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件、渲染必须挂载 `nxp-collapsible-card` 与既有必需控件、卸载后不得残留定时器与 window 监听。
 
 构建、测试和发布命令保持实时输出；失败时保留失败项、原因摘要和必要的 runtime 证据。长任务不使用无反馈的超长等待。
 
 ## CI 与清理
 
 CI 不创建临时测试账户、不写入测试账户密码、不使用令牌降级启动器，也不把日志、配置、密钥或运行产物加入版本库。Playwright 失败结果保留在 `tests/e2e/test-results/` 供同一 step 上传，测试结束后按项目 AGENTS.md 的精确清单清理。
+
+`.github/workflows/ci.yml` 按影响域拆成六个 Gate：前端 Unit（ubuntu：`npm ci`、typecheck、Vitest、构建）、宿主 Core（windows：编译加 `node tests\run.mjs unit`）、文档与 i18n（ubuntu：`node tests\run.mjs docs`）、插件契约（windows：Plugin API 编译、`unit`、plugin-bridge 契约用例，并检出官方插件仓库运行 `node tools\Test-FrontendPlugins.mjs`）、管理员 UI Smoke（windows：`node tests\run.mjs admin ui`）、System Runtime 四域（windows：`node tests\run.mjs admin system runtime|execution|emulator|update`）。
+
+影响域路径清单维护在 `tools/ci-domains.mjs`，判定脚本 `tools/ci-changes.mjs` 输出六个域布尔值。改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。每周 `schedule`（`17 3 * * 1`）与手动 `workflow_dispatch` 运行 `node tests\run.mjs admin all` 全量回归。
 
 `tests/stress/diagnostics/flake-monitor.mjs` 仅在专项诊断需要时运行；新的 regression 直接进入当前 L1–L5 层级并补充对应文档事实。

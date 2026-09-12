@@ -2,6 +2,45 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
 
+## v0.15.9（Pre-release）
+
+### 前端公共组件收口
+
+- 新增结构组件 `NxpPageHeader`、`NxpSectionCard`、`NxpCollapsibleCard`、`NxpTabs`、`NxpDialogPopover`；`nxp-section-card` 与 `nxp-collapsible-card` 作为公开 Native Custom Elements 注册，插件可直接消费。
+- Settings、Plugins、Dispatch、History 页面把重复的卡片、标签页、筛选浮层、运行计划、列表与详情结构下沉到同域组件：Plugins 24.4KB→11.9KB、Dispatch 22.5KB→11.2KB、History 19.8KB→9.6KB、Settings 31.6KB→15.2KB。
+- 所有带取消语义的二级弹窗改由 `NxpModal` 渲染右上角关闭按钮，关闭与取消调用同一 handler；删除 feature 内重复的 header 与 `modal-close` markup，并移除会让锁定弹窗关闭按钮不可见的宿主样式规则。
+
+### 插件契约与外观边界
+
+- Plugin API 升级到 1.6：新增通用 `IPluginAssetStore`（插件命名空间隔离、内容寻址 Id、写入/读取/删除/枚举、路径逃逸防护、原子写入与宿主级绝对上限）与二进制 Web API 传输（原始请求体流、受限 Content-Type 的二进制响应、Content-Length 与取消）。
+- Frontend API 升级到 1.5：`host.appearance` 收敛为通用外观表面（`setBackground`/`clearBackground`/`setTokens`/`clearTokens`/`registerTheme`/`applyTheme`），删除宿主 `wallpaperStore` 与 `derivePalette`；`host.api` 增加二进制 `blob` 与 `upload`。
+- 宿主删除服务端壁纸实现：`AppearanceService`、`/api/appearance`、`/api/appearance-assets`、`/api/appearance-upload` 与相关 DTO 全部移除，环境仅保留 light/dark/system 主题、通用 token 校验、注册主题、通用背景表面与外观变更事件。
+- CustomWallpaper 回归真正的插件实现：壁纸配置、单文件/总量/数量配额、文件头校验、SHA256 去重、排序、当前壁纸、按时间与启动轮换、配色推导、插件自有 Web API 与状态 revision 均由插件持有。
+- 宿主提供一次性旧外观数据搬迁：把 `config/appearance.json`、`user-assets/appearance/wallpapers/` 与外观轮换游标写入原提供方插件的资产命名空间与作用域载荷，幂等、可重试、不删除旧文件，成功标记只在载荷落盘后写入；插件初始化时导入并消费该载荷。
+- 官方 LiveScreenshot 与 CustomWallpaper 前端改用公开 `nxp-*` 元素、插件自有 class 命名空间与 `--nx-*` design token，不再引用宿主结构 class，也不再复制 Nexus UI 组件。
+
+### 宿主插件知识清理
+
+- 删除脚本视图中的官方专项插件展示名硬编码；插件展示名只取自当前插件元数据，插件缺失时回退到记录的 `pluginType` 原始 ID。
+- 插件商店单插件安装、更新、卸载响应统一返回 `restartRequired`，与启用、禁用和批量更新保持一致。
+
+### 服务重启与外观细节
+
+- 重启状态迁入 shell store（`restartRequired`、`restartReasons`、`restarting`、`restartError`），由 `ServiceRestartNotice` 在全局页面 shell 渲染；插件安装、更新、卸载、启用、禁用与批量更新成功后立即出现重启入口。
+- 重启流程改为平台 helper：请求重启后读取新端口、按协议/主机/新端口/当前路径与 hash 构造地址、有限次数退避探测服务恢复（连续两次成功）、再顶层跳转；超时显示“服务仍在启动”与手动重试，并阻止重复点击。
+- 环境粒子增强为 36/56/80 三档密度、点透明度 0.2、连线透明度 0.08、连接阈值 104px，连线改为双层索引循环；`prefers-reduced-motion`、页面隐藏暂停、resize、DPR 上限与外观变更重绘保持不变。
+
+### CI 影响域治理
+
+- 宿主 CI 拆分为影响域 Gate（前端 Unit、宿主 Core、文档/i18n、插件契约、管理员 UI Smoke、System Runtime 四域），普通前端或文档改动不再触发 Windows System Smoke；每周定时与手动 `workflow_dispatch` 保留 `admin all` 全量回归，判定失败时按全量门禁执行。
+- `tests/run.mjs` 增加 `system` 分组入口（`runtime`、`execution`、`emulator`、`update`）与 `--dry` 列表模式，CI 不再复制 System Smoke 运行逻辑。
+- 插件仓库 CI 拆分为 plugin-source、plugin-frontend、plugin-managed、plugin-package 四个 Gate，发布与每周审计工作流保持完整校验。
+
+### 双仓插件门禁
+
+- `Test-FrontendPlugins.mjs` 强化为 Frontend API 1.5 conformance：精确版本校验、宿主私有 class 拒绝、公开 `nxp-*` 元素白名单（宿主检出可用时直接读取 `NEXUS_PUBLIC_ELEMENTS`）、禁止复制 Nexus UI 组件、折叠卡片挂载断言，以及卸载后定时器与 window 监听不残留。
+- 宿主 `NxpModal` 锁定语义、公开元素注册与新公共组件契约均有对应组件测试；新增插件资产存储、二进制传输、旧数据搬迁与插件业务用例。
+
 ## v0.15.8（Pre-release）
 
 ### 插件桥接与外部契约
@@ -45,7 +84,7 @@
 
 ### 迁移对照
 
-- 新增 [docs/frontend-migration-coverage.md](docs/frontend-migration-coverage.md) 作为全面迁移的发布硬门禁。
+- 新增 docs/frontend-migration-coverage.md 作为全面迁移的发布硬门禁。
 - 删除已经确认不可达的旧 Web 入口、`wwwroot/views/**`、`wwwroot/i18n/**` 与无消费者 `wwwroot/core/*` 模块；`wwwroot/package.json` 与 `wwwroot/style.css` 按计划保留。
 - 宿主语言资源以 `frontend/public/i18n/` 为唯一源并移除失去消费者的资源键；文档一致性检查改为按当前 Vue 组件调用点与插件桥接源码校验。
 

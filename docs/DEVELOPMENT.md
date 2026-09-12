@@ -76,6 +76,17 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](TESTING.md)。统一入口为 `node tests/run.mjs codex <suite>` 或 `node tests/run.mjs admin <suite>`；每次改动按照修改范围执行对应模式；涉及进程、端口、解释器、模拟器、插件或更新事务时，先运行 Codex System Smoke，再由 GitHub Administrator Gate 验证生产 release。
 
+System Smoke 可按影响域只跑受影响的 suite；省略分组等于全部 suite，`--dry` 只列出将要执行的 suite：
+
+```text
+node tests\run.mjs codex system runtime
+node tests\run.mjs codex system execution emulator
+node tests\run.mjs codex system --group update --realtime
+node tests\run.mjs codex system --dry
+```
+
+CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/ci-domains.mjs`，判定入口为 `tools/ci-changes.mjs`；改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。每周计划与手动触发执行全量回归。
+
 ## 5. 调试技巧
 
 ### 5.1 日志
@@ -128,7 +139,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 | `logs/` | 管理器日志 |
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 | `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |
-| `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的内部运行状态 |
+| `.nxp/state/` | `scheduler-state.json`、旧外观数据搬迁标记 `appearance-migration.json` 等需要跨重启保留的内部运行状态 |
 | `.nxp/state/plugins/` | 插件仓库 catalog 缓存、商店归属、待重启事务以及 staging/backup 操作现场 |
 
 `.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录；它们与 `.nxp/` 当前运行状态目录职责分离。

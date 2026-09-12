@@ -16,7 +16,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 - 调度队列：按顺序运行多个脚本，支持按星期/时间触发、重试、资源冲突检查和完成后系统操作。
 - 历史与通知：保存状态、每次尝试的日志和运行截图；支持 Webhook、SMTP、飞书、钉钉、企业微信、Slack、Discord 等通知目标。
 - 专项插件：官方 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 提供 BetterGI、March7th Assistant、ZenlessZoneZeroOneDragon、MaaEnd 等适配。
-- 模拟器支持：可使用通用 ADB，或由专项插件提供 MuMuManager 等模拟器能力。
+- 模拟器支持：宿主内置 Generic ADB 与 MuMuManager 两种驱动；专项插件通过 `emulator` capability 声明支持模拟器实例，宿主负责帧缓冲采集、命令执行与实例清理。
 - 控制面：网页、`manage` 菜单和正式 CLI 共享本机服务；可选启用 loopback MCP Server。
 - 诊断与可验证性：提供系统诊断、脱敏支持包和运行计划 dry-run，便于确认环境、恢复现场与准入原因。
 - 内建更新：定期检查、下载和校验 GitHub 发布包，支持立即应用或下次启动应用；可选在宿主闲时自动应用并重启。
