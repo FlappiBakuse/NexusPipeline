@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { t } from "../../platform/i18n";
+import NxpSwitch from "../primitives/NxpSwitch.vue";
 const props = withDefaults(
   defineProps<{
+    id?: string;
     modelValue?: boolean;
     label: string;
     description?: string;
@@ -9,7 +10,7 @@ const props = withDefaults(
     disabled?: boolean;
     ariaLabel?: string;
   }>(),
-  { modelValue: false, description: "", help: "", disabled: false, ariaLabel: "" },
+  { id: "", modelValue: false, description: "", help: "", disabled: false, ariaLabel: "" },
 );
 const emit = defineEmits<{
   "update:modelValue": [value: boolean];
@@ -28,18 +29,12 @@ function update(value: boolean) {
       <strong>{{ props.label }}</strong>
       <span v-if="props.description" class="muted">{{ props.description }}</span>
     </div>
-    <button
-      class="mode-toggle switch-control nxp-switch"
-      type="button"
+    <NxpSwitch
+      :id="props.id || undefined"
+      :model-value="props.modelValue"
       :disabled="props.disabled"
-      :aria-disabled="props.disabled"
-      :aria-pressed="props.modelValue"
       :aria-label="props.ariaLabel || props.label"
-      :data-state="props.modelValue ? 'on' : 'off'"
-      @click="update(!props.modelValue)"
-    >
-      <span class="switch-track" aria-hidden="true"><span class="switch-thumb" /></span>
-      <span class="sr-only">{{ props.modelValue ? t("common.enabled") : t("common.disabled") }}</span>
-    </button>
+      @update:model-value="update"
+    />
   </div>
 </template>

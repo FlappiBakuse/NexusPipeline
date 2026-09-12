@@ -7,6 +7,7 @@ import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
 import { useShellStore } from "../../stores/shell";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpTabs from "../../ui/composites/NxpTabs.vue";
 import FilterPopover from "./components/FilterPopover.vue";
@@ -239,14 +240,14 @@ onBeforeUnmount(() => {
         <div class="plugin-search-toolbar">
           <label class="plugin-search">
             <span class="sr-only">{{ t("plugins.search.placeholder") }}</span>
-            <input
+            <NxpTextInput
               v-model="currentView.query"
               type="search"
-              :placeholder="t('plugins.search.placeholder')"
               :aria-label="t('plugins.search.placeholder')"
-              data-testid="plugin-search"
+              :placeholder="t('plugins.search.placeholder')"
               autocomplete="off"
-            >
+              data-testid="plugin-search"
+            />
           </label>
           <div class="plugin-filter-wrap">
             <button

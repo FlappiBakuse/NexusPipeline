@@ -3,12 +3,15 @@ import { computed, ref } from "vue";
 import { api, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../../ui/primitives/NxpSwitch.vue";
 import NxpCollapseTransition from "../../../ui/composites/NxpCollapseTransition.vue";
+import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
+import NxpTextArea from "../../../ui/primitives/NxpTextArea.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import type { Settings } from "../utils/settingsTypes";
 
 /** 通知 section：Webhook/SMTP 表单、密钥草稿、通道开关与测试发送；保存事务由页面统一调度。 */
@@ -128,32 +131,20 @@ const secureOptions = computed<NxpOption[]>(() =>
             class="panel-body"
           >
           <div class="settings-list">
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("settings.enable_webhook") }}</strong
-                ><span class="muted">{{
-                  t("settings.notification.webhook_status")
-                }}</span>
-              </div>
-              <NxpSwitch
-                v-model="settings.webhookEnabled"
-                :aria-label="t('settings.enable_webhook')"
-                @change="save"
-              />
-            </div>
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("settings.send_screenshots") }}</strong
-                ><span class="muted">{{
-                  t("settings.notification.screenshot_scope")
-                }}</span>
-              </div>
-              <NxpSwitch
-                v-model="settings.webhookScreenshotEnabled"
-                :aria-label="t('settings.send_screenshots')"
-                @change="save"
-              />
-            </div>
+            <NxpSwitchSetting
+              :label="t('settings.enable_webhook')"
+              :description="t('settings.notification.webhook_status')"
+              v-model="settings.webhookEnabled"
+              :aria-label="t('settings.enable_webhook')"
+              @change="save"
+            />
+            <NxpSwitchSetting
+              :label="t('settings.send_screenshots')"
+              :description="t('settings.notification.screenshot_scope')"
+              v-model="settings.webhookScreenshotEnabled"
+              :aria-label="t('settings.send_screenshots')"
+              @change="save"
+            />
           </div>
           <div class="form-grid">
             <div class="field">
@@ -186,10 +177,11 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-whurl">{{
                 t("settings.webhook_address")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-whurl"
                 v-model="secretDraft.webhookUrl"
                 type="url"
+                :aria-label="t('settings.webhook_address')"
                 :placeholder="
                   settings.webhookUrl
                     ? t('common.leave_blank_to_keep')
@@ -202,10 +194,11 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-whsec">{{
                 t("settings.webhook_signing_secret")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-whsec"
                 v-model="secretDraft.webhookSecret"
                 type="password"
+                :aria-label="t('settings.webhook_signing_secret')"
                 @blur="save"
               />
             </div>
@@ -214,14 +207,15 @@ const secureOptions = computed<NxpOption[]>(() =>
             <div class="form-grid">
               <div class="field" :data-help="t('settings.notification.image_credentials')">
                 <label class="field-label" for="st-feishu-appid">{{ t("settings.feishu_app_id") }}</label>
-                <input id="st-feishu-appid" v-model="settings.feishuAppId" @blur="save" />
+                <NxpTextInput id="st-feishu-appid" v-model="settings.feishuAppId" :aria-label="t('settings.feishu_app_id')" @blur="save" />
               </div>
               <div class="field" :data-help="t('settings.notification.app_secret_keep')">
                 <label class="field-label" for="st-feishu-secret">{{ t("settings.feishu_app_secret", {}, "Feishu App Secret") }}</label>
-                <input
+                <NxpTextInput
                   id="st-feishu-secret"
                   v-model="secretDraft.feishuAppSecret"
                   type="password"
+                  :aria-label="t('settings.feishu_app_secret', {}, 'Feishu App Secret')"
                   :placeholder="settings.feishuAppSecret ? t('common.leave_blank_to_keep') : undefined"
                   autocomplete="new-password"
                   @blur="save"
@@ -233,14 +227,15 @@ const secureOptions = computed<NxpOption[]>(() =>
             <div class="form-grid">
               <div class="field" :data-help="t('settings.notification.bot_member_help')">
                 <label class="field-label" for="st-slack-channel">{{ t("settings.slack_channel_id") }}</label>
-                <input id="st-slack-channel" v-model="settings.slackChannelId" @blur="save" />
+                <NxpTextInput id="st-slack-channel" v-model="settings.slackChannelId" :aria-label="t('settings.slack_channel_id')" @blur="save" />
               </div>
               <div class="field" :data-help="t('settings.notification.bot_token_keep')">
                 <label class="field-label" for="st-slack-token">{{ t("settings.slack_bot_token") }}</label>
-                <input
+                <NxpTextInput
                   id="st-slack-token"
                   v-model="secretDraft.slackBotToken"
                   type="password"
+                  :aria-label="t('settings.slack_bot_token')"
                   :placeholder="settings.slackBotToken ? t('common.leave_blank_to_keep') : 'xoxb-…'"
                   autocomplete="new-password"
                   @blur="save"
@@ -252,24 +247,25 @@ const secureOptions = computed<NxpOption[]>(() =>
             <div class="form-grid">
               <div class="field">
                 <label class="field-label" for="st-dingtalk-key">{{ t("settings.dingtalk_app_key") }}</label>
-                <input id="st-dingtalk-key" v-model="settings.dingTalkAppKey" @blur="save" />
+                <NxpTextInput id="st-dingtalk-key" v-model="settings.dingTalkAppKey" :aria-label="t('settings.dingtalk_app_key')" @blur="save" />
               </div>
               <div class="field">
                 <label class="field-label" for="st-dingtalk-robot">{{ t("settings.dingtalk_robot_code") }}</label>
-                <input id="st-dingtalk-robot" v-model="settings.dingTalkRobotCode" @blur="save" />
+                <NxpTextInput id="st-dingtalk-robot" v-model="settings.dingTalkRobotCode" :aria-label="t('settings.dingtalk_robot_code')" @blur="save" />
               </div>
             </div>
             <div class="form-grid">
               <div class="field">
                 <label class="field-label" for="st-dingtalk-conversation">{{ t("settings.dingtalk_open_conversation_id") }}</label>
-                <input id="st-dingtalk-conversation" v-model="settings.dingTalkOpenConversationId" @blur="save" />
+                <NxpTextInput id="st-dingtalk-conversation" v-model="settings.dingTalkOpenConversationId" :aria-label="t('settings.dingtalk_open_conversation_id')" @blur="save" />
               </div>
               <div class="field" :data-help="t('settings.notification.app_secret_keep')">
                 <label class="field-label" for="st-dingtalk-secret">{{ t("settings.dingtalk_app_secret") }}</label>
-                <input
+                <NxpTextInput
                   id="st-dingtalk-secret"
                   v-model="secretDraft.dingTalkAppSecret"
                   type="password"
+                  :aria-label="t('settings.dingtalk_app_secret')"
                   :placeholder="settings.dingTalkAppSecret ? t('common.leave_blank_to_keep') : undefined"
                   autocomplete="new-password"
                   @blur="save"
@@ -281,11 +277,11 @@ const secureOptions = computed<NxpOption[]>(() =>
             <label class="field-label" for="st-whtpl">{{
               t("settings.notification.custom_template")
             }}</label
-            ><textarea
+            ><NxpTextArea
               id="st-whtpl"
               v-model="settings.webhookTemplate"
               @blur="save"
-            ></textarea>
+            />
           </div>
           </div>
         </NxpCollapseTransition>
@@ -321,41 +317,30 @@ const secureOptions = computed<NxpOption[]>(() =>
             class="panel-body"
           >
           <div class="settings-list">
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("settings.enable_smtp") }}</strong
-                ><span class="muted">{{
-                  t("settings.notification.email_status")
-                }}</span>
-              </div>
-              <NxpSwitch
-                v-model="settings.smtpEnabled"
-                :aria-label="t('settings.enable_smtp')"
-                @change="save"
-              />
-            </div>
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("settings.send_screenshots") }}</strong
-                ><span class="muted">{{
-                  t("settings.notification.screenshot_scope")
-                }}</span>
-              </div>
-              <NxpSwitch
-                v-model="settings.smtpScreenshotEnabled"
-                :aria-label="t('settings.send_screenshots')"
-                @change="save"
-              />
-            </div>
+            <NxpSwitchSetting
+              :label="t('settings.enable_smtp')"
+              :description="t('settings.notification.email_status')"
+              v-model="settings.smtpEnabled"
+              :aria-label="t('settings.enable_smtp')"
+              @change="save"
+            />
+            <NxpSwitchSetting
+              :label="t('settings.send_screenshots')"
+              :description="t('settings.notification.screenshot_scope')"
+              v-model="settings.smtpScreenshotEnabled"
+              :aria-label="t('settings.send_screenshots')"
+              @change="save"
+            />
           </div>
           <div class="form-grid three">
             <div class="field">
               <label class="field-label" for="st-host">{{
                 t("settings.smtp_server")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-host"
                 v-model="settings.smtpHost"
+                :aria-label="t('settings.smtp_server')"
                 @blur="save"
               />
             </div>
@@ -388,9 +373,10 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-user">{{
                 t("common.account")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-user"
                 v-model="settings.smtpUser"
+                :aria-label="t('common.account')"
                 @blur="save"
               />
             </div>
@@ -398,10 +384,11 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-pwd">{{
                 t("settings.smtp_password")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-pwd"
                 v-model="secretDraft.smtpPassword"
                 type="password"
+                :aria-label="t('settings.smtp_password')"
                 @blur="save"
               />
             </div>
@@ -411,9 +398,10 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-to">{{
                 t("settings.notification.recipients_help")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-to"
                 v-model="settings.smtpTo"
+                :aria-label="t('settings.notification.recipients_help')"
                 @blur="save"
               />
             </div>
@@ -421,9 +409,10 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-from">{{
                 t("settings.from_address_blank_account")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-from"
                 v-model="settings.smtpFrom"
+                :aria-label="t('settings.from_address_blank_account')"
                 @blur="save"
               />
             </div>
@@ -433,9 +422,10 @@ const secureOptions = computed<NxpOption[]>(() =>
               <label class="field-label" for="st-subject">{{
                 t("settings.subject_prefix")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="st-subject"
                 v-model="settings.smtpSubjectPrefix"
+                :aria-label="t('settings.subject_prefix')"
                 @blur="save"
               />
             </div>
@@ -455,9 +445,9 @@ const secureOptions = computed<NxpOption[]>(() =>
           </div>
         </NxpCollapseTransition>
         <div class="modal-footer-inline plain">
-          <button class="ghost" type="button" @click="testNotifications">
+          <NxpButton class="ghost" type="button" @click="testNotifications">
             {{ t("settings.test_notifications") }}
-          </button>
+          </NxpButton>
         </div>
       </div>
       </div>

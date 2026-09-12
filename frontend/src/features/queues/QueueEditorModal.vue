@@ -5,6 +5,8 @@ import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSelect from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
+import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
+import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
 import { vSortable } from "../../ui/sortable";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
@@ -97,7 +99,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
     <div class="field">
         <label class="field-label" for="qm-name"
           >{{ translate("queues.queue_name") }} <span class="req">*</span></label
-        ><input id="qm-name" v-model="draft.name" type="text" />
+        ><NxpTextInput id="qm-name" v-model="draft.name" :aria-label="translate('queues.queue_name')" />
     </div>
     <div class="form-grid">
         <div class="field">
@@ -123,19 +125,13 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
           />
         </div>
     </div>
-    <div class="switch-row settings-option switch-card">
-        <div class="switch-copy">
-          <strong>{{ translate("queues.queue_notifications") }}</strong
-          ><span class="muted">{{
-            translate("queues.notification.override_help")
-          }}</span>
-        </div>
-        <NxpSwitch
+    <NxpSwitchSetting
           id="qm-notify"
           v-model="draft.notifyEnabled"
+          :label="translate('queues.queue_notifications')"
+          :description="translate('queues.notification.override_help')"
           :aria-label="translate('queues.queue_notifications')"
         />
-    </div>
     <div class="subsection">
         <div class="section-heading">
           <h3>{{ translate("queues.schedules") }}</h3>

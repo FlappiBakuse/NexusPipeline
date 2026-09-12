@@ -2,6 +2,7 @@
 import { computed, nextTick, ref, watch } from "vue";
 import NxpModal from "../ui/primitives/NxpModal.vue";
 import NxpButton from "../ui/primitives/NxpButton.vue";
+import NxpTextInput from "../ui/primitives/NxpTextInput.vue";
 import { authPromptText, reloadPage, verifyToken } from "../platform/auth";
 
 const props = defineProps<{ open: boolean }>();
@@ -10,7 +11,7 @@ const emit = defineEmits<{ close: [] }>();
 const token = ref("");
 const error = ref("");
 const busy = ref(false);
-const input = ref<HTMLInputElement | null>(null);
+const input = ref<InstanceType<typeof NxpTextInput> | null>(null);
 
 const title = computed(() => authPromptText.title());
 const copy = computed(() => authPromptText.copy());
@@ -49,7 +50,7 @@ async function submit() {
     <form id="token-form" class="token-form" @submit.prevent="submit">
       <p class="modal-copy">{{ copy }}</p>
       <label class="field-label" for="token-input">{{ placeholder }}</label>
-      <input
+      <NxpTextInput
         id="token-input"
         ref="input"
         v-model="token"
@@ -59,7 +60,7 @@ async function submit() {
         :aria-label="placeholder"
         :aria-invalid="error ? 'true' : undefined"
         :aria-describedby="error ? 'token-error' : undefined"
-      >
+      />
       <p id="token-error" class="req" role="alert" aria-live="polite">{{ error }}</p>
     </form>
     <template #footer>

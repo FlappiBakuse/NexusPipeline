@@ -6,10 +6,14 @@ import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
 import { toast } from "../../platform/toast";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
+import NxpSwitchGrid from "../../ui/composites/NxpSwitchGrid.vue";
+import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
+import NxpTextArea from "../../ui/primitives/NxpTextArea.vue";
+import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import { browseNativeDialog, createScript, probeScriptRoot, updateScript } from "./services/scriptsApi";
 import { createRootProbe } from "./utils/scriptProbe";
 import { emptyScriptDraft, scriptDraftFrom, scriptPayload, validateScriptDraft } from "./utils/scriptTypes";
@@ -182,7 +186,7 @@ watch(
             <label class="field-label" for="sm-name"
               >{{ t("scripts.script_name") }}
               <span class="req">*</span></label
-            ><input id="sm-name" v-model="draft.name" type="text" />
+            ><NxpTextInput id="sm-name" v-model="draft.name" :aria-label="t('scripts.script_name')" />
           </div>
           <div class="field">
             <label class="field-label" for="sm-root"
@@ -219,10 +223,11 @@ watch(
               <label class="field-label" for="sm-args">{{
                 t("scripts.script_startup_arguments")
               }}</label
-              ><input
+              ><NxpTextInput
                 id="sm-args"
                 v-model="draft.args"
                 type="text"
+                :aria-label="t('scripts.script_startup_arguments')"
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.optional_startup_arguments')"
               />
@@ -265,62 +270,33 @@ watch(
               t("scripts.editor.path_adb_cleanup_help")
             }}</span>
           </div>
-          <div class="toggle-grid switch-grid">
-            <div class="switch-row settings-option switch-card" :data-tooltip="selfManagedPc ? t('scripts.editor.pc_client_disabled') : undefined">
-              <div>
-                <strong>{{ t("scripts.launch_game") }}</strong
-                ><span class="muted">{{
-                  t(
-                    "scripts.editor.game_launch.help",
-                    {},
-                    "Launch the game before running the script",
-                  )
-                }}</span>
-              </div>
-              <NxpSwitch
-                id="sm-launch"
-                :model-value="selfManagedPc ? false : draft.launchGame"
-                :disabled="selfManagedPc"
-                :aria-label="t('scripts.launch_game')"
-                @update:model-value="draft.launchGame = $event"
-              />
-            </div>
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("scripts.force_close") }}</strong
-                ><span class="muted">{{
-                  t(
-                    "scripts.game.cleanup_help",
-                    {},
-                    "Close the game after the run",
-                  )
-                }}</span>
-              </div>
-              <NxpSwitch
-                id="sm-force"
-                v-model="draft.forceCloseGame"
-                :aria-label="t('scripts.force_close')"
-              />
-            </div>
-            <div class="switch-row settings-option switch-card">
-              <div>
-                <strong>{{ t("scripts.editor.config_auto_update") }}</strong
-                ><span class="muted">{{
-                  t(
-                    "scripts.editor.config_sync_help",
-                    {},
-                    "Keep configuration synchronized automatically",
-                  )
-                }}</span>
-              </div>
-              <NxpSwitch
-                id="sm-autoupdate"
-                v-model="draft.autoUpdateConfig"
-                :disabled="Boolean(draft.pluginType)"
-                :aria-label="t('scripts.editor.config_auto_update')"
-              />
-            </div>
-          </div>
+          <NxpSwitchGrid>
+            <NxpSwitchSetting
+              id="sm-launch"
+              :model-value="selfManagedPc ? false : draft.launchGame"
+              :label="t('scripts.launch_game')"
+              :description="t('scripts.editor.game_launch.help', {}, 'Launch the game before running the script')"
+              :help="selfManagedPc ? t('scripts.editor.pc_client_disabled') : undefined"
+              :disabled="selfManagedPc"
+              :aria-label="t('scripts.launch_game')"
+              @update:model-value="draft.launchGame = $event"
+            />
+            <NxpSwitchSetting
+              id="sm-force"
+              v-model="draft.forceCloseGame"
+              :label="t('scripts.force_close')"
+              :description="t('scripts.game.cleanup_help', {}, 'Close the game after the run')"
+              :aria-label="t('scripts.force_close')"
+            />
+            <NxpSwitchSetting
+              id="sm-autoupdate"
+              v-model="draft.autoUpdateConfig"
+              :label="t('scripts.editor.config_auto_update')"
+              :description="t('scripts.editor.config_sync_help', {}, 'Keep configuration synchronized automatically')"
+              :disabled="Boolean(draft.pluginType)"
+              :aria-label="t('scripts.editor.config_auto_update')"
+            />
+          </NxpSwitchGrid>
           <div class="nested-panel">
             <div class="form-grid">
               <div
@@ -340,11 +316,12 @@ watch(
                   :placeholder="t('scripts.editor.game_path.placeholder')"
                   :aria-label="t('scripts.game_path')"
                   @browse="browseDraftPath('gameExe', $event)"
-                /><input
+                /><NxpTextInput
                   v-else
                   id="sm-game-exe"
                   v-model="draft.gameExe"
                   type="text"
+                  :aria-label="t('scripts.emulator_adb_address')"
                   :placeholder="t('scripts.emulator_adb_address')"
                 />
               </div>
@@ -355,10 +332,11 @@ watch(
                 <label class="field-label" for="sm-game-args">{{
                   t("scripts.script_startup_arguments")
                 }}</label
-                ><input
+                ><NxpTextInput
                   id="sm-game-args"
                   v-model="draft.gameArgs"
                   type="text"
+                  :aria-label="t('scripts.script_startup_arguments')"
                   :disabled="selfManagedPc"
                 />
               </div>
@@ -448,11 +426,11 @@ watch(
               <label class="field-label" for="sm-succ-kw">{{
                 t("scripts.success_keywords")
               }}</label
-              ><textarea
+              ><NxpTextArea
                 id="sm-succ-kw"
                 v-model="draft.successKeywords"
                 :placeholder="t('scripts.judge.keyword_syntax')"
-              ></textarea>
+              />
             </div>
             <div
               class="field"
@@ -461,11 +439,11 @@ watch(
               <label class="field-label" for="sm-fail-kw">{{
                 t("scripts.failure_keywords")
               }}</label
-              ><textarea
+              ><NxpTextArea
                 id="sm-fail-kw"
                 v-model="draft.failureKeywords"
                 :placeholder="t('scripts.judge.failure_marker')"
-              ></textarea>
+              />
             </div>
           </div>
           <div v-show="draft.judgeScriptEnabled" id="sm-script-box">
@@ -487,24 +465,25 @@ watch(
               <label class="field-label" for="sm-judge-code"
                 >{{ t("scripts.judge_script") }}
                 {{ t("scripts.code", {}, "Code") }}</label
-              ><textarea
+              ><NxpTextArea
                 id="sm-judge-code"
                 v-model="draft.judgeScript"
                 class="mono code-area"
                 :placeholder="t('scripts.output_a_json_result')"
-              ></textarea>
+              />
             </div>
           </div>
           <div class="judge-actions">
-            <button
+            <NxpButton
               v-show="draft.judgeScriptEnabled"
               id="sm-upload-btn"
               class="judge-upload-button"
               type="button"
               @click.stop="uploadJudgeScript"
             >
-              {{ t("scripts.upload_script_file") }}</button
-            ><button
+              {{ t("scripts.upload_script_file") }}
+            </NxpButton>
+            <button
               id="sm-mode-btn"
               class="judge-mode-card mode-toggle"
               type="button"
@@ -528,11 +507,12 @@ watch(
           hidden
         ></div>
     <template #footer>
-        <button class="ghost" type="button" @click.stop="close">
-          {{ t("common.cancel") }}</button
-        ><button class="primary" type="button" @click.stop="save">
+        <NxpButton class="ghost" type="button" @click.stop="close">
+          {{ t("common.cancel") }}
+        </NxpButton>
+        <NxpButton class="primary" type="button" @click.stop="save">
           {{ t("common.save") }}
-        </button>
+        </NxpButton>
     </template>
     </NxpModal>
 </template>

@@ -7,9 +7,12 @@ import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
+import NxpTextArea from "../../../ui/primitives/NxpTextArea.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import {
   browseNativeDialog,
@@ -59,9 +62,6 @@ function value(contribution: Contribution, key: string) {
 function setValue(contribution: Contribution, key: string, next: unknown) {
   contribution.values ||= {};
   contribution.values[key] = next;
-}
-function inputValue(event: Event) {
-  return (event.target as HTMLInputElement | HTMLTextAreaElement).value;
 }
 function contributionStringValue(contribution: Contribution, field: GlobalField) {
   const current = value(contribution, field.key);
@@ -304,12 +304,13 @@ watch(
         </div>
         <div class="field" :data-help="t('users.global.notification.smtp_help')">
           <label class="field-label" for="gm-notification-smtp">{{ t("users.smtp_recipients") }}</label>
-          <input
+          <NxpTextInput
             id="gm-notification-smtp"
-            :value="settings.notification.smtpTo"
+            :model-value="settings.notification.smtpTo"
             type="text"
             :placeholder="t('users.binding.smtp_inherit_help')"
-            @input="setGlobalInput('notification', 'smtpTo', inputValue($event))"
+            :aria-label="t('users.smtp_recipients')"
+            @update:model-value="setGlobalInput('notification', 'smtpTo', $event)"
           />
         </div>
       </section>
@@ -392,7 +393,7 @@ watch(
             />
             <div v-else-if="fieldType(field) === 'textarea'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <textarea :id="fieldId(contribution, field)" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setValue(contribution, field.key, inputValue($event))"></textarea>
+              <NxpTextArea :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'select'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="`${fieldId(contribution, field)}-trigger`">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
@@ -408,14 +409,14 @@ watch(
             </div>
             <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <div class="plugin-secret-row"><input :id="fieldId(contribution, field)" type="password" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" @input="setSecretValue(contribution, field, inputValue($event))"><button v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</button></div>
+              <div class="plugin-secret-row"><NxpTextInput :id="fieldId(contribution, field)" type="password" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setSecretValue(contribution, field, $event)" /><NxpButton v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</NxpButton></div>
             </div>
             <div v-else-if="fieldType(field) === 'status'" class="field plugin-field" :data-help="field.description || undefined">
               <span class="field-label">{{ field.label }}</span><span class="plugin-status-value">{{ String(value(contribution, field.key) || t('users.no_status')) }}</span>
             </div>
             <div v-else class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <input :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" @input="setValue(contribution, field.key, inputValue($event))">
+              <NxpTextInput :id="fieldId(contribution, field)" :type="fieldType(field) === 'number' ? 'number' : fieldType(field) === 'url' ? 'url' : 'text'" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="field.placeholder || undefined" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setValue(contribution, field.key, $event)" />
             </div>
           </template>
         </div>
@@ -423,8 +424,8 @@ watch(
       <div ref="slotRoot" class="plugin-slot global-management-plugin-slot" data-plugin-slot="users.global.sections" data-plugin-anchor="users.global.sections" data-plugin-mode="user" :data-plugin-primary-id="props.userId" hidden></div>
     </section>
     <template #footer>
-      <button class="primary" type="button" @click.stop="save">{{ t("common.save") }}</button>
-      <button class="ghost" type="button" @click.stop="close">{{ t("common.cancel") }}</button>
+      <NxpButton class="primary" type="button" @click.stop="save">{{ t("common.save") }}</NxpButton>
+      <NxpButton class="ghost" type="button" @click.stop="close">{{ t("common.cancel") }}</NxpButton>
     </template>
   </NxpModal>
 </template>

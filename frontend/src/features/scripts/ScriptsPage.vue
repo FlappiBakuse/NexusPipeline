@@ -247,9 +247,9 @@ onBeforeUnmount(() => {
           </button>
         </div>
       <template #footer>
-          <button class="ghost" type="button" @click.stop="chooserOpen = false">
+          <NxpButton class="ghost" type="button" @click.stop="chooserOpen = false">
             {{ t("common.cancel") }}
-          </button>
+          </NxpButton>
       </template>
     </NxpModal>
     <ScriptEditorModal

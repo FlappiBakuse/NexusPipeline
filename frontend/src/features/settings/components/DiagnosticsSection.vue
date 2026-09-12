@@ -4,6 +4,7 @@ import { api, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import type { DiagnosticsData } from "../utils/settingsTypes";
 
 /** 系统诊断卡片：独立承担诊断结果加载、导出与结果投影。 */
@@ -79,11 +80,11 @@ defineExpose({ reload: loadDiagnostics });
 <template>
   <div class="diagnostics-section">
     <div class="row-actions">
-      <button class="ghost" type="button" data-testid="load-diagnostics" :disabled="loading" @click="loadDiagnostics">
-        {{ t("settings.refresh_diagnostics") }}</button
-      ><button class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">
+      <NxpButton class="ghost" type="button" data-testid="load-diagnostics" :disabled="loading" @click="loadDiagnostics">
+        {{ t("settings.refresh_diagnostics") }}</NxpButton>
+      <NxpButton class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">
         {{ t("settings.diagnostics.export_help") }}
-      </button>
+      </NxpButton>
     </div>
     <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite">
       <p v-if="loading" class="muted">{{ t("settings.loading_diagnostics") }}</p>

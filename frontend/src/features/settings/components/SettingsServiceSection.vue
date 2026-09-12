@@ -4,7 +4,7 @@ import { t } from "../../../platform/i18n";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../../ui/primitives/NxpSwitch.vue";
+import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import type { Settings } from "../utils/settingsTypes";
 
 /** 服务行为 section：启动注册、轻量模式、浏览器打开、保留期、端口、日志级别与语言。 */
@@ -41,39 +41,30 @@ const logLevelOptions = computed<NxpOption[]>(() => [
     @toggle="emit('toggle')"
   >
     <div class="settings-list">
-      <div class="switch-row settings-option switch-card">
-        <div>
-          <strong>{{ t("settings.start_with_windows") }}</strong><span class="muted">{{ t("settings.service.startup_registration") }}</span>
-        </div>
-        <NxpSwitch
-          id="st-autostart"
-          v-model="props.settings.autoStart"
-          :aria-label="t('settings.start_with_windows')"
-          @change="props.save"
-        />
-      </div>
-      <div class="switch-row settings-option switch-card">
-        <div>
-          <strong>{{ t("settings.lightweight_mode") }}</strong><span class="muted">{{ t("settings.service.web_disabled") }}</span>
-        </div>
-        <NxpSwitch
-          id="st-lightweight"
-          v-model="props.settings.lightweightMode"
-          :aria-label="t('settings.lightweight_mode')"
-          @change="props.onLightweightChange"
-        />
-      </div>
-      <div class="switch-row settings-option switch-card">
-        <div>
-          <strong>{{ t("settings.open_browser") }}</strong><span class="muted">{{ t("settings.service.console_startup") }}</span>
-        </div>
-        <NxpSwitch
-          id="st-browser"
-          v-model="props.settings.autoOpenBrowser"
-          :aria-label="t('settings.open_browser')"
-          @change="props.save"
-        />
-      </div>
+      <NxpSwitchSetting
+        id="st-autostart"
+        v-model="props.settings.autoStart"
+        :label="t('settings.start_with_windows')"
+        :description="t('settings.service.startup_registration')"
+        :aria-label="t('settings.start_with_windows')"
+        @change="props.save"
+      />
+      <NxpSwitchSetting
+        id="st-lightweight"
+        v-model="props.settings.lightweightMode"
+        :label="t('settings.lightweight_mode')"
+        :description="t('settings.service.web_disabled')"
+        :aria-label="t('settings.lightweight_mode')"
+        @change="props.onLightweightChange"
+      />
+      <NxpSwitchSetting
+        id="st-browser"
+        v-model="props.settings.autoOpenBrowser"
+        :label="t('settings.open_browser')"
+        :description="t('settings.service.console_startup')"
+        :aria-label="t('settings.open_browser')"
+        @change="props.save"
+      />
     </div>
     <div class="settings-service-fields" :data-help="t('settings.service.restart_requirements')">
       <div class="form-grid settings-service-grid settings-service-grid-primary">

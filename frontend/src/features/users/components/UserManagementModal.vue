@@ -14,6 +14,9 @@ import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpPathPicker from "../../../ui/primitives/NxpPathPicker.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
+import NxpTextArea from "../../../ui/primitives/NxpTextArea.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import { vSortable } from "../../../ui/sortable";
 import {
@@ -379,15 +382,15 @@ onMounted(() => {
       <section class="user-management-settings">
         <div class="field">
           <label class="field-label" for="um-name">{{ t("users.user_name") }} <span class="req">*</span></label>
-          <input id="um-name" v-model="draft.name" type="text" />
+          <NxpTextInput id="um-name" v-model="draft.name" :aria-label="t('users.user_name')" />
         </div>
         <div class="field">
           <label class="field-label" for="um-remark">{{ t("users.remark") }}</label>
-          <textarea id="um-remark" class="form-textarea" v-model="draft.remark" rows="3"></textarea>
+          <NxpTextArea id="um-remark" class="form-textarea" v-model="draft.remark" :rows="3" :aria-label="t('users.remark')" />
         </div>
         <div v-if="draft.avatarUrl" class="user-avatar-setting">
           <span class="muted">{{ t("users.custom_avatar") }}</span>
-          <button class="tertiary" type="button" @click.stop="removeAvatar">{{ t("users.remove_custom_avatar") }}</button>
+          <NxpButton class="tertiary" type="button" @click.stop="removeAvatar">{{ t("users.remove_custom_avatar") }}</NxpButton>
         </div>
       </section>
       <section
@@ -432,8 +435,8 @@ onMounted(() => {
             </div>
             <NxpEmptyState v-else :title="t('users.no_script_instances_can_be_added')" :description="t('users.binding.all_bound')" />
             <div class="um-add-actions">
-              <button class="ghost" type="button" @click.stop="addBindingOpen = false">{{ t("common.cancel") }}</button>
-              <button class="primary" type="button" data-testid="um-add-confirm" @click.stop="addBindings">{{ t("common.confirm") }}</button>
+              <NxpButton class="ghost" type="button" @click.stop="addBindingOpen = false">{{ t("common.cancel") }}</NxpButton>
+              <NxpButton class="primary" type="button" data-testid="um-add-confirm" @click.stop="addBindings">{{ t("common.confirm") }}</NxpButton>
             </div>
           </div>
         </div>
@@ -556,13 +559,14 @@ onMounted(() => {
                     />
                     <div class="field" :data-help="t('users.binding.smtp_help')">
                       <label class="field-label" :for="`um-${binding.scriptInstanceId}-smtp`">{{ t("users.smtp_recipients") }}</label>
-                      <input
+                      <NxpTextInput
                         :id="`um-${binding.scriptInstanceId}-smtp`"
-                        :value="bindingValue(binding, 'smtpTo') || ''"
+                        :model-value="String(bindingValue(binding, 'smtpTo') || '')"
                         type="text"
                         :disabled="binding.locks?.notification === true"
                         :placeholder="t('users.binding.smtp_inherit_help')"
-                        @input="setBindingValue(binding, 'smtpTo', ($event.target as HTMLInputElement).value)"
+                        :aria-label="t('users.smtp_recipients')"
+                        @update:model-value="setBindingValue(binding, 'smtpTo', $event)"
                       />
                     </div>
                     <p v-if="bindingOverrideHelp(binding, 'notification')" class="muted helper-copy um-override-helper">{{ bindingOverrideHelp(binding, 'notification') }}</p>
@@ -614,8 +618,8 @@ onMounted(() => {
       </section>
     </section>
     <template #footer>
-      <button class="primary" type="button" @click.stop="save">{{ t("common.save") }}</button>
-      <button class="ghost" type="button" data-action="close-modal" @click.stop="close">{{ t("common.cancel") }}</button>
+      <NxpButton class="primary" type="button" @click.stop="save">{{ t("common.save") }}</NxpButton>
+      <NxpButton class="ghost" type="button" data-action="close-modal" @click.stop="close">{{ t("common.cancel") }}</NxpButton>
     </template>
   </NxpModal>
 </template>

@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { t } from "../../../platform/i18n";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import NxpCollapseTransition from "../../../ui/composites/NxpCollapseTransition.vue";
 import type { Settings } from "../utils/settingsTypes";
 
@@ -81,9 +82,10 @@ const proxyModeOptions = computed<NxpOption[]>(() => [
             <label class="field-label" for="st-proxy-url">{{
               t("settings.http_https_proxy_address")
             }}</label
-            ><input
+            ><NxpTextInput
               id="st-proxy-url"
               v-model="settings.proxyUrl"
+              :aria-label="t('settings.http_https_proxy_address')"
               placeholder="http://127.0.0.1:7890"
               @blur="save"
             />
@@ -92,9 +94,10 @@ const proxyModeOptions = computed<NxpOption[]>(() => [
             <label class="field-label" for="st-proxy-user">{{
               t("settings.username_optional")
             }}</label
-            ><input
+            ><NxpTextInput
               id="st-proxy-user"
               v-model="settings.proxyUsername"
+              :aria-label="t('settings.username_optional')"
               @blur="save"
             />
           </div>
@@ -102,10 +105,11 @@ const proxyModeOptions = computed<NxpOption[]>(() => [
             <label class="field-label" for="st-proxy-pwd">{{
               t("settings.password_optional")
             }}</label
-            ><input
+            ><NxpTextInput
               id="st-proxy-pwd"
               v-model="secretDraft.proxyPassword"
               type="password"
+              :aria-label="t('settings.password_optional')"
               @blur="save"
             />
           </div>

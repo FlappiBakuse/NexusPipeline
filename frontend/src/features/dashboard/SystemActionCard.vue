@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { toast } from "../../platform/toast";
 import { t } from "../../platform/i18n";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 
 interface SystemAction {
   action?: string;
@@ -68,6 +69,6 @@ onBeforeUnmount(() => {
       <span class="muted">{{ t("common.status.queue_action_pending") }}</span>
     </div>
     <p class="countdown-text"><span data-testid="system-action-countdown" :data-deadline="action.deadline || ''" :data-queue-name="action.queueName || ''">{{ statusText }}</span></p>
-    <div class="qk-row"><button class="danger" type="button" :disabled="cancelling" @click="cancel">{{ t("common.action.cancel_verb", { verb }) }}</button></div>
+    <div class="qk-row"><NxpButton class="danger" type="button" :disabled="cancelling" @click="cancel">{{ t("common.action.cancel_verb", { verb }) }}</NxpButton></div>
   </section>
 </template>

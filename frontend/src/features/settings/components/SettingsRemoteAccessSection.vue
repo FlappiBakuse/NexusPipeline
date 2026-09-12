@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
+import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
-import NxpSwitch from "../../../ui/primitives/NxpSwitch.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import type { Settings } from "../utils/settingsTypes";
 
 /** 远程访问与 MCP section：访问令牌、远程地址列表、MCP 端口与开关。 */
@@ -37,32 +39,30 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
     <div class="settings-merged-content">
       <section class="settings-subsection remote-settings">
         <div class="settings-list">
-          <div class="switch-row settings-option switch-card">
-            <div>
-              <strong>{{ t("settings.remote_access") }}</strong><span class="muted">{{ t("settings.remote_access.bind_all_help") }}</span>
-            </div>
-            <NxpSwitch
-              id="st-remote"
-              :model-value="props.settings.allowRemoteAccess === true"
-              :aria-label="t('settings.remote_access')"
-              @update:model-value="props.onRemoteChange"
-            />
-          </div>
+          <NxpSwitchSetting
+            id="st-remote"
+            :model-value="props.settings.allowRemoteAccess === true"
+            :label="t('settings.remote_access')"
+            :description="t('settings.remote_access.bind_all_help')"
+            :aria-label="t('settings.remote_access')"
+            @update:model-value="props.onRemoteChange"
+          />
         </div>
         <div class="field-btn-row">
           <div class="field" :data-help="t('settings.remote_access.token_keep_help')">
             <label class="field-label" for="st-token">{{ t("settings.access_token") }}</label>
-            <input
+            <NxpTextInput
               id="st-token"
-              :value="props.token"
+              :model-value="props.token"
               :type="props.tokenVisible ? 'text' : 'password'"
+              :aria-label="t('settings.access_token')"
               autocomplete="new-password"
               :placeholder="t('common.leave_blank_to_keep')"
-              @input="emit('update:token', ($event.target as HTMLInputElement).value)"
+              @update:model-value="emit('update:token', $event)"
               @change="props.save"
-            >
+            />
           </div>
-          <button
+          <NxpButton
             class="ghost"
             type="button"
             data-testid="toggle-token-visibility"
@@ -70,11 +70,11 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
             @click="emit('update:tokenVisible', !props.tokenVisible)"
           >
             {{ props.tokenVisible ? t("settings.hide") : t("common.show") }}
-          </button>
-          <button class="ghost" type="button" @click="props.copyToken">{{ t("settings.copy") }}</button>
-          <button class="ghost" type="button" data-testid="gen-token" @click="props.generateToken">
+          </NxpButton>
+          <NxpButton class="ghost" type="button" @click="props.copyToken">{{ t("settings.copy") }}</NxpButton>
+          <NxpButton class="ghost" type="button" data-testid="gen-token" @click="props.generateToken">
             {{ t("settings.generate_token") }}
-          </button>
+          </NxpButton>
         </div>
         <div
           id="remote-lan-list"
@@ -89,17 +89,14 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
       </section>
       <section class="settings-subsection mcp-settings">
         <div class="settings-list">
-          <div class="switch-row settings-option switch-card">
-            <div>
-              <strong>{{ t("settings.enable_mcp_service") }}</strong><span class="muted">{{ t("settings.remote_access.mcp_listen_help") }}</span>
-            </div>
-            <NxpSwitch
-              id="st-mcp-enabled"
-              v-model="props.settings.mcpEnabled"
-              :aria-label="t('settings.enable_mcp_service')"
-              @change="props.onMcpChange"
-            />
-          </div>
+          <NxpSwitchSetting
+            id="st-mcp-enabled"
+            v-model="props.settings.mcpEnabled"
+            :label="t('settings.enable_mcp_service')"
+            :description="t('settings.remote_access.mcp_listen_help')"
+            :aria-label="t('settings.enable_mcp_service')"
+            @change="props.onMcpChange"
+          />
         </div>
         <div
           class="form-grid settings-single-field"

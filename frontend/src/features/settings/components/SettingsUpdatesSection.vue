@@ -2,8 +2,9 @@
 import { computed, ref } from "vue";
 import { t } from "../../../platform/i18n";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
+import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
-import NxpSwitch from "../../../ui/primitives/NxpSwitch.vue";
+import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import UpdateStatusCard from "./UpdateStatusCard.vue";
 import type { Settings } from "../utils/settingsTypes";
 
@@ -43,30 +44,24 @@ defineExpose({ reload });
   >
     <div class="update-section">
       <div class="settings-list">
-        <div class="switch-row settings-option switch-card">
-          <div>
-            <strong>{{ t("settings.update.periodic") }}</strong><span class="muted">{{ t("settings.update.check_schedule") }}</span>
-          </div>
-          <NxpSwitch
-            id="st-update-check"
-            :model-value="props.settings.updateCheckEnabled === true"
-            :aria-label="t('settings.update.periodic')"
-            @update:model-value="props.onUpdateCheck"
-          />
-        </div>
-        <div class="switch-row settings-option switch-card">
-          <div>
-            <strong>{{ t("settings.update_automatically_when_idle") }}</strong><span class="muted">{{ t("settings.update.auto_download_help") }}</span>
-          </div>
-          <NxpSwitch
-            id="st-update-auto"
-            :model-value="props.settings.updateAutoApplyEnabled === true"
-            :disabled="props.settings.updateCheckEnabled !== true"
-            :aria-label="t('settings.update_automatically_when_idle')"
-            @update:model-value="emit('update:updateAutoApplyEnabled', $event)"
-            @change="props.save"
-          />
-        </div>
+        <NxpSwitchSetting
+          id="st-update-check"
+          :model-value="props.settings.updateCheckEnabled === true"
+          :label="t('settings.update.periodic')"
+          :description="t('settings.update.check_schedule')"
+          :aria-label="t('settings.update.periodic')"
+          @update:model-value="props.onUpdateCheck"
+        />
+        <NxpSwitchSetting
+          id="st-update-auto"
+          :model-value="props.settings.updateAutoApplyEnabled === true"
+          :label="t('settings.update_automatically_when_idle')"
+          :description="t('settings.update.auto_download_help')"
+          :disabled="props.settings.updateCheckEnabled !== true"
+          :aria-label="t('settings.update_automatically_when_idle')"
+          @update:model-value="emit('update:updateAutoApplyEnabled', $event)"
+          @change="props.save"
+        />
       </div>
       <div class="form-grid">
         <div class="field">
@@ -81,12 +76,13 @@ defineExpose({ reload });
         </div>
         <div class="field" :data-help="t('settings.update.source_default_help')">
           <label class="field-label" for="st-update-source">{{ t("settings.mirror_url") }}</label>
-          <input
+          <NxpTextInput
             id="st-update-source"
             v-model="props.settings.updateSourceUrl"
             :placeholder="t('settings.default_github')"
+            :aria-label="t('settings.mirror_url')"
             @blur="props.save"
-          >
+          />
         </div>
       </div>
       <UpdateStatusCard ref="updateCard" />

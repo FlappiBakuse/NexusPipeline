@@ -10,6 +10,7 @@ import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
+import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import { vSortable } from "../../ui/sortable";
 import GlobalUserCard from "./GlobalUserCard.vue";
 import ConfigEditFlow from "./components/ConfigEditFlow.vue";
@@ -361,21 +362,21 @@ onBeforeUnmount(() => {
       <div class="field">
         <label class="field-label" for="gu-name">{{
           t("users.user_name")
-        }} <span class="req">*</span></label
-        ><input id="gu-name" v-model="newUserName" type="text" />
+        }} <span class="req">*</span></label>
+        <NxpTextInput id="gu-name" v-model="newUserName" :aria-label="t('users.user_name')" />
         <span class="muted">{{ t("users.username_case_insensitive") }}</span>
       </div>
       <template #footer>
-        <button class="ghost" type="button" @click.stop="closeNewUser">
-          {{ t("common.cancel") }}</button
-        ><button
+        <NxpButton class="ghost" type="button" @click.stop="closeNewUser">
+          {{ t("common.cancel") }}</NxpButton>
+        <NxpButton
           class="primary"
           type="button"
           data-testid="save-global-user"
           @click.stop="createUser"
         >
           {{ t("common.save") }}
-        </button>
+        </NxpButton>
       </template>
     </NxpModal>
     <GlobalManagementModal
@@ -410,8 +411,8 @@ onBeforeUnmount(() => {
       <div class="field">
         <label class="field-label" for="gu-delete-name">{{
           t("users.confirm_username")
-        }}</label
-        ><input id="gu-delete-name" v-model="deleteName" type="text" />
+        }}</label>
+        <NxpTextInput id="gu-delete-name" v-model="deleteName" :aria-label="t('users.confirm_username')" />
       </div>
       <template #footer>
         <NxpButton class="ghost" type="button" @click="closeDelete">{{
@@ -422,8 +423,7 @@ onBeforeUnmount(() => {
           type="button"
           data-testid="confirm-delete-global-user"
           @click="confirmDelete"
-          >{{ t("common.confirm_deletion") }}</NxpButton
-        >
+          >{{ t("common.confirm_deletion") }}</NxpButton>
       </template>
     </NxpModal>
   </main>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import { editConfig, getEditConfigStatus, listEditSessions } from "../services/usersApi";
 import { useConfigEditFlow } from "../composables/useConfigEditFlow";
@@ -82,7 +83,7 @@ defineExpose({
         </button>
       </div>
     </template>
-    <template #footer><button class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</button></template>
+    <template #footer><NxpButton class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</NxpButton></template>
   </NxpModal>
   <NxpModal
     :locked="true"
@@ -102,7 +103,7 @@ defineExpose({
         </button>
       </div>
     </template>
-    <template #footer><button class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</button></template>
+    <template #footer><NxpButton class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</NxpButton></template>
   </NxpModal>
   <NxpModal
     :locked="true"
@@ -117,8 +118,8 @@ defineExpose({
       <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>
     </template>
     <template #footer>
-      <button class="primary" type="button" @click.stop="flow.finish('done')">{{ t("common.complete") }}</button>
-      <button class="ghost" type="button" @click.stop="flow.finish('cancel')">{{ t("common.cancel") }}</button>
+      <NxpButton class="primary" type="button" @click.stop="flow.finish('done')">{{ t("common.complete") }}</NxpButton>
+      <NxpButton class="ghost" type="button" @click.stop="flow.finish('cancel')">{{ t("common.cancel") }}</NxpButton>
     </template>
   </NxpModal>
 </template>
