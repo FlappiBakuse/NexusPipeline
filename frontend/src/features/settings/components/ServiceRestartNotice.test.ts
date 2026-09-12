@@ -8,16 +8,16 @@ import { defineComponent } from "vue";
 const restartServiceMock = vi.fn(async () => "ready" as "ready" | "timeout" | "failed");
 let statusResponse: { lightweightMode?: boolean } = { lightweightMode: false };
 
-vi.mock("../platform/service-restart", () => ({
+vi.mock("../../../platform/service-restart", () => ({
   restartService: (...args: unknown[]) => restartServiceMock(...(args as [])),
 }));
-vi.mock("../platform/api", () => ({
+vi.mock("../../../platform/api", () => ({
   api: async () => statusResponse,
   isAbortError: () => false,
 }));
 
 import ServiceRestartNotice from "./ServiceRestartNotice.vue";
-import { useShellStore } from "../stores/shell";
+import { useShellStore } from "../../../stores/shell";
 
 const Page = defineComponent({
   components: { ServiceRestartNotice },
@@ -90,7 +90,32 @@ describe("service restart notice", () => {
     wrapper.unmount();
   });
 
-  it("shows the timeout message with a manual retry action", async () => {
+  it("hides the restart action while the restart is in progress", async () => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    let resolveRestart: (outcome: "ready" | "timeout" | "failed") => void = () => {};
+    restartServiceMock.mockImplementation(() => new Promise(resolve => {
+      resolveRestart = resolve;
+    }));
+    const shell = useShellStore();
+    const wrapper = await mountNotice();
+    shell.markRestartRequired("plugin.update");
+    await flushPromises();
+
+    await wrapper.get("[data-testid='restart-service']").trigger("click");
+    await flushPromises();
+
+    expect(shell.restarting).toBe(true);
+    expect(wrapper.find("[data-testid='restart-service']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='service-restart-notice']").text()).toContain("settings.service_restarting");
+
+    resolveRestart("ready");
+    await flushPromises();
+    expect(shell.restarting).toBe(true);
+    wrapper.unmount();
+    vi.unstubAllGlobals();
+  });
+
+  it("offers the same restart action again after a timeout", async () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     restartServiceMock.mockResolvedValue("timeout");
     const shell = useShellStore();
@@ -102,7 +127,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     expect(shell.restartError).toBe("settings.service.restart_timeout");
-    expect(wrapper.get("[data-testid='restart-service']").text()).toBe("settings.service.restart_retry");
+    expect(wrapper.get("[data-testid='restart-service']").text()).toBe("settings.restart_service");
     vi.unstubAllGlobals();
     wrapper.unmount();
   });

@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import { useShellStore } from "../stores/shell";
 import BootLoadingState from "./BootLoadingState.vue";
-import ServiceRestartNotice from "./ServiceRestartNotice.vue";
 import TokenPrompt from "./TokenPrompt.vue";
 import { bootstrapFrontend } from "./bootstrap";
 import { applyTranslations, t } from "../platform/i18n";
@@ -135,7 +134,6 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <ServiceRestartNotice />
       <Transition name="nxp-page" mode="out-in" appear>
         <RouterView v-if="shell.booted" :key="route.fullPath" />
         <BootLoadingState v-else-if="!shell.bootError" />

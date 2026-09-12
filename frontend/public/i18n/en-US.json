@@ -856,7 +856,6 @@
   "settings.service.restart_failed": "The restart request failed. Try again shortly.",
   "settings.service.restart_notice": "Changes are pending; restart the service to apply them.",
   "settings.service.restart_requirements": "Log level changes apply immediately; Web port changes require a service restart.",
-  "settings.service.restart_retry": "Retry",
   "settings.service.restart_timeout": "The service is still starting. Try again shortly.",
   "settings.service.startup_registration": "Register in the current user's startup items",
   "settings.service.web_disabled": "Do not start the web service; takes effect after restart",

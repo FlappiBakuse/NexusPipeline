@@ -856,7 +856,6 @@
   "settings.service.restart_failed": "重启请求失败，请稍后重试。",
   "settings.service.restart_notice": "有改动需要重启服务后生效。",
   "settings.service.restart_requirements": "日志级别即时生效；Web 端口改动需重启服务。",
-  "settings.service.restart_retry": "重试",
   "settings.service.restart_timeout": "服务仍在启动，请稍后重试。",
   "settings.service.startup_registration": "注册到当前用户启动项",
   "settings.service.web_disabled": "不启动网页服务，重启后生效",

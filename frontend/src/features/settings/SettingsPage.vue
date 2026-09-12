@@ -25,6 +25,7 @@ import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpCollapsibleCard from "../../ui/composites/NxpCollapsibleCard.vue";
 import UpdateStatusCard from "./components/UpdateStatusCard.vue";
 import DiagnosticsSection from "./components/DiagnosticsSection.vue";
+import ServiceRestartNotice from "./components/ServiceRestartNotice.vue";
 import SettingsNotificationsSection from "./components/SettingsNotificationsSection.vue";
 import SettingsNetworkSection from "./components/SettingsNetworkSection.vue";
 import SettingsServiceSection from "./components/SettingsServiceSection.vue";
@@ -350,6 +351,7 @@ onBeforeUnmount(() => {
         :title="t('shell.settings', {}, 'Settings')"
         :description="t('settings.page.help')"
       />
+      <ServiceRestartNotice />
       <div class="settings-cards" data-testid="settings-cards">
         <SettingsServiceSection
           :settings="settings"

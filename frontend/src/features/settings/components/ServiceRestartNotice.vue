@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { useShellStore } from "../stores/shell";
-import { t } from "../platform/i18n";
-import { api } from "../platform/api";
-import { restartService, type ServiceRestartHandoff } from "../platform/service-restart";
+import { useShellStore } from "../../../stores/shell";
+import { t } from "../../../platform/i18n";
+import { api } from "../../../platform/api";
+import { restartService, type ServiceRestartHandoff } from "../../../platform/service-restart";
 
 const shell = useShellStore();
 const lightweight = ref(false);
-const showRetry = ref(false);
-/** 已提交的重启交接信息：重试时复用，避免对已经退出的旧实例再次提交重启请求。 */
+/** 已提交的重启交接信息：失败后重试时复用，避免对已经退出的旧实例再次提交重启请求。 */
 const pendingHandoff = ref<ServiceRestartHandoff | null>(null);
 
 /** 轻量模式不启动 Web 服务，此时只提示手动重启，不显示不可执行的按钮。 */
@@ -30,10 +29,12 @@ const message = computed(() => {
   return shell.restartError || t("settings.service.restart_notice");
 });
 
+/** 重启期间只显示进行中的提示：页面在确认新实例接管后自动刷新。 */
+const actionVisible = computed(() => !shell.restarting && !lightweight.value);
+
 async function triggerRestart() {
   if (shell.restarting) return;
   if (!window.confirm(t("settings.restart_warning"))) return;
-  showRetry.value = false;
   shell.beginRestart();
   const outcome = await restartService({
     timeoutMs: 40_000,
@@ -43,7 +44,6 @@ async function triggerRestart() {
     },
   });
   if (outcome === "ready") return;
-  showRetry.value = true;
   shell.failRestart(outcome === "timeout"
     ? t("settings.service.restart_timeout")
     : t("settings.service.restart_failed"));
@@ -62,16 +62,13 @@ async function triggerRestart() {
     <p>{{ message }}</p>
     <span v-if="lightweight" class="muted">{{ t("settings.service.lightweight_restart") }}</span>
     <button
-      v-else
+      v-else-if="actionVisible"
       class="primary"
       type="button"
       data-testid="restart-service"
-      :disabled="shell.restarting"
       @click="triggerRestart"
     >
-      {{ shell.restarting
-        ? t("common.restart")
-        : showRetry ? t("settings.service.restart_retry") : t("settings.restart_service") }}
+      {{ t("settings.restart_service") }}
     </button>
   </section>
 </template>
