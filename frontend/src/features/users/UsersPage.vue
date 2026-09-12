@@ -8,8 +8,8 @@ import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
-import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
+import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import { vSortable } from "../../ui/sortable";
 import GlobalUserCard from "./GlobalUserCard.vue";
 import ConfigEditFlow from "./components/ConfigEditFlow.vue";
@@ -311,21 +311,20 @@ onBeforeUnmount(() => {
       tone="danger"
     />
     <template v-else>
-      <header class="page-head">
-        <div class="page-head-copy">
-          <div class="eyebrow">{{ t("users.account_management") }}</div>
-          <h2>{{ t("users.user_management") }}</h2>
-          <p class="page-kicker">{{ t("users.page.help") }}</p>
-        </div>
-        <div class="page-head-actions">
+      <NxpPageHeader
+        :eyebrow="t('users.account_management')"
+        :title="t('users.user_management')"
+        :description="t('users.page.help')"
+      >
+        <template #actions>
           <NxpButton
             class="primary"
             data-testid="open-global-user-modal"
             @click="openNewUser"
             >{{ t("users.add_user") }}</NxpButton
           >
-        </div>
-      </header>
+        </template>
+      </NxpPageHeader>
       <NxpEmptyState
         v-if="!sortedUsers.length"
         :title="t('users.no_users_yet')"
@@ -351,24 +350,14 @@ onBeforeUnmount(() => {
     </template>
 
     <NxpModal
-      :open="newUserOpen"
-      :closeable="false"
       :locked="true"
+      :open="newUserOpen"
+      :title="t('users.add_user')"
       :aria-label="t('users.add_user')"
       panel-class="secondary-surface"
-      data-locked
+      :close-label="t('common.close')"
+      @close="closeNewUser"
     >
-      <template #header>
-        <div><h3 class="modal-title">{{ t("users.add_user") }}</h3></div>
-        <button
-          class="icon-button modal-close"
-          type="button"
-          :aria-label="t('common.close')"
-          @click.stop="closeNewUser"
-        >
-          <NxpIcon name="close" />
-        </button>
-      </template>
       <div class="field">
         <label class="field-label" for="gu-name">{{
           t("users.user_name")

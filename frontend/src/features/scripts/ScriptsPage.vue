@@ -18,7 +18,7 @@ import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
-import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import { vSortable } from "../../ui/sortable";
 import ScriptCard from "./ScriptCard.vue";
@@ -174,13 +174,12 @@ onBeforeUnmount(() => {
       tone="danger"
     />
     <template v-else>
-      <header class="page-head">
-        <div class="page-head-copy">
-          <div class="eyebrow">{{ t("scripts.automation_management") }}</div>
-          <h2>{{ t("common.script_instance") }}</h2>
-          <p class="page-kicker">{{ t("scripts.page.help") }}</p>
-        </div>
-        <div class="page-head-actions">
+      <NxpPageHeader
+        :eyebrow="t('scripts.automation_management')"
+        :title="t('common.script_instance')"
+        :description="t('scripts.page.help')"
+      >
+        <template #actions>
           <button
             class="primary"
             type="button"
@@ -189,8 +188,8 @@ onBeforeUnmount(() => {
           >
             {{ t("scripts.new_script_instance") }}
           </button>
-        </div>
-      </header>
+        </template>
+      </NxpPageHeader>
       <NxpEmptyState
         v-if="!scripts.length"
         :title="t('scripts.no_script_instances_yet')"
@@ -213,24 +212,14 @@ onBeforeUnmount(() => {
     </template>
 
     <NxpModal
-      :open="chooserOpen"
-      :closeable="false"
       :locked="true"
+      :open="chooserOpen"
+      :title="t('scripts.new_script_instance')"
       :aria-label="t('scripts.new_script_instance')"
       panel-class="secondary-surface"
-      data-locked
+      :close-label="t('common.close', {}, 'Close')"
+      @close="chooserOpen = false"
     >
-      <template #header>
-          <h2 class="modal-title">{{ t("scripts.new_script_instance") }}</h2>
-          <button
-            class="icon-button modal-close"
-            type="button"
-            :aria-label="t('common.close', {}, 'Close')"
-            @click.stop="chooserOpen = false"
-          >
-            <NxpIcon name="close" />
-          </button>
-      </template>
       <div class="new-script-chooser">
           <button
             class="chooser-card"

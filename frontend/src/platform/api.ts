@@ -125,3 +125,32 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
     if (controller) releaseController(controller);
   }
 }
+
+/** 发送二进制请求体并读取 JSON 响应；用于受保护的二进制上传。 */
+export async function apiUpload<T = unknown>(
+  method: string,
+  path: string,
+  body: Blob | ArrayBuffer | string,
+  contentType = "application/octet-stream",
+  signal?: AbortSignal | null): Promise<T> {
+  const controller = signal ? null : trackController(new AbortController());
+  try {
+    const response = await fetch(path, {
+      method,
+      headers: { ...authHeaders(), "Content-Type": contentType },
+      body: body as BodyInit,
+      signal: signal || controller!.signal,
+    });
+    if (response.status === 204) return null as T;
+    const data = await response.json().catch(() => null);
+    if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
+    if (!response.ok) {
+      throw apiError(formatApiError(data, response.status), response.status, data);
+    }
+    return data as T;
+  } catch (reason) {
+    throw normalizeAbortError(reason, signal);
+  } finally {
+    if (controller) releaseController(controller);
+  }
+}

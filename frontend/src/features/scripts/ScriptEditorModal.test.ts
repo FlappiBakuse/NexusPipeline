@@ -108,4 +108,23 @@ describe("ScriptEditorModal root probe", () => {
     expect(toast).not.toHaveBeenCalledWith(expect.stringContaining("config_derive_failed"), "error");
     wrapper.unmount();
   });
+
+  it("exposes one close control that shares the cancel handler", async () => {
+    const wrapper = mountEditor(null, "hoyolab");
+
+    const closeControls = wrapper.findAll(".modal-close");
+    expect(closeControls).toHaveLength(1);
+    expect(closeControls[0].attributes("aria-label")).toBe("Close");
+
+    await closeControls[0].trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    wrapper.unmount();
+
+    const cancelWrapper = mountEditor(null, "hoyolab");
+    const cancel = cancelWrapper.findAll(".modal-footer button").find(button => button.text() === "common.cancel");
+    expect(cancel).toBeTruthy();
+    await cancel!.trigger("click");
+    expect(cancelWrapper.emitted("close")).toHaveLength(1);
+    cancelWrapper.unmount();
+  });
 });

@@ -92,7 +92,6 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
     :locked="true"
     panel-class="secondary-surface"
     :close-label="translate('common.close', {}, 'Close')"
-    data-locked
     @close="emit('close')"
   >
     <div class="field">

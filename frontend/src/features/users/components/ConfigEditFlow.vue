@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
-import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import { editConfig, getEditConfigStatus, listEditSessions } from "../services/usersApi";
 import { useConfigEditFlow } from "../composables/useConfigEditFlow";
@@ -62,17 +61,14 @@ defineExpose({
 
 <template>
   <NxpModal
-    :open="Boolean(configChooser)"
-    :closeable="false"
     :locked="true"
+    :open="Boolean(configChooser)"
+    :title="`${t('users.first_edit')} ${t('users.edit_configuration')}`"
     :aria-label="t('users.first_edit') + ' ' + t('users.edit_configuration')"
     panel-class="secondary-surface"
-    data-locked
+    :close-label="t('common.close')"
+    @close="flow.close"
   >
-    <template #header>
-      <div><h3 class="modal-title">{{ t("users.first_edit") }} {{ t("users.edit_configuration") }}</h3></div>
-      <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="flow.close"><NxpIcon name="close" /></button>
-    </template>
     <template v-if="configChooser">
       <p class="modal-copy">{{ t("users.config.edit_first", { script: configChooser.scriptName }) }}</p>
       <div class="first-edit-chooser">
@@ -89,17 +85,14 @@ defineExpose({
     <template #footer><button class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</button></template>
   </NxpModal>
   <NxpModal
-    :open="Boolean(configCandidates)"
-    :closeable="false"
     :locked="true"
+    :open="Boolean(configCandidates)"
+    :title="t('users.take_over_configuration')"
     :aria-label="t('users.take_over_configuration')"
     panel-class="secondary-surface"
-    data-locked
+    :close-label="t('common.close')"
+    @close="flow.close"
   >
-    <template #header>
-      <div><h3 class="modal-title">{{ t("users.take_over_configuration") }}</h3></div>
-      <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="flow.close"><NxpIcon name="close" /></button>
-    </template>
     <template v-if="configCandidates">
       <p class="modal-copy">{{ t("users.config.candidates_help") }}</p>
       <div class="first-edit-chooser">
@@ -112,17 +105,14 @@ defineExpose({
     <template #footer><button class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</button></template>
   </NxpModal>
   <NxpModal
-    :open="Boolean(configEdit)"
-    :closeable="false"
     :locked="true"
+    :open="Boolean(configEdit)"
+    :title="t('users.config.edit_progress')"
     :aria-label="t('users.config.edit_progress')"
     panel-class="secondary-surface"
-    data-locked
+    :close-label="t('common.close')"
+    @close="flow.finish('cancel')"
   >
-    <template #header>
-      <div><h3 class="modal-title">{{ t("users.config.edit_progress") }}</h3></div>
-      <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="flow.finish('cancel')"><NxpIcon name="close" /></button>
-    </template>
     <template v-if="configEdit">
       <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>
     </template>

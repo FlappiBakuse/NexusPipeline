@@ -16,19 +16,12 @@ export interface ScriptPluginStatus {
   displayName: string;
 }
 
-// 插件未安装或运行时元数据尚未返回时，使用插件目录中的正式展示名。
-export const knownPluginDisplayNames: Readonly<Record<string, string>> = Object.freeze({
-  bettergi: "BetterGI",
-  maaend: "MaaEnd",
-  march7th: "March7thAssistant",
-  zzzonedragon: "ZenlessZoneZeroOneDragon",
-});
-
+/** 插件展示名只来自当前插件元数据；插件缺失时回退到记录的 pluginType 原始 ID。 */
 export function pluginDisplayName(name: unknown, plugins: ScriptPluginRecord[] = []): string {
   const key = String(name || "").trim();
   const normalized = key.toLowerCase();
   const plugin = plugins.find(item => String(item?.name || "").trim().toLowerCase() === normalized);
-  return knownPluginDisplayNames[normalized] || plugin?.displayName || plugin?.name || key;
+  return plugin?.displayName || plugin?.name || key;
 }
 
 /** 动态判断脚本实例的专项插件状态；插件卸载后仍可识别旧数据，但不再允许操作或运行。 */

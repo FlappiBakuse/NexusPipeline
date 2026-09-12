@@ -8,6 +8,7 @@ import { setTopbarTitle } from "../../platform/shell";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpCard from "../../ui/primitives/NxpCard.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import SystemActionCard from "./SystemActionCard.vue";
 
 interface RunningRecord {
@@ -116,9 +117,11 @@ onBeforeUnmount(() => {
       <NxpEmptyState :title="t('dashboard.connection.unavailable')" :description="error" tone="danger" />
     </template>
     <template v-else>
-      <header class="page-head">
-        <div class="page-head-copy"><div class="eyebrow">{{ t("dashboard.run_overview") }}</div><h2>{{ t("dashboard.dashboard") }}</h2><p class="page-kicker">{{ t("dashboard.overview.help") }}</p></div>
-      </header>
+      <NxpPageHeader
+        :eyebrow="t('dashboard.run_overview')"
+        :title="t('dashboard.dashboard')"
+        :description="t('dashboard.overview.help')"
+      />
       <div ref="cardsSlot" class="plugin-slot" data-plugin-slot="dashboard.cards" data-plugin-anchor="dashboard.cards" hidden></div>
       <section id="dashboard-state" class="dashboard-state" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
         <div class="dashboard-state-copy"><div class="state-label">{{ (status.running || []).length ? t("common.running") : t("dashboard.system_idle") }}</div><h3>{{ (status.running || []).length ? t("dashboard.task_in_progress") : t("dashboard.everything_is_ready") }}</h3><p>{{ (status.running || []).length ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help") }}</p></div>

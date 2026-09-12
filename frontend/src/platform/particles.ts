@@ -14,6 +14,13 @@ let frame = 0;
 let paused = false;
 let reducedMotion = false;
 
+/** 连线阈值（像素）：密度提升后同步放大连接范围。 */
+const connectionDistance = 104;
+
+function particleCount(): number {
+  return window.innerWidth < 640 ? 36 : window.innerWidth < 1000 ? 56 : 80;
+}
+
 function resize(): void {
   if (!canvas) return;
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
@@ -22,8 +29,7 @@ function resize(): void {
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   context?.setTransform(ratio, 0, 0, ratio, 0, 0);
-  const count = window.innerWidth < 640 ? 24 : window.innerWidth < 1000 ? 36 : 48;
-  particles = Array.from({ length: count }, () => spawn());
+  particles = Array.from({ length: particleCount() }, () => spawn());
   if (context && (paused || reducedMotion)) drawFrame(false);
 }
 
@@ -54,8 +60,8 @@ function drawFrame(move: boolean): void {
   const height = window.innerHeight;
   context.clearRect(0, 0, width, height);
   const accent = color();
-  const dotAlpha = alpha("--particle-dot-alpha", 0.12);
-  const lineAlpha = alpha("--particle-line-alpha", 0.05);
+  const dotAlpha = alpha("--particle-dot-alpha", 0.2);
+  const lineAlpha = alpha("--particle-line-alpha", 0.08);
   particles.forEach(point => {
     if (move) {
       point.vx += (Math.random() - 0.5) * point.drift * 2;
@@ -73,21 +79,24 @@ function drawFrame(move: boolean): void {
     context!.arc(point.x, point.y, point.r, 0, Math.PI * 2);
     context!.fill();
   });
+  // 连线使用双层索引循环：粒子密度提高后不再每帧创建临时数组。
   context.globalAlpha = lineAlpha;
-  particles.forEach((point, index) => {
-    particles.slice(index + 1).forEach(other => {
-      const dx = point.x - other.x;
-      const dy = point.y - other.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      if (distance > 90) return;
-      context!.beginPath();
-      context!.strokeStyle = accent;
-      context!.lineWidth = 1;
-      context!.moveTo(point.x, point.y);
-      context!.lineTo(other.x, other.y);
-      context!.stroke();
-    });
-  });
+  context.strokeStyle = accent;
+  context.lineWidth = 1;
+  const maxDistanceSquared = connectionDistance * connectionDistance;
+  for (let index = 0; index < particles.length; index += 1) {
+    const point = particles[index];
+    for (let other = index + 1; other < particles.length; other += 1) {
+      const candidate = particles[other];
+      const dx = point.x - candidate.x;
+      const dy = point.y - candidate.y;
+      if (dx * dx + dy * dy > maxDistanceSquared) continue;
+      context.beginPath();
+      context.moveTo(point.x, point.y);
+      context.lineTo(candidate.x, candidate.y);
+      context.stroke();
+    }
+  }
   context.globalAlpha = 1;
   canvas.dataset.ready = "true";
 }

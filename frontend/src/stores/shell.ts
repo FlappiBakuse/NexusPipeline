@@ -6,6 +6,10 @@ export const useShellStore = defineStore("shell", {
     bootError: "",
     navOpen: false,
     tokenPromptOpen: false,
+    restartRequired: false,
+    restartReasons: [] as string[],
+    restarting: false,
+    restartError: "",
   }),
   actions: {
     markBooted() {
@@ -17,6 +21,30 @@ export const useShellStore = defineStore("shell", {
     },
     closeNav() {
       this.navOpen = false;
+    },
+    /** 记录一次必须重启服务才能生效的改动；重复原因只记录一次。 */
+    markRestartRequired(reason = "") {
+      const key = String(reason || "").trim();
+      if (key && !this.restartReasons.includes(key)) this.restartReasons.push(key);
+      this.restartRequired = true;
+      this.restartError = "";
+    },
+    clearRestartRequired() {
+      this.restartRequired = false;
+      this.restartReasons = [];
+      this.restartError = "";
+    },
+    beginRestart() {
+      this.restarting = true;
+      this.restartError = "";
+    },
+    failRestart(message: unknown) {
+      this.restarting = false;
+      this.restartError = message instanceof Error ? message.message : String(message || "");
+    },
+    finishRestart() {
+      this.restarting = false;
+      this.restartError = "";
     },
   },
 });

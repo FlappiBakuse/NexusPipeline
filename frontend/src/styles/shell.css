@@ -592,7 +592,6 @@ pre.logbox { max-height: 280px; overflow: auto; padding: 13px; border: 1px solid
 .modal-title { margin: 0; font-size: 19px; }
 .modal-close .icon { width: 18px; height: 18px; }
 .modal-close { margin: -5px -8px 0 0; }
-.modal[data-locked]:not([data-allow-close]) .modal-close { display: none; }
 .modal-body { min-height: 0; flex: 1 1 auto; overflow: auto; padding: 0 clamp(18px, 3vw, 30px) var(--space-4); overscroll-behavior: contain; }
 .modal-footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: var(--action-gap); margin: 0; padding: var(--space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--border); }
 .settings-list { display: grid; gap: 0; margin: var(--space-3) 0 var(--space-5); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--content-card); }

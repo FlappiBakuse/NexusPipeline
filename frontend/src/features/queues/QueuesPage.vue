@@ -9,6 +9,7 @@ import { queueRuntimeLimits } from "../../platform/queue-runtime";
 import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../scripts/utils/pluginStatus";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpLoadingState from "../../ui/composites/NxpLoadingState.vue";
 import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpPager from "../../ui/primitives/NxpPager.vue";
@@ -361,20 +362,19 @@ onBeforeUnmount(() => {
 
 <template>
   <main id="view" ref="root" class="view-root" data-testid="main-view">
-    <header class="page-head">
-      <div class="page-head-copy">
-        <div class="eyebrow">{{ t("queues.queue_management") }}</div>
-        <h2>{{ t("common.schedule_queues") }}</h2>
-        <p class="page-kicker">{{ t("queues.page.help") }}</p>
-      </div>
-      <div class="page-head-actions">
+    <NxpPageHeader
+      :eyebrow="t('queues.queue_management')"
+      :title="t('common.schedule_queues')"
+      :description="t('queues.page.help')"
+    >
+      <template #actions>
         <NxpButton class="primary" type="button" :disabled="queueAtLimit" @click="openEditor()">{{
           queueAtLimit
             ? t("queues.action.create_count", { current: queues.length, maximum: queueLimits.maxQueues })
             : t("queues.new_schedule_queue")
         }}</NxpButton>
-      </div>
-    </header>
+      </template>
+    </NxpPageHeader>
     <NxpLoadingState v-if="loading" :title="t('common.loading')" test-id="queues-loading" />
     <NxpEmptyState
       v-else-if="error"

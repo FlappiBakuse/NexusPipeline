@@ -5,7 +5,6 @@ import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
 import { toast } from "../../platform/toast";
-import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpNumberInput from "../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
@@ -162,35 +161,22 @@ watch(
 
 <template>
     <NxpModal
-    :open="true"
-    :closeable="false"
     :locked="true"
+    :open="true"
+    :title="
+      scriptLabel
+        ? t('scripts.edit_script_instance')
+        : draft.pluginType
+          ? t('scripts.action.new_specialized', {
+              plugin: pluginName(draft),
+            })
+          : t('scripts.new_general_script_instance')
+    "
     :aria-label="scriptLabel ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
     panel-class="secondary-surface"
     size="wide"
-    data-locked
+    @close="close"
     >
-    <template #header>
-        <h2 class="modal-title">
-          {{
-            scriptLabel
-              ? t("scripts.edit_script_instance")
-              : draft.pluginType
-                ? t("scripts.action.new_specialized", {
-                    plugin: pluginName(draft),
-                  })
-                : t("scripts.new_general_script_instance")
-          }}
-        </h2>
-        <button
-          class="icon-button modal-close"
-          type="button"
-          :aria-label="t('common.close', {}, 'Close')"
-          @click.stop="close"
-        >
-          <NxpIcon name="close" />
-        </button>
-    </template>
         <div class="form-grid">
           <div class="field">
             <label class="field-label" for="sm-name"

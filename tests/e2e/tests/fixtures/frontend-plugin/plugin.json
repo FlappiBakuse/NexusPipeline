@@ -6,14 +6,14 @@
   "description": "宿主前端插件生命周期端到端测试 fixture。",
   "version": "0.1.0",
   "kind": "data-specialized",
-  "minHostVersion": "0.15.6",
+  "minHostVersion": "0.15.9",
   "capabilities": [
     "frontend-module"
   ],
   "resolve": "data/resolve.json",
   "judgeScript": "data/judge.js",
   "frontend": {
-    "apiVersion": "1.4",
+    "apiVersion": "1.5",
     "entry": "web/main.js",
     "styles": [
       "web/style.css"

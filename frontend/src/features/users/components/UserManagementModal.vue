@@ -366,20 +366,15 @@ onMounted(() => {
 
 <template>
   <NxpModal
-    :open="true"
-    :closeable="false"
     :locked="true"
+    :open="true"
+    :title="t('users.user_management')"
     :aria-label="t('users.user_management')"
     panel-class="secondary-surface"
     size="wide"
-    data-locked
+    :close-label="t('common.close')"
+    @close="close"
   >
-    <template #header>
-      <div><h3 class="modal-title">{{ t("users.user_management") }}</h3></div>
-      <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="close">
-        <NxpIcon name="close" />
-      </button>
-    </template>
     <section ref="root" class="user-management-surface">
       <section class="user-management-settings">
         <div class="field">

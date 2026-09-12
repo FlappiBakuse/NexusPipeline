@@ -6,7 +6,6 @@ import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
-import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpPathPicker from "../../../ui/primitives/NxpPathPicker.vue";
@@ -220,18 +219,15 @@ watch(
 
 <template>
   <NxpModal
-    :open="true"
-    :closeable="false"
     :locked="true"
+    :open="true"
+    :title="t('users.global.title')"
     :aria-label="t('users.global.title')"
     panel-class="secondary-surface"
     size="wide"
-    data-locked
+    :close-label="t('common.close')"
+    @close="close"
   >
-    <template #header>
-      <div><h3 class="modal-title">{{ t("users.global.title") }}</h3></div>
-      <button class="icon-button modal-close" type="button" :aria-label="t('common.close')" @click.stop="close"><NxpIcon name="close" /></button>
-    </template>
     <div class="global-management-grid">
       <section class="global-management-card">
         <div class="section-heading">

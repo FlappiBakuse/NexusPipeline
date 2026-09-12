@@ -1,17 +1,17 @@
 // @ts-nocheck
 /**
- * Frontend API 1.4 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
- * 插件 Web API、本地化、外观与运行预览宿主访问。
+ * Frontend API 1.5 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
+ * 插件 Web API（JSON 与二进制）、本地化、外观与运行预览宿主访问。
  *
  * 宿主平台依赖只通过 host-adapter 获取。
  */
 import {
   api,
-  appearance,
+  apiBlob,
+  apiUpload,
   captureExecutionPreview,
   createAppearanceHost,
   getLocale,
-  refreshAppearance,
   t,
   toast,
 } from "./host-adapter";
@@ -40,9 +40,9 @@ export const PLUGIN_SLOT_NAMES = Object.freeze([
 const SLOT_NAMES = new Set(PLUGIN_SLOT_NAMES);
 
 /** Frontend API 的精确版本；只有完全匹配的插件模块才会被加载。 */
-export const FRONTEND_API_VERSION = "1.4";
+export const FRONTEND_API_VERSION = "1.5";
 
-/** 插件可自行校验宿主 Frontend API 版本；非 1.4 一律返回 false。 */
+/** 插件可自行校验宿主 Frontend API 版本；非 1.5 一律返回 false。 */
 export function verifyPluginApiVersion(value) {
   return String(value ?? "") === FRONTEND_API_VERSION;
 }
@@ -79,12 +79,18 @@ function pluginKey(name, value) {
   return `${String(name || "").toLowerCase()}:${value}`;
 }
 
-function pluginApiPath(name, route) {
+function pluginApiPath(name, route, query) {
   const parts = normalizeRoute(route)
     .split("/")
     .filter(Boolean)
     .map(part => encodeURIComponent(part));
-  return `/api/plugin-api/${encodeURIComponent(name)}${parts.length ? `/${parts.join("/")}` : ""}`;
+  const search = new URLSearchParams();
+  Object.entries(query || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    search.append(key, String(value));
+  });
+  const suffix = search.toString();
+  return `/api/plugin-api/${encodeURIComponent(name)}${parts.length ? `/${parts.join("/")}` : ""}${suffix ? `?${suffix}` : ""}`;
 }
 
 function registerRoute(descriptor, route, handler) {
@@ -211,6 +217,13 @@ export function createPluginHost(descriptor) {  const host = {
       put: (route, body, signal) => api("PUT", pluginApiPath(descriptor.name, route), body, signal),
       patch: (route, body, signal) => api("PATCH", pluginApiPath(descriptor.name, route), body, signal),
       delete: (route, body, signal) => api("DELETE", pluginApiPath(descriptor.name, route), body, signal),
+      blob: (route, options = {}) => apiBlob(pluginApiPath(descriptor.name, route, options.query), options.signal),
+      upload: (route, body, options = {}) => apiUpload(
+        options.method || "POST",
+        pluginApiPath(descriptor.name, route, options.query),
+        body,
+        options.contentType || (body && body.type) || "application/octet-stream",
+        options.signal),
     },
     routes: {
       register: (route, handler) => registerRoute(descriptor, route, handler),
@@ -244,7 +257,7 @@ export function createPluginHost(descriptor) {  const host = {
       onPageUpdated: handler => registerLifecycle("onPageUpdated", handler),
       onDispose: handler => registerLifecycle("onDispose", handler),
     },
-    appearance: createAppearanceHost(descriptor.name),
+    appearance: createAppearanceHost(),
   };
   return host;
 }
@@ -281,7 +294,6 @@ export async function initPluginRuntime() {
       const payload = await api("GET", "/api/plugin-runtime/frontend");
       const descriptors = Array.isArray(payload) ? payload : (payload?.plugins || []);
       for (const descriptor of descriptors) await activateDescriptor(descriptor);
-      await appearance.init();
       renderPluginNav();
       return true;
     } catch (error) {
@@ -298,7 +310,6 @@ export async function refreshPluginRuntime() {
     const payload = await api("GET", "/api/plugin-runtime/frontend");
     const descriptors = Array.isArray(payload) ? payload : (payload?.plugins || []);
     for (const descriptor of descriptors) await activateDescriptor(descriptor);
-    await refreshAppearance();
     renderPluginNav();
     return true;
   } catch {

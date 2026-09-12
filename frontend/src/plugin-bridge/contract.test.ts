@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Frontend API 1.4 外部契约：精确版本匹配、host.* 能力面、18 个公开 slot 白名单、
- * renderer surface context 与清理、生命周期订阅与释放、dispose 后无残留注册。
+ * Frontend API 1.5 外部契约：精确版本匹配、host.* 能力面（含二进制 api.blob/api.upload）、
+ * 18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放、dispose 后无残留注册。
  *
  * 宿主平台依赖经 host-adapter 注入，测试只替换该边界。
  */
@@ -10,6 +10,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const apiCalls: Array<{ method: string; path: string; body: unknown }> = [];
 const toasts: Array<{ message: string; tone: string }> = [];
 const previewCalls: Array<{ runId: string; plugin: string }> = [];
+const blobCalls: string[] = [];
+const uploadCalls: Array<{ method: string; path: string; contentType: string }> = [];
+const appearanceCalls: string[] = [];
 let apiResponder: (method: string, path: string, body: unknown) => unknown = () => null;
 
 vi.mock("./host-adapter", () => ({
@@ -17,7 +20,14 @@ vi.mock("./host-adapter", () => ({
     apiCalls.push({ method, path, body });
     return apiResponder(method, path, body);
   },
-  apiBlob: async () => new Blob(),
+  apiBlob: async (path: string) => {
+    blobCalls.push(path);
+    return new Blob();
+  },
+  apiUpload: async (method: string, path: string, _body: unknown, contentType: string) => {
+    uploadCalls.push({ method, path, contentType });
+    return { ok: true };
+  },
   isAbortError: () => false,
   formatCompactList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatDate: (value: unknown) => String(value ?? ""),
@@ -35,11 +45,15 @@ vi.mock("./host-adapter", () => ({
   clearFieldError: () => {},
   setRequiredFieldError: () => {},
   toast: (message: string, tone = "info") => { toasts.push({ message, tone }); },
-  appearance: { init: async () => null },
-  createAppearanceHost: (pluginName: string) => ({ pluginName }),
-  derivePalette: async () => ({}),
+  createAppearanceHost: () => Object.freeze({
+    registerTheme: () => { appearanceCalls.push("registerTheme"); return { dispose() {} }; },
+    applyTheme: () => { appearanceCalls.push("applyTheme"); return "system"; },
+    setTokens: () => { appearanceCalls.push("setTokens"); },
+    clearTokens: () => { appearanceCalls.push("clearTokens"); },
+    setBackground: () => { appearanceCalls.push("setBackground"); },
+    clearBackground: () => { appearanceCalls.push("clearBackground"); },
+  }),
   initAppearance: async () => null,
-  refreshAppearance: async () => null,
   captureExecutionPreview: async (runId: string, plugin: string) => {
     previewCalls.push({ runId, plugin });
     return { state: "ready", url: null, source: "", capturedAt: null };
@@ -99,7 +113,7 @@ function descriptorFixture() {
     name: `contract-fixture-${pluginSerial}`,
     displayName: "契约夹具",
     version: "1.0.0",
-    frontendApiVersion: "1.4",
+    frontendApiVersion: "1.5",
     entryUrl: `/plugins/contract-fixture-${pluginSerial}/web/main.js`,
     styleUrls: [],
     localization: { defaultLocale: "zh-CN", locales: { "zh-CN": { greeting: "占位文案 {name}" } } },
@@ -112,22 +126,25 @@ function installFixtureNav() {
   document.body.innerHTML = '<nav data-plugin-anchor="shell.nav"></nav>';
 }
 
-describe("Frontend API 1.4 contract", () => {
+describe("Frontend API 1.5 contract", () => {
   beforeEach(() => {
     apiCalls.length = 0;
     toasts.length = 0;
     previewCalls.length = 0;
+    blobCalls.length = 0;
+    uploadCalls.length = 0;
+    appearanceCalls.length = 0;
     apiResponder = () => null;
     document.body.innerHTML = "";
     resetPluginRuntimeForTests();
   });
 
-  it("accepts only the exact 1.4 frontend API version", () => {
-    expect(FRONTEND_API_VERSION).toBe("1.4");
-    expect(verifyPluginApiVersion("1.4")).toBe(true);
-    expect(verifyPluginApiVersion("1.3")).toBe(false);
-    expect(verifyPluginApiVersion("1.5")).toBe(false);
-    expect(verifyPluginApiVersion("1.4.0")).toBe(false);
+  it("accepts only the exact 1.5 frontend API version", () => {
+    expect(FRONTEND_API_VERSION).toBe("1.5");
+    expect(verifyPluginApiVersion("1.5")).toBe(true);
+    expect(verifyPluginApiVersion("1.4")).toBe(false);
+    expect(verifyPluginApiVersion("1.6")).toBe(false);
+    expect(verifyPluginApiVersion("1.5.0")).toBe(false);
     expect(verifyPluginApiVersion("")).toBe(false);
     expect(verifyPluginApiVersion(undefined)).toBe(false);
   });
@@ -279,6 +296,20 @@ describe("Frontend API 1.4 contract", () => {
     expect(apiCalls[1].body).toEqual({ value: 1 });
   });
 
+  it("routes plugin binary api calls into the plugin namespace", async () => {
+    const descriptor = descriptorFixture();
+    const host = createPluginHost(descriptor) as Host;
+    await host.api.blob("asset", { query: { id: "abc123" } });
+    await host.api.upload("assets", new Blob(["x"], { type: "image/png" }));
+    await host.api.upload("assets", new Blob(["x"]), { method: "PUT", contentType: "image/webp", query: { name: "壁纸 一.png" } });
+
+    expect(blobCalls).toEqual([`/api/plugin-api/${descriptor.name}/asset?id=abc123`]);
+    expect(uploadCalls).toEqual([
+      { method: "POST", path: `/api/plugin-api/${descriptor.name}/assets`, contentType: "image/png" },
+      { method: "PUT", path: `/api/plugin-api/${descriptor.name}/assets?name=%E5%A3%81%E7%BA%B8+%E4%B8%80.png`, contentType: "image/webp" },
+    ]);
+  });
+
   it("exposes ui.query/save/action/toast with the documented payloads", async () => {
     apiResponder = () => ({ contributions: [] });
     const descriptor = descriptorFixture();
@@ -312,12 +343,12 @@ describe("Frontend API 1.4 contract", () => {
     ]);
   });
 
-  it("exposes the plugin descriptor, localization, appearance and execution preview", async () => {
+  it("exposes the plugin descriptor, localization, appearance surface and execution preview", async () => {
     const descriptor = descriptorFixture();
     const host = createPluginHost(descriptor) as Host;
     expect(host.plugin.name).toBe(descriptor.name);
     expect(host.plugin.displayName).toBe(descriptor.displayName);
-    expect(host.plugin.frontendApiVersion).toBe("1.4");
+    expect(host.plugin.frontendApiVersion).toBe("1.5");
     expect(Object.isFrozen(host.plugin)).toBe(true);
 
     expect(host.i18n.locale).toBe("zh-CN");
@@ -328,7 +359,19 @@ describe("Frontend API 1.4 contract", () => {
     expect(typeof host.i18n.formatDate).toBe("function");
     expect(typeof host.i18n.formatTime).toBe("function");
 
-    expect((host.appearance as { pluginName?: string }).pluginName).toBe(descriptor.name);
+    expect(Object.keys(host.appearance).sort()).toEqual([
+      "applyTheme",
+      "clearBackground",
+      "clearTokens",
+      "registerTheme",
+      "setBackground",
+      "setTokens",
+    ]);
+    host.appearance.setBackground({ url: "blob:test", blurPx: 4 });
+    host.appearance.setTokens({ "--accent": "#123456" });
+    host.appearance.clearBackground();
+    expect(appearanceCalls).toEqual(["setBackground", "setTokens", "clearBackground"]);
+
     await host.executionPreview.capture("run-1");
     expect(previewCalls).toEqual([{ runId: "run-1", plugin: descriptor.name }]);
   });

@@ -34,4 +34,22 @@ describe("NxpModal", () => {
     expect(document.activeElement).toBe(wrapper.get(".modal-close").element);
     wrapper.unmount();
   });
+
+  it("keeps the explicit close control reachable for every locked secondary modal", async () => {
+    const wrapper = mount(NxpModal, {
+      attachTo: document.body,
+      props: { open: true, title: "锁定二级弹窗", locked: true, ariaLabel: "锁定二级弹窗" },
+      slots: { header: () => h("h3", "锁定二级弹窗"), default: "内容" },
+    });
+    await nextTick();
+
+    const close = wrapper.get(".modal-close");
+    expect(close.isVisible()).toBe(true);
+    expect(close.attributes("aria-label")).toBe("Close");
+    expect(wrapper.get("[role='dialog']").attributes("aria-label")).toBe("锁定二级弹窗");
+
+    await close.trigger("click");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+    wrapper.unmount();
+  });
 });

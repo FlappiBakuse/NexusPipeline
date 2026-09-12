@@ -24,6 +24,8 @@ import Toast from "./primitives/NxpToast.vue";
 import Icon from "./primitives/NxpIcon.vue";
 import SwitchSetting from "./composites/NxpSwitchSetting.vue";
 import LoadingState from "./composites/NxpLoadingState.vue";
+import SectionCard from "./composites/NxpSectionCard.vue";
+import CollapsibleCard from "./composites/NxpCollapsibleCard.vue";
 
 export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-button": Button,
@@ -51,6 +53,8 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-icon": Icon,
   "nxp-switch-setting": SwitchSetting,
   "nxp-loading-state": LoadingState,
+  "nxp-section-card": SectionCard,
+  "nxp-collapsible-card": CollapsibleCard,
 } as const;
 
 export function registerNexusElements() {
