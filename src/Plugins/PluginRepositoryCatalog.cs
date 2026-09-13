@@ -482,22 +482,48 @@ internal static class PluginRepositoryCatalog
             : string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
+    public static PluginCompatibilityResult EvaluateCompatibility(PluginCatalogEntry entry, string hostVersion)
+    {
+        if (!TryParseVersion(hostVersion, out NexusVersion host)
+            || !TryParseVersion(entry.MinHostVersion, out NexusVersion minimum))
+        {
+            return new PluginCompatibilityResult(
+                false,
+                "invalid_version",
+                "宿主版本或插件最低版本无效");
+        }
+        if (host.CompareTo(minimum) < 0)
+        {
+            return new PluginCompatibilityResult(
+                false,
+                "host_version_too_low",
+                $"需要宿主 v{entry.MinHostVersion} 或更高版本");
+        }
+        if (entry.Kind == "managed-code")
+        {
+            if (!TryParseApiVersion(entry.ApiVersion, out int apiMajor, out int apiMinor))
+            {
+                return new PluginCompatibilityResult(
+                    false,
+                    "invalid_version",
+                    $"插件声明的 Plugin API 版本无效：{entry.ApiVersion}");
+            }
+            if (apiMajor != PluginApiVersion.Major || apiMinor > PluginApiVersion.Minor)
+            {
+                return new PluginCompatibilityResult(
+                    false,
+                    "plugin_api_incompatible",
+                    $"需要兼容 Plugin API v{PluginApiVersion.Major}.{PluginApiVersion.Minor} 的版本（插件声明 v{entry.ApiVersion}）");
+            }
+        }
+        return PluginCompatibilityResult.CompatibleResult;
+    }
+
     public static bool IsCompatible(PluginCatalogEntry entry, string hostVersion, out string reason)
     {
-        if (!IsHostVersionCompatible(entry.MinHostVersion, hostVersion, out reason))
-        {
-            return false;
-        }
-        if (entry.Kind == "managed-code"
-            && (!TryParseApiVersion(entry.ApiVersion, out int apiMajor, out int apiMinor)
-                || apiMajor != PluginApiVersion.Major
-                || apiMinor > PluginApiVersion.Minor))
-        {
-            reason = $"需要兼容 Plugin API v{PluginApiVersion.Major}.{PluginApiVersion.Minor} 的版本（插件声明 v{entry.ApiVersion}）";
-            return false;
-        }
-        reason = "";
-        return true;
+        PluginCompatibilityResult result = EvaluateCompatibility(entry, hostVersion);
+        reason = result.Reason;
+        return result.Compatible;
     }
 
     public static bool IsHostVersionCompatible(string minimumVersion, string hostVersion, out string reason)
@@ -568,6 +594,14 @@ internal sealed record PluginCatalog(
     string Repository,
     string GeneratedAt,
     IReadOnlyList<PluginCatalogEntry> Plugins);
+
+internal sealed record PluginCompatibilityResult(
+    bool Compatible,
+    string? Code,
+    string Reason)
+{
+    public static PluginCompatibilityResult CompatibleResult { get; } = new(true, null, "");
+}
 
 internal sealed record PluginCatalogEntry(
     string Name,

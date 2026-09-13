@@ -8,6 +8,7 @@ import {
   prepareRuntime,
   projectRoot,
   runtimeDir,
+  runtimeDiagnostic,
   sleep,
   startRuntime,
   systemWebPort,
@@ -38,11 +39,20 @@ function writeSettings(updateCheckEnabled) {
 function createReleaseServer() {
   let requestCount = 0;
   const server = http.createServer((request, response) => {
+    if (request.url === "/update-policy.json") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({
+        schemaVersion: 1,
+        repository: "FlappiBakuse/NexusPipeline",
+        barriers: [],
+      }));
+      return;
+    }
     if (request.url === "/releases") {
       requestCount++;
       const release = {
         draft: false,
-        prerelease: true,
+        prerelease: false,
         tag_name: `v${updateVersion}`,
         name: `v${updateVersion} test release`,
         body: "periodic update regression fixture",
@@ -110,7 +120,14 @@ test("定期自动检查：开启时服务启动后完成首次检查", { skip: 
       const status = await response.json();
       return status.available === true && status.latest === updateVersion;
     }, 15000, 100);
-    assert.equal(observed, true, "宿主启动后应自动请求更新源");
+    let diagnosticStatus = "";
+    try {
+      const response = await api("GET", "/api/update/status");
+      diagnosticStatus = `${response.status} ${await response.text()}`;
+    } catch (error) {
+      diagnosticStatus = error?.stack || error?.message || String(error);
+    }
+    assert.equal(observed, true, `宿主启动后应自动请求更新源；requests=${fixture.requestCount}; status=${diagnosticStatus}\n${runtimeDiagnostic()}`);
     assert.equal(fixture.requestCount, 1, "首次检查观察窗口内不得重复触发");
     const status = await (await api("GET", "/api/update/status")).json();
     assert.equal(status.available, true);

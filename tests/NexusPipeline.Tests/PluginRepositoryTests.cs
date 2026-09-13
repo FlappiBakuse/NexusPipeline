@@ -360,6 +360,38 @@ public sealed class PluginRepositoryCatalogTests
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, CandidateHostVersion, out _));
     }
 
+    [Fact]
+    public void CompatibilityEvaluator_DistinguishesHostApiAndInvalidVersionFailures()
+    {
+        PluginCatalogEntry managed = new(
+            "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.7", Array.Empty<string>(),
+            UpdateService.CurrentVersion,
+            "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/fixture/fixture-0.1.0.zip",
+            new string('a', 64),
+            1);
+
+        PluginCompatibilityResult api = PluginRepositoryCatalog.EvaluateCompatibility(
+            managed,
+            UpdateService.CurrentVersion);
+        Assert.False(api.Compatible);
+        Assert.Equal("plugin_api_incompatible", api.Code);
+        Assert.Equal("incompatible", PluginRepositoryService.ResolveStoreStatus(api, installed: true, updateAvailable: true, pending: false));
+
+        PluginCompatibilityResult host = PluginRepositoryCatalog.EvaluateCompatibility(
+            managed with { ApiVersion = "1.0", MinHostVersion = CandidateHostVersion },
+            UpdateService.CurrentVersion);
+        Assert.False(host.Compatible);
+        Assert.Equal("host_version_too_low", host.Code);
+        Assert.Equal("incompatible", PluginRepositoryService.ResolveStoreStatus(host, installed: false, updateAvailable: false, pending: false));
+        Assert.Equal("update-requires-host-upgrade", PluginRepositoryService.ResolveStoreStatus(host, installed: true, updateAvailable: true, pending: false));
+
+        PluginCompatibilityResult invalid = PluginRepositoryCatalog.EvaluateCompatibility(
+            managed with { MinHostVersion = "not-a-version" },
+            UpdateService.CurrentVersion);
+        Assert.False(invalid.Compatible);
+        Assert.Equal("invalid_version", invalid.Code);
+    }
+
     private static JsonObject CreateCatalog(int schemaVersion = 2)
     {
         var entry = new JsonObject

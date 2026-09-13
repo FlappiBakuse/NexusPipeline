@@ -225,7 +225,7 @@ internal sealed class UpdateService
             using HttpResponseMessage response = await policy.GetAsync(
                 http,
                 policy.SourceUri,
-                manifest: true,
+                UpdateResourceKind.Manifest,
                 "NexusPipeline-update/" + CurrentVersion,
                 operation.Cts.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)

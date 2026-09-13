@@ -55,17 +55,17 @@ public sealed class UpdateCatalogTests
         // 当前版本 0.10.0；v0.10.1 资产齐全 → 选中；v0.10.2 缺少 sha → 跳过；v0.10.3 draft → 跳过。
         JsonNode root = JsonNode.Parse("""
         [
-          { "tag_name": "v0.10.2", "draft": false, "prerelease": true, "assets": [
-              { "name": "NexusPipeline-v0.10.2-win-x64.zip", "browser_download_url": "https://github.com/x.zip" }
+          { "tag_name": "v0.10.2-beta.1", "draft": false, "prerelease": true, "assets": [
+              { "name": "NexusPipeline-v0.10.2-beta.1-win-x64.zip", "browser_download_url": "https://github.com/x.zip" }
           ] },
-          { "tag_name": "v0.10.3", "draft": true, "prerelease": true, "assets": [
-              { "name": "NexusPipeline-v0.10.3-win-x64.zip", "browser_download_url": "https://github.com/x.zip" },
-              { "name": "NexusPipeline-v0.10.3-win-x64.zip.sha256", "browser_download_url": "https://github.com/x.sha" }
+          { "tag_name": "v0.10.3-beta.1", "draft": true, "prerelease": true, "assets": [
+              { "name": "NexusPipeline-v0.10.3-beta.1-win-x64.zip", "browser_download_url": "https://github.com/x.zip" },
+              { "name": "NexusPipeline-v0.10.3-beta.1-win-x64.zip.sha256", "browser_download_url": "https://github.com/x.sha" }
           ] },
-          { "tag_name": "v0.10.1", "draft": false, "prerelease": true, "body": "更新说明",
+          { "tag_name": "v0.10.1-beta.1", "draft": false, "prerelease": true, "body": "更新说明",
             "assets": [
-              { "name": "NexusPipeline-v0.10.1-win-x64.zip", "browser_download_url": "https://github.com/a.zip" },
-              { "name": "NexusPipeline-v0.10.1-win-x64.zip.sha256", "browser_download_url": "https://github.com/a.sha" }
+              { "name": "NexusPipeline-v0.10.1-beta.1-win-x64.zip", "browser_download_url": "https://github.com/a.zip" },
+              { "name": "NexusPipeline-v0.10.1-beta.1-win-x64.zip.sha256", "browser_download_url": "https://github.com/a.sha" }
           ] }
         ]
         """)!;
@@ -73,8 +73,8 @@ public sealed class UpdateCatalogTests
         ReleaseInfo? release = UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0"));
 
         Assert.NotNull(release);
-        Assert.Equal("v0.10.1", release!.Tag);
-        Assert.Equal("0.10.1", release.VersionText);
+        Assert.Equal("v0.10.1-beta.1", release!.Tag);
+        Assert.Equal("0.10.1-beta.1", release.VersionText);
         Assert.Equal("更新说明", release.Notes);
         Assert.True(release.Prerelease);
     }
@@ -101,6 +101,44 @@ public sealed class UpdateCatalogTests
         Assert.Equal("v0.11.0", stable!.Tag);
         // prerelease 渠道取最高版本（stable 与 prerelease 均可见）。
         Assert.Equal("v0.11.0", prerelease!.Tag);
+    }
+
+    [Theory]
+    [InlineData("v1.0.0", false, true)]
+    [InlineData("v1.0.0", true, false)]
+    [InlineData("v1.0.0-beta.1", true, true)]
+    [InlineData("v1.0.0-beta.1", false, false)]
+    [InlineData("v1.0.0-rc.1", true, true)]
+    [InlineData("v1.0.0-rc.1", false, false)]
+    public void PickRelease_RequiresConsistentPrereleaseMetadata(string tag, bool prerelease, bool expected)
+    {
+        string version = tag[1..];
+        JsonNode root = new JsonArray
+        {
+            new JsonObject
+            {
+                ["tag_name"] = tag,
+                ["draft"] = false,
+                ["prerelease"] = prerelease,
+                ["assets"] = new JsonArray
+                {
+                    new JsonObject
+                    {
+                        ["name"] = $"NexusPipeline-v{version}-win-x64.zip",
+                        ["browser_download_url"] = "https://github.com/package.zip",
+                    },
+                    new JsonObject
+                    {
+                        ["name"] = $"NexusPipeline-v{version}-win-x64.zip.sha256",
+                        ["browser_download_url"] = "https://github.com/package.sha256",
+                    },
+                },
+            },
+        };
+
+        ReleaseInfo? release = UpdateCatalog.PickRelease(root, "prerelease", V("0.0.0"));
+
+        Assert.Equal(expected, release is not null);
     }
 
     [Fact]
@@ -167,7 +205,32 @@ public sealed class UpdateCatalogTests
         await Assert.ThrowsAsync<InvalidDataException>(() => policy.GetAsync(
             http,
             new Uri("https://mirror.example.com/releases/pkg.zip"),
-            manifest: false,
+            UpdateResourceKind.ReleaseAsset,
+            "test",
+            CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SourcePolicy_PolicyUsesItsOwnUriBoundary()
+    {
+        var defaultPolicy = new UpdateSourcePolicy("");
+        Assert.Null(defaultPolicy.ValidatePolicyUri(new Uri(UpdatePolicy.DefaultPolicyUrl)));
+        Assert.NotNull(defaultPolicy.ValidatePolicyUri(new Uri(
+            "https://github.com/FlappiBakuse/NexusPipeline/releases/download/v0.17.0/update-policy.json")));
+        Assert.NotNull(defaultPolicy.ValidatePolicyUri(new Uri(
+            "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json?source=mirror")));
+
+        var customPolicy = new UpdateSourcePolicy("https://mirror.example.com/releases");
+        Assert.Null(customPolicy.ValidatePolicyUri(UpdatePolicy.ResolveUri(customPolicy)));
+        Assert.NotNull(customPolicy.ValidatePolicyUri(new Uri("https://other.example.com/update-policy.json")));
+        Assert.NotNull(customPolicy.ValidatePolicyUri(new Uri("http://mirror.example.com/update-policy.json")));
+
+        using var http = new HttpClient(new RedirectEscapeHandler(new Uri(
+            "https://github.com/FlappiBakuse/NexusPipeline/releases/download/v0.17.0/update-policy.json")));
+        await Assert.ThrowsAsync<InvalidDataException>(() => defaultPolicy.GetAsync(
+            http,
+            new Uri(UpdatePolicy.DefaultPolicyUrl),
+            UpdateResourceKind.Policy,
             "test",
             CancellationToken.None));
     }
@@ -183,7 +246,7 @@ public sealed class UpdateCatalogTests
         using HttpResponseMessage response = await policy.GetAsync(
             http,
             new Uri("http://127.0.0.1:5899/catalog.json"),
-            manifest: true,
+            UpdateResourceKind.Manifest,
             "test",
             CancellationToken.None,
             request =>
@@ -199,13 +262,20 @@ public sealed class UpdateCatalogTests
 
     private sealed class RedirectEscapeHandler : HttpMessageHandler
     {
+        private readonly Uri _destination;
+
+        public RedirectEscapeHandler(Uri? destination = null)
+        {
+            _destination = destination ?? new Uri("https://evil.example.com/pkg.zip");
+        }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var response = new HttpResponseMessage(HttpStatusCode.Redirect)
             {
                 RequestMessage = request,
             };
-            response.Headers.Location = new Uri("https://evil.example.com/pkg.zip");
+            response.Headers.Location = _destination;
             return Task.FromResult(response);
         }
     }
@@ -446,7 +516,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         get
         {
             Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
-            return $"{current.Major}.{current.Minor}.{checked(current.Patch + 1)}";
+            return $"{current.Major}.{current.Minor}.{checked(current.Patch + 1)}-beta.1";
         }
     }
 

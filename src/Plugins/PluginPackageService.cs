@@ -47,9 +47,14 @@ internal sealed class PluginPackageService
         {
             throw new PluginRepositoryException("invalid_package_url", urlError);
         }
-        if (!PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason))
+        PluginCompatibilityResult compatibility = PluginRepositoryCatalog.EvaluateCompatibility(
+            entry,
+            UpdateService.CurrentVersion);
+        if (!compatibility.Compatible)
         {
-            throw new PluginRepositoryException("incompatible", compatibilityReason);
+            throw new PluginRepositoryException(
+                compatibility.Code ?? "incompatible",
+                compatibility.Reason);
         }
 
         string operationRoot = Path.Combine(AppPaths.PluginStagingDir, $"{entry.Name}.{Guid.NewGuid():N}");
@@ -104,7 +109,7 @@ internal sealed class PluginPackageService
         using HttpResponseMessage response = await policy.GetAsync(
             client,
             packageUri,
-            manifest: false,
+            UpdateResourceKind.ReleaseAsset,
             "NexusPipeline-plugin/" + entry.Name + "/" + entry.Version,
             cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

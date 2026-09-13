@@ -40,6 +40,8 @@ internal sealed record PluginDetail(
     IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales)
 {
     public string? RuntimeErrorCode { get; init; }
+
+    public string? CompatibilityCode { get; init; }
 }
 
 internal sealed record PluginReadmeResult(

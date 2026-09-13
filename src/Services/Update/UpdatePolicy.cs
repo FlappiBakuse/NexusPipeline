@@ -143,7 +143,7 @@ internal static class UpdatePolicy
             using HttpResponseMessage response = await sourcePolicy.GetAsync(
                 http,
                 policyUri,
-                manifest: false,
+                UpdateResourceKind.Policy,
                 userAgent,
                 token,
                 request => AddConditionalHeaders(request, cached)).ConfigureAwait(false);

@@ -77,9 +77,35 @@ public sealed class NexusVersionTests
         Assert.Equal("https://example.com/migrate", barrier.MigrationUrl);
     }
 
+    [Fact]
+    public void UpdatePolicy_RepositoryPolicy_IsValid()
+    {
+        string path = Path.Combine(FindProjectRoot(), "update-policy.json");
+        Assert.True(File.Exists(path), $"缺少仓库根目录 update-policy.json：{path}");
+
+        Assert.True(
+            UpdatePolicy.TryParse(File.ReadAllText(path), out UpdatePolicyDocument? policy, out string? error),
+            error);
+        Assert.Equal(UpdatePolicy.Repository, policy!.Repository);
+    }
+
     private static NexusVersion V(string value)
     {
         Assert.True(NexusVersion.TryParse(value, out NexusVersion version));
         return version;
+    }
+
+    private static string FindProjectRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "src", "NexusPipeline.csproj")))
+            {
+                return current.FullName;
+            }
+            current = current.Parent;
+        }
+        throw new InvalidOperationException("无法定位 NexusPipeline 项目根目录");
     }
 }

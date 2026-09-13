@@ -172,6 +172,14 @@ internal static class ApiPluginsHandler
             configuredEnabled = view.ConfiguredEnabled,
             runtimeEnabled = view.RuntimeEnabled,
             state = view.State,
+            compatibilityCode = view.RuntimeErrorCode switch
+            {
+                "plugin_incompatible_host" => "host_version_too_low",
+                "plugin_incompatible_api" => "plugin_api_incompatible",
+                _ when string.Equals(view.State, PluginRuntimeState.Incompatible.ToString(), StringComparison.Ordinal)
+                    => "incompatible",
+                _ => null,
+            },
             runtimeErrorCode = string.IsNullOrWhiteSpace(view.Error) ? null : view.RuntimeErrorCode,
             restartRequired = view.RestartRequired,
             hasFrontend = view.HasFrontend,
@@ -215,7 +223,7 @@ internal static class ApiPluginsHandler
             installedVersion = plugin.InstalledVersion,
             updateAvailable = plugin.UpdateAvailable,
             compatible = plugin.Compatible,
-            compatibilityCode = plugin.Compatible ? null : "host_version_too_low",
+            compatibilityCode = plugin.CompatibilityCode,
             managedByStore = plugin.ManagedByStore,
             pendingAction = plugin.PendingAction,
             pendingVersion = plugin.PendingVersion,
@@ -283,6 +291,10 @@ internal static class ApiPluginsHandler
 
     private static string? DetailCompatibilityCode(PluginDetail detail)
     {
+        if (!string.IsNullOrWhiteSpace(detail.CompatibilityCode))
+        {
+            return detail.CompatibilityCode;
+        }
         if (detail.Compatible)
         {
             return null;

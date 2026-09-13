@@ -57,7 +57,7 @@ export function runtimeLabel(plugin: PluginViewPlugin, t: PluginTranslator) {
   if (plugin.state === "Incompatible") {
     return plugin.runtimeErrorCode === "plugin_incompatible_host"
       ? t("plugins.incompatible_host", { version: plugin.minHostVersion || "" })
-      : t("plugins.incompatible_api");
+      : t("plugins.incompatible");
   }
   return plugin.configuredEnabled ? t("plugins.restart_required") : t("common.disabled");
 }
@@ -74,7 +74,7 @@ export function storeStatusLabel(plugin: PluginViewPlugin, t: PluginTranslator) 
     installed: "plugins.installed",
     "update-available": "plugins.update_available",
     pending: "plugins.restart_required",
-    incompatible: "plugins.incompatible_with_host",
+    incompatible: "plugins.incompatible",
     "update-requires-host-upgrade": "plugins.update_requires_host_upgrade",
     unlisted: "plugins.not_listed_in_repository",
   };
@@ -96,10 +96,20 @@ export function storeActionNotice(plugin: PluginViewPlugin, t: PluginTranslator)
       restart: t("plugins.effective_after_restart"),
     });
   }
-  if (plugin.compatible === false || ["incompatible", "update-requires-host-upgrade"].includes(String(plugin.status))) {
+  const compatibilityCode = String(plugin.compatibilityCode || "");
+  if (compatibilityCode === "host_version_too_low" || plugin.status === "update-requires-host-upgrade") {
     return t("plugin.store.host_upgrade_required", {
       version: plugin.minHostVersion || "",
     }, "Update the host before updating this plugin");
+  }
+  if (compatibilityCode === "plugin_api_incompatible") {
+    return t("plugin.store.api_incompatible", {}, "This plugin is incompatible with the current Plugin API");
+  }
+  if (compatibilityCode === "invalid_version") {
+    return t("plugin.store.invalid_version", {}, "The plugin or host version is invalid");
+  }
+  if (plugin.compatible === false || ["incompatible", "update-requires-host-upgrade"].includes(String(plugin.status))) {
+    return t("plugin.store.incompatible", {}, "This plugin is incompatible with the current host");
   }
   return "";
 }

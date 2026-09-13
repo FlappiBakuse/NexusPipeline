@@ -18,7 +18,9 @@ describe("pluginStatusView", () => {
   });
 
   it("keeps API incompatibility distinguishable from a host version requirement", () => {
-    expect(runtimeLabel({ state: "Incompatible", runtimeErrorCode: "plugin_incompatible_api" }, t)).toBe("plugins.incompatible_api");
+    expect(runtimeLabel({ state: "Incompatible", runtimeErrorCode: "plugin_incompatible_api" }, t)).toBe("plugins.incompatible");
+    expect(storeActionNotice({ status: "incompatible", compatible: false, compatibilityCode: "plugin_api_incompatible" }, t))
+      .toBe("This plugin is incompatible with the current Plugin API");
   });
 
   it("removes store actions when the catalog requires a host upgrade", () => {

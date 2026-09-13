@@ -397,6 +397,8 @@ jobs:
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -407,6 +409,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: 校验 update-policy 历史不可变性
+        env:
+          NEXUS_UPDATE_POLICY_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          NEXUS_UPDATE_POLICY_HEAD_SHA: ${{ github.sha }}
+        run: node tools/validate-update-policy-history.mjs
 
       - name: 管理员完整性自检
         shell: pwsh

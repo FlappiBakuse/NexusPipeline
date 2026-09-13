@@ -57,6 +57,7 @@ export const CI_DOMAINS = [
       "src/**",
       "tests/NexusPipeline.Tests/**",
       "tests/fixtures/**",
+      "update-policy.json",
       "*.csproj",
       "global.json",
       "build.cmd",
@@ -179,8 +180,11 @@ export const CI_DOMAINS = [
     paths: [
       ...SYSTEM_SHARED_PATHS,
       "src/Services/Update/**",
+      "update-policy.json",
+      "tools/validate-update-policy-history.mjs",
       "tests/system/startup-update-smoke.mjs",
       "tests/system/update-smoke.mjs",
+      "tests/tools/update-policy-history.test.mjs",
     ],
   },
 ];

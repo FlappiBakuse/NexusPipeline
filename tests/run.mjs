@@ -171,7 +171,11 @@ async function runDocs() {
 }
 
 async function runTooling() {
-  return runProcess(nodeCommand, ["--test", "tests\\tools\\ci-domains.test.mjs"]);
+  return runProcess(nodeCommand, [
+    "--test",
+    "tests\\tools\\ci-domains.test.mjs",
+    "tests\\tools\\update-policy-history.test.mjs",
+  ]);
 }
 
 async function runSyntax() {

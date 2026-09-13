@@ -251,7 +251,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 壁纸配置、配额、文件校验、去重、轮换、配色与持久化属于插件业务，由插件通过自己的资产 scope、插件 Web API 与前端模块实现；宿主只提供通用资产存储、二进制 Web API 与通用外观表面。旧宿主壁纸数据的搬迁见上文「旧外观数据搬迁」。
 
-`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`minHostVersion`、`runtimeErrorCode`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。宿主版本低于 `minHostVersion` 时使用 `state=Incompatible` 与 `runtimeErrorCode=plugin_incompatible_host`，不会解析专项插件、注册其能力或加载 managed-code 程序集；Plugin API 不兼容使用 `plugin_incompatible_api`。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
+`capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`minHostVersion`、`runtimeErrorCode`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。宿主版本低于 `minHostVersion` 时使用 `state=Incompatible` 与 `runtimeErrorCode=plugin_incompatible_host`，不会解析专项插件、注册其能力或加载 managed-code 程序集；Plugin API 不兼容使用 `plugin_incompatible_api`。插件商店列表与详情另提供 `compatibilityCode`，使用 `host_version_too_low`、`plugin_api_incompatible` 或 `invalid_version` 区分更新阻断原因。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 
 插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，创建时间取 `store.json.createdAt`（插件第一次正式公开发布日期），更新时间取最新更新记录日期。旧 catalog 缺少 `createdAt` 时按空值展示并保持可读取。
 

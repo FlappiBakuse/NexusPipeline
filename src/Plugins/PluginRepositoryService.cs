@@ -188,6 +188,34 @@ internal sealed class PluginRepositoryService
             && string.IsNullOrWhiteSpace(plugin.PendingAction);
     }
 
+    internal static string ResolveStoreStatus(
+        PluginCompatibilityResult compatibility,
+        bool installed,
+        bool updateAvailable,
+        bool pending)
+    {
+        if (pending)
+        {
+            return "pending";
+        }
+        if (!compatibility.Compatible
+            && compatibility.Code == "host_version_too_low"
+            && installed
+            && updateAvailable)
+        {
+            return "update-requires-host-upgrade";
+        }
+        if (!compatibility.Compatible)
+        {
+            return "incompatible";
+        }
+        if (!installed)
+        {
+            return "not-installed";
+        }
+        return updateAvailable ? "update-available" : "installed";
+    }
+
     public async Task<PluginPendingOperation> InstallAsync(
         string name,
         bool update,
@@ -197,9 +225,14 @@ internal sealed class PluginRepositoryService
         try
         {
             PluginCatalogEntry entry = await RequireEntryAsync(name, cancellationToken).ConfigureAwait(false);
-            if (!PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason))
+            PluginCompatibilityResult compatibility = PluginRepositoryCatalog.EvaluateCompatibility(
+                entry,
+                UpdateService.CurrentVersion);
+            if (!compatibility.Compatible)
             {
-                throw new PluginRepositoryException("incompatible", compatibilityReason);
+                throw new PluginRepositoryException(
+                    compatibility.Code ?? "incompatible",
+                    compatibility.Reason);
             }
             PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
                 string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
@@ -338,6 +371,14 @@ internal sealed class PluginRepositoryService
             view.Locales)
         {
             RuntimeErrorCode = view.RuntimeErrorCode,
+            CompatibilityCode = view.RuntimeErrorCode switch
+            {
+                "plugin_incompatible_host" => "host_version_too_low",
+                "plugin_incompatible_api" => "plugin_api_incompatible",
+                _ when string.Equals(view.State, PluginRuntimeState.Incompatible.ToString(), StringComparison.Ordinal)
+                    => "incompatible",
+                _ => null,
+            },
         };
     }
 
@@ -406,6 +447,7 @@ internal sealed class PluginRepositoryService
             item.Locales)
         {
             RuntimeErrorCode = installedView?.RuntimeErrorCode,
+            CompatibilityCode = item.CompatibilityCode,
         };
     }
 
@@ -490,7 +532,7 @@ internal sealed class PluginRepositoryService
             using HttpResponseMessage response = await new UpdateSourcePolicy("").GetAsync(
                 client,
                 uri,
-                manifest: false,
+                UpdateResourceKind.ReleaseAsset,
                 "NexusPipeline-plugin-readme/" + item.Name + "/" + item.Version,
                 cancellationToken,
                 request => AddConditionalHeaders(request, cachedEntry?.ETag, cachedEntry?.LastModified)).ConfigureAwait(false);
@@ -608,7 +650,7 @@ internal sealed class PluginRepositoryService
         using HttpResponseMessage response = await policy.GetAsync(
             client,
             uri,
-            manifest: true,
+            UpdateResourceKind.Manifest,
             "NexusPipeline-plugin-catalog/" + UpdateService.CurrentVersion,
             cancellationToken,
             request => AddConditionalHeaders(
@@ -679,16 +721,17 @@ internal sealed class PluginRepositoryService
             installed.TryGetValue(entry.Name, out PluginSummary? local);
             PluginPendingOperation? operation = pending.LastOrDefault(item =>
                 string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
-            bool compatible = PluginRepositoryCatalog.IsCompatible(entry, UpdateService.CurrentVersion, out string compatibilityReason);
+            PluginCompatibilityResult compatibility = PluginRepositoryCatalog.EvaluateCompatibility(
+                entry,
+                UpdateService.CurrentVersion);
+            bool compatible = compatibility.Compatible;
             bool updateAvailable = local is not null
                 && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
-            string status = operation is not null
-                ? "pending"
-                : !compatible
-                    ? "update-requires-host-upgrade"
-                : local is null
-                    ? "not-installed"
-                : updateAvailable ? "update-available" : "installed";
+            string status = ResolveStoreStatus(
+                compatibility,
+                installed: local is not null,
+                updateAvailable: updateAvailable,
+                pending: operation is not null);
             items.Add(new PluginStoreItem(
                 entry.Name,
                 entry.ArtifactName,
@@ -704,7 +747,7 @@ internal sealed class PluginRepositoryService
                 local?.Version ?? "",
                 updateAvailable,
                 compatible,
-                compatible ? "" : compatibilityReason,
+                compatible ? "" : compatibility.Reason,
                 ownership.ContainsKey(entry.Name),
                 operation?.Action ?? "",
                 operation?.Version ?? "",
@@ -719,6 +762,7 @@ internal sealed class PluginRepositoryService
                 UpdatedAt = entry.UpdatedAt,
                 Locales = entry.Locales,
                 HasReadme = entry.HasReadme,
+                CompatibilityCode = compatibility.Code,
             });
         }
         foreach (PluginSummary local in installed.Values
@@ -1104,6 +1148,8 @@ internal sealed record PluginStoreItem(
     public string UpdatedAt { get; init; } = "";
 
     public bool HasReadme { get; init; }
+
+    public string? CompatibilityCode { get; init; }
 
     public IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales { get; init; } =
         new Dictionary<string, PluginLocalizedMetadata>(StringComparer.OrdinalIgnoreCase);

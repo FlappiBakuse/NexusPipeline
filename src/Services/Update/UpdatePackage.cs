@@ -45,7 +45,7 @@ internal static class UpdatePackage
         {
             string shaText;
             using (HttpResponseMessage shaResponse = await policy.GetAsync(
-                       http, shaUri, manifest: false, "NexusPipeline-update", token).ConfigureAwait(false))
+                       http, shaUri, UpdateResourceKind.ReleaseAsset, "NexusPipeline-update", token).ConfigureAwait(false))
             {
                 if (!shaResponse.IsSuccessStatusCode)
                 {
@@ -63,7 +63,7 @@ internal static class UpdatePackage
             }
 
             using (HttpResponseMessage response = await policy.GetAsync(
-                       http, zipUri, manifest: false, "NexusPipeline-update", token).ConfigureAwait(false))
+                       http, zipUri, UpdateResourceKind.ReleaseAsset, "NexusPipeline-update", token).ConfigureAwait(false))
             {
                 if (!response.IsSuccessStatusCode)
                 {

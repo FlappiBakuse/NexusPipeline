@@ -105,6 +105,22 @@ test("UpdateService 改动只触发 system_update 的 System 门禁", () => {
   assertFlags(files, { host: true, system_update: true, system_emulator: false, system_execution: false, system_runtime: false });
 });
 
+test("update-policy.json 改动触发 host 与 system_update 门禁", () => {
+  const files = ["update-policy.json"];
+  assertRepoFiles(files);
+  assertFlags(files, {
+    frontend: false,
+    host: true,
+    docs: false,
+    plugin: false,
+    ui: false,
+    system_runtime: false,
+    system_execution: false,
+    system_emulator: false,
+    system_update: true,
+  });
+});
+
 test("ExecutionService 改动只触发 system_execution 的 System 门禁", () => {
   const files = ["src/Services/Execution/ExecutionCoordinator.cs"];
   assertRepoFiles(files);

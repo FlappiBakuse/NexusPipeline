@@ -102,6 +102,9 @@ function hasPendingAction() {
         <div v-if="tab === 'local' && plugin.runtimeErrorCode === 'plugin_incompatible_host'" class="callout callout-warning">
           {{ t("plugin.store.incompatible_host", { version: plugin.minHostVersion || "" }) }}
         </div>
+        <div v-else-if="tab === 'local' && plugin.runtimeErrorCode === 'plugin_incompatible_api'" class="callout callout-warning">
+          {{ t("plugin.store.api_incompatible") }}
+        </div>
         <div v-else-if="tab === 'local' && plugin.runtimeErrorCode" class="field-error-message">{{ t("plugin.store.runtime_error") }}</div>
         <div v-if="plugin.installed && plugin.installedVersion && plugin.installedVersion !== plugin.version" class="callout callout-warning">
           {{ t("plugins.version.installed", { version: plugin.installedVersion }) }}
