@@ -85,7 +85,7 @@ internal sealed class McpToolContext
                 pending.Deadline,
             },
             running = Runtime.Center.Active.Select(item => McpRunView.From(item.Snapshot(), includeRecords: false)).ToList(),
-            plugins = Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleCatalog.HostLocale),
+            plugins = Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleContext.Current),
         };
     }
 
@@ -156,11 +156,15 @@ internal sealed class McpToolContext
                 "ambiguous_target",
                 $"{label}引用匹配到多个对象，请改用稳定 ID",
                 OperationErrorKind.Conflict,
-                resolution.Candidates.Select(describe).ToArray()),
+                resolution.Candidates.Select(describe).ToArray(),
+                messageKey: "api.error.ambiguous_target",
+                messageArgs: new Dictionary<string, object?> { ["label"] = label }),
             _ => OperationResult<T>.Failure(
                 "not_found",
                 $"未找到{label}：引用为空或对象不存在",
-                OperationErrorKind.NotFound),
+                OperationErrorKind.NotFound,
+                messageKey: "api.error.target_not_found",
+                messageArgs: new Dictionary<string, object?> { ["label"] = label }),
         };
     }
 

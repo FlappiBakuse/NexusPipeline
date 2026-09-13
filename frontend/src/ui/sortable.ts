@@ -88,7 +88,11 @@ function placeBeforeForPoint(drag: ActiveDrag, clientX: number, clientY: number)
     }
     if (!closest) return null;
     const rect = closest.getBoundingClientRect();
-    return clientY < rect.top + rect.height / 2 || clientX < rect.left + rect.width / 2 ? closest : null;
+    const before = clientY < rect.top + rect.height / 2
+      || (Math.abs(clientY - (rect.top + rect.height / 2)) <= rect.height / 2 && clientX < rect.left + rect.width / 2);
+    if (before) return closest;
+    const index = directItems(drag.container).indexOf(closest);
+    return directItems(drag.container)[index + 1] || null;
   }
   return candidates.find(item => {
     const rect = item.getBoundingClientRect();

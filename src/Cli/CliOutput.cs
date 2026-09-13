@@ -43,13 +43,14 @@ internal static class CliOutput
     public static int WriteFailure(string code, string message, JsonNode? data = null)
     {
         int exitCode = CliExitCodes.For(code);
+        string localizedMessage = HostLocalization.TranslateUserMessage(code, message, LocaleCatalog.HostLocale);
         if (MachineMode)
         {
             var envelope = new JsonObject
             {
                 ["ok"] = false,
                 ["code"] = code,
-                ["message"] = message,
+                ["message"] = localizedMessage,
             };
             if (data is not null)
             {
@@ -59,7 +60,7 @@ internal static class CliOutput
         }
         else
         {
-            Console.WriteLine(CliText.Get("output.error", "[错误] {message}", ("message", message)));
+            Console.WriteLine(CliText.Get("output.error", "[错误] {message}", ("message", localizedMessage)));
         }
         return exitCode;
     }

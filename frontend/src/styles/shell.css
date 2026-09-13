@@ -211,6 +211,7 @@ body[data-wallpaper="on"] .topbar {
 .topbar { display: none; }
 .page-main-scroll { min-height: 0; flex: 1 1 auto; }
 #view, .view-root { width: min(100%, var(--content-max)); min-width: 0; margin: 0 auto; padding: clamp(24px, 4vw, 52px) clamp(16px, 4vw, 48px) 72px; container-type: inline-size; container-name: page-content; }
+#view.plugin-page { padding-bottom: 28px; }
 #view:focus, .view-root:focus { outline: none; }
 .loading-state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 40vh; color: var(--muted); font-size: 13px; }
 .spinner { width: 16px; height: 16px; border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
@@ -1088,15 +1089,15 @@ body[data-wallpaper="on"] :is(.plugin-group, .plugin-grid, .dispatch-runbar, .se
 .plugin-store-unavailable-message strong { display: block; margin-bottom: 5px; color: var(--text); font-size: 15px; }
 .plugin-store-unavailable-message span { display: block; }
 .plugin-list { display: grid; min-width: 0; gap: var(--space-2); padding: var(--space-2); }
-.plugin-list-item { display: grid; width: auto; min-width: 0; min-height: 92px; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); padding: 14px 18px; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); color: var(--text); text-align: left; }
+.plugin-list-item { display: grid; width: auto; min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); gap: 6px; padding: 10px 14px; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); color: var(--text); text-align: left; }
 .plugin-list-item:hover { background: var(--content-card-hover); }
 .plugin-list-item.is-selected { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .plugin-list-item:focus-visible { outline: none; box-shadow: inset 3px 0 0 var(--accent), var(--focus); }
 .plugin-list-item-main { display: grid; min-width: 0; gap: 5px; overflow: hidden; }
 .plugin-list-item-main .plugin-name-line { min-width: 0; }
-.plugin-list-description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.plugin-list-description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted); font-size: 12px; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .plugin-list-item-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.plugin-list-item-meta .badge { min-height: 22px; }
+.plugin-list-item-meta .badge { min-height: 20px; }
 .plugin-detail-pane { flex: 1 1 auto; min-height: 0; padding: clamp(18px, 2.5vw, 28px); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
 .plugin-browser-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: var(--space-3); min-height: 40px; }
 .plugin-browser-footer > .muted { margin-right: auto; }
@@ -1142,13 +1143,13 @@ body[data-wallpaper="on"] :is(.plugin-group, .plugin-grid, .dispatch-runbar, .se
 .markdown-content a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
 @container page-content (max-width: 679px) {
-  .plugin-browser { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); height: auto; }
+  .plugin-browser { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); height: clamp(360px, calc(100dvh - 210px), 720px); min-height: 0; }
   .plugin-browser:not(.detail-visible) .plugin-detail-column:not(.has-store-footer) { display: none; }
   .plugin-browser:not(.detail-visible) .plugin-detail-column.has-store-footer .plugin-detail-pane { display: none; }
   .plugin-browser.detail-visible .plugin-list-column { display: none; }
   .plugin-browser:not(.detail-visible) .plugin-detail-pane { display: none; }
   .plugin-browser.detail-visible .plugin-detail-pane { display: block; }
-  .plugin-list-pane, .plugin-detail-pane { max-height: none; }
+  .plugin-list-pane, .plugin-detail-pane { max-height: none; min-height: 0; }
   .plugin-detail-pane { min-height: 0; padding: 18px; }
   .plugin-browser.detail-visible .plugin-detail-back { display: flex; width: 100%; margin: 0; }
   .plugin-detail-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 14px; }

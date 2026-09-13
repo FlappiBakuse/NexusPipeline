@@ -101,11 +101,18 @@ internal sealed class McpReadOnlyTools
     {
         if (string.IsNullOrWhiteSpace(runId))
         {
-            return McpToolResult.Failure("validation_error", "runId 不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "runId 不能为空",
+                messageKey: "api.error.run_id_required");
         }
         RunningExecution? execution = _context.Runtime.Center.FindAny(runId.Trim());
         return execution is null
-            ? McpToolResult.Failure("not_found", $"未找到运行任务：{runId}")
+            ? McpToolResult.Failure(
+                "not_found",
+                $"未找到运行任务：{runId}",
+                messageKey: "api.error.run_not_found",
+                messageArgs: new Dictionary<string, object?> { ["runId"] = runId.Trim() })
             : McpToolResult.Success(McpRunView.From(execution.Snapshot()));
     }
 
@@ -125,11 +132,18 @@ internal sealed class McpReadOnlyTools
     {
         if (days < 1 || days > AppFixedLimits.HistoryRetentionDaysMax)
         {
-            return McpToolResult.Failure("validation_error", $"days 必须在 1 到 {AppFixedLimits.HistoryRetentionDaysMax} 之间");
+            return McpToolResult.Failure(
+                "validation_error",
+                $"days 必须在 1 到 {AppFixedLimits.HistoryRetentionDaysMax} 之间",
+                messageKey: "api.error.history_days_invalid",
+                messageArgs: new Dictionary<string, object?> { ["maxDays"] = AppFixedLimits.HistoryRetentionDaysMax });
         }
         if (limit < 1 || limit > 200 || offset < 0)
         {
-            return McpToolResult.Failure("validation_error", "limit 必须在 1 到 200 之间，offset 不能小于 0");
+            return McpToolResult.Failure(
+                "validation_error",
+                "limit 必须在 1 到 200 之间，offset 不能小于 0",
+                messageKey: "api.error.history_paging_invalid");
         }
         string? scriptId = null;
         if (!string.IsNullOrWhiteSpace(scriptReference))
@@ -167,7 +181,7 @@ internal sealed class McpReadOnlyTools
     [Description("列出插件元数据、能力、配置启用状态和运行状态。")]
     public CallToolResult ListPlugins()
     {
-        return McpToolResult.Success(_context.Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleCatalog.HostLocale));
+        return McpToolResult.Success(_context.Runtime.Plugins.GetLocalizedPluginManagementViews(LocaleContext.Current));
     }
 
     [McpServerTool(Name = "get_settings", Title = "获取脱敏设置", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
@@ -187,7 +201,10 @@ internal sealed class McpReadOnlyTools
                 .ConfigureAwait(false);
             return snapshot.Available
                 ? McpToolResult.Success(McpViews.PluginStore(snapshot))
-                : McpToolResult.Failure("repository_unavailable", snapshot.Error ?? "插件仓库暂不可用");
+                : McpToolResult.Failure(
+                    "repository_unavailable",
+                    snapshot.Error ?? "插件仓库暂不可用",
+                    messageKey: "api.error.repository_unavailable");
         }
         catch (Exception ex)
         {

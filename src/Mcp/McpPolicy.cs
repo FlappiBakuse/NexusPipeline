@@ -25,7 +25,8 @@ internal static class McpPolicy
             return OperationResult<DispatchQueue>.Failure(
                 "dangerous_completion_action",
                 message,
-                OperationErrorKind.Forbidden);
+                OperationErrorKind.Forbidden,
+                messageKey: "api.error.dangerous_completion_action");
         }
         return OperationResult<DispatchQueue>.Ok(queue);
     }

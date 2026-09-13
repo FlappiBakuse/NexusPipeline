@@ -15,13 +15,13 @@ internal static partial class UserCommands
         string? remark,
         string source = Audit.Web)
     {
-        if (ValidateName(name) is string nameError)
+        if (ValidateName(name) is ValidationIssue nameError)
         {
-            return Validation<NexusUser>(nameError);
+            return Validation<NexusUser>(nameError.Code, nameError.Message, nameError.Args);
         }
-        if (ValidateRemark(remark) is string remarkError)
+        if (ValidateRemark(remark) is ValidationIssue remarkError)
         {
-            return Validation<NexusUser>(remarkError);
+            return Validation<NexusUser>(remarkError.Code, remarkError.Message, remarkError.Args);
         }
         RuntimeContext ctx = RuntimeContext.Instance;
         NexusUser? created = null;
@@ -84,13 +84,13 @@ internal static partial class UserCommands
         string? remark,
         string source = Audit.Web)
     {
-        if (ValidateName(name) is string nameError)
+        if (ValidateName(name) is ValidationIssue nameError)
         {
-            return Validation<NexusUser>(nameError);
+            return Validation<NexusUser>(nameError.Code, nameError.Message, nameError.Args);
         }
-        if (ValidateRemark(remark) is string remarkError)
+        if (ValidateRemark(remark) is ValidationIssue remarkError)
         {
-            return Validation<NexusUser>(remarkError);
+            return Validation<NexusUser>(remarkError.Code, remarkError.Message, remarkError.Args);
         }
 
         RuntimeContext ctx = RuntimeContext.Instance;

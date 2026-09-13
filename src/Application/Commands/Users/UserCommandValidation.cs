@@ -8,15 +8,26 @@ namespace NexusPipeline.App.Commands;
 /// <summary>用户输入与头像资源验证。</summary>
 internal static partial class UserCommands
 {
-    private static string? ValidateName(string? name)
+    private sealed record ValidationIssue(
+        string Code,
+        string Message,
+        IReadOnlyDictionary<string, object?>? Args = null);
+
+    private static ValidationIssue? ValidateName(string? name)
     {
-        return string.IsNullOrWhiteSpace(name) || !UserNameRule.IsValidName(name.Trim())
-            ? "用户名不能为空且不能包含非法字符"
-            : Limits.CheckNameBytes(name.Trim(), AppFixedLimits.MaxEntityNameBytes, "用户名");
+        if (string.IsNullOrWhiteSpace(name) || !UserNameRule.IsValidName(name.Trim()))
+        {
+            return new ValidationIssue("user_name_invalid", "用户名不能为空且不能包含非法字符");
+        }
+        string? lengthError = Limits.CheckNameBytes(name.Trim(), AppFixedLimits.MaxEntityNameBytes, "用户名");
+        return lengthError is null ? null : new ValidationIssue("user_name_invalid", lengthError);
     }
 
-    private static string? ValidateRemark(string? remark) =>
-        Limits.CheckNameBytes(remark?.Trim() ?? "", AppFixedLimits.MaxUserRemarkBytes, "备注");
+    private static ValidationIssue? ValidateRemark(string? remark)
+    {
+        string? lengthError = Limits.CheckNameBytes(remark?.Trim() ?? "", AppFixedLimits.MaxUserRemarkBytes, "备注");
+        return lengthError is null ? null : new ValidationIssue("user_remark_invalid", lengthError);
+    }
 
     private static string? ValidateRunDays(int value) => Limits.CheckRunDays(value);
 

@@ -48,7 +48,17 @@ internal sealed class OperationResult<T>
 
     public static OperationResult<T> Ok(T value) => new(true, value, null);
 
-    public static OperationResult<T> Failure(OperationError error) => new(false, default, error);
+    public static OperationResult<T> Failure(OperationError error)
+    {
+        // Stable error codes are the cross-adapter contract.  Older command paths still
+        // provide a source-language Message; adapters must be able to resolve a locale
+        // key even when that path has not yet supplied one explicitly.
+        if (string.IsNullOrWhiteSpace(error.MessageKey))
+        {
+            error = error with { MessageKey = $"api.error.{error.Code}" };
+        }
+        return new(false, default, error);
+    }
 
     public static OperationResult<T> Failure(
         string code,

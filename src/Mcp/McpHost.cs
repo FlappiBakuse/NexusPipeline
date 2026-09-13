@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
+using NexusPipeline.Localization;
 using NexusPipeline.Persistence;
 using NexusPipeline.Utilities;
 
@@ -132,6 +133,9 @@ internal sealed class McpHost : IDisposable
         WebApplication app = builder.Build();
         app.Use(async (context, next) =>
         {
+            using IDisposable localeScope = LocaleContext.Push(LocaleCatalog.Resolve(
+                context.Request.Headers["X-Nexus-Locale"].FirstOrDefault(),
+                context.Request.Headers.AcceptLanguage.ToString()));
             if (context.Request.Path.StartsWithSegments("/mcp"))
             {
                 string? securityError = McpSecurity.Validate(context, Port);

@@ -74,7 +74,10 @@ internal sealed class McpMutationTools
         }
         catch (InvalidOperationException ex)
         {
-            return McpToolResult.Failure("execution_validation_failed", ex.Message);
+            return McpToolResult.Failure(
+                "execution_validation_failed",
+                ex.Message,
+                messageKey: "api.error.execution_validation_failed");
         }
         catch (Exception ex)
         {
@@ -122,7 +125,10 @@ internal sealed class McpMutationTools
         }
         catch (InvalidOperationException ex)
         {
-            return McpToolResult.Failure("execution_validation_failed", ex.Message);
+            return McpToolResult.Failure(
+                "execution_validation_failed",
+                ex.Message,
+                messageKey: "api.error.execution_validation_failed");
         }
         catch (Exception ex)
         {
@@ -137,11 +143,18 @@ internal sealed class McpMutationTools
     {
         if (string.IsNullOrWhiteSpace(runId))
         {
-            return McpToolResult.Failure("validation_error", "runId 不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "runId 不能为空",
+                messageKey: "api.error.run_id_required");
         }
         if (_context.Runtime.Center.Find(runId.Trim()) is null)
         {
-            return McpToolResult.Failure("not_found", $"未找到活动运行：{runId}");
+            return McpToolResult.Failure(
+                "not_found",
+                $"未找到活动运行：{runId}",
+                messageKey: "api.error.active_run_not_found",
+                messageArgs: new Dictionary<string, object?> { ["runId"] = runId });
         }
         try
         {
@@ -169,7 +182,10 @@ internal sealed class McpMutationTools
     {
         if (input is null)
         {
-            return McpToolResult.Failure("validation_error", "脚本输入不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "脚本输入不能为空",
+                messageKey: "api.error.script_input_required");
         }
         return McpToolResult.From(
             ScriptCommands.Create(input.ToModel(), Audit.Mcp),
@@ -186,7 +202,10 @@ internal sealed class McpMutationTools
     {
         if (input is null)
         {
-            return McpToolResult.Failure("validation_error", "脚本输入不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "脚本输入不能为空",
+                messageKey: "api.error.script_input_required");
         }
         OperationResult<ScriptInstance> target = _context.ResolveScript(reference);
         if (!target.Succeeded)
@@ -205,7 +224,10 @@ internal sealed class McpMutationTools
     {
         if (input is null)
         {
-            return McpToolResult.Failure("validation_error", "用户输入不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "用户输入不能为空",
+                messageKey: "api.error.user_input_required");
         }
         OperationResult<NexusUser> result = UserCommands.Create(
             input.Name,
@@ -228,7 +250,10 @@ internal sealed class McpMutationTools
     {
         if (input is null)
         {
-            return McpToolResult.Failure("validation_error", "绑定输入不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "绑定输入不能为空",
+                messageKey: "api.error.binding_input_required");
         }
         OperationResult<NexusUser> user = _context.ResolveUser(userReference);
         if (!user.Succeeded)
@@ -259,7 +284,10 @@ internal sealed class McpMutationTools
     {
         if (input is null)
         {
-            return McpToolResult.Failure("validation_error", "绑定输入不能为空");
+            return McpToolResult.Failure(
+                "validation_error",
+                "绑定输入不能为空",
+                messageKey: "api.error.binding_input_required");
         }
         OperationResult<NexusUser> user = _context.ResolveUser(userReference);
         if (!user.Succeeded)

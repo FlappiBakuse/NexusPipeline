@@ -444,7 +444,7 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <div v-if="draft.bindings?.length" v-sortable="{ canDrag: canReorderBindings, onDrop: reorderBindings }" class="um-bindings">
+        <div v-if="draft.bindings?.length" v-sortable="{ axis: 'both', canDrag: canReorderBindings, onDrop: reorderBindings }" class="um-bindings">
           <article
             v-for="binding in draft.bindings"
             :key="binding.scriptInstanceId"

@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.App.Contracts;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Localization;
@@ -116,6 +117,63 @@ internal static class HostLocalization
             _ => $"服务返回 HTTP {statusCode}（{code}）",
         };
         return TranslateNamed("api.error." + code, fallback, named, locale);
+    }
+
+    /// <summary>
+    /// 将应用层错误投影为当前适配器的最终用户文案。
+    /// MessageKey/MessageArgs 优先；旧调用路径只有源语言 Message 时，英文环境拒绝泄漏中文业务句子。
+    /// </summary>
+    public static string TranslateOperationError(OperationError error, string? locale = null)
+    {
+        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
+        IReadOnlyDictionary<string, object?> args = error.MessageArgs
+            ?? new Dictionary<string, object?>(StringComparer.Ordinal);
+        string key = string.IsNullOrWhiteSpace(error.MessageKey)
+            ? $"api.error.{error.Code}"
+            : error.MessageKey!;
+        string translated = TranslateNamed(key, "", args, normalized);
+        if (!string.IsNullOrWhiteSpace(translated))
+        {
+            return translated;
+        }
+
+        string codeKey = $"api.error.{error.Code}";
+        if (!string.Equals(codeKey, key, StringComparison.Ordinal))
+        {
+            translated = TranslateNamed(codeKey, "", args, normalized);
+            if (!string.IsNullOrWhiteSpace(translated))
+            {
+                return translated;
+            }
+        }
+
+        if (normalized == LocaleCatalog.DefaultLocale || !ContainsCjk(error.Message))
+        {
+            return error.Message;
+        }
+
+        return TranslateNamed(
+            "api.error.internal_error",
+            "The operation failed",
+            locale: normalized);
+    }
+
+    /// <summary>将没有完整 OperationError 上下文的 CLI/MCP 边界消息收敛到同一套错误本地化规则。</summary>
+    public static string TranslateUserMessage(string code, string message, string? locale = null)
+    {
+        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
+        if (normalized == LocaleCatalog.DefaultLocale)
+        {
+            return message;
+        }
+
+        return TranslateOperationError(
+            new OperationError(
+                code,
+                message,
+                OperationErrorKind.Validation,
+                MessageKey: $"api.error.{code}"),
+            normalized);
     }
 
     /// <summary>

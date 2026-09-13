@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" class="view-root" data-testid="main-view">
+  <main id="view" class="view-root plugin-page" data-testid="main-view">
     <NxpPageHeader
       class="plugin-page-head"
       :description="activeTab === 'store' ? t('plugins.page.help') : t('plugins.installed.help')"

@@ -68,13 +68,16 @@ internal static class LocaleCatalog
 
     public static string Resolve(NameValueCollection headers)
     {
-        string? explicitLocale = headers["X-Nexus-Locale"];
+        return Resolve(headers["X-Nexus-Locale"], headers["Accept-Language"]);
+    }
+
+    public static string Resolve(string? explicitLocale, string? acceptLanguage)
+    {
         if (!string.IsNullOrWhiteSpace(explicitLocale))
         {
             return Normalize(explicitLocale);
         }
 
-        string? acceptLanguage = headers["Accept-Language"];
         if (string.IsNullOrWhiteSpace(acceptLanguage))
         {
             return LocaleRegistry.DefaultLocale;

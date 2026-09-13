@@ -51,4 +51,27 @@ describe("vSortable", () => {
     expect(wrapper.findAll("[data-dnd-id]").map(item => item.attributes("data-dnd-id"))).toEqual(["c", "a", "b"]);
     wrapper.unmount();
   });
+
+  it("keeps the item attached to the pointer on both axes when configured", () => {
+    const wrapper = mount(defineComponent({
+      directives: { sortable: vSortable },
+      setup() {
+        return { items: ref(["a", "b"]) };
+      },
+      template: `<div v-sortable="{ axis: 'both' }"><div v-for="item in items" :key="item" :data-dnd-id="item"><button class="drag-handle" type="button">{{ item }}</button></div></div>`,
+    }));
+    const container = wrapper.element as HTMLElement;
+    const item = wrapper.get('[data-dnd-id="b"]').element as HTMLElement;
+    const handle = wrapper.get('[data-dnd-id="b"] .drag-handle').element;
+    const pointer = (type: string, values: Record<string, number>) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      for (const [key, value] of Object.entries(values)) Object.defineProperty(event, key, { value });
+      return event;
+    };
+    handle.dispatchEvent(pointer("pointerdown", { button: 0, pointerId: 3, clientX: 20, clientY: 60 }));
+    container.dispatchEvent(pointer("pointermove", { pointerId: 3, clientX: 88, clientY: 96 }));
+    expect(item.style.transform).toBe("translate(68px, 36px)");
+    container.dispatchEvent(pointer("pointerup", { pointerId: 3, clientX: 88, clientY: 96 }));
+    wrapper.unmount();
+  });
 });

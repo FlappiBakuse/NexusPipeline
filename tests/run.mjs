@@ -167,7 +167,7 @@ async function runWeb() {
 }
 
 async function runDocs() {
-  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs", "tests\\documentation\\test-policy-consistency.mjs"]);
+  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs", "tests\\documentation\\backend-i18n-audit.mjs", "tests\\documentation\\native-scrollbar-audit.mjs", "tests\\documentation\\test-policy-consistency.mjs"]);
 }
 
 async function runTooling() {
