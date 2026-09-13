@@ -35,6 +35,44 @@ public sealed class ExecutionPreviewTests
     }
 
     [Fact]
+    public void RecentPcScreenshotCacheIsDerivedFromEffectiveConsumers()
+    {
+        var noJudge = new ScriptInstance { GameExe = "game.exe" };
+        var keywords = new ScriptInstance { GameExe = "game.exe", SuccessKeywords = "done" };
+        var judge = new ScriptInstance { GameExe = "game.exe", JudgeScriptEnabled = true, JudgeScript = "return true;" };
+        var emulatorJudge = new ScriptInstance
+        {
+            GameMode = "emulator",
+            GameExe = "127.0.0.1:16384",
+            JudgeScriptEnabled = true,
+            JudgeScript = "return true;",
+        };
+
+        Assert.False(ExecutionCoordinator.NeedsRecentPcScreenshotCache(noJudge, null));
+        Assert.True(ExecutionCoordinator.NeedsRecentPcScreenshotCache(keywords, null));
+        Assert.True(ExecutionCoordinator.NeedsRecentPcScreenshotCache(judge, null));
+        Assert.False(ExecutionCoordinator.NeedsRecentPcScreenshotCache(emulatorJudge, null));
+
+        var effectiveSpecialized = new ResolvedScriptSpec(
+            noJudge,
+            "plugin-version",
+            new ResolvedJudgeScript(true, "javascript", "plugin-file", "judge.js", "hash"),
+            "profile");
+        Assert.True(ExecutionCoordinator.NeedsRecentPcScreenshotCache(noJudge, effectiveSpecialized));
+    }
+
+    [Fact]
+    public void RecentPcScreenshotScheduleGateMatchesEffectiveConsumerAndRuntime()
+    {
+        var pcScript = new ScriptInstance { GameExe = "game.exe" };
+        var emulatorScript = new ScriptInstance { GameMode = "emulator", GameExe = "127.0.0.1:16384" };
+
+        Assert.False(AttemptMonitorLoop.ShouldScheduleRecentPcScreenshotCache(pcScript, false));
+        Assert.True(AttemptMonitorLoop.ShouldScheduleRecentPcScreenshotCache(pcScript, true));
+        Assert.False(AttemptMonitorLoop.ShouldScheduleRecentPcScreenshotCache(emulatorScript, true));
+    }
+
+    [Fact]
     public void RunningExecution_StoresCanonicalStructuredLogEntries()
     {
         var execution = new RunningExecution { Id = "run-1", Kind = "script" };

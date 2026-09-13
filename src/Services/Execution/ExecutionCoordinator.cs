@@ -87,6 +87,17 @@ internal sealed class ExecutionCoordinator : RunSession
             && !(spec?.SelfManagedPcLaunch == true && !EmulatorSupport.IsEmulator(script));
     }
 
+    /// <summary>按本次实际解析出的有效判定配置决定是否需要最近 PC 帧缓存。</summary>
+    internal static bool NeedsRecentPcScreenshotCache(ScriptInstance script, ResolvedScriptSpec? spec)
+    {
+        if (EmulatorSupport.IsEmulator(script))
+        {
+            return false;
+        }
+        // 专项脚本的 spec 是 frozen profile 的有效事实；通用脚本由解析后的 Script 字段表达。
+        return spec?.JudgeScript.Enabled == true || script.HasJudgeScript() || script.HasKeywords();
+    }
+
     public async Task<RunRecord> RunAsync()
     {
         _budget = new RunBudget(_script.TotalTimeoutMinutes, DateTime.Now);
@@ -580,7 +591,8 @@ internal sealed class ExecutionCoordinator : RunSession
             () => _budgetExpired || _budget?.IsExpired == true,
             KillScriptAndConfirm,
             BringGameToFrontIfRunning,
-            ScheduleRecentPcScreenshot).ConfigureAwait(false);
+            ScheduleRecentPcScreenshot,
+            NeedsRecentPcScreenshotCache(_script, _resolvedSpec)).ConfigureAwait(false);
         result = monitorLoop.Result;
         monitor = monitorLoop.Monitor;
 
@@ -678,7 +690,7 @@ internal sealed class ExecutionCoordinator : RunSession
         _previewTargetChanged?.Invoke(target);
     }
 
-    private int? FindGameProcessId(int? preferredProcessId)
+    private int? FindGameProcessId(int? preferredProcessId, AttemptProcessSnapshot? processSnapshot = null)
     {
         if (preferredProcessId is int preferred && preferred > 0
             && SystemActions.FindVisibleWindow(preferred) != IntPtr.Zero)
@@ -690,6 +702,18 @@ internal sealed class ExecutionCoordinator : RunSession
         {
             return null;
         }
+        if (processSnapshot is not null)
+        {
+            foreach (int processId in processSnapshot.FindProcessIds(processName))
+            {
+                if (SystemActions.FindVisibleWindow(processId) != IntPtr.Zero)
+                {
+                    return processId;
+                }
+            }
+            return null;
+        }
+
         Process[] processes;
         try
         {
@@ -724,7 +748,7 @@ internal sealed class ExecutionCoordinator : RunSession
     /// 游戏出现即前置（复用 BringToFront 30 秒窗口覆盖「进程出现但窗口未建」），前置一次后由 _gameFronted 停止重复。
     /// 游戏启动方式复杂（启动器常驻/必须以启动器启动等）由脚本专门适配，宿主不重复启动游戏；此处仅做窗口前置。
     /// 找不到窗口（游戏未启动/无窗口）由 BringToFront 内部静默跳过。</summary>
-    private void BringGameToFrontIfRunning()
+    private void BringGameToFrontIfRunning(AttemptProcessSnapshot? processSnapshot = null)
     {
         if (_gameFronted || string.IsNullOrWhiteSpace(_script.GameExe))
         {
@@ -732,7 +756,7 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         try
         {
-            int? processId = FindGameProcessId(_gameProcessId);
+            int? processId = FindGameProcessId(_gameProcessId, processSnapshot);
             if (processId is int pid)
             {
                 _gameProcessId = pid;

@@ -249,6 +249,8 @@ internal sealed class MemorySchedulerStateStore : ISchedulerStateStore
 
     private SchedulerPersistedState _state = new();
 
+    internal int SaveCount { get; private set; }
+
     public SchedulerPersistedState Load()
     {
         lock (_sync)
@@ -261,6 +263,7 @@ internal sealed class MemorySchedulerStateStore : ISchedulerStateStore
     {
         lock (_sync)
         {
+            SaveCount++;
             _state = state.Clone();
         }
     }

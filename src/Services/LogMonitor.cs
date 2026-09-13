@@ -47,9 +47,23 @@ internal class LogMonitor : IDisposable
 
     private bool _reopenScheduled;
 
-    // 保存上一次已观察到的完整文件内容，用于在同一文件发生截断并重新增长时定位真实边界。
-    // 日志输入本身在判断脚本侧已有容量限制；这里的 checkpoint 只服务当前 Attempt 的增量读取协议。
-    private byte[] _checkpoint = Array.Empty<byte>();
+    // 只保留最近窗口，避免日志文件越大，Attempt 的常驻内存和每轮复制就越大。
+    // 窗口数组按监视器实例一次分配，ReadNew 不再为整文件创建快照。
+    internal const int CheckpointCapacityBytes = 4 * 1024 * 1024;
+
+    private const int ReadBufferBytes = 64 * 1024;
+
+    private readonly byte[] _checkpoint = new byte[CheckpointCapacityBytes];
+
+    private readonly byte[] _readBuffer = new byte[ReadBufferBytes];
+
+    private int _checkpointLength;
+
+    private long _checkpointStartOffset;
+
+    private long _checkpointEndOffset;
+
+    private long _checkpointLastWriteTicks;
 
     private bool _checkpointReady;
 
@@ -75,6 +89,9 @@ internal class LogMonitor : IDisposable
     public long FileStamp { get; private set; }
 
     public DateTime LastWrite { get; private set; } = DateTime.Now;
+
+    /// <summary>诊断用 checkpoint 当前占用字节数；不参与日志读取协议。</summary>
+    internal int CheckpointBytes => _checkpointLength;
 
     internal static LogCandidateSnapshot? CaptureSnapshot(string path)
     {
@@ -165,24 +182,46 @@ internal class LogMonitor : IDisposable
         }
         try
         {
-            byte[] current = ReadCurrentBytes();
-            ReadOnlySpan<byte> previous = _checkpointReady ? _checkpoint : ReadOnlySpan<byte>.Empty;
-            if (_checkpointReady && current.AsSpan().SequenceEqual(previous))
+            long currentLength = _stream.Length;
+            long start;
+            if (!_checkpointReady)
             {
-                return "";
+                start = Math.Min(Math.Max(0, _position), currentLength);
+            }
+            else
+            {
+                long? divergence = FindCheckpointDivergence(currentLength);
+                if (divergence is long changedAt)
+                {
+                    // 窗口内发生截断/重写：从第一个可证明变化的字节重新交给判定层。
+                    start = changedAt;
+                }
+                else if (currentLength > _checkpointEndOffset)
+                {
+                    // 保留窗口仍连续时，只读取旧文件尾之后的新增区间。
+                    // 若窗口外发生深度重写，旧区间没有可证明边界，保守地丢弃它，
+                    // 但仍交付文件长度增长后真正位于旧 EOF 之后的内容。
+                    start = Math.Max(_position, _checkpointEndOffset);
+                }
+                else if (currentLength == _checkpointEndOffset
+                    && _position < currentLength
+                    && !CheckpointMetadataChanged())
+                {
+                    // Attempt 初始位置可能落在已有文件尾之前；首次读取仍需交付该段。
+                    start = _position;
+                }
+                else
+                {
+                    // 文件缩短但保留窗口前缀仍一致，或同长度发生窗口外未知重写：
+                    // 不注入无法证明属于本 Attempt 的旧内容，将新长度作为可信基线。
+                    start = currentLength;
+                }
             }
 
-            int commonPrefix = CommonPrefixLength(previous, current);
-            int start = !_checkpointReady
-                ? 0
-                : commonPrefix == previous.Length && current.Length >= previous.Length
-                    ? checked((int)Math.Min(_position, current.Length))
-                    : commonPrefix;
-            string content = DecodeUtf8(current, start);
-            _position = current.Length;
+            string content = ReadRange(start, currentLength);
+            _position = currentLength;
             _lastCommittedOffset = _position;
-            _checkpoint = current;
-            _checkpointReady = true;
+            RefreshCheckpoint(currentLength);
             if (content.Length > 0)
             {
                 LastWrite = DateTime.Now;
@@ -208,7 +247,16 @@ internal class LogMonitor : IDisposable
         _stream = null;
         try
         {
-            _stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            // 日志由其他进程持续写入；FileStream 的默认用户态缓冲可能在同一实例内保留
+            // 已经读取过的旧窗口，导致截断/同长度重写在下一轮比较时不可见。
+            // 使用最小缓冲，让每次 Seek/Read 都以文件当前内容为准，checkpoint 自身仍按固定窗口复用。
+            _stream = new FileStream(
+                _path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 1,
+                FileOptions.RandomAccess);
             try
             {
                 FileStamp = File.GetCreationTimeUtc(_path).Ticks;
@@ -247,13 +295,11 @@ internal class LogMonitor : IDisposable
                 _lastCommittedOffset = _position;
                 if (_readFromStart || replacementDuringReopen)
                 {
-                    _checkpoint = Array.Empty<byte>();
-                    _checkpointReady = false;
+                    ClearCheckpoint();
                 }
                 else
                 {
-                    _checkpoint = ReadCurrentBytes();
-                    _checkpointReady = true;
+                    RefreshCheckpoint(_stream.Length);
                 }
             }
         }
@@ -262,19 +308,51 @@ internal class LogMonitor : IDisposable
         }
     }
 
-    private byte[] ReadCurrentBytes()
+    private void ClearCheckpoint()
     {
-        if (_stream is null)
+        _checkpointLength = 0;
+        _checkpointStartOffset = 0;
+        _checkpointEndOffset = 0;
+        _checkpointLastWriteTicks = 0;
+        _checkpointReady = false;
+    }
+
+    private long? FindCheckpointDivergence(long currentLength)
+    {
+        if (_stream is null || currentLength < _checkpointStartOffset || _checkpointLength == 0)
         {
-            return Array.Empty<byte>();
+            return null;
         }
+
+        long overlap = Math.Min(_checkpointLength, currentLength - _checkpointStartOffset);
+        if (overlap <= 0)
+        {
+            return null;
+        }
+
         long originalPosition = _stream.Position;
         try
         {
-            _stream.Seek(0, SeekOrigin.Begin);
-            using var snapshot = new MemoryStream();
-            _stream.CopyTo(snapshot);
-            return snapshot.ToArray();
+            _stream.Seek(_checkpointStartOffset, SeekOrigin.Begin);
+            long compared = 0;
+            while (compared < overlap)
+            {
+                int requested = (int)Math.Min(_readBuffer.Length, overlap - compared);
+                int read = _stream.Read(_readBuffer, 0, requested);
+                if (read <= 0)
+                {
+                    return null;
+                }
+                for (int index = 0; index < read; index++)
+                {
+                    if (_readBuffer[index] != _checkpoint[compared + index])
+                    {
+                        return _checkpointStartOffset + compared + index;
+                    }
+                }
+                compared += read;
+            }
+            return null;
         }
         finally
         {
@@ -282,24 +360,67 @@ internal class LogMonitor : IDisposable
         }
     }
 
-    private static int CommonPrefixLength(ReadOnlySpan<byte> previous, ReadOnlySpan<byte> current)
+    private bool CheckpointMetadataChanged()
     {
-        int length = Math.Min(previous.Length, current.Length);
-        int index = 0;
-        while (index < length && previous[index] == current[index])
+        if (_stream is null)
         {
-            index++;
+            return true;
         }
-        return index;
+        try
+        {
+            return File.GetLastWriteTimeUtc(_path).Ticks != _checkpointLastWriteTicks;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
-    private static string DecodeUtf8(byte[] bytes, int start)
+    private string ReadRange(long start, long end)
     {
-        if (start >= bytes.Length)
+        if (_stream is null || end <= start)
         {
             return "";
         }
-        using var stream = new MemoryStream(bytes, start, bytes.Length - start, writable: false, publiclyVisible: true);
+        start = Math.Max(0, start);
+        end = Math.Max(start, end);
+        long originalPosition = _stream.Position;
+        using var output = new MemoryStream();
+        try
+        {
+            _stream.Seek(start, SeekOrigin.Begin);
+            long remaining = end - start;
+            while (remaining > 0)
+            {
+                int requested = (int)Math.Min(_readBuffer.Length, remaining);
+                int read = _stream.Read(_readBuffer, 0, requested);
+                if (read <= 0)
+                {
+                    break;
+                }
+                output.Write(_readBuffer, 0, read);
+                remaining -= read;
+            }
+        }
+        finally
+        {
+            _stream.Seek(Math.Min(originalPosition, _stream.Length), SeekOrigin.Begin);
+        }
+
+        if (output.Length == 0)
+        {
+            return "";
+        }
+        if (!output.TryGetBuffer(out ArraySegment<byte> segment) || segment.Array is null)
+        {
+            return Encoding.UTF8.GetString(output.ToArray());
+        }
+        using var stream = new MemoryStream(
+            segment.Array,
+            segment.Offset,
+            checked((int)output.Length),
+            writable: false,
+            publiclyVisible: true);
         using var reader = new StreamReader(
             stream,
             Encoding.UTF8,
@@ -307,6 +428,54 @@ internal class LogMonitor : IDisposable
             bufferSize: 4096,
             leaveOpen: false);
         return reader.ReadToEnd();
+    }
+
+    private void RefreshCheckpoint(long fileLength)
+    {
+        if (_stream is null)
+        {
+            ClearCheckpoint();
+            return;
+        }
+        fileLength = Math.Max(0, fileLength);
+        int expected = (int)Math.Min(fileLength, CheckpointCapacityBytes);
+        long start = fileLength - expected;
+        long originalPosition = _stream.Position;
+        int readTotal = 0;
+        try
+        {
+            _stream.Seek(start, SeekOrigin.Begin);
+            while (readTotal < expected)
+            {
+                int read = _stream.Read(_checkpoint, readTotal, expected - readTotal);
+                if (read <= 0)
+                {
+                    break;
+                }
+                readTotal += read;
+            }
+        }
+        finally
+        {
+            _stream.Seek(Math.Min(originalPosition, _stream.Length), SeekOrigin.Begin);
+        }
+        _checkpointLength = readTotal;
+        _checkpointStartOffset = start;
+        _checkpointEndOffset = start + readTotal;
+        _checkpointLastWriteTicks = GetLastWriteTicks();
+        _checkpointReady = readTotal == expected;
+    }
+
+    private long GetLastWriteTicks()
+    {
+        try
+        {
+            return File.GetLastWriteTimeUtc(_path).Ticks;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 
     private static (uint Vol, uint Hi, uint Lo, bool Ok) QueryFileId(SafeFileHandle handle)
@@ -328,8 +497,7 @@ internal class LogMonitor : IDisposable
     {
         _stream?.Dispose();
         _stream = null;
-        _checkpoint = Array.Empty<byte>();
-        _checkpointReady = false;
+        ClearCheckpoint();
     }
 }
 

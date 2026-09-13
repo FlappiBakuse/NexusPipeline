@@ -21,7 +21,8 @@ internal sealed class AttemptMonitor
         Process? rootProcess,
         string launchExe,
         ProcessOwnership? ownership,
-        string? excludeGame)
+        string? excludeGame,
+        AttemptProcessSnapshot? processSnapshot)
     {
         bool ownedAlive = ownership?.Snapshot().Any(identity =>
             excludeGame is null
@@ -36,7 +37,8 @@ internal sealed class AttemptMonitor
         {
             rootExited = true;
         }
-        return rootExited && !SystemActions.IsExeRunning(launchExe) && !ownedAlive;
+        bool launchRunning = processSnapshot?.IsExecutableRunning(launchExe) ?? SystemActions.IsExeRunning(launchExe);
+        return rootExited && !launchRunning && !ownedAlive;
     }
 
     public StallObservation CheckStall(

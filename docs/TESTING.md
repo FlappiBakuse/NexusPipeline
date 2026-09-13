@@ -16,6 +16,8 @@ L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 N
 
 `tests/stress/` 是按需运行的压力与诊断资产，不参与默认发布门禁。历史测试容器已删除；需要追溯行为时使用 CHANGELOG 和 Git 历史。
 
+运行时效率诊断先构建 `tests/stress/RuntimeEfficiencyDiagnostic/RuntimeEfficiencyDiagnostic.csproj`，再执行 `node tests\stress\runtime-efficiency.mjs`；默认测量 600 个调度 tick、100 MiB 日志 checkpoint 和一次追加读取，使用隔离 runtime 输出机器可读 JSON，结束后清理临时目录。
+
 文档一致性检查独立于 L1–L5：`tests/documentation/documentation-consistency.mjs` 检查 Markdown 本地链接、CHANGELOG 标题唯一性、README 导航、当前版本和已删除路径引用；`tests/documentation/test-policy-consistency.mjs` 检查持久化测试中是否出现截图匹配器、视觉回归套件和快照基线。
 
 ## 测试归属与写法
@@ -65,6 +67,7 @@ LLM 与自动化代理不得新增持久化视觉回归测试、截图基线或�
 - 配置定位变化时，新位置缺失会阻断运行并保留旧快照；新位置存在时按当前配置重新建立 `store`，更新当前元数据，不跨定位复用旧快照内容。
 - 配置恢复、快照事务、fail-closed、Windows 真实进程边界和第三方插件契约需要持续覆盖；删除的迁移链路不通过测试保留。
 - 测试 runtime、日志、PID、服务停止信号和 Playwright 结果必须使用隔离目录。测试结束后确认进程退出，再清理本次产生的精确临时路径。
+- 历史计算测试应覆盖状态筛选、负耗时归零、未结束运行不计入耗时、摘要状态计数和每日聚合；`durationMs` 只验证 Web/MCP 返回投影，不把它写入持久化 fixture。
 
 ## 默认命令
 

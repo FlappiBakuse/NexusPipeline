@@ -10,9 +10,11 @@ internal sealed class Scheduler : IDisposable
 {
     private readonly object _sync = new();
 
+    private readonly object _stateSaveSync = new();
+
     private readonly HashSet<string> _runningQueueIds = new();
 
-    /// <summary>当前进程内仍待准入的 occurrence；已完成 occurrence 保留在 _occurrences 中用于去重。</summary>
+    /// <summary>当前进程内仍待准入的 occurrence；terminal occurrence 仅在 replay fence 落盘前短暂保留用于去重。</summary>
     private readonly Dictionary<string, PendingScheduledRun> _pendingTriggers = new();
 
     private readonly Dictionary<string, PendingScheduledRun> _occurrences = new();
@@ -28,6 +30,11 @@ internal sealed class Scheduler : IDisposable
     private string? _lastCleanupDate;
 
     private DateTime? _lastSchedulerCheck;
+
+    // LastSchedulerCheck 是进程内 watermark；只有 occurrence/计划状态等 durable 变化才需要写盘。
+    private bool _stateDirty;
+
+    private long _stateRevision;
 
     private readonly IQueueRepository _queues;
 
@@ -107,7 +114,9 @@ internal sealed class Scheduler : IDisposable
         }
         _cts = null;
         _loop = null;
-        SaveState();
+        // 正常 Stop 是显式的 durable checkpoint：把最新 watermark 与 recovery state 一起写入，
+        // 让本进程内已经完成的 occurrence 可以安全越过 replay fence。
+        SaveState(force: true);
     }
 
     /// <summary>用户修改队列、脚本或用户后调用，显式重校验尚未准入的冻结计划。</summary>
@@ -156,6 +165,7 @@ internal sealed class Scheduler : IDisposable
                     {
                         live.Plan = plan;
                         live.QueueName = plan.Queue.Name;
+                        MarkStateDirtyLocked();
                     }
                 }
             }
@@ -508,6 +518,7 @@ internal sealed class Scheduler : IDisposable
                 {
                     if (_occurrences.TryAdd(invalid.Key, invalid))
                     {
+                        MarkStateDirtyLocked();
                         Logger.Error($"[错误] 自动运行队列「{queue.Name}」触发失败：{ex.Message}");
                     }
                 }
@@ -534,6 +545,7 @@ internal sealed class Scheduler : IDisposable
                 return;
             }
             _pendingTriggers[pending.Key] = pending;
+            MarkStateDirtyLocked();
             if (isStartup)
             {
                 _startupRunsIssued = true;
@@ -595,6 +607,7 @@ internal sealed class Scheduler : IDisposable
             return;
         }
 
+        bool alreadyRunning;
         lock (_sync)
         {
             if (!_pendingTriggers.TryGetValue(pending.Key, out PendingScheduledRun? current)
@@ -603,14 +616,22 @@ internal sealed class Scheduler : IDisposable
                 ReleaseTriggerAttemptLocked(pending);
                 return;
             }
-            if (_runningQueueIds.Contains(queue.Id))
+            alreadyRunning = _runningQueueIds.Contains(queue.Id);
+            if (alreadyRunning)
             {
                 ScheduleRetryLocked(pending, $"队列「{queue.Name}」已有自动运行实例");
+                MarkStateDirtyLocked();
                 ReleaseTriggerAttemptLocked(pending);
-                SaveState();
-                return;
             }
-            _runningQueueIds.Add(queue.Id);
+            else
+            {
+                _runningQueueIds.Add(queue.Id);
+            }
+        }
+        if (alreadyRunning)
+        {
+            SaveState();
+            return;
         }
 
         try
@@ -627,7 +648,15 @@ internal sealed class Scheduler : IDisposable
             else if (_plans is not null)
             {
                 plan = _plans.BuildQueueForSchedule(queue.Id);
-                pending.Plan = plan;
+                lock (_sync)
+                {
+                    if (_pendingTriggers.TryGetValue(pending.Key, out PendingScheduledRun? live)
+                        && ReferenceEquals(live, pending))
+                    {
+                        live.Plan = plan;
+                        MarkStateDirtyLocked();
+                    }
+                }
             }
 
             RunningExecution exec;
@@ -657,6 +686,7 @@ internal sealed class Scheduler : IDisposable
             {
                 _pendingTriggers.Remove(pending.Key);
                 pending.Status = "Running";
+                MarkStateDirtyLocked();
             }
             SaveState();
             try
@@ -668,6 +698,7 @@ internal sealed class Scheduler : IDisposable
                 lock (_sync)
                 {
                     pending.Status = "Completed";
+                    MarkStateDirtyLocked();
                 }
                 SaveState();
             }
@@ -691,6 +722,7 @@ internal sealed class Scheduler : IDisposable
                 return;
             }
             ScheduleRetryLocked(pending, reason);
+            MarkStateDirtyLocked();
         }
         SaveState();
         Logger.Info($"[调度等待] 队列「{pending.QueueName}」本次触发暂缓：{reason}；将在资源释放后重试。");
@@ -716,6 +748,7 @@ internal sealed class Scheduler : IDisposable
             _pendingTriggers.Remove(pending.Key);
             pending.Status = cancelled ? "Cancelled" : "Invalidated";
             pending.LastReason = reason;
+            MarkStateDirtyLocked();
         }
         Logger.Error($"[错误] 自动运行队列「{pending.QueueName}」触发失败：{reason}");
         if (saveHistory)
@@ -771,6 +804,12 @@ internal sealed class Scheduler : IDisposable
                 {
                     continue;
                 }
+                if (!RequiresRecovery(item.Status))
+                {
+                    // terminal occurrence 不再作为 durable 去重表永久保存；LastSchedulerCheck
+                    // 与 recovery state 已经组成 replay fence。
+                    continue;
+                }
                 QueueExecutionPlan? plan = null;
                 if (item.Plan is not null && _plans is not null)
                 {
@@ -809,37 +848,81 @@ internal sealed class Scheduler : IDisposable
         }
     }
 
-    private void SaveState()
+    private static bool RequiresRecovery(string status)
     {
-        SchedulerPersistedState snapshot;
-        lock (_sync)
+        return status is "Triggered" or "Waiting" or "Running";
+    }
+
+    private void MarkStateDirtyLocked()
+    {
+        _stateDirty = true;
+        _stateRevision++;
+    }
+
+    private void SaveState(bool force = false)
+    {
+        // 同一 scheduler 可能同时收到 tick、准入和完成回调；序列化整个快照-写入过程，
+        // 避免较旧 snapshot 在较新 snapshot 之后完成而覆盖 durable replay fence。
+        lock (_stateSaveSync)
         {
-            snapshot = new SchedulerPersistedState
+            SchedulerPersistedState snapshot;
+            long revision;
+            DateTime? replayFence;
+            lock (_sync)
             {
-                LastSchedulerCheck = _lastSchedulerCheck,
-                Occurrences = _occurrences.Values.Select(item => new PersistedScheduledOccurrence
+                if (!force && !_stateDirty)
                 {
-                    Key = item.Key,
-                    QueueId = item.QueueId,
-                    QueueName = item.QueueName,
-                    OccurrenceKey = item.OccurrenceKey,
-                    OriginalTriggerTime = item.OriginalTriggerTime,
-                    IsStartup = item.IsStartup,
-                    Status = item.Status,
-                    RetryCount = item.RetryCount,
-                    LastReason = item.LastReason,
-                    NextAttemptAt = item.NextAttemptAt,
-                    Plan = item.Plan is null ? null : ExecutionPlanBuilder.FreezeQueue(item.Plan),
-                }).ToList(),
-            };
-        }
-        try
-        {
-            _stateStore.Save(snapshot);
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[调度] 保存 scheduler-state.json 失败：{ex.Message}");
+                    return;
+                }
+                revision = _stateRevision;
+                replayFence = _lastSchedulerCheck;
+                snapshot = new SchedulerPersistedState
+                {
+                    LastSchedulerCheck = _lastSchedulerCheck,
+                    Occurrences = _occurrences.Values.Where(item => RequiresRecovery(item.Status)).Select(item => new PersistedScheduledOccurrence
+                    {
+                        Key = item.Key,
+                        QueueId = item.QueueId,
+                        QueueName = item.QueueName,
+                        OccurrenceKey = item.OccurrenceKey,
+                        OriginalTriggerTime = item.OriginalTriggerTime,
+                        IsStartup = item.IsStartup,
+                        Status = item.Status,
+                        RetryCount = item.RetryCount,
+                        LastReason = item.LastReason,
+                        NextAttemptAt = item.NextAttemptAt,
+                        Plan = item.Plan is null ? null : ExecutionPlanBuilder.FreezeQueue(item.Plan),
+                    }).ToList(),
+                };
+            }
+
+            try
+            {
+                _stateStore.Save(snapshot);
+                lock (_sync)
+                {
+                    // 只有本次 snapshot 仍是最新版本时，才能清除 dirty 并释放已经越过
+                    // durable replay fence 的 terminal occurrence。
+                    if (_stateRevision == revision)
+                    {
+                        _stateDirty = false;
+                        if (replayFence is DateTime fence)
+                        {
+                            foreach (string key in _occurrences.Values
+                                         .Where(item => !RequiresRecovery(item.Status) && item.OriginalTriggerTime <= fence)
+                                         .Select(item => item.Key)
+                                         .ToArray())
+                            {
+                                _occurrences.Remove(key);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[调度] 保存 scheduler-state.json 失败：{ex.Message}");
+            }
         }
     }
 

@@ -17,6 +17,14 @@ internal sealed class AttemptMonitorLoop
 {
     private const int ExitGraceSecondsAfterMarker = 60;
 
+    /// <summary>按当前 Attempt 的有效消费者决定本轮是否安排最近 PC 帧采集。</summary>
+    internal static bool ShouldScheduleRecentPcScreenshotCache(
+        ScriptInstance script,
+        bool needsRecentPcScreenshotCache)
+    {
+        return needsRecentPcScreenshotCache && !EmulatorSupport.IsEmulator(script);
+    }
+
     public async Task<AttemptMonitorLoopResult> RunAsync(
         RunSession session,
         RunAttempt attempt,
@@ -37,8 +45,9 @@ internal sealed class AttemptMonitorLoop
         Func<CancellationToken> operationToken,
         Func<bool> budgetExpired,
         Func<bool> killScriptAndConfirm,
-        Action bringGameToFrontIfRunning,
-        Action<int> scheduleRecentPcScreenshot)
+        Action<AttemptProcessSnapshot?> bringGameToFrontIfRunning,
+        Action<int> scheduleRecentPcScreenshot,
+        bool needsRecentPcScreenshotCache)
     {
         var state = new MonitorState(monitor);
         try
@@ -50,9 +59,13 @@ internal sealed class AttemptMonitorLoop
 
                 // 先预热最近有效帧，再消费判断结果和新增日志；截图请求可能就在本轮随后到达。
                 // 模拟器模式跳过（模拟器截图走实时 ADB，不使用 PC 窗口缓存）。
+                AttemptProcessSnapshot? processSnapshot = AttemptProcessSnapshot.Capture();
                 if (!EmulatorSupport.IsEmulator(session.Script))
                 {
-                    bringGameToFrontIfRunning();
+                    bringGameToFrontIfRunning(processSnapshot);
+                }
+                if (ShouldScheduleRecentPcScreenshotCache(session.Script, needsRecentPcScreenshotCache))
+                {
                     scheduleRecentPcScreenshot(attempt.Number);
                 }
 
@@ -175,7 +188,12 @@ internal sealed class AttemptMonitorLoop
                     break;
                 }
 
-                bool scriptExited = attemptMonitor.IsScriptExited(process, launchExe, session.ProcessOwnership, excludeGame);
+                bool scriptExited = attemptMonitor.IsScriptExited(
+                    process,
+                    launchExe,
+                    session.ProcessOwnership,
+                    excludeGame,
+                    processSnapshot);
                 if (scriptExited)
                 {
                     state.Result = terminator.OnScriptExited(state.Monitor is null, !string.IsNullOrWhiteSpace(session.Script.LogPath), skipFinalJudge);

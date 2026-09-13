@@ -138,6 +138,71 @@ public sealed class LogMonitorTests
         }
     }
 
+    [Fact]
+    public void LargeFileKeepsOnlyBoundedCheckpointAndReadsAppendWithoutFullSnapshot()
+    {
+        string root = MakeTempDir();
+        string path = Path.Combine(root, "large.log");
+        try
+        {
+            const int size = 100 * 1024 * 1024;
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+            {
+                stream.SetLength(size);
+            }
+
+            using var monitor = new LogMonitor(path, readFromStart: false, initialPosition: size);
+
+            Assert.Equal(LogMonitor.CheckpointCapacityBytes, monitor.CheckpointBytes);
+            File.AppendAllText(path, "new\n", Encoding.UTF8);
+
+            Assert.Equal("new\n", monitor.ReadNew());
+            Assert.Equal(LogMonitor.CheckpointCapacityBytes, monitor.CheckpointBytes);
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public void DeepRewriteOutsideCheckpointWindowFailsConservatively()
+    {
+        string root = MakeTempDir();
+        string path = Path.Combine(root, "deep.log");
+        try
+        {
+            const int size = 8 * 1024 * 1024;
+            using (var stream = new FileStream(path, FileMode.Create, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+            {
+                stream.SetLength(size);
+                stream.Seek(0, SeekOrigin.Begin);
+                stream.WriteByte((byte)'a');
+                stream.Seek(size - 1, SeekOrigin.Begin);
+                stream.WriteByte((byte)'z');
+                stream.Flush(flushToDisk: true);
+            }
+
+            using var monitor = new LogMonitor(path, readFromStart: true);
+            Assert.Equal(size, Encoding.UTF8.GetByteCount(monitor.ReadNew()));
+
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+            {
+                stream.Seek(0, SeekOrigin.Begin);
+                stream.WriteByte((byte)'b');
+                stream.Flush(flushToDisk: true);
+            }
+
+            Assert.Equal("", monitor.ReadNew());
+            File.AppendAllText(path, "safe-new\n", Encoding.UTF8);
+            Assert.Equal("safe-new\n", monitor.ReadNew());
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
     private static string MakeTempDir()
     {
         string root = Path.Combine(Path.GetTempPath(), "np-log-monitor-" + Guid.NewGuid().ToString("N"));
