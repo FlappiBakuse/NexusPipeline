@@ -10,6 +10,7 @@ using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using NexusPipeline.Localization;
 using NexusPipeline.Persistence;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Mcp;
@@ -122,7 +123,7 @@ internal sealed class McpHost : IDisposable
             options.ServerInfo = new Implementation
             {
                 Name = "NexusPipeline",
-                Version = typeof(McpHost).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
+                Version = UpdateService.CurrentVersion,
             };
             options.ServerInstructions = "NexusPipeline 本地自动化控制面。长时间运行操作会立即返回 runId，请使用 get_run 轮询；破坏性操作请通过本地 CLI 执行。";
         });

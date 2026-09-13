@@ -166,12 +166,13 @@ internal static class ApiPluginsHandler
             version = view.Version,
             kind = view.Kind,
             apiVersion = view.ApiVersion,
+            minHostVersion = view.MinHostVersion,
             capabilities = view.Capabilities,
             supportsEmulator = view.SupportsEmulator,
             configuredEnabled = view.ConfiguredEnabled,
             runtimeEnabled = view.RuntimeEnabled,
             state = view.State,
-            runtimeErrorCode = string.IsNullOrWhiteSpace(view.Error) ? null : "plugin_runtime_error",
+            runtimeErrorCode = string.IsNullOrWhiteSpace(view.Error) ? null : view.RuntimeErrorCode,
             restartRequired = view.RestartRequired,
             hasFrontend = view.HasFrontend,
             frontendApiVersion = view.FrontendApiVersion,
@@ -214,7 +215,7 @@ internal static class ApiPluginsHandler
             installedVersion = plugin.InstalledVersion,
             updateAvailable = plugin.UpdateAvailable,
             compatible = plugin.Compatible,
-            compatibilityCode = plugin.Compatible ? null : "incompatible",
+            compatibilityCode = plugin.Compatible ? null : "host_version_too_low",
             managedByStore = plugin.ManagedByStore,
             pendingAction = plugin.PendingAction,
             pendingVersion = plugin.PendingVersion,
@@ -250,7 +251,7 @@ internal static class ApiPluginsHandler
             installedVersion = detail.InstalledVersion,
             updateAvailable = detail.UpdateAvailable,
             compatible = detail.Compatible,
-            compatibilityCode = detail.Compatible ? null : "incompatible",
+            compatibilityCode = DetailCompatibilityCode(detail),
             managedByStore = detail.ManagedByStore,
             pendingAction = detail.PendingAction,
             pendingVersion = detail.PendingVersion,
@@ -258,7 +259,7 @@ internal static class ApiPluginsHandler
             configuredEnabled = detail.ConfiguredEnabled,
             runtimeEnabled = detail.RuntimeEnabled,
             runtimeState = detail.RuntimeState,
-            runtimeErrorCode = string.IsNullOrWhiteSpace(detail.RuntimeError) ? null : "plugin_runtime_error",
+            runtimeErrorCode = string.IsNullOrWhiteSpace(detail.RuntimeError) ? null : detail.RuntimeErrorCode,
             restartRequired = detail.RestartRequired,
             hasFrontend = detail.HasFrontend,
             frontendApiVersion = detail.FrontendApiVersion,
@@ -277,6 +278,20 @@ internal static class ApiPluginsHandler
                 date = change.Date,
                 items = change.Items,
             }).ToList(),
+        };
+    }
+
+    private static string? DetailCompatibilityCode(PluginDetail detail)
+    {
+        if (detail.Compatible)
+        {
+            return null;
+        }
+        return detail.RuntimeErrorCode switch
+        {
+            "plugin_incompatible_host" => "host_version_too_low",
+            "plugin_incompatible_api" => "plugin_api_incompatible",
+            _ => "incompatible",
         };
     }
 

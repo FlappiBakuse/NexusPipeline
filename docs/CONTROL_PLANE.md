@@ -31,6 +31,8 @@
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
+更新状态投影在发现候选版本后补充 `policyVerified`、`canDownload`、`manualUpdateRequired`、`updateBlockCode`、`barrierVersion`、`migrationUrl` 和 `policyError`。`updateBlockCode=breaking-update` 时，页面显示手动下载安装包与配置迁移指引，下载、下次启动应用和自动应用入口均被后端拒绝；策略无法验证时使用 `policy-unavailable` 并保持 fail-closed。
+
 插件读取的本地列表、商店列表和详情投影均以 additive 字段提供 `createdAt`；该字段表示插件第一次正式公开发布日期，旧插件或旧 catalog 缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。
 
 ## 行为护栏
@@ -51,6 +53,7 @@
 - 配置编辑保存、取消与崩溃恢复共享 `.session`、`edit-isolation`、`original-extra` 和附加快照事务，收尾完成后清理空闲 `work/`。
 - 插件批量更新只选择官方 catalog 中已安装、与当前宿主兼容、存在新版本且没有待处理事务的插件，按顺序登记更新；插件是否由官方商店登记不影响候选资格。单项失败会进入汇总结果并继续处理后续插件，完成后由用户按页面提示重启宿主。
 - 插件启用、禁用与商店单插件安装、更新、卸载响应都返回 `restartRequired: true`；批量更新在至少一项登记成功时返回同一字段，页面据此显示重启入口。
+- 插件管理与详情投影包含 `minHostVersion`。运行时发现宿主版本过低时保留插件元数据并返回 `state=Incompatible`、`runtimeErrorCode=plugin_incompatible_host`；插件商店以 `status=update-requires-host-upgrade` 和 `compatibilityCode=host_version_too_low` 禁止安装或更新。
 - `/api/status` 返回进程实例标识 `instanceId`、本次重启交接标识 `restartHandoffId` 与实际监听端口 `actualPort`；`POST /api/settings/restart` 返回候选端口 `newPort`、本次交接标识 `handoffId` 与旧实例 `instanceId`。管理页面据此确认新实例已经接管再跳转；只读的 `GET /api/status` 放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
 - 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 

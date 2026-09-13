@@ -48,10 +48,10 @@ internal static class ApiUpdateHandler
             }
             case "download" when method == "POST":
             {
-                string? error = updates.StartDownload(Audit.Web);
-                if (error is not null)
+                UpdateDownloadResult result = updates.StartDownload(Audit.Web);
+                if (!result.Succeeded)
                 {
-                    await HttpHelper.ErrorAsync(context, "update_download_rejected", 409).ConfigureAwait(false);
+                    await HttpHelper.ErrorAsync(context, result.Code ?? "update_download_rejected", 409).ConfigureAwait(false);
                     return;
                 }
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
@@ -105,6 +105,13 @@ internal static class ApiUpdateHandler
             progress = status.Progress,
             bytesRead = status.BytesRead,
             bytesTotal = status.BytesTotal,
+            policyVerified = status.PolicyVerified,
+            canDownload = status.CanDownload,
+            manualUpdateRequired = status.ManualUpdateRequired,
+            updateBlockCode = status.UpdateBlockCode,
+            barrierVersion = status.BarrierVersion,
+            migrationUrl = status.MigrationUrl,
+            policyError = status.PolicyError,
             errorCode = string.IsNullOrWhiteSpace(status.Error) ? null : "update_failed",
             automation = new
             {

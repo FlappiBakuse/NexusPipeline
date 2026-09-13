@@ -18,6 +18,9 @@ export interface PluginViewPlugin {
   pendingAction?: string;
   pendingVersion?: string;
   compatible?: boolean;
+  minHostVersion?: string;
+  runtimeErrorCode?: string;
+  compatibilityCode?: string;
   authors?: Array<{ name?: string }>;
   tags?: string[];
   [key: string]: unknown;
@@ -51,7 +54,11 @@ export function runtimeLabel(plugin: PluginViewPlugin, t: PluginTranslator) {
     return plugin.configuredEnabled ? t("common.running") : t("plugins.running_restart_required");
   }
   if (plugin.state === "InitFailed") return t("plugins.initialization_failed");
-  if (plugin.state === "Incompatible") return t("plugins.incompatible_api");
+  if (plugin.state === "Incompatible") {
+    return plugin.runtimeErrorCode === "plugin_incompatible_host"
+      ? t("plugins.incompatible_host", { version: plugin.minHostVersion || "" })
+      : t("plugins.incompatible_api");
+  }
   return plugin.configuredEnabled ? t("plugins.restart_required") : t("common.disabled");
 }
 
@@ -68,13 +75,14 @@ export function storeStatusLabel(plugin: PluginViewPlugin, t: PluginTranslator) 
     "update-available": "plugins.update_available",
     pending: "plugins.restart_required",
     incompatible: "plugins.incompatible_with_host",
+    "update-requires-host-upgrade": "plugins.update_requires_host_upgrade",
     unlisted: "plugins.not_listed_in_repository",
   };
   return t(keys[String(plugin.status)] || "plugins.available");
 }
 
 export function storeTone(plugin: PluginViewPlugin): "ok" | "warn" | "bad" | "muted" {
-  if (plugin.status === "incompatible") return "bad";
+  if (["incompatible", "update-requires-host-upgrade"].includes(String(plugin.status))) return "bad";
   if (["update-available", "pending"].includes(String(plugin.status))) return "warn";
   if (plugin.status === "installed") return "ok";
   return "muted";
@@ -88,7 +96,11 @@ export function storeActionNotice(plugin: PluginViewPlugin, t: PluginTranslator)
       restart: t("plugins.effective_after_restart"),
     });
   }
-  if (plugin.compatible === false) return t("plugin.store.incompatible", {}, "The current host version is incompatible");
+  if (plugin.compatible === false || ["incompatible", "update-requires-host-upgrade"].includes(String(plugin.status))) {
+    return t("plugin.store.host_upgrade_required", {
+      version: plugin.minHostVersion || "",
+    }, "Update the host before updating this plugin");
+  }
   return "";
 }
 

@@ -99,7 +99,10 @@ function hasPendingAction() {
           </div>
         </div>
         <p class="plugin-detail-description">{{ plugin.description || t("plugins.no_description") }}</p>
-        <div v-if="tab === 'local' && plugin.runtimeErrorCode" class="field-error-message">{{ t("plugin.store.runtime_error") }}</div>
+        <div v-if="tab === 'local' && plugin.runtimeErrorCode === 'plugin_incompatible_host'" class="callout callout-warning">
+          {{ t("plugin.store.incompatible_host", { version: plugin.minHostVersion || "" }) }}
+        </div>
+        <div v-else-if="tab === 'local' && plugin.runtimeErrorCode" class="field-error-message">{{ t("plugin.store.runtime_error") }}</div>
         <div v-if="plugin.installed && plugin.installedVersion && plugin.installedVersion !== plugin.version" class="callout callout-warning">
           {{ t("plugins.version.installed", { version: plugin.installedVersion }) }}
         </div>
@@ -109,7 +112,7 @@ function hasPendingAction() {
           <div><dt>{{ t("plugins.updated_at") }}</dt><dd>{{ plugin.updatedAt || t("plugins.not_provided") }}</dd></div>
           <div><dt>{{ t("plugins.supported_project") }}</dt><dd>{{ plugin.gameName || t("common.general") }}</dd></div>
           <div><dt>{{ t("plugins.plugin_type") }}</dt><dd>{{ pluginKindLabel(plugin, t) }}</dd></div>
-          <div v-if="tab === 'store' && plugin.minHostVersion && plugin.minHostVersion !== '0.0.0'">
+          <div v-if="plugin.minHostVersion && plugin.minHostVersion !== '0.0.0'">
             <dt>{{ t("plugins.minimum_host_version") }}</dt><dd>v{{ plugin.minHostVersion }}</dd>
           </div>
           <div><dt>{{ t("plugins.author") }}</dt><dd>{{ authorName(plugin, t) }}</dd></div>

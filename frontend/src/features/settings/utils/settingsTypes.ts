@@ -9,6 +9,13 @@ export interface UpdateStatus {
   checked?: boolean;
   notes?: string;
   progress?: number;
+  policyVerified?: boolean | null;
+  canDownload?: boolean;
+  manualUpdateRequired?: boolean;
+  updateBlockCode?: string;
+  barrierVersion?: string;
+  migrationUrl?: string;
+  policyError?: string;
   automation?: {
     checkEnabled?: boolean;
     waitingForIdle?: boolean;

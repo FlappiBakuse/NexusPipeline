@@ -52,6 +52,10 @@ internal sealed record PluginManagementView(
     /// <summary>数据化专项插件 resolve.json 声明的用户输入变量（前端专项弹窗表单据此渲染）。</summary>
     public IReadOnlyList<Extensibility.PluginInputDeclaration> Inputs { get; init; } = Array.Empty<Extensibility.PluginInputDeclaration>();
 
+    public string MinHostVersion { get; init; } = "0.0.0";
+
+    public string? RuntimeErrorCode { get; init; }
+
     public static PluginManagementView Create(
         PluginSummary summary,
         PluginManager manager,
@@ -99,6 +103,8 @@ internal sealed record PluginManagementView(
             SelfManagedPcLaunch = manager.HasCapability(summary.Name, Extensibility.PluginCapabilityKeys.SelfManagedPcLaunch),
             NoFreshConfig = manager.HasCapability(summary.Name, Extensibility.PluginCapabilityKeys.NoFreshConfig),
             Inputs = summary.Inputs,
+            MinHostVersion = summary.MinHostVersion,
+            RuntimeErrorCode = manager.GetRuntimeErrorCode(summary.Name),
         };
     }
 }

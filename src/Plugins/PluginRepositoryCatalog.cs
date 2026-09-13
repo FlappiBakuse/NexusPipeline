@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NexusPipeline.Plugin.Abstractions;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
@@ -456,22 +457,9 @@ internal static class PluginRepositoryCatalog
         return ch is >= 'a' and <= 'z' or >= '0' and <= '9';
     }
 
-    public static bool TryParseVersion(string? value, out PluginVersion version)
+    public static bool TryParseVersion(string? value, out NexusVersion version)
     {
-        version = default;
-        string[] parts = (value ?? "").Trim().Split('.', StringSplitOptions.None);
-        if (parts.Length != 3
-            || parts.Any(part => string.IsNullOrEmpty(part)
-                || (part.Length > 1 && part[0] == '0')
-                || part.Any(ch => ch is < '0' or > '9'))
-            || !int.TryParse(parts[0], out int major)
-            || !int.TryParse(parts[1], out int minor)
-            || !int.TryParse(parts[2], out int patch))
-        {
-            return false;
-        }
-        version = new PluginVersion(major, minor, patch);
-        return true;
+        return NexusVersion.TryParse(value, out version);
     }
 
     public static bool TryParseDate(string? value)
@@ -488,23 +476,16 @@ internal static class PluginRepositoryCatalog
 
     public static int CompareVersions(string left, string right)
     {
-        return TryParseVersion(left, out PluginVersion leftVersion)
-            && TryParseVersion(right, out PluginVersion rightVersion)
+        return TryParseVersion(left, out NexusVersion leftVersion)
+            && TryParseVersion(right, out NexusVersion rightVersion)
             ? leftVersion.CompareTo(rightVersion)
             : string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
     public static bool IsCompatible(PluginCatalogEntry entry, string hostVersion, out string reason)
     {
-        if (!TryParseVersion(hostVersion, out PluginVersion host)
-            || !TryParseVersion(entry.MinHostVersion, out PluginVersion minimum))
+        if (!IsHostVersionCompatible(entry.MinHostVersion, hostVersion, out reason))
         {
-            reason = "宿主版本或插件最低版本无效";
-            return false;
-        }
-        if (host.CompareTo(minimum) < 0)
-        {
-            reason = $"需要宿主 v{entry.MinHostVersion} 或更高版本";
             return false;
         }
         if (entry.Kind == "managed-code"
@@ -513,6 +494,23 @@ internal static class PluginRepositoryCatalog
                 || apiMinor > PluginApiVersion.Minor))
         {
             reason = $"需要兼容 Plugin API v{PluginApiVersion.Major}.{PluginApiVersion.Minor} 的版本（插件声明 v{entry.ApiVersion}）";
+            return false;
+        }
+        reason = "";
+        return true;
+    }
+
+    public static bool IsHostVersionCompatible(string minimumVersion, string hostVersion, out string reason)
+    {
+        if (!TryParseVersion(hostVersion, out NexusVersion host)
+            || !TryParseVersion(minimumVersion, out NexusVersion minimum))
+        {
+            reason = "宿主版本或插件最低版本无效";
+            return false;
+        }
+        if (host.CompareTo(minimum) < 0)
+        {
+            reason = $"需要宿主 v{minimumVersion} 或更高版本";
             return false;
         }
         reason = "";
@@ -610,14 +608,3 @@ internal sealed record PluginChangelogEntry(
     string Version,
     string Date,
     IReadOnlyList<string> Items);
-
-internal readonly record struct PluginVersion(int Major, int Minor, int Patch) : IComparable<PluginVersion>
-{
-    public int CompareTo(PluginVersion other)
-    {
-        int major = Major.CompareTo(other.Major);
-        if (major != 0) return major;
-        int minor = Minor.CompareTo(other.Minor);
-        return minor != 0 ? minor : Patch.CompareTo(other.Patch);
-    }
-}

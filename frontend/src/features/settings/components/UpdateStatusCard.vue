@@ -20,6 +20,12 @@ let updateTimer: ReturnType<typeof setTimeout> | null = null;
 
 const completionActionText = computed(() => {
   const state = updateStatus.value?.state || "idle";
+  if (updateStatus.value?.manualUpdateRequired) {
+    return t("settings.update.manual_required", { version: updateStatus.value.latest || "" });
+  }
+  if (updateStatus.value?.updateBlockCode === "policy-unavailable") {
+    return t("settings.update.policy_unavailable");
+  }
   if (state === "checking") return t("settings.update.checking");
   if (state === "downloading") return t("settings.update.downloading");
   if (state === "ready") return t("settings.update.ready_confirm");
@@ -144,6 +150,15 @@ defineExpose({ reload: loadUpdateStatus });
       </div>
     </div>
     <p class="muted update-state-copy">{{ completionActionText }}</p>
+    <p v-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
+      {{ t("settings.update.manual_required_help", { version: updateStatus.latest || "" }) }}
+      <a v-if="updateStatus.migrationUrl" :href="String(updateStatus.migrationUrl)" target="_blank" rel="noopener noreferrer">
+        {{ t("settings.update.open_migration") }}
+      </a>
+    </p>
+    <p v-else-if="updateStatus?.updateBlockCode === 'policy-unavailable'" class="callout callout-warning update-policy-warning" data-testid="update-policy-warning">
+      {{ t("settings.update.policy_unavailable_help") }}
+    </p>
     <p v-if="updateStatusView.showBackupWarning" class="callout callout-warning update-backup-warning" data-testid="update-backup-warning">
       {{ t("settings.update.backup_help") }}
     </p>
@@ -170,7 +185,7 @@ defineExpose({ reload: loadUpdateStatus });
       <NxpButton v-if="updateStatus?.state === 'downloading'" class="ghost" type="button" @click="cancelUpdate">
         {{ t("common.cancel_download") }}
       </NxpButton>
-      <NxpButton v-else-if="updateStatus?.state === 'idle' && updateStatus?.available" class="ghost" type="button" @click="downloadUpdate">
+      <NxpButton v-else-if="updateStatus?.state === 'idle' && updateStatus?.available && updateStatus?.canDownload" class="ghost" type="button" @click="downloadUpdate">
         {{ t("common.download_update") }}
       </NxpButton>
       <NxpButton v-if="updateStatus?.state === 'ready'" class="primary" type="button" @click="requestApplyUpdate(false)">

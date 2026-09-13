@@ -1,0 +1,85 @@
+using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
+using Xunit;
+
+namespace NexusPipeline.Tests;
+
+public sealed class NexusVersionTests
+{
+    [Theory]
+    [InlineData("0.0.0", "0.0.0")]
+    [InlineData("1.2.3-beta.1", "1.2.3-beta.1")]
+    [InlineData("1.2.3-rc.9", "1.2.3-rc.9")]
+    [InlineData("V10.20.30", "10.20.30")]
+    public void TryParseTag_UsesCurrentVersionGrammar(string value, string expected)
+    {
+        Assert.True(NexusVersion.TryParseTag(value, out NexusVersion version));
+        Assert.Equal(expected, version.ToString());
+    }
+
+    [Theory]
+    [InlineData("01.2.3")]
+    [InlineData("1.2.3-alpha.1")]
+    [InlineData("1.2.3-beta.01")]
+    [InlineData("1.2.3+build.1")]
+    [InlineData("v1.2.3")]
+    [InlineData("1.2")]
+    public void TryParse_RejectsVersionsOutsideCurrentGrammar(string value)
+    {
+        Assert.False(NexusVersion.TryParse(value, out _));
+    }
+
+    [Fact]
+    public void Compare_OrdersBetaRcAndStableWithinCoreVersion()
+    {
+        Assert.True(V("1.2.3-beta.1").CompareTo(V("1.2.3-beta.2")) < 0);
+        Assert.True(V("1.2.3-beta.2").CompareTo(V("1.2.3-rc.1")) < 0);
+        Assert.True(V("1.2.3-rc.1").CompareTo(V("1.2.3")) < 0);
+        Assert.True(V("1.2.3").CompareTo(V("1.2.4-beta.1")) < 0);
+    }
+
+    [Fact]
+    public void UpdatePolicy_RejectsMalformedOrUntrustedDocuments()
+    {
+        Assert.False(UpdatePolicy.TryParse(
+            "{\"schemaVersion\":1,\"repository\":\"other/repo\",\"barriers\":[]}",
+            out _,
+            out string? error));
+        Assert.Contains("仓库", error);
+
+        Assert.False(UpdatePolicy.TryParse(
+            "{\"schemaVersion\":1,\"repository\":\"FlappiBakuse/NexusPipeline\",\"barriers\":[{\"version\":\"0.17.0\",\"code\":\"layout\"},{\"version\":\"0.16.0\",\"code\":\"older\"}]}",
+            out _,
+            out error));
+        Assert.Contains("从旧到新", error);
+    }
+
+    [Fact]
+    public void UpdatePolicy_FindsEarliestCrossedBarrier()
+    {
+        string json = """
+        {
+          "schemaVersion": 1,
+          "repository": "FlappiBakuse/NexusPipeline",
+          "barriers": [
+            { "version": "0.16.0", "code": "layout-v2", "migrationUrl": "https://example.com/migrate" },
+            { "version": "0.17.0", "code": "layout-v3" }
+          ]
+        }
+        """;
+        Assert.True(UpdatePolicy.TryParse(json, out UpdatePolicyDocument? policy, out string? error), error);
+
+        UpdateBarrier? barrier = UpdatePolicy.FindBarrier(policy!, V("0.15.12"), V("0.18.0"));
+
+        Assert.NotNull(barrier);
+        Assert.Equal("0.16.0", barrier!.Version.ToString());
+        Assert.Equal("layout-v2", barrier.Code);
+        Assert.Equal("https://example.com/migrate", barrier.MigrationUrl);
+    }
+
+    private static NexusVersion V(string value)
+    {
+        Assert.True(NexusVersion.TryParse(value, out NexusVersion version));
+        return version;
+    }
+}

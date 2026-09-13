@@ -9,6 +9,7 @@ using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Notification;
+using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
@@ -46,6 +47,8 @@ internal sealed record PluginSummary(
 
     /// <summary>数据化专项插件 resolve.json 声明的用户输入变量（managed-code 恒为空）。</summary>
     public IReadOnlyList<PluginInputDeclaration> Inputs { get; init; } = Array.Empty<PluginInputDeclaration>();
+
+    public string MinHostVersion { get; init; } = "0.0.0";
 }
 
 internal sealed record PluginFrontendRuntimeDescriptor(
@@ -88,6 +91,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly Dictionary<string, bool> _configuredEnabled = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, PluginRuntimeState> _runtimeStates = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _runtimeErrors = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _runtimeErrorCodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Func<List<DataSpecializedPlugin>> _discoverData;
     private readonly OutboundHttpClientProvider _http;
     private readonly PluginUserGlobalManagementRegistry _userGlobalManagement = new();
@@ -202,6 +206,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 Locales = metadata.Locales,
                 HasReadme = metadata.HasReadme,
                 Inputs = ReadInputDeclarations(plugin),
+                MinHostVersion = plugin.MinHostVersion,
             });
         }
         foreach (ManagedPluginDescriptor plugin in _managedPlugins)
@@ -232,6 +237,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 Changelog = metadata.Changelog,
                 Locales = metadata.Locales,
                 HasReadme = metadata.HasReadme,
+                MinHostVersion = plugin.Manifest.MinHostVersion,
             });
         }
         return list;
@@ -742,6 +748,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _configuredEnabled.Clear();
         _runtimeStates.Clear();
         _runtimeErrors.Clear();
+        _runtimeErrorCodes.Clear();
 
         foreach (DataSpecializedPlugin plugin in _discoverData())
         {
@@ -753,6 +760,19 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         {
             bool enabled = ReadConfiguredEnabled(plugin.Name, managedCode: false);
             _configuredEnabled[plugin.Name] = enabled;
+            if (!PluginRepositoryCatalog.IsHostVersionCompatible(
+                    plugin.MinHostVersion,
+                    UpdateService.CurrentVersion,
+                    out string hostCompatibilityReason))
+            {
+                _runtimeStates[plugin.Name] = PluginRuntimeState.Incompatible;
+                _runtimeErrors[plugin.Name] = hostCompatibilityReason;
+                _runtimeErrorCodes[plugin.Name] = "plugin_incompatible_host";
+                Logger.Warn($"[插件] 插件「{plugin.DisplayName}」需要更高宿主版本，运行时未启用：{hostCompatibilityReason}");
+                continue;
+            }
+            _capabilities.Register(plugin.Name, plugin);
+            _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
             _runtimeStates[plugin.Name] = enabled ? PluginRuntimeState.Active : PluginRuntimeState.Disabled;
             Logger.Info($"[插件] 已{(enabled ? "启用" : "禁用")}：{plugin.DisplayName} v{plugin.Version}（数据化专项）");
         }
@@ -761,6 +781,18 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             string name = descriptor.Manifest.Name;
             bool enabled = ReadConfiguredEnabled(name, managedCode: true);
             _configuredEnabled[name] = enabled;
+            if (!PluginRepositoryCatalog.IsHostVersionCompatible(
+                    descriptor.Manifest.MinHostVersion,
+                    UpdateService.CurrentVersion,
+                    out string hostCompatibilityReason))
+            {
+                _runtimeStates[name] = PluginRuntimeState.Incompatible;
+                _runtimeErrors[name] = hostCompatibilityReason;
+                _runtimeErrorCodes[name] = "plugin_incompatible_host";
+                Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」需要更高宿主版本，程序集未加载：{hostCompatibilityReason}");
+                continue;
+            }
+            _capabilities.RegisterKeys(name, descriptor.Manifest.Capabilities);
             if (!enabled)
             {
                 _runtimeStates[name] = PluginRuntimeState.Disabled;
@@ -771,6 +803,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             {
                 _runtimeStates[name] = PluginRuntimeState.Incompatible;
                 _runtimeErrors[name] = $"不支持 Plugin API v{descriptor.Manifest.ApiVersion}（宿主支持 v{PluginApiMajor}.{PluginApiMinor} 及兼容的更低 minor）";
+                _runtimeErrorCodes[name] = "plugin_incompatible_api";
                 Logger.Warn($"[插件] 插件「{descriptor.Manifest.DisplayName}」与 Plugin API 不兼容，程序集未加载。");
                 continue;
             }
@@ -836,6 +869,14 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     public string? GetRuntimeError(string name)
     {
         return _runtimeErrors.TryGetValue(ResolveLoadedPluginName(name), out string? error) ? error : null;
+    }
+
+    internal string? GetRuntimeErrorCode(string name)
+    {
+        string lookupName = ResolveLoadedPluginName(name);
+        return _runtimeErrors.ContainsKey(lookupName)
+            ? _runtimeErrorCodes.GetValueOrDefault(lookupName, "plugin_runtime_error")
+            : null;
     }
 
     public bool IsKnownPlugin(string name)
@@ -922,8 +963,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             return;
         }
         _dataPlugins.Add(plugin);
-        _capabilities.Register(plugin.Name, plugin);
-        _capabilities.RegisterKeys(plugin.Name, plugin.CapabilityKeys);
         _runtimeStates[plugin.Name] = PluginRuntimeState.Discovered;
     }
 
@@ -956,7 +995,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             }
             var descriptor = new ManagedPluginDescriptor(manifest, directory);
             _managedPlugins.Add(descriptor);
-            _capabilities.RegisterKeys(manifest.Name, manifest.Capabilities);
             _runtimeStates[manifest.Name] = PluginRuntimeState.Discovered;
         }
     }

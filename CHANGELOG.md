@@ -1,6 +1,19 @@
 # Changelog
 
-本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本遵循 [SemVer](https://semver.org/lang/zh-CN/)（v1.0.0 之前为 Pre-release）。
+本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式（v1.0.0 之前为 Pre-release）。
+
+## v0.15.12（Pre-release）
+
+### 更新与版本
+
+- 宿主与插件工具统一支持正式版、`-beta.N` 和 `-rc.N` 版本，并按 beta、rc、正式版顺序比较。
+- 增加 `update-policy.json` 更新策略校验；跨越破坏性版本屏障时保留更新发现结果，要求手动下载安装包并迁移配置。
+- 更新状态、Web API、MCP 和自动更新服务同步暴露策略验证与手动迁移状态，内置下载和应用入口在屏障状态下统一拒绝。
+
+### 插件兼容性
+
+- 插件商店安装与更新继续校验 `minHostVersion`；运行时发现手动放入的不兼容插件时保留元数据显示并标记为不兼容，禁止解析、加载和激活。
+- 插件管理页、详情页和控制面补充最低宿主版本与兼容性原因展示。
 
 ## v0.15.11（Pre-release）
 

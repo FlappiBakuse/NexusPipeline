@@ -1,18 +1,20 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const numericSemver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const nexusVersion = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?$/;
 
 export function parseProjectVersion(version) {
-  const match = numericSemver.exec(String(version).trim());
+  const match = nexusVersion.exec(String(version).trim());
   if (!match) {
-    throw new Error(`项目版本必须是 numeric semver（major.minor.patch）：${version}`);
+    throw new Error(`项目版本必须是 Nexus 版本（major.minor.patch[-beta.N|-rc.N]）：${version}`);
   }
   return {
-    text: `${match[1]}.${match[2]}.${match[3]}`,
+    text: match[0],
     major: Number(match[1]),
     minor: Number(match[2]),
     patch: Number(match[3]),
+    stage: match[4] || "stable",
+    stageNumber: match[5] ? Number(match[5]) : 0,
   };
 }
 

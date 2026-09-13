@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Reflection;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Execution;
@@ -44,6 +45,13 @@ internal sealed class UpdateService
     private HostMaintenanceLease? _maintenanceLease;
     private bool _hasChecked;
     private bool _discoveryInvalidationPending;
+    private bool? _policyVerified;
+    private bool _canDownload;
+    private bool _manualUpdateRequired;
+    private string? _updateBlockCode;
+    private string? _barrierVersion;
+    private string? _migrationUrl;
+    private string? _policyError;
 
     public UpdateService(
         Func<AppSettings> settings,
@@ -82,14 +90,15 @@ internal sealed class UpdateService
         }
     }
 
-    /// <summary>当前发现结果是否因渠道或更新源变化而禁止自动应用；Ready 事务仍保留给人工处理。</summary>
+    /// <summary>当前发现结果是否允许自动应用；策略未验证或跨越破坏性屏障时保持关闭。</summary>
     internal bool IsAutomaticApplyAllowed
     {
         get
         {
             lock (_gate)
             {
-                return !_discoveryInvalidationPending;
+                return !_discoveryInvalidationPending
+                    && (_latest is null || _policyVerified == true && _canDownload);
             }
         }
     }
@@ -105,8 +114,26 @@ internal sealed class UpdateService
         }
     }
 
-    /// <summary>进程数版本（与 /api/status 同源）。</summary>
-    public static string CurrentVersion => typeof(UpdateService).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+    /// <summary>进程版本（与 /api/status 同源），保留 AssemblyInformationalVersion 的预发布后缀。</summary>
+    public static string CurrentVersion
+    {
+        get
+        {
+            Assembly assembly = typeof(UpdateService).Assembly;
+            string? informational = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            if (!string.IsNullOrWhiteSpace(informational))
+            {
+                string candidate = informational.Split('+', 2)[0];
+                if (NexusVersion.TryParse(candidate, out _))
+                {
+                    return candidate;
+                }
+            }
+            Version? numeric = assembly.GetName().Version;
+            string fallback = numeric?.ToString(3) ?? "0.0.0";
+            return NexusVersion.TryParse(fallback, out _) ? fallback : "0.0.0";
+        }
+    }
 
     public static string EffectiveChannel(AppSettings settings)
     {
@@ -175,6 +202,8 @@ internal sealed class UpdateService
             operation = BeginOperationLocked(UpdateState.Checking);
             _readyStagingDir = null;
             _error = "";
+            _latest = null;
+            ClearPolicyLocked();
         }
 
         try
@@ -188,7 +217,7 @@ internal sealed class UpdateService
             }
             UpdateSourcePolicy policy = new(source);
             string channel = EffectiveChannel(settings);
-            (int, int, int) current = ParseCurrent();
+            NexusVersion current = ParseCurrent();
             using HttpClient http = _outbound.CreateClient(
                 policy.SourceUri,
                 TimeSpan.FromMinutes(10),
@@ -206,6 +235,17 @@ internal sealed class UpdateService
             string json = await response.Content.ReadAsStringAsync(operation.Cts.Token).ConfigureAwait(false);
             operation.Cts.Token.ThrowIfCancellationRequested();
             ReleaseInfo? best = UpdateCatalog.PickRelease(JsonNode.Parse(json), channel, current);
+            UpdatePolicyFetchResult policyResult = best is null
+                ? new UpdatePolicyFetchResult(false, null, null)
+                : await UpdatePolicy.FetchAsync(
+                    policy,
+                    http,
+                    "NexusPipeline-update/" + CurrentVersion,
+                    Path.Combine(_installDir, ".nxp", "state"),
+                    operation.Cts.Token).ConfigureAwait(false);
+            UpdateBarrier? barrier = best is not null && policyResult.Verified
+                ? UpdatePolicy.FindBarrier(policyResult.Policy!, current, best.Version)
+                : null;
             lock (_gate)
             {
                 if (!IsCurrentLocked(operation))
@@ -213,6 +253,17 @@ internal sealed class UpdateService
                     return BuildSnapshotLocked();
                 }
                 _latest = best;
+                _policyVerified = best is null ? null : policyResult.Verified;
+                _canDownload = best is not null && policyResult.Verified && barrier is null;
+                _manualUpdateRequired = barrier is not null;
+                _updateBlockCode = best is null
+                    ? null
+                    : policyResult.Verified
+                        ? barrier is null ? null : "breaking-update"
+                        : "policy-unavailable";
+                _barrierVersion = barrier?.Version.ToString();
+                _migrationUrl = barrier?.MigrationUrl;
+                _policyError = policyResult.Verified ? null : policyResult.Error;
             }
             Audit.Log(auditSource, best is null ? "检查更新" : "发现新版本", best is null
                 ? $"当前 v{CurrentVersion}，渠道 {channel}，无可用更新"
@@ -220,6 +271,14 @@ internal sealed class UpdateService
             if (best is not null)
             {
                 Logger.Info($"[更新] 发现新版本：v{CurrentVersion} → v{best.VersionText}（{best.Name}）");
+                if (!policyResult.Verified)
+                {
+                    Logger.Warn($"[更新] 无法验证 update-policy.json，已禁止内置下载：{policyResult.Error}");
+                }
+                else if (barrier is not null)
+                {
+                    Logger.Warn($"[更新] v{best.VersionText} 跨越破坏性更新屏障 v{barrier.Version}，要求手动迁移。");
+                }
             }
         }
         catch (OperationCanceledException) when (operation.Cts.IsCancellationRequested)
@@ -245,7 +304,7 @@ internal sealed class UpdateService
     }
 
     /// <summary>开始下载并校验到 staging（后台任务，进度经 GetStatus 轮询）。</summary>
-    public string? StartDownload(string auditSource)
+    public UpdateDownloadResult StartDownload(string auditSource)
     {
         ReleaseInfo? latest;
         UpdateOperation operation;
@@ -257,20 +316,26 @@ internal sealed class UpdateService
         {
             if (_state != UpdateState.Idle)
             {
-                return "已有更新操作进行中";
+                return UpdateDownloadResult.Rejected("busy", "已有更新操作进行中");
             }
             latest = _latest;
             if (latest is null)
             {
-                return "尚未检查到可用更新";
+                return UpdateDownloadResult.Rejected("not-available", "尚未检查到可用更新");
+            }
+            if (!_canDownload)
+            {
+                return _manualUpdateRequired
+                    ? UpdateDownloadResult.Rejected("breaking-update", "当前更新跨越破坏性版本屏障，请手动下载最新安装包并迁移配置文件")
+                    : UpdateDownloadResult.Rejected("policy-unavailable", "无法验证更新策略，暂不能使用内置更新");
             }
             if (File.Exists(TaskFile))
             {
-                return "已有更新事务待处理，请先完成启动恢复";
+                return UpdateDownloadResult.Rejected("transaction-pending", "已有更新事务待处理，请先完成启动恢复");
             }
             if (Directory.Exists(BackupDir) || File.Exists(BackupDir))
             {
-                return "检测到未恢复的更新 backup，请先完成启动恢复";
+                return UpdateDownloadResult.Rejected("recovery-pending", "检测到未恢复的更新 backup，请先完成启动恢复");
             }
             version = latest.VersionText;
             long nextGeneration = checked(_generation + 1);
@@ -349,7 +414,7 @@ internal sealed class UpdateService
             }
         });
         Audit.Log(auditSource, "开始下载更新", $"v{version}（staging: {stagingDir}）");
-        return null;
+        return UpdateDownloadResult.Started();
     }
 
     /// <summary>取消检查/下载。取消只释放当前状态，过期 worker 仍受 generation 和现场归属保护。</summary>
@@ -507,6 +572,11 @@ internal sealed class UpdateService
     {
         version = "";
         stagingDir = "";
+        if (_manualUpdateRequired)
+        {
+            failure = UpdateApplyResult.Busy("breaking-update", "当前更新跨越破坏性版本屏障，请手动下载最新安装包并迁移配置文件");
+            return false;
+        }
         if (_state != UpdateState.Ready || _latest is null)
         {
             failure = UpdateApplyResult.Busy("not-ready", "更新尚未就绪（请先检查并下载更新）");
@@ -589,6 +659,7 @@ internal sealed class UpdateService
             }
             _error = message;
             _latest = null;
+            ClearPolicyLocked();
             _state = UpdateState.Idle;
             _readyStagingDir = null;
             _bytesRead = 0;
@@ -672,11 +743,11 @@ internal sealed class UpdateService
         }
     }
 
-    private (int Major, int Minor, int Patch) ParseCurrent()
+    private NexusVersion ParseCurrent()
     {
-        return UpdateCatalog.TryParseTag(CurrentVersion, out (int Major, int Minor, int Patch) version)
+        return UpdateCatalog.TryParseTag(CurrentVersion, out NexusVersion version)
             ? version
-            : (0, 0, 0);
+            : NexusVersion.Stable(0, 0, 0);
     }
 
     private UpdateStatusSnapshot BuildSnapshotLocked()
@@ -693,7 +764,14 @@ internal sealed class UpdateService
             EffectiveChannel(_settings()),
             _latest is not null,
             _latest?.Notes ?? "",
-            _hasChecked);
+            _hasChecked,
+            _policyVerified,
+            _canDownload,
+            _manualUpdateRequired,
+            _updateBlockCode,
+            _barrierVersion,
+            _migrationUrl,
+            _policyError);
     }
 
     private void ClearDiscoveryLocked()
@@ -702,6 +780,18 @@ internal sealed class UpdateService
         _error = "";
         _hasChecked = false;
         _discoveryInvalidationPending = false;
+        ClearPolicyLocked();
+    }
+
+    private void ClearPolicyLocked()
+    {
+        _policyVerified = null;
+        _canDownload = false;
+        _manualUpdateRequired = false;
+        _updateBlockCode = null;
+        _barrierVersion = null;
+        _migrationUrl = null;
+        _policyError = null;
     }
 
     private static int? BytesToPercent(long bytesRead, long bytesTotal)
@@ -742,7 +832,22 @@ internal sealed record UpdateStatusSnapshot(
     string Channel,
     bool Available,
     string Notes,
-    bool HasChecked);
+    bool HasChecked,
+    bool? PolicyVerified = null,
+    bool CanDownload = false,
+    bool ManualUpdateRequired = false,
+    string? UpdateBlockCode = null,
+    string? BarrierVersion = null,
+    string? MigrationUrl = null,
+    string? PolicyError = null);
+
+/// <summary>下载请求结果：Started 表示后台下载已受理，Rejected 携带稳定的 API 错误码。</summary>
+internal sealed record UpdateDownloadResult(bool Succeeded, string? Code, string? Error)
+{
+    public static UpdateDownloadResult Started() => new(true, null, null);
+
+    public static UpdateDownloadResult Rejected(string code, string error) => new(false, code, error);
+}
 
 /// <summary>应用请求结果：Succeeded=true 表示已受理（Deferred 区分立即/下次启动）。</summary>
 internal sealed record UpdateApplyResult(bool Succeeded, bool Deferred, string? Code, string? Error)

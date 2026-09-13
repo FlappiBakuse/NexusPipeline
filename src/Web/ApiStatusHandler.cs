@@ -6,6 +6,7 @@ using NexusPipeline.Plugins;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Update;
 
 namespace NexusPipeline.Web;
 
@@ -45,7 +46,7 @@ internal static class ApiStatusHandler
             webPort = settings.WebPort,
             // 实际监听端口（端口冲突 +1 漂移/未重启时与配置端口不同），侧栏地址文案据此显示。
             actualPort = WebServer.Current?.Port ?? settings.WebPort,
-            version = typeof(WebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0",
+            version = UpdateService.CurrentVersion,
             scriptCount,
             queueCount,
             nextSchedule = next is null ? null : new { queueName = next.Value.QueueName, time = next.Value.TriggerTime },

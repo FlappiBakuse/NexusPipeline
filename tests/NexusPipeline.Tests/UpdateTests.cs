@@ -7,21 +7,24 @@ using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
 using Xunit;
 
 namespace NexusPipeline.Tests;
 
-/// <summary>更新域 L1：SemVer 解析比较、releases JSON 解析、渠道过滤、主机白名单与当前 zip 合约。</summary>
+/// <summary>更新域 L1：受限版本解析比较、releases JSON 解析、渠道过滤、主机白名单与当前 zip 合约。</summary>
 public sealed class UpdateCatalogTests
 {
     [Theory]
-    [InlineData("v1.2.3", 1, 2, 3)]
-    [InlineData("v0.10.0", 0, 10, 0)]
-    [InlineData("10.11.12", 10, 11, 12)]
-    public void TryParseTag_AcceptsStandardTags(string tag, int major, int minor, int patch)
+    [InlineData("v1.2.3", "1.2.3")]
+    [InlineData("v0.10.0", "0.10.0")]
+    [InlineData("10.11.12", "10.11.12")]
+    [InlineData("v1.2.3-beta.2", "1.2.3-beta.2")]
+    [InlineData("1.2.3-rc.1", "1.2.3-rc.1")]
+    public void TryParseTag_AcceptsStandardTags(string tag, string expected)
     {
         Assert.True(UpdateCatalog.TryParseTag(tag, out var version));
-        Assert.Equal((major, minor, patch), version);
+        Assert.Equal(expected, version.ToString());
     }
 
     [Theory]
@@ -38,10 +41,12 @@ public sealed class UpdateCatalogTests
     [Fact]
     public void Compare_OrdersByMajorThenMinorThenPatch()
     {
-        Assert.True(UpdateCatalog.Compare((0, 10, 0), (1, 0, 0)) < 0);
-        Assert.True(UpdateCatalog.Compare((1, 2, 3), (1, 2, 3)) == 0);
-        Assert.True(UpdateCatalog.Compare((1, 2, 4), (1, 2, 3)) > 0);
-        Assert.True(UpdateCatalog.Compare((1, 3, 0), (1, 2, 9)) > 0);
+        Assert.True(UpdateCatalog.Compare(V("0.10.0"), V("1.0.0")) < 0);
+        Assert.True(UpdateCatalog.Compare(V("1.2.3"), V("1.2.3")) == 0);
+        Assert.True(UpdateCatalog.Compare(V("1.2.4"), V("1.2.3")) > 0);
+        Assert.True(UpdateCatalog.Compare(V("1.3.0"), V("1.2.9")) > 0);
+        Assert.True(UpdateCatalog.Compare(V("1.2.3-beta.2"), V("1.2.3-rc.1")) < 0);
+        Assert.True(UpdateCatalog.Compare(V("1.2.3-rc.1"), V("1.2.3")) < 0);
     }
 
     [Fact]
@@ -65,7 +70,7 @@ public sealed class UpdateCatalogTests
         ]
         """)!;
 
-        ReleaseInfo? release = UpdateCatalog.PickRelease(root, "prerelease", (0, 10, 0));
+        ReleaseInfo? release = UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0"));
 
         Assert.NotNull(release);
         Assert.Equal("v0.10.1", release!.Tag);
@@ -90,8 +95,8 @@ public sealed class UpdateCatalogTests
         ]
         """)!;
 
-        ReleaseInfo? stable = UpdateCatalog.PickRelease(root, "stable", (0, 10, 0));
-        ReleaseInfo? prerelease = UpdateCatalog.PickRelease(root, "prerelease", (0, 10, 0));
+        ReleaseInfo? stable = UpdateCatalog.PickRelease(root, "stable", V("0.10.0"));
+        ReleaseInfo? prerelease = UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0"));
 
         Assert.Equal("v0.11.0", stable!.Tag);
         // prerelease 渠道取最高版本（stable 与 prerelease 均可见）。
@@ -110,8 +115,8 @@ public sealed class UpdateCatalogTests
         ]
         """)!;
 
-        Assert.Null(UpdateCatalog.PickRelease(root, "prerelease", (0, 10, 0)));
-        Assert.Null(UpdateCatalog.PickRelease(JsonNode.Parse("[]"), "prerelease", (0, 10, 0)));
+        Assert.Null(UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0")));
+        Assert.Null(UpdateCatalog.PickRelease(JsonNode.Parse("[]"), "prerelease", V("0.10.0")));
     }
 
     [Fact]
@@ -222,6 +227,12 @@ public sealed class UpdateCatalogTests
                 RequestMessage = request,
             });
         }
+    }
+
+    private static NexusVersion V(string text)
+    {
+        Assert.True(NexusVersion.TryParse(text, out NexusVersion version));
+        return version;
     }
 }
 
@@ -434,8 +445,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     {
         get
         {
-            Version current = Version.Parse(CurrentVersion);
-            return $"{current.Major}.{current.Minor}.{checked(current.Build + 1)}";
+            Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
+            return $"{current.Major}.{current.Minor}.{checked(current.Patch + 1)}";
         }
     }
 
@@ -454,6 +465,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     private bool _canApply = true;
     private bool _exited;
     private List<string> _launched = new();
+    private string _policyJson = "{\"schemaVersion\":1,\"repository\":\"FlappiBakuse/NexusPipeline\",\"barriers\":[]}";
 
     public Task InitializeAsync()
     {
@@ -616,6 +628,10 @@ public sealed class UpdateServiceTests : IAsyncLifetime
 
     private (int StatusCode, string ContentType, byte[] Body) BuildResponse(string path)
     {
+        if (path == "/update-policy.json")
+        {
+            return (200, "application/json", Encoding.UTF8.GetBytes(_policyJson));
+        }
         if (path == "/releases" || path == "/")
         {
             var releases = new JsonArray();
@@ -688,6 +704,47 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         Assert.True(status.Available);
         Assert.Equal(CandidateVersion, status.Latest);
         Assert.Contains("更新说明", status.Notes);
+        Assert.True(status.PolicyVerified);
+        Assert.True(status.CanDownload);
+    }
+
+    [Fact]
+    public async Task Check_BreakingBarrierRequiresManualMigrationAndRejectsDownload()
+    {
+        _policyJson = $"{{\"schemaVersion\":1,\"repository\":\"FlappiBakuse/NexusPipeline\",\"barriers\":[{{\"version\":\"{CandidateVersion}\",\"code\":\"installation-layout-v2\",\"migrationUrl\":\"https://example.com/migrate\"}}]}}";
+        UpdateService service = NewService();
+
+        UpdateStatusSnapshot status = await service.CheckAsync("test");
+
+        Assert.True(status.Available);
+        Assert.True(status.PolicyVerified);
+        Assert.False(status.CanDownload);
+        Assert.True(status.ManualUpdateRequired);
+        Assert.Equal("breaking-update", status.UpdateBlockCode);
+        Assert.Equal(CandidateVersion, status.BarrierVersion);
+        Assert.Equal("https://example.com/migrate", status.MigrationUrl);
+        UpdateDownloadResult result = service.StartDownload("test");
+        Assert.False(result.Succeeded);
+        Assert.Equal("breaking-update", result.Code);
+        Assert.Equal("breaking-update", service.RequestApply(false, "test").Code);
+    }
+
+    [Fact]
+    public async Task Check_FailsClosedWhenPolicyCannotBeValidated()
+    {
+        _policyJson = "{}";
+        UpdateService service = NewService();
+
+        UpdateStatusSnapshot status = await service.CheckAsync("test");
+
+        Assert.True(status.Available);
+        Assert.False(status.PolicyVerified);
+        Assert.False(status.CanDownload);
+        Assert.False(status.ManualUpdateRequired);
+        Assert.Equal("policy-unavailable", status.UpdateBlockCode);
+        UpdateDownloadResult result = service.StartDownload("test");
+        Assert.False(result.Succeeded);
+        Assert.Equal("policy-unavailable", result.Code);
     }
 
     [Fact]
@@ -696,9 +753,9 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         UpdateService service = NewService();
         await service.CheckAsync("test");
 
-        string? error = service.StartDownload("test");
+        UpdateDownloadResult result = service.StartDownload("test");
 
-        Assert.Null(error);
+        Assert.True(result.Succeeded);
         await WaitStateAsync(service, UpdateState.Ready);
         UpdateStatusSnapshot status = service.GetStatus();
         Assert.True(string.IsNullOrEmpty(status.Error));
@@ -714,9 +771,9 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         UpdateService service = NewService();
         await service.CheckAsync("test");
 
-        Assert.Null(service.StartDownload("test"));
-        string? second = service.StartDownload("test");
-        Assert.NotNull(second);
+        Assert.True(service.StartDownload("test").Succeeded);
+        UpdateDownloadResult second = service.StartDownload("test");
+        Assert.False(second.Succeeded);
         await WaitStateAsync(service, UpdateState.Ready);
     }
 

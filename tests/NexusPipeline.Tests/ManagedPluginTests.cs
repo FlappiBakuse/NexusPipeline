@@ -80,6 +80,7 @@ public sealed class ManagedPluginTests
             manager.LoadAll();
             Assert.Equal("Incompatible", manager.GetRuntimeState("fixture-incompatible"));
             Assert.Contains("API", manager.GetRuntimeError("fixture-incompatible"));
+            Assert.Equal("plugin_incompatible_api", manager.GetRuntimeErrorCode("fixture-incompatible"));
             Assert.False(File.Exists(PluginStatePath("fixture-incompatible")));
 
             Assert.Equal("InitFailed", manager.GetRuntimeState("fixture-failing"));
@@ -92,6 +93,44 @@ public sealed class ManagedPluginTests
             ReleasePluginContexts();
             DeletePluginDirectory(incompatibleRoot);
             DeletePluginDirectory(failingRoot);
+        }
+    }
+
+    [Fact]
+    public void ManagedPlugin_MinimumHostVersionBlocksManualInstallationBeforeAssemblyLoad()
+    {
+        const string name = "fixture-host-too-old";
+        string root = CreatePluginDirectory(
+            name,
+            typeof(NexusPipeline.TestPlugin.TestPlugin),
+            minHostVersion: "99.0.0");
+        var settings = new AppSettings
+        {
+            PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
+            {
+                [name] = new PluginPreference { Enabled = true },
+            },
+        };
+        var manager = new PluginManager(
+            () => settings,
+            () => new NotificationDispatcher(new FixtureSettingsProvider()));
+
+        try
+        {
+            manager.LoadAll();
+
+            Assert.Equal("Incompatible", manager.GetRuntimeState(name));
+            Assert.False(manager.IsEnabled(name));
+            Assert.Contains("需要宿主", manager.GetRuntimeError(name));
+            Assert.Equal("plugin_incompatible_host", manager.GetRuntimeErrorCode(name));
+            Assert.Equal("99.0.0", manager.PluginSummaries.Single(item => item.Name == name).MinHostVersion);
+            Assert.False(File.Exists(PluginStatePath(name)));
+        }
+        finally
+        {
+            manager.ShutdownAll();
+            ReleasePluginContexts();
+            DeletePluginDirectory(root);
         }
     }
 
@@ -133,7 +172,12 @@ public sealed class ManagedPluginTests
         }
     }
 
-    private static string CreatePluginDirectory(string name, Type entryType, string apiVersion = "1.0", bool frontend = false)
+    private static string CreatePluginDirectory(
+        string name,
+        Type entryType,
+        string apiVersion = "1.0",
+        bool frontend = false,
+        string minHostVersion = "0.0.0")
     {
         string artifactName = char.ToUpperInvariant(name[0])
             + name[1..].Replace("-", "", StringComparison.Ordinal);
@@ -161,6 +205,7 @@ public sealed class ManagedPluginTests
           "description": "managed fixture",
           "version": "0.1.0",
           "kind": "managed-code",
+          "minHostVersion": "{{minHostVersion}}",
           "apiVersion": "{{apiVersion}}",
           "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
           "entryType": "{{entryType.FullName}}",

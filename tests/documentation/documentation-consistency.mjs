@@ -62,7 +62,7 @@ function read(relativePath) {
 
 function currentProjectVersion() {
   const project = read("src/NexusPipeline.csproj");
-  const match = project.match(/<Version>(\d+\.\d+\.\d+)<\/Version>/u);
+  const match = project.match(/<Version>((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?)<\/Version>/u);
   assert.ok(match, "NexusPipeline.csproj 缺少可解析的 Version");
   return match[1];
 }
@@ -116,7 +116,7 @@ function findLocalLinks(text) {
 
 function extractVersionHeadings(text) {
   const versions = [];
-  const pattern = /^##\s+\[?(v\d+\.\d+\.\d+)\]?/gimu;
+  const pattern = /^##\s+\[?(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?)\]?/gimu;
   for (const match of text.matchAll(pattern)) {
     versions.push({ version: match[1].toLowerCase(), index: match.index ?? 0 });
   }

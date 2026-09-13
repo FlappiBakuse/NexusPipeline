@@ -19,11 +19,11 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 - 模拟器支持：宿主内置 Generic ADB 与 MuMuManager 两种驱动；专项插件通过 `emulator` capability 声明支持模拟器实例，宿主负责帧缓冲采集、命令执行与实例清理。
 - 控制面：网页、`manage` 菜单和正式 CLI 共享本机服务；可选启用 loopback MCP Server。
 - 诊断与可验证性：提供系统诊断、脱敏支持包和运行计划 dry-run，便于确认环境、恢复现场与准入原因。
-- 内建更新：定期检查、下载和校验 GitHub 发布包，支持立即应用或下次启动应用；可选在宿主闲时自动应用并重启。
+- 内建更新：定期检查、下载和校验 GitHub 发布包，支持立即应用或下次启动应用；可选在宿主闲时自动应用并重启；跨越声明的破坏性版本时提示手动迁移。
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载 `NexusPipeline-vX.Y.Z-win-x64.zip`。
+1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载 `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip`。
 2. 解压到固定目录，例如 `D:\NexusPipeline\`。
 3. 双击 `nexus-pipeline.exe`，按系统提示允许管理员权限。
 4. 浏览器打开 `http://127.0.0.1:58731/`，完成脚本、用户和队列设置。
@@ -41,7 +41,7 @@ config/    data/    history/    logs/    plugins/    .nxp/
 
 「更新」页中的版本备份用于更新文件切换与回滚，不能替代用户数据备份。更新完成后若发现无法识别的旧现场，请保留现场目录和日志，使用备份恢复数据，再根据当前版本格式重新配置。
 
-手动升级时，保留上述运行时目录，仅替换新版本发布包中的程序文件和 `wwwroot/`。插件仓库独立维护，插件版本和最低宿主版本以插件 manifest 为准。
+手动升级时，保留上述运行时目录，仅替换新版本发布包中的程序文件和 `wwwroot/`。如果更新页提示跨越破坏性版本屏障，请手动下载对应安装包，按发布说明迁移配置后再启动。插件仓库独立维护，插件版本和最低宿主版本以插件 manifest 为准。
 
 ## 快速开始
 

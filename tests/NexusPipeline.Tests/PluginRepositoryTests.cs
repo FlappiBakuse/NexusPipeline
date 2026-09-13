@@ -5,6 +5,7 @@ using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services.Networking;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -15,8 +16,8 @@ public sealed class PluginRepositoryCatalogTests
     {
         get
         {
-            Version current = Version.Parse(UpdateService.CurrentVersion);
-            return $"{current.Major}.{current.Minor}.{checked(current.Build + 1)}";
+            Assert.True(NexusVersion.TryParse(UpdateService.CurrentVersion, out NexusVersion current));
+            return $"{current.Major}.{current.Minor}.{checked(current.Patch + 1)}";
         }
     }
 
@@ -261,6 +262,9 @@ public sealed class PluginRepositoryCatalogTests
     {
         Assert.True(PluginRepositoryCatalog.CompareVersions("0.10.9", "0.10.8") > 0);
         Assert.True(PluginRepositoryCatalog.CompareVersions("1.2.0", "1.10.0") < 0);
+        Assert.True(PluginRepositoryCatalog.CompareVersions("1.2.3-beta.2", "1.2.3-beta.1") > 0);
+        Assert.True(PluginRepositoryCatalog.CompareVersions("1.2.3-rc.1", "1.2.3-beta.9") > 0);
+        Assert.True(PluginRepositoryCatalog.CompareVersions("1.2.3", "1.2.3-rc.9") > 0);
         Assert.Equal(0, PluginRepositoryCatalog.CompareVersions("0.1.0", "0.1.0"));
     }
 

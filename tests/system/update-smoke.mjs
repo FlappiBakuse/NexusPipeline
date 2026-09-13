@@ -209,7 +209,7 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   await waitFor(() => !fs.existsSync(versionFile), 30000);
   assertMarkersCleaned();
   const status = await (await api("GET", "/api/status")).json();
-  assert.match(status.version, /^\d+\.\d+\.\d+$/);
+  assert.match(status.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?$/);
   const audit = logTail();
   assert.match(audit, /更新完成/, "日志应包含「更新完成」审计");
   await stopRuntimeHard();

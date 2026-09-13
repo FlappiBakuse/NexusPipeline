@@ -42,6 +42,9 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     public string Version { get; private set; } = "";
 
+    /// <summary>插件声明的最低宿主版本；未满足时保留元数据但不参与运行时解析。</summary>
+    public string MinHostVersion { get; private set; } = "0.0.0";
+
     /// <summary>数据化插件可选的同源前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
@@ -99,6 +102,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
                 GameName = manifest.GameName,
                 Description = manifest.Description,
                 Version = manifest.Version,
+                MinHostVersion = manifest.MinHostVersion,
                 Frontend = manifest.Frontend,
                 Localization = manifest.Localization,
                 _resolvePath = manifest.ResolvePath,

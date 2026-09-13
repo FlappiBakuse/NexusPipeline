@@ -308,12 +308,12 @@ internal sealed class PluginRepositoryService
             view.Kind,
             view.ApiVersion,
             view.Capabilities,
-            "0.0.0",
-            true,
+            view.MinHostVersion,
+            !string.Equals(view.State, PluginRuntimeState.Incompatible.ToString(), StringComparison.Ordinal),
             view.InstalledName,
             view.InstalledVersion,
             false,
-            true,
+            view.RuntimeErrorCode != "plugin_incompatible_host",
             "",
             view.ManagedByStore,
             view.PendingAction,
@@ -335,7 +335,10 @@ internal sealed class PluginRepositoryService
             readme.Markdown,
             readme.Error,
             view.Changelog,
-            view.Locales);
+            view.Locales)
+        {
+            RuntimeErrorCode = view.RuntimeErrorCode,
+        };
     }
 
     public async Task<PluginDetail?> GetStoreDetailAsync(
@@ -400,7 +403,10 @@ internal sealed class PluginRepositoryService
             readme.Markdown,
             readme.Error,
             item.Changelog,
-            item.Locales);
+            item.Locales)
+        {
+            RuntimeErrorCode = installedView?.RuntimeErrorCode,
+        };
     }
 
     private async Task<PluginReadmeResult> LoadLocalReadmeAsync(
@@ -679,7 +685,7 @@ internal sealed class PluginRepositoryService
             string status = operation is not null
                 ? "pending"
                 : !compatible
-                    ? "incompatible"
+                    ? "update-requires-host-upgrade"
                 : local is null
                     ? "not-installed"
                 : updateAvailable ? "update-available" : "installed";

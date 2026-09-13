@@ -1,7 +1,7 @@
 """更新可见性自检：按宿主更新引擎的当前契约复核已发布 Release 的资产。
 
 复现 UpdateCatalog 对默认更新源的解析结果：
-- 只接受 tag 形如 vX.Y.Z 的非 draft 发布；
+- 只接受 tag 形如 vX.Y.Z、vX.Y.Z-beta.N 或 vX.Y.Z-rc.N 的非 draft 发布；
 - prerelease 渠道接受 prerelease 发布；
 - 必须同时存在 zip 与 sha256 两项资产，且名称与 tag 派生结果一致；
 - 下载主机必须在默认源白名单内；
@@ -52,10 +52,10 @@ if release is None:
 check(f"{TAG} 非 draft", release.get("draft") is not True)
 check(f"{TAG} 标记为 prerelease（v1.0.0 前契约）", release.get("prerelease") is True)
 
-# 3. tag 可被引擎解析为严格递增的 SemVer
-match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", TAG)
-check("tag 符合 vX.Y.Z 解析规则", match is not None)
-parsed = tuple(int(part) for part in match.groups()) if match else None
+# 3. tag 可被引擎解析为受限 Nexus 版本
+match = re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?", TAG)
+check("tag 符合受限 Nexus 版本规则", match is not None)
+parsed = tuple(int(part) for part in match.groups()[:3]) if match else None
 check("版本高于上一发布 v0.15.7", parsed > (0, 15, 7), f"{parsed} > (0, 15, 7)")
 
 # 4. 两项资产齐全且命名与 tag 派生一致

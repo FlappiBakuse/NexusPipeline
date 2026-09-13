@@ -1,10 +1,11 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Persistence;
+using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Update;
 
 /// <summary>
-/// 更新清单：SemVer 解析比较、GitHub Releases API JSON 解析与渠道过滤。纯逻辑，便于单测。
+/// 更新清单：受限 Nexus 版本解析比较、GitHub Releases API JSON 解析与渠道过滤。纯逻辑，便于单测。
 /// 资产约定：release 必须同时携带 NexusPipeline-v{ver}-win-x64.zip 与同名 .sha256 才能被发现。
 /// </summary>
 internal static class UpdateCatalog
@@ -14,49 +15,21 @@ internal static class UpdateCatalog
     /// <summary>下载包尺寸上限（默认 200 MB，逐块校验）。</summary>
     public const long MaxDownloadBytes = 200L * 1024 * 1024;
 
-    public static bool TryParseTag(string? tag, out (int Major, int Minor, int Patch) version)
+    public static bool TryParseTag(string? tag, out NexusVersion version)
     {
-        version = default;
-        if (string.IsNullOrWhiteSpace(tag))
-        {
-            return false;
-        }
-        string text = tag.Trim();
-        if (text.StartsWith("v", StringComparison.OrdinalIgnoreCase))
-        {
-            text = text[1..];
-        }
-        string[] parts = text.Split('.');
-        if (parts.Length != 3)
-        {
-            return false;
-        }
-        if (!int.TryParse(parts[0], out int major)
-            || !int.TryParse(parts[1], out int minor)
-            || !int.TryParse(parts[2], out int patch))
-        {
-            return false;
-        }
-        version = (major, minor, patch);
-        return true;
+        return NexusVersion.TryParseTag(tag, out version);
     }
 
-    public static int Compare((int Major, int Minor, int Patch) left, (int Major, int Minor, int Patch) right)
+    public static int Compare(NexusVersion left, NexusVersion right)
     {
-        int major = left.Major.CompareTo(right.Major);
-        if (major != 0)
-        {
-            return major;
-        }
-        int minor = left.Minor.CompareTo(right.Minor);
-        return minor != 0 ? minor : left.Patch.CompareTo(right.Patch);
+        return left.CompareTo(right);
     }
 
     /// <summary>
     /// 从 GitHub Releases API JSON 中按渠道挑选最高版本：跳过 draft；stable 渠道只见非 pre-release；
     /// 资产 zip+sha256 必须齐全；版本须高于当前版本。
     /// </summary>
-    public static ReleaseInfo? PickRelease(JsonNode? root, string channel, (int Major, int Minor, int Patch) currentVersion)
+    public static ReleaseInfo? PickRelease(JsonNode? root, string channel, NexusVersion currentVersion)
     {
         if (root is not JsonArray releases)
         {
@@ -73,12 +46,13 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            if (channel == "stable" && release["prerelease"]?.GetValue<bool>() == true)
+            string? tag = release["tag_name"]?.ToString();
+            if (!TryParseTag(tag, out NexusVersion version))
             {
                 continue;
             }
-            string? tag = release["tag_name"]?.ToString();
-            if (!TryParseTag(tag, out (int Major, int Minor, int Patch) version))
+            bool prerelease = release["prerelease"]?.GetValue<bool>() == true;
+            if (channel == "stable" && (prerelease || version.IsPrerelease))
             {
                 continue;
             }
@@ -118,7 +92,6 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            bool prerelease = release["prerelease"]?.GetValue<bool>() == true;
             var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", prerelease, zipUrl, shaUrl);
             if (best is null || Compare(version, best.Version) > 0)
             {
@@ -160,15 +133,15 @@ internal static class UpdateCatalog
         }
     }
 
-    public static string Format((int Major, int Minor, int Patch) version)
+    public static string Format(NexusVersion version)
     {
-        return $"{version.Major}.{version.Minor}.{version.Patch}";
+        return version.ToString();
     }
 }
 
 /// <summary>候选发布信息（已通过渠道与资产完整性过滤）。</summary>
 internal sealed record ReleaseInfo(
-    (int Major, int Minor, int Patch) Version,
+    NexusVersion Version,
     string Tag,
     string Name,
     string Notes,

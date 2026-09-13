@@ -89,7 +89,7 @@ public sealed class UpdateAutomationServiceTests
             {
                 downloads++;
                 status = status with { State = UpdateState.Downloading };
-                return null;
+                return UpdateDownloadResult.Started();
             },
             initialDelay: TimeSpan.Zero,
             interval: TimeSpan.FromHours(12));
@@ -118,7 +118,7 @@ public sealed class UpdateAutomationServiceTests
             _ =>
             {
                 downloads++;
-                return null;
+                return UpdateDownloadResult.Started();
             },
             initialDelay: TimeSpan.Zero,
             interval: TimeSpan.FromHours(12));
@@ -250,7 +250,7 @@ public sealed class UpdateAutomationServiceTests
         AppSettings settings,
         Func<UpdateStatusSnapshot> getStatus,
         Func<string, Task<UpdateStatusSnapshot>> check,
-        Func<string, string?>? startDownload = null,
+        Func<string, UpdateDownloadResult>? startDownload = null,
         Func<HostMaintenanceLease, string, UpdateApplyResult>? apply = null,
         Func<TimeSpan, AutoUpdateIdleAttempt>? tryAcquireIdle = null,
         Func<bool>? isAutomaticApplyAllowed = null,
@@ -262,7 +262,7 @@ public sealed class UpdateAutomationServiceTests
             () => settings,
             getStatus,
             check,
-            startDownload ?? (_ => null),
+            startDownload ?? (_ => UpdateDownloadResult.Started()),
             apply ?? ((lease, _) =>
             {
                 lease.Dispose();
@@ -298,7 +298,9 @@ public sealed class UpdateAutomationServiceTests
             "prerelease",
             available,
             "",
-            @checked);
+            @checked,
+            available,
+            available);
     }
 
     private static async Task EventuallyAsync(Func<bool> condition)

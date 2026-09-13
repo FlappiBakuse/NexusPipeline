@@ -22,6 +22,8 @@ internal sealed class UpdateSourcePolicy
 
     public Uri SourceUri { get; }
 
+    internal bool IsDefaultSource => _isDefaultSource;
+
     public UpdateSourcePolicy(string? sourceUrl)
     {
         string source = string.IsNullOrWhiteSpace(sourceUrl) ? UpdateCatalog.DefaultSourceUrl : sourceUrl.Trim();

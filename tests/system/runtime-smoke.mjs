@@ -110,7 +110,7 @@ test("当前隔离宿主启动并提供 status API", { skip }, async () => {
   const status = await response.json();
   assert.equal(status.service, "NexusPipeline");
   assert.equal(status.controlApiVersion, 1);
-  assert.match(status.version, /^\d+\.\d+\.\d+$/);
+  assert.match(status.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?$/);
   assert.ok(status.actualPort >= 1024 && status.actualPort <= 65535);
   // 重启恢复协议依赖实例标识区分重启前后的服务；普通启动的进程没有交接标识。
   assert.match(status.instanceId, /^[0-9a-f]{32}$/);

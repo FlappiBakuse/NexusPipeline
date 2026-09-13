@@ -37,7 +37,10 @@ internal sealed record PluginDetail(
     string ReadmeMarkdown,
     string? ReadmeError,
     IReadOnlyList<PluginChangelogEntry> Changelog,
-    IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales);
+    IReadOnlyDictionary<string, PluginLocalizedMetadata> Locales)
+{
+    public string? RuntimeErrorCode { get; init; }
+}
 
 internal sealed record PluginReadmeResult(
     bool HasReadme,

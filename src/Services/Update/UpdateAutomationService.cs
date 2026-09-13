@@ -17,7 +17,7 @@ internal sealed class UpdateAutomationService
     private readonly Func<AppSettings> _settings;
     private readonly Func<UpdateStatusSnapshot> _getStatus;
     private readonly Func<string, Task<UpdateStatusSnapshot>> _check;
-    private readonly Func<string, string?> _startDownload;
+    private readonly Func<string, UpdateDownloadResult> _startDownload;
     private readonly Func<HostMaintenanceLease, string, UpdateApplyResult> _applyWithLease;
     private readonly Func<TimeSpan, AutoUpdateIdleAttempt> _tryAcquireIdle;
     private readonly Action _invalidateDiscovery;
@@ -72,7 +72,7 @@ internal sealed class UpdateAutomationService
         Func<AppSettings> settings,
         Func<UpdateStatusSnapshot> getStatus,
         Func<string, Task<UpdateStatusSnapshot>> check,
-        Func<string, string?> startDownload,
+        Func<string, UpdateDownloadResult> startDownload,
         Func<HostMaintenanceLease, string, UpdateApplyResult> applyWithLease,
         Func<TimeSpan, AutoUpdateIdleAttempt> tryAcquireIdle,
         Action invalidateDiscovery,
@@ -231,6 +231,7 @@ internal sealed class UpdateAutomationService
                     UpdateStatusSnapshot status = _getStatus();
                     if (settings.UpdateAutoApplyEnabled
                         && status.State == UpdateState.Ready
+                        && status.CanDownload
                         && _isAutomaticApplyAllowed())
                     {
                         TryApplyWhenIdle();
@@ -312,16 +313,16 @@ internal sealed class UpdateAutomationService
 
         AppSettings current = _settings();
         if (current.UpdateCheckEnabled && current.UpdateAutoApplyEnabled
-            && status.State == UpdateState.Idle && status.Available)
+            && status.State == UpdateState.Idle && status.Available && status.CanDownload)
         {
-            string? error = _startDownload(Audit.System);
-            if (error is null)
+            UpdateDownloadResult result = _startDownload(Audit.System);
+            if (result.Succeeded)
             {
                 Logger.Info($"[更新自动化] 开始自动下载 v{status.Latest}");
             }
             else
             {
-                Logger.Warn($"[更新自动化] 自动下载未启动：{error}");
+                Logger.Warn($"[更新自动化] 自动下载未启动：{result.Error}");
             }
         }
         return true;

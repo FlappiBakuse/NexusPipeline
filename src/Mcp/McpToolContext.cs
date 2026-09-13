@@ -110,6 +110,13 @@ internal sealed class McpToolContext
             status.BytesRead,
             status.BytesTotal,
             status.Error,
+            status.PolicyVerified,
+            status.CanDownload,
+            status.ManualUpdateRequired,
+            status.UpdateBlockCode,
+            status.BarrierVersion,
+            status.MigrationUrl,
+            status.PolicyError,
             automation = new
             {
                 checkEnabled = automation.CheckEnabled,

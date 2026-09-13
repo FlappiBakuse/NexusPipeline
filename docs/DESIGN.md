@@ -60,7 +60,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 配置运行作用域（ConfigRunSession） | 编排一次运行的事务动作并固定最终收尾顺序 |
 | 日志监控（LogMonitor） | 对脚本日志文件的增量读取器，支持追加/截断/替换三种文件形态（见第 6 节） |
 | 插件 capability | 与插件身份/元数据分离的可查询能力；C# 按接口注册，数据化插件按 key 登记 |
-| 插件仓库 catalog | 固定官方源发布的插件索引；客户端校验 schema、名称、SemVer、宿主兼容性、包 URL、大小和 SHA256 |
+| 插件仓库 catalog | 固定官方源发布的插件索引；客户端校验 schema、名称、受限版本、宿主兼容性、包 URL、大小和 SHA256 |
 | 插件 pending 事务 | 插件包下载并校验后写入 staging 与 `pending.json`，下次启动在插件扫描前完成安装、更新或卸载 |
 | 宿主外部 HTTP 出口 | 依据 `ProxyMode` 选择无代理、系统代理或自定义代理；外部请求读取最新设置，loopback 强制直连 |
 | 执行应用端口（IExecutionService / IFrozenQueueExecutionService） | Web、Scheduler 与常驻服务 CLI 通道共享的启动/取消入口，由 `DispatchCenter` 直接实现 |
@@ -255,13 +255,15 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 ### 3.6 定期检查与闲时自动更新
 
-`UpdateAutomationService` 是宿主级单例协调器，负责更新检查周期和自动更新编排；`UpdateService` 继续拥有清单、下载、SHA256 校验、staging、应用 journal、恢复和回滚状态机。定期检查开关开启时，服务启动约 5 秒后首次检查，之后以自动检查完成时间为起点每 12 小时检查一次；人工检查不会重置自动周期。
+`UpdateAutomationService` 是宿主级单例协调器，负责更新检查周期和自动更新编排；`UpdateService` 继续拥有清单、下载、SHA256 校验、staging、应用 journal、恢复和回滚状态机。定期检查开关开启时，服务启动约 5 秒后首次检查，之后以自动检查完成时间为起点每 12 小时检查一次；人工检查不会重置自动周期。宿主和插件版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式，比较顺序为 beta、rc、stable。
 
 “闲时自动更新”默认关闭，并依赖定期检查开关。开启后流程为：发现新版本 → 自动下载并校验 → `Ready` 暂存 → 等待闲时 → 自动立即应用并重启。下载不占用维护窗口，真正应用前必须通过 `AutoUpdateIdlePolicy` 取得 `HostMaintenanceLease`，再在同一准入协调域内确认：没有活动运行、编辑会话、待执行系统操作、待准入/等待中的调度 occurrence、未触发的启动队列，并且未来 5 分钟内没有 scheduled occurrence。调度器的 occurrence 注册与队列变更共享该协调域，避免检查与维护租约之间的竞态。
 
 自动化等待信息通过更新状态 API 和 MCP `get_update_status` 的 additive `automation` 投影提供，包括检查开关、上次/下次自动检查、是否等待闲时和阻止原因。渠道或更新源变化会使发现结果进入 pending invalidation；正在进行或已 Ready 的事务保留给当前人工处理，自动化不会应用已失效的发现结果。
 
-主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。
+更新检查发现候选版本后，`UpdateService` 通过固定更新源读取根目录 `update-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
+
+主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。`update-policy.json` 的屏障记录在破坏性布局发布前按版本递增追加，桥接版本从 `v0.15.12` 开始承担该策略检查。
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
@@ -462,7 +464,7 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式源码插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），源码按 `plugins/general/`（managed-code）和 `plugins/specialized/`（data-specialized）分类；GitHub Actions 据此生成根目录 `catalog.json` 与扁平 `packages/<artifactName>/`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。`store.json.createdAt` 固定记录插件第一次正式公开发布日期，catalog 同步提供 `createdAt` 与最新 changelog 日期 `updatedAt`。catalog 条目包含名称、正式 artifactName、显示信息、SemVer、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、createdAt 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`，同时写入 `.nxp/state/plugins/catalog-cache.meta.json` 保存源地址、ETag、Last-Modified、最近验证时间和内容 SHA256。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式源码插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），源码按 `plugins/general/`（managed-code）和 `plugins/specialized/`（data-specialized）分类；GitHub Actions 据此生成根目录 `catalog.json` 与扁平 `packages/<artifactName>/`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N`，按 beta、rc、stable 顺序比较；`store.json.createdAt` 固定记录插件第一次正式公开发布日期，catalog 同步提供 `createdAt` 与最新 changelog 日期 `updatedAt`。catalog 条目包含名称、正式 artifactName、显示信息、受限 Nexus 版本、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、createdAt 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`，同时写入 `.nxp/state/plugins/catalog-cache.meta.json` 保存源地址、ETag、Last-Modified、最近验证时间和内容 SHA256。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
 
 插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。catalog 在最近 5 分钟验证有效期内直接复用内存快照；过期或手动刷新时携带 ETag/Last-Modified 发起条件请求，`304` 只更新时间和验证元数据，`200` 仅在内容 SHA256 变化时替换 catalog 快照；没有 HTTP validator 时仍以校验后的内容哈希判断是否变化。网络失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。README 按官方 artifact/version 记录条件验证缓存，本地 README 按路径、文件大小和 LastWriteTimeUtc 指纹复用。`PluginManager` 的本地插件管理投影使用运行时修订缓存，启停、安装/更新/卸载登记、重载和归属/待处理事务变化会使其失效；前端保留当前列表和详情，在后台验证期间继续展示。
 
@@ -473,6 +475,8 @@ flowchart LR
 3. 检查根 `plugin.json` 与 catalog 的名称、artifactName、版本、类型、API 和 capability 一致，并验证数据插件文件或 managed-code 入口程序集存在；
 4. 写入带有机器 ID 和 artifactName 的 `pending.json`，返回“重启后生效”；
 5. 下次启动应用 pending 事务，再由 `PluginManager.LoadAll` 扫描当前插件目录。`PluginInstallRecovery` 使用 artifactName 进行目录交换；交换前失败会恢复旧插件，交换完成后的 journal 可幂等重试。
+
+`PluginManager.LoadAll` 在运行时再次比较每个插件的 `minHostVersion` 与宿主当前受限版本。手动放入最低版本过高的插件会保留在管理投影中并标记 `Incompatible`，同时跳过数据插件能力/解析器注册与 managed-code 程序集加载；前端详情显示最低宿主版本和升级提示。Plugin API 不兼容继续使用独立的运行时错误码，避免与宿主版本不兼容混淆。
 
 插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
 
@@ -507,6 +511,7 @@ managed-code 插件可以通过 Plugin API v1.6 注册用户列表徽章、通�
 └── state/
     ├── scheduler-state.json
     ├── appearance-migration.json   旧外观数据搬迁标记
+    ├── update-policy-cache.json     经验证的更新策略响应缓存
     └── plugins/          catalog-cache.json、ownership.json、pending.json、staging/、backup/
 ```
 

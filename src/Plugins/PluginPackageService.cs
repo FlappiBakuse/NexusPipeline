@@ -245,7 +245,8 @@ internal sealed class PluginPackageService
                 || !string.Equals(manifest.Name, entry.Name, StringComparison.Ordinal)
                 || !string.Equals(manifest.Version, entry.Version, StringComparison.Ordinal)
                 || !string.Equals(manifest.Kind, entry.Kind, StringComparison.Ordinal)
-                || !string.Equals(manifest.ApiVersion, entry.ApiVersion, StringComparison.Ordinal))
+                || !string.Equals(manifest.ApiVersion, entry.ApiVersion, StringComparison.Ordinal)
+                || !string.Equals(manifest.MinHostVersion, entry.MinHostVersion, StringComparison.Ordinal))
             {
                 throw new PluginRepositoryException("manifest_mismatch", "插件 manifest 与 catalog 条目不一致");
             }

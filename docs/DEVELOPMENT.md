@@ -231,7 +231,7 @@ refactor(core): 抽取运行会话状态机
 
 ### 9.1 版本号规则
 
-- 采用 SemVer `X.Y.Z`，tag 为 `vX.Y.Z`；`fix`、`perf` 和文档/工程治理的补丁性变更使用 PATCH，`feat` 使用 MINOR，带 `!` 或 `BREAKING CHANGE` 的变更按项目当前阶段升级。
+- 采用受限 Nexus 版本 `X.Y.Z`、`X.Y.Z-beta.N` 或 `X.Y.Z-rc.N`，tag 为对应版本前加 `v`；版本比较遵循 `beta < rc < stable`。`fix`、`perf` 和文档/工程治理的补丁性变更使用 PATCH，`feat` 使用 MINOR，带 `!` 或 `BREAKING CHANGE` 的变更按项目当前阶段升级。
 - v1.0.0 之前所有版本发布均标记 Pre-release；v1.0.0 起按正式版本规则发布。
 - 用户指定新版本并开始开发后，立即同步 `src/NexusPipeline.csproj` 的 `<Version>` 和版本展示所需配置；发布流程不重复 bump。
 - 版本开发期间的本地 `backup/vX.Y.Z-*` 还原点只存在本地，不推送到 origin。
@@ -250,7 +250,7 @@ refactor(core): 抽取运行会话状态机
 
 1. 完成版本开发并获得全部适用质量门禁结果；
 2. 按协作策略提交并推送版本变更；
-3. 创建 tag：`git tag vX.Y.Z`，再按授权推送 `git push origin vX.Y.Z`；
+3. 创建 tag：`git tag vX.Y.Z[-beta.N|-rc.N]`，再按授权推送对应 tag；
 4. 将 Release Notes 写入 UTF-8 无 BOM 临时文件；
 5. v1.0.0 前执行：
 
@@ -266,11 +266,11 @@ refactor(core): 抽取运行会话状态机
 
 | 项目 | 规则 |
 |---|---|
-| tag | `vX.Y.Z` |
+| tag | `vX.Y.Z`、`vX.Y.Z-beta.N` 或 `vX.Y.Z-rc.N` |
 | Release 标题 | `vX.Y.Z` |
 | Pre-release | v1.0.0 前使用 `--prerelease` |
-| zip 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip` |
-| SHA 资产 | `NexusPipeline-vX.Y.Z-win-x64.zip.sha256` |
+| zip 资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip` |
+| SHA 资产 | 对应 zip 文件名追加 `.sha256` |
 
 发布包采用扁平根布局：
 
@@ -299,10 +299,24 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 - 无法以管理员上下文启动宿主时，用 `python tools/update-visibility-check.py` 按同一契约核对默认更新源的发布列表、tag 解析、资产命名、下载主机白名单与资产哈希；
 - 如果检查不到，先核对 `gh release view vX.Y.Z` 的资产列表、资产命名和 zip 根布局。
 
+### 9.4.1 更新策略与破坏性版本屏障
+
+`update-policy.json` 位于仓库根目录，桥接版本发布时保持有效。未来改变更新器无法安全处理的安装布局前，在该文件的 `barriers` 数组追加一条按版本递增的记录：
+
+```json
+{
+  "version": "0.17.0",
+  "code": "installation-layout-v2",
+  "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.17.0"
+}
+```
+
+版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
+
 ### 9.5 Release Notes 格式
 
 ```text
-## vX.Y.Z（Pre-release）
+## vX.Y.Z[-beta.N|-rc.N]（Pre-release）
 
 ### 功能分组标题
 - 要点一
@@ -311,7 +325,7 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 ### 另一个分组
 - 要点一
 
-SHA256：见附件 NexusPipeline-vX.Y.Z-win-x64.zip.sha256
+SHA256：见附件对应版本的 `.sha256` 校验文件
 ```
 
 按用户价值或工程主题分组，列出可核对的结果。版本历史的完整记录进入 [CHANGELOG.md](../CHANGELOG.md)。
