@@ -23,6 +23,10 @@ internal static class StartupPipeline
         }
         if (!PrepareHostedStart())
         {
+            // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
+            // Environment.Exit 保持启动阶段持有的互斥体直到进程终止，避免 using
+            // 提前释放互斥体而让 worker 在当前 EXE 仍被映射时开始交换。
+            Environment.Exit(0);
             return;
         }
 
@@ -212,9 +216,12 @@ internal static class StartupPipeline
             Console.WriteLine(CliText.Get("startup.service_running_no_port", "[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。"));
             return 1;
         }
-        // web 模式同样执行更新事务启动收尾（defer 时退出由本模式专用退出端口处理）。
+        // web 模式同样执行更新事务启动收尾；worker 接管后当前进程必须立即终止。
         if (!PrepareHostedStart())
         {
+            // 与 service 模式保持相同的退出语义：互斥体和当前 EXE 的文件句柄
+            // 在 worker 开始交换前一并由进程终止释放。
+            Environment.Exit(0);
             return 0;
         }
         ApplicationHost.IsWebOnly = true;
