@@ -60,6 +60,7 @@ export interface Plugin {
   configuredEnabled?: boolean;
   runtimeEnabled?: boolean;
   state?: string;
+  noFreshConfig?: boolean;
 }
 
 export interface Badge {

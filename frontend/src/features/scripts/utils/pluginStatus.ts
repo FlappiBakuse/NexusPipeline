@@ -6,6 +6,8 @@ export interface ScriptPluginRecord {
   kind?: string;
   state?: string;
   runtimeEnabled?: boolean;
+  noFreshConfig?: boolean;
+  selfManagedPcLaunch?: boolean;
 }
 
 export interface ScriptPluginStatus {

@@ -53,6 +53,9 @@ const emulatorAllowed = computed(() => !draft.pluginType || currentPlugin.value?
 const selfManagedPc = computed(
   () => draft.gameMode !== "emulator" && currentPlugin.value?.selfManagedPcLaunch === true,
 );
+const showSelfManagedPcHint = computed(
+  () => selfManagedPc.value && String(currentPlugin.value?.name || "").trim().toLowerCase() !== "baah",
+);
 
 // 生产探测器：手工输入与原生目录选择统一走这一实例（含签名去重与过期响应抑制）。
 const rootProbe = createRootProbe({
@@ -359,6 +362,7 @@ watch(
             />
           </NxpSwitchGrid>
           <div class="nested-panel">
+            <p v-if="showSelfManagedPcHint" id="sm-self-managed-hint" class="muted">{{ t("scripts.editor.launch.controlled_help") }}</p>
             <div class="form-grid">
               <div
                 class="field"
@@ -428,6 +432,7 @@ watch(
                   id="sm-game-wait"
                   v-model.number="draft.gameWaitSeconds"
                   :min="0"
+                  :disabled="selfManagedPc"
                   :aria-label="t('scripts.wait_after_game_start')"
                 />
               </div>

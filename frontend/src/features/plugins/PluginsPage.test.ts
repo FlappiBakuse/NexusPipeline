@@ -94,4 +94,22 @@ describe("plugins page restart signalling", () => {
     expect(shell.restartRequired).toBe(false);
     wrapper.unmount();
   });
+
+  it("shows batch update busy state until the update request and reload finish", async () => {
+    let resolveUpdate: (value: unknown) => void = () => {};
+    responses.set("POST /api/plugins/store/update-all", new Promise(resolve => { resolveUpdate = resolve; }));
+    const wrapper = await mountPage();
+    const detail = wrapper.getComponent(PluginDetail);
+
+    detail.vm.$emit("updateAll");
+    await Promise.resolve();
+    await wrapper.vm.$nextTick();
+
+    expect(detail.props("updateAllBusy")).toBe(true);
+
+    resolveUpdate({ ok: true, updated: [], failed: [], eligibleCount: 0, restartRequired: false });
+    await flushPromises();
+    expect(detail.props("updateAllBusy")).toBe(false);
+    wrapper.unmount();
+  });
 });

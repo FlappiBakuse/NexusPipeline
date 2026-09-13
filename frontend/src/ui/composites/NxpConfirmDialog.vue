@@ -50,6 +50,7 @@ function cancel() {
       <NxpButton
         type="button"
         :class="{ primary: props.confirmTone === 'primary', danger: props.confirmTone === 'danger' }"
+        :busy="props.busy"
         :disabled="props.busy"
         @click="emit('confirm')"
       >

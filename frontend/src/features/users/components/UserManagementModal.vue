@@ -312,13 +312,13 @@ function openConfigEdit(binding: Binding) {
     return;
   }
   const script = props.scripts.find((item) => item.id === binding.scriptInstanceId);
-  const plugin = props.plugins.find((item) => item.name === script?.pluginType) as (Plugin & { noFreshConfig?: boolean }) | undefined;
+  const pluginStatus = script ? scriptPluginStatus(script, props.plugins) : null;
   emit("open-config", {
     userId: current.id,
     scriptId: binding.scriptInstanceId,
     userName: current.name,
     scriptName: bindingName(binding),
-    freshAvailable: plugin?.noFreshConfig !== true,
+    freshAvailable: pluginStatus?.plugin?.noFreshConfig !== true,
   });
 }
 

@@ -21,6 +21,25 @@ function walk(relativeDirectory) {
   return files;
 }
 
+function withoutComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//gu, "")
+    .replace(/\/\/[^\r\n]*/gu, "");
+}
+
+function assertNoChineseStringLiterals(source, label) {
+  const code = withoutComments(source);
+  for (const match of code.matchAll(/"(?:\\.|[^"\\])*"/gu)) {
+    assert.doesNotMatch(match[0], /[\u3400-\u9fff]/u, `${label} contains a Chinese string literal: ${match[0]}`);
+  }
+}
+
+function assertNoChineseOutputArguments(source, pattern, label) {
+  for (const match of source.matchAll(pattern)) {
+    assert.doesNotMatch(match[1], /[\u3400-\u9fff]/u, `${label} contains Chinese output text: ${match[1]}`);
+  }
+}
+
 test("backend user-output adapters share the localized operation-error contract", () => {
   const english = JSON.parse(read("src/Localization/Resources/en-US.json"));
   const chinese = JSON.parse(read("src/Localization/Resources/zh-CN.json"));
@@ -71,4 +90,47 @@ test("backend user-output adapters share the localized operation-error contract"
       assert.ok(Object.hasOwn(english, `api.error.${match[1]}`), `${relativePath} uses an unregistered user error code: ${match[1]}`);
     }
   }
+
+  for (const key of [
+    "exit.active_runs",
+    "exit.blocked_title",
+    "exit.completion_delayed",
+    "exit.config_edit_sessions",
+    "exit.pending_system_action",
+    "exit.request_rejected",
+    "exit.shutdown_blocked",
+    "exit.unknown_reason",
+    "exit.waiting_for_safe_shutdown",
+    "startup.admin_required",
+    "startup.admin_title",
+    "startup.limits_fatal",
+  ]) {
+    assert.ok(Object.hasOwn(english, key), `missing host lifecycle localization key: ${key}`);
+  }
+
+  const runtimeInitializer = read("src/Application/RuntimeInitializer.cs");
+  assertNoChineseStringLiterals(runtimeInitializer, "RuntimeInitializer");
+  assertNoChineseOutputArguments(
+    runtimeInitializer,
+    /(?:MessageBox\.Show|Console\.Error\.WriteLine)\(([\s\S]*?)\);/gu,
+    "RuntimeInitializer user output");
+
+  const bootstrap = read("src/Bootstrap.cs");
+  assert.match(bootstrap, /HostLocalization\.TranslateNamed/iu);
+  const exitBoundaryStart = bootstrap.indexOf("internal static bool CanStopServices");
+  const exitBoundaryEnd = bootstrap.indexOf("internal static bool TryRequestRestart");
+  assert.ok(exitBoundaryStart >= 0 && exitBoundaryEnd > exitBoundaryStart, "Bootstrap exit boundary must remain auditable");
+  assertNoChineseStringLiterals(bootstrap.slice(exitBoundaryStart, exitBoundaryEnd), "Bootstrap exit boundary");
+  assertNoChineseOutputArguments(
+    bootstrap,
+    /MessageBox\.Show\(([\s\S]*?)\);/gu,
+    "Bootstrap user output");
+
+  const tray = read("src/TrayApp.cs");
+  assert.match(tray, /Text\s*=\s*HostLocalization\.TranslateNamed/iu);
+  assert.doesNotMatch(tray, /Text\s*=\s*["'][^"'\r\n]*[\u3400-\u9fff]/u, "Tray icon text must use localized output");
+  assert.doesNotMatch(
+    tray,
+    /(?:new ToolStripMenuItem|menu\.Items\.Add)\(\s*["'][^"'\r\n]*[\u3400-\u9fff]/u,
+    "Tray menu labels must use localized output");
 });

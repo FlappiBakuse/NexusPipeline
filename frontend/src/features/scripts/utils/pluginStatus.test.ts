@@ -35,6 +35,13 @@ describe("script plugin status", () => {
     expect(scriptPluginUnavailableMessage({ pluginType: "example-plugin", name: "日常" }, plugins)).toBe("");
   });
 
+  it("matches no-fresh-config capabilities case-insensitively", () => {
+    const plugins = [{ name: "Example-Plugin", kind: "data-specialized", noFreshConfig: true }];
+    const status = scriptPluginStatus({ pluginType: "example-plugin", name: "日常" }, plugins);
+
+    expect(status.plugin?.noFreshConfig).toBe(true);
+  });
+
   it("treats manual scripts without a plugin type as available", () => {
     const status = scriptPluginStatus({ name: "手动脚本" }, []);
 

@@ -703,6 +703,7 @@
   "scripts.editor.game_path.cleanup_help": "The game path is used for failure cleanup and retry recovery.",
   "scripts.editor.game_path.placeholder": "Game executable path",
   "scripts.editor.judge_code_help": "Enter judge script code or turn off “Use judge script”",
+  "scripts.editor.launch.controlled_help": "The client is launched by the script. Startup arguments and wait time cannot be configured; the game path is used to force-close the game after a failure.",
   "scripts.editor.log_path.help": "Log path (date placeholders and wildcards supported)",
   "scripts.editor.manual_config_help": "Configure the main program, startup arguments, configuration, and log paths manually",
   "scripts.editor.path_adb_cleanup_help": "Path/ADB is used for failure cleanup and retry recovery",

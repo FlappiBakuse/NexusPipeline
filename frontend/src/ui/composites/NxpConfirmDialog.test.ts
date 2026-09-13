@@ -41,6 +41,7 @@ describe("NxpConfirmDialog", () => {
     expect(wrapper.find(".modal-close").exists()).toBe(false);
     expect(wrapper.get(".modal-footer .ghost").attributes("disabled")).toBeDefined();
     expect(wrapper.get(".modal-footer .primary").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".modal-footer .primary").attributes("aria-busy")).toBe("true");
     await wrapper.get(".nxp-modal").trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("close")).toBeUndefined();
     wrapper.unmount();

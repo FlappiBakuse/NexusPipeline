@@ -44,9 +44,9 @@ import ScriptEditorModal from "./ScriptEditorModal.vue";
 
 const plugin = { name: "hoyolab", displayName: "HoYoLab", kind: "data-specialized", configuredEnabled: true, runtimeEnabled: true };
 
-function mountEditor(script: { id: string; name: string; pluginType?: string } | null, pluginName: string) {
+function mountEditor(script: { id: string; name: string; pluginType?: string } | null, pluginName: string, pluginOverrides: Record<string, unknown> = {}) {
   return mount(ScriptEditorModal, {
-    props: { script, plugin: pluginName, plugins: [plugin] },
+    props: { script, plugin: pluginName, plugins: [{ ...plugin, ...pluginOverrides }] },
     global: { stubs: { Teleport: true } },
     attachTo: document.body,
   });
@@ -153,6 +153,30 @@ describe("ScriptEditorModal root probe", () => {
 
     await wrapper.find("#sm-name").setValue("Alice");
     expect(wrapper.find("#sm-name").classes()).not.toContain("field-error");
+    wrapper.unmount();
+  });
+
+  it("restores self-managed PC launch controls and keeps the dormant values visible", async () => {
+    const wrapper = mountEditor(null, "hoyolab", { selfManagedPcLaunch: true });
+
+    expect(wrapper.find("#sm-launch").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-game-args").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-game-wait").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-self-managed-hint").exists()).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("hides the self-managed launch hint for BAAH while retaining the disabled controls", async () => {
+    const wrapper = mountEditor(null, "baah", {
+      name: "baah",
+      displayName: "蔚蓝档案爱丽丝助手",
+      selfManagedPcLaunch: true,
+    });
+
+    expect(wrapper.find("#sm-launch").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-game-args").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-game-wait").attributes("disabled")).toBeDefined();
+    expect(wrapper.find("#sm-self-managed-hint").exists()).toBe(false);
     wrapper.unmount();
   });
 });

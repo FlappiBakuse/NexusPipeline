@@ -52,6 +52,46 @@ public sealed class LocalizationTests
     }
 
     [Fact]
+    public void HostLifecycleEnglishMessagesDoNotLeakChinese()
+    {
+        string[] messages =
+        {
+            RuntimeInitializer.AdministratorRequiredMessage("en-US"),
+            RuntimeInitializer.AdministratorRequiredTitle("en-US"),
+            RuntimeInitializer.LimitsFatalMessage("en-US"),
+            RuntimeInitializer.LocalizeLimitFatal(
+                "约束配置 [MaxScripts（脚本实例上限）=1000] 超出警告区间（允许 1-999），禁止启动",
+                "en-US"),
+            Bootstrap.LocalizeExitReason(Bootstrap.ActiveRunsReason, "en-US"),
+            Bootstrap.LocalizeExitReason(Bootstrap.ConfigEditSessionsReason, "en-US"),
+            Bootstrap.LocalizeExitReason(Bootstrap.PendingSystemActionReason, "en-US"),
+            Bootstrap.LocalizeExitLog(
+                "exit.request_rejected",
+                "Exit request rejected: {reason}",
+                Bootstrap.ActiveRunsReason,
+                "en-US"),
+        };
+
+        foreach (string message in messages)
+        {
+            Assert.DoesNotMatch("[\\u3400-\\u9fff]", message);
+        }
+    }
+
+    [Theory]
+    [InlineData("en-US", "zh-CN", "en-US")]
+    [InlineData("", "en-US", "en-US")]
+    [InlineData("fr-FR", "en-GB", "en-US")]
+    [InlineData("zh-CN", "en-US", "zh-CN")]
+    public void ResolveEarlyHostLocalePrefersConfiguredLocaleAndUsesSystemFallback(
+        string configuredLocale,
+        string uiLocale,
+        string expected)
+    {
+        Assert.Equal(expected, RuntimeInitializer.ResolveEarlyHostLocale(configuredLocale, uiLocale));
+    }
+
+    [Fact]
     public void ApiErrorTranslationsKeepDispatchFailureSemantics()
     {
         Assert.Equal(

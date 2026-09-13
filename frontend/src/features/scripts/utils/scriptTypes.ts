@@ -34,6 +34,7 @@ export interface ScriptPlugin {
   state?: string;
   supportsEmulator?: boolean;
   selfManagedPcLaunch?: boolean;
+  noFreshConfig?: boolean;
 }
 
 export interface ScriptDraft extends Script {

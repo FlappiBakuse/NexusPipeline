@@ -7,6 +7,7 @@ using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Plugins;
+using NexusPipeline.Localization;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline;
@@ -14,6 +15,10 @@ namespace NexusPipeline;
 /// <summary>服务启动/停止编排：插件、历史清理、调度器、配置恢复、更新自动化与 Web 服务。</summary>
 internal static class Bootstrap
 {
+    internal const string ActiveRunsReason = "active_runs";
+    internal const string ConfigEditSessionsReason = "config_edit_sessions";
+    internal const string PendingSystemActionReason = "pending_system_action";
+
     private static readonly object RestartSync = new();
 
     private static HostRestartCoordinator? _restartCoordinator;
@@ -71,35 +76,72 @@ internal static class Bootstrap
         }
     }
 
-    internal static bool CanStopServices(out string reason)
+    internal static bool CanStopServices(out string reasonCode)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         if (ctx.Center.Active.Count > 0)
         {
-            reason = "存在运行中的任务，请先等待完成或取消任务";
+            reasonCode = ActiveRunsReason;
             return false;
         }
         if (UserConfigManager.EditSessions.Count > 0)
         {
-            reason = "存在编辑配置会话，请先完成或取消编辑";
+            reasonCode = ConfigEditSessionsReason;
             return false;
         }
-        reason = "";
+        reasonCode = "";
         return true;
     }
 
-    internal static bool CanRequestDirectExit(out string reason)
+    internal static bool CanRequestDirectExit(out string reasonCode)
     {
-        if (!CanStopServices(out reason))
+        if (!CanStopServices(out reasonCode))
         {
             return false;
         }
         if (RuntimeContext.Instance.Center.CurrentSystemAction is not null)
         {
-            reason = "存在待执行的系统操作，请先完成或取消该操作";
+            reasonCode = PendingSystemActionReason;
             return false;
         }
         return true;
+    }
+
+    internal static string LocalizeExitReason(string reasonCode, string? locale = null)
+    {
+        string normalized = locale ?? LocaleCatalog.HostLocale;
+        return reasonCode switch
+        {
+            ActiveRunsReason => HostLocalization.TranslateNamed(
+                "exit.active_runs",
+                "There are active runs. Wait for them to finish or cancel them first.",
+                locale: normalized),
+            ConfigEditSessionsReason => HostLocalization.TranslateNamed(
+                "exit.config_edit_sessions",
+                "There are configuration edit sessions. Finish or cancel them first.",
+                locale: normalized),
+            PendingSystemActionReason => HostLocalization.TranslateNamed(
+                "exit.pending_system_action",
+                "There is a pending system action. Complete or cancel it first.",
+                locale: normalized),
+            _ => HostLocalization.TranslateNamed(
+                "exit.unknown_reason",
+                "NexusPipeline cannot exit right now. Try again later.",
+                locale: normalized),
+        };
+    }
+
+    internal static string LocalizeExitLog(string key, string fallback, string reasonCode, string? locale = null)
+    {
+        string normalized = locale ?? LocaleCatalog.HostLocale;
+        return HostLocalization.TranslateNamed(
+            key,
+            fallback,
+            new Dictionary<string, object?>
+            {
+                ["reason"] = LocalizeExitReason(reasonCode, normalized),
+            },
+            normalized);
     }
 
     /// <summary>按设置启动内嵌 MCP；MCP 端口冲突不自动漂移，失败不影响 Control API。</summary>
@@ -124,15 +166,26 @@ internal static class Bootstrap
 
     internal static bool TryRequestDirectExit()
     {
-        if (CanRequestDirectExit(out string reason))
+        if (CanRequestDirectExit(out string reasonCode))
         {
             System.Windows.Forms.Application.Exit();
             return true;
         }
-        Logger.Warn($"[退出] 已拒绝退出请求：{reason}");
+        string reason = LocalizeExitReason(reasonCode);
+        Logger.Warn(LocalizeExitLog(
+            "exit.request_rejected",
+            "Exit request rejected: {reason}",
+            reasonCode));
         try
         {
-            System.Windows.Forms.MessageBox.Show(reason, "NexusPipeline", System.Windows.Forms.MessageBoxButtons.OK, System.Windows.Forms.MessageBoxIcon.Information);
+            System.Windows.Forms.MessageBox.Show(
+                reason,
+                HostLocalization.TranslateNamed(
+                    "exit.blocked_title",
+                    "NexusPipeline cannot exit",
+                    locale: LocaleCatalog.HostLocale),
+                System.Windows.Forms.MessageBoxButtons.OK,
+                System.Windows.Forms.MessageBoxIcon.Information);
         }
         catch
         {
@@ -142,9 +195,12 @@ internal static class Bootstrap
 
     internal static bool TryRequestCompletionExit()
     {
-        if (!CanStopServices(out string reason))
+        if (!CanStopServices(out string reasonCode))
         {
-            Logger.Warn($"[退出] 完成操作退出请求被延后：{reason}");
+            Logger.Warn(LocalizeExitLog(
+                "exit.completion_delayed",
+                "Completion exit request delayed: {reason}",
+                reasonCode));
             return false;
         }
         System.Windows.Forms.Application.Exit();
@@ -240,9 +296,12 @@ internal static class Bootstrap
     public static void Shutdown(WebServer? web, McpHost? mcp)
     {
         RuntimeContext ctx = RuntimeContext.Instance;
-        if (!CanStopServices(out string reason))
+        if (!CanStopServices(out string reasonCode))
         {
-            Logger.Warn($"[退出] 服务仍有活动任务，拒绝执行宿主停止：{reason}");
+            Logger.Warn(LocalizeExitLog(
+                "exit.shutdown_blocked",
+                "The host shutdown was refused because services are still active: {reason}",
+                reasonCode));
             return;
         }
         try

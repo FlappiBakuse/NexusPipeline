@@ -48,7 +48,7 @@ const flow = useConfigEditFlow({
   onTransactionChanged: (userId) => emit("changed", userId),
 });
 
-const { configEdit, configChooser, configCandidates, isOpen } = flow;
+const { configEdit, configChooser, configCandidates, finishingAction, isOpen } = flow;
 
 defineExpose({
   open: flow.open,
@@ -118,8 +118,20 @@ defineExpose({
       <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>
     </template>
     <template #footer>
-      <NxpButton class="primary" type="button" @click.stop="flow.finish('done')">{{ t("common.complete") }}</NxpButton>
-      <NxpButton class="ghost" type="button" @click.stop="flow.finish('cancel')">{{ t("common.cancel") }}</NxpButton>
+      <NxpButton
+        class="primary"
+        type="button"
+        :busy="finishingAction === 'done'"
+        :disabled="finishingAction !== null"
+        @click.stop="flow.finish('done')"
+      >{{ t("common.complete") }}</NxpButton>
+      <NxpButton
+        class="ghost"
+        type="button"
+        :busy="finishingAction === 'cancel'"
+        :disabled="finishingAction !== null"
+        @click.stop="flow.finish('cancel')"
+      >{{ t("common.cancel") }}</NxpButton>
     </template>
   </NxpModal>
 </template>

@@ -38,6 +38,8 @@ const view = reactive<Record<Tab, { query: string; kind: string; sortBy: string;
 const requestSerial = ref(0);
 const listSerial = ref(0);
 const storeRefreshing = ref(false);
+const pluginActionBusy = ref("");
+const updateAllBusy = ref(false);
 const shell = useShellStore();
 
 const currentList = computed(() => list[activeTab.value]);
@@ -134,7 +136,9 @@ function resetFilter() {
 }
 async function runPluginAction(action: string, nameOverride = "") {
   const name = nameOverride || selected[activeTab.value];
-  if (!name) return;
+  if (!name || pluginActionBusy.value || updateAllBusy.value) return;
+  const busyKey = `${action}:${name}`;
+  pluginActionBusy.value = busyKey;
   try {
     const result = await api<{ restartRequired?: boolean }>(
       "POST",
@@ -148,10 +152,12 @@ async function runPluginAction(action: string, nameOverride = "") {
     await loadList(activeTab.value, true);
   } catch (reason) {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    if (pluginActionBusy.value === busyKey) pluginActionBusy.value = "";
   }
 }
 async function refreshStoreAsync() {
-  if (storeRefreshing.value) return;
+  if (storeRefreshing.value || pluginActionBusy.value || updateAllBusy.value) return;
   storeRefreshing.value = true;
   try {
     await refreshStoreRepository({
@@ -169,6 +175,8 @@ async function refreshStoreAsync() {
   }
 }
 async function updateAllStorePlugins() {
+  if (updateAllBusy.value || pluginActionBusy.value || storeRefreshing.value) return;
+  updateAllBusy.value = true;
   try {
     const result = await api("POST", "/api/plugins/store/update-all") as {
       updated?: unknown[];
@@ -199,6 +207,8 @@ async function updateAllStorePlugins() {
     await loadList("store", true);
   } catch (reason) {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    updateAllBusy.value = false;
   }
 }
 function onEscape(event: KeyboardEvent) {
@@ -292,6 +302,8 @@ onBeforeUnmount(() => {
         :plugin="detail.data"
         :fetched-at="currentList.fetchedAt"
         :refreshing="storeRefreshing"
+        :action-busy="pluginActionBusy"
+        :update-all-busy="updateAllBusy"
         @back-to-list="detailVisibleMobile = false"
         @action="runPluginAction"
         @update-all="updateAllStorePlugins"

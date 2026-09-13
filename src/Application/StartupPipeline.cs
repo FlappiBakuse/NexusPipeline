@@ -350,7 +350,10 @@ internal static class StartupPipeline
         {
             if (DateTime.Now >= nextNotice)
             {
-                Logger.Warn($"[退出] 等待任务/编辑会话结束后再停止宿主：{reason}");
+                Logger.Warn(Bootstrap.LocalizeExitLog(
+                    "exit.waiting_for_safe_shutdown",
+                    "Waiting for runs or edit sessions to finish before stopping the host: {reason}",
+                    reason));
                 nextNotice = DateTime.Now.AddSeconds(5);
             }
             Thread.Sleep(500);

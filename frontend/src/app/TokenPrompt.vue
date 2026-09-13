@@ -64,7 +64,7 @@ async function submit() {
       <p id="token-error" class="req" role="alert" aria-live="polite">{{ error }}</p>
     </form>
     <template #footer>
-      <NxpButton tone="primary" :disabled="busy" @click="submit">{{ authPromptText.enter() }}</NxpButton>
+      <NxpButton tone="primary" :busy="busy" :disabled="busy" @click="submit">{{ authPromptText.enter() }}</NxpButton>
     </template>
   </NxpModal>
 </template>

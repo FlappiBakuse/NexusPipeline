@@ -97,6 +97,25 @@ describe("useConfigEditFlow restore semantics", () => {
     expect(flow.configEdit.value).toBeNull();
   });
 
+  it("keeps the active finish action busy and ignores a duplicate finish", async () => {
+    let resolveFinish: (value: null) => void = () => {};
+    const adapters = createAdapters({
+      finish: vi.fn().mockImplementation(() => new Promise<null>(resolve => { resolveFinish = resolve; })),
+    });
+    const flow = useConfigEditFlow(adapters);
+    flow.restore({ userId: "u1", scriptId: "s1", userName: "Alice", scriptName: "Script One", mode: "reuse" });
+
+    const pending = flow.finish("done");
+    expect(flow.finishingAction.value).toBe("done");
+    await flow.finish("done");
+    expect(adapters.finish).toHaveBeenCalledTimes(1);
+
+    resolveFinish(null);
+    await pending;
+    expect(flow.finishingAction.value).toBeNull();
+    expect(flow.configEdit.value).toBeNull();
+  });
+
   it("Case D: a failing sessions API is silent and leaves the page usable", async () => {
     const adapters = createAdapters({ listSessions: vi.fn().mockRejectedValue(new Error("offline")) });
     const flow = useConfigEditFlow(adapters);

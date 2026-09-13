@@ -703,6 +703,7 @@
   "scripts.editor.game_path.cleanup_help": "游戏路径用于失败清理与重试恢复。",
   "scripts.editor.game_path.placeholder": "游戏可执行文件路径",
   "scripts.editor.judge_code_help": "请填写判断脚本代码，或关闭「使用脚本」",
+  "scripts.editor.launch.controlled_help": "客户端由脚本自身启动；启动参数与等待秒数不可配置，游戏路径用于失败时强制关闭游戏。",
   "scripts.editor.log_path.help": "日志路径（支持日期占位符与通配符）",
   "scripts.editor.manual_config_help": "手动配置主程序、自启动参数、配置与日志路径",
   "scripts.editor.path_adb_cleanup_help": "路径/ADB 用于失败清理与重试恢复",

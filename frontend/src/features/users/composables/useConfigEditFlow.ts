@@ -79,6 +79,7 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
   const configEdit = ref<ConfigEditItem | null>(null);
   const configChooser = ref<ConfigEditSelection | null>(null);
   const configCandidates = ref<ConfigEditCandidate | null>(null);
+  const finishingAction = ref<"done" | "cancel" | null>(null);
   const isOpen = computed(() => Boolean(configEdit.value || configChooser.value || configCandidates.value));
 
   /** 创建新编辑事务：唯一发送 `action:"start"` 的路径。 */
@@ -186,7 +187,8 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
 
   async function finish(action: "done" | "cancel") {
     const edit = configEdit.value;
-    if (!edit) return;
+    if (!edit || finishingAction.value) return;
+    finishingAction.value = action;
     try {
       const result = await adapters.finish(edit.userId, edit.scriptId, action);
       configEdit.value = null;
@@ -205,6 +207,8 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
       adapters.onTransactionChanged(edit.userId);
     } catch (reason) {
       if (!isAbortError(reason)) adapters.notify(errorText(reason), "error");
+    } finally {
+      if (finishingAction.value === action) finishingAction.value = null;
     }
   }
 
@@ -218,6 +222,7 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
     configEdit,
     configChooser,
     configCandidates,
+    finishingAction,
     isOpen,
     open,
     startSession,

@@ -17,6 +17,8 @@ const props = defineProps<{
   plugin: PluginViewPlugin | null;
   fetchedAt: string;
   refreshing: boolean;
+  actionBusy?: string;
+  updateAllBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -28,6 +30,15 @@ const emit = defineEmits<{
 
 function actions(plugin: PluginViewPlugin) {
   return storeActions(plugin, t);
+}
+function actionKey(action: string, name: string) {
+  return `${action}:${name}`;
+}
+function isActionBusy(action: string, name: string) {
+  return props.actionBusy === actionKey(action, name);
+}
+function hasPendingAction() {
+  return Boolean(props.actionBusy) || Boolean(props.updateAllBusy) || props.refreshing;
 }
 </script>
 
@@ -64,12 +75,25 @@ function actions(plugin: PluginViewPlugin) {
             </h3>
           </div>
           <div class="plugin-detail-actions">
-            <NxpButton v-if="tab === 'local'" class="tertiary" @click="emit('action', plugin.configuredEnabled ? 'disable' : 'enable', String(plugin.name))">
+            <NxpButton
+              v-if="tab === 'local'"
+              class="tertiary"
+              :busy="isActionBusy(plugin.configuredEnabled ? 'disable' : 'enable', String(plugin.name))"
+              :disabled="hasPendingAction()"
+              @click="emit('action', plugin.configuredEnabled ? 'disable' : 'enable', String(plugin.name))"
+            >
               {{ plugin.configuredEnabled ? t("plugins.disable_plugin") : t("plugins.enable_plugin") }}
             </NxpButton>
             <template v-else>
               <span v-if="storeActionNotice(plugin, t)" class="muted">{{ storeActionNotice(plugin, t) }}</span>
-              <NxpButton v-for="item in actions(plugin)" :key="item.action" :class="item.tone" @click="emit('action', item.action, String(plugin.name))">{{ item.label }}</NxpButton>
+              <NxpButton
+                v-for="item in actions(plugin)"
+                :key="item.action"
+                :class="item.tone"
+                :busy="isActionBusy(item.action, String(plugin.name))"
+                :disabled="hasPendingAction()"
+                @click="emit('action', item.action, String(plugin.name))"
+              >{{ item.label }}</NxpButton>
               <span v-if="!storeActionNotice(plugin, t) && !actions(plugin).length" class="muted">{{ t("common.already_up_to_date") }}</span>
             </template>
           </div>
@@ -124,8 +148,20 @@ function actions(plugin: PluginViewPlugin) {
     <div v-if="props.tab === 'store'" class="plugin-browser-footer">
       <span class="muted">{{ fetchedAt ? t("plugins.catalog.updated", { time: fetchedAt }) : "" }}</span>
       <span class="plugin-browser-footer-actions">
-        <NxpButton class="primary" data-testid="plugin-store-update-all" @click="emit('updateAll')">{{ t("plugin.store.update_all", {}, "Update all plugins") }}</NxpButton>
-        <NxpButton class="tertiary" data-testid="plugin-store-refresh" :disabled="refreshing" @click="emit('refresh')">{{ t("plugins.refresh_repository") }}</NxpButton>
+        <NxpButton
+          class="primary"
+          data-testid="plugin-store-update-all"
+          :busy="updateAllBusy"
+          :disabled="hasPendingAction()"
+          @click="emit('updateAll')"
+        >{{ t("plugin.store.update_all", {}, "Update all plugins") }}</NxpButton>
+        <NxpButton
+          class="tertiary"
+          data-testid="plugin-store-refresh"
+          :busy="refreshing"
+          :disabled="hasPendingAction()"
+          @click="emit('refresh')"
+        >{{ t("plugins.refresh_repository") }}</NxpButton>
       </span>
     </div>
   </div>
