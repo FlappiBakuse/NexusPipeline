@@ -458,6 +458,8 @@ flowchart LR
 - 配置了 `LogPath` 时，业务日志以日志文件监控结果为单一来源；未配置 `LogPath` 时，业务日志来自脚本 stdout/stderr。实时显示和历史详情沿用相同的等级解析。
 - 每个 Attempt 最终保留的截图写入同一运行目录，JSON 保存元数据；通知发送完成后释放运行期内存截图池。
 - `Status` 是一次运行唯一的最终状态：`success / partial / failed / cancelled / skipped`；其中 `partial` 只能来自判断脚本显式结果，不由重试次数、退出码或日志关键字派生。
+- 历史 Web、CLI 和 MCP 查询可按上述最终状态筛选；历史返回投影按 `EndTime - StartTime` 计算 `durationMs`，结束时间缺失返回空值，负差值归零。运行 JSON 继续保持纯运行状态，不落盘 `DurationMs`。
+- 历史摘要按范围、脚本、队列、用户和状态聚合总运行数、五种状态计数、已结束运行的累计/平均耗时、成功率和每日趋势；没有结束时间的运行不参与耗时统计，成功率为成功运行数占筛选结果总数的百分比。
 - `PluginHistory`：运行落盘前由已注册插件生成的纯文本展示快照；单贡献 16 KiB、单次运行总量 64 KiB，插件异常不会影响运行结果，卸载插件后历史仍保留快照。
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。

@@ -117,7 +117,7 @@ internal sealed class McpReadOnlyTools
     }
 
     [McpServerTool(Name = "list_history", Title = "查询运行历史", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true, OutputSchemaType = typeof(McpToolEnvelope))]
-    [Description("按最近天数和可选脚本/队列引用分页查询运行历史；天数受本地历史保留策略限制。")]
+    [Description("按最近天数和可选脚本/队列/状态筛选分页查询运行历史；天数受本地历史保留策略限制。")]
     public CallToolResult ListHistory(
         [Description("查询最近多少天，范围为 1 到本地历史保留上限。")]
         int days = 3,
@@ -128,7 +128,9 @@ internal sealed class McpReadOnlyTools
         [Description("返回条数，范围为 1 到 200。")]
         int limit = 50,
         [Description("分页偏移，不能小于 0。")]
-        int offset = 0)
+        int offset = 0,
+        [Description("可选状态：success、failed、partial、cancelled 或 skipped。")]
+        string? status = null)
     {
         if (days < 1 || days > AppFixedLimits.HistoryRetentionDaysMax)
         {
@@ -144,6 +146,14 @@ internal sealed class McpReadOnlyTools
                 "validation_error",
                 "limit 必须在 1 到 200 之间，offset 不能小于 0",
                 messageKey: "api.error.history_paging_invalid");
+        }
+        string? normalizedStatus = HistoryService.NormalizeStatus(status);
+        if (!HistoryService.IsValidStatus(normalizedStatus))
+        {
+            return McpToolResult.Failure(
+                "history_invalid_status",
+                "status 必须是 success、failed、partial、cancelled 或 skipped",
+                messageKey: "api.error.history_invalid_status");
         }
         string? scriptId = null;
         if (!string.IsNullOrWhiteSpace(scriptReference))
@@ -169,11 +179,12 @@ internal sealed class McpReadOnlyTools
             DateTime.Today.AddDays(-(days - 1)),
             DateTime.Now.AddMinutes(5),
             scriptId,
-            queueId);
+            queueId,
+            status: normalizedStatus);
         return McpToolResult.Success(new
         {
             total = records.Count,
-            records = records.Skip(offset).Take(limit).ToList(),
+            records = records.Skip(offset).Take(limit).Select(HistoryService.ToView).ToList(),
         });
     }
 

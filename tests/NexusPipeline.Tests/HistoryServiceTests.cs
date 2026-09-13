@@ -1,9 +1,11 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Utilities;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -169,6 +171,85 @@ public sealed class HistoryServiceTests
         }
     }
 
+    [Fact]
+    public void SummaryCalculatesStatusDurationAndDailyTrendWithoutPersistingDuration()
+    {
+        DateTime firstDay = new(2026, 8, 30, 0, 0, 0);
+        var records = new[]
+        {
+            Record("u1", "Alice", "success", firstDay.AddHours(1), endTime: firstDay.AddHours(1).AddMilliseconds(1500)),
+            Record("u1", "Alice", "failed", firstDay.AddHours(2), endTime: firstDay.AddHours(2).AddSeconds(1)),
+            Record("u2", "Bob", "partial", firstDay.AddDays(1).AddHours(3), endTime: firstDay.AddDays(1).AddHours(3).AddSeconds(-1)),
+            Record("u2", "Bob", "skipped", firstDay.AddDays(1).AddHours(4)),
+        };
+
+        HistorySummary summary = HistoryService.SummarizeRecords(
+            records,
+            firstDay,
+            firstDay.AddDays(2).AddTicks(-1));
+
+        Assert.Equal(4, summary.TotalCount);
+        Assert.Equal(1, summary.StatusCounts["success"]);
+        Assert.Equal(1, summary.StatusCounts["failed"]);
+        Assert.Equal(1, summary.StatusCounts["partial"]);
+        Assert.Equal(1, summary.StatusCounts["skipped"]);
+        Assert.Equal(2500, summary.TotalDurationMs);
+        Assert.Equal(833, summary.AverageDurationMs);
+        Assert.Equal(25d, summary.SuccessRate);
+        Assert.Equal(2, summary.Daily.Count);
+        Assert.Equal(2, summary.Daily[0].TotalCount);
+        Assert.Equal(2, summary.Daily[1].TotalCount);
+        Assert.Equal(0, summary.Daily[1].TotalDurationMs);
+        Assert.Null(HistoryService.DurationMilliseconds(records[3]));
+        Assert.Equal(0, HistoryService.DurationMilliseconds(records[2]));
+
+        JsonObject persisted = JsonSerializer.SerializeToNode(records[0], JsonOpts.Default)!.AsObject();
+        Assert.Null(persisted["durationMs"]);
+    }
+
+    [Fact]
+    public void SummarizeUsersCanFilterByStatus()
+    {
+        DateTime date = new(2026, 8, 31, 12, 0, 0);
+        var records = new[]
+        {
+            Record("u1", "Alice", "success", date.AddHours(-1)),
+            Record("u1", "Alice", "failed", date.AddHours(-2)),
+            Record("u2", "Bob", "success", date.AddHours(-3)),
+        };
+
+        List<HistoryUserSummary> result = HistoryService.SummarizeUsers(records, date, status: "success");
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(1, Assert.Single(result, item => item.UserKey == "id:u1").Count);
+        Assert.Equal(1, Assert.Single(result, item => item.UserKey == "id:u2").SuccessCount);
+        Assert.True(HistoryService.IsValidStatus(" PARTIAL "));
+        Assert.False(HistoryService.IsValidStatus("unknown"));
+    }
+
+    [Fact]
+    public void HistoryViewProjectsRecordAndAttemptDurationsWithoutMutatingModel()
+    {
+        DateTime start = new(2026, 8, 31, 12, 0, 0);
+        var record = Record("u1", "Alice", "success", start, endTime: start.AddSeconds(2));
+        record.AttemptDetails = new List<RunAttempt>
+        {
+            new()
+            {
+                Number = 1,
+                StartTime = start,
+                EndTime = start.AddMilliseconds(750),
+                Status = "success",
+            },
+        };
+
+        JsonObject view = HistoryService.ToView(record);
+
+        Assert.Equal(2000, view["durationMs"]!.GetValue<long>());
+        Assert.Equal(750, view["attemptDetails"]![0]!["durationMs"]!.GetValue<long>());
+        Assert.Null(JsonSerializer.SerializeToNode(record, JsonOpts.Default)!.AsObject()["durationMs"]);
+    }
+
     private static RunScreenshot Screenshot(string id, long ordinal, int attempt, byte value) =>
         new(
             id,
@@ -201,12 +282,14 @@ public sealed class HistoryServiceTests
         string userName,
         string status,
         DateTime startTime,
-        string scriptId = "script-1") => new()
+        string scriptId = "script-1",
+        DateTime? endTime = null) => new()
     {
         ScriptInstanceId = scriptId,
         UserId = userId,
         UserName = userName,
         StartTime = startTime,
+        EndTime = endTime,
         Status = status,
     };
 }

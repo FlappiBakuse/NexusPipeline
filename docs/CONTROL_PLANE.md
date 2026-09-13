@@ -20,7 +20,7 @@
 | 运行计划解释 | `POST /api/dispatch/explain/script`、`POST /api/dispatch/explain/queue`（只读） | `run script/queue --dry-run` | `explain_script_run` / `explain_queue_run` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
-| 历史 | `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ...` | `list_history` |
+| 历史 | `/api/history/summary`（范围、脚本、队列、用户、状态筛选）→ `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ... --status <status>` | `list_history(status=...)` |
 | 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
 | 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
@@ -46,6 +46,7 @@
 - MCP 网络边界独立于 Web 远程访问设置：仅 loopback、Host/Origin 校验、请求体上限 2 MiB。
 - 用户绑定的通用设置包含 `RunDays` 与 `MaxSuccessfulRunsPerDay`；后者使用 `-1` 表示不限制，达到正数上限后生成 `skipped` 历史记录。
 - 历史页面按日期、用户、运行记录分层查询；`/api/history/users` 与带 `userKey` 的记录查询都在宿主侧完成过滤，避免把整日记录一次性返回前端。
+- 历史查询支持 `success`、`failed`、`partial`、`cancelled`、`skipped` 状态筛选；`/api/history/summary` 返回总数、状态计数、累计/平均耗时、成功率和按日趋势。`durationMs` 由开始/结束时间在返回投影中计算，运行历史 JSON 不增加该字段。
 - 本机路径选择器只接受回环请求，由 Windows 原生选择器返回路径；返回值写入可继续手动编辑的文本框，不提供远程文件系统浏览能力。
 - 已绑定脚本实例的配置编辑预检查与操作请求均只接受回环请求，远程请求直接返回 `403 local_only`。
 - Web UI 启动配置编辑时会在 `start` 请求中附带一次性浏览器窗口 token，用于将发起请求的窗口后置；CLI/MCP 请求不携带该辅助字段，窗口识别失败不会阻断编辑。

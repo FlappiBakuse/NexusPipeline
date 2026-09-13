@@ -12,6 +12,20 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
       body: JSON.stringify({ dates: [{ date, count: 1 }, { date: secondDate, count: 1 }] }),
     });
   });
+  await page.route("**/api/history/summary**", async route => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        totalCount: 2,
+        statusCounts: { success: 0, failed: 0, partial: 0, cancelled: 0, skipped: 2 },
+        totalDurationMs: 2000,
+        averageDurationMs: 1000,
+        successRate: 0,
+        daily: [{ date, totalCount: 1, statusCounts: { success: 0, failed: 0, partial: 0, cancelled: 0, skipped: 1 }, totalDurationMs: 1000, averageDurationMs: 1000 }],
+      }),
+    });
+  });
   await page.route("**/api/history/users?date=**", async route => {
     const requestDate = new URL(route.request().url()).searchParams.get("date") || date;
     await route.fulfill({
@@ -60,6 +74,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 900 });
   await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
   await expect(page.locator('[data-testid="history-date"]').first()).toBeVisible();
+  await expect(page.getByTestId("history-summary-total")).toContainText("2");
   await expect(page.getByTestId("history-records-count")).toHaveText("选择用户");
   await page.locator(`[data-testid="history-date"][data-date="${date}"]`).click();
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${date}"]`).getByTestId("history-user")).toBeVisible();
@@ -70,7 +85,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await expect(page.locator('[data-testid="history-date-users"]')).toHaveCount(1);
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`)).toBeVisible();
   await page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user").click();
-  await expect(page.getByText("已跳过", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("history-entry").getByText("已跳过", { exact: true })).toBeVisible();
   const requestsAfterInitialUser = historyRecordRequests;
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeHidden();

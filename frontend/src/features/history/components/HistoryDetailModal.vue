@@ -10,7 +10,7 @@ import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
-import { badgeTone, formatDateTime, statusLabel, statusTone } from "../utils/historyFormat";
+import { badgeTone, formatDateTime, formatDurationMs, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryAttempt, HistoryDetailPayload, HistoryLog, HistoryRecord, HistoryScreenshot } from "../utils/historyTypes";
 
 /** 运行详情弹窗：承担详情加载、尝试日志/截图、object URL 生命周期与插件 slot 清理。 */
@@ -178,6 +178,7 @@ onBeforeUnmount(() => {
           <div class="history-detail-meta-item"><span class="k">{{ t("history.attempts") }}</span><span>{{ detailData.record.attemptDetails?.length || detailData.record.attempts || 0 }} / {{ detailData.record.maxAttempts || "-" }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.start_time") }}</span><span>{{ formatDateTime(detailData.record.startTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.end_time") }}</span><span>{{ formatDateTime(detailData.record.endTime) }}</span></div>
+          <div class="history-detail-meta-item"><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(detailData.record.durationMs) }}</span></div>
           <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.resultDetail || "-" }}</span></div>
         </div>
         <section v-if="detailData.record.pluginHistory?.length" class="plugin-history-section">
@@ -192,7 +193,7 @@ onBeforeUnmount(() => {
         <div class="history-attempt-list">
           <section v-for="attempt in detailData.record.attemptDetails || []" :key="attempt.number" class="subsection history-attempt-detail">
             <div class="section-heading"><h3>{{ t("common.run.attempt", { attempt: attempt.number }) }}</h3><NxpBadge :tone="statusTone(attempt.status)">{{ statusLabel(attempt.status) }}</NxpBadge></div>
-            <div class="history-attempt-meta"><div><span class="k">{{ t("common.time") }}</span><span>{{ formatDateTime(attempt.startTime) }} - {{ formatDateTime(attempt.endTime) }}</span></div><div><span class="k">{{ t("common.reason") }}</span><span>{{ attempt.reason || "-" }}</span></div></div>
+            <div class="history-attempt-meta"><div><span class="k">{{ t("common.time") }}</span><span>{{ formatDateTime(attempt.startTime) }} - {{ formatDateTime(attempt.endTime) }}</span></div><div><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(attempt.durationMs) }}</span></div><div><span class="k">{{ t("common.reason") }}</span><span>{{ attempt.reason || "-" }}</span></div></div>
             <div v-if="attemptLog(attempt.number)" class="history-log" data-history-log>
               <div class="qk-row">{{ attemptLogIsTail(attempt.number) ? t("history.log.lines_summary.tail", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) : t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) }}</div>
               <div v-if="attemptLogIsTail(attempt.number)" class="history-log-actions"><span class="muted">{{ t("history.log.tail_only") }}</span><NxpButton class="ghost sm" type="button" @click.stop="loadFullLog(attempt.number)">{{ t("history.view_full_log") }}</NxpButton></div>

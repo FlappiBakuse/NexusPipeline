@@ -6,7 +6,7 @@ import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import HistoryDetailModal from "./HistoryDetailModal.vue";
-import { formatDateTime, historyBadges, statusLabel, statusTone } from "../utils/historyFormat";
+import { formatDateTime, formatDurationMs, historyBadges, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryRecord } from "../utils/historyTypes";
 
 /** 历史记录栏：记录列表、详情弹窗与运行记录计数。请求由页面执行。 */
@@ -82,7 +82,7 @@ function recordPath(record: HistoryRecord) {
                 hidden
               ></span>
             </span>
-            <span class="history-entry-path">{{ recordPath(record) }}</span>
+            <span class="history-entry-path">{{ recordPath(record) }} · {{ t("history.duration.label") }} {{ formatDurationMs(record.durationMs) }}</span>
           </span>
           <span class="history-entry-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
         </button>

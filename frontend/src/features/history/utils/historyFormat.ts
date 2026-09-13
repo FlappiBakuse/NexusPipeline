@@ -1,4 +1,4 @@
-import { getLocale, t } from "../../../platform/i18n";
+import { formatNumber, getLocale, t } from "../../../platform/i18n";
 import type { HistoryRecord } from "./historyTypes";
 
 export function formatDateTime(value?: string) {
@@ -7,6 +7,18 @@ export function formatDateTime(value?: string) {
   return Number.isNaN(parsed.getTime())
     ? value
     : parsed.toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "medium" });
+}
+
+export function formatDurationMs(value?: number | null) {
+  if (value == null || !Number.isFinite(value) || value < 0) return "-";
+  const milliseconds = Math.round(value);
+  const number = (amount: number) => formatNumber(amount, { maximumFractionDigits: 1 });
+  if (milliseconds < 1000) return t("history.duration.ms", { value: number(milliseconds) }, `${number(milliseconds)} ms`);
+  const seconds = milliseconds / 1000;
+  if (seconds < 60) return t("history.duration.seconds", { value: number(seconds) }, `${number(seconds)} s`);
+  const minutes = seconds / 60;
+  if (minutes < 60) return t("history.duration.minutes", { value: number(minutes) }, `${number(minutes)} min`);
+  return t("history.duration.hours", { value: number(minutes / 60) }, `${number(minutes / 60)} h`);
 }
 
 /** 日期键（YYYY-MM-DD）按当前界面语言展示。 */

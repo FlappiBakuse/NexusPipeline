@@ -16,11 +16,11 @@ internal static partial class CliCommandRouter
         if (sub is "dates")
         {
             if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "history dates")))
-                || !EnsureOptions(args, "days"))
+                || !EnsureOptions(args, "days", "status"))
             {
                 return CliExitCodes.For("invalid_arguments");
             }
-            string query = Query(("days", args.Get("days") ?? "3"));
+            string query = Query(("days", args.Get("days") ?? "3"), ("status", args.Get("status") ?? ""));
             return ReturnApi(client.Get("/api/history/dates" + query));
         }
         if (sub is "get" or "detail")
@@ -56,7 +56,7 @@ internal static partial class CliCommandRouter
                 args,
                 rawSub is null ? 1 : 2,
                 CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "history list")))
-            || !EnsureOptions(args, "date", "days", "script", "queue", "offset", "limit"))
+            || !EnsureOptions(args, "date", "days", "script", "queue", "status", "offset", "limit"))
         {
             return CliExitCodes.For("invalid_arguments");
         }
@@ -65,6 +65,7 @@ internal static partial class CliCommandRouter
             ("days", args.Get("days") ?? "3"),
             ("scriptId", args.Get("script") ?? ""),
             ("queueId", args.Get("queue") ?? ""),
+            ("status", args.Get("status") ?? ""),
             ("offset", args.Get("offset") ?? ""),
             ("limit", args.Get("limit") ?? ""));
         return ReturnApi(client.Get(path));

@@ -142,7 +142,11 @@ internal sealed class McpToolContext
                 logTotalLines = log?.TotalLines ?? 0,
             };
         }).ToList();
-        return new { record, attemptLogs };
+        return new
+        {
+            record = HistoryService.ToView(record),
+            attemptLogs,
+        };
     }
 
     public static OperationResult<T> NotFound<T>(string message) =>

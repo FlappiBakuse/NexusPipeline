@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
@@ -20,9 +21,25 @@ internal sealed record HistoryUserSummary(
     int CancelledCount,
     int SkippedCount);
 
+internal sealed record HistoryDailySummary(
+    string Date,
+    int TotalCount,
+    IReadOnlyDictionary<string, int> StatusCounts,
+    long TotalDurationMs,
+    long? AverageDurationMs);
+
+internal sealed record HistorySummary(
+    int TotalCount,
+    IReadOnlyDictionary<string, int> StatusCounts,
+    long TotalDurationMs,
+    long? AverageDurationMs,
+    double? SuccessRate,
+    IReadOnlyList<HistoryDailySummary> Daily);
+
 internal class HistoryService : IHistoryStore
 {
     private const int ScreenshotCapacity = 8;
+    private static readonly string[] KnownStatuses = { "success", "failed", "partial", "cancelled", "skipped" };
     private static readonly object Sync = new();
 
     private readonly string _historyDir;
@@ -215,11 +232,15 @@ internal class HistoryService : IHistoryStore
     }
 
     /// <summary>按日期聚合当天实际出现过的运行用户。</summary>
-    public List<HistoryUserSummary> QueryUsers(DateTime date, string? scriptId = null, string? queueId = null)
+    public List<HistoryUserSummary> QueryUsers(
+        DateTime date,
+        string? scriptId = null,
+        string? queueId = null,
+        string? status = null)
     {
         lock (Sync)
         {
-            return SummarizeUsers(ReadDayRecords(date), date, scriptId, queueId);
+            return SummarizeUsers(ReadDayRecords(date), date, scriptId, queueId, status);
         }
     }
 
@@ -227,12 +248,13 @@ internal class HistoryService : IHistoryStore
         IEnumerable<RunRecord> records,
         DateTime date,
         string? scriptId = null,
-        string? queueId = null)
+        string? queueId = null,
+        string? status = null)
     {
         return records
             .Where(record => record.StartTime.Date == date.Date
                 && !string.IsNullOrWhiteSpace(record.UserId)
-                && Matches(record, scriptId, queueId, null))
+                && Matches(record, scriptId, queueId, null, status))
             .GroupBy(GetUserKey, StringComparer.Ordinal)
             .Select(group =>
             {
@@ -279,7 +301,8 @@ internal class HistoryService : IHistoryStore
         DateTime end,
         string? scriptId = null,
         string? queueId = null,
-        string? userKey = null)
+        string? userKey = null,
+        string? status = null)
     {
         var result = new List<RunRecord>();
         lock (Sync)
@@ -292,7 +315,7 @@ internal class HistoryService : IHistoryStore
                     {
                         continue;
                     }
-                    if (Matches(record, scriptId, queueId, userKey))
+                    if (Matches(record, scriptId, queueId, userKey, status))
                     {
                         result.Add(record);
                     }
@@ -300,6 +323,94 @@ internal class HistoryService : IHistoryStore
             }
         }
         return result.OrderByDescending(record => record.StartTime).ToList();
+    }
+
+    /// <summary>按当前查询条件生成历史摘要；DurationMs 只存在于返回投影，不写回运行历史 JSON。</summary>
+    public HistorySummary Summarize(
+        DateTime start,
+        DateTime end,
+        string? scriptId = null,
+        string? queueId = null,
+        string? userKey = null,
+        string? status = null)
+    {
+        return SummarizeRecords(Query(start, end, scriptId, queueId, userKey, status), start, end);
+    }
+
+    internal static HistorySummary SummarizeRecords(
+        IEnumerable<RunRecord> records,
+        DateTime start,
+        DateTime end)
+    {
+        List<RunRecord> materialized = records.ToList();
+        Dictionary<string, int> statusCounts = NewStatusCounts();
+        long totalDurationMs = 0;
+        long durationCount = 0;
+        int successCount = 0;
+
+        foreach (RunRecord record in materialized)
+        {
+            string status = StatusOf(record);
+            if (statusCounts.ContainsKey(status))
+            {
+                statusCounts[status]++;
+            }
+            if (status == "success")
+            {
+                successCount++;
+            }
+            AddDuration(record.StartTime, record.EndTime, ref totalDurationMs, ref durationCount);
+        }
+
+        var daily = new List<HistoryDailySummary>();
+        for (DateTime date = start.Date; date <= end.Date; date = date.AddDays(1))
+        {
+            List<RunRecord> dayRecords = materialized
+                .Where(record => record.StartTime.Date == date.Date)
+                .ToList();
+            daily.Add(BuildDailySummary(date, dayRecords));
+        }
+
+        return new HistorySummary(
+            materialized.Count,
+            statusCounts,
+            totalDurationMs,
+            AverageDuration(totalDurationMs, durationCount),
+            materialized.Count == 0 ? null : successCount * 100d / materialized.Count,
+            daily);
+    }
+
+    internal static JsonObject ToView(RunRecord record)
+    {
+        JsonObject view = JsonSerializer.SerializeToNode(record, JsonOpts.Web) as JsonObject ?? new JsonObject();
+        view["durationMs"] = JsonValue.Create(DurationMilliseconds(record));
+        if (view["attemptDetails"] is JsonArray attemptViews)
+        {
+            IReadOnlyList<RunAttempt> attempts = record.AttemptDetails ?? new List<RunAttempt>();
+            for (int index = 0; index < attemptViews.Count && index < attempts.Count; index++)
+            {
+                if (attemptViews[index] is JsonObject attemptView)
+                {
+                    attemptView["durationMs"] = JsonValue.Create(DurationMilliseconds(attempts[index]));
+                }
+            }
+        }
+        return view;
+    }
+
+    internal static long? DurationMilliseconds(RunRecord record) =>
+        DurationMilliseconds(record.StartTime, record.EndTime);
+
+    internal static long? DurationMilliseconds(RunAttempt attempt) =>
+        DurationMilliseconds(attempt.StartTime, attempt.EndTime);
+
+    internal static long? DurationMilliseconds(DateTime start, DateTime? end)
+    {
+        if (!end.HasValue)
+        {
+            return null;
+        }
+        return Math.Max(0L, (long)(end.Value - start).TotalMilliseconds);
     }
 
     internal static string GetUserKey(RunRecord record)
@@ -314,7 +425,24 @@ internal class HistoryService : IHistoryStore
             && userKey.StartsWith("id:", StringComparison.Ordinal);
     }
 
-    private static bool Matches(RunRecord record, string? scriptId, string? queueId, string? userKey)
+    internal static string? NormalizeStatus(string? status)
+    {
+        string value = (status ?? "").Trim().ToLowerInvariant();
+        return value.Length == 0 ? null : value;
+    }
+
+    internal static bool IsValidStatus(string? status)
+    {
+        string? normalized = NormalizeStatus(status);
+        return normalized is null || KnownStatuses.Contains(normalized, StringComparer.Ordinal);
+    }
+
+    private static bool Matches(
+        RunRecord record,
+        string? scriptId,
+        string? queueId,
+        string? userKey,
+        string? status)
     {
         if (!string.IsNullOrWhiteSpace(scriptId) && record.ScriptInstanceId != scriptId)
         {
@@ -328,12 +456,66 @@ internal class HistoryService : IHistoryStore
         {
             return false;
         }
+        string? normalizedStatus = NormalizeStatus(status);
+        if (normalizedStatus is not null && StatusOf(record) != normalizedStatus)
+        {
+            return false;
+        }
         return true;
     }
 
-    private static string StatusOf(RunRecord record)
+    internal static string StatusOf(RunRecord record)
     {
         return (record.Status ?? "").Trim().ToLowerInvariant();
+    }
+
+    private static Dictionary<string, int> NewStatusCounts() =>
+        KnownStatuses.ToDictionary(status => status, _ => 0, StringComparer.Ordinal);
+
+    private static HistoryDailySummary BuildDailySummary(DateTime date, IReadOnlyList<RunRecord> records)
+    {
+        Dictionary<string, int> statusCounts = NewStatusCounts();
+        long totalDurationMs = 0;
+        long durationCount = 0;
+        foreach (RunRecord record in records)
+        {
+            string status = StatusOf(record);
+            if (statusCounts.ContainsKey(status))
+            {
+                statusCounts[status]++;
+            }
+            AddDuration(record.StartTime, record.EndTime, ref totalDurationMs, ref durationCount);
+        }
+        return new HistoryDailySummary(
+            date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            records.Count,
+            statusCounts,
+            totalDurationMs,
+            AverageDuration(totalDurationMs, durationCount));
+    }
+
+    private static void AddDuration(
+        DateTime start,
+        DateTime? end,
+        ref long totalDurationMs,
+        ref long durationCount)
+    {
+        long? duration = DurationMilliseconds(start, end);
+        if (!duration.HasValue)
+        {
+            return;
+        }
+        totalDurationMs = totalDurationMs > long.MaxValue - duration.Value
+            ? long.MaxValue
+            : totalDurationMs + duration.Value;
+        durationCount++;
+    }
+
+    private static long? AverageDuration(long totalDurationMs, long durationCount)
+    {
+        return durationCount == 0
+            ? null
+            : Math.Max(0L, (long)Math.Round(totalDurationMs / (double)durationCount, MidpointRounding.AwayFromZero));
     }
 
     /// <summary>按 Id 查找历史记录；默认窗口与历史保留上限一致。</summary>

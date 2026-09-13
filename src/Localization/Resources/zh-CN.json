@@ -34,6 +34,7 @@
   "api.error.history_id_required": "缺少记录 ID",
   "api.error.history_invalid_date": "日期格式无效",
   "api.error.history_invalid_date_range": "日期范围格式无效",
+  "api.error.history_invalid_status": "状态筛选值无效",
   "api.error.history_invalid_user_key": "用户标识格式无效",
   "api.error.history_not_found": "记录不存在",
   "api.error.history_paging_invalid": "limit 必须在 1 到 200 之间，offset 不能小于 0",

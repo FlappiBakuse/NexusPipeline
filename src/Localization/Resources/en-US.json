@@ -34,6 +34,7 @@
   "api.error.history_id_required": "A history ID is required",
   "api.error.history_invalid_date": "The history date is invalid",
   "api.error.history_invalid_date_range": "The history date range is invalid",
+  "api.error.history_invalid_status": "The history status filter is invalid",
   "api.error.history_invalid_user_key": "The history user key is invalid",
   "api.error.history_not_found": "The history was not found",
   "api.error.history_paging_invalid": "limit must be between 1 and 200, and offset cannot be negative",

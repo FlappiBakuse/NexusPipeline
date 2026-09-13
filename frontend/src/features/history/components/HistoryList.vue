@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
+import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { formatHistoryDate } from "../utils/historyFormat";
@@ -77,7 +78,18 @@ function usersOf(date: string) {
               @click="emit('chooseUser', item.date, user)"
             >
               <span class="history-user-avatar" aria-hidden="true"><NxpIcon name="user" /></span>
-              <span class="history-user-main"><strong>{{ user.userName || t("history.no_user_specified") }}</strong></span>
+              <span class="history-user-main">
+                <strong>{{ user.userName || t("history.no_user_specified") }}</strong>
+                <span v-if="user.userId" class="history-user-id">{{ user.userId }}</span>
+                <span class="history-user-badges">
+                  <NxpBadge v-if="user.count != null" tone="muted">{{ t("history.summary.runs_short", { count: user.count }) }}</NxpBadge>
+                  <NxpBadge v-if="user.successCount" tone="ok">{{ t("history.status.success_short", { count: user.successCount }) }}</NxpBadge>
+                  <NxpBadge v-if="user.failedCount" tone="bad">{{ t("history.status.failed_short", { count: user.failedCount }) }}</NxpBadge>
+                  <NxpBadge v-if="user.partialCount" tone="warn">{{ t("history.status.partial_short", { count: user.partialCount }) }}</NxpBadge>
+                  <NxpBadge v-if="user.cancelledCount" tone="warn">{{ t("history.status.cancelled_short", { count: user.cancelledCount }) }}</NxpBadge>
+                  <NxpBadge v-if="user.skippedCount" tone="blue">{{ t("history.status.skipped_short", { count: user.skippedCount }) }}</NxpBadge>
+                </span>
+              </span>
               <span class="history-user-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
             </button>
           </div>
