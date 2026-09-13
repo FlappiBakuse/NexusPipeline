@@ -84,9 +84,9 @@ public sealed class UpdateCatalogTests
     {
         JsonNode root = JsonNode.Parse("""
         [
-          { "tag_name": "v0.11.0", "draft": false, "prerelease": false, "assets": [
-              { "name": "NexusPipeline-v0.11.0-win-x64.zip", "browser_download_url": "https://github.com/s.zip" },
-              { "name": "NexusPipeline-v0.11.0-win-x64.zip.sha256", "browser_download_url": "https://github.com/s.sha" }
+          { "tag_name": "v1.0.0", "draft": false, "prerelease": false, "assets": [
+              { "name": "NexusPipeline-v1.0.0-win-x64.zip", "browser_download_url": "https://github.com/s.zip" },
+              { "name": "NexusPipeline-v1.0.0-win-x64.zip.sha256", "browser_download_url": "https://github.com/s.sha" }
           ] },
           { "tag_name": "v0.10.9", "draft": false, "prerelease": true, "assets": [
               { "name": "NexusPipeline-v0.10.9-win-x64.zip", "browser_download_url": "https://github.com/p.zip" },
@@ -98,14 +98,16 @@ public sealed class UpdateCatalogTests
         ReleaseInfo? stable = UpdateCatalog.PickRelease(root, "stable", V("0.10.0"));
         ReleaseInfo? prerelease = UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0"));
 
-        Assert.Equal("v0.11.0", stable!.Tag);
+        Assert.Equal("v1.0.0", stable!.Tag);
         // prerelease 渠道取最高版本（stable 与 prerelease 均可见）。
-        Assert.Equal("v0.11.0", prerelease!.Tag);
+        Assert.Equal("v1.0.0", prerelease!.Tag);
     }
 
     [Theory]
     [InlineData("v1.0.0", false, true)]
     [InlineData("v1.0.0", true, false)]
+    [InlineData("v0.15.12", true, true)]
+    [InlineData("v0.15.12", false, false)]
     [InlineData("v1.0.0-beta.1", true, true)]
     [InlineData("v1.0.0-beta.1", false, false)]
     [InlineData("v1.0.0-rc.1", true, true)]
@@ -139,6 +141,10 @@ public sealed class UpdateCatalogTests
         ReleaseInfo? release = UpdateCatalog.PickRelease(root, "prerelease", V("0.0.0"));
 
         Assert.Equal(expected, release is not null);
+        if (release is not null)
+        {
+            Assert.Equal(prerelease, release.Prerelease);
+        }
     }
 
     [Fact]
@@ -146,15 +152,15 @@ public sealed class UpdateCatalogTests
     {
         JsonNode root = JsonNode.Parse("""
         [
-          { "tag_name": "v0.10.0", "draft": false, "prerelease": false, "assets": [
-              { "name": "NexusPipeline-v0.10.0-win-x64.zip", "browser_download_url": "https://github.com/x.zip" },
-              { "name": "NexusPipeline-v0.10.0-win-x64.zip.sha256", "browser_download_url": "https://github.com/x.sha" }
+          { "tag_name": "v1.0.0", "draft": false, "prerelease": false, "assets": [
+              { "name": "NexusPipeline-v1.0.0-win-x64.zip", "browser_download_url": "https://github.com/x.zip" },
+              { "name": "NexusPipeline-v1.0.0-win-x64.zip.sha256", "browser_download_url": "https://github.com/x.sha" }
           ] }
         ]
         """)!;
 
-        Assert.Null(UpdateCatalog.PickRelease(root, "prerelease", V("0.10.0")));
-        Assert.Null(UpdateCatalog.PickRelease(JsonNode.Parse("[]"), "prerelease", V("0.10.0")));
+        Assert.Null(UpdateCatalog.PickRelease(root, "prerelease", V("1.0.0")));
+        Assert.Null(UpdateCatalog.PickRelease(JsonNode.Parse("[]"), "prerelease", V("1.0.0")));
     }
 
     [Fact]

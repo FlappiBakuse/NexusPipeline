@@ -27,7 +27,7 @@ internal static class UpdateCatalog
 
     /// <summary>
     /// 从 GitHub Releases API JSON 中按渠道挑选最高版本：跳过 draft；Release 的 prerelease 标记
-    /// 必须与版本后缀语义一致；stable 渠道只见正式版本；资产 zip+sha256 必须齐全；版本须高于当前版本。
+    /// 必须符合宿主项目发布策略；stable 渠道只见正式 Release；资产 zip+sha256 必须齐全；版本须高于当前版本。
     /// </summary>
     public static ReleaseInfo? PickRelease(JsonNode? root, string channel, NexusVersion currentVersion)
     {
@@ -52,11 +52,12 @@ internal static class UpdateCatalog
                 continue;
             }
             bool declaredPrerelease = release["prerelease"]?.GetValue<bool>() == true;
-            if (declaredPrerelease != version.IsPrerelease)
+            bool expectedPrerelease = NexusReleasePolicy.RequiresGitHubPrerelease(version);
+            if (declaredPrerelease != expectedPrerelease)
             {
                 continue;
             }
-            if (channel == "stable" && version.IsPrerelease)
+            if (!NexusReleasePolicy.IsVisibleInChannel(version, channel))
             {
                 continue;
             }
@@ -96,7 +97,7 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", version.IsPrerelease, zipUrl, shaUrl);
+            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", declaredPrerelease, zipUrl, shaUrl);
             if (best is null || Compare(version, best.Version) > 0)
             {
                 best = candidate;

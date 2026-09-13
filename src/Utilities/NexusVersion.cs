@@ -26,7 +26,8 @@ internal readonly record struct NexusVersion(
         "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(beta|rc)\\.(0|[1-9]\\d*))?$",
         RegexOptions.CultureInvariant | RegexOptions.NonBacktracking | RegexOptions.Compiled);
 
-    public bool IsPrerelease => Stage != NexusVersionStage.Stable;
+    /// <summary>版本字符串是否带有 beta/rc 预发布后缀。</summary>
+    public bool HasPrereleaseSuffix => Stage != NexusVersionStage.Stable;
 
     public static NexusVersion Stable(int major, int minor, int patch) =>
         new(major, minor, patch, NexusVersionStage.Stable, 0);

@@ -111,7 +111,7 @@ public class AppSettings
     /// <summary>发现更新后，宿主进入闲时并满足调度安全窗口时自动应用并重启。</summary>
     public bool UpdateAutoApplyEnabled { get; set; }
 
-    /// <summary>更新接受渠道：stable / prerelease（前项目全是 Pre-release，默认 prerelease 才能收到更新）。</summary>
+    /// <summary>更新接受渠道：stable / prerelease（major=0 版本为 Pre-release，默认 prerelease 才能收到更新）。</summary>
     public string UpdateChannel { get; set; } = "prerelease";
 
     /// <summary>可选更新镜像源（GitHub Releases API JSON）；空 = 默认 GitHub。</summary>

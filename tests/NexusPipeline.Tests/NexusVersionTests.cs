@@ -38,6 +38,33 @@ public sealed class NexusVersionTests
         Assert.True(V("1.2.3").CompareTo(V("1.2.4-beta.1")) < 0);
     }
 
+    [Theory]
+    [InlineData("0.15.12", false, true)]
+    [InlineData("0.15.12-rc.1", true, true)]
+    [InlineData("1.0.0-beta.1", true, true)]
+    [InlineData("1.0.0", false, false)]
+    [InlineData("2.0.0-rc.1", true, true)]
+    [InlineData("2.0.0", false, false)]
+    public void ReleasePolicy_SeparatesSuffixFromGitHubClassification(
+        string value,
+        bool expectedSuffix,
+        bool expectedGitHubPrerelease)
+    {
+        NexusVersion version = V(value);
+
+        Assert.Equal(expectedSuffix, version.HasPrereleaseSuffix);
+        Assert.Equal(expectedGitHubPrerelease, NexusReleasePolicy.RequiresGitHubPrerelease(version));
+    }
+
+    [Fact]
+    public void ReleasePolicy_HidesAllMajorZeroVersionsFromStableChannel()
+    {
+        Assert.False(NexusReleasePolicy.IsVisibleInChannel(V("0.15.12"), "stable"));
+        Assert.False(NexusReleasePolicy.IsVisibleInChannel(V("0.15.12-rc.1"), "stable"));
+        Assert.True(NexusReleasePolicy.IsVisibleInChannel(V("0.15.12"), "prerelease"));
+        Assert.True(NexusReleasePolicy.IsVisibleInChannel(V("1.0.0"), "stable"));
+    }
+
     [Fact]
     public void UpdatePolicy_RejectsMalformedOrUntrustedDocuments()
     {

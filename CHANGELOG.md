@@ -1,6 +1,6 @@
 # Changelog
 
-本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式（v1.0.0 之前为 Pre-release）。
+本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
 ## v0.15.12（Pre-release）
 
@@ -10,7 +10,7 @@
 - 增加 `update-policy.json` 更新策略校验；跨越破坏性版本屏障时保留更新发现结果，要求手动下载安装包并迁移配置。
 - 更新状态、Web API、MCP 和自动更新服务同步暴露策略验证与手动迁移状态，内置下载和应用入口在屏障状态下统一拒绝。
 - 更新策略读取使用独立 URI 安全域；仓库根目录策略由生产解析器校验，CI 强制 barrier 历史追加-only，既有记录不可删除、修改或重排。
-- Release tag 的预发布后缀必须与 GitHub Release `prerelease` 标记一致；元数据矛盾的发布不会进入更新候选。
+- Release 的 `prerelease` 标记必须符合宿主项目发布策略；元数据矛盾的发布不会进入更新候选。
 
 ### 插件兼容性
 

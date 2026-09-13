@@ -52,7 +52,7 @@ function createReleaseServer() {
       requestCount++;
       const release = {
         draft: false,
-        prerelease: false,
+        prerelease: true,
         tag_name: `v${updateVersion}`,
         name: `v${updateVersion} test release`,
         body: "periodic update regression fixture",

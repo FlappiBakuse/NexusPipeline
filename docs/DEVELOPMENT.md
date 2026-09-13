@@ -174,7 +174,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 | v1.0.0 之前的项目维护者 | 按当前主分支策略直接 push `main`，提交前先同步远端，禁止 force push |
 | v1.0.0 起的项目维护者 | 工作分支 → Pull Request；CI 全绿后 squash 合入 `main`，禁止直接 push 或 force push |
 
-如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。版本发布在 v1.0.0 前统一标记为 Pre-release。
+如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。Release 分类遵循 9.1 节的宿主项目发布策略。
 
 ### 8.3 功能拆分与 UI 测试边界
 
@@ -232,7 +232,7 @@ refactor(core): 抽取运行会话状态机
 ### 9.1 版本号规则
 
 - 采用受限 Nexus 版本 `X.Y.Z`、`X.Y.Z-beta.N` 或 `X.Y.Z-rc.N`，tag 为对应版本前加 `v`；版本比较遵循 `beta < rc < stable`。`fix`、`perf` 和文档/工程治理的补丁性变更使用 PATCH，`feat` 使用 MINOR，带 `!` 或 `BREAKING CHANGE` 的变更按项目当前阶段升级。
-- v1.0.0 之前所有版本发布均标记 Pre-release；v1.0.0 起按正式版本规则发布。
+- GitHub Release 分类按宿主项目发布策略执行：`major=0` 的所有版本均为 Pre-release；`major>=1` 时，带 `-beta.N` 或 `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无预发布后缀的版本为正式 Release。
 - 用户指定新版本并开始开发后，立即同步 `src/NexusPipeline.csproj` 的 `<Version>` 和版本展示所需配置；发布流程不重复 bump。
 - 版本开发期间的本地 `backup/vX.Y.Z-*` 还原点只存在本地，不推送到 origin。
 
@@ -252,10 +252,14 @@ refactor(core): 抽取运行会话状态机
 2. 按协作策略提交并推送版本变更；
 3. 创建 tag：`git tag vX.Y.Z[-beta.N|-rc.N]`，再按授权推送对应 tag；
 4. 将 Release Notes 写入 UTF-8 无 BOM 临时文件；
-5. v1.0.0 前执行：
+5. 按版本分类创建 Release：
 
    ```text
-   gh release create vX.Y.Z --prerelease --title vX.Y.Z --notes-file <file>
+   # major=0，或 major>=1 且带 -beta.N / -rc.N 后缀
+   gh release create vX.Y.Z[-beta.N|-rc.N] --prerelease --title vX.Y.Z[-beta.N|-rc.N] --notes-file <file>
+
+   # major>=1 且无预发布后缀
+   gh release create vX.Y.Z --title vX.Y.Z --notes-file <file>
    ```
 
 6. 上传 zip 与 SHA 资产；
@@ -268,7 +272,7 @@ refactor(core): 抽取运行会话状态机
 |---|---|
 | tag | `vX.Y.Z`、`vX.Y.Z-beta.N` 或 `vX.Y.Z-rc.N` |
 | Release 标题 | `vX.Y.Z` |
-| Pre-release | v1.0.0 前使用 `--prerelease` |
+| Pre-release | `major=0` 或版本带 `-beta.N` / `-rc.N` 后缀时使用 `--prerelease` |
 | zip 资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip` |
 | SHA 资产 | 对应 zip 文件名追加 `.sha256` |
 
@@ -296,7 +300,7 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 
 - Release 必须同时具备 zip 与 sha256 资产；缺少任一项时更新清单会跳过该版本；
 - 上传后在本机设置页点击「检查更新」，或调用 `POST /api/update/check`，确认更新源识别到刚发布的 tag 与两项资产；
-- 无法以管理员上下文启动宿主时，用 `python tools/update-visibility-check.py` 按同一契约核对默认更新源的发布列表、tag 解析、资产命名、下载主机白名单与资产哈希；
+- 无法以管理员上下文启动宿主时，用 `python tools/update-visibility-check.py [vX.Y.Z[-beta.N|-rc.N]]` 按同一契约核对默认更新源的发布列表、tag 解析、宿主 Release 分类、资产命名、下载主机白名单与资产哈希；省略参数时读取当前 `src/NexusPipeline.csproj` 版本；
 - 如果检查不到，先核对 `gh release view vX.Y.Z` 的资产列表、资产命名和 zip 根布局。
 
 ### 9.4.1 更新策略与破坏性版本屏障
@@ -316,7 +320,9 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 ### 9.5 Release Notes 格式
 
 ```text
-## vX.Y.Z[-beta.N|-rc.N]（Pre-release）
+## vX.Y.Z[-beta.N|-rc.N]（按宿主发布策略决定是否附加「Pre-release」）
+
+`major=0` 或带 `-beta.N` / `-rc.N` 后缀时，标题附加「Pre-release」；`major>=1` 且无后缀时不附加。
 
 ### 功能分组标题
 - 要点一
