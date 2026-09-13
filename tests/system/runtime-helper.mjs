@@ -92,7 +92,7 @@ export function prepareRuntime() {
     fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
     fs.writeFileSync(
       path.join(runtimeDir, "config", "settings.json"),
-      JSON.stringify({ WebPort: systemWebPort }),
+      JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN" }),
       "utf8",
     );
   }
