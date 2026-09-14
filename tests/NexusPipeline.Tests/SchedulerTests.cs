@@ -83,6 +83,62 @@ public class SchedulerTests
     }
 
     [Fact]
+    public void AutoUpdateBlocker_IgnoresScheduledOccurrenceBeforeCurrentMinuteDespiteStaleWatermark()
+    {
+        DateTime now = DateTime.Now;
+        DateTime missed = now.AddHours(-3);
+        var queue = new DispatchQueue
+        {
+            Id = "stale-watermark-queue",
+            Name = "历史错过队列",
+            AutoRunMode = "scheduled",
+            Tasks = [new QueueTask { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" }],
+            TimeSets = [new QueueTimeSet { Enabled = true, Days = [(int)missed.DayOfWeek], Time = missed.ToString("HH:mm") }],
+        };
+        var stateStore = new MemorySchedulerStateStore();
+        stateStore.Save(new SchedulerPersistedState { LastSchedulerCheck = now.AddHours(-4) });
+        using Scheduler scheduler = CreateScheduler(queue, stateStore);
+
+        Assert.Null(scheduler.GetAutoUpdateBlocker(TimeSpan.FromMinutes(5), now));
+    }
+
+    [Fact]
+    public void ScheduledTrigger_DoesNotBackfillOccurrenceAfterRestartWithStaleWatermark()
+    {
+        DateTime now = DateTime.Now;
+        DateTime missed = now.AddHours(-3);
+        var queue = new DispatchQueue
+        {
+            Id = "stale-restart-queue",
+            Name = "重启错过队列",
+            AutoRunMode = "scheduled",
+            Tasks = [new QueueTask { Id = "task-1", Index = 0, ScriptInstanceId = "missing-script" }],
+            TimeSets = [new QueueTimeSet { Enabled = true, Days = [(int)missed.DayOfWeek], Time = missed.ToString("HH:mm") }],
+        };
+        var queues = new TestQueueRepository(queue);
+        var commands = new TestExecutionService(failFirst: false);
+        var validator = new ExecutionValidator(
+            new EmptyScriptRepository(),
+            queues,
+            new EmptyUserRepository(),
+            new AllowAllPluginAvailability());
+        var stateStore = new MemorySchedulerStateStore();
+        stateStore.Save(new SchedulerPersistedState { LastSchedulerCheck = now.AddHours(-4) });
+        using var scheduler = new Scheduler(
+            queues,
+            new EmptyHistoryStore(),
+            new TestSettingsProvider(),
+            commands,
+            validator,
+            stateStore: stateStore);
+
+        scheduler.TickForTest();
+
+        Assert.Equal(0, commands.Attempts);
+        Assert.Equal(0, PendingCount(scheduler));
+    }
+
+    [Fact]
     public async Task StartupTrigger_RemainsPendingAfterTransientAdmissionConflict()
     {
         var queue = new DispatchQueue
@@ -189,7 +245,7 @@ public class SchedulerTests
         Assert.True(condition(), "条件在超时时间内未满足");
     }
 
-    private static Scheduler CreateScheduler(DispatchQueue queue)
+    private static Scheduler CreateScheduler(DispatchQueue queue, ISchedulerStateStore? stateStore = null)
     {
         var queues = new TestQueueRepository(queue);
         var validator = new ExecutionValidator(
@@ -202,7 +258,8 @@ public class SchedulerTests
             new EmptyHistoryStore(),
             new TestSettingsProvider(),
             new TestExecutionService(failFirst: false),
-            validator);
+            validator,
+            stateStore: stateStore);
     }
 
     private static int PendingCount(Scheduler scheduler)

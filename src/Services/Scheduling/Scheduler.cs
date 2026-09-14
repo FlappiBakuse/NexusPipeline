@@ -203,7 +203,6 @@ internal sealed class Scheduler : IDisposable
         DateTime now = nowOverride ?? DateTime.Now;
         DateTime until = now.Add(horizon < TimeSpan.Zero ? TimeSpan.Zero : horizon);
         IReadOnlyList<DispatchQueue> queues = _queues.Snapshot();
-        DateTime? lastCheck;
         lock (_sync)
         {
             if (_runningQueueIds.Count > 0)
@@ -240,10 +239,9 @@ internal sealed class Scheduler : IDisposable
                     queues.First(queue => queue.AutoRunMode == "startup" && queue.Tasks.Count > 0).Name,
                     null);
             }
-            lastCheck = _lastSchedulerCheck;
         }
 
-        DateTime from = lastCheck ?? now.AddMinutes(-1);
+        DateTime from = ScheduledScanStart(now);
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             foreach ((string occurrenceKey, DateTime triggerTime) in EnumerateOccurrences(queue, from, until))
@@ -430,13 +428,13 @@ internal sealed class Scheduler : IDisposable
             }
         }
 
-        DateTime from;
         lock (_sync)
         {
-            // 首次 tick 仍检查当前分钟，后续按 (lastCheck, now] 补齐整个停顿窗口。
-            from = _lastSchedulerCheck ?? now.AddMinutes(-1);
+            // durable watermark 只作为恢复围栏保存；计划扫描严格限制在当前分钟，
+            // 宿主离线或长时间停顿期间错过的 occurrence 不在启动后补发。
             _lastSchedulerCheck = now;
         }
+        DateTime from = ScheduledScanStart(now);
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             foreach ((string occurrenceKey, DateTime triggerTime) in EnumerateOccurrences(queue, from, now))
@@ -947,6 +945,12 @@ internal sealed class Scheduler : IDisposable
                 }
             }
         }
+    }
+
+    private static DateTime ScheduledScanStart(DateTime now)
+    {
+        DateTime minuteStart = new(now.Year, now.Month, now.Day, now.Hour, now.Minute, 0, now.Kind);
+        return minuteStart.AddTicks(-1);
     }
 
     private static bool MatchesOccurrence(DispatchQueue queue, DateTime triggerTime)

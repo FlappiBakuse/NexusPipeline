@@ -369,27 +369,77 @@ internal static class UpdateApply
     private static bool WaitForHostExit(TimeSpan timeout)
     {
         using var probe = new Mutex(false, StartupPipeline.SingleInstanceMutexName);
-        DateTime deadline = DateTime.Now + timeout;
-        while (DateTime.Now < deadline)
+        DateTime deadline = DateTime.UtcNow + timeout;
+        bool acquired = false;
+        while (DateTime.UtcNow < deadline)
         {
             try
             {
                 if (probe.WaitOne(500))
                 {
-                    try
-                    {
-                        probe.ReleaseMutex();
-                    }
-                    catch
-                    {
-                    }
-                    return true;
+                    acquired = true;
+                    break;
                 }
             }
             catch (AbandonedMutexException)
             {
+                // AbandonedMutexException 同样表示当前线程已取得互斥体所有权；
+                // 仍需继续等待旧宿主的 EXE 映像句柄真正释放。
+                acquired = true;
+                break;
+            }
+        }
+        if (!acquired)
+        {
+            return false;
+        }
+
+        try
+        {
+            return WaitForExecutableRelease(Path.Combine(AppPaths.AppRoot, "nexus-pipeline.exe"), deadline);
+        }
+        finally
+        {
+            try
+            {
+                probe.ReleaseMutex();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    /// <summary>
+    /// 单实例互斥体释放与 Windows 解除宿主 EXE 映像映射之间存在极短的交接窗口。
+    /// 只有目标文件可以以独占读写方式打开时，更新 worker 才能安全进入交换。
+    /// </summary>
+    private static bool WaitForExecutableRelease(string path, DateTime deadline)
+    {
+        while (DateTime.UtcNow < deadline)
+        {
+            if (!File.Exists(path))
+            {
                 return true;
             }
+            try
+            {
+                using var probe = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None,
+                    bufferSize: 1,
+                    options: FileOptions.RandomAccess);
+                return true;
+            }
+            catch (IOException)
+            {
+            }
+            catch (UnauthorizedAccessException)
+            {
+            }
+            Thread.Sleep(50);
         }
         return false;
     }
