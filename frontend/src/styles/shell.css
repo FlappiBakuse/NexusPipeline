@@ -966,7 +966,7 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .history-range-icon { position: absolute; top: 50%; right: 12px; display: inline-flex; pointer-events: none; transform: translateY(-50%); color: var(--accent); }
 .history-range-icon .icon { width: 16px; height: 16px; }
 .history-range-popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 70; display: grid; container-name: history-range-popover; container-type: inline-size; min-width: min(100%, 520px); gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--content-control-border); border-radius: var(--radius-md); background: var(--content-card); box-shadow: var(--shadow); }
-.history-query-toolbar .history-range-popover { right: auto; left: 0; width: 100%; min-width: 0; max-width: 100%; }
+.history-query-toolbar .history-range-popover { right: auto; left: 0; width: min(560px, calc(100vw - 32px)); width: min(560px, calc(100cqw - 16px)); min-width: 0; max-width: calc(100vw - 32px); }
 .history-range-popover[hidden] { display: none; }
 .history-calendar-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2); }
 .history-calendar-toolbar strong { min-width: 0; color: var(--text); font-size: 13px; text-align: center; }
@@ -1614,7 +1614,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   .history-browser.history-detail-visible .history-records-column { display: flex; }
   .history-browser.history-user-selected .history-detail-back,
   .history-browser.history-detail-visible .history-detail-back { display: flex; width: 100%; margin: 0 0 var(--space-3); }
-  .history-range-popover { right: 0; left: auto; }
   .history-dates-panel,
   .history-records-panel { min-height: 360px; }
 }
@@ -1625,7 +1624,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 }
 
 /* 日历月视图以浮层实际可用宽度切换，避免把两个月份压成窄长日期格。 */
-@container history-range-popover (max-width: 520px) {
+@container history-range-popover (max-width: 495px) {
   .history-calendar-months { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -2152,7 +2151,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   .history-browser.history-detail-visible .history-records-column { display: flex; }
   .history-browser.history-user-selected .history-detail-back,
   .history-browser.history-detail-visible .history-detail-back { display: flex; width: 100%; margin: 0 0 var(--space-3); }
-  .history-range-popover { right: 0; left: auto; }
   .history-dates-panel,
   .history-records-panel { min-height: 360px; }
 }
