@@ -33,7 +33,24 @@ export const testHostExitFile = resolveTestHostExitFile(
   path.join(runtimeDir, ".nxp", "test-host.exit"),
 );
 export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
-export const baseUrl = "http://127.0.0.1:58731/";
+const configuredBaseUrl = process.env.NEXUS_E2E_BASE_URL?.trim();
+const configuredWebPort = (() => {
+  if (!configuredBaseUrl) return null;
+  let parsed;
+  try {
+    parsed = new URL(configuredBaseUrl);
+  } catch {
+    throw new Error(`非法 NEXUS_E2E_BASE_URL：${configuredBaseUrl}`);
+  }
+  const port = Number(parsed.port);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error(`NEXUS_E2E_BASE_URL 必须包含 1024-65535 之间的端口：${configuredBaseUrl}`);
+  }
+  return port;
+})();
+export const baseUrl = configuredBaseUrl
+  ? `${configuredBaseUrl.replace(/\/+$/u, "")}/`
+  : "http://127.0.0.1:58731/";
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 
@@ -62,6 +79,14 @@ export function setupRuntime() {
   for (const pid of ownedPids()) killProcessTree(pid);
   fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
+  if (configuredWebPort !== null) {
+    fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
+    fs.writeFileSync(
+      path.join(runtimeDir, "config", "settings.json"),
+      JSON.stringify({ WebPort: configuredWebPort }, null, 2),
+      "utf8",
+    );
+  }
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} ui`);
   copyReleaseArtifacts(releaseDir, runtimeDir);

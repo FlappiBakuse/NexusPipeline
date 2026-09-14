@@ -67,6 +67,7 @@ test("插件页面：双栏浏览器加载本地与仓库列表", async ({ page 
   await expect(filterDialog).toBeVisible();
   await page.getByTestId("plugin-filter-kind-data-specialized").click();
   await expect(page.getByTestId("plugin-filter-kind-data-specialized")).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("plugin-filter")).not.toContainText("已设置");
   await page.getByTestId("plugin-filter-sort-updatedAt").click();
   await page.getByTestId("plugin-filter-direction-desc").click();
   await page.keyboard.press("Escape");

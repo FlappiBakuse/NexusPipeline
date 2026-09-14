@@ -63,6 +63,8 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   });
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("dashboard-state")).toBeVisible();
+  await expect(page.getByTestId("dashboard-history-summary-total")).toContainText("2");
+  await expect(page.getByTestId("dashboard-history-summary-performance")).toBeVisible();
   await expect(page.getByTestId("nav-dashboard")).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "仪表盘", exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("signal is aborted without reason");
@@ -74,7 +76,11 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 900 });
   await page.goto(baseUrl + "#/history", { waitUntil: "domcontentloaded" });
   await expect(page.locator('[data-testid="history-date"]').first()).toBeVisible();
-  await expect(page.getByTestId("history-summary-total")).toContainText("2");
+  await expect(page.getByTestId("history-query-toolbar")).toBeVisible();
+  await expect(page.getByTestId("history-status-filter")).toBeVisible();
+  await expect(page.getByText("状态筛选", { exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-testid="history-summary"]')).toHaveCount(0);
+  await expect(page.getByTestId("history-records-count")).toBeVisible();
   await expect(page.getByTestId("history-records-count")).toHaveText("选择用户");
   await page.locator(`[data-testid="history-date"][data-date="${date}"]`).click();
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${date}"]`).getByTestId("history-user")).toBeVisible();
@@ -86,6 +92,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`)).toBeVisible();
   await page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user").click();
   await expect(page.getByTestId("history-entry").getByText("已跳过", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeHidden();
   const requestsAfterInitialUser = historyRecordRequests;
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeHidden();
@@ -95,7 +102,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user").click();
   await expect.poll(() => historyRecordRequests).toBe(requestsAfterInitialUser + 1);
   await expect(page.getByTestId("history-entry")).toBeVisible();
-  await page.setViewportSize({ width: 768, height: 900 });
+  await page.setViewportSize({ width: 600, height: 900 });
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "返回用户列表", exact: true }).click();
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user")).toBeVisible();

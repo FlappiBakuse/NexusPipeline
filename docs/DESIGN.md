@@ -521,7 +521,7 @@ managed-code 插件可以通过 Plugin API v1.6 注册用户列表徽章、通�
 
 `RuntimeStateLayout` 在服务启动时创建当前目录；CLI 端口发现读取 `.nxp/runtime/web.port`，找不到时按设置端口范围探测。
 
-`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 与根目录 update worker 继续作为更新 crash-recovery protocol 的组成部分，保持原路径和生命周期。
+`.nxp-update/`、`.nxp-backup/`、`.nxp-version` 与根目录 update worker 继续作为更新 crash-recovery protocol 的组成部分，保持原路径和生命周期。`scheduler-state.json` 中持久化的 `LastSchedulerCheck` 是崩溃恢复的 replay fence，调度器的实际定时扫描从当前分钟开始，启动或停顿期间错过的历史 occurrence 不会被补发。
 
 ### 7.6 文件布局治理规范
 

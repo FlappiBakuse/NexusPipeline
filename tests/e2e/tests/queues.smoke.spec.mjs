@@ -67,6 +67,12 @@ test("调度中心入口：从队列选择器启动并看到运行状态", async
     await page.getByTestId("dispatch-run").click();
     expect((await dispatchResponse).ok()).toBeTruthy();
     await expect(page.getByTestId("dispatch-running")).toContainText(`Smoke 调度队列-${suffix}`, { timeout: 10000 });
+    const runningItem = page.locator(".running-item").filter({ hasText: `Smoke 调度队列-${suffix}` }).first();
+    const logResizer = runningItem.getByRole("separator", { name: "调整运行日志高度" });
+    const initialLogHeight = Number(await logResizer.getAttribute("aria-valuenow"));
+    await logResizer.focus();
+    await page.keyboard.press("ArrowDown");
+    await expect.poll(async () => Number(await logResizer.getAttribute("aria-valuenow"))).toBeGreaterThan(initialLogHeight);
     await expect.poll(async () => (await (await api("GET", "/api/status")).json()).running.length, { timeout: 60000 }).toBe(0);
     await waitNoRunning();
   } finally {

@@ -12,7 +12,7 @@ module.exports = defineConfig({
   globalSetup: "./tests/global-setup.mjs",
   globalTeardown: "./tests/global-teardown.mjs",
   use: {
-    baseURL: "http://127.0.0.1:58731/",
+    baseURL: process.env.NEXUS_E2E_BASE_URL || "http://127.0.0.1:58731/",
     channel: "msedge",
     headless: true,
     locale: "zh-CN",
