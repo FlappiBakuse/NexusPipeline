@@ -88,7 +88,7 @@ function explainReason(code?: string, args?: Record<string, unknown>) {
             <div class="execution-plan-cell execution-plan-name">
               <div class="execution-plan-task-main">
                 <span class="execution-plan-task-index" aria-hidden="true">{{ index + 1 }}</span>
-                <span class="execution-plan-task-copy"><strong>{{ task.scriptName || task.taskId || "" }}</strong></span>
+                <span class="execution-plan-task-copy"><strong>{{ task.scriptName || task.taskId || "" }}</strong><span v-if="task.taskId && task.scriptName" class="execution-plan-task-id">{{ task.taskId }}</span></span>
               </div>
             </div>
             <div class="execution-plan-cell execution-plan-users">

@@ -77,38 +77,6 @@ function summaryRate() {
       <div v-if="loading && !summary" class="muted dashboard-history-loading" role="status">{{ t("common.loading") }}</div>
       <p v-else-if="error" class="dashboard-history-error" role="status">{{ t("dashboard.history.unavailable") }}</p>
       <template v-else-if="summary">
-        <div class="dashboard-history-total" data-testid="dashboard-history-summary-total">
-          <span class="k">{{ t("history.summary.total") }}</span>
-          <strong class="v">{{ formatNumber(safeCount(summary.totalCount)) }}</strong>
-        </div>
-        <div class="dashboard-history-trend-block">
-          <div class="dashboard-history-subheading">
-            <span class="k">{{ t("dashboard.history.trend") }}</span>
-            <span class="muted">{{ t("dashboard.history.trend_legend") }}</span>
-          </div>
-          <div
-            class="dashboard-history-trend"
-            data-testid="dashboard-history-trend"
-            role="img"
-            :aria-label="t('dashboard.history.trend_aria')"
-          >
-            <div v-if="dailyData.length" class="dashboard-history-trend-bars" aria-hidden="true">
-              <div v-for="point in dailyData" :key="point.date" class="dashboard-history-trend-day">
-                <div class="dashboard-history-trend-bar" :style="{ height: dailyHeight(point.total) }">
-                  <span class="dashboard-history-trend-segment dashboard-history-trend-success" :style="{ flexGrow: point.success }" />
-                  <span class="dashboard-history-trend-segment dashboard-history-trend-other" :style="{ flexGrow: point.other }" />
-                </div>
-                <span class="dashboard-history-trend-label">{{ point.label }}</span>
-              </div>
-            </div>
-            <span v-else class="muted">{{ t("dashboard.history.trend_empty") }}</span>
-          </div>
-          <ul class="sr-only">
-            <li v-for="point in dailyData" :key="`sr-${point.date}`">
-              {{ t("dashboard.history.day_summary", { date: point.label, success: point.success, other: point.other, total: point.total }) }}
-            </li>
-          </ul>
-        </div>
         <div class="dashboard-history-statuses" data-testid="dashboard-history-summary-statuses">
           <div class="dashboard-history-subheading">
             <span class="k">{{ t("dashboard.history.distribution") }}</span>
@@ -142,6 +110,34 @@ function summaryRate() {
       <div v-if="loading && !summary" class="muted dashboard-history-loading" role="status">{{ t("common.loading") }}</div>
       <p v-else-if="error" class="dashboard-history-error" role="status">{{ t("dashboard.history.unavailable") }}</p>
       <div v-else-if="summary" class="dashboard-history-metrics">
+        <div class="dashboard-history-trend-block">
+          <div class="dashboard-history-subheading">
+            <span class="k">{{ t("dashboard.history.trend") }}</span>
+            <span class="muted">{{ t("dashboard.history.trend_legend") }}</span>
+          </div>
+          <div class="dashboard-history-trend" data-testid="dashboard-history-trend" role="img" :aria-label="t('dashboard.history.trend_aria')">
+            <div v-if="dailyData.length" class="dashboard-history-trend-bars" aria-hidden="true">
+              <button
+                v-for="point in dailyData"
+                :key="point.date"
+                class="dashboard-history-trend-day"
+                type="button"
+                :data-tooltip="`${point.label} · ${t('history.summary.total', {}, '总数')}: ${formatNumber(point.total)} · ${t('common.success', {}, '成功')}: ${formatNumber(point.success)} · ${t('dashboard.history.trend_other', {}, '其他')}: ${formatNumber(point.other)}`"
+                :aria-label="`${point.label} · ${t('history.summary.total', {}, '总数')}: ${formatNumber(point.total)} · ${t('common.success', {}, '成功')}: ${formatNumber(point.success)} · ${t('dashboard.history.trend_other', {}, '其他')}: ${formatNumber(point.other)}`"
+              >
+                <div class="dashboard-history-trend-bar" :style="{ height: dailyHeight(point.total) }">
+                  <span class="dashboard-history-trend-segment dashboard-history-trend-success" :style="{ flexGrow: point.success }" />
+                  <span class="dashboard-history-trend-segment dashboard-history-trend-other" :style="{ flexGrow: point.other }" />
+                </div>
+                <span class="dashboard-history-trend-label">{{ point.label }}</span>
+              </button>
+            </div>
+            <span v-else class="muted">{{ t("dashboard.history.trend_empty") }}</span>
+          </div>
+          <ul class="sr-only">
+            <li v-for="point in dailyData" :key="`sr-${point.date}`">{{ t("dashboard.history.day_summary", { date: point.label, success: point.success, other: point.other, total: point.total }) }}</li>
+          </ul>
+        </div>
         <div class="dashboard-history-metric">
           <span>{{ t("history.summary.success_rate") }}</span><strong>{{ summaryRate() }}</strong>
         </div>

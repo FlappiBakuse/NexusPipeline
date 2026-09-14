@@ -62,6 +62,7 @@ describe("RunPlanModal", () => {
     expect(wrapper.get("[data-metric='users']").text()).toContain("2");
     expect(wrapper.get("[data-metric='completion-action']").text()).toContain("Sleep");
     expect(wrapper.get("[role='list']").findAll("[role='listitem']")).toHaveLength(2);
+    expect(wrapper.get("[role='list']").text()).toContain("task-1");
     expect(wrapper.find(".execution-plan-task-header").exists()).toBe(false);
   });
 

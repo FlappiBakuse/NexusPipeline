@@ -32,7 +32,6 @@ describe("DashboardHistorySummary", () => {
     const wrapper = mountSummary();
 
     expect(wrapper.findAll(".dashboard-history-card")).toHaveLength(2);
-    expect(wrapper.get("[data-testid='dashboard-history-summary-total']").text()).toContain("12");
     expect(wrapper.get("[data-status='success']").text()).toContain("7");
     expect(wrapper.get("[data-status='partial']").text()).toContain("2");
     expect(wrapper.get("[data-status='failed']").text()).toContain("3");
@@ -40,6 +39,8 @@ describe("DashboardHistorySummary", () => {
     expect(wrapper.get("[data-status='skipped']").text()).toContain("0");
     expect(wrapper.get("[data-testid='dashboard-history-trend']").text()).toContain("2026");
     expect(wrapper.findAll(".dashboard-history-trend-day")).toHaveLength(2);
+    expect(wrapper.find(".dashboard-history-trend-day").attributes("data-tooltip")).toContain("成功");
+    expect(wrapper.find(".dashboard-history-trend-day").attributes("aria-label")).toContain("其他");
     expect(wrapper.get("[data-testid='dashboard-history-summary-performance']").text()).toContain("58.3");
   });
 
