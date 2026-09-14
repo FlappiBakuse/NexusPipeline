@@ -68,11 +68,32 @@ test("调度中心入口：从队列选择器启动并看到运行状态", async
     expect((await dispatchResponse).ok()).toBeTruthy();
     await expect(page.getByTestId("dispatch-running")).toContainText(`Smoke 调度队列-${suffix}`, { timeout: 10000 });
     const runningItem = page.locator(".running-item").filter({ hasText: `Smoke 调度队列-${suffix}` }).first();
+    const runId = await runningItem.getAttribute("data-run-id");
+    expect(runId).not.toBeNull();
+    const logFrame = runningItem.getByTestId(`run-log-resizable-${runId}`);
     const logResizer = runningItem.getByRole("separator", { name: "调整运行日志高度" });
-    const initialLogHeight = Number(await logResizer.getAttribute("aria-valuenow"));
-    await logResizer.focus();
-    await page.keyboard.press("ArrowDown");
-    await expect.poll(async () => Number(await logResizer.getAttribute("aria-valuenow"))).toBeGreaterThan(initialLogHeight);
+    const renderedLogHeight = () => logFrame.evaluate(element => element.getBoundingClientRect().height);
+    const initialLogHeight = await renderedLogHeight();
+    const downHandle = await logResizer.boundingBox();
+    expect(downHandle).not.toBeNull();
+    const downX = downHandle.x + downHandle.width / 2;
+    const downY = downHandle.y + downHandle.height / 2;
+    await page.mouse.move(downX, downY);
+    await page.mouse.down();
+    await page.mouse.move(downX, downY + 96, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(renderedLogHeight).toBeGreaterThan(initialLogHeight);
+
+    const expandedLogHeight = await renderedLogHeight();
+    const upHandle = await logResizer.boundingBox();
+    expect(upHandle).not.toBeNull();
+    const upX = upHandle.x + upHandle.width / 2;
+    const upY = upHandle.y + upHandle.height / 2;
+    await page.mouse.move(upX, upY);
+    await page.mouse.down();
+    await page.mouse.move(upX, upY - 96, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(renderedLogHeight).toBeLessThan(expandedLogHeight);
     await expect.poll(async () => (await (await api("GET", "/api/status")).json()).running.length, { timeout: 60000 }).toBe(0);
     await waitNoRunning();
   } finally {

@@ -129,7 +129,7 @@ function recordMode(record: DispatchRunningRecord) {
           <div :data-progress="runningProgress(record)" :style="{ width: `${Math.max(0, Math.min(100, runningProgress(record)))}%` }"></div>
         </div>
         <div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }">
-          <div class="run-log-resizable" :style="{ height: `${logHeight(record.id)}px` }" :data-log-height="logHeight(record.id)">
+          <div class="run-log-resizable" :style="{ height: `${logHeight(record.id)}px` }" :data-log-height="logHeight(record.id)" :data-testid="`run-log-resizable-${record.id}`">
             <NxpScrollArea class="run-log run-terminal" direction="both" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || "" }}</span></pre></NxpScrollArea>
             <div
               class="run-log-resize-handle"
