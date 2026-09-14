@@ -154,7 +154,9 @@ function printModeBanner(mode, suite) {
 }
 
 async function runUnit() {
-  return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo", "-m:1"]);
+  // 管理员 UI/System 门禁使用 NEXUS_TIME_SCALE 加速墙钟等待；宿主单元测试应保持生产默认时间语义。
+  const env = { ...process.env, NEXUS_TIME_SCALE: "1" };
+  return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo", "-m:1"], { env });
 }
 
 async function runWeb() {
