@@ -11,6 +11,9 @@ import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpScrollArea from "../../ui/primitives/NxpScrollArea.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import SystemActionCard from "./SystemActionCard.vue";
+import DashboardHistorySummary from "./DashboardHistorySummary.vue";
+import { historyTodayValue } from "../history/utils/historyFormat";
+import type { HistorySummary } from "../history/utils/historyTypes";
 
 interface RunningRecord {
   targetName?: string;
@@ -38,6 +41,22 @@ const cardsSlot = ref<HTMLElement | null>(null);
 const afterRunningSlot = ref<HTMLElement | null>(null);
 let timer: ReturnType<typeof setInterval> | null = null;
 let requestController: AbortController | null = null;
+const historySummary = ref<HistorySummary | null>(null);
+const historySummaryLoading = ref(false);
+const historySummaryError = ref("");
+const initialHistoryRange = recentHistoryRange();
+const historyFrom = ref(initialHistoryRange.from);
+const historyTo = ref(initialHistoryRange.to);
+let historySummaryTimer: ReturnType<typeof setInterval> | null = null;
+let historySummaryController: AbortController | null = null;
+let disposed = false;
+
+function recentHistoryRange(now = new Date()) {
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  return { from: historyTodayValue(start), to: historyTodayValue(end) };
+}
 
 function tone(value: string | undefined) {
   if (value === "success") return "ok";
@@ -74,11 +93,12 @@ async function paintSlots() {
 }
 
 async function load() {
-  if (requestController) return;
+  if (disposed || requestController) return;
   const controller = new AbortController();
   requestController = controller;
   try {
     const next = await api("GET", "/api/status", undefined, controller.signal) as DashboardStatus;
+    if (disposed || controller.signal.aborted) return;
     status.value = { running: [], plugins: [], ...next };
     loading.value = false;
     error.value = "";
@@ -94,16 +114,64 @@ async function load() {
   }
 }
 
+function normalizeHistorySummary(data: Partial<HistorySummary>): HistorySummary {
+  return {
+    totalCount: Number(data?.totalCount || 0),
+    statusCounts: data?.statusCounts || {},
+    totalDurationMs: Number(data?.totalDurationMs || 0),
+    averageDurationMs: data?.averageDurationMs ?? null,
+    successRate: data?.successRate ?? null,
+    daily: Array.isArray(data?.daily) ? data.daily : [],
+  };
+}
+
+async function loadHistorySummary() {
+  if (disposed || historySummaryController) return;
+  const range = recentHistoryRange();
+  historyFrom.value = range.from;
+  historyTo.value = range.to;
+  historySummaryLoading.value = true;
+  historySummaryError.value = "";
+  const controller = new AbortController();
+  historySummaryController = controller;
+  try {
+    const data = await api(
+      "GET",
+      `/api/history/summary?from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`,
+      undefined,
+      controller.signal,
+    ) as Partial<HistorySummary>;
+    if (disposed || controller.signal.aborted) return;
+    historySummary.value = normalizeHistorySummary(data || {});
+  } catch (reason) {
+    if (disposed || controller.signal.aborted || isAbortError(reason)) return;
+    historySummary.value = null;
+    historySummaryError.value = reason instanceof Error ? reason.message : String(reason);
+  } finally {
+    if (historySummaryController === controller) {
+      historySummaryController = null;
+      if (!disposed) historySummaryLoading.value = false;
+    }
+  }
+}
+
 onMounted(() => {
+  disposed = false;
   setTopbarTitle(t("dashboard.dashboard"));
   void load();
+  void loadHistorySummary();
   timer = setInterval(() => void load(), 3000);
+  historySummaryTimer = setInterval(() => void loadHistorySummary(), 60000);
 });
 
 onBeforeUnmount(() => {
+  disposed = true;
   if (timer) clearInterval(timer);
   requestController?.abort();
   requestController = null;
+  if (historySummaryTimer) clearInterval(historySummaryTimer);
+  historySummaryController?.abort();
+  historySummaryController = null;
   if (cardsSlot.value) void disposePluginSlot(cardsSlot.value);
   if (afterRunningSlot.value) void disposePluginSlot(afterRunningSlot.value);
 });
@@ -127,6 +195,13 @@ onBeforeUnmount(() => {
       <section id="dashboard-state" class="dashboard-state" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
         <div class="dashboard-state-copy"><div class="state-label">{{ (status.running || []).length ? t("common.running") : t("dashboard.system_idle") }}</div><h3>{{ (status.running || []).length ? t("dashboard.task_in_progress") : t("dashboard.everything_is_ready") }}</h3><p>{{ (status.running || []).length ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help") }}</p></div>
       </section>
+      <DashboardHistorySummary
+        :summary="historySummary"
+        :loading="historySummaryLoading"
+        :error="historySummaryError"
+        :from="historyFrom"
+        :to="historyTo"
+      />
       <div id="system-action-area"><SystemActionCard v-if="status.systemAction && status.systemAction.action !== 'exit'" :action="status.systemAction" @cancelled="load" /></div>
       <NxpCard class="content-section list-surface" data-testid="running-panel">
         <div class="section-heading"><h3>{{ t("common.running") }}</h3><span class="muted">{{ t("dashboard.active_tasks.count", { count: (status.running || []).length }) }}</span></div>

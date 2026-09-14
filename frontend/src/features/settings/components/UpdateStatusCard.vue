@@ -37,6 +37,7 @@ const completionActionText = computed(() => {
     : t("settings.update.not_checked");
 });
 const updateStatusView = computed(() => updateStatusViewFor(updateStatus.value?.state));
+const canCheckUpdate = computed(() => !["checking", "downloading", "ready", "applying"].includes(updateStatus.value?.state || "idle"));
 
 function errorText(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
@@ -175,9 +176,9 @@ defineExpose({ reload: loadUpdateStatus });
     </div>
     <div class="modal-footer-inline plain update-actions">
       <NxpButton
+        v-if="canCheckUpdate"
         class="ghost"
         type="button"
-        :disabled="updateStatus?.state === 'checking' || updateStatus?.state === 'downloading' || updateStatus?.state === 'ready'"
         @click="checkUpdate"
       >
         {{ t("common.check_for_updates") }}

@@ -271,7 +271,6 @@ onBeforeUnmount(() => {
               @click="filterOpen = !filterOpen"
             >
               <NxpIcon name="filter" /><span>{{ t("plugins.filter") }}</span>
-              <span v-if="isPluginViewStateActive(currentView)" class="plugin-filter-status">{{ t("common.set") }}</span>
             </button>
             <FilterPopover
               :open="filterOpen"
