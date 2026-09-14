@@ -5,7 +5,7 @@ import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
-import type { DiagnosticsData } from "../utils/settingsTypes";
+import type { DiagnosticCheck, DiagnosticsData } from "../utils/settingsTypes";
 
 /** 系统诊断卡片：独立承担诊断结果加载、导出与结果投影。 */
 
@@ -14,6 +14,20 @@ const loading = ref(false);
 
 const checks = computed(() => (Array.isArray(diagnostics.value?.checks) ? diagnostics.value!.checks! : []));
 const attentionCount = computed(() => checks.value.filter((item) => ["warn", "fail"].includes(item.status || "")).length);
+const groupedChecks = computed(() => {
+  const groups = new Map<string, { key: string; label: string; checks: DiagnosticCheck[] }>();
+  checks.value.forEach((check) => {
+    const rawCategory = String(check.category || "").trim();
+    const key = rawCategory || "uncategorized";
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, label: categoryLabel(rawCategory), checks: [] };
+      groups.set(key, group);
+    }
+    group.checks.push(check);
+  });
+  return [...groups.values()];
+});
 
 function statusTone(value?: string): "ok" | "warn" | "bad" | "muted" {
   return value === "pass" ? "ok" : value === "fail" ? "bad" : value === "warn" ? "warn" : "muted";
@@ -37,7 +51,10 @@ function checkLabel(id?: string) {
 }
 function categoryLabel(category?: string) {
   const key = String(category || "").trim();
-  return key ? t(`diagnostics.category.${key}`, {}, key) : "";
+  return key ? t(`diagnostics.category.${key}`, {}, key) : t("diagnostics.category.uncategorized", {}, "Other");
+}
+function requiresDetail(check: DiagnosticCheck) {
+  return ["warn", "fail"].includes(check.status || "");
 }
 function diagnosticText(code?: string, args?: Record<string, unknown>, fallback = "") {
   if (!code) return fallback;
@@ -108,38 +125,53 @@ defineExpose({ reload: loadDiagnostics });
             ><span role="columnheader">{{ t("common.status") }}</span
             ><span role="columnheader">{{ t("settings.diagnostics") }}</span>
           </div>
-          <div
-            v-for="check in checks"
-            :key="check.id"
-            class="diagnostic-row"
-            role="row"
-            :data-diagnostic-status="check.status || 'unknown'"
+          <section
+            v-for="group in groupedChecks"
+            :key="group.key"
+            class="diagnostics-group"
+            role="rowgroup"
+            :aria-label="group.label"
+            :data-diagnostic-category="group.key"
           >
-            <div class="diagnostic-check-name" role="cell">
-              <div class="diagnostic-check-title-line">
-                <strong class="diagnostic-check-title">{{ checkLabel(check.id) }}</strong
-                ><NxpBadge tone="muted">{{ categoryLabel(check.category) }}</NxpBadge>
-              </div>
-              <span class="muted diagnostic-check-id mono">{{ check.id || "" }}</span>
-            </div>
-            <div class="diagnostic-check-status" role="cell">
-              <NxpBadge :tone="statusTone(check.status)">{{ statusLabel(check.status) }}</NxpBadge>
-            </div>
-            <div class="diagnostic-check-info" role="cell">
-              <div class="diagnostic-check-summary">
-                <span class="diagnostic-info-label">{{ t("diagnostics.summary", {}, "Summary") }}</span
-                ><span>{{ diagnosticText(check.summaryCode, check.summaryArgs, statusLabel(check.status)) }}</span>
-              </div>
-              <div v-if="check.detailCode" class="diagnostic-check-detail">
-                <span class="diagnostic-info-label">{{ t("diagnostics.detail", {}, "Details") }}</span
-                ><span>{{ diagnosticText(check.detailCode, check.detailArgs) }}</span>
-              </div>
-              <div v-if="check.remediationCode" class="diagnostic-check-remediation">
-                <span class="diagnostic-info-label">{{ t("diagnostics.remediation", {}, "Recommendation") }}</span
-                ><span>{{ diagnosticText(check.remediationCode, check.remediationArgs) }}</span>
+            <div class="diagnostics-group-heading">
+              <div class="diagnostics-group-heading-main">
+                <h4>{{ group.label }}</h4>
+                <NxpBadge tone="muted">{{ group.checks.length }}</NxpBadge>
               </div>
             </div>
-          </div>
+            <div
+              v-for="(check, checkIndex) in group.checks"
+              :key="`${check.id || 'unknown'}-${checkIndex}`"
+              class="diagnostic-row"
+              role="row"
+              :data-diagnostic-status="check.status || 'unknown'"
+            >
+              <div class="diagnostic-check-name" role="cell">
+                <div class="diagnostic-check-title-line">
+                  <strong class="diagnostic-check-title" :title="check.id || undefined">{{ checkLabel(check.id) }}</strong
+                  ><NxpBadge tone="muted">{{ group.label }}</NxpBadge>
+                </div>
+                <span v-if="check.id" class="sr-only">{{ t("diagnostics.identifier", { id: check.id }, `Diagnostic ID: ${check.id}`) }}</span>
+              </div>
+              <div class="diagnostic-check-status" role="cell">
+                <NxpBadge :tone="statusTone(check.status)">{{ statusLabel(check.status) }}</NxpBadge>
+              </div>
+              <div class="diagnostic-check-info" role="cell">
+                <div class="diagnostic-check-summary">
+                  <span class="diagnostic-info-label">{{ t("diagnostics.summary", {}, "Summary") }}</span
+                  ><span>{{ diagnosticText(check.summaryCode, check.summaryArgs, statusLabel(check.status)) }}</span>
+                </div>
+                <div v-if="requiresDetail(check) && check.detailCode" class="diagnostic-check-detail">
+                  <span class="diagnostic-info-label">{{ t("diagnostics.detail", {}, "Details") }}</span
+                  ><span>{{ diagnosticText(check.detailCode, check.detailArgs) }}</span>
+                </div>
+                <div v-if="requiresDetail(check) && check.remediationCode" class="diagnostic-check-remediation">
+                  <span class="diagnostic-info-label">{{ t("diagnostics.remediation", {}, "Recommendation") }}</span
+                  ><span>{{ diagnosticText(check.remediationCode, check.remediationArgs) }}</span>
+                </div>
+              </div>
+            </div>
+          </section>
           <div v-if="!checks.length" class="diagnostics-empty" role="row">
             {{ t("diagnostics.empty", {}, "No diagnostic results") }}
           </div>

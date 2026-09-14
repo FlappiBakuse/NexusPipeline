@@ -49,6 +49,7 @@ const specializedPlugins = computed(() =>
   ),
 );
 const hasSpecialized = computed(() => specializedPlugins.value.length > 0);
+const existingScriptNames = computed(() => scripts.value.map(script => script.name));
 
 function openNew() {
   if (hasSpecialized.value) chooserOpen.value = true;
@@ -257,6 +258,7 @@ onBeforeUnmount(() => {
       :script="editing"
       :plugin="editorPlugin"
       :plugins="plugins"
+      :existing-names="existingScriptNames"
       @close="closeEditor"
       @saved="load"
     />

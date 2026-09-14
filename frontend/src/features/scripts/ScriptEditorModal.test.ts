@@ -1,4 +1,4 @@
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -41,12 +41,19 @@ vi.mock("@bridge/index", () => ({
 }));
 
 import ScriptEditorModal from "./ScriptEditorModal.vue";
+import { buildScriptExport } from "./utils/scriptTransfer";
+import { emptyScriptDraft } from "./utils/scriptTypes";
 
 const plugin = { name: "hoyolab", displayName: "HoYoLab", kind: "data-specialized", configuredEnabled: true, runtimeEnabled: true };
 
-function mountEditor(script: { id: string; name: string; pluginType?: string } | null, pluginName: string, pluginOverrides: Record<string, unknown> = {}) {
+function mountEditor(
+  script: { id: string; name: string; pluginType?: string } | null,
+  pluginName: string,
+  pluginOverrides: Record<string, unknown> = {},
+  existingNames: string[] = [],
+) {
   return mount(ScriptEditorModal, {
-    props: { script, plugin: pluginName, plugins: [{ ...plugin, ...pluginOverrides }] },
+    props: { script, plugin: pluginName, plugins: [{ ...plugin, ...pluginOverrides }], existingNames },
     global: { stubs: { Teleport: true } },
     attachTo: document.body,
   });
@@ -63,6 +70,7 @@ describe("ScriptEditorModal root probe", () => {
   beforeEach(() => {
     probeScriptRoot.mockClear();
     browseNativeDialog.mockReset();
+    toast.mockClear();
   });
 
   it("probes once when a specialized script root changes manually", async () => {
@@ -178,5 +186,79 @@ describe("ScriptEditorModal root probe", () => {
     expect(wrapper.find("#sm-game-wait").attributes("disabled")).toBeDefined();
     expect(wrapper.find("#sm-self-managed-hint").exists()).toBe(false);
     wrapper.unmount();
+  });
+
+  it("shows import and export only for the matching general-script modes", () => {
+    const edit = mountEditor({ id: "script-1", name: "Existing" }, "");
+    expect(edit.findAll(".script-transfer-actions button").map(button => button.text())).toEqual(["导出"]);
+    edit.unmount();
+
+    const create = mountEditor(null, "");
+    expect(create.findAll(".script-transfer-actions button").map(button => button.text())).toEqual(["导入"]);
+    create.unmount();
+
+    const specialized = mountEditor({ id: "script-2", name: "Special", pluginType: "hoyolab" }, "hoyolab");
+    expect(specialized.findAll(".script-transfer-actions button")).toHaveLength(0);
+    specialized.unmount();
+  });
+
+  it("imports a valid file without mutating until validation succeeds and derives relative paths after root input", async () => {
+    const wrapper = mountEditor(null, "", {}, ["Daily"]);
+    const file = new File([JSON.stringify(buildScriptExport({
+      ...emptyScriptDraft,
+      name: "Daily",
+      rootPath: "C:\\Source",
+      mainExe: "C:\\Source\\bin\\tool.exe",
+      configPath: "C:\\Source\\config",
+      logPath: "C:\\Source\\logs\\run.log",
+      gameExe: "C:\\Games\\game.exe",
+    }))], "daily.nxpscript.json", { type: "application/json" });
+    const input = wrapper.get("input[type='file']").element as HTMLInputElement;
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await wrapper.get("input[type='file']").trigger("change");
+    await flushPromises();
+
+    expect((wrapper.get("#sm-name").element as HTMLInputElement).value).toBe("Daily-2");
+    const pickers = wrapper.findAllComponents({ name: "NxpPathPicker" });
+    const rootPicker = pickers.find(item => item.props("id") === "sm-root")!;
+    const mainPicker = pickers.find(item => item.props("id") === "sm-exe")!;
+    expect(rootPicker.props("modelValue")).toBe("");
+    expect(mainPicker.props("modelValue")).toBe("");
+
+    await rootPicker.vm.$emit("update:modelValue", "D:/Imported");
+    await nextTick();
+    expect(mainPicker.props("modelValue")).toBe("D:\\Imported\\bin\\tool.exe");
+    expect(pickers.find(item => item.props("id") === "sm-config")?.props("modelValue")).toBe("D:\\Imported\\config");
+    wrapper.unmount();
+  });
+
+  it("keeps the draft unchanged for an invalid import and downloads an edited general script", async () => {
+    const createWrapper = mountEditor(null, "");
+    const input = createWrapper.get("input[type='file']").element as HTMLInputElement;
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["{"], "broken.nxpscript.json", { type: "application/json" })],
+    });
+    await createWrapper.get("input[type='file']").trigger("change");
+    await flushPromises();
+    expect((createWrapper.get("#sm-name").element as HTMLInputElement).value).toBe("");
+    expect(toast).toHaveBeenCalledWith("导入文件不是有效 JSON", "error");
+    createWrapper.unmount();
+
+    const createObjectUrl = vi.fn().mockReturnValue("blob:nexus-script-test");
+    const revokeObjectUrl = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, writable: true, value: createObjectUrl });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, writable: true, value: revokeObjectUrl });
+    let download = "";
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      download = this.download;
+    });
+    const editWrapper = mountEditor({ id: "script-1", name: "A:B" }, "");
+    await editWrapper.find(".script-transfer-actions button").trigger("click");
+    expect(createObjectUrl).toHaveBeenCalledTimes(1);
+    expect(download).toBe("A_B.nxpscript.json");
+    expect(revokeObjectUrl).toHaveBeenCalledWith("blob:nexus-script-test");
+    click.mockRestore();
+    editWrapper.unmount();
   });
 });

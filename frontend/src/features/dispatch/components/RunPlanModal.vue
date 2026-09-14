@@ -25,10 +25,17 @@ function explainUserStatus(user: DispatchPlanUser): { tone: "ok" | "blue" | "bad
   const tone = value === "ready" ? "ok" : value === "skipped" ? "blue" : "bad";
   const label = value === "ready" ? t("dispatch.ready") : value === "skipped" ? t("dispatch.will_skip") : t("dispatch.blocked");
   const today = Number.isInteger(user.successfulRunsToday)
-    ? t("dispatch.plan.successful_today", { successful: user.successfulRunsToday, maximum: (user.maxSuccessfulRunsPerDay || 0) > 0 ? user.maxSuccessfulRunsPerDay : t("common.unlimited") })
+    ? t("dispatch.plan.successful_today", { successful: user.successfulRunsToday, maximum: (user.maxSuccessfulRunsPerDay || 0) > 0 ? user.maxSuccessfulRunsPerDay : "∞" })
     : t("dispatch.not_tracked");
   const reason = t(`dispatch.reason.${user.reasonCode || "ready"}`, user.reasonArgs || {}, user.reasonCode || t("dispatch.ready"));
   return { tone, label, today, reason };
+}
+function planTaskCount() {
+  const total = Number(props.plan?.totalTasks);
+  return Number.isFinite(total) && total >= 0 ? Math.floor(total) : props.plan?.tasks?.length || 0;
+}
+function planUserCount() {
+  return props.plan?.users?.length || 0;
 }
 function explainReason(code?: string, args?: Record<string, unknown>) {
   return t(`dispatch.warning.${code || ""}`, args || {}, code || t("dispatch.needs_attention"));
@@ -46,18 +53,23 @@ function explainReason(code?: string, args?: Record<string, unknown>) {
   >
     <template v-if="props.plan">
       <section class="execution-plan" data-testid="execution-explain-result" role="region" :aria-label="t('dispatch.run_plan_check')">
-        <section class="execution-plan-summary">
+        <section class="execution-plan-summary" data-testid="execution-plan-summary">
           <div class="execution-plan-summary-main">
             <span class="execution-plan-summary-label">{{ t("dispatch.target") }}</span>
             <strong>{{ props.plan.targetName || "" }}</strong>
             <NxpBadge :tone="props.plan.admissible ? 'ok' : 'bad'">{{ props.plan.admissible ? t("dispatch.ready_to_run") : t("dispatch.cannot_start_now") }}</NxpBadge>
           </div>
-          <div class="execution-plan-summary-stat">
+          <div class="execution-plan-summary-stat" data-metric="tasks">
             <span class="k">{{ t("common.task") }}</span>
-            <strong class="execution-plan-stat-value">{{ t("common.unit.tasks", { count: Number.isFinite(Number(props.plan.totalTasks)) ? Number(props.plan.totalTasks) : (props.plan.tasks || []).length }) }}</strong>
+            <strong class="execution-plan-stat-value">{{ t("common.unit.tasks", { count: planTaskCount() }) }}</strong>
             <span class="muted execution-plan-stat-subvalue">{{ explainQueueClass(props.plan.queueClass) }}</span>
           </div>
-          <div class="execution-plan-summary-stat">
+          <div class="execution-plan-summary-stat" data-metric="users">
+            <span class="k">{{ t("common.user") }}</span>
+            <strong class="execution-plan-stat-value">{{ t("dispatch.summary.users", { count: planUserCount() }) }}</strong>
+            <span class="muted execution-plan-stat-subvalue">{{ t("dispatch.user_eligibility") }}</span>
+          </div>
+          <div class="execution-plan-summary-stat" data-metric="completion-action">
             <span class="k">{{ t("common.completion_action") }}</span>
             <strong class="execution-plan-stat-value">{{ explainCompletionAction(props.plan.completionAction) }}</strong>
           </div>
@@ -65,25 +77,21 @@ function explainReason(code?: string, args?: Record<string, unknown>) {
         <div v-if="props.plan.admissionFailure" class="callout callout-warning execution-plan-warning">
           <strong>{{ t(`api.error.${props.plan.admissionFailure.code || 'admission_failed'}`, props.plan.admissionFailure.args || {}, props.plan.admissionFailure.code || t('dispatch.start.unavailable')) }}</strong>
         </div>
-        <section v-if="props.plan.tasks?.length" class="execution-plan-section" role="table">
+        <section v-if="props.plan.tasks?.length" class="execution-plan-section" role="list" :aria-label="t('common.task_list')">
           <div class="execution-plan-section-heading">
             <div class="execution-plan-section-heading-main">
               <h4>{{ t("common.task_list") }}</h4>
               <NxpBadge tone="muted">{{ t("common.unit.tasks", { count: props.plan.tasks.length }) }}</NxpBadge>
             </div>
           </div>
-          <div class="execution-plan-table-header execution-plan-task-header" role="row">
-            <span role="columnheader">{{ t("common.task") }}</span>
-            <span role="columnheader">{{ t("dispatch.users") }}</span>
-          </div>
-          <div v-for="(task, index) in props.plan.tasks" :key="`${task.taskId || task.scriptName}-${index}`" class="execution-plan-row execution-plan-task-row" role="row">
-            <div class="execution-plan-cell execution-plan-name" role="cell">
+          <div v-for="(task, index) in props.plan.tasks" :key="`${task.taskId || task.scriptName}-${index}`" class="execution-plan-row execution-plan-task-row" role="listitem">
+            <div class="execution-plan-cell execution-plan-name">
               <div class="execution-plan-task-main">
                 <span class="execution-plan-task-index" aria-hidden="true">{{ index + 1 }}</span>
                 <span class="execution-plan-task-copy"><strong>{{ task.scriptName || task.taskId || "" }}</strong></span>
               </div>
             </div>
-            <div class="execution-plan-cell execution-plan-users" role="cell">
+            <div class="execution-plan-cell execution-plan-users">
               <NxpBadge tone="blue">{{ t("dispatch.summary.users", { count: task.userCount || 0 }) }}</NxpBadge>
             </div>
           </div>
@@ -110,7 +118,7 @@ function explainReason(code?: string, args?: Record<string, unknown>) {
             <div class="execution-plan-cell execution-plan-reason muted" role="cell">{{ explainUserStatus(user).reason }}</div>
           </div>
         </section>
-        <div v-if="props.plan.warnings?.length" class="callout callout-warning execution-plan-warning">
+        <div v-if="props.plan.warnings?.length" class="callout callout-warning execution-plan-warning" data-testid="execution-plan-warnings">
           <strong>{{ t("dispatch.notice") }}</strong><br>
           <span v-for="(warning, index) in props.plan.warnings" :key="`${warning.code}-${index}`">{{ explainReason(warning.code, warning.args) }}<br></span>
         </div>

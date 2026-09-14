@@ -12,22 +12,53 @@ const props = defineProps<{
   to: string;
 }>();
 
-const statusDefinitions: Array<{ value: HistoryStatus; label: string; optional?: boolean }> = [
+const statusDefinitions: Array<{ value: HistoryStatus; label: string }> = [
   { value: "success", label: "common.success" },
   { value: "partial", label: "common.partially_failed" },
   { value: "failed", label: "common.failed" },
-  { value: "cancelled", label: "common.cancelled", optional: true },
-  { value: "skipped", label: "common.skipped", optional: true },
+  { value: "cancelled", label: "common.cancelled" },
+  { value: "skipped", label: "common.skipped" },
 ];
 
-function count(status: HistoryStatus) {
-  return Number(props.summary?.statusCounts?.[status] || 0);
+function safeCount(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
-const visibleStatuses = computed(() => statusDefinitions.filter(item => !item.optional || count(item.value) > 0));
+function count(status: HistoryStatus) {
+  return safeCount(props.summary?.statusCounts?.[status]);
+}
+
+const distributionTotal = computed(() => Math.max(
+  safeCount(props.summary?.totalCount),
+  statusDefinitions.reduce((total, item) => total + count(item.value), 0),
+));
+
+function statusPercentage(status: HistoryStatus) {
+  const total = distributionTotal.value;
+  return total > 0 ? (count(status) / total) * 100 : 0;
+}
+
+const dailyData = computed(() => (Array.isArray(props.summary?.daily) ? props.summary!.daily : [])
+  .slice(-7)
+  .map((item) => {
+    const total = safeCount(item.totalCount);
+    const success = Math.min(total, countFromDaily(item.statusCounts?.success));
+    return { date: item.date, label: formatHistoryDate(item.date), total, success, other: Math.max(0, total - success) };
+  }));
+
+function countFromDaily(value: unknown) {
+  return safeCount(value);
+}
+
+const maxDailyTotal = computed(() => Math.max(1, ...dailyData.value.map(item => item.total)));
+
+function dailyHeight(value: number) {
+  return value > 0 ? `${Math.max(8, (value / maxDailyTotal.value) * 100)}%` : "0%";
+}
 
 function summaryRate() {
-  return props.summary?.successRate == null
+  return props.summary?.successRate == null || !Number.isFinite(Number(props.summary.successRate))
     ? "-"
     : `${formatNumber(props.summary.successRate, { maximumFractionDigits: 1 })}%`;
 }
@@ -48,11 +79,52 @@ function summaryRate() {
       <template v-else-if="summary">
         <div class="dashboard-history-total" data-testid="dashboard-history-summary-total">
           <span class="k">{{ t("history.summary.total") }}</span>
-          <strong class="v">{{ formatNumber(summary.totalCount) }}</strong>
+          <strong class="v">{{ formatNumber(safeCount(summary.totalCount)) }}</strong>
+        </div>
+        <div class="dashboard-history-trend-block">
+          <div class="dashboard-history-subheading">
+            <span class="k">{{ t("dashboard.history.trend") }}</span>
+            <span class="muted">{{ t("dashboard.history.trend_legend") }}</span>
+          </div>
+          <div
+            class="dashboard-history-trend"
+            data-testid="dashboard-history-trend"
+            role="img"
+            :aria-label="t('dashboard.history.trend_aria')"
+          >
+            <div v-if="dailyData.length" class="dashboard-history-trend-bars" aria-hidden="true">
+              <div v-for="point in dailyData" :key="point.date" class="dashboard-history-trend-day">
+                <div class="dashboard-history-trend-bar" :style="{ height: dailyHeight(point.total) }">
+                  <span class="dashboard-history-trend-segment dashboard-history-trend-success" :style="{ flexGrow: point.success }" />
+                  <span class="dashboard-history-trend-segment dashboard-history-trend-other" :style="{ flexGrow: point.other }" />
+                </div>
+                <span class="dashboard-history-trend-label">{{ point.label }}</span>
+              </div>
+            </div>
+            <span v-else class="muted">{{ t("dashboard.history.trend_empty") }}</span>
+          </div>
+          <ul class="sr-only">
+            <li v-for="point in dailyData" :key="`sr-${point.date}`">
+              {{ t("dashboard.history.day_summary", { date: point.label, success: point.success, other: point.other, total: point.total }) }}
+            </li>
+          </ul>
         </div>
         <div class="dashboard-history-statuses" data-testid="dashboard-history-summary-statuses">
-          <span v-for="item in visibleStatuses" :key="item.value" class="dashboard-history-status" :data-status="item.value">
-            <span>{{ t(item.label) }}</span><strong>{{ formatNumber(count(item.value)) }}</strong>
+          <div class="dashboard-history-subheading">
+            <span class="k">{{ t("dashboard.history.distribution") }}</span>
+            <span class="muted">{{ t("history.summary.total") }} {{ formatNumber(distributionTotal) }}</span>
+          </div>
+          <div class="dashboard-history-status-bar" role="img" :aria-label="t('dashboard.history.distribution_aria')">
+            <span
+              v-for="item in statusDefinitions"
+              :key="`bar-${item.value}`"
+              class="dashboard-history-status-bar-segment"
+              :class="`status-${item.value}`"
+              :style="{ width: `${statusPercentage(item.value)}%` }"
+            />
+          </div>
+          <span v-for="item in statusDefinitions" :key="item.value" class="dashboard-history-status" :data-status="item.value">
+            <span>{{ t(item.label) }}</span><strong>{{ formatNumber(count(item.value)) }}</strong><small>{{ formatNumber(statusPercentage(item.value), { maximumFractionDigits: 1 }) }}%</small>
           </span>
         </div>
       </template>

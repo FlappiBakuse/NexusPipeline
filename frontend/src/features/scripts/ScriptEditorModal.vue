@@ -17,6 +17,15 @@ import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import { browseNativeDialog, createScript, probeScriptRoot, updateScript } from "./services/scriptsApi";
 import { createRootProbe } from "./utils/scriptProbe";
 import { emptyScriptDraft, scriptDraftFrom, scriptPayload, validateScriptDraft } from "./utils/scriptTypes";
+import {
+  buildScriptExport,
+  deriveImportedPath,
+  makeUniqueImportedName,
+  MAX_SCRIPT_IMPORT_BYTES,
+  parseScriptImport,
+  type ScriptImportErrorCode,
+  type ScriptPathField,
+} from "./utils/scriptTransfer";
 import type { Script, ScriptDraft, ScriptPlugin } from "./utils/scriptTypes";
 
 /** 脚本实例编辑弹窗：承担草稿、字段联动、专项 root 探测、判定脚本上传与保存事务。
@@ -27,12 +36,26 @@ const props = defineProps<{
   script: Script | null;
   plugin: string;
   plugins: ScriptPlugin[];
+  existingNames?: string[];
 }>();
 const emit = defineEmits<{ close: []; saved: [] }>();
 
 const draft = reactive<ScriptDraft>({ ...emptyScriptDraft });
 const editorSlotRoot = ref<HTMLElement | null>(null);
+const importFileInput = ref<HTMLInputElement | null>(null);
+const pendingRelativePaths = reactive<Partial<Record<ScriptPathField, string>>>({});
+const lastDerivedPaths = reactive<Partial<Record<ScriptPathField, string>>>({});
+const manualPathOverrides = reactive<Partial<Record<ScriptPathField, boolean>>>({});
 const scriptLabel = computed(() => props.script || null);
+const modalTitle = computed(() =>
+  scriptLabel.value
+    ? t("scripts.edit_script_instance")
+    : draft.pluginType
+      ? t("scripts.action.new_specialized", { plugin: pluginName(draft) })
+      : t("scripts.new_general_script_instance"),
+);
+const canExport = computed(() => Boolean(props.script && draft.id && !draft.pluginType));
+const canImport = computed(() => !props.script && !draft.id && !draft.pluginType);
 
 const gameModeOptions = computed<NxpOption[]>(() => [
   { value: "pc", label: t("scripts.pc_client") },
@@ -73,6 +96,150 @@ function pluginName(script: { pluginType?: string }) {
   return plugin?.displayName || plugin?.name || script.pluginType || t("scripts.general_script");
 }
 
+const pathFields: ScriptPathField[] = ["mainExe", "configPath", "logPath"];
+
+function clearTransferState() {
+  for (const field of pathFields) {
+    delete pendingRelativePaths[field];
+    delete lastDerivedPaths[field];
+    delete manualPathOverrides[field];
+  }
+}
+
+function applyPendingRelativePaths() {
+  for (const field of pathFields) {
+    const relative = pendingRelativePaths[field];
+    if (relative === undefined || manualPathOverrides[field]) continue;
+    const previous = lastDerivedPaths[field];
+    const current = draft[field];
+    const canReplace = !current || current === previous;
+    if (!canReplace) {
+      manualPathOverrides[field] = true;
+      continue;
+    }
+    const derived = deriveImportedPath({ kind: "relative", value: relative }, draft.rootPath);
+    draft[field] = derived;
+    if (derived) lastDerivedPaths[field] = derived;
+    else delete lastDerivedPaths[field];
+  }
+}
+
+function setPathValue(field: ScriptPathField, value: unknown) {
+  const next = String(value ?? "");
+  draft[field] = next;
+  const previous = lastDerivedPaths[field];
+  if (pendingRelativePaths[field] !== undefined && next !== previous) manualPathOverrides[field] = true;
+  clearFieldError(scriptFieldId(field));
+}
+
+function setRootPathValue(value: unknown) {
+  draft.rootPath = String(value ?? "");
+  applyPendingRelativePaths();
+  clearFieldError("sm-root");
+}
+
+function transferErrorMessage(code: ScriptImportErrorCode) {
+  const fallback: Record<ScriptImportErrorCode, string> = {
+    file_too_large: "导入文件过大",
+    invalid_json: "导入文件不是有效 JSON",
+    invalid_shape: "导入文件结构无效",
+    wrong_kind: "导入文件类型不受支持",
+    unsupported_version: "导入文件版本不受支持",
+    invalid_field: "导入文件包含无效字段",
+    invalid_mode: "导入文件包含无效模式",
+    invalid_path: "导入文件包含无效路径",
+  };
+  switch (code) {
+    case "file_too_large": return t("scripts.transfer.error.file_too_large", { bytes: Math.floor(MAX_SCRIPT_IMPORT_BYTES / 1024) }, fallback[code]);
+    case "invalid_json": return t("scripts.transfer.error.invalid_json", {}, fallback[code]);
+    case "invalid_shape": return t("scripts.transfer.error.invalid_shape", {}, fallback[code]);
+    case "wrong_kind": return t("scripts.transfer.error.wrong_kind", {}, fallback[code]);
+    case "unsupported_version": return t("scripts.transfer.error.version", {}, fallback[code]);
+    case "invalid_field": return t("scripts.transfer.error.invalid_field", {}, fallback[code]);
+    case "invalid_mode": return t("scripts.transfer.error.invalid_mode", {}, fallback[code]);
+    case "invalid_path": return t("scripts.transfer.error.invalid_path", {}, fallback[code]);
+  }
+}
+
+function sanitizeExportName(name: string) {
+  const sanitized = String(name || "script")
+    .trim()
+    .replace(/[<>:"/\\|?*]/g, "_")
+    .replace(/[. ]+$/g, "_");
+  return `${sanitized || "script"}.nxpscript.json`;
+}
+
+function exportScript() {
+  if (!canExport.value) return;
+  const file = buildScriptExport(draft);
+  const blob = new Blob([JSON.stringify(file, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = sanitizeExportName(draft.name);
+    anchor.click();
+    toast(t("scripts.transfer.exported", {}, "脚本配置已导出"));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function applyImportedFile(result: Extract<ReturnType<typeof parseScriptImport>, { ok: true }>["value"]) {
+  const importedName = makeUniqueImportedName(result.file.script.name, props.existingNames || []);
+  clearTransferState();
+  Object.assign(draft, result.file.script);
+  draft.id = "";
+  draft.pluginType = "";
+  draft.pluginInputs = {};
+  draft.rootPath = "";
+  draft.gameExe = "";
+  for (const field of pathFields) {
+    const descriptor = result.file.paths[field];
+    if (descriptor.kind === "relative") {
+      pendingRelativePaths[field] = descriptor.value;
+      draft[field] = "";
+    } else {
+      draft[field] = descriptor.value;
+    }
+  }
+  draft.name = importedName;
+  applyPendingRelativePaths();
+  result.warnings.forEach(warning => {
+    toast(t("scripts.transfer.warning.absolute_path", { path: warning.value }, `路径“${warning.value}”需要检查。`), "info");
+  });
+  if (importedName !== result.file.script.name.trim()) {
+    toast(t("scripts.transfer.renamed", { name: importedName }, `导入脚本名称已调整为“${importedName}”`), "info");
+  }
+  toast(t("scripts.transfer.imported", {}, "脚本配置已导入"));
+  void nextTick(() => document.getElementById("sm-root")?.focus());
+}
+
+async function importScriptFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file || !canImport.value) return;
+  if (file.size > MAX_SCRIPT_IMPORT_BYTES) {
+    toast(transferErrorMessage("file_too_large"), "error");
+    return;
+  }
+  try {
+    const result = parseScriptImport(await file.text());
+    if (!result.ok) {
+      toast(transferErrorMessage(result.code), "error");
+      return;
+    }
+    applyImportedFile(result.value);
+  } catch (reason) {
+    toast(reason instanceof Error ? reason.message : String(reason), "error");
+  }
+}
+
+function openImportPicker() {
+  if (canImport.value) importFileInput.value?.click();
+}
+
 function toggleJudge() {
   draft.judgeScriptEnabled = !draft.judgeScriptEnabled;
 }
@@ -91,7 +258,9 @@ async function browseDraftPath(
       filter: "",
     })) as { path?: string } | null;
     if (result?.path) {
-      draft[field] = result.path;
+      if (field === "rootPath") setRootPathValue(result.path);
+      else if (field === "mainExe" || field === "configPath" || field === "logPath") setPathValue(field, result.path);
+      else draft[field] = result.path;
       clearFieldError(scriptFieldId(field));
       if (field === "rootPath") await rootProbe.probe(draft.pluginType, result.path);
     }
@@ -122,6 +291,7 @@ function uploadJudgeScript() {
   input.click();
 }
 async function probeRootPath(value: string) {
+  setRootPathValue(value);
   await rootProbe.probe(draft.pluginType, value);
 }
 
@@ -216,6 +386,7 @@ watch(
   () => props.script,
   () => {
     rootProbe.invalidate();
+    clearTransferState();
     Object.assign(draft, scriptDraftFrom(props.script, props.plugin));
     void paintEditorSlot();
   },
@@ -227,20 +398,42 @@ watch(
     <NxpModal
     :locked="true"
     :open="true"
-    :title="
-      scriptLabel
-        ? t('scripts.edit_script_instance')
-        : draft.pluginType
-          ? t('scripts.action.new_specialized', {
-              plugin: pluginName(draft),
-            })
-          : t('scripts.new_general_script_instance')
-    "
+    :title="modalTitle"
     :aria-label="scriptLabel ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
     panel-class="secondary-surface"
     size="wide"
     @close="close"
     >
+        <template #header>
+          <div class="script-editor-header">
+            <h2 class="modal-title">{{ modalTitle }}</h2>
+            <div class="script-transfer-actions">
+              <input
+                ref="importFileInput"
+                class="script-transfer-input"
+                type="file"
+                accept=".nxpscript.json,application/json"
+                aria-hidden="true"
+                tabindex="-1"
+                @change="importScriptFile"
+              />
+              <NxpButton
+                v-if="canImport"
+                class="ghost"
+                size="sm"
+                type="button"
+                @click.stop="openImportPicker"
+              >{{ t("scripts.transfer.import", {}, "导入") }}</NxpButton>
+              <NxpButton
+                v-if="canExport"
+                class="ghost"
+                size="sm"
+                type="button"
+                @click.stop="exportScript"
+              >{{ t("scripts.transfer.export", {}, "导出") }}</NxpButton>
+            </div>
+          </div>
+        </template>
         <div class="form-grid">
           <div class="field">
             <label class="field-label" for="sm-name"
@@ -254,12 +447,12 @@ watch(
               <span class="req">*</span></label
             ><NxpPathPicker
               id="sm-root"
-              v-model="draft.rootPath"
+              :model-value="draft.rootPath"
               kind="folder"
               :placeholder="t('scripts.script_root_directory')"
               :aria-label="t('scripts.script_root_directory')"
+              @update:model-value="setRootPathValue"
               @change="probeRootPath"
-              @update:model-value="clearFieldError('sm-root')"
               @browse="browseDraftPath('rootPath', $event)"
             />
           </div>
@@ -272,12 +465,12 @@ watch(
                 <span class="req">*</span></label
               ><NxpPathPicker
                 id="sm-exe"
-                v-model="draft.mainExe"
+                :model-value="draft.mainExe"
                 kind="file"
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.main_program_file')"
                 :aria-label="t('scripts.main_program_path')"
-                @update:model-value="clearFieldError('sm-exe')"
+                @update:model-value="setPathValue('mainExe', $event)"
                 @browse="browseDraftPath('mainExe', $event)"
               />
             </div>
@@ -302,12 +495,12 @@ watch(
                 <span class="req">*</span></label
               ><NxpPathPicker
                 id="sm-config"
-                v-model="draft.configPath"
+                :model-value="draft.configPath"
                 kind="file-or-folder"
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.editor.root_required')"
                 :aria-label="t('scripts.configuration_file_folder')"
-                @update:model-value="clearFieldError('sm-config')"
+                @update:model-value="setPathValue('configPath', $event)"
                 @browse="browseDraftPath('configPath', $event)"
               />
             </div>
@@ -316,12 +509,12 @@ watch(
                 >{{ t("scripts.editor.log_path.help") }} <span class="req">*</span></label
               ><NxpPathPicker
                 id="sm-log"
-                v-model="draft.logPath"
+                :model-value="draft.logPath"
                 kind="file-or-folder"
                 :disabled="!draft.rootPath"
                 :placeholder="t('scripts.log_file_path')"
                 :aria-label="t('scripts.log_path')"
-                @update:model-value="clearFieldError('sm-log')"
+                @update:model-value="setPathValue('logPath', $event)"
                 @browse="browseDraftPath('logPath', $event)"
               />
             </div>
@@ -588,3 +781,29 @@ watch(
     </template>
     </NxpModal>
 </template>
+
+<style scoped>
+.script-editor-header {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--nx-space-3, 12px);
+}
+
+.script-editor-header .modal-title {
+  min-width: 0;
+}
+
+.script-transfer-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--nx-space-2, 8px);
+}
+
+.script-transfer-input {
+  display: none;
+}
+</style>

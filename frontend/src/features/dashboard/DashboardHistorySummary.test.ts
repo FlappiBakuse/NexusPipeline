@@ -9,7 +9,10 @@ const baseSummary: HistorySummary = {
   totalDurationMs: 12_000,
   averageDurationMs: 1_000,
   successRate: 58.3,
-  daily: [],
+  daily: [
+    { date: "2026-09-08", totalCount: 2, statusCounts: { success: 1, failed: 1 }, totalDurationMs: 1000 },
+    { date: "2026-09-09", totalCount: 3, statusCounts: { success: 3 }, totalDurationMs: 2000 },
+  ],
 };
 
 function mountSummary(summary = baseSummary) {
@@ -25,7 +28,7 @@ function mountSummary(summary = baseSummary) {
 }
 
 describe("DashboardHistorySummary", () => {
-  it("renders the two dashboard cards and hides zero-value optional statuses", () => {
+  it("renders the two cards, seven-day trend, and complete status distribution", () => {
     const wrapper = mountSummary();
 
     expect(wrapper.findAll(".dashboard-history-card")).toHaveLength(2);
@@ -33,8 +36,10 @@ describe("DashboardHistorySummary", () => {
     expect(wrapper.get("[data-status='success']").text()).toContain("7");
     expect(wrapper.get("[data-status='partial']").text()).toContain("2");
     expect(wrapper.get("[data-status='failed']").text()).toContain("3");
-    expect(wrapper.find("[data-status='cancelled']").exists()).toBe(false);
-    expect(wrapper.find("[data-status='skipped']").exists()).toBe(false);
+    expect(wrapper.get("[data-status='cancelled']").text()).toContain("0");
+    expect(wrapper.get("[data-status='skipped']").text()).toContain("0");
+    expect(wrapper.get("[data-testid='dashboard-history-trend']").text()).toContain("2026");
+    expect(wrapper.findAll(".dashboard-history-trend-day")).toHaveLength(2);
     expect(wrapper.get("[data-testid='dashboard-history-summary-performance']").text()).toContain("58.3");
   });
 
