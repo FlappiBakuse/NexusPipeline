@@ -49,7 +49,7 @@ describe("DashboardPage history summary polling", () => {
     wrapper = mount(DashboardPage, { attachTo: document.body });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='dashboard-history-summary-total']").text()).toContain("4");
+    expect(wrapper.get("[data-testid='dashboard-history-summary-statuses'] [data-status='success']").text()).toContain("3");
     expect(requestPaths.filter(path => path.startsWith("/api/status"))).toHaveLength(1);
     expect(requestPaths.filter(path => path.startsWith("/api/history/summary"))).toHaveLength(1);
 

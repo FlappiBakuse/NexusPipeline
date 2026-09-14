@@ -63,7 +63,8 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   });
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("dashboard-state")).toBeVisible();
-  await expect(page.getByTestId("dashboard-history-summary-total")).toContainText("2");
+  await expect(page.getByTestId("dashboard-history-summary-statuses")).toBeVisible();
+  await expect(page.locator("[data-testid='dashboard-history-summary-statuses'] [data-status='skipped']")).toContainText("2");
   await expect(page.getByTestId("dashboard-history-summary-performance")).toBeVisible();
   await expect(page.getByTestId("nav-dashboard")).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("heading", { name: "仪表盘", exact: true })).toBeVisible();
