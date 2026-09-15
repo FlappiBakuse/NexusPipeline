@@ -10,14 +10,12 @@ internal sealed class Scheduler : IDisposable
 {
     private readonly object _sync = new();
 
-    private readonly object _stateSaveSync = new();
-
     private readonly HashSet<string> _runningQueueIds = new();
 
     /// <summary>当前进程内仍待准入的 occurrence；terminal occurrence 仅在 replay fence 落盘前短暂保留用于去重。</summary>
-    private readonly Dictionary<string, PendingScheduledRun> _pendingTriggers = new();
+    private readonly Dictionary<string, PendingScheduledRun> _pendingTriggers;
 
-    private readonly Dictionary<string, PendingScheduledRun> _occurrences = new();
+    private readonly Dictionary<string, PendingScheduledRun> _occurrences;
 
     private readonly HashSet<string> _attemptingTriggers = new();
 
@@ -28,13 +26,6 @@ internal sealed class Scheduler : IDisposable
     private bool _startupRunsIssued;
 
     private string? _lastCleanupDate;
-
-    private DateTime? _lastSchedulerCheck;
-
-    // LastSchedulerCheck 是进程内 watermark；只有 occurrence/计划状态等 durable 变化才需要写盘。
-    private bool _stateDirty;
-
-    private long _stateRevision;
 
     private readonly IQueueRepository _queues;
 
@@ -50,7 +41,7 @@ internal sealed class Scheduler : IDisposable
 
     private readonly ExecutionPlanBuilder? _plans;
 
-    private readonly ISchedulerStateStore _stateStore;
+    private readonly SchedulerStateFence _stateFence;
 
     private readonly Func<bool>? _decrementRunDays;
 
@@ -75,11 +66,17 @@ internal sealed class Scheduler : IDisposable
         _coordination = coordination;
         _validator = validator;
         _plans = plans;
-        _stateStore = stateStore ?? new MemorySchedulerStateStore();
+        _stateFence = new SchedulerStateFence(
+            _sync,
+            stateStore ?? new MemorySchedulerStateStore(),
+            _plans);
+        _pendingTriggers = _stateFence.PendingTriggers;
+        _occurrences = _stateFence.Occurrences;
         _decrementRunDays = decrementRunDays;
         // 启动当天不立即递减（避免每次重启就少一天）；只有运行期间跨天、或首次 tick 在启动后的次日触发才递减。
         _lastRunDaysDecayDate = DateTime.Now.ToString("yyyy-MM-dd");
-        RestorePersistedState();
+        _stateFence.Restore();
+        _startupRunsIssued = _stateFence.StartupRunsIssued;
     }
 
     public void Start()
@@ -432,7 +429,7 @@ internal sealed class Scheduler : IDisposable
         {
             // durable watermark 只作为恢复围栏保存；计划扫描严格限制在当前分钟，
             // 宿主离线或长时间停顿期间错过的 occurrence 不在启动后补发。
-            _lastSchedulerCheck = now;
+            _stateFence.LastSchedulerCheck = now;
         }
         DateTime from = ScheduledScanStart(now);
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
@@ -781,148 +778,9 @@ internal sealed class Scheduler : IDisposable
         _attemptingTriggers.Remove(pending.Key);
     }
 
-    private void RestorePersistedState()
-    {
-        SchedulerPersistedState state;
-        try
-        {
-            state = _stateStore.Load();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[调度] 读取 scheduler-state.json 失败，按空状态启动：{ex.Message}");
-            return;
-        }
-        _lastSchedulerCheck = state.LastSchedulerCheck;
-        lock (_sync)
-        {
-            foreach (PersistedScheduledOccurrence item in state.Occurrences)
-            {
-                if (string.IsNullOrWhiteSpace(item.QueueId) || string.IsNullOrWhiteSpace(item.OccurrenceKey))
-                {
-                    continue;
-                }
-                if (!RequiresRecovery(item.Status))
-                {
-                    // terminal occurrence 不再作为 durable 去重表永久保存；LastSchedulerCheck
-                    // 与 recovery state 已经组成 replay fence。
-                    continue;
-                }
-                QueueExecutionPlan? plan = null;
-                if (item.Plan is not null && _plans is not null)
-                {
-                    try
-                    {
-                        plan = _plans.RestoreFrozenQueue(item.Plan);
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Warn($"[调度] 恢复队列「{item.QueueName}」冻结计划失败，将在下次重校验：{ex.Message}");
-                    }
-                }
-                var occurrence = new PendingScheduledRun
-                {
-                    QueueId = item.QueueId,
-                    QueueName = item.QueueName,
-                    OccurrenceKey = item.OccurrenceKey,
-                    OriginalTriggerTime = item.OriginalTriggerTime,
-                    IsStartup = item.IsStartup,
-                    Status = item.Status == "Running" ? "Waiting" : item.Status,
-                    RetryCount = item.RetryCount,
-                    LastReason = item.LastReason,
-                    NextAttemptAt = item.Status == "Running" ? DateTime.Now : item.NextAttemptAt,
-                    Plan = plan,
-                };
-                _occurrences[occurrence.Key] = occurrence;
-                if (occurrence.Status is "Triggered" or "Waiting")
-                {
-                    _pendingTriggers[occurrence.Key] = occurrence;
-                }
-                if (occurrence.IsStartup && (occurrence.Status is "Triggered" or "Waiting" or "Running"))
-                {
-                    _startupRunsIssued = true;
-                }
-            }
-        }
-    }
+    private void MarkStateDirtyLocked() => _stateFence.MarkDirtyLocked();
 
-    private static bool RequiresRecovery(string status)
-    {
-        return status is "Triggered" or "Waiting" or "Running";
-    }
-
-    private void MarkStateDirtyLocked()
-    {
-        _stateDirty = true;
-        _stateRevision++;
-    }
-
-    private void SaveState(bool force = false)
-    {
-        // 同一 scheduler 可能同时收到 tick、准入和完成回调；序列化整个快照-写入过程，
-        // 避免较旧 snapshot 在较新 snapshot 之后完成而覆盖 durable replay fence。
-        lock (_stateSaveSync)
-        {
-            SchedulerPersistedState snapshot;
-            long revision;
-            DateTime? replayFence;
-            lock (_sync)
-            {
-                if (!force && !_stateDirty)
-                {
-                    return;
-                }
-                revision = _stateRevision;
-                replayFence = _lastSchedulerCheck;
-                snapshot = new SchedulerPersistedState
-                {
-                    LastSchedulerCheck = _lastSchedulerCheck,
-                    Occurrences = _occurrences.Values.Where(item => RequiresRecovery(item.Status)).Select(item => new PersistedScheduledOccurrence
-                    {
-                        Key = item.Key,
-                        QueueId = item.QueueId,
-                        QueueName = item.QueueName,
-                        OccurrenceKey = item.OccurrenceKey,
-                        OriginalTriggerTime = item.OriginalTriggerTime,
-                        IsStartup = item.IsStartup,
-                        Status = item.Status,
-                        RetryCount = item.RetryCount,
-                        LastReason = item.LastReason,
-                        NextAttemptAt = item.NextAttemptAt,
-                        Plan = item.Plan is null ? null : ExecutionPlanBuilder.FreezeQueue(item.Plan),
-                    }).ToList(),
-                };
-            }
-
-            try
-            {
-                _stateStore.Save(snapshot);
-                lock (_sync)
-                {
-                    // 只有本次 snapshot 仍是最新版本时，才能清除 dirty 并释放已经越过
-                    // durable replay fence 的 terminal occurrence。
-                    if (_stateRevision == revision)
-                    {
-                        _stateDirty = false;
-                        if (replayFence is DateTime fence)
-                        {
-                            foreach (string key in _occurrences.Values
-                                         .Where(item => !RequiresRecovery(item.Status) && item.OriginalTriggerTime <= fence)
-                                         .Select(item => item.Key)
-                                         .ToArray())
-                            {
-                                _occurrences.Remove(key);
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"[调度] 保存 scheduler-state.json 失败：{ex.Message}");
-            }
-        }
-    }
+    private void SaveState(bool force = false) => _stateFence.Save(force);
 
     private static IEnumerable<(string OccurrenceKey, DateTime TriggerTime)> EnumerateOccurrences(
         DispatchQueue queue,
@@ -963,12 +821,12 @@ internal sealed class Scheduler : IDisposable
                 && string.Equals(timeSet.Time, triggerTime.ToString("HH:mm"), StringComparison.Ordinal));
     }
 
-    private static string TriggerKey(string queueId, string occurrenceKey)
+    internal static string TriggerKey(string queueId, string occurrenceKey)
     {
         return $"{queueId}\n{occurrenceKey}";
     }
 
-    private sealed class PendingScheduledRun
+    internal sealed class PendingScheduledRun
     {
         public string QueueId { get; init; } = "";
 
