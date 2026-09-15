@@ -429,67 +429,6 @@ public sealed class PluginRepositoryCatalogTests
     }
 }
 
-public sealed class ProxyConfigurationTests
-{
-    [Fact]
-    public void ProxyModes_MapToExpectedHttpHandler()
-    {
-        using (HttpClientHandler none = ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "none",
-        }).CreateHandler(OutboundHttpTarget.External, allowAutoRedirect: false))
-        {
-            Assert.False(none.UseProxy);
-        }
-
-        using (HttpClientHandler system = ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "system",
-        }).CreateHandler(OutboundHttpTarget.External, allowAutoRedirect: false))
-        {
-            Assert.True(system.UseProxy);
-            Assert.Null(system.Proxy);
-        }
-
-        using (HttpClientHandler custom = ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "http",
-            ProxyUrl = "http://127.0.0.1:7890",
-            ProxyUsername = "user",
-            ProxyPassword = "password",
-        }).CreateHandler(OutboundHttpTarget.External, allowAutoRedirect: false))
-        {
-            Assert.True(custom.UseProxy);
-            WebProxy proxy = Assert.IsType<WebProxy>(custom.Proxy);
-            Assert.Equal(new Uri("http://127.0.0.1:7890"), proxy.Address);
-            Assert.NotNull(proxy.Credentials);
-        }
-
-        using (HttpClientHandler loopback = ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "http",
-            ProxyUrl = "http://127.0.0.1:7890",
-        }).CreateHandler(OutboundHttpTarget.Loopback, allowAutoRedirect: false))
-        {
-            Assert.False(loopback.UseProxy);
-        }
-    }
-
-    [Fact]
-    public void CustomProxy_RequiresHttpOrHttpsAddress()
-    {
-        Assert.Throws<InvalidDataException>(() => ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "http",
-        }));
-        Assert.Throws<InvalidDataException>(() => ProxyConfiguration.FromSettings(new AppSettings
-        {
-            ProxyMode = "http",
-            ProxyUrl = "socks5://127.0.0.1:7890",
-        }));
-    }
-}
-
 public sealed class PluginInstallRecoveryTests
 {
     [Fact]

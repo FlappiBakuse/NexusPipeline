@@ -67,6 +67,25 @@ internal sealed class WebServer : IDisposable
     /// <summary>API 路由表：启动时反射扫描带 [ApiRoute] 的 handler 类/方法注册；新增 API 无需改路由表。</summary>
     private static readonly Dictionary<string, ApiRouteDefinition> Routes = BuildRoutes();
 
+    internal static IReadOnlyList<string> RegisteredApiRouteNames =>
+        Routes.Keys.OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToArray();
+
+    internal static bool TryGetRegisteredApiRoute(
+        string name,
+        out ApiBodyMode bodyMode,
+        out int maxBodyBytes)
+    {
+        if (Routes.TryGetValue(name, out ApiRouteDefinition? route))
+        {
+            bodyMode = route.BodyMode;
+            maxBodyBytes = route.MaxBodyBytes;
+            return true;
+        }
+        bodyMode = ApiBodyMode.JsonText;
+        maxBodyBytes = 0;
+        return false;
+    }
+
     private static Dictionary<string, ApiRouteDefinition> BuildRoutes()
     {
         var routes = new Dictionary<string, ApiRouteDefinition>(StringComparer.OrdinalIgnoreCase);

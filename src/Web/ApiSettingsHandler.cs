@@ -117,7 +117,7 @@ internal static class ApiSettingsHandler
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
-    private static object MaskedSettings(AppSettings settings)
+    internal static object MaskedSettings(AppSettings settings)
     {
         return new
         {

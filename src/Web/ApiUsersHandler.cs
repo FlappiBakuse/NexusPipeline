@@ -373,27 +373,14 @@ internal static class ApiUsersHandler
     private static async Task SaveAvatarAsync(HttpListenerContext context, string userId, string body)
     {
         AvatarPayload? payload = HttpHelper.ParseBody<AvatarPayload>(body);
-        string mime = payload?.MimeType?.Trim().ToLowerInvariant() ?? "";
-        string extension = mime switch
+        if (!TryDecodeAvatar(
+                payload?.MimeType,
+                payload?.Data,
+                out string mime,
+                out byte[] data,
+                out string errorCode))
         {
-            "image/png" => "png",
-            "image/jpeg" => "jpg",
-            "image/webp" => "webp",
-            _ => "",
-        };
-        if (extension.Length == 0 || string.IsNullOrWhiteSpace(payload?.Data))
-        {
-            await HttpHelper.ErrorAsync(context, "avatar_type_invalid", 400).ConfigureAwait(false);
-            return;
-        }
-        byte[] data;
-        try
-        {
-            data = Convert.FromBase64String(payload!.Data);
-        }
-        catch
-        {
-            await HttpHelper.ErrorAsync(context, "avatar_data_invalid", 400).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, errorCode, 400).ConfigureAwait(false);
             return;
         }
         OperationResult<bool> result = UserCommands.SetAvatar(userId, mime, data);
@@ -403,6 +390,34 @@ internal static class ApiUsersHandler
             return;
         }
         await HttpHelper.WriteJsonAsync(context, new { ok = true, avatarUrl = $"/api/users/{Uri.EscapeDataString(userId)}/avatar" }).ConfigureAwait(false);
+    }
+
+    internal static bool TryDecodeAvatar(
+        string? mimeType,
+        string? encodedData,
+        out string normalizedMimeType,
+        out byte[] data,
+        out string errorCode)
+    {
+        normalizedMimeType = mimeType?.Trim().ToLowerInvariant() ?? "";
+        data = Array.Empty<byte>();
+        errorCode = "";
+        if (normalizedMimeType is not ("image/png" or "image/jpeg" or "image/webp")
+            || string.IsNullOrWhiteSpace(encodedData))
+        {
+            errorCode = "avatar_type_invalid";
+            return false;
+        }
+        try
+        {
+            data = Convert.FromBase64String(encodedData);
+            return true;
+        }
+        catch (FormatException)
+        {
+            errorCode = "avatar_data_invalid";
+            return false;
+        }
     }
 
     private static async Task GetAvatarAsync(HttpListenerContext context, string userId)

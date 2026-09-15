@@ -67,4 +67,45 @@ public sealed class PluginContributionRouteTests
             "GET",
             new[] { "plugin-contributions", "user-list-badges", "extra" }));
     }
+
+    [Fact]
+    public void UiRoutesDecodePluginAndContributionIdentifiers()
+    {
+        Assert.True(ApiPluginContributionsHandler.TryParseUiSaveRoute(
+            "PUT",
+            new[] { "plugin-contributions", "ui", "better%2Fgi", "daily%2Dsummary" },
+            out string pluginName,
+            out string contributionId));
+        Assert.Equal("better/gi", pluginName);
+        Assert.Equal("daily-summary", contributionId);
+
+        Assert.True(ApiPluginContributionsHandler.TryParseUiActionRoute(
+            "POST",
+            new[] { "plugin-contributions", "ui", "bettergi", "summary", "action", "refresh%2Dnow" },
+            out pluginName,
+            out contributionId,
+            out string action));
+        Assert.Equal("bettergi", pluginName);
+        Assert.Equal("summary", contributionId);
+        Assert.Equal("refresh-now", action);
+    }
+
+    [Fact]
+    public void UiRoutesRejectWrongShapeAndWrongVerb()
+    {
+        Assert.False(ApiPluginContributionsHandler.TryParseUiQueryRoute(
+            "GET",
+            new[] { "plugin-contributions", "ui", "query" }));
+        Assert.False(ApiPluginContributionsHandler.TryParseUiSaveRoute(
+            "POST",
+            new[] { "plugin-contributions", "ui", "bettergi", "summary" },
+            out _,
+            out _));
+        Assert.False(ApiPluginContributionsHandler.TryParseUiActionRoute(
+            "POST",
+            new[] { "plugin-contributions", "ui", "bettergi", "summary", "action" },
+            out _,
+            out _,
+            out _));
+    }
 }
