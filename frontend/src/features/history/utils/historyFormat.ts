@@ -27,6 +27,12 @@ export function formatHistoryDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(getLocale(), { year: "numeric", month: "short", day: "numeric" });
 }
 
+/** 用于紧凑趋势标签的日期键展示，不包含年份。 */
+export function formatHistoryShortDate(value: string) {
+  const parsed = new Date(`${value}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
+}
+
 export function historyTodayValue(now: Date = new Date()) {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;

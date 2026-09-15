@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatDurationMs } from "./historyFormat";
+import { formatDurationMs, formatHistoryShortDate } from "./historyFormat";
 
 describe("historyFormat", () => {
   it("formats completed durations across useful time units", () => {
@@ -13,5 +13,10 @@ describe("historyFormat", () => {
   it("rejects invalid or negative durations", () => {
     expect(formatDurationMs(-1)).toBe("-");
     expect(formatDurationMs(Number.NaN)).toBe("-");
+  });
+
+  it("formats dashboard dates without the year", () => {
+    expect(formatHistoryShortDate("2026-09-08")).not.toContain("2026");
+    expect(formatHistoryShortDate("invalid-date")).toBe("invalid-date");
   });
 });
