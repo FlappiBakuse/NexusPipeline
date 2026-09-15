@@ -529,7 +529,7 @@ internal static class WebhookSender
         }
     }
 
-    private static bool IsResponseBodySuccessful(string type, string responseText)
+    internal static bool IsResponseBodySuccessful(string type, string responseText)
     {
         if (string.IsNullOrWhiteSpace(responseText))
         {
@@ -565,7 +565,7 @@ internal static class WebhookSender
         }
     }
 
-    private static string BuildBody(string type, string text, string template)
+    internal static string BuildBody(string type, string text, string template)
     {
         string literal = JsonLiteral(text);
         return type switch
@@ -578,7 +578,7 @@ internal static class WebhookSender
         };
     }
 
-    private static string BuildGenericBody(string text, string template, NotificationImage? image)
+    internal static string BuildGenericBody(string text, string template, NotificationImage? image)
     {
         string base64 = image is null ? "" : Convert.ToBase64String(image.Data);
         string dataUri = image is null ? "" : $"data:{image.ContentType};base64,{base64}";
@@ -649,7 +649,7 @@ internal static class WebhookSender
         }
     }
 
-    private static Dictionary<string, string> BearerHeaders(string token) => new()
+    internal static Dictionary<string, string> BearerHeaders(string token) => new()
     {
         ["Authorization"] = $"Bearer {token}",
     };
@@ -663,7 +663,7 @@ internal static class WebhookSender
     /// 签名注入：钉钉自定义机器人使用 URL 查询参数；飞书自定义机器人使用请求体字段。
     /// 应用级图片 API 使用独立的凭据请求，不复用 Webhook 签名。
     /// </summary>
-    private static (string Url, Dictionary<string, string> Headers) ApplySignature(string type, string url, string? secret)
+    internal static (string Url, Dictionary<string, string> Headers) ApplySignature(string type, string url, string? secret)
     {
         if (string.IsNullOrWhiteSpace(secret))
         {
@@ -679,7 +679,7 @@ internal static class WebhookSender
         return (url, new Dictionary<string, string>());
     }
 
-    private static string BuildSignedFeishuBody(string body, string? secret)
+    internal static string BuildSignedFeishuBody(string body, string? secret)
     {
         if (string.IsNullOrWhiteSpace(secret))
         {
@@ -703,7 +703,7 @@ internal static class WebhookSender
     }
 
     /// <summary>官方签名算法：HMAC-SHA256 以「timestamp\nsecret」为密钥对空消息计算，结果 Base64。</summary>
-    private static string Sign(string timestamp, string secret)
+    internal static string Sign(string timestamp, string secret)
     {
         byte[] key = Encoding.UTF8.GetBytes($"{timestamp}\n{secret}");
         using var hmac = new HMACSHA256(key);

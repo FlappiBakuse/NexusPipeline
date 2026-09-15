@@ -1,13 +1,58 @@
 ﻿using System.Text;
-using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
+using MailKitSmtpClient = MailKit.Net.Smtp.SmtpClient;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
+
+internal interface ISmtpTransport : IDisposable
+{
+    int Timeout { set; }
+
+    Task ConnectAsync(string host, int port, SecureSocketOptions options);
+
+    Task AuthenticateAsync(string user, string password);
+
+    Task SendAsync(MimeMessage message);
+
+    Task DisconnectAsync(bool quit);
+}
+
+internal interface ISmtpTransportFactory
+{
+    ISmtpTransport Create();
+}
+
+internal sealed class MailKitSmtpTransportFactory : ISmtpTransportFactory
+{
+    public ISmtpTransport Create() => new MailKitSmtpTransport();
+}
+
+internal sealed class MailKitSmtpTransport : ISmtpTransport
+{
+    private readonly MailKitSmtpClient _client = new();
+
+    public int Timeout
+    {
+        set => _client.Timeout = value;
+    }
+
+    public Task ConnectAsync(string host, int port, SecureSocketOptions options) =>
+        _client.ConnectAsync(host, port, options);
+
+    public Task AuthenticateAsync(string user, string password) =>
+        _client.AuthenticateAsync(user, password);
+
+    public Task SendAsync(MimeMessage message) => _client.SendAsync(message);
+
+    public Task DisconnectAsync(bool quit) => _client.DisconnectAsync(quit);
+
+    public void Dispose() => _client.Dispose();
+}
 
 internal static class SmtpSender
 {
@@ -46,7 +91,8 @@ internal static class SmtpSender
         AppSettings settings,
         string text,
         string? recipientOverride = null,
-        NotificationImage? image = null)
+        NotificationImage? image = null,
+        ISmtpTransportFactory? transportFactory = null)
     {
         string? host = settings.SmtpHost;
         string? user = settings.SmtpUser;
@@ -66,40 +112,10 @@ internal static class SmtpSender
         string prefix = settings.SmtpSubjectPrefix;
         int timeout = settings.SmtpTimeout < 1 ? 30 : settings.SmtpTimeout;
 
-        string firstLine = text.Split('\n').FirstOrDefault()?.Trim('\r') ?? "";
-        if (string.IsNullOrWhiteSpace(firstLine))
-        {
-            firstLine = "NexusPipeline 运行通知";
-        }
-        var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(from));
-        foreach (string recipient in toList)
-        {
-            message.To.Add(MailboxAddress.Parse(recipient));
-        }
-        message.Subject = $"{prefix} {firstLine}";
-        if (image is null)
-        {
-            message.Body = new TextPart("plain")
-            {
-                Text = text,
-            };
-        }
-        else
-        {
-            var builder = new BodyBuilder
-            {
-                TextBody = text,
-            };
-            builder.Attachments.Add(
-                image.FileName,
-                image.Data,
-                ContentType.Parse(image.ContentType));
-            message.Body = builder.ToMessageBody();
-        }
+        MimeMessage message = BuildMessage(from!, toList, prefix, text, image);
         try
         {
-            using var client = new SmtpClient();
+            using ISmtpTransport client = (transportFactory ?? new MailKitSmtpTransportFactory()).Create();
             client.Timeout = timeout * 1000;
             await client.ConnectAsync(host, port, secure).ConfigureAwait(false);
             await client.AuthenticateAsync(user, password).ConfigureAwait(false);
@@ -137,7 +153,48 @@ internal static class SmtpSender
         }
     }
 
-    private static SecureSocketOptions ResolveSecure(int port, string mode)
+    internal static MimeMessage BuildMessage(
+        string from,
+        IReadOnlyList<string> recipients,
+        string subjectPrefix,
+        string text,
+        NotificationImage? image)
+    {
+        string firstLine = text.Split('\n').FirstOrDefault()?.Trim('\r') ?? "";
+        if (string.IsNullOrWhiteSpace(firstLine))
+        {
+            firstLine = "NexusPipeline 运行通知";
+        }
+        var message = new MimeMessage();
+        message.From.Add(MailboxAddress.Parse(from));
+        foreach (string recipient in recipients)
+        {
+            message.To.Add(MailboxAddress.Parse(recipient));
+        }
+        message.Subject = $"{subjectPrefix} {firstLine}";
+        if (image is null)
+        {
+            message.Body = new TextPart("plain")
+            {
+                Text = text,
+            };
+        }
+        else
+        {
+            var builder = new BodyBuilder
+            {
+                TextBody = text,
+            };
+            builder.Attachments.Add(
+                image.FileName,
+                image.Data,
+                ContentType.Parse(image.ContentType));
+            message.Body = builder.ToMessageBody();
+        }
+        return message;
+    }
+
+    internal static SecureSocketOptions ResolveSecure(int port, string mode)
     {
         return mode switch
         {

@@ -37,6 +37,18 @@ internal static class NetInfo
         {
             Logger.Warn($"[网络] 枚举局域网地址失败：{ex.Message}");
         }
-        return result.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(addr => addr, StringComparer.Ordinal).ToList();
+        return NormalizeLanAddresses(result);
+    }
+
+    internal static List<string> NormalizeLanAddresses(IEnumerable<string> addresses)
+    {
+        return addresses
+            .Select(address => address.Trim())
+            .Where(address => IPAddress.TryParse(address, out IPAddress? parsed)
+                && parsed.AddressFamily == AddressFamily.InterNetwork
+                && !IPAddress.IsLoopback(parsed))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(address => address, StringComparer.Ordinal)
+            .ToList();
     }
 }

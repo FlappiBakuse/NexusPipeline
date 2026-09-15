@@ -77,6 +77,10 @@ internal static class SecretStore
             plaintext = Encoding.UTF8.GetString(unprotected);
             return true;
         }
+        catch (FormatException)
+        {
+            return false;
+        }
         catch (CryptographicException)
         {
             return false;

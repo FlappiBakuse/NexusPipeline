@@ -20,11 +20,11 @@ internal static class FirewallRule
         }
         try
         {
-            string setArgs = $"advfirewall firewall set rule name=\"{RuleName}\" new dir=in action=allow protocol=TCP localport={port} enable=yes profile=private,public";
+            string setArgs = BuildSetRuleArguments(port);
             int code = RunNetsh(setArgs);
             if (code != 0)
             {
-                string addArgs = $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} enable=yes profile=private,public";
+                string addArgs = BuildAddRuleArguments(port);
                 code = RunNetsh(addArgs);
             }
             if (code == 0)
@@ -41,6 +41,12 @@ internal static class FirewallRule
             Logger.Warn($"[防火墙] 更新 Web TCP 入站规则失败：{ex.Message}");
         }
     }
+
+    internal static string BuildSetRuleArguments(int port) =>
+        $"advfirewall firewall set rule name=\"{RuleName}\" new dir=in action=allow protocol=TCP localport={port} enable=yes profile=private,public";
+
+    internal static string BuildAddRuleArguments(int port) =>
+        $"advfirewall firewall add rule name=\"{RuleName}\" dir=in action=allow protocol=TCP localport={port} enable=yes profile=private,public";
 
     private static int RunNetsh(string args)
     {
