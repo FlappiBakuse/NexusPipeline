@@ -247,7 +247,7 @@ defineExpose({ focus: () => input.value?.focus() });
 
 <style>
 .nxp-textarea-shell { position: relative; width: 100%; min-width: 0; }
-.nxp-textarea-shell > .nxp-textarea { display: block; width: 100%; min-height: 96px; padding-block: var(--nx-space-3); resize: vertical; overscroll-behavior: contain; scrollbar-width: none; -ms-overflow-style: none; }
+.nxp-textarea-shell > .nxp-textarea { display: block; width: 100%; min-height: 96px; padding-block: var(--nx-space-3); background: var(--input-bg, var(--content-control, var(--nx-color-surface, transparent))); resize: vertical; overscroll-behavior: contain; scrollbar-width: none; -ms-overflow-style: none; }
 .nxp-textarea-shell > .nxp-textarea::-webkit-scrollbar { width: 0; height: 0; }
 .nxp-textarea-scroll-track { position: absolute; z-index: 2; top: 4px; right: 2px; bottom: 8px; width: 8px; pointer-events: none; opacity: 0; transition: opacity var(--nx-motion-duration-fast, .15s) var(--nx-motion-ease, ease); }
 .nxp-textarea-shell:hover .nxp-textarea-scroll-track,

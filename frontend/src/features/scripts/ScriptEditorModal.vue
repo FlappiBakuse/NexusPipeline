@@ -790,10 +790,16 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: var(--nx-space-3, 12px);
+  text-align: left;
 }
 
 .script-editor-header .modal-title {
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
 }
 
 .script-transfer-actions {
@@ -803,7 +809,17 @@ watch(
   gap: var(--nx-space-2, 8px);
 }
 
+.script-transfer-actions button {
+  flex: 0 0 80px;
+  width: 80px;
+  min-width: 80px;
+  height: var(--control-height, var(--nx-control-height, 40px));
+  min-height: var(--control-height, var(--nx-control-height, 40px));
+  margin: 0;
+}
+
 .script-transfer-input {
   display: none;
 }
+
 </style>

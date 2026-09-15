@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
 .nxp-modal-backdrop { position: absolute; inset: 0; background: transparent; cursor: default; }
 .nxp-modal-panel { position: relative; z-index: 1; display: flex; width: min(680px, 100%); max-height: min(88vh, 900px); min-height: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-lg); background: var(--nx-color-surface); color: var(--nx-color-text); box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, .28)); }
 .nxp-modal-panel.wide { width: min(960px, 100%); }
-.nxp-modal-header { display: flex; flex: 0 0 auto; align-items: flex-start; justify-content: space-between; gap: var(--nx-space-3); margin: 0; padding: clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px) var(--nx-space-4); border-bottom: 0; }
+.nxp-modal-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: var(--nx-space-3); margin: 0; padding: clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px) var(--nx-space-4); border-bottom: 0; }
 .nxp-modal-header h2 { margin: 0; font-size: 19px; }
 .nxp-modal-header button { flex: 0 0 auto; }
 .nxp-modal-header button .nxp-icon { width: 18px; height: 18px; }
