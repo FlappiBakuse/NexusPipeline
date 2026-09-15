@@ -65,6 +65,7 @@ internal sealed record ProxyConfiguration(
         var handler = new HttpClientHandler
         {
             AllowAutoRedirect = allowAutoRedirect,
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
         };
 
         if (target == OutboundHttpTarget.Loopback || Mode == "none")

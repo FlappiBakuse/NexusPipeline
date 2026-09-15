@@ -1,11 +1,11 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using Jint;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
+using NexusPipeline.Services;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Configuration;
@@ -86,24 +86,22 @@ internal static class ConfigValidationScriptRunner
             timeout.CancelAfter(TimeSpan.FromSeconds(MaxExecutionSeconds));
             await Task.Run(() =>
             {
-                var engine = new Engine(options =>
-                {
-                    options.TimeoutInterval(TimeSpan.FromSeconds(MaxExecutionSeconds));
-                    options.MaxStatements(1_000_000);
-                    options.CancellationToken(timeout.Token);
-                });
-                engine.SetValue("__NEXUS_INPUT__", inputJson);
-                engine.SetValue("__nexusListFiles", new Func<object>(() =>
+                var host = JintScriptHost.Create(
+                    TimeSpan.FromSeconds(MaxExecutionSeconds),
+                    timeout.Token,
+                    maxStatements: 1_000_000);
+                host.SetInput(inputJson);
+                host.SetValue("__nexusListFiles", new Func<object>(() =>
                     ListFiles(storeRoot)
                         .Select(file => file.Path)
                         .Concat(extraSnapshots.SelectMany((extra, index) =>
                             ListSnapshotFiles(extra).Select(file => ExtraPrefix(index) + file.Path)))
                         .ToArray()));
-                engine.SetValue("__nexusReadFile", new Func<object, object?>(path =>
+                host.SetValue("__nexusReadFile", new Func<object, object?>(path =>
                     ResolvePathRoot(storeRoot, path?.ToString() ?? "", extraSnapshots, out string? root, out string? relative)
                         ? ReadFile(root!, relative!)
                         : null));
-                engine.SetValue("__nexusWriteFile", new Func<object, object, object>((path, content) =>
+                host.SetValue("__nexusWriteFile", new Func<object, object, object>((path, content) =>
                 {
                     string candidate = path?.ToString() ?? "";
                     if (IsExtraRef(candidate, out int extraIndex, out _))
@@ -125,16 +123,15 @@ internal static class ConfigValidationScriptRunner
                     }
                     return WriteFile(storeRoot, candidate, content?.ToString() ?? "", changedFiles);
                 }));
-                engine.SetValue("__nexusExists", new Func<object, object>(path =>
+                host.SetValue("__nexusExists", new Func<object, object>(path =>
                     ResolvePathRoot(storeRoot, path?.ToString() ?? "", extraSnapshots, out string? root, out string? relative)
                         ? Exists(root!, relative!)
                         : false));
-                engine.SetValue("__nexusToast", new Func<object, object, object>((message, kind) =>
+                host.SetValue("__nexusToast", new Func<object, object, object>((message, kind) =>
                     QueueToast(message?.ToString() ?? "", kind?.ToString() ?? "", toasts)));
-                engine.SetValue("__nexusNotify", new Func<object, object, object, object>((title, body, kind) =>
+                host.SetValue("__nexusNotify", new Func<object, object, object, object>((title, body, kind) =>
                     QueueNotification(title?.ToString() ?? "", body?.ToString() ?? "", kind?.ToString() ?? "", notifications)));
-                engine.Execute(EngineGlue);
-                engine.Execute(descriptor.Script);
+                host.Execute(descriptor.Script, JintScriptHostProfile.ConfigValidation);
             }).ConfigureAwait(false);
             return new ConfigValidationResult(true, "", changedFiles, toasts, notifications);
         }
@@ -655,16 +652,4 @@ internal static class ConfigValidationScriptRunner
         return false;
     }
 
-    private const string EngineGlue = """
-        const input = JSON.parse(__NEXUS_INPUT__);
-        const nexus = {
-          input,
-          listFiles: () => __nexusListFiles(),
-          readFile: (p) => __nexusReadFile(p),
-          writeFile: (p, c) => __nexusWriteFile(p, c),
-          exists: (p) => __nexusExists(p),
-          toast: (m, k) => __nexusToast(m, k),
-          notify: (t, b, k) => __nexusNotify(t, b, k),
-        };
-        """;
 }

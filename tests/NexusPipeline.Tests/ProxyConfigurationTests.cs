@@ -16,6 +16,7 @@ public sealed class ProxyConfigurationTests
         }).CreateHandler(OutboundHttpTarget.External, allowAutoRedirect: false))
         {
             Assert.False(none.UseProxy);
+            Assert.Equal(DecompressionMethods.GZip | DecompressionMethods.Deflate, none.AutomaticDecompression);
         }
 
         using (HttpClientHandler system = ProxyConfiguration.FromSettings(new AppSettings

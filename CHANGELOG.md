@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.3（Pre-release）
+
+### 判定脚本探针
+
+- 新增进程、可见顶层窗口和只读 HTTP GET 探针，JavaScript 与 Python 共用统一脚本宿主和回环运行时桥接。
+- 探针遵循数量、超时、响应体和输入长度上限；外网请求沿用宿主统一 HTTP 出口，保留截图接口的现有调用契约。
+- 补充 Plugin API、插件判断脚本指南以及进程、窗口、HTTP 和 Python 回环调用的契约测试。
+
+### 官方签到插件
+
+- GameCheckIn 升级到 v0.2.0，覆盖米游社、HoYoLAB、森空岛、终末地国际服 / SKPORT 和库街区五个平台的游戏内签到。
+- 米游社与 HoYoLAB 增加崩坏 3；森空岛支持明日方舟与终末地，SKPORT 支持终末地，库街区支持鸣潮与战双帕弥什。
+- 配置、凭据指纹、运行状态、汇总徽章和中英文商店资料同步扩展到五个平台，沿用当前格式与安全边界。
+
 ## v0.16.2（Pre-release）
 
 ### 文档与维护性

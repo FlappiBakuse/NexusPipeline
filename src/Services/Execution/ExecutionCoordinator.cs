@@ -2,6 +2,7 @@ using System.Diagnostics;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 using NexusPipeline.App.Abstractions;
 
@@ -22,6 +23,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private readonly RunScreenshotStore _screenshotStore;
 
     private readonly AttemptScreenshotCapture _screenshotCapture;
+
+    private readonly OutboundHttpClientProvider? _http;
 
     private int? _gameProcessId;
 
@@ -45,14 +48,16 @@ internal sealed class ExecutionCoordinator : RunSession
         Action<int, int>? attemptChanged,
         Action<string>? statusChanged,
         Action<string, LogLevel>? logLine,
-        Action<ExecutionPreviewTarget>? previewTargetChanged,
-        IUserRepository users,
-        ResolvedScriptUser? resolvedUser = null,
-        ResolvedScriptSpec? resolvedSpec = null)
+         Action<ExecutionPreviewTarget>? previewTargetChanged,
+         IUserRepository users,
+         ResolvedScriptUser? resolvedUser = null,
+         ResolvedScriptSpec? resolvedSpec = null,
+         OutboundHttpClientProvider? http = null)
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
         _resolvedSpec = resolvedSpec;
+        _http = http;
         _previewTargetChanged = previewTargetChanged;
         _screenshotCapture = new AttemptScreenshotCapture(
             _script,
@@ -566,7 +571,8 @@ internal sealed class ExecutionCoordinator : RunSession
                 _configRun?.SyncToStore(request.FirstCheck);
                 OperationToken.ThrowIfCancellationRequested();
             },
-            (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken));
+             (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken),
+             _http);
         var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
         await using var workersScope = workers;
 

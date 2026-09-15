@@ -561,6 +561,33 @@ internal static class ProcessWindows
         return FindVisibleWindowForPid(pid, skipConsoleWindows: false);
     }
 
+    /// <summary>枚举当前桌面上的可见顶层窗口快照；只返回窗口句柄、所属 PID 和标题，不暴露窗口控制能力。</summary>
+    internal static IReadOnlyList<VisibleTopLevelWindow> EnumerateVisibleTopLevelWindows()
+    {
+        var result = new List<VisibleTopLevelWindow>();
+        IntPtr foreground = GetForegroundWindow();
+        EnumWindows((hWnd, _) =>
+        {
+            if (!IsWindow(hWnd) || !IsWindowVisible(hWnd))
+            {
+                return true;
+            }
+
+            GetWindowThreadProcessId(hWnd, out uint pid);
+            if (pid == 0)
+            {
+                return true;
+            }
+
+            var title = new StringBuilder(257);
+            int length = GetWindowText(hWnd, title, title.Capacity);
+            string text = length > 256 ? title.ToString(0, 256) : title.ToString();
+            result.Add(new VisibleTopLevelWindow(hWnd, (int)pid, text, hWnd == foreground));
+            return true;
+        }, IntPtr.Zero);
+        return result;
+    }
+
     private static IntPtr FindVisibleWindowForPid(int pid, bool skipConsoleWindows)
     {
         IntPtr found = IntPtr.Zero;
@@ -586,5 +613,7 @@ internal static class ProcessWindows
         return length > 0
             && string.Equals(className.ToString(), "ConsoleWindowClass", StringComparison.Ordinal);
     }
+
+    internal sealed record VisibleTopLevelWindow(IntPtr Hwnd, int Pid, string Title, bool Foreground);
 
 }

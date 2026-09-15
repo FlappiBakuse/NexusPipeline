@@ -191,6 +191,29 @@ public sealed class JudgeScriptRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task JavaScriptCanUseReadOnlyProcessWindowAndHttpProbes()
+    {
+        var script = new ScriptInstance
+        {
+            JudgeScriptLanguage = "javascript",
+            JudgeScript = "var processes = nexus.listProcesses({pid: 1}); var windows = nexus.listWindows({pid: 1}); var http = nexus.httpGet('file:///secret'); console.log(JSON.stringify({status:'success', reason: processes.processes instanceof Array && windows.windows instanceof Array && http.error === 'invalid_url' ? 'probes' : 'unexpected'}));",
+        };
+        string input = JudgeScriptRunner.BuildInput(script, null, [], _scriptDir, "", false);
+
+        JudgeScriptResult result = await JudgeScriptRunner.ExecuteAsync(
+            script,
+            input,
+            [],
+            _configFile,
+            _scriptDir,
+            CancellationToken.None);
+
+        Assert.Null(result.JudgeError);
+        Assert.Equal("success", result.Status);
+        Assert.Equal("probes", result.Reason);
+    }
+
+    [Fact]
     public async Task PartialWithoutReasonIsNotAValidResult()
     {
         var script = new ScriptInstance
@@ -310,6 +333,62 @@ public sealed class JudgeScriptRunnerTests : IDisposable
         Assert.Equal("success", result.Status);
         Assert.Equal("screenshot-0000000002", result.NotifyScreenshotId);
         Assert.Equal(1, calls);
+    }
+
+    [Fact]
+    public async Task PythonCanUseReadOnlyProbesThroughTemporaryLoopbackApi()
+    {
+        var script = new ScriptInstance
+        {
+            JudgeScriptLanguage = "python",
+            JudgeScript = """
+                import json
+                import sys
+                import urllib.request
+
+                with open(sys.argv[1], encoding="utf-8") as stream:
+                    input_data = json.load(stream)
+                api = input_data["probeApi"]
+
+                def probe(path, payload):
+                    request = urllib.request.Request(
+                        api["endpoint"] + path,
+                        data=json.dumps(payload).encode("utf-8"),
+                        method="POST",
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Nexus-Judge-Token": api["token"],
+                        },
+                    )
+                    with urllib.request.urlopen(request, timeout=5) as response:
+                        return json.load(response)
+
+                processes = probe("/processes", {"pid": 1})
+                windows = probe("/windows", {"pid": 1})
+                http = probe("/http-probe", {"url": "file:///secret"})
+                print(json.dumps({
+                    "status": "success",
+                    "reason": "probes" if (
+                        isinstance(processes.get("processes"), list)
+                        and isinstance(windows.get("windows"), list)
+                        and http.get("error") == "invalid_url"
+                    ) else "unexpected",
+                }))
+                """,
+        };
+        string input = JudgeScriptRunner.BuildInput(script, null, [], _scriptDir, "", false);
+
+        JudgeScriptResult result = await JudgeScriptRunner.ExecuteAsync(
+            script,
+            input,
+            [],
+            _configFile,
+            _scriptDir,
+            CancellationToken.None);
+
+        Assert.Null(result.JudgeError);
+        Assert.Equal("success", result.Status);
+        Assert.Equal("probes", result.Reason);
     }
 
     public void Dispose()

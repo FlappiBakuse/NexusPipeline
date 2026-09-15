@@ -3,6 +3,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services.Notification;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services.Execution;
@@ -20,6 +21,7 @@ internal sealed class ExecutionRunner
     private readonly IPluginAvailability _pluginAvailability;
     private readonly IUserRunStartingPublisher? _userRunEvents;
     private readonly PluginManager? _plugins;
+    private readonly OutboundHttpClientProvider? _http;
 
     public ExecutionRunner(
         IUserRepository users,
@@ -28,7 +30,8 @@ internal sealed class ExecutionRunner
         SystemActionExecutor systemActions,
         IPluginAvailability pluginAvailability,
         IUserRunStartingPublisher? userRunEvents = null,
-        PluginManager? plugins = null)
+        PluginManager? plugins = null,
+        OutboundHttpClientProvider? http = null)
     {
         _users = users;
         _history = history;
@@ -37,6 +40,7 @@ internal sealed class ExecutionRunner
         _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
         _userRunEvents = userRunEvents;
         _plugins = plugins;
+        _http = http;
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)
@@ -184,9 +188,10 @@ internal sealed class ExecutionRunner
                         status => exec.CurrentStatus = status,
                         (line, level) => exec.AppendLog(level, line),
                         target => exec.SetPreviewTarget(target),
-                        _users,
-                        runUser,
-                        runUser.Spec ?? resolvedSpec);
+                         _users,
+                         runUser,
+                         runUser.Spec ?? resolvedSpec,
+                         _http);
 
                     try
                     {

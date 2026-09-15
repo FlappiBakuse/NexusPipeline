@@ -1,5 +1,6 @@
 using NexusPipeline.Services;
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Networking;
 
 namespace NexusPipeline.Services.Execution;
 
@@ -20,6 +21,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     private readonly Func<int, JudgeSnapshot> _captureSnapshot;
     private readonly Action<List<string>> _replaceRequested;
     private readonly Func<int, string, CancellationToken, Task<RunScreenshot?>>? _captureScreenshot;
+    private readonly OutboundHttpClientProvider? _http;
     private readonly SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult> _judgeWorker;
     private readonly SingleFlightWorker<ConfigSyncRequest, bool> _configSyncWorker;
 
@@ -44,7 +46,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         Func<int, JudgeSnapshot> captureSnapshot,
         Action<List<string>> replaceRequested,
         Action<ConfigSyncRequest> configSync,
-        Func<int, string, CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null)
+        Func<int, string, CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null,
+        OutboundHttpClientProvider? http = null)
     {
         _attemptId = attemptId;
         _attemptNumber = attemptNumber;
@@ -56,6 +59,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         _captureSnapshot = captureSnapshot;
         _replaceRequested = replaceRequested;
         _captureScreenshot = captureScreenshot;
+        _http = http;
         _judgeWorker = new SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult>(async (snapshot, workerToken) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, _operationToken);
@@ -71,9 +75,10 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                 snapshot.Script.ConfigPath,
                 snapshot.ScriptDir,
                 linked.Token,
-                _captureScreenshot is null
-                    ? null
-                    : captureToken => _captureScreenshot(snapshot.AttemptNumber, "judge-manual", captureToken)).ConfigureAwait(false);
+                 _captureScreenshot is null
+                     ? null
+                     : captureToken => _captureScreenshot(snapshot.AttemptNumber, "judge-manual", captureToken),
+                 _http).ConfigureAwait(false);
             return new JudgeWorkerResult(
                 snapshot.AttemptId,
                 snapshot.AttemptNumber,

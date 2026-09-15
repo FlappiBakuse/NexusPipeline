@@ -21,7 +21,15 @@ import {
   saveGlobalContribution,
   saveGlobalSettings,
 } from "../services/usersApi";
-import { encodePrePost, normalizeGlobalSettings, splitPrePost, PRE_ONLY_MARKER, POST_FINAL_MARKER } from "../utils/globalSettings";
+import {
+  encodePrePost,
+  globalContributionFieldKey,
+  globalContributionValuesForSave,
+  normalizeGlobalSettings,
+  splitPrePost,
+  PRE_ONLY_MARKER,
+  POST_FINAL_MARKER,
+} from "../utils/globalSettings";
 import type { Contribution, GlobalField, GlobalSettings } from "../utils/globalSettings";
 
 /** 全局管理弹窗：独立承担全局设置与插件贡献的加载、编辑、保存与清理。 */
@@ -38,7 +46,7 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const errorText = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
 
 function fieldKey(contribution: Contribution, field: GlobalField) {
-  return `${contribution.pluginName || "plugin"}::${contribution.id || "settings"}::${field.key}`;
+  return globalContributionFieldKey(contribution, field);
 }
 function fieldId(contribution: Contribution, field: GlobalField) {
   return `gm-plugin-${fieldKey(contribution, field).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
@@ -76,28 +84,12 @@ function secretIsConfigured(contribution: Contribution, field: GlobalField) {
   return Boolean(current && typeof current === "object" && (current as { configured?: boolean }).configured === true);
 }
 function setSecretValue(contribution: Contribution, field: GlobalField, next: string) {
-  secretActions.value[fieldKey(contribution, field)] = next ? "set" : (secretIsConfigured(contribution, field) ? "keep" : "set");
+  secretActions.value[fieldKey(contribution, field)] = next ? "set" : "keep";
   setContributionValue(contribution, field, next);
 }
 function clearSecret(contribution: Contribution, field: GlobalField) {
   secretActions.value[fieldKey(contribution, field)] = "clear";
   setContributionValue(contribution, field, "");
-}
-function contributionValuesForSave(contribution: Contribution) {
-  const values: Record<string, unknown> = {};
-  for (const field of contribution.fields || []) {
-    const type = fieldType(field);
-    const current = value(contribution, field.key);
-    if (type === "secret") {
-      const action = secretActions.value[fieldKey(contribution, field)] || (secretIsConfigured(contribution, field) ? "keep" : "set");
-      values[field.key] = action === "set" ? { action, value: String(current || "") } : { action };
-    } else if (type === "multi-select") {
-      values[field.key] = Array.isArray(current) ? current.map(String) : [];
-    } else {
-      values[field.key] = current;
-    }
-  }
-  return values;
 }
 function contributionOptions(field: GlobalField): NxpOption[] {
   return (field.options || []).map((option) =>
@@ -212,7 +204,7 @@ async function save() {
         props.userId,
         contribution.pluginName || "",
         contribution.id || "",
-        contributionValuesForSave(contribution),
+        globalContributionValuesForSave(contribution, secretActions.value),
       );
     }
     toast(t("users.global.saved"));
@@ -435,7 +427,7 @@ watch(
             </div>
             <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <div class="plugin-secret-row"><NxpTextInput :id="fieldId(contribution, field)" type="password" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" :aria-label="field.label" @update:model-value="setSecretValue(contribution, field, $event)" /><NxpButton v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</NxpButton></div>
+              <div class="plugin-secret-row"><NxpTextInput :id="fieldId(contribution, field)" type="password" :model-value="contributionStringValue(contribution, field)" :maxlength="field.maxLength || undefined" :placeholder="secretIsConfigured(contribution, field) ? t('users.secret.configured_placeholder', { set: t('common.set'), leaveBlank: t('common.leave_blank_to_keep').toLowerCase() }) : (field.placeholder || undefined)" :readonly="field.readOnly" :aria-label="field.label" :show-password-toggle="true" :show-password-label="`${t('common.show')} ${field.label}`" :hide-password-label="`${t('settings.hide')} ${field.label}`" @update:model-value="setSecretValue(contribution, field, $event)" /><NxpButton v-if="secretIsConfigured(contribution, field) && !field.readOnly" class="tertiary" type="button" @click="clearSecret(contribution, field)">{{ t('users.clear') }}</NxpButton></div>
             </div>
             <div v-else-if="fieldType(field) === 'status'" class="field plugin-field" :data-help="field.description || undefined">
               <span class="field-label">{{ field.label }}</span><span class="plugin-status-value">{{ String(value(contribution, field.key) || t('users.no_status')) }}</span>

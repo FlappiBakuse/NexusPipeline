@@ -1998,6 +1998,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .plugin-contribution-fields > .switch-card { background: var(--content-card); border-color: var(--content-card-border); }
 .plugin-contribution-fields > .switch-card:hover { background: var(--content-card-hover); }
 .plugin-secret-row { display: flex; align-items: center; gap: var(--space-2); }
+.plugin-secret-row > .nxp-password-input { min-width: 0; flex: 1; }
 .plugin-secret-row input { min-width: 0; flex: 1; }
 .plugin-status-value { display: block; min-height: 40px; padding: 10px 12px; border: 1px solid var(--content-card-border); border-radius: var(--radius-sm); background: var(--content-card); color: var(--text); line-height: 1.5; }
 .plugin-multi-select-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

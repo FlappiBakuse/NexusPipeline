@@ -21,6 +21,37 @@ export interface Contribution {
   values?: Record<string, unknown>;
 }
 
+export type GlobalSecretAction = "keep" | "set" | "clear";
+
+export function globalContributionFieldKey(contribution: Contribution, field: GlobalField): string {
+  return `${contribution.pluginName || "plugin"}::${contribution.id || "settings"}::${field.key}`;
+}
+
+/** 将全局插件表单转换为宿主保存契约，过滤只读字段并保留未编辑的密钥。 */
+export function globalContributionValuesForSave(
+  contribution: Contribution,
+  secretActions: Record<string, GlobalSecretAction>,
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const field of contribution.fields || []) {
+    const type = String(field.type || "text").toLowerCase();
+    if (field.readOnly || type === "status") continue;
+
+    const current = contribution.values?.[field.key];
+    if (type === "secret") {
+      const action = secretActions[globalContributionFieldKey(contribution, field)] || "keep";
+      values[field.key] = action === "set"
+        ? { action, value: typeof current === "string" ? current : "" }
+        : { action };
+    } else if (type === "multi-select") {
+      values[field.key] = Array.isArray(current) ? current.map(String) : [];
+    } else {
+      values[field.key] = current;
+    }
+  }
+  return values;
+}
+
 export interface GlobalSettings {
   general: { syncEnabled: boolean; enabled: boolean; runDays: number; maxSuccessfulRunsPerDay: number };
   notification: { syncEnabled: boolean; notifyEnabled: boolean; smtpTo: string };

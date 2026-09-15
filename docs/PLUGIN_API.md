@@ -358,6 +358,53 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 - 契约与通用判断脚本一致：输入 `__NEXUS_INPUT__`（JS）/ 输入 JSON 路径（Python），包含宿主当前 `locale`（规范化 BCP 47 语言标识），输出 stdout 尾行 `{"status":"success|partial|failed","reason":"…","notifyText":"…","notifyScreenshotId":"…","replaceConfigs":[…]}`；`partial` 只能由判断脚本主动返回，属于终局结果且不触发重试、不计入每日成功次数；`replaceConfigs` 仅在 `failed` 结果下为下一次重试应用。宿主在当前 profile 解析成功后将 `judgeScript` 作为本次操作的有效判断脚本，用户不可编辑（专项弹窗不渲染自定义完成标志区）。
 - 语言按扩展名自动识别：`.js`（内置 Jint 引擎）/ `.py`（系统 python.exe）。
 
+### 判断脚本只读探针
+
+JavaScript 判断脚本可使用以下同步 API：
+
+```js
+const processes = nexus.listProcesses({ nameContains: "game" });
+const windows = nexus.listWindows({ titleContains: "Game" });
+const health = nexus.httpGet("https://example.com/health", {
+  timeoutMs: 5000,
+  maxBytes: 65536,
+});
+```
+
+`listProcesses` 返回 `{ processes, truncated }`。每项包含 `pid`、`ppid`、`name` 和可为空的 `startTimeUtc`；可按 `nameContains` 或 `pid` 筛选，结果最多 2048 项。
+
+`listWindows` 返回 `{ windows, truncated }`。每项包含字符串形式的 `hwnd`、`pid`、`name`、`title` 和 `foreground`；结果来自可见顶层窗口，可按 `titleContains` 或 `pid` 筛选，结果最多 512 项。
+
+`httpGet` 只接受长度不超过 2048 的绝对 `http`/`https` URL，执行 GET 并返回 `{ ok, status, body, truncated, error? }`。默认超时 10 秒，单次请求最多 15 秒；响应正文默认及硬上限为 2 MiB。错误使用 `invalid_url`、`timeout` 或 `network_error`。
+
+Python 判断脚本通过输入中的 `probeApi.endpoint` 与 `probeApi.token` 访问同一组探针。请求必须使用 `POST` 和 `X-Nexus-Judge-Token` 请求头：
+
+```python
+import json
+import urllib.request
+
+api = input_data.get("probeApi")
+if api:
+    def probe(path, payload):
+        request = urllib.request.Request(
+            api["endpoint"] + path,
+            data=json.dumps(payload).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Nexus-Judge-Token": api["token"],
+            },
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return json.load(response)
+
+    processes = probe("/processes", {"nameContains": "game"})
+    windows = probe("/windows", {})
+    health = probe("/http-probe", {"url": "https://example.com/health"})
+```
+
+探针桥接仅监听本机回环地址，令牌只在当前判断脚本调用期间有效。进程与窗口接口提供快照读取；HTTP 接口提供受限 GET 读取。脚本运行时保持文件读写、进程控制、窗口控制、命令执行和 HTTP 写入权限关闭。
+
 ### 判断脚本截图
 
 历史详情中的受保护图片由宿主前端通过带 Bearer 认证的 Blob 请求加载，再以弹窗生命周期管理 Object URL；插件无需获得历史文件鉴权令牌。

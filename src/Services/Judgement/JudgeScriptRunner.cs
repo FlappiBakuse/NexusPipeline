@@ -3,11 +3,11 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using Jint;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Localization;
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Networking;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -189,11 +189,12 @@ internal static class JudgeScriptRunner
         string configPath,
         string scriptDir,
         CancellationToken token,
-        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null)
+        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null,
+        OutboundHttpClientProvider? http = null)
     {
         return script.JudgeScriptLanguage == "python"
-            ? await RunPythonAsync(script.JudgeScript, inputJson, token, captureScreenshot).ConfigureAwait(false)
-            : await RunJsAsync(script.JudgeScript, inputJson, allowedFiles, configPath, scriptDir, token, captureScreenshot).ConfigureAwait(false);
+            ? await RunPythonAsync(script.JudgeScript, inputJson, token, captureScreenshot, http).ConfigureAwait(false)
+            : await RunJsAsync(script.JudgeScript, inputJson, allowedFiles, configPath, scriptDir, token, captureScreenshot, http).ConfigureAwait(false);
     }
 
     private static async Task<JudgeScriptResult> RunJsAsync(
@@ -203,7 +204,8 @@ internal static class JudgeScriptRunner
         string configPath,
         string scriptDir,
         CancellationToken token,
-        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot)
+        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot,
+        OutboundHttpClientProvider? http)
     {
         var result = new JudgeScriptResult();
         var outputs = new List<string>();
@@ -211,17 +213,12 @@ internal static class JudgeScriptRunner
         {
             await Task.Run(() =>
             {
-                var engine = new Engine(options =>
-                {
-                    options.TimeoutInterval(TimeSpan.FromSeconds(ScriptTimeoutSeconds));
-                    options.CancellationToken(token);
-                });
-                engine.SetValue("__NEXUS_INPUT__", inputJson);
-                engine.SetValue("__nexusLog", new Action<object>(obj => outputs.Add(obj?.ToString() ?? "")));
-                engine.SetValue("__nexusReadFile", new Func<object, object>(abs => ReadAllowedFile(configPath, scriptDir, abs?.ToString() ?? "") ?? (object)""));
-                engine.SetValue("__nexusWriteFile", new Func<object, object, object>((rel, content) => WriteScriptFile(scriptDir, rel?.ToString() ?? "", content?.ToString() ?? "")));
-                engine.SetValue("__nexusListFiles", new Func<object>(() => allowedFiles.Select(file => file.Abs).ToArray()));
-                engine.SetValue("__nexusCaptureScreenshot", new Func<object>(() =>
+                var host = JintScriptHost.Create(TimeSpan.FromSeconds(ScriptTimeoutSeconds), token);
+                host.SetInput(inputJson);
+                host.SetValue("__nexusReadFile", new Func<object, object>(abs => ReadAllowedFile(configPath, scriptDir, abs?.ToString() ?? "") ?? (object)""));
+                host.SetValue("__nexusWriteFile", new Func<object, object, object>((rel, content) => WriteScriptFile(scriptDir, rel?.ToString() ?? "", content?.ToString() ?? "")));
+                host.SetValue("__nexusListFiles", new Func<object>(() => allowedFiles.Select(file => file.Abs).ToArray()));
+                host.SetValue("__nexusCaptureScreenshot", new Func<object>(() =>
                 {
                     try
                     {
@@ -233,8 +230,12 @@ internal static class JudgeScriptRunner
                         return "";
                     }
                 }));
-                engine.Execute(EngineGlue);
-                engine.Execute(code);
+                host.SetValue("__nexusListProcesses", new Func<object, object>(options => JudgeProbeService.ListProcessesJson(options?.ToString())));
+                host.SetValue("__nexusListWindows", new Func<object, object>(options => JudgeProbeService.ListWindowsJson(options?.ToString())));
+                host.SetValue("__nexusHttpGet", new Func<object, object, object>((url, options) =>
+                    JudgeHttpProbe.RunSync(url?.ToString(), options?.ToString(), http, token)));
+                host.Execute(code, JintScriptHostProfile.Judge);
+                outputs.AddRange(host.Outputs);
             }, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -250,17 +251,6 @@ internal static class JudgeScriptRunner
         ParseOutput(outputs, result);
         return result;
     }
-
-    /// <summary>预绑定注入 API：console.log 收集输出；nexus.readFile 只读 config/script 目录；nexus.writeFile 写 script 目录；nexus.listFiles 返回绝对路径数组；nexus.captureScreenshot 返回截图 ID。</summary>
-    private const string EngineGlue = """
-        const console = { log: (...args) => args.forEach(a => __nexusLog(typeof a === "string" ? a : JSON.stringify(a))) };
-        const nexus = {
-          readFile: (p) => __nexusReadFile(p) || null,
-          writeFile: (p, c) => __nexusWriteFile(p, c),
-          listFiles: () => __nexusListFiles(),
-          captureScreenshot: () => __nexusCaptureScreenshot(),
-        };
-        """;
 
     /// <summary>仅允许读取 configPath（运行时生效配置）与 scriptDir（可读写目录）范围内的文件，单文件 2MB 上限；失败返回 null。</summary>
     private static string? ReadAllowedFile(string configPath, string scriptDir, string abs)
@@ -456,20 +446,23 @@ internal static class JudgeScriptRunner
         string code,
         string inputJson,
         CancellationToken token,
-        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot)
+        Func<CancellationToken, Task<RunScreenshot?>>? captureScreenshot,
+        OutboundHttpClientProvider? http)
     {
         var result = new JudgeScriptResult();
         string pyPath = Path.Combine(Path.GetTempPath(), "nexus-judge-" + Guid.NewGuid().ToString("N") + ".py");
         string inputPath = Path.Combine(Path.GetTempPath(), "nexus-judge-" + Guid.NewGuid().ToString("N") + ".json");
-        JudgeScreenshotBridge? screenshotBridge = null;
+        JudgeRuntimeBridge? runtimeBridge = null;
         try
         {
             string effectiveInputJson = inputJson;
-            if (captureScreenshot is not null)
-            {
-                screenshotBridge = JudgeScreenshotBridge.Start(captureScreenshot);
-                effectiveInputJson = AddScreenshotApi(inputJson, screenshotBridge.Endpoint, screenshotBridge.Token);
-            }
+            runtimeBridge = JudgeRuntimeBridge.Start(captureScreenshot, http);
+            effectiveInputJson = AddRuntimeApis(
+                inputJson,
+                runtimeBridge.Endpoint,
+                runtimeBridge.ScreenshotEndpoint,
+                runtimeBridge.Token,
+                captureScreenshot is not null);
             File.WriteAllText(pyPath, code, new UTF8Encoding(false));
             File.WriteAllText(inputPath, effectiveInputJson, new UTF8Encoding(false));
             // 显式解析 python.exe 完整路径（PATH 搜索跳过 WindowsApps 的 Store 别名——别名进程在
@@ -544,16 +537,21 @@ internal static class JudgeScriptRunner
         }
         finally
         {
-            if (screenshotBridge is not null)
+            if (runtimeBridge is not null)
             {
-                await screenshotBridge.DisposeAsync().ConfigureAwait(false);
+                await runtimeBridge.DisposeAsync().ConfigureAwait(false);
             }
             TryDelete(pyPath);
             TryDelete(inputPath);
         }
     }
 
-    private static string AddScreenshotApi(string inputJson, string endpoint, string token)
+    private static string AddRuntimeApis(
+        string inputJson,
+        string probeEndpoint,
+        string screenshotEndpoint,
+        string token,
+        bool includeScreenshot)
     {
         try
         {
@@ -562,16 +560,24 @@ internal static class JudgeScriptRunner
             {
                 return inputJson;
             }
-            root["screenshotApi"] = new JsonObject
+            root["probeApi"] = new JsonObject
             {
-                ["endpoint"] = endpoint,
+                ["endpoint"] = probeEndpoint,
                 ["token"] = token,
             };
+            if (includeScreenshot)
+            {
+                root["screenshotApi"] = new JsonObject
+                {
+                    ["endpoint"] = screenshotEndpoint,
+                    ["token"] = token,
+                };
+            }
             return root.ToJsonString();
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[判断脚本] Python 截图 API 输入注入失败：{ex.Message}");
+            Logger.Warn($"[判断脚本] Python 运行时 API 输入注入失败：{ex.Message}");
             return inputJson;
         }
     }

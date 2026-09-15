@@ -78,9 +78,10 @@ internal class RuntimeContext
             provider.GetRequiredService<IHistoryStore>(),
             provider.GetRequiredService<INotificationService>(),
             provider.GetRequiredService<SystemActionExecutor>(),
-            provider.GetRequiredService<IPluginAvailability>(),
-            provider.GetRequiredService<IUserRunStartingPublisher>(),
-            provider.GetRequiredService<PluginManager>()));
+             provider.GetRequiredService<IPluginAvailability>(),
+             provider.GetRequiredService<IUserRunStartingPublisher>(),
+             provider.GetRequiredService<PluginManager>(),
+             provider.GetRequiredService<OutboundHttpClientProvider>()));
         collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());

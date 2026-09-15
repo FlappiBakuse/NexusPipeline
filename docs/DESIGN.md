@@ -673,8 +673,8 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
 | `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
 | `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
-| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时、截图 API 和 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
-| `RunScreenshotStore` / `RecentScreenshotCache` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Execution/RecentScreenshotCache.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、PC 最近有效帧缓存、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
+| `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供统一 Jint 宿主、Python/Jint 30 秒超时、截图与只读判定探针 API，以及 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
+| `RunScreenshotStore` / `RecentScreenshotCache` / `JudgeRuntimeBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Execution/RecentScreenshotCache.cs、src/Services/Judgement/JudgeRuntimeBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、PC 最近有效帧缓存、截图与进程/窗口/HTTP 只读探针共用的 Python 判断脚本临时 loopback 桥接 |
 | `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加、截断后追加和替换三种形态；同长度重写通过已观察内容 checkpoint 定位截断边界，替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话（normal/fresh/reuse）与隐藏配置管理 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
