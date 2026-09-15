@@ -7,7 +7,7 @@ namespace NexusPipeline.Plugins;
 
 internal sealed partial class DataSpecializedPlugin
 {
-    /// <summary>��ȡ��ǰ�汾 resolve.json ���û��������������ҳ��ǰ�˱���ͶӰ�ã���</summary>
+    /// <summary>读取当前版本 resolve.json 的用户输入声明（插件页与前端表单投影用）。</summary>
     internal bool TryReadInputDeclarations(out IReadOnlyList<PluginInputDeclaration> declarations, out string? error)
     {
         declarations = Array.Empty<PluginInputDeclaration>();
@@ -32,7 +32,7 @@ internal sealed partial class DataSpecializedPlugin
             error = ex.Message;
             return false;
         }
-        List<PluginInputDeclaration> parsed = ParseInputDeclarations(resolve?["inputs"], out error);
+        List<PluginInputDeclaration> parsed = DataSpecializedResolveParser.ParseInputDeclarations(resolve?["inputs"], out error);
         if (error is not null)
         {
             return false;
@@ -42,7 +42,7 @@ internal sealed partial class DataSpecializedPlugin
             if ((declaration.LabelKey.Length > 0 && !Localization.ContainsKey(declaration.LabelKey))
                 || (declaration.DescriptionKey.Length > 0 && !Localization.ContainsKey(declaration.DescriptionKey)))
             {
-                error = $"inputs��{declaration.Name}�������˲���ʵ��в����ڵ� labelKey �� descriptionKey";
+                error = $"inputs「{declaration.Name}」引用了插件词典中不存在的 labelKey 或 descriptionKey";
                 return false;
             }
         }
@@ -50,7 +50,7 @@ internal sealed partial class DataSpecializedPlugin
         return true;
     }
 
-    /// <summary>���������Խ��������ֶ�չʾ���֣�δ���� key ʱ���� resolve.json �е��ַ������ˡ�</summary>
+    /// <summary>按请求语言解析输入字段展示文字；未声明 key 时保留 resolve.json 中的字符串回退。</summary>
     internal IReadOnlyList<PluginInputDeclaration> LocalizeInputDeclarations(
         IReadOnlyList<PluginInputDeclaration> declarations,
         string? locale)
@@ -72,9 +72,9 @@ internal sealed partial class DataSpecializedPlugin
         }).ToArray();
     }
 
-    /// <summary>�������ú�ѡ�Ƶ���configPath ģ��ǡ������һ�����루{input:����}�����ް�ռλ����ʱ��
-    /// ö��ģ�徲̬Ŀ¼��ƥ�䡸��̬ǰ׺ + * + ��̬��׺�����ļ������ذ��뾲̬���ֺ�ĺ�ѡ����ֵ��
-    /// ���ڸ��ñ༭����ʱ�����������ļ������ڡ���󶨵��ֳ�ʵ�����õĳ������ṹ������Ŀ¼ȱʧ���ؿա�</summary>
+    /// <summary>复用配置候选推导：configPath 模板恰好引用一个输入（{input:名称}，且无绑定占位符）时，
+    /// 枚举模板静态目录中匹配「静态前缀 + * + 静态后缀」的文件，返回剥离静态部分后的候选输入值。
+    /// 用于复用编辑启动时声明的配置文件不存在、需绑定到现场实际配置的场景；结构不符或目录缺失返回空。</summary>
     internal bool TryDiscoverConfigInputValues(string rootPath, out IReadOnlyList<string> values)
     {
         values = Array.Empty<string>();
@@ -87,7 +87,7 @@ internal sealed partial class DataSpecializedPlugin
         return true;
     }
 
-    /// <summary>�������ú�ѡ�Ƶ��������� configPath ģ��ʵ�����õ� input ���ơ�</summary>
+    /// <summary>复用配置候选推导，并保留 configPath 模板实际引用的 input 名称。</summary>
     internal bool TryDiscoverConfigInputCandidates(string rootPath, out ConfigInputCandidateSet? candidates)
     {
         candidates = null;
@@ -108,31 +108,31 @@ internal sealed partial class DataSpecializedPlugin
         {
             return false;
         }
-        // require ȫ��������Ƶ���ѡ����Ŀ¼����Ŀ������ʱ�г��ļ�ֻ����
+        // require 全部满足才推导候选：根目录不是目标软件时列出文件只会误导
         if (resolve["require"] is JsonArray requireList)
         {
-            string normalizedRoot = NormalizePathSeparators(rootPath.Trim());
+            string normalizedRoot = DataSpecializedResolveParser.NormalizePathSeparators(rootPath.Trim());
             foreach (JsonNode? item in requireList)
             {
                 string file = item?["file"]?.ToString() ?? "";
                 if (string.IsNullOrWhiteSpace(file)
-                    || FindFile(normalizedRoot, SubstituteInputs(file, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), item?["searchUpward"]?.GetValue<bool>() == true) is null)
+                    || DataSpecializedResolveParser.FindFile(normalizedRoot, DataSpecializedResolveParser.SubstituteInputs(file, new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)), item?["searchUpward"]?.GetValue<bool>() == true) is null)
                 {
                     return false;
                 }
             }
         }
         string configTemplate = resolve["paths"]?["configPath"]?.ToString() ?? "";
-        if (!TryLocateConfigInputTemplate(configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
+        if (!DataSpecializedResolveParser.TryLocateConfigInputTemplate(configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
             return false;
         }
-        List<PluginInputDeclaration> declarations = ParseInputDeclarations(resolve["inputs"], out _);
+        List<PluginInputDeclaration> declarations = DataSpecializedResolveParser.ParseInputDeclarations(resolve["inputs"], out _);
         string pattern = declarations
             .FirstOrDefault(declaration => declaration.Name.Equals(inputName, StringComparison.OrdinalIgnoreCase))
             ?.Pattern ?? "";
-        string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
-        List<string> discovered = EnumerateConfigValues(searchDirectory, namePrefix, staticTail, pattern);
+        string searchDirectory = Path.Combine(DataSpecializedResolveParser.NormalizePathSeparators(rootPath.Trim()), relativeDir);
+        List<string> discovered = DataSpecializedResolveParser.EnumerateConfigValues(searchDirectory, namePrefix, staticTail, pattern);
         if (discovered.Count == 0)
         {
             return false;
@@ -142,16 +142,16 @@ internal sealed partial class DataSpecializedPlugin
         return true;
     }
 
-    /// <summary>�Զ���Ψһ���ã�configPath ģ��ǡ������һ������ʱ������ǰ����ֵָ���Ŀ�겻���ڶ�
-    /// ��̬Ŀ¼��ǡ����һ�������ļ������Ը��ļ���������ֵ������������ default��������ԭ������ null��</summary>
-    private Dictionary<string, string>? AdoptSingleConfigCandidate(
+    /// <summary>自动绑定唯一配置：configPath 模板恰好引用一个输入时，若当前输入值指向的目标不存在而
+    /// 静态目录中恰好有一个配置文件，则以该文件覆盖输入值（发现优先于 default）；否则原样返回 null。</summary>
+    internal Dictionary<string, string>? AdoptSingleConfigCandidate(
         string configPathTemplate,
         string rootPath,
         List<PluginInputDeclaration> declarations,
         IReadOnlyDictionary<string, string>? provided,
         HashSet<string> referencedInputs)
     {
-        if (!TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
+        if (!DataSpecializedResolveParser.TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
             return null;
         }
@@ -163,16 +163,16 @@ internal sealed partial class DataSpecializedPlugin
         string current = provided is not null && provided.TryGetValue(declaration.Name, out string? raw) && raw.Trim().Length > 0
             ? raw.Trim()
             : declaration.Default;
-        string searchDirectory = Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir);
+        string searchDirectory = Path.Combine(DataSpecializedResolveParser.NormalizePathSeparators(rootPath.Trim()), relativeDir);
         string currentTarget = Path.Combine(searchDirectory, namePrefix + current + staticTail);
         if (current.Length > 0 && (File.Exists(currentTarget) || Directory.Exists(currentTarget)))
         {
             return null;
         }
-        List<string> candidates = EnumerateConfigValues(searchDirectory, namePrefix, staticTail, declaration.Pattern);
+        List<string> candidates = DataSpecializedResolveParser.EnumerateConfigValues(searchDirectory, namePrefix, staticTail, declaration.Pattern);
         if (candidates.Count != 1)
         {
-            // ���������ѡ���²⣺�����ѡ�ɸ��ñ༭����ʱ�г��������û���ʽѡ��
+            // 零个或多个候选不猜测：多个候选由复用编辑启动时列出，交由用户显式选择
             return null;
         }
         var adopted = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -188,7 +188,7 @@ internal sealed partial class DataSpecializedPlugin
         return adopted;
     }
 
-    /// <summary>�Զ�����־������ֵ�Ƿ�仯��ȥ�أ�ͬһ�ű�ͬһ���뷴����������ֵͬʱ���ظ���¼��</summary>
+    /// <summary>自动绑定日志按「绑定值是否变化」去重：同一脚本同一输入反复解析出相同值时不重复记录。</summary>
     private void LogAutoBoundOnce(string rootPath, string inputName, string value)
     {
         string key = $"{rootPath.Trim().TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)}|{inputName}";
@@ -201,21 +201,21 @@ internal sealed partial class DataSpecializedPlugin
             }
             _lastAutoBoundValues[key] = value;
         }
-        Logger.Info($"[���] ����Ŀ¼�ڽ���һ�������ļ����Զ������롸{inputName}��= {value}��{Name}");
+        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{inputName}」= {value}：{Name}");
     }
 
-    /// <summary>��� configPath ģ��İ������Ƿ��ڡ�δ����״̬������ֵȱʧ��ָ���Ŀ�겻���ڣ�
-    /// �Ҿ�̬Ŀ¼�д������������Ϻ�ѡ�����غ�ѡ�嵥���Ѷ�������ѡ�Զ��󶨻����ѡʱΪ�գ���
-    /// �������ڱ༭����ʱҪ���û�ѡ��������ǰ�ܾ���������Ŀ¼�� configPath ��δ��ʱ�����Ϊ
-    /// ���ڵ�Ŀ¼���������˼��ᱻ��Ŀ¼����Ϊ�û����ա�</summary>
-    private ConfigInputCandidateSet? DetectUnresolvedConfigCandidates(
+    /// <summary>检测 configPath 模板的绑定输入是否处于「未定」状态：输入值缺失或指向的目标不存在，
+    /// 且静态目录中存在两个及以上候选。返回候选清单（已定、单候选自动绑定或零候选时为空），
+    /// 供宿主在编辑启动时要求用户选择、在运行前拒绝启动——目录型 configPath 在未定时会解析为
+    /// 存在的目录，若不做此检测会被整目录采用为用户快照。</summary>
+    internal ConfigInputCandidateSet? DetectUnresolvedConfigCandidates(
         string configPathTemplate,
         string rootPath,
         List<PluginInputDeclaration> declarations,
         IReadOnlyDictionary<string, string>? provided,
         HashSet<string> referencedInputs)
     {
-        if (!TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
+        if (!DataSpecializedResolveParser.TryLocateConfigInputTemplate(configPathTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
             return null;
         }
@@ -230,15 +230,15 @@ internal sealed partial class DataSpecializedPlugin
         if (current.Length > 0)
         {
             string currentTarget = Path.Combine(
-                Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir),
+                Path.Combine(DataSpecializedResolveParser.NormalizePathSeparators(rootPath.Trim()), relativeDir),
                 namePrefix + current + staticTail);
             if (File.Exists(currentTarget) || Directory.Exists(currentTarget))
             {
                 return null;
             }
         }
-        List<string> candidates = EnumerateConfigValues(
-            Path.Combine(NormalizePathSeparators(rootPath.Trim()), relativeDir),
+        List<string> candidates = DataSpecializedResolveParser.EnumerateConfigValues(
+            Path.Combine(DataSpecializedResolveParser.NormalizePathSeparators(rootPath.Trim()), relativeDir),
             namePrefix,
             staticTail,
             declaration.Pattern);
@@ -247,69 +247,5 @@ internal sealed partial class DataSpecializedPlugin
             : null;
     }
 
-    /// <summary>��λ configPath ģ���е�Ψһ�������ã���������������ǰ��ľ�̬Ŀ¼/ǰ׺/��׺���ṹ�������� false��</summary>
-    private static bool TryLocateConfigInputTemplate(string configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail)
-    {        inputName = "";
-        relativeDir = "";
-        namePrefix = "";
-        staticTail = "";
-        var matches = InputPlaceholderRegex.Matches(configTemplate);
-        if (matches.Count != 1 || BindingPlaceholderRegex.IsMatch(configTemplate))
-        {
-            return false;
-        }
-        inputName = matches[0].Groups[1].Value;
-        string head = configTemplate[..matches[0].Index].Replace('/', Path.DirectorySeparatorChar);
-        staticTail = configTemplate[(matches[0].Index + matches[0].Length)..];
-        int lastSeparator = head.LastIndexOf(Path.DirectorySeparatorChar);
-        relativeDir = lastSeparator >= 0 ? head[..(lastSeparator + 1)] : "";
-        namePrefix = lastSeparator >= 0 ? head[(lastSeparator + 1)..] : head;
-        return !namePrefix.Contains('{') && !staticTail.Contains('{');
-    }
-
-    /// <summary>ö�پ�̬Ŀ¼��ƥ�䡸��̬ǰ׺ + * + ��̬��׺�����ļ�����Ŀ¼��Ŀ¼��ѡ������ʵ��Ŀ¼�����ã�
-    /// �� OneDragon config/{input:instance}�������뾲̬���ֺ�ĺ�ѡ����ֵ��pattern �ǿ�ʱ����������������ˡ�</summary>
-    private static List<string> EnumerateConfigValues(string searchDirectory, string namePrefix, string staticTail, string pattern = "")
-    {
-        var values = new List<string>();
-        if (!Directory.Exists(searchDirectory))
-        {
-            return values;
-        }
-        try
-        {
-            foreach (string file in Directory.GetFiles(searchDirectory, namePrefix + "*" + staticTail))
-            {
-                AddConfigCandidate(values, Path.GetFileName(file), namePrefix, staticTail, pattern);
-            }
-            foreach (string directory in Directory.GetDirectories(searchDirectory, namePrefix + "*" + staticTail))
-            {
-                AddConfigCandidate(values, Path.GetFileName(directory), namePrefix, staticTail, pattern);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[���] ���ú�ѡö��ʧ�ܣ�{searchDirectory}����{ex.Message}");
-        }
-        return values;
-    }
-
-    private static void AddConfigCandidate(List<string> values, string name, string namePrefix, string staticTail, string pattern)
-    {
-        if (name.Length <= namePrefix.Length + staticTail.Length)
-        {
-            return;
-        }
-        string candidate = name[namePrefix.Length..^staticTail.Length];
-        if (candidate.Length == 0)
-        {
-            return;
-        }
-        if (pattern.Length > 0 && !Regex.IsMatch(candidate, pattern))
-        {
-            return;
-        }
-        values.Add(candidate);
-    }
-
+    /// <summary>定位 configPath 模板中的唯一输入引用：返回输入名与其前后的静态目录/前缀/后缀；结构不符返回 false。</summary>
 }

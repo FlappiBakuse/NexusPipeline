@@ -7,11 +7,11 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
 /// <summary>
-/// ���ݻ�ר��������Ŀ¼��̬ plugins/&lt;artifactName&gt;/����
-/// plugin.json�����ļ���Ԫ���� + ���� data �ļ�����data/resolve.json���Ƶ����ã���data/judge.{js,py}���жϽű�����
-/// �Ƶ�����require ȫ�����㣨file ��Խű���Ŀ¼��searchUpward=true ʱ���������������Ƶ��ɹ���
-/// paths ģ��ռλ�� {var}�����ļ�����·����/ {rel:var}����Խű���Ŀ¼�����·������
-/// ��ѡ inputs �����û����������ģ������ {input:����} �����滻���������·���ı�������ϣ������ռλ�����ã���
+/// 数据化专项插件：纯目录形态 plugins/&lt;artifactName&gt;/——
+/// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）。
+/// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
+/// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）；
+/// 可选 inputs 声明用户输入变量，模板中以 {input:名称} 内联替换（可与相对路径文本自由组合，不与绑定占位符混用）。
 /// </summary>
 internal sealed record ConfigValidatorDescriptor(
     string PluginName,
@@ -27,9 +27,33 @@ internal sealed record ConfigEditorDescriptor(
 
 internal sealed partial class DataSpecializedPlugin : IProfileResolver
 {
+    internal DataSpecializedPlugin(PluginManifest manifest, string pluginDir)
+    {
+        PluginDirectory = Path.GetFullPath(pluginDir);
+        Name = manifest.Name;
+        ArtifactName = manifest.ArtifactName;
+        SchemaVersion = manifest.SchemaVersion;
+        DisplayName = manifest.DisplayName;
+        GameName = manifest.GameName;
+        Description = manifest.Description;
+        Version = manifest.Version;
+        MinHostVersion = manifest.MinHostVersion;
+        Frontend = manifest.Frontend;
+        Localization = manifest.Localization;
+        _resolvePath = manifest.ResolvePath;
+        _judgeScriptPath = manifest.JudgeScriptPath;
+        _configValidatorPath = manifest.ConfigValidatorPath;
+        _configEditorPath = manifest.ConfigEditorPath;
+        foreach (string capability in manifest.Capabilities)
+        {
+            _capabilityKeys.Add(capability);
+        }
+        _profileResolver = new DataSpecializedProfileResolver(this);
+    }
+
     public string Name { get; private set; } = "";
 
-    /// <summary>�������ʽ����Ŀ¼��������ʱ���õ��߼������ռ���ʹ�� Name��</summary>
+    /// <summary>插件的正式物理目录名；运行时配置等逻辑命名空间仍使用 Name。</summary>
     public string ArtifactName { get; private set; } = "";
 
     public int SchemaVersion { get; private set; } = PluginRepositoryCatalog.SchemaVersion;
@@ -42,42 +66,43 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
 
     public string Version { get; private set; } = "";
 
-    /// <summary>�����������������汾��δ����ʱ����Ԫ���ݵ�����������ʱ������</summary>
+    /// <summary>插件声明的最低宿主版本；未满足时保留元数据但不参与运行时解析。</summary>
     public string MinHostVersion { get; private set; } = "0.0.0";
 
-    /// <summary>���ݻ������ѡ��ͬԴǰ��ģ��������</summary>
+    /// <summary>数据化插件可选的同源前端模块声明。</summary>
     public PluginFrontendManifest? Frontend { get; private set; }
 
     public PluginLocalizationManifest Localization { get; private set; } = PluginLocalizationManifest.Empty;
 
     internal string PluginDirectory { get; private set; } = "";
 
-    /// <summary>���ݻ�������������� key��</summary>
+    /// <summary>数据化插件声明的能力 key。</summary>
     public IReadOnlySet<string> CapabilityKeys => _capabilityKeys;
 
-    private string _resolvePath = "";
+    internal string _resolvePath = "";
 
-    private string _judgeScriptPath = "";
+    internal string _judgeScriptPath = "";
 
-    private string? _configValidatorPath;
+    internal string? _configValidatorPath;
 
     private string? _configValidator;
 
-    private string? _configEditorPath;
+    internal string? _configEditorPath;
 
     private string? _configEditor;
 
     private readonly object _sync = new();
 
-    private readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DataSpecializedProfileResolver _profileResolver;
 
-    /// <summary>�Զ��������ȥ��̨�ˣ��ű� id + ������ �� ��ǰ��ֵ������������״̬��ѯ��Ƶִ�У�
-    /// ��ֵ����ʱ��Ĭ��ֵ�仯���״ΰ�/���ø���/��ɾ���ż�¼��־��</summary>
+    internal readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>自动绑定输入的去重台账（脚本 id + 输入名 → 当前绑定值）：解析链随状态轮询高频执行，
+    /// 绑定值不变时静默，值变化（首次绑定/配置改名/增删）才记录日志。</summary>
     private readonly Dictionary<string, string> _lastAutoBoundValues = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>�Ӳ��Ŀ¼���أ�plugin.json ���� + data ����У�飩��Ŀ¼��Ч���� null�����÷��Ǿ��棬����������</summary>
-
-    /// <summary>�жϽű����ԣ�data/judge.{js|py} ����չ����Ĭ�� javascript����</summary>
+    /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
+    /// <summary>判断脚本语言：data/judge.{js|py} 按扩展名（默认 javascript）。</summary>
     public string JudgeScriptLanguage
     {
         get
@@ -85,205 +110,18 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
             string ext = Path.GetExtension(_judgeScriptPath).ToLowerInvariant();
             return ext == ".py" ? "python" : "javascript";
         }
-    }
-
-
-    /// <summary>���� resolve.json �� inputs ��������ѡ�Σ�������Чʱ���ش���ԭ��</summary>
-    private static List<PluginInputDeclaration> ParseInputDeclarations(JsonNode? node, out string? error)
-    {
-        error = null;
-        var list = new List<PluginInputDeclaration>();
-        if (node is not JsonArray items)
-        {
-            return list;
-        }
-        foreach (JsonNode? item in items)
-        {
-            string name = item?["name"]?.ToString()?.Trim() ?? "";
-            if (!Regex.IsMatch(name, @"^[A-Za-z][A-Za-z0-9_]*$"))
-            {
-                error = $"inputs ������ name��{name}����Ч����Ϊ��ĸ��ͷ����ĸ/����/�»��ߣ�";
-                return list;
-            }
-            string labelKey = item?["labelKey"]?.ToString()?.Trim() ?? "";
-            string descriptionKey = item?["descriptionKey"]?.ToString()?.Trim() ?? "";
-            if ((labelKey.Length > 0 && !PluginLocalizationValidation.IsSafeKey(labelKey, 128))
-                || (descriptionKey.Length > 0 && !PluginLocalizationValidation.IsSafeKey(descriptionKey, 128)))
-            {
-                error = $"inputs��{name}���� labelKey �� descriptionKey ��Ч";
-                return list;
-            }
-            string pattern = item?["pattern"]?.ToString() ?? "";
-            if (pattern.Length > 0)
-            {
-                try
-                {
-                    _ = new Regex(pattern);
-                }
-                catch (ArgumentException ex)
-                {
-                    error = $"inputs��{name}���� pattern ������Ч���������ʽ��{ex.Message}";
-                    return list;
-                }
-            }
-            list.Add(new PluginInputDeclaration
-            {
-                Name = name,
-                Label = item?["label"]?.ToString()?.Trim() ?? "",
-                LabelKey = labelKey,
-                Description = item?["description"]?.ToString()?.Trim() ?? "",
-                DescriptionKey = descriptionKey,
-                Default = item?["default"]?.ToString() ?? "",
-                Required = item?["required"]?.GetValue<bool>() ?? false,
-                Pattern = pattern,
-            });
-        }
-        if (list.GroupBy(declaration => declaration.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
-        {
-            error = "inputs �����ظ��� name";
-            return new List<PluginInputDeclaration>();
-        }
-        return list;
-    }
-
-    /// <summary>ģ��ռλ�����У�飺��ռλ����{var}/{rel:var}��ÿ����� 1 ���Ҳ���������ռλ�����ã�
-    /// ����ռλ�����ñ����������������嵥�ɵ��÷�����ǰ�Ƚ�����������ȫ�������õ���������</summary>
-    private static bool ValidateTemplatePlaceholders(string[] templates, out string? error, out HashSet<string> referencedInputs)
-    {
-        error = null;
-        referencedInputs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string template in templates)
-        {
-            int bindingCount = BindingPlaceholderRegex.Matches(template).Count;
-            var inputRefs = InputPlaceholderRegex.Matches(template).Select(match => match.Groups[1].Value).ToList();
-            if (bindingCount > 1 || (bindingCount > 0 && inputRefs.Count > 0))
-            {
-                error = "��ռλ����{var}/{rel:var}��ÿ����� 1 �����Ҳ���������ռλ����{input:����}������";
-                return false;
-            }
-            foreach (string name in inputRefs)
-            {
-                referencedInputs.Add(name);
-            }
-        }
-        return true;
-    }
-
-    /// <summary>�����������û�����ֵ����������ģ�����û��û���ʽ�ṩ��������ȱʧ���� default������ȱʧ��У��ʧ�ܷ��ش���</summary>
-    private static Dictionary<string, string>? ResolveInputValues(
-        List<PluginInputDeclaration> declarations,
-        IReadOnlyDictionary<string, string>? provided,
-        HashSet<string> referencedInputs,
-        out string? error)
-    {
-        error = null;
-        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        // �û��ṩ�ļ�����Сд�����й�һ������ʵ���洢�������ļ���Сд���쵼��ȡֵ��ա�
-        var providedNormalized = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (provided is not null)
-        {
-            foreach (KeyValuePair<string, string> item in provided)
-            {
-                providedNormalized[item.Key] = item.Value;
-            }
-        }
-        foreach (PluginInputDeclaration declaration in declarations)
-        {
-            bool providedValue = providedNormalized.TryGetValue(declaration.Name, out string? raw);
-            if (!referencedInputs.Contains(declaration.Name) && !providedValue)
-            {
-                continue;
-            }
-            string value = providedValue ? raw!.Trim() : "";
-            if (value.Length == 0)
-            {
-                value = declaration.Default.Trim();
-            }
-            if (value.Length == 0)
-            {
-                if (declaration.Required && referencedInputs.Contains(declaration.Name))
-                {
-                    error = $"ȱ�ٱ������롸{(declaration.Label.Length > 0 ? declaration.Label : declaration.Name)}��";
-                    return null;
-                }
-                values[declaration.Name] = "";
-                continue;
-            }
-            string? invalidReason = ValidateInputValue(declaration, value);
-            if (invalidReason is not null)
-            {
-                error = $"���롸{(declaration.Label.Length > 0 ? declaration.Label : declaration.Name)}��{invalidReason}";
-                return null;
-            }
-            values[declaration.Name] = value;
-        }
-        foreach (string name in referencedInputs)
-        {
-            if (!values.ContainsKey(name))
-            {
-                error = $"���롸{name}��δ�� resolve.json �� inputs ������";
-                return null;
-            }
-        }
-        return values;
-    }
-
-    /// <summary>�û�����ֵ���߾�������ֹ·���ָ�����ð�š����·���Ρ�ͨ����뻨���ţ���ֹƴ��Խ���ע��ռλ����pattern Ϊ����Զ������������</summary>
-    private static string? ValidateInputValue(PluginInputDeclaration declaration, string value)
-    {
-        if (value.Any(char.IsControl))
-        {
-            return "���������ַ�";
-        }
-        if (value.Contains('/') || value.Contains('\\'))
-        {
-            return "����������·���ָ���";
-        }
-        if (value.Contains(':'))
-        {
-            return "����������ð��";
-        }
-        if (value.Contains(".."))
-        {
-            return "�������������·����";
-        }
-        if (value.Any(c => "*?\"<>|{}".Contains(c)))
-        {
-            return "�����Ƿ��ַ�";
-        }
-        if (declaration.Pattern.Length > 0 && !Regex.IsMatch(value, declaration.Pattern))
-        {
-            return "�����ϲ�������ĸ�ʽҪ��";
-        }
-        return null;
-    }
-
-    /// <summary>�����滻ģ���е� {input:����} ռλ�������滻�ѽ���������ֵ����</summary>
-    private static string SubstituteInputs(string template, Dictionary<string, string> values)
-    {
-        if (template.Length == 0 || values.Count == 0 || !template.Contains("{input:", StringComparison.Ordinal))
-        {
-            return template;
-        }
-        return InputPlaceholderRegex.Replace(
-            template,
-            match => values.TryGetValue(match.Groups[1].Value, out string? value) ? value : match.Value);
-    }
-
-    private static readonly Regex InputPlaceholderRegex = new(@"\{input:([A-Za-z][A-Za-z0-9_]*)\}", RegexOptions.Compiled);
-
-    private static readonly Regex BindingPlaceholderRegex = new(@"\{(rel:)?[A-Za-z][A-Za-z0-9_]*\}", RegexOptions.Compiled);
-
-    private string ReadJudgeScript()
+}
+    /// <summary>解析 resolve.json 的 inputs 声明；可选段，声明无效时返回错误原因。</summary>
+    internal string ReadJudgeScript()
     {
         try
         {
-            // �жϽű��� resolve.json һ���ǲ����ǰ�汾���ʲ�������ʱֻ��ȡһ�β������������п��ա�
+            // 判断脚本和 resolve.json 一样是插件当前版本的资产，解析时只读取一次并交给本次运行快照。
             return File.ReadAllText(_judgeScriptPath);
         }
         catch (Exception ex)
         {
-            Logger.Warn($"ר���жϽű���ȡʧ�ܣ�{_judgeScriptPath}�����ж����˻�Ϊ�����˳����壺{ex.Message}");
+            Logger.Warn($"专项判断脚本读取失败（{_judgeScriptPath}），判定将退化为进程退出语义：{ex.Message}");
             return "";
         }
     }
@@ -306,7 +144,7 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"ר������У��ű���ȡʧ�ܣ�{_configValidatorPath}����{ex.Message}");
+                    Logger.Warn($"专项配置校验脚本读取失败（{_configValidatorPath}）：{ex.Message}");
                     _configValidator = "";
                 }
             }
@@ -332,7 +170,7 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
                 }
                 catch (Exception ex)
                 {
-                    Logger.Warn($"ר�����ñ༭�ű���ȡʧ�ܣ�{_configEditorPath}����{ex.Message}");
+                    Logger.Warn($"专项配置编辑脚本读取失败（{_configEditorPath}）：{ex.Message}");
                     _configEditor = "";
                 }
             }
@@ -340,143 +178,4 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
         }
     }
 
-    private static ConfigEditOptions? ParseConfigEditOptions(
-        JsonNode? node,
-        IReadOnlyList<PluginInputDeclaration> declarations,
-        out string? error)
-    {
-        error = null;
-        if (node is null)
-        {
-            return null;
-        }
-        if (node is not JsonObject configEdit)
-        {
-            error = "configEdit �����Ƕ���";
-            return null;
-        }
-        bool isolate = false;
-        if (configEdit["isolateSiblingCandidates"] is not null)
-        {
-            try
-            {
-                isolate = configEdit["isolateSiblingCandidates"]!.GetValue<bool>();
-            }
-            catch
-            {
-                error = "isolateSiblingCandidates �����ǲ���ֵ";
-                return null;
-            }
-        }
-        ConfigEditFreshInput? freshInput = null;
-        if (configEdit["freshInput"] is not null)
-        {
-            if (configEdit["freshInput"] is not JsonObject fresh)
-            {
-                error = "freshInput �����Ƕ���";
-                return null;
-            }
-            string name = fresh["name"]?.ToString()?.Trim() ?? "";
-            string value = fresh["value"]?.ToString()?.Trim() ?? "";
-            PluginInputDeclaration? declaration = declarations.FirstOrDefault(item =>
-                item.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-            if (declaration is null || string.IsNullOrWhiteSpace(value))
-            {
-                error = "freshInput �������������������벢�ṩ�ǿ� value";
-                return null;
-            }
-            if (ValidateInputValue(declaration, value) is string invalid)
-            {
-                error = $"freshInput.value {invalid}";
-                return null;
-            }
-            freshInput = new ConfigEditFreshInput(declaration.Name, value);
-        }
-        return new ConfigEditOptions(isolate, freshInput);
-    }
-
-    /// <summary>�ڸ�Ŀ¼�����ļ���searchUpward ʱ�����ϣ���� 4 �㣩��</summary>
-    private static string? FindFile(string rootPath, string file, bool searchUpward)
-    {
-        string candidate = NormalizePathSeparators(Path.Combine(rootPath, file));
-        if (File.Exists(candidate))
-        {
-            return candidate;
-        }
-        if (!searchUpward)
-        {
-            return null;
-        }
-        string? dir = Directory.GetParent(rootPath)?.FullName;
-        for (int depth = 0; dir is not null && depth < 4; depth++)
-        {
-            candidate = NormalizePathSeparators(Path.Combine(dir, file));
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-            dir = Directory.GetParent(dir)?.FullName;
-        }
-        return null;
-    }
-
-    /// <summary>����ģ�������args Ϊ�����ı�����·��������ռλ��ʱ��·�����������{rel:var} ���·����������ԭ�����ء�</summary>
-    private static string ResolveArgs(string? template, string rootPath, Dictionary<string, string> bindings)
-    {
-        if (string.IsNullOrWhiteSpace(template))
-        {
-            return "";
-        }
-        foreach ((string key, string value) in bindings)
-        {
-            string rel = "{rel:" + key + "}";
-            if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
-            {
-                return NormalizePathSeparators(MakeRelativePath(rootPath, value));
-            }
-            string abs = "{" + key + "}";
-            if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
-            {
-                return NormalizePathSeparators(value);
-            }
-        }
-        return template;
-    }
-
-    /// <summary>·��ģ�������{var} = ���ļ�����·����{rel:var} = ��� rootPath �����·�������ఴ��� rootPath ƴ�ӡ�</summary>
-    private static string ResolvePath(string? template, string rootPath, Dictionary<string, string> bindings)
-    {
-        if (string.IsNullOrWhiteSpace(template))
-        {
-            return "";
-        }
-        foreach ((string key, string value) in bindings)
-        {
-            string abs = "{" + key + "}";
-            string rel = "{rel:" + key + "}";
-            if (template.Contains(rel, StringComparison.OrdinalIgnoreCase))
-            {
-                return NormalizePathSeparators(MakeRelativePath(rootPath, value));
-            }
-            if (template.Contains(abs, StringComparison.OrdinalIgnoreCase))
-            {
-                return NormalizePathSeparators(value);
-            }
-        }
-        return NormalizePathSeparators(Path.Combine(rootPath, template.Trim()));
-    }
-
-    /// <summary>ͳһר������������е� Windows ·���ָ��������� resolve.json ʹ��б��ʱ���ɻ��·����</summary>
-    private static string NormalizePathSeparators(string path)
-    {
-        return path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
-    }
-
-    /// <summary>�������·����toFile ��� fromDir����ͬĿ¼����� .\ ��ͷ������ʱ����Ŀ�����壩��</summary>
-    private static string MakeRelativePath(string fromDir, string toFile)
-    {
-        string from = fromDir.EndsWith("\\", StringComparison.Ordinal) ? fromDir : fromDir + "\\";
-        string rel = Uri.UnescapeDataString(new Uri(from).MakeRelativeUri(new Uri(toFile)).ToString()).Replace('/', '\\');
-        return rel.StartsWith(".\\", StringComparison.Ordinal) || rel.StartsWith("..\\", StringComparison.Ordinal) ? rel : ".\\" + rel;
-    }
 }
