@@ -2,6 +2,17 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.2（Pre-release）
+
+### 文档与维护性
+
+- 文档事实、控制面入口、插件契约与测试门禁按当前实现重新对账。
+- 补齐网络通知、Web API 与调度维护性测试，并完成内部职责收敛。
+
+### 仪表盘
+
+- 优化近 7 日历史摘要的状态分布与每日趋势展示。
+
 ## v0.16.1（Pre-release）
 
 ### 插件会话轮换

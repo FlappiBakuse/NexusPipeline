@@ -42,7 +42,7 @@ NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C
 
 - `frontend/` 是宿主前端源码的唯一入口，使用 Vue 3、TypeScript、Vite 和项目内 Nexus UI 组件；Node/npm 只用于开发与发布构建，运行时只托管构建生成的静态文件。
 - `frontend/dist/` 构建结果同步到发布包 `wwwroot/`；最终用户不需要 Node/npm。源码、构建产物和发布静态目录之间的同步由 `build.cmd` 负责。
-- 可复用交互控件优先使用 `frontend/src/ui/primitives/`，对插件开放的稳定控件以 `nxp-*` Native Custom Elements 注册。插件只能依赖 Frontend API 1.4、公开 slot 和这些公共元素，不得依赖 Vue 内部组件、宿主私有 class 或已移除的 `host.controls` / `host.actions`。
+- 可复用交互控件优先使用 `frontend/src/ui/primitives/`，对插件开放的稳定控件以 `nxp-*` Native Custom Elements 注册。插件只能依赖 Frontend API 1.5、公开 slot 和这些公共元素，不得依赖 Vue 内部组件、宿主私有 class 或内部实现。
 - 宿主平台服务位于 `frontend/src/platform/`，启动编排位于 `frontend/src/app/bootstrap.ts`；`frontend/src` 不引用 `wwwroot/` 源码，宿主源码与发布静态目录之间没有源码依赖。
 - 插件桥接实现位于 `frontend/src/plugin-bridge/`，只通过 `plugin-bridge/host-adapter.ts` 使用宿主平台服务；宿主 `app/**`、`features/**`、`ui/**` 只经 `@bridge/index` facade 使用 slot 与生命周期能力，不直接引用桥接内部模块。
 - 业务页面的编排放在 `frontend/src/features/<domain>/<Domain>Page.vue`；复杂事务进入同域 `components/`、请求进入 `services/`、纯转换进入 `utils/`。新增请求与状态不放进页面之外的可变全局单例。

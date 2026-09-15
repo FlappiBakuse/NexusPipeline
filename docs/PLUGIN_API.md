@@ -2,7 +2,7 @@
 
 数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.6 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
-插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
+插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[前端插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
 ## 目录结构
 
@@ -90,7 +90,8 @@ queues.editor.sections          dispatch.cards
 dispatch.running.badges         dispatch.running.sidecar
 dispatch.run.sections
 history.list.badges             history.detail.sections
-settings.sections               shell.nav
+settings.sections               settings.cards
+shell.nav
 ```
 
 每个贡献包含稳定 `id`、`slot`、`kind`、标题、说明、排序值和可选字段。字段类型包括 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`，以及 v1.3 的 `number`、`color`、`range`、`url`。上下文使用 `PluginUiContext(Slot, Mode, PrimaryId, SecondaryId)`；例如脚本编辑器可用 `PrimaryId` 表示脚本实例，用户绑定设置可同时传入用户和脚本 ID。
@@ -193,7 +194,6 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
       "originalName": "wallpaper.png",
       "mimeType": "image/png",
       "sizeBytes": 102400,
-      "createdAt": "2026-09-12T00:00:00.0000000+00:00",
       "palette": { "--accent": "#62a0ff" }
     }
   ]
@@ -234,7 +234,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.5` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
 
-公开元素注册表位于 `frontend/src/ui/register.ts` 的 `NEXUS_PUBLIC_ELEMENTS`，插件只应使用该注册表登记的元素。当前包含 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-section-card`、`nxp-collapsible-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-switch-setting`、`nxp-switch-list`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner`、`nxp-empty-state`、`nxp-icon` 和 `nxp-loading-state`，共 28 个。
+公开元素注册表位于 `frontend/src/ui/register.ts` 的 `NEXUS_PUBLIC_ELEMENTS`，插件只应使用该注册表登记的元素。当前包含 `nxp-button`、`nxp-icon-button`、`nxp-badge`、`nxp-card`、`nxp-section-card`、`nxp-collapsible-card`、`nxp-field`、`nxp-text-input`、`nxp-text-area`、`nxp-select`、`nxp-number-input`、`nxp-switch`、`nxp-switch-setting`、`nxp-switch-list`、`nxp-range`、`nxp-path-picker`、`nxp-file-picker`、`nxp-color-picker`、`nxp-time-picker`、`nxp-menu`、`nxp-tooltip`、`nxp-pager`、`nxp-modal`、`nxp-toast`、`nxp-spinner`、`nxp-empty-state`、`nxp-icon`、`nxp-scroll-area` 和 `nxp-loading-state`，共 29 个。
 
 元素在 light DOM 下渲染，自身不产生额外布局盒：插件的结构卡片（`nxp-collapsible-card`、`nxp-section-card`）与宿主卡片一样直接参与设置页卡片栅格，展开态因此按同一规则置顶。`nxp-switch-list` 把多个 `nxp-switch-setting` 组成与设置页一致的开关列表。
 
@@ -253,7 +253,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 `capabilities` 仅作为发现元数据，除已明确接入的 v1.3 扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`minHostVersion`、`runtimeErrorCode`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。宿主版本低于 `minHostVersion` 时使用 `state=Incompatible` 与 `runtimeErrorCode=plugin_incompatible_host`，不会解析专项插件、注册其能力或加载 managed-code 程序集；Plugin API 不兼容使用 `plugin_incompatible_api`。插件商店列表与详情另提供 `compatibilityCode`，使用 `host_version_too_low`、`plugin_api_incompatible` 或 `invalid_version` 区分更新阻断原因。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 
-插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，创建时间取 `store.json.createdAt`（插件第一次正式公开发布日期），更新时间取最新更新记录日期。旧 catalog 缺少 `createdAt` 时按空值展示并保持可读取。
+插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，`createdAt` 是 catalog 可选的创建日期投影，缺失时按空值展示，更新时间取最新更新记录日期。
 
 ## plugin.json（根文件）
 
@@ -289,7 +289,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
 | `configValidator` | 配置编辑完成后运行的可选配置校验/自修复脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
 | `configEditor` | 配置编辑准备阶段运行的可选工作副本调整脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
-| `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏；持久化启动开关、参数和等待时间保留，仅在运行时生成宿主启动计划约束）、`execution-preview-client` |
+| `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏；持久化启动开关、参数和等待时间保留，仅在运行时生成宿主启动计划约束）、`execution-preview-client`、`no-fresh-config`（插件不允许使用全新配置文件模式） |
 
 `self-managed-pc-launch` 的持久化启动开关、参数和等待时间保持用户设置；能力只在 PC 模式生成运行时宿主启动计划约束，切换到模拟器模式时可恢复原设置。
 
@@ -342,13 +342,13 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 }
 ```
 
-- **inputs（可选）**：用户输入变量声明，供 paths/require 模板内联引用。`name` 必须是字母开头的字母/数字/下划线且不重复；`label`/`description` 为回退文本，`labelKey`/`descriptionKey` 可引用插件 `i18n/` 资源中的展示文字；`default` 为缺省值；`required` 表示缺失（且无 default 可回退）时推导失败；`pattern` 为可选的整串正则校验。仅声明未被模板引用的输入不参与推导。宿主对所有输入值做基线净化（禁止路径分隔符、冒号、相对路径段、通配符、花括号与控制字符），防止路径拼接越界。`configPath` 模板恰好引用一个输入且输入未提供/指向的目标不存在时，宿主枚举静态目录中匹配「静态前缀 + * + 静态后缀」的**文件与子目录**作为候选（目录候选服务于实例目录型配置），目录内唯一候选时自动绑定并跟随改名，多候选不猜测；`pattern` 同时用于枚举过滤（如实例目录名 `^\d{2}$` 可排除共享数据目录）。宿主 v0.15.3 起按请求语言解析 `label`/`description` 并返回输入 DTO，输入 key 必须存在于所有 locale 资源中。宿主 v0.14.2 起输入值按用户保存在绑定（`configInputs`）上，运行/编辑/校验按用户绑定解析（接管哪个配置文件属于用户选择，多用户可各自接管不同配置）；脚本实例的 `pluginInputs` 仅作为未设置绑定输入时的回退，专项实例编辑弹窗不再渲染输入表单。
+- **inputs（可选）**：用户输入变量声明，供 paths/require 模板内联引用。`name` 必须是字母开头的字母/数字/下划线且不重复；`label`/`description` 为回退文本，`labelKey`/`descriptionKey` 可引用插件 `i18n/` 资源中的展示文字；`default` 为缺省值；`required` 表示缺失（且无 default 可回退）时推导失败；`pattern` 为可选的整串正则校验。仅声明未被模板引用的输入不参与推导。宿主对所有输入值做基线净化（禁止路径分隔符、冒号、相对路径段、通配符、花括号与控制字符），防止路径拼接越界。`configPath` 模板恰好引用一个输入且输入未提供/指向的目标不存在时，宿主枚举静态目录中匹配「静态前缀 + * + 静态后缀」的**文件与子目录**作为候选（目录候选服务于实例目录型配置），目录内唯一候选时自动绑定并跟随改名，多候选不猜测；`pattern` 同时用于枚举过滤（如实例目录名 `^\d{2}$` 可排除共享数据目录）。宿主按请求语言解析 `label`/`description` 并返回输入 DTO，输入 key 必须存在于所有 locale 资源中。输入值按用户保存在绑定（`configInputs`）上，运行/编辑/校验按用户绑定解析（接管哪个配置文件属于用户选择，多用户可各自接管不同配置）；脚本实例的 `pluginInputs` 仅作为未设置绑定输入时的回退，专项实例编辑弹窗不再渲染输入表单。
 - **require**：全部满足才推导成功（替代 DLL 时代的 `File.Exists` 校验）。`file` 相对脚本根目录；`var` 将匹配到的绝对路径绑定为变量；`searchUpward: true` 时根目录找不到则逐级向上搜索（最多 4 层，March7th 管理端/执行端分离场景）。
 - **paths**：`mainExe` / `args` / `configPath` / `logPath` 四项，另有可选 `extraConfigPaths` 数组。
   - 占位符 `{var}` = 绑定文件绝对路径；`{rel:var}` = 相对脚本根目录的相对路径（运行时启动目标语义，同目录结果带 `.\` 前缀）。**占位符仅整体替换**：整项命中即替换为该路径，不支持路径文本内嵌入拼接（如 `C:\dir\{var}` 的模板会丢弃前缀只保留 `{var}` 解析值）；需要组合路径时请用无占位符的相对拼接。绑定占位符每项最多 1 个，且不可与 `{input:名称}` 混用。
   - 占位符 `{input:名称}` = 用户输入值**内联替换**，可与相对路径文本自由组合（如 `BAAH_CONFIGS/{input:config}`、`--config {input:config}`）；引用未声明的输入、必填输入缺失且无 default、或值未通过 pattern 校验时整体推导失败。
   - 无占位符：路径字段按相对脚本根目录拼接；`args` 原样返回（参数文本）。`logPath` 允许为空：为空表示专项脚本无专用日志文件，判定日志改由进程标准输出提供。
-  - `extraConfigPaths`（可选，宿主 v0.14.1+）：附加配置文件/文件夹路径数组（相对脚本根目录，支持 `{input:名称}`）。附加路径与主配置路径一样按用户快照隔离交换（运行前快照覆盖现场、运行后与编辑提交差异入库），但**判定脚本始终不可见**——`input.files`、`replaceConfigs` 与 config-restore 只作用于主 `configPath`。适用对象是软件级配置（如 BAAH 的 `DATA/CONFIGS/software_config.json`、BetterGI 的 `User/config.json`）。快照缺失宽容：现场也不存在时保持为空，等现场生成后自动采用。
+  - `extraConfigPaths`（可选）：附加配置文件/文件夹路径数组（相对脚本根目录，支持 `{input:名称}`）。附加路径与主配置路径一样按用户快照隔离交换（运行前快照覆盖现场、运行后与编辑提交差异入库），但**判定脚本始终不可见**——`input.files`、`replaceConfigs` 与 config-restore 只作用于主 `configPath`。适用对象是软件级配置（如 BAAH 的 `DATA/CONFIGS/software_config.json`、BetterGI 的 `User/config.json`）。快照缺失宽容：现场也不存在时保持为空，等现场生成后自动采用。
   - `mainExe` 推导后必须存在（require 覆盖或文件真实存在），否则推导失败（前端保存被拒）。
 
 附加配置路径的运行准备与快照同步采用带 manifest 的 stage/backup/commit 事务；准备失败会回滚已处理路径并阻断本次运行，启动恢复和运行收尾会处理未提交现场，无法确认的现场保留并告警。

@@ -11,6 +11,7 @@
 | L3 Web Logic | `frontend/src/**/*.test.ts` | 否 | 否 | 可独立导入的 ES module 纯函数、Vue 组件契约和协议转换 |
 
 L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 Node 用例，`node tests\run.mjs web` 会提示该情况并以 `0` 结束。
+
 | L4 System Smoke | `tests/system/` | 是 | 否 | Windows 进程、HTTP/CLI/MCP、诊断与运行解释、解释器、端口、模拟器和更新事务 |
 | L5 UI Smoke | `tests/e2e/tests/*.smoke.spec.mjs` | 是 | 是 | 页面加载、导航和少量关键用户工作流 |
 
@@ -18,7 +19,7 @@ L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 N
 
 运行时效率诊断先构建 `tests/stress/RuntimeEfficiencyDiagnostic/RuntimeEfficiencyDiagnostic.csproj`，再执行 `node tests\stress\runtime-efficiency.mjs`；默认测量 600 个调度 tick、100 MiB 日志 checkpoint 和一次追加读取，使用隔离 runtime 输出机器可读 JSON，结束后清理临时目录。
 
-文档一致性检查独立于 L1–L5：`tests/documentation/documentation-consistency.mjs` 检查 Markdown 本地链接、CHANGELOG 标题唯一性、README 导航、当前版本和已删除路径引用；`tests/documentation/test-policy-consistency.mjs` 检查持久化测试中是否出现截图匹配器、视觉回归套件和快照基线。
+文档一致性检查独立于 L1–L5：`tests/documentation/documentation-consistency.mjs`、`i18n-consistency.mjs`、`i18n-semantic-consistency.mjs`、`i18n-audit-consistency.mjs`、`backend-i18n-audit.mjs`、`native-scrollbar-audit.mjs` 和 `test-policy-consistency.mjs` 共七个脚本共同构成 Docs 门禁。它们分别检查 Markdown/版本/导航、语言资源、语义键、审计清单、后端本地化、原生滚动条约束以及持久化测试政策。
 
 ## 测试归属与写法
 
@@ -31,12 +32,12 @@ L3 用例统一由 frontend Vitest 承载；`tests/web/` 已不再保留独立 N
 
 ### UI Smoke 配额
 
-当前浏览器验收保留 10 个用户工作流，硬上限 12 个：
+当前浏览器验收保留 11 个用户工作流，硬上限 12 个：
 
 ```text
 tests/e2e/tests/
 ├── app.smoke.spec.mjs                 2
-├── scripts-users.smoke.spec.mjs       2
+├── scripts-users.smoke.spec.mjs       3
 ├── queues.smoke.spec.mjs              2
 └── settings-platform.smoke.spec.mjs   4
 ```
@@ -86,7 +87,7 @@ node tests\run.mjs syntax
 node tests\run.mjs build
 ```
 
-`tooling` 运行 `tests/tools/ci-domains.test.mjs`，校验 CI 影响域清单与四个 System 分组的映射关系；`changes` 作业在判定影响域之前执行同一用例。
+`tooling` 运行 `tests/tools/ci-domains.test.mjs` 与 `tests/tools/update-policy-history.test.mjs`，分别校验 CI 影响域清单/四个 System 分组映射和更新策略历史；`changes` 作业在判定影响域之前执行同一组用例。
 
 `codex all` 不执行 frontend Vitest；每次修改前端源码都必须显式运行 `npm test --prefix frontend`。
 
@@ -118,7 +119,7 @@ node tests\run.mjs codex system [runtime|execution|emulator|update] [--realtime]
 
 1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、UI Smoke（适用时）和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`。
-3. 发布前由 CI 在管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`。
+3. 发布前在适用的 CI 触发路径中由管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`；计划任务与手动回归会执行完整组合。
 4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。
 5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`。该脚本使用 mock host 运行插件入口，不读取宿主检出；插件仓库 CI 的 plugin-frontend Gate 不检出宿主，元素白名单在无宿主检出时使用脚本内维护的清单。宿主 CI 的插件契约 Gate 检出官方插件仓库并在宿主工作区内运行同一脚本，元素白名单来自同级宿主检出的 `NEXUS_PUBLIC_ELEMENTS`。managed-code 构建与打包使用 `host.lock.json` 锁定的宿主 commit。
 
@@ -130,7 +131,7 @@ node tests\run.mjs codex system [runtime|execution|emulator|update] [--realtime]
 
 CI 不创建临时测试账户、不写入测试账户密码、不使用令牌降级启动器，也不把日志、配置、密钥或运行产物加入版本库。Playwright 失败结果保留在 `tests/e2e/test-results/` 供同一 step 上传，测试结束后按项目 AGENTS.md 的精确清单清理。
 
-`.github/workflows/ci.yml` 按影响域拆成六个 Gate：前端 Unit（ubuntu：`npm ci`、typecheck、Vitest、构建）、宿主 Core（windows：编译加 `node tests\run.mjs unit`）、文档与 i18n（ubuntu：`node tests\run.mjs docs`）、插件契约（windows：Plugin API 编译、`unit`、plugin-bridge 契约用例，并检出官方插件仓库运行 `node tools\Test-FrontendPlugins.mjs`）、管理员 UI Smoke（windows：`node tests\run.mjs admin ui`）、System 四域（windows：`node tests\run.mjs admin system runtime|execution|emulator|update`）。
+`.github/workflows/ci.yml` 按影响域拆分基础 Gate 与独立的 System Smoke 子作业：前端 Unit（ubuntu：`npm ci`、typecheck、Vitest、构建）、宿主 Core（windows：编译加 `node tests\run.mjs unit`）、文档与 i18n（ubuntu：`node tests\run.mjs docs`）、插件契约（windows：Plugin API 编译、`unit`、plugin-bridge 契约用例，并检出官方插件仓库运行 `node tools\Test-FrontendPlugins.mjs`）、管理员 UI Smoke（windows：`node tests\run.mjs admin ui`），以及 System 的 runtime、execution、emulator、update 四个独立作业。计划任务与手动触发的 full-regression 会执行完整组合。
 
 影响域路径清单维护在 `tools/ci-domains.mjs`，判定脚本 `tools/ci-changes.mjs` 输出九个域布尔值（`frontend`、`host`、`docs`、`plugin`、`ui` 与 `system_runtime`、`system_execution`、`system_emulator`、`system_update`）。四个 System 域各自只覆盖对应的运行时路径，横切文件（宿主入口与启动、持久化、Web 控制面、插件加载、构建与测试入口）显式列入多个域。改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。映射关系由 `tests/tools/ci-domains.test.mjs` 固定，`changes` 作业在判定前运行该用例。每周 `schedule`（`17 3 * * 1`）与手动 `workflow_dispatch` 运行 `node tests\run.mjs admin all` 全量回归。
 

@@ -25,7 +25,7 @@
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
 | 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
-| 设置读取 | 设置 API | `settings status` | `get_settings`（密钥脱敏） |
+| 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
 | 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`（仅回环） | `doctor`、`doctor export` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
@@ -33,7 +33,7 @@
 
 更新状态投影在发现候选版本后补充 `policyVerified`、`canDownload`、`manualUpdateRequired`、`updateBlockCode`、`barrierVersion`、`migrationUrl` 和 `policyError`。`updateBlockCode=breaking-update` 时，页面显示手动下载安装包与配置迁移指引，下载、下次启动应用和自动应用入口均被后端拒绝；策略无法验证时使用 `policy-unavailable` 并保持 fail-closed。
 
-插件读取的本地列表、商店列表和详情投影均以 additive 字段提供 `createdAt`；该字段表示插件第一次正式公开发布日期，旧插件或旧 catalog 缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。
+插件读取的本地列表、商店列表和详情投影均可提供 additive 字段 `createdAt`；该字段来自 catalog 的可选创建日期，缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。
 
 ## 行为护栏
 

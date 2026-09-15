@@ -211,7 +211,7 @@ flowchart TD
 
 ### 3.5 MCP Agent 控制面
 
-v0.10.5 在同一个 `nexus-pipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
+宿主在同一个 `nexus-pipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
 
 ```text
 http://127.0.0.1:<McpPort>/mcp
@@ -226,7 +226,7 @@ MCP 的启动条件和运行语义如下：
 
 MCP 只保留面向 Agent 的核心子集（22 个工具）：只读工具覆盖状态、诊断、运行计划解释、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
-v0.10.6 对 MCP 控制面采用以下行为契约：
+MCP 控制面采用以下行为契约：
 
 - NexusPipeline 信任同一台计算机上的本机进程；loopback、Host、Origin 与请求体限制用于网络和网页边界，MCP 不增加本机进程认证令牌或 SID 鉴权。
 - `run_queue` 在提交执行前复核队列快照的 `CompletionAction`；任何非 `none` 动作都返回稳定的 `dangerous_completion_action`，既有 Web/本地队列仍可按本地设置执行完成操作。
@@ -263,7 +263,7 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 更新检查发现候选版本后，`UpdateService` 通过固定更新源读取根目录 `update-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
 
-主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。`update-policy.json` 的屏障记录在破坏性布局发布前按版本递增追加，桥接版本从 `v0.15.12` 开始承担该策略检查。
+主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。`update-policy.json` 的屏障记录在破坏性布局发布前按版本递增追加，启动时按当前版本与目标版本区间执行策略检查。
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
@@ -466,7 +466,7 @@ flowchart LR
 
 ### 7.3 插件仓库与安装事务
 
-官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式源码插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），源码按 `plugins/general/`（managed-code）和 `plugins/specialized/`（data-specialized）分类；GitHub Actions 据此生成根目录 `catalog.json` 与扁平 `packages/<artifactName>/`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N`，按 beta、rc、stable 顺序比较；`store.json.createdAt` 固定记录插件第一次正式公开发布日期，catalog 同步提供 `createdAt` 与最新 changelog 日期 `updatedAt`。catalog 条目包含名称、正式 artifactName、显示信息、受限 Nexus 版本、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、createdAt 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`，同时写入 `.nxp/state/plugins/catalog-cache.meta.json` 保存源地址、ETag、Last-Modified、最近验证时间和内容 SHA256。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
+官方插件源固定为 `FlappiBakuse/NexusPipeline-Plugins`。每个正式源码插件目录维护 `plugin.json`（运行时事实）与 `store.json`（商店展示元数据），源码按 `plugins/general/`（managed-code）和 `plugins/specialized/`（data-specialized）分类；GitHub Actions 据此生成根目录 `catalog.json` 与扁平 `packages/<artifactName>/`。schemaVersion 2 的 manifest 必须使用小写 kebab-case 机器 ID，并声明严格区分大小写的 `artifactName`；源码目录、宿主安装目录、发行目录和 ZIP 名称均使用 artifactName，配置、密钥、作用域和偏好仍使用机器 ID。版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N`，按 beta、rc、stable 顺序比较；catalog 可选提供 `createdAt` 与最新 changelog 日期 `updatedAt`，缺失的创建日期按空值处理。catalog 条目包含名称、正式 artifactName、显示信息、受限 Nexus 版本、插件类型、最低宿主版本、官方 raw 包地址、包大小、SHA256 和最近更新记录。客户端对 catalog 做 schema、重复名称、artifactName、官方 URL、版本、大小、SHA256、可选 createdAt 和 changelog 校验，并将最近成功目录缓存到 `.nxp/state/plugins/catalog-cache.json`，同时写入 `.nxp/state/plugins/catalog-cache.meta.json` 保存源地址、ETag、Last-Modified、最近验证时间和内容 SHA256。宿主保留 catalog 作为高效索引，新增插件由自身 manifest/store 驱动生成。
 
 插件页默认显示「插件仓库」，提供浏览、安装、更新和卸载；「本地插件」继续显示当前运行目录的分组与启停状态。catalog 在最近 5 分钟验证有效期内直接复用内存快照；过期或手动刷新时携带 ETag/Last-Modified 发起条件请求，`304` 只更新时间和验证元数据，`200` 仅在内容 SHA256 变化时替换 catalog 快照；没有 HTTP validator 时仍以校验后的内容哈希判断是否变化。网络失败时显示经校验的磁盘缓存并标记为 stale，没有可用缓存则返回仓库不可用状态。README 按官方 artifact/version 记录条件验证缓存，本地 README 按路径、文件大小和 LastWriteTimeUtc 指纹复用。`PluginManager` 的本地插件管理投影使用运行时修订缓存，启停、安装/更新/卸载登记、重载和归属/待处理事务变化会使其失效；前端保留当前列表和详情，在后台验证期间继续展示。
 
@@ -480,7 +480,7 @@ flowchart LR
 
 `PluginManager.LoadAll` 在运行时再次比较每个插件的 `minHostVersion` 与宿主当前受限版本。手动放入最低版本过高的插件会保留在管理投影中并标记 `Incompatible`，同时跳过数据插件能力/解析器注册与 managed-code 程序集加载；前端详情显示最低宿主版本和升级提示。Plugin API 不兼容继续使用独立的运行时错误码，避免与宿主版本不兼容混淆。
 
-插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在 v0.10.7 → v0.10.8 升级时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除的插件以 `unlisted` 状态保留卸载入口。现有用户 `plugins/` 在宿主更新时保留；宿主更新器只交换 exe 与 `wwwroot/`。
 
 插件配置、密钥和作用域 JSON 解析失败时保留 `.corrupt-<timestamp>-<guid>` 现场，再以空值继续运行；后续写入不会覆盖原始损坏文件。managed-code 生命周期初始化、启动和停止均有 20 秒截止时间；用户运行事件在插件作用域中跟踪，并在清理时执行有界排空。
 
@@ -532,7 +532,7 @@ managed-code 插件可以通过 Plugin API v1.6 注册用户列表徽章、通�
 3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
 4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。
 5. **持久化格式变更**：改变既有 API、字段或目录布局时，先明确当前协议和升级前备份要求；运行时只处理当前协议，未知现场保留并告警，版本发布说明提供用户可执行的备份提示。
-6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是 v0.12.1 的既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为 v0.13.2 布局。
+6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为当前布局。
 
 ## 8. 已知行为与边界
 
@@ -675,7 +675,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `SessionJudge` | src/Services/Judgement/SessionJudge.cs | 完成判定策略状态机：判断脚本/关键字两模式，维护判定状态与输入 |
 | `JudgeScriptRunner` | src/Services/Judgement/JudgeScriptRunner.cs | 判断脚本执行器：构造脚本字段、用户、config（只读）、script（可读写）和**本次尝试日志段**输入；提供 Jint/Python 执行、30 秒超时、截图 API 和 stdout 尾行 JSON 解析（含 `replaceConfigs`/`notifyScreenshotId`） |
 | `RunScreenshotStore` / `RecentScreenshotCache` / `JudgeScreenshotBridge` | src/Services/Execution/RunScreenshot.cs、src/Services/Execution/RecentScreenshotCache.cs、src/Services/Judgement/JudgeScreenshotBridge.cs | 按 Attempt 隔离的 8 张 FIFO 原分辨率截图池、PC 最近有效帧缓存、历史提交与 Python 判断脚本临时 loopback 截图桥接 |
-| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加/截断后追加/同长度重写/替换四种形态；以已观察内容 checkpoint 定位截断边界，替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
+| `LogMonitor` | src/Services/LogMonitor.cs | 日志增量读取器：追加、截断后追加和替换三种形态；同长度重写通过已观察内容 checkpoint 定位截断边界，替换使用 FileId 与创建时间回退检测，忽略运行前已有内容 |
 | `UserConfigManager` | src/Services/UserConfigManager.cs | 配置储存对外门面，实现分层见 `ConfigSwapPrimitives`/`ConfigSwapSession`/`ConfigSwapPaths`；编辑会话（normal/fresh/reuse）与隐藏配置管理 |
 | `ConfigSwapPrimitives` | src/Services/ConfigSwapPrimitives.cs | 配置交换文件原语层：安全移动/原子替换/重试/跨进程互斥/形态判断 |
 | `ConfigSwapSession` | src/Services/ConfigSwapSession.cs | 配置交换 façade：replaceConfigs、自动更新配置事务镜像与公共会话入口；恢复职责转交 `ConfigSwapRecovery` |
@@ -688,7 +688,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位与清理（持久层在用户目录顶层，会话事务目录收敛于 work/） |
 | `ConfigWorkDirMaintenance` | src/Services/ConfigWorkDirMaintenance.cs | 当前 work/ 空闲目录、runtime 和 staging 启动清扫 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Services/Scheduling/Scheduler.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过队列仓储、历史、设置、执行端口和 `ExecutionValidator` 工作 |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs + SchedulerStateFence.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过状态 fence 编排 occurrence/replay 恢复，持久化 I/O 仍由 `ISchedulerStateStore` 承担 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.6 DTO 均从此入口发送 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
@@ -708,14 +708,15 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
 | `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
-| `PluginManager` | src/Plugins/PluginManager.cs | 负责本地插件发现、加载、开关和生命周期；通用 capability 查询委托 registry，并生成控制面共享插件投影 |
+| `PluginManager` | src/Plugins/PluginManager.cs + PluginManager.Discovery.cs / Lifecycle.cs / Management.cs | 负责本地插件发现、加载、开关和生命周期；通用 capability 查询委托 registry，并生成控制面共享插件投影 |
 | `PluginManagementView` | src/Plugins/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
 | `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.6 UI、作用域数据、插件 Web API、历史贡献、本地化引用注册表与 DTO 校验；按插件生命周期撤销注册 |
 | `PluginAssetStore` | src/Plugins/Managed/PluginAssetStore.cs | 插件二进制资产存储：按插件命名空间与 scope 隔离、内容寻址 Id、原子写入、路径逃逸防护与宿主级绝对上限 |
 | `PluginUserGlobalSettingsService` | src/Plugins/PluginUserGlobalSettingsService.cs | 统一插件用户全局设置的读取、字段投影、secret 脱敏、输入校验和超时边界，供 Web 复用 |
 | `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.5 清单与 `web/` 资源路径，不向前端泄露插件目录 |
 | `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
-| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
+| `DataSpecializedPlugin` | src/Plugins/DataSpecializedPlugin.cs + DataSpecializedPlugin.Manifest.cs / Profile.cs / Inputs.cs | 数据化插件的清单校验、profile 推导、输入声明与配置候选发现；保持数据驱动的插件运行边界 |
+| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs + PluginRepositoryService.Operations.cs / Readme.cs / Cache.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
 | `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
 | `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
 | `DiagnosticsService` | src/Services/Diagnostics/DiagnosticsService.cs | 汇总稳定诊断检查，生成脱敏支持包并执行大小与敏感信息边界校验 |
@@ -855,7 +856,7 @@ Capability 扩展约束：
 | 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/ExecutionCoordinator.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
-| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs`、`src/Plugins/PluginPackageService.cs`、`src/Plugins/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
+| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs` 及其 `Cache.cs` / `Readme.cs` / `Operations.cs` 分部、`src/Plugins/PluginPackageService.cs`、`src/Plugins/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
 | 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
 | 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
