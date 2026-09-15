@@ -1,4 +1,3 @@
-using System.Reflection;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Services;
@@ -97,13 +96,7 @@ public sealed class SchedulerRecoveryTests
 
     private static void MakePendingTriggersDue(Scheduler scheduler)
     {
-        object value = typeof(Scheduler)
-            .GetField("_pendingTriggers", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .GetValue(scheduler)!;
-        foreach (System.Collections.DictionaryEntry entry in (System.Collections.IDictionary)value)
-        {
-            entry.Value!.GetType().GetProperty("NextAttemptAt")!.SetValue(entry.Value, DateTime.MinValue);
-        }
+        scheduler.MakePendingTriggersDueForTest();
     }
 
     private static async Task EventuallyAsync(Func<bool> condition)

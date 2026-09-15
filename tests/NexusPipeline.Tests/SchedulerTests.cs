@@ -264,41 +264,22 @@ public class SchedulerTests
 
     private static int PendingCount(Scheduler scheduler)
     {
-        object value = typeof(Scheduler)
-            .GetField("_pendingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(scheduler)!;
-        return ((System.Collections.IDictionary)value).Count;
+        return scheduler.GetTestSnapshot().PendingCount;
     }
 
     private static string? PendingStatus(Scheduler scheduler)
     {
-        object value = typeof(Scheduler)
-            .GetField("_pendingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(scheduler)!;
-        foreach (System.Collections.DictionaryEntry entry in (System.Collections.IDictionary)value)
-        {
-            return entry.Value?.GetType().GetProperty("Status")?.GetValue(entry.Value)?.ToString();
-        }
-        return null;
+        return scheduler.GetTestSnapshot().PendingStatus;
     }
 
     private static int PendingAttemptCount(Scheduler scheduler)
     {
-        object value = typeof(Scheduler)
-            .GetField("_attemptingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(scheduler)!;
-        return (int)value.GetType().GetProperty("Count")!.GetValue(value)!;
+        return scheduler.GetTestSnapshot().PendingAttemptCount;
     }
 
     private static void MakePendingTriggersDue(Scheduler scheduler)
     {
-        object value = typeof(Scheduler)
-            .GetField("_pendingTriggers", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
-            .GetValue(scheduler)!;
-        foreach (System.Collections.DictionaryEntry entry in (System.Collections.IDictionary)value)
-        {
-            entry.Value!.GetType().GetProperty("NextAttemptAt")!.SetValue(entry.Value, DateTime.MinValue);
-        }
+        scheduler.MakePendingTriggersDueForTest();
     }
 
     private sealed class TestQueueRepository : IQueueRepository

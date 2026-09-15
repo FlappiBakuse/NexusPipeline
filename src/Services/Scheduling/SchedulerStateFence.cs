@@ -17,23 +17,30 @@ internal sealed class SchedulerStateFence
 
     private readonly ExecutionPlanBuilder? _plans;
 
+    private readonly SchedulerRetryQueue _retryQueue;
+
     internal SchedulerStateFence(
         object sync,
         ISchedulerStateStore stateStore,
-        ExecutionPlanBuilder? plans)
+        ExecutionPlanBuilder? plans,
+        SchedulerRetryQueue retryQueue)
     {
         _sync = sync;
         _stateStore = stateStore;
         _plans = plans;
+        _retryQueue = retryQueue;
     }
 
-    internal Dictionary<string, Scheduler.PendingScheduledRun> PendingTriggers { get; } = new(StringComparer.Ordinal);
-
-    internal Dictionary<string, Scheduler.PendingScheduledRun> Occurrences { get; } = new(StringComparer.Ordinal);
+    internal Dictionary<string, ScheduledOccurrence> Occurrences { get; } = new(StringComparer.Ordinal);
 
     internal DateTime? LastSchedulerCheck { get; set; }
 
     internal bool StartupRunsIssued { get; private set; }
+
+    internal void MarkStartupRunsIssuedLocked()
+    {
+        StartupRunsIssued = true;
+    }
 
     internal bool StateDirty { get; private set; }
 
@@ -85,7 +92,7 @@ internal sealed class SchedulerStateFence
                         Logger.Warn($"[调度] 恢复队列「{item.QueueName}」冻结计划失败，将在下次重校验：{ex.Message}");
                     }
                 }
-                var occurrence = new Scheduler.PendingScheduledRun
+                var occurrence = new ScheduledOccurrence
                 {
                     QueueId = item.QueueId,
                     QueueName = item.QueueName,
@@ -101,7 +108,7 @@ internal sealed class SchedulerStateFence
                 Occurrences[occurrence.Key] = occurrence;
                 if (occurrence.Status is "Triggered" or "Waiting")
                 {
-                    PendingTriggers[occurrence.Key] = occurrence;
+                    _retryQueue.RestorePending(occurrence);
                 }
                 if (occurrence.IsStartup && (occurrence.Status is "Triggered" or "Waiting" or "Running"))
                 {

@@ -1,5 +1,3 @@
-using System.Collections;
-using System.Reflection;
 using NexusPipeline.App.Abstractions;
 using NexusPipeline.App.Commands;
 using NexusPipeline.App.Contracts;
@@ -262,49 +260,18 @@ public sealed class BindingAndSchedulerTests
             ExecutionAdmissionProfile.ForQueue(queue, new[] { task }),
             1);
 
-        (IDictionary pending, string key) = AddPending(context.Scheduler, plan, queueId);
+        string key = context.Scheduler.AddPendingForTest(plan, queueId, "regression-occurrence");
         try
         {
-            MethodInfo? lookup = typeof(Scheduler).GetMethod(
-                "HasPendingBinding",
-                BindingFlags.Instance | BindingFlags.Public);
-            Assert.NotNull(lookup);
-            Assert.True((bool)lookup!.Invoke(context.Scheduler, new object[] { userId, scriptId })!);
-            Assert.False((bool)lookup.Invoke(context.Scheduler, new object[] { userId, unrelatedScriptId })!);
-            Assert.False((bool)lookup.Invoke(context.Scheduler, new object[] { Guid.NewGuid().ToString("N"), scriptId })!);
+            Assert.True(context.Scheduler.HasPendingBinding(userId, scriptId));
+            Assert.False(context.Scheduler.HasPendingBinding(userId, unrelatedScriptId));
+            Assert.False(context.Scheduler.HasPendingBinding(Guid.NewGuid().ToString("N"), scriptId));
 
         }
         finally
         {
-            pending.Remove(key);
+            context.Scheduler.RemoveOccurrenceForTest(key);
         }
-    }
-
-    private static (IDictionary Pending, string Key) AddPending(
-        Scheduler scheduler,
-        QueueExecutionPlan plan,
-        string queueId)
-    {
-        Type pendingType = typeof(Scheduler).GetNestedType("PendingScheduledRun", BindingFlags.NonPublic)!;
-        object pending = Activator.CreateInstance(pendingType)!;
-        SetProperty(pendingType, pending, "QueueId", queueId);
-        SetProperty(pendingType, pending, "QueueName", plan.Queue.Name);
-        SetProperty(pendingType, pending, "OccurrenceKey", "regression-occurrence");
-        SetProperty(pendingType, pending, "OriginalTriggerTime", DateTime.Now);
-        SetProperty(pendingType, pending, "Status", "Waiting");
-        SetProperty(pendingType, pending, "NextAttemptAt", DateTime.Now.AddHours(1));
-        SetProperty(pendingType, pending, "Plan", plan);
-
-        string key = queueId + "\nregression-occurrence";
-        FieldInfo field = typeof(Scheduler).GetField("_pendingTriggers", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var pendingDictionary = (IDictionary)field.GetValue(scheduler)!;
-        pendingDictionary.Add(key, pending);
-        return (pendingDictionary, key);
-    }
-
-    private static void SetProperty(Type type, object target, string name, object value)
-    {
-        type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public)!.SetValue(target, value);
     }
 
     private static void RestoreFile(string path, bool existed, byte[]? bytes)
