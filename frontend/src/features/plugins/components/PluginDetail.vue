@@ -135,9 +135,10 @@ function hasPendingAction() {
         </dl>
         <section class="plugin-detail-section">
           <h4>README</h4>
-          <div v-if="plugin.readmeErrorCode" class="callout callout-warning">{{ t('plugin.store.readme_error', {}, 'README 加载失败') }}</div>
-          <div v-else-if="plugin.readmeAvailable === true && plugin.readmeMarkdown" class="plugin-readme" v-html="renderMarkdown(plugin.readmeMarkdown)"></div>
-          <div v-else class="empty compact-empty"><span>{{ plugin.hasReadme ? t("plugins.readme.empty") : t("plugins.no_readme") }}</span></div>
+          <div v-if="plugin.readmeErrorCode && plugin.readmeAvailable === true && plugin.readmeMarkdown" class="callout callout-warning">{{ t('plugin.store.readme_cached', {}, '当前显示上次缓存的 README') }}</div>
+          <div v-else-if="plugin.readmeErrorCode" class="callout callout-warning">{{ t('plugin.store.readme_error', {}, 'README 加载失败') }}</div>
+          <div v-if="plugin.readmeAvailable === true && plugin.readmeMarkdown" class="plugin-readme" v-html="renderMarkdown(plugin.readmeMarkdown)"></div>
+          <div v-else-if="!plugin.readmeErrorCode" class="empty compact-empty"><span>{{ plugin.hasReadme ? t("plugins.readme.empty") : t("plugins.no_readme") }}</span></div>
         </section>
         <section class="plugin-detail-section">
           <h4>{{ t("plugins.changelog") }}</h4>

@@ -175,6 +175,10 @@ jobs:
           npm ci --no-audit --no-fund
           node tools\Test-FrontendPlugins.mjs
 
+      - name: 官方插件 README 源码目录契约
+        shell: pwsh
+        run: node tests\tools\plugin-source-layout.test.mjs
+
   # Gate E：管理员 UI Smoke，保留完整性自检、NEXUS_TIME_SCALE 与失败产物上传。
   ui-smoke:
     name: Gate E 管理员 UI Smoke

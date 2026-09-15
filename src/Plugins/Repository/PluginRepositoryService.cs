@@ -1,29 +1,17 @@
-using System.Net;
-using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Services.Networking;
-using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
 /// <summary>官方插件 catalog 缓存、商店状态合并和生命周期操作编排。</summary>
-internal sealed partial class PluginRepositoryService
+internal sealed class PluginRepositoryService
 {
-    private static readonly TimeSpan ReadmeCacheTtl = TimeSpan.FromMinutes(5);
-    private const long MaxReadmeBytes = 256L * 1024;
-    private const string OfficialReadmePrefix = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/plugins/";
-
-    private readonly Func<AppSettings> _settings;
     private readonly Func<PluginManager> _plugins;
     private readonly PluginPackageService _packages;
     private readonly OutboundHttpClientProvider _outbound;
-    private readonly object _readmeSync = new();
-    private readonly Dictionary<string, PluginReadmeResult> _localReadmeCache = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, PluginReadmeCacheEntry> _officialReadmeCache = new(StringComparer.Ordinal);
+    private readonly PluginReadmeService _readmes;
 
     private readonly PluginRepositoryCatalogCache _catalogCache;
     private readonly PluginStoreProjector _storeProjector;
@@ -35,10 +23,13 @@ internal sealed partial class PluginRepositoryService
         PluginPackageService packages,
         OutboundHttpClientProvider? outbound = null)
     {
-        _settings = settings;
         _plugins = plugins;
         _packages = packages;
         _outbound = outbound ?? new OutboundHttpClientProvider(settings);
+        _readmes = new PluginReadmeService(uri => _outbound.CreateClient(
+            uri,
+            TimeSpan.FromSeconds(30),
+            allowAutoRedirect: false));
         _catalogCache = new PluginRepositoryCatalogCache();
         _storeProjector = new PluginStoreProjector(_plugins);
         _operations = new PluginRepositoryOperations(
@@ -79,7 +70,11 @@ internal sealed partial class PluginRepositoryService
 
             try
             {
-                PluginCatalogFetchResult fetched = await FetchCatalogAsync(cached, source, cancellationToken).ConfigureAwait(false);
+                PluginCatalogFetchResult fetched = await _catalogCache.FetchAsync(
+                    cached,
+                    source,
+                    _outbound,
+                    cancellationToken).ConfigureAwait(false);
                 PluginCatalog catalog;
                 DateTimeOffset fetchedAt;
                 string contentHash;
@@ -194,80 +189,152 @@ internal sealed partial class PluginRepositoryService
         return entry ?? throw new PluginRepositoryException("not_found", $"插件仓库中不存在：{name}");
     }
 
-    private static bool HasPending(string name)
+    public Task<PluginPendingOperation> InstallAsync(
+        string name,
+        bool update,
+        CancellationToken cancellationToken = default) =>
+        _operations.InstallAsync(name, update, cancellationToken);
+
+    public Task<PluginPendingOperation> UninstallAsync(
+        string name,
+        CancellationToken cancellationToken = default) =>
+        _operations.UninstallAsync(name, cancellationToken);
+
+    public async Task<PluginDetail?> GetLocalDetailAsync(
+        string name,
+        CancellationToken cancellationToken = default)
     {
-        return PluginInstallRecovery.ReadPending()
-            .Any(item => string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
+        {
+            return null;
+        }
+        PluginManager manager = _plugins();
+        PluginManagementView? view = manager.PluginManagementViews.FirstOrDefault(item =>
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (view is null || !manager.TryGetPluginDirectory(view.Name, out string? directory) || directory is null)
+        {
+            return null;
+        }
+        PluginReadmeResult readme = await _readmes.LoadLocalAsync(directory, cancellationToken).ConfigureAwait(false);
+        return new PluginDetail(
+            view.Name,
+            view.ArtifactName,
+            view.DisplayName,
+            view.GameName,
+            view.Description,
+            view.Version,
+            view.Kind,
+            view.ApiVersion,
+            view.Capabilities,
+            view.MinHostVersion,
+            !string.Equals(view.State, PluginRuntimeState.Incompatible.ToString(), StringComparison.Ordinal),
+            view.InstalledName,
+            view.InstalledVersion,
+            false,
+            view.RuntimeErrorCode != "plugin_incompatible_host",
+            "",
+            view.ManagedByStore,
+            view.PendingAction,
+            view.PendingVersion,
+            view.State.ToLowerInvariant(),
+            view.ConfiguredEnabled,
+            view.RuntimeEnabled,
+            view.State,
+            view.Error,
+            view.RestartRequired,
+            view.HasFrontend,
+            view.FrontendApiVersion,
+            view.Authors,
+            view.Tags,
+            view.Homepage,
+            view.CreatedAt,
+            view.UpdatedAt,
+            readme.HasReadme,
+            readme.Markdown,
+            readme.Error,
+            view.Changelog,
+            view.Locales)
+        {
+            RuntimeErrorCode = view.RuntimeErrorCode,
+            CompatibilityCode = view.RuntimeErrorCode switch
+            {
+                "plugin_incompatible_host" => "host_version_too_low",
+                "plugin_incompatible_api" => "plugin_api_incompatible",
+                _ when string.Equals(view.State, PluginRuntimeState.Incompatible.ToString(), StringComparison.Ordinal)
+                    => "incompatible",
+                _ => null,
+            },
+        };
     }
 
-    private async Task<PluginCatalogFetchResult> FetchCatalogAsync(
-        PluginCatalogCacheState cached,
-        string source,
-        CancellationToken cancellationToken)
+    public async Task<PluginDetail?> GetStoreDetailAsync(
+        string name,
+        CancellationToken cancellationToken = default)
     {
-        if (!Uri.TryCreate(source, UriKind.Absolute, out Uri? uri)
-            || (uri.Scheme != Uri.UriSchemeHttps && !uri.IsLoopback))
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(name))
         {
-            throw new PluginRepositoryException("repository_unavailable", "插件 catalog 地址无效");
+            return null;
         }
-        var policy = new UpdateSourcePolicy(source);
-        using HttpClient client = _outbound.CreateClient(
-            uri,
-            TimeSpan.FromSeconds(30),
-            allowAutoRedirect: false);
-        using HttpResponseMessage response = await policy.GetAsync(
-            client,
-            uri,
-            UpdateResourceKind.Manifest,
-            "NexusPipeline-plugin-catalog/" + UpdateService.CurrentVersion,
-            cancellationToken,
-            request => AddConditionalHeaders(
-                request,
-                string.Equals(cached.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
-                    ? cached.ETag
-                    : "",
-                string.Equals(cached.SourceUrl, source, StringComparison.OrdinalIgnoreCase)
-                    ? cached.LastModified
-                    : null)).ConfigureAwait(false);
-        DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
-        string? etag = response.Headers.ETag?.ToString();
-        DateTimeOffset? lastModified = ReadLastModified(response);
-        if (response.StatusCode == HttpStatusCode.NotModified && cached.Catalog is not null)
+        PluginStoreSnapshot snapshot = await GetStoreAsync(false, cancellationToken).ConfigureAwait(false);
+        if (!snapshot.Available)
         {
-            return new PluginCatalogFetchResult(
-                null,
-                cached.FetchedAt,
-                checkedAt,
-                etag,
-                lastModified,
-                cached.ContentHash,
-                NotModified: true);
+            throw new PluginRepositoryException(
+                "repository_unavailable",
+                snapshot.Error ?? "插件仓库暂不可用");
         }
-        if (!response.IsSuccessStatusCode)
+        PluginStoreItem? item = snapshot.Plugins.FirstOrDefault(plugin =>
+            string.Equals(plugin.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
         {
-            throw new PluginRepositoryException("repository_unavailable", $"插件 catalog 请求失败：HTTP {(int)response.StatusCode}");
+            return null;
         }
-        if (response.Content.Headers.ContentLength is long length && length > PluginRepositoryCatalog.MaxCatalogBytes)
+        PluginManagementView? installedView = _plugins().PluginManagementViews.FirstOrDefault(view =>
+            string.Equals(view.Name, item.InstalledName, StringComparison.OrdinalIgnoreCase));
+        PluginReadmeResult readme = await _readmes.LoadOfficialAsync(item, cancellationToken).ConfigureAwait(false);
+        return new PluginDetail(
+            item.Name,
+            item.ArtifactName,
+            item.DisplayName,
+            item.GameName,
+            item.Description,
+            item.Version,
+            item.Kind,
+            item.ApiVersion,
+            item.Capabilities,
+            item.MinHostVersion,
+            item.Installed,
+            item.InstalledName,
+            item.InstalledVersion,
+            item.UpdateAvailable,
+            item.Compatible,
+            item.CompatibilityReason,
+            item.ManagedByStore,
+            item.PendingAction,
+            item.PendingVersion,
+            item.Status,
+            installedView?.ConfiguredEnabled ?? false,
+            installedView?.RuntimeEnabled ?? false,
+            installedView?.State ?? "",
+            installedView?.Error,
+            installedView?.RestartRequired ?? false,
+            installedView?.HasFrontend ?? false,
+            installedView?.FrontendApiVersion ?? "",
+            item.Authors,
+            item.Tags,
+            item.Homepage,
+            item.CreatedAt,
+            item.UpdatedAt,
+            readme.HasReadme,
+            readme.Markdown,
+            readme.Error,
+            item.Changelog,
+            item.Locales)
         {
-            throw new PluginRepositoryException("catalog_too_large", "插件 catalog 超过尺寸上限");
-        }
-        string json = await ReadBoundedTextAsync(
-            response.Content,
-            PluginRepositoryCatalog.MaxCatalogBytes,
-            cancellationToken).ConfigureAwait(false);
-        if (!PluginRepositoryCatalog.TryParse(json, out PluginCatalog? catalog, out string? error)
-            || catalog is null)
-        {
-            throw new PluginRepositoryException("catalog_invalid", error ?? "插件 catalog 无效");
-        }
-        return new PluginCatalogFetchResult(
-            catalog,
-            checkedAt,
-            checkedAt,
-            etag,
-            lastModified,
-            PluginRepositoryCatalogCache.ComputeHash(catalog),
-            NotModified: false);
+            RuntimeErrorCode = installedView?.RuntimeErrorCode,
+            CompatibilityCode = item.CompatibilityCode,
+        };
     }
 
     private PluginStoreSnapshot BuildSnapshot(

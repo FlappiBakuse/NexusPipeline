@@ -1,5 +1,4 @@
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Utilities;
@@ -25,7 +24,7 @@ internal sealed record ConfigEditorDescriptor(
     string EditorPath,
     string Script);
 
-internal sealed partial class DataSpecializedPlugin : IProfileResolver
+internal sealed class DataSpecializedPlugin : IProfileResolver
 {
     internal DataSpecializedPlugin(PluginManifest manifest, string pluginDir)
     {
@@ -49,7 +48,14 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
             _capabilityKeys.Add(capability);
         }
         _profileResolver = new DataSpecializedProfileResolver(this);
+        _inputResolver = new DataSpecializedInputResolver(this);
     }
+
+    public static DataSpecializedPlugin? Load(string pluginDir) =>
+        DataSpecializedPluginLoader.Load(pluginDir);
+
+    internal static DataSpecializedPlugin? Load(string pluginDir, PluginManifest manifest) =>
+        DataSpecializedPluginLoader.Load(pluginDir, manifest);
 
     public string Name { get; private set; } = "";
 
@@ -95,11 +101,9 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
 
     private readonly DataSpecializedProfileResolver _profileResolver;
 
-    internal readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DataSpecializedInputResolver _inputResolver;
 
-    /// <summary>自动绑定输入的去重台账（脚本 id + 输入名 → 当前绑定值）：解析链随状态轮询高频执行，
-    /// 绑定值不变时静默，值变化（首次绑定/配置改名/增删）才记录日志。</summary>
-    private readonly Dictionary<string, string> _lastAutoBoundValues = new(StringComparer.OrdinalIgnoreCase);
+    internal readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
     /// <summary>判断脚本语言：data/judge.{js|py} 按扩展名（默认 javascript）。</summary>
@@ -110,7 +114,53 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
             string ext = Path.GetExtension(_judgeScriptPath).ToLowerInvariant();
             return ext == ".py" ? "python" : "javascript";
         }
-}
+    }
+
+    internal bool TryReadInputDeclarations(
+        out IReadOnlyList<PluginInputDeclaration> declarations,
+        out string? error) =>
+        _inputResolver.TryReadInputDeclarations(out declarations, out error);
+
+    internal IReadOnlyList<PluginInputDeclaration> LocalizeInputDeclarations(
+        IReadOnlyList<PluginInputDeclaration> declarations,
+        string? locale) =>
+        _inputResolver.LocalizeInputDeclarations(declarations, locale);
+
+    internal bool TryDiscoverConfigInputValues(
+        string rootPath,
+        out IReadOnlyList<string> values) =>
+        _inputResolver.TryDiscoverConfigInputValues(rootPath, out values);
+
+    internal bool TryDiscoverConfigInputCandidates(
+        string rootPath,
+        out ConfigInputCandidateSet? candidates) =>
+        _inputResolver.TryDiscoverConfigInputCandidates(rootPath, out candidates);
+
+    internal Dictionary<string, string>? AdoptSingleConfigCandidate(
+        string configPathTemplate,
+        string rootPath,
+        List<PluginInputDeclaration> declarations,
+        IReadOnlyDictionary<string, string>? provided,
+        HashSet<string> referencedInputs) =>
+        _inputResolver.AdoptSingleConfigCandidate(
+            configPathTemplate,
+            rootPath,
+            declarations,
+            provided,
+            referencedInputs);
+
+    internal ConfigInputCandidateSet? DetectUnresolvedConfigCandidates(
+        string configPathTemplate,
+        string rootPath,
+        List<PluginInputDeclaration> declarations,
+        IReadOnlyDictionary<string, string>? provided,
+        HashSet<string> referencedInputs) =>
+        _inputResolver.DetectUnresolvedConfigCandidates(
+            configPathTemplate,
+            rootPath,
+            declarations,
+            provided,
+            referencedInputs);
     /// <summary>解析 resolve.json 的 inputs 声明；可选段，声明无效时返回错误原因。</summary>
     internal string ReadJudgeScript()
     {
@@ -177,5 +227,8 @@ internal sealed partial class DataSpecializedPlugin : IProfileResolver
             return new ConfigEditorDescriptor(Name, PluginDirectory, _configEditorPath, _configEditor);
         }
     }
+
+    public ScriptProfile? Resolve(string rootPath, IReadOnlyDictionary<string, string>? inputs) =>
+        _profileResolver.Resolve(rootPath, inputs);
 
 }

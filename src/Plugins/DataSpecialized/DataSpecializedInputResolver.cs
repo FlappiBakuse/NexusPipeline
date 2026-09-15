@@ -1,12 +1,20 @@
 using System.Text.Json.Nodes;
-using System.Text.RegularExpressions;
 using NexusPipeline.Extensibility;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins;
 
-internal sealed partial class DataSpecializedPlugin
+internal sealed class DataSpecializedInputResolver
 {
+    private readonly DataSpecializedPlugin _plugin;
+    private readonly object _sync = new();
+    private readonly Dictionary<string, string> _lastAutoBoundValues = new(StringComparer.OrdinalIgnoreCase);
+
+    internal DataSpecializedInputResolver(DataSpecializedPlugin plugin)
+    {
+        _plugin = plugin;
+    }
+
     /// <summary>读取当前版本 resolve.json 的用户输入声明（插件页与前端表单投影用）。</summary>
     internal bool TryReadInputDeclarations(out IReadOnlyList<PluginInputDeclaration> declarations, out string? error)
     {
@@ -15,7 +23,7 @@ internal sealed partial class DataSpecializedPlugin
         string resolveText;
         try
         {
-            resolveText = File.ReadAllText(_resolvePath);
+            resolveText = File.ReadAllText(_plugin._resolvePath);
         }
         catch (Exception ex)
         {
@@ -39,8 +47,8 @@ internal sealed partial class DataSpecializedPlugin
         }
         foreach (PluginInputDeclaration declaration in parsed)
         {
-            if ((declaration.LabelKey.Length > 0 && !Localization.ContainsKey(declaration.LabelKey))
-                || (declaration.DescriptionKey.Length > 0 && !Localization.ContainsKey(declaration.DescriptionKey)))
+            if ((declaration.LabelKey.Length > 0 && !_plugin.Localization.ContainsKey(declaration.LabelKey))
+                || (declaration.DescriptionKey.Length > 0 && !_plugin.Localization.ContainsKey(declaration.DescriptionKey)))
             {
                 error = $"inputs「{declaration.Name}」引用了插件词典中不存在的 labelKey 或 descriptionKey";
                 return false;
@@ -60,11 +68,11 @@ internal sealed partial class DataSpecializedPlugin
             Name = declaration.Name,
             Label = string.IsNullOrWhiteSpace(declaration.LabelKey)
                 ? declaration.Label
-                : Localization.Resolve(locale ?? "", declaration.LabelKey, declaration.Label),
+                : _plugin.Localization.Resolve(locale ?? "", declaration.LabelKey, declaration.Label),
             LabelKey = declaration.LabelKey,
             Description = string.IsNullOrWhiteSpace(declaration.DescriptionKey)
                 ? declaration.Description
-                : Localization.Resolve(locale ?? "", declaration.DescriptionKey, declaration.Description),
+                : _plugin.Localization.Resolve(locale ?? "", declaration.DescriptionKey, declaration.Description),
             DescriptionKey = declaration.DescriptionKey,
             Default = declaration.Default,
             Required = declaration.Required,
@@ -98,7 +106,7 @@ internal sealed partial class DataSpecializedPlugin
         JsonNode? resolve;
         try
         {
-            resolve = JsonNode.Parse(File.ReadAllText(_resolvePath));
+            resolve = JsonNode.Parse(File.ReadAllText(_plugin._resolvePath));
         }
         catch
         {
@@ -201,7 +209,7 @@ internal sealed partial class DataSpecializedPlugin
             }
             _lastAutoBoundValues[key] = value;
         }
-        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{inputName}」= {value}：{Name}");
+        Logger.Info($"[插件] 配置目录内仅有一个配置文件，自动绑定输入「{inputName}」= {value}：{_plugin.Name}");
     }
 
     /// <summary>检测 configPath 模板的绑定输入是否处于「未定」状态：输入值缺失或指向的目标不存在，

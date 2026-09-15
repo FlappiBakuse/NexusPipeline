@@ -584,6 +584,7 @@
   "plugin.store.incompatible": "该插件与当前宿主不兼容",
   "plugin.store.incompatible_host": "该插件需要宿主 v{version} 或更高版本",
   "plugin.store.invalid_version": "插件或宿主版本无效",
+  "plugin.store.readme_cached": "当前显示上次缓存的 README",
   "plugin.store.readme_error": "README 暂时不可用",
   "plugin.store.runtime_error": "插件运行状态异常",
   "plugin.store.stale": "仓库连接暂时不可用，当前显示缓存目录。",

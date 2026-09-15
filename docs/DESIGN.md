@@ -707,18 +707,18 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `CliApiClient` / `CliTransport` | src/Cli/ | CLI 到 owning service 的本机 HTTP 控制通道、身份握手、自动拉起、端口发现和按端点分层超时 |
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
 | `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
-| `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
-| `PluginManager` | src/Plugins/PluginManager.cs + `PluginDiscovery.cs` / `ManagedPluginRuntime.cs` / `PluginManagementSnapshotCache.cs` | 门面负责插件开关、能力查询和生命周期编排；`PluginDiscovery` 负责本地 manifest 扫描/启用偏好；`ManagedPluginRuntime` 负责 managed-code 加载、生命周期和卸载；`PluginManagementSnapshotCache` 负责摘要与控制面管理投影缓存 |
-| `PluginManagementView` | src/Plugins/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
+| `PluginCapabilityRegistry` | src/Plugins/Runtime/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
+| `PluginManager` | src/Plugins/Runtime/PluginManager.cs + `Runtime/PluginDiscovery.cs` / `Runtime/ManagedPluginRuntime.cs` / `Runtime/PluginManagementSnapshotCache.cs` | 门面负责插件开关、能力查询和生命周期编排；`PluginDiscovery` 负责本地 manifest 扫描/启用偏好；`ManagedPluginRuntime` 负责 managed-code 加载、生命周期和卸载；`PluginManagementSnapshotCache` 负责摘要与控制面管理投影缓存 |
+| `PluginManagementView` | src/Plugins/Runtime/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
 | `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.6 UI、作用域数据、插件 Web API、历史贡献、本地化引用注册表与 DTO 校验；按插件生命周期撤销注册 |
 | `PluginAssetStore` | src/Plugins/Managed/PluginAssetStore.cs | 插件二进制资产存储：按插件命名空间与 scope 隔离、内容寻址 Id、原子写入、路径逃逸防护与宿主级绝对上限 |
 | `PluginUserGlobalSettingsService` | src/Plugins/PluginUserGlobalSettingsService.cs | 统一插件用户全局设置的读取、字段投影、secret 脱敏、输入校验和超时边界，供 Web 复用 |
 | `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.5 清单与 `web/` 资源路径，不向前端泄露插件目录 |
-| `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
-| `DataSpecializedPlugin` | src/Plugins/DataSpecializedPlugin.cs + `DataSpecializedPluginLoader.cs` / `DataSpecializedResolveParser.cs` / `DataSpecializedProfileResolver.cs` / Inputs.cs | 门面保留 `IProfileResolver` 与缓存/插件身份；`DataSpecializedPluginLoader` 负责 manifest、路径和脚本文件校验；`DataSpecializedResolveParser` 负责 resolve.json、输入和路径模板解析；`DataSpecializedProfileResolver` 负责 profile 推导 |
-| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs + `PluginRepositoryCatalogCache.cs` / `PluginStoreProjector.cs` / `PluginRepositoryOperations.cs` / Readme.cs | 门面编排 catalog 刷新和详情读取；`PluginRepositoryCatalogCache` 负责内存/磁盘 catalog 缓存；`PluginStoreProjector` 负责合并本地状态的商店投影；`PluginRepositoryOperations` 负责安装/更新/卸载串行事务 |
-| `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
-| `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
+| `PluginRepositoryCatalog` | src/Plugins/Repository/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
+| `DataSpecializedPlugin` | src/Plugins/DataSpecialized/DataSpecializedPlugin.cs + `DataSpecialized/DataSpecializedPluginLoader.cs` / `DataSpecialized/DataSpecializedResolveParser.cs` / `DataSpecialized/DataSpecializedProfileResolver.cs` / `DataSpecialized/DataSpecializedInputResolver.cs` | 门面保留 `IProfileResolver` 与缓存/插件身份；`DataSpecializedPluginLoader` 负责 manifest、路径和脚本文件校验；`DataSpecializedResolveParser` 负责 resolve.json、输入和路径模板解析；`DataSpecializedProfileResolver` 负责 profile 推导；`DataSpecializedInputResolver` 负责输入声明与候选绑定 |
+| `PluginRepositoryService` | src/Plugins/Repository/PluginRepositoryService.cs + `Repository/PluginRepositoryCatalogCache.cs` / `Repository/PluginStoreProjector.cs` / `Repository/PluginRepositoryOperations.cs` / `Repository/PluginReadmeService.cs` | 门面编排 catalog 刷新和详情读取；`PluginRepositoryCatalogCache` 负责内存/磁盘 catalog 缓存；`PluginStoreProjector` 负责合并本地状态的商店投影；`PluginRepositoryOperations` 负责安装/更新/卸载串行事务；`PluginReadmeService` 负责本地与官方 README 读取和缓存 |
+| `PluginPackageService` | src/Plugins/Repository/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
+| `PluginInstallRecovery` | src/Plugins/Repository/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
 | `DiagnosticsService` | src/Services/Diagnostics/DiagnosticsService.cs | 汇总稳定诊断检查，生成脱敏支持包并执行大小与敏感信息边界校验 |
 | `JsonStore` | src/Persistence/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
 | `AppearanceLegacyMigration` | src/Services/AppearanceLegacyMigration.cs | 旧外观数据的一次性格式搬迁：资产导入原提供方插件的资产 scope，搬迁载荷写入作用域数据，成功标记落盘后可重试 |
@@ -856,7 +856,7 @@ Capability 扩展约束：
 | 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/ExecutionCoordinator.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
-| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs`、`PluginRepositoryCatalogCache.cs`、`PluginStoreProjector.cs`、`PluginRepositoryOperations.cs`、`PluginPackageService.cs`、`PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
+| 插件仓库/安装恢复 | `src/Plugins/Repository/PluginRepositoryService.cs`、`src/Plugins/Repository/PluginRepositoryCatalogCache.cs`、`src/Plugins/Repository/PluginStoreProjector.cs`、`src/Plugins/Repository/PluginRepositoryOperations.cs`、`src/Plugins/Repository/PluginPackageService.cs`、`src/Plugins/Repository/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
 | 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
 | 队列调度触发 | `src/Services/Scheduling/Scheduler.cs`、`SchedulerTriggerPlanner.cs`、`SchedulerRetryQueue.cs`、`SchedulerStateFence.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |

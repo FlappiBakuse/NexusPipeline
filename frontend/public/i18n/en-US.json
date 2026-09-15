@@ -584,6 +584,7 @@
   "plugin.store.incompatible": "This plugin is incompatible with the current host",
   "plugin.store.incompatible_host": "This plugin requires host v{version} or later",
   "plugin.store.invalid_version": "The plugin or host version is invalid",
+  "plugin.store.readme_cached": "Showing the last cached README",
   "plugin.store.readme_error": "README is temporarily unavailable",
   "plugin.store.runtime_error": "The plugin runtime reported an error",
   "plugin.store.stale": "The repository is temporarily unavailable; showing the cached catalog.",

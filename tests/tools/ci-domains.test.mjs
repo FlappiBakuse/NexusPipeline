@@ -178,7 +178,7 @@ test("横切路径逐条命中四个 System 域", () => {
     "src/Localization/**": "src/Localization/HostLocalization.cs",
     "src/Models/**": "src/Models/AppSettings.cs",
     "src/Persistence/**": "src/Persistence/ConfigStore.cs",
-    "src/Plugins/**": "src/Plugins/PluginManager.cs",
+    "src/Plugins/**": "src/Plugins/Runtime/PluginManager.cs",
     "src/Utilities/**": "src/Utilities/Logger.cs",
     "src/Web/**": "src/Web/WebServer.cs",
     "*.csproj": "NexusPipeline.csproj",
