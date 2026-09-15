@@ -81,6 +81,49 @@ public sealed class JudgeRuntimeBridgeTests
         Assert.Equal("invalid_url", document.RootElement.GetProperty("error").GetString());
     }
 
+    [Fact]
+    public async Task BridgeRejectsOversizedRequestBody()
+    {
+        await using var bridge = JudgeRuntimeBridge.Start();
+        var uri = new Uri(bridge.Endpoint + "/processes");
+        string request = "POST /processes HTTP/1.1\r\n"
+            + $"Host: {uri.Host}:{uri.Port}\r\n"
+            + $"X-Nexus-Judge-Token: {bridge.Token}\r\n"
+            + $"Content-Length: {JudgeRuntimeBridge.MaxBodyBytes + 1}\r\n"
+            + "Connection: close\r\n\r\n";
+
+        string response = await SendRawAsync(uri, request);
+
+        Assert.Contains("413 Payload Too Large", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BridgeReturnsHeaderTooLargeForOversizedHeaders()
+    {
+        await using var bridge = JudgeRuntimeBridge.Start();
+        var uri = new Uri(bridge.Endpoint + "/processes");
+        string request = new string('x', JudgeRuntimeBridge.MaxHeaderBytes);
+
+        string response = await SendRawAsync(uri, request);
+
+        Assert.Contains("431 Request Header Fields Too Large", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BridgeDisposeClosesListeningPort()
+    {
+        var bridge = JudgeRuntimeBridge.Start();
+        Uri endpoint = new(bridge.Endpoint);
+
+        await bridge.DisposeAsync();
+
+        using var client = new TcpClient();
+        await Assert.ThrowsAnyAsync<SocketException>(async () =>
+        {
+            await client.ConnectAsync(endpoint.Host, endpoint.Port);
+        });
+    }
+
     private static async Task<string> SendAsync(
         string endpoint,
         string token,
@@ -96,12 +139,19 @@ public sealed class JudgeRuntimeBridgeTests
             + $"{headerName}: {token}\r\n"
             + $"Content-Length: {Encoding.UTF8.GetByteCount(body)}\r\n"
             + "Connection: close\r\n\r\n";
-        byte[] bytes = Encoding.ASCII.GetBytes(request);
-        await stream.WriteAsync(bytes);
-        if (body.Length > 0)
-        {
-            await stream.WriteAsync(Encoding.UTF8.GetBytes(body));
-        }
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(request + body));
+        client.Client.Shutdown(SocketShutdown.Send);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        return await reader.ReadToEndAsync();
+    }
+
+    private static async Task<string> SendRawAsync(Uri uri, string request)
+    {
+        using var client = new TcpClient();
+        await client.ConnectAsync(uri.Host, uri.Port);
+        using NetworkStream stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes(request));
+        client.Client.Shutdown(SocketShutdown.Send);
         using var reader = new StreamReader(stream, Encoding.UTF8);
         return await reader.ReadToEndAsync();
     }

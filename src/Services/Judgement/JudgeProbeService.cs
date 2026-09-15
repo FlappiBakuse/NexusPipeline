@@ -50,13 +50,29 @@ internal static class JudgeProbeService
     {
         (string titleContains, int? pid) = ReadWindowOptions(optionsJson);
         IReadOnlyDictionary<int, ProcessTree.ProcessNode> nodes = ProcessTree.SnapshotProcesses();
-        var windows = ProcessWindows.EnumerateVisibleTopLevelWindows()
+        return Serialize(ProjectWindows(
+            ProcessWindows.EnumerateVisibleTopLevelWindows(),
+            nodes,
+            titleContains,
+            pid));
+    }
+
+    internal static JudgeWindowResponse ProjectWindows(
+        IReadOnlyList<ProcessWindows.VisibleTopLevelWindow> windows,
+        IReadOnlyDictionary<int, ProcessTree.ProcessNode> nodes,
+        string? titleContains = null,
+        int? pid = null,
+        int maxResults = MaxWindows)
+    {
+        string filter = BoundFilter(titleContains);
+        int boundedMaxResults = Math.Clamp(maxResults, 0, MaxWindows);
+        var projected = windows
             .Where(window => !pid.HasValue || window.Pid == pid.Value)
-            .Where(window => titleContains.Length == 0
-                || window.Title.Contains(titleContains, StringComparison.OrdinalIgnoreCase))
+            .Where(window => filter.Length == 0
+                || window.Title.Contains(filter, StringComparison.OrdinalIgnoreCase))
             .OrderBy(window => window.Pid)
             .ThenBy(window => window.Hwnd.ToInt64())
-            .Take(MaxWindows + 1)
+            .Take(boundedMaxResults + 1)
             .Select(window => new JudgeWindowInfo(
                 window.Hwnd.ToInt64().ToString(),
                 window.Pid,
@@ -64,12 +80,12 @@ internal static class JudgeProbeService
                 window.Title.Length > MaxFilterLength ? window.Title[..MaxFilterLength] : window.Title,
                 window.Foreground))
             .ToList();
-        bool truncated = windows.Count > MaxWindows;
+        bool truncated = projected.Count > boundedMaxResults;
         if (truncated)
         {
-            windows.RemoveRange(MaxWindows, windows.Count - MaxWindows);
+            projected.RemoveRange(boundedMaxResults, projected.Count - boundedMaxResults);
         }
-        return Serialize(new JudgeWindowResponse(windows, truncated));
+        return new JudgeWindowResponse(projected, truncated);
     }
 
     internal static JudgeProcessResponse ProjectProcesses(

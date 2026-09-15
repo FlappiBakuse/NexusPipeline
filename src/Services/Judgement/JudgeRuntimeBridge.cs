@@ -156,6 +156,16 @@ internal sealed class JudgeRuntimeBridge : IAsyncDisposable
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested || token.IsCancellationRequested)
         {
         }
+        catch (RequestHeadersTooLargeException)
+        {
+            try
+            {
+                await WriteErrorAsync(stream, 431, "运行时接口请求头过大", CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
         catch (JsonException)
         {
             try
@@ -251,7 +261,11 @@ internal sealed class JudgeRuntimeBridge : IAsyncDisposable
                 }
             }
         }
-        return null;
+        throw new RequestHeadersTooLargeException();
+    }
+
+    private sealed class RequestHeadersTooLargeException : Exception
+    {
     }
 
     private static (string Method, string Path, Dictionary<string, string> Headers) ParseHeaders(byte[] bytes)
