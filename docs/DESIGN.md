@@ -688,7 +688,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `ConfigSwapPaths` | src/Services/ConfigSwapPaths.cs | 配置数据目录管理：data/{脚本Id}/{UserId} 子目录定位与清理（持久层在用户目录顶层，会话事务目录收敛于 work/） |
 | `ConfigWorkDirMaintenance` | src/Services/ConfigWorkDirMaintenance.cs | 当前 work/ 空闲目录、runtime 和 staging 启动清扫 |
 | `LogPattern` | src/Persistence/LogPattern.cs | 日志路径格式解析（日期占位符/通配符严格匹配，无格式外猜测） |
-| `Scheduler` | src/Services/Scheduling/Scheduler.cs + SchedulerStateFence.cs | 定时/启动时触发队列；瞬时准入冲突进入 pending 触发并在后续 tick 重试，永久校验失败消费本次触发；通过状态 fence 编排 occurrence/replay 恢复，持久化 I/O 仍由 `ISchedulerStateStore` 承担 |
+| `Scheduler` | src/Services/Scheduling/Scheduler.cs + `SchedulerTriggerPlanner.cs` / `SchedulerRetryQueue.cs` / `SchedulerStateFence.cs` / `SchedulerStateStore.cs` | 门面协调定时/启动触发；`SchedulerTriggerPlanner` 负责 next-trigger、扫描窗口、occurrence 枚举/匹配和 trigger key；`SchedulerRetryQueue` 负责 pending、attempting、running、重试调度和状态转换；`SchedulerStateFence` 负责 occurrence/replay fence、快照/恢复编排，持久化 I/O 仍由 `ISchedulerStateStore` 承担 |
 | `HistoryService` | src/Services/History/HistoryService.cs | 历史记录读写与清理 |
 | `NotificationDispatcher` | src/Services/Notification/NotificationDispatcher.cs | 宿主内置 Webhook/SMTP 通知领域服务；脚本、队列和 Plugin API v1.6 DTO 均从此入口发送 |
 | `WebServer` | src/Web/WebServer.cs | HTTP 骨架：生产 HttpListener / Test Host 托管 loopback 监听、静态文件安全头、特性路由表（[ApiRoute] 反射扫描注册）和远程令牌校验 |
@@ -708,15 +708,15 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `CliOutput` / `CliExitCodes` | src/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
 | `ControlMenu` / `MainMenu` | src/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Plugins/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
-| `PluginManager` | src/Plugins/PluginManager.cs + PluginManager.Discovery.cs / Lifecycle.cs / Management.cs | 负责本地插件发现、加载、开关和生命周期；通用 capability 查询委托 registry，并生成控制面共享插件投影 |
+| `PluginManager` | src/Plugins/PluginManager.cs + `PluginDiscovery.cs` / `ManagedPluginRuntime.cs` / `PluginManagementSnapshotCache.cs` | 门面负责插件开关、能力查询和生命周期编排；`PluginDiscovery` 负责本地 manifest 扫描/启用偏好；`ManagedPluginRuntime` 负责 managed-code 加载、生命周期和卸载；`PluginManagementSnapshotCache` 负责摘要与控制面管理投影缓存 |
 | `PluginManagementView` | src/Plugins/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
 | `PluginExtensionServices` | src/Plugins/PluginExtensionServices.cs | v1.6 UI、作用域数据、插件 Web API、历史贡献、本地化引用注册表与 DTO 校验；按插件生命周期撤销注册 |
 | `PluginAssetStore` | src/Plugins/Managed/PluginAssetStore.cs | 插件二进制资产存储：按插件命名空间与 scope 隔离、内容寻址 Id、原子写入、路径逃逸防护与宿主级绝对上限 |
 | `PluginUserGlobalSettingsService` | src/Plugins/PluginUserGlobalSettingsService.cs | 统一插件用户全局设置的读取、字段投影、secret 脱敏、输入校验和超时边界，供 Web 复用 |
 | `PluginFrontendManifest` | src/Plugins/PluginFrontendManifest.cs | 校验 Frontend API 1.5 清单与 `web/` 资源路径，不向前端泄露插件目录 |
 | `PluginRepositoryCatalog` | src/Plugins/PluginRepositoryCatalog.cs | 固定官方源的 catalog schema、artifact/名称/版本/URL/SHA/changelog/宿主兼容性校验；不执行网络请求 |
-| `DataSpecializedPlugin` | src/Plugins/DataSpecializedPlugin.cs + DataSpecializedPlugin.Manifest.cs / Profile.cs / Inputs.cs | 数据化插件的清单校验、profile 推导、输入声明与配置候选发现；保持数据驱动的插件运行边界 |
-| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs + PluginRepositoryService.Operations.cs / Readme.cs / Cache.cs | 读取 catalog、内存/磁盘缓存、合并本地插件状态并编排安装/更新/卸载操作 |
+| `DataSpecializedPlugin` | src/Plugins/DataSpecializedPlugin.cs + `DataSpecializedPluginLoader.cs` / `DataSpecializedResolveParser.cs` / `DataSpecializedProfileResolver.cs` / Inputs.cs | 门面保留 `IProfileResolver` 与缓存/插件身份；`DataSpecializedPluginLoader` 负责 manifest、路径和脚本文件校验；`DataSpecializedResolveParser` 负责 resolve.json、输入和路径模板解析；`DataSpecializedProfileResolver` 负责 profile 推导 |
+| `PluginRepositoryService` | src/Plugins/PluginRepositoryService.cs + `PluginRepositoryCatalogCache.cs` / `PluginStoreProjector.cs` / `PluginRepositoryOperations.cs` / Readme.cs | 门面编排 catalog 刷新和详情读取；`PluginRepositoryCatalogCache` 负责内存/磁盘 catalog 缓存；`PluginStoreProjector` 负责合并本地状态的商店投影；`PluginRepositoryOperations` 负责安装/更新/卸载串行事务 |
 | `PluginPackageService` | src/Plugins/PluginPackageService.cs | 通过统一外网出口下载插件包，校验大小/SHA/ZIP 路径/manifest 并写入 staging journal |
 | `PluginInstallRecovery` | src/Plugins/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
 | `DiagnosticsService` | src/Services/Diagnostics/DiagnosticsService.cs | 汇总稳定诊断检查，生成脱敏支持包并执行大小与敏感信息边界校验 |
@@ -856,9 +856,9 @@ Capability 扩展约束：
 | 脚本运行流程/重试/日志监控 | `src/Services/Execution/ExecutionCoordinator.cs`、`src/Services/RunSession.cs`（状态）、`src/Services/Execution/RetryPolicy.cs`、`src/Services/Execution/RunBudget.cs`、`src/Services/Execution/RunAttemptFinalizer.cs`、`src/Services/LogMonitor.cs`（日志增量读取/替换检测）、`src/Persistence/LogPattern.cs`（日志路径格式解析） |
 | 自定义完成标志（关键字/判断脚本） | `src/Services/Judgement/SessionJudge.cs`（判定状态机）、`src/Services/Execution/ExecutionCoordinator.cs`（尝试执行/触发时机）、`src/Services/Judgement/JudgeScriptRunner.cs`（脚本执行器）、`src/Utilities/TextRules.cs`（`KeywordRule`） |
 | 判断脚本边界与配置替换 | `src/Services/UserConfigManager.cs`（门面）、`src/Services/Configuration/ConfigRunSession.cs`（运行配置生命周期）、`src/Services/ConfigSwapSession.cs`（替换/同步 façade）、`src/Services/ConfigSwap/ConfigSwapRecovery.cs`（恢复）、`src/Services/Judgement/JudgeScriptRunner.cs`（`ResolveWithin` 防逃逸） |
-| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs` 及其 `Cache.cs` / `Readme.cs` / `Operations.cs` 分部、`src/Plugins/PluginPackageService.cs`、`src/Plugins/PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
+| 插件仓库/安装恢复 | `src/Plugins/PluginRepositoryService.cs`、`PluginRepositoryCatalogCache.cs`、`PluginStoreProjector.cs`、`PluginRepositoryOperations.cs`、`PluginPackageService.cs`、`PluginInstallRecovery.cs`、`src/Web/ApiPluginsHandler.cs` |
 | 外部 HTTP/代理 | `src/Services/Networking/ProxyConfiguration.cs`、`src/Services/Update/UpdateService.cs`、`src/Services/WebhookSender.cs` |
-| 队列调度触发 | `src/Services/Scheduling/Scheduler.cs` |
+| 队列调度触发 | `src/Services/Scheduling/Scheduler.cs`、`SchedulerTriggerPlanner.cs`、`SchedulerRetryQueue.cs`、`SchedulerStateFence.cs` |
 | 通知发送（Webhook/SMTP） | `src/Services/Notification/NotificationDispatcher.cs`、`src/Services/Notification/NotificationFormatter.cs`、`src/Services/WebhookSender.cs`、`src/Services/SmtpSender.cs` |
 | Vue 页面渲染/表单 | `frontend/src/features/` 对应域文件与 `frontend/src/ui/` 组件 |
 | 页面前端交互绑定 | Vue props/emits、组件事件与 feature composable；现存 `data-action` 属性不再由全局运行时读取，新交互不得依赖它 |

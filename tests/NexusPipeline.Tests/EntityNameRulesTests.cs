@@ -62,7 +62,7 @@ public sealed class EntityNameRulesTests
 
         Assert.True(Encoding.UTF8.GetByteCount(candidate) <= 64);
         Assert.EndsWith("-2", candidate, StringComparison.Ordinal);
-        Assert.DoesNotContain("�", candidate, StringComparison.Ordinal);
+        Assert.DoesNotContain("\uFFFD", candidate, StringComparison.Ordinal);
     }
 
     [Fact]

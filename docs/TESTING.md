@@ -87,7 +87,7 @@ node tests\run.mjs syntax
 node tests\run.mjs build
 ```
 
-`tooling` 运行 `tests/tools/ci-domains.test.mjs` 与 `tests/tools/update-policy-history.test.mjs`，分别校验 CI 影响域清单/四个 System 分组映射和更新策略历史；`changes` 作业在判定影响域之前执行同一组用例。
+`tooling` 运行 `tests/tools/ci-domains.test.mjs`、`tests/tools/source-encoding.test.mjs` 与 `tests/tools/update-policy-history.test.mjs`，分别校验 CI 影响域清单/四个 System 分组映射、受控文本源码编码卫生和更新策略历史；`changes` 作业在判定影响域之前执行同一组用例。
 
 `codex all` 不执行 frontend Vitest；每次修改前端源码都必须显式运行 `npm test --prefix frontend`。
 

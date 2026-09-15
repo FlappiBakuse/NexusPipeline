@@ -176,6 +176,7 @@ async function runTooling() {
   return runProcess(nodeCommand, [
     "--test",
     "tests\\tools\\ci-domains.test.mjs",
+    "tests\\tools\\source-encoding.test.mjs",
     "tests\\tools\\update-policy-history.test.mjs",
   ]);
 }
