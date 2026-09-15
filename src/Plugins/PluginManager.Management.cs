@@ -15,10 +15,7 @@ internal sealed partial class PluginManager
     {
         get
         {
-            lock (_managementSnapshotSync)
-            {
-                return _pluginSummariesCache ??= BuildPluginSummaries();
-            }
+            return _managementSnapshotCache.GetSummaries(BuildPluginSummaries);
         }
     }
 
@@ -35,25 +32,13 @@ internal sealed partial class PluginManager
     /// <summary>插件管理投影的当前内存修订号，供宿主缓存和调试观测使用。</summary>
     internal long PluginManagementRevision
     {
-        get
-        {
-            lock (_managementSnapshotSync)
-            {
-                return _managementRevision;
-            }
-        }
+        get => _managementSnapshotCache.Revision;
     }
 
     /// <summary>插件文件状态或运行时配置发生变化时清除本地投影缓存。</summary>
     internal void InvalidateManagementSnapshot()
     {
-        lock (_managementSnapshotSync)
-        {
-            _managementRevision++;
-            _pluginSummariesCache = null;
-            _pluginManagementViewsCache = null;
-            _managementStateFingerprint = null;
-        }
+        _managementSnapshotCache.Invalidate();
     }
 
     private IReadOnlyList<PluginSummary> BuildPluginSummaries()
@@ -152,31 +137,16 @@ internal sealed partial class PluginManager
     /// <summary>插件管理控制面共享投影；ownership/pending 由同一份快照合并，避免各适配器自行拼装。</summary>
     internal IReadOnlyList<PluginManagementView> PluginManagementViews
     {
-        get
-        {
-            string fingerprint = ReadManagementStateFingerprint();
-            lock (_managementSnapshotSync)
+        get => _managementSnapshotCache.GetViews(
+            ReadManagementStateFingerprint(),
+            () =>
             {
-                if (!string.Equals(_managementStateFingerprint, fingerprint, StringComparison.Ordinal))
-                {
-                    _managementRevision++;
-                    _pluginSummariesCache = null;
-                    _pluginManagementViewsCache = null;
-                    _managementStateFingerprint = fingerprint;
-                }
-                if (_pluginManagementViewsCache is not null)
-                {
-                    return _pluginManagementViewsCache;
-                }
-
                 IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
                 IReadOnlyList<PluginPendingOperation> pending = PluginInstallRecovery.ReadPending();
-                _pluginManagementViewsCache = PluginSummaries
+                return PluginSummaries
                     .Select(summary => PluginManagementView.Create(summary, this, ownership, pending))
                     .ToArray();
-                return _pluginManagementViewsCache;
-            }
-        }
+            });
     }
 
     /// <summary>按请求语言投影控制面插件元数据，确保状态页与插件页使用同一份本地化结果。</summary>

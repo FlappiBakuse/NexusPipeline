@@ -141,75 +141,16 @@ internal sealed partial class PluginManager
 
     private void DiscoverManagedPlugins()
     {
-        if (!Directory.Exists(AppPaths.PluginsDir))
+        IReadOnlySet<string> knownNames = _dataPlugins
+            .Select(plugin => plugin.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (ManagedPluginDescriptor descriptor in _discovery.DiscoverManagedPlugins(knownNames))
         {
-            return;
-        }
-        foreach (string directory in Directory.GetDirectories(AppPaths.PluginsDir))
-        {
-            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out string? error) || manifest is null)
-            {
-                Logger.Warn($"[插件] 跳过无效插件目录：{Path.GetFileName(directory)}（{error}）");
-                continue;
-            }
-            if (manifest.Kind != "managed-code")
-            {
-                continue;
-            }
-            if (!string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
-            {
-                Logger.Error($"[插件] 跳过物理目录名不匹配的插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
-                continue;
-            }
-            if (IsKnownPlugin(manifest.Name))
-            {
-                Logger.Warn($"[插件] 检测到重复插件名「{manifest.Name}」，跳过 managed-code 插件。");
-                continue;
-            }
-            var descriptor = new ManagedPluginDescriptor(manifest, directory);
             _managedPlugins.Add(descriptor);
-            _runtimeStates[manifest.Name] = PluginRuntimeState.Discovered;
+            _runtimeStates[descriptor.Manifest.Name] = PluginRuntimeState.Discovered;
         }
     }
 
-    private bool ReadConfiguredEnabled(string name, bool managedCode)
-    {
-        AppSettings settings = _settings();
-        PluginPreference? preference = settings.PluginPreferences?
-            .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase)).Value;
-        return preference?.Enabled ?? !managedCode;
-    }
-
-    private static List<DataSpecializedPlugin> DiscoverDataPlugins()
-    {
-        var list = new List<DataSpecializedPlugin>();
-        if (!Directory.Exists(AppPaths.PluginsDir))
-        {
-            return list;
-        }
-        foreach (string directory in Directory.GetDirectories(AppPaths.PluginsDir))
-        {
-            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out _)
-                || manifest is null
-                || manifest.Kind != "data-specialized")
-            {
-                continue;
-            }
-            if (!string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))
-            {
-                Logger.Error($"[插件] 跳过物理目录名不匹配的数据插件：{Path.GetFileName(directory)}（期望 {manifest.ArtifactName}）");
-                continue;
-            }
-            DataSpecializedPlugin? plugin = DataSpecializedPlugin.Load(directory, manifest);
-            if (plugin is not null)
-            {
-                list.Add(plugin);
-            }
-            else
-            {
-                Logger.Warn($"[插件] 跳过无效数据化插件目录：{Path.GetFileName(directory)}");
-            }
-        }
-        return list;
-    }
+    private bool ReadConfiguredEnabled(string name, bool managedCode) =>
+        _discovery.ReadConfiguredEnabled(name, managedCode);
 }

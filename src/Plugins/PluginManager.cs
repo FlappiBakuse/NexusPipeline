@@ -84,6 +84,7 @@ internal sealed partial class PluginManager : IPluginCapabilityResolver, IPlugin
     private readonly Func<NotificationDispatcher> _notifications;
 
     private readonly Func<Action, bool> _tryConfigurationMutation;
+    private readonly PluginDiscovery _discovery;
     private readonly List<DataSpecializedPlugin> _dataPlugins = new();
     private readonly List<ManagedPluginDescriptor> _managedPlugins = new();
     private readonly Dictionary<string, ManagedPluginRuntime> _managedRuntimes = new(StringComparer.OrdinalIgnoreCase);
@@ -100,11 +101,7 @@ internal sealed partial class PluginManager : IPluginCapabilityResolver, IPlugin
     private readonly PluginUiContributionRegistry _uiContributions = new();
     private readonly PluginWebApiRegistry _webApi = new();
     private readonly PluginHistoryContributionRegistry _historyContributions = new();
-    private readonly object _managementSnapshotSync = new();
-    private long _managementRevision;
-    private IReadOnlyList<PluginSummary>? _pluginSummariesCache;
-    private IReadOnlyList<PluginManagementView>? _pluginManagementViewsCache;
-    private string? _managementStateFingerprint;
+    private readonly PluginManagementSnapshotCache _managementSnapshotCache = new();
 
     internal PluginManager(
         Func<AppSettings> settings,
@@ -115,13 +112,14 @@ internal sealed partial class PluginManager : IPluginCapabilityResolver, IPlugin
     {
         _settings = settings;
         _notifications = notifications;
+        _discovery = new PluginDiscovery(_settings);
         _http = http ?? new OutboundHttpClientProvider(settings);
         _executionEvents = new PluginExecutionEventRegistry((pluginName, exception) =>
         {
             _runtimeErrors[pluginName] = exception.Message;
             Logger.Warn($"[插件:{pluginName}] 用户运行事件处理失败：{exception.Message}");
         });
-        _discoverData = discoverData ?? DiscoverDataPlugins;
+        _discoverData = discoverData ?? _discovery.DiscoverDataPlugins;
         _tryConfigurationMutation = tryConfigurationMutation ?? (mutation =>
         {
             mutation();
