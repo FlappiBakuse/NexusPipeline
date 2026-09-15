@@ -212,7 +212,7 @@ internal sealed partial class PluginRepositoryService
         {
             _officialReadmeCache.TryGetValue(key, out cachedEntry);
             if (cachedEntry is not null
-                && DateTimeOffset.UtcNow - cachedEntry.LastCheckedAt < MemoryCacheTtl)
+                && DateTimeOffset.UtcNow - cachedEntry.LastCheckedAt < ReadmeCacheTtl)
             {
                 return cachedEntry.Result;
             }
