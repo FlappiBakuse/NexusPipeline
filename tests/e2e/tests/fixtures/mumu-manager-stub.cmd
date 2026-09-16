@@ -6,6 +6,10 @@ set STUB=%~dp0
 set CALLS=%STUB%mumu-calls.log
 echo %*>>"%CALLS%"
 
+if /I "%~1"=="info" if "%~2"=="-v" if /I "%~3"=="all" if exist "%STUB%info-fail.flag" (
+  echo info failed 1>&2
+  exit /b 1
+)
 if /I "%~1"=="info" if "%~2"=="-v" if /I "%~3"=="all" (
   echo {"0":{"adb_port":16416,"is_main":true,"is_process_started":true,"is_android_started":true}}
   exit /b 0

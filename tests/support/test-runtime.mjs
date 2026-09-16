@@ -89,10 +89,15 @@ export function installEmulatorStubs(runtimeDir, fixtureDir) {
 
   const noxDir = path.join(runtimeDir, "nox-stub");
   fs.mkdirSync(path.join(noxDir, "BignoxVMS", "Android7"), { recursive: true });
+  fs.mkdirSync(path.join(noxDir, "BignoxVMS", "NoxPlayer"), { recursive: true });
   fs.copyFileSync(path.join(fixtureDir, "noxconsole-stub.cmd"), path.join(noxDir, "noxconsole-stub.cmd"));
   fs.copyFileSync(
     path.join(fixtureDir, "nox-instance.vbox"),
     path.join(noxDir, "BignoxVMS", "Android7", "Android7.vbox"),
+  );
+  fs.copyFileSync(
+    path.join(fixtureDir, "nox-instance.vbox"),
+    path.join(noxDir, "BignoxVMS", "NoxPlayer", "NoxPlayer.vbox"),
   );
 
   const blueStacksDir = path.join(runtimeDir, "bluestacks-stub");

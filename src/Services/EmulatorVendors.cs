@@ -40,7 +40,7 @@ internal sealed record EmulatorVendorPaths(
 
 internal sealed record LdPlayerInstance(string Index, string Name, int? ProcessId);
 
-internal sealed record NoxInstance(string Index, string Name, int? ProcessId);
+internal sealed record NoxInstance(string Index, string Name, int? ProcessId, bool UsesNameSelector = false);
 
 internal sealed record BlueStacksInstance(string Id, int AdbPort);
 
@@ -50,21 +50,29 @@ internal static class EmulatorVendorSupport
         @"(?:pid|process[_ -]?id)\s*[:=]\s*(\d+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly Regex NoxListLinePattern = new(
-        @"^\s*(?<index>\d+)\s*(?:[,|:\t]+|\s{2,})(?<name>[^,|:\t]+)",
+    private static readonly Regex NoxLabeledListLinePattern = new(
+        @"(?:index\s*[:=]\s*)(?<index>\d+).*?(?:name\s*[:=]\s*)(?<name>[A-Za-z0-9_. -]+)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex NoxWhitespaceListLinePattern = new(
+        @"^\s*(?<first>[^\s,|:\t]+)\s{2,}(?<second>[^,|:\t]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex NoxVboxPortPattern = new(
         @"(?:hostport|host\s*port|adb[_ -]?port|forward[^\r\n]{0,20}port)\D{0,24}(?<port>\d{1,5})",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static readonly Regex BlueStacksFlatConfigPattern = new(
-        "[\\\"'](?:bst\\.)?instance\\.(?<id>[^\\\"']+?)\\.(?:adb[_\\.]?port|adbPort)[\\\"']\\s*:\\s*[\\\"']?(?<port>\\d{1,5})",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
-
     private static readonly Regex BlueStacksNestedConfigPattern = new(
         "[\\\"'](?<id>[^\\\"']+)[\\\"']\\s*:\\s*\\{[^}]{0,2000}?[\\\"'](?:adb[_\\.]?port|adbPort)[\\\"']\\s*:\\s*[\\\"']?(?<port>\\d{1,5})",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled | RegexOptions.Singleline);
+
+    private static readonly Regex BlueStacksLineConfigPattern = new(
+        "^\\s*[\\\"']?bst\\.instance\\.(?<id>.+?)\\.(?:(?<status>status)\\.)?adb[_\\.]?port\\s*=\\s*[\\\"']?(?<port>\\d{1,5})[\\\"']?\\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex BlueStacksJsonFlatConfigPattern = new(
+        "[\\\"'](?:bst\\.)?instance\\.(?<id>[^\\\"'.]+?)(?:\\.(?<status>status))?\\.(?:adb[_\\.]?port|adbPort)[\\\"']\\s*:\\s*[\\\"']?(?<port>\\d{1,5})",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     internal static IReadOnlyList<int> CandidateLdAdbPorts(string index)
     {
@@ -100,7 +108,9 @@ internal static class EmulatorVendorSupport
                 index = match.Groups["index"].Value;
                 name = match.Groups["name"].Value;
             }
-            int? processId = ParseProcessId(line);
+            int? processId = fields.Length >= 7
+                ? ParsePositiveProcessId(fields[5])
+                : ParseProcessId(line);
             instances.Add(new LdPlayerInstance(index.Trim(), name.Trim(), processId));
         }
         return instances;
@@ -113,16 +123,46 @@ internal static class EmulatorVendorSupport
         {
             string line = rawLine.Trim().Trim('\r');
             if (line.Length == 0) continue;
-            Match match = NoxListLinePattern.Match(line);
-            if (!match.Success)
+
+            Match labeled = NoxLabeledListLinePattern.Match(line);
+            if (labeled.Success)
             {
-                match = Regex.Match(line, @"(?:index\s*[:=]\s*)(?<index>\d+).*?(?:name\s*[:=]\s*)?(?<name>[A-Za-z0-9_. -]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+                instances.Add(new NoxInstance(
+                    labeled.Groups["index"].Value.Trim(),
+                    labeled.Groups["name"].Value.Trim(),
+                    ParseProcessId(line)));
+                continue;
             }
-            if (!match.Success) continue;
-            instances.Add(new NoxInstance(
-                match.Groups["index"].Value.Trim(),
-                match.Groups["name"].Value.Trim(),
-                ParseProcessId(line)));
+
+            string[] fields = line.Split(new[] { ',', '\t', '|', ':' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (fields.Length >= 2)
+            {
+                string selector = fields[0];
+                string name = fields[1];
+                if (int.TryParse(selector, out int numericIndex) && numericIndex >= 0)
+                {
+                    instances.Add(new NoxInstance(selector, name, ParseProcessId(line)));
+                    continue;
+                }
+                if (IsNoxNameSelector(selector) && !IsNoxHeader(name))
+                {
+                    instances.Add(new NoxInstance(selector, name, ParseProcessId(line), UsesNameSelector: true));
+                    continue;
+                }
+            }
+
+            Match whitespace = NoxWhitespaceListLinePattern.Match(line);
+            if (!whitespace.Success) continue;
+            string first = whitespace.Groups["first"].Value.Trim();
+            string second = whitespace.Groups["second"].Value.Trim();
+            if (int.TryParse(first, out int whitespaceIndex) && whitespaceIndex >= 0)
+            {
+                instances.Add(new NoxInstance(first, second, ParseProcessId(line)));
+            }
+            else if (IsNoxNameSelector(first) && !IsNoxHeader(second))
+            {
+                instances.Add(new NoxInstance(first, second, ParseProcessId(line), UsesNameSelector: true));
+            }
         }
         return instances;
     }
@@ -142,16 +182,35 @@ internal static class EmulatorVendorSupport
 
     internal static IReadOnlyList<BlueStacksInstance> ParseBlueStacksConfig(string config)
     {
-        var instances = new Dictionary<string, BlueStacksInstance>(StringComparer.OrdinalIgnoreCase);
-        foreach (Match match in BlueStacksFlatConfigPattern.Matches(config))
+        var instances = new Dictionary<string, (int Port, bool IsStatus)>(StringComparer.OrdinalIgnoreCase);
+        foreach (string rawLine in config.Split('\n'))
         {
-            AddBlueStacksInstance(instances, match.Groups["id"].Value, match.Groups["port"].Value);
+            Match match = BlueStacksLineConfigPattern.Match(rawLine.Trim().Trim('\r'));
+            if (match.Success)
+            {
+                AddBlueStacksInstance(
+                    instances,
+                    match.Groups["id"].Value,
+                    match.Groups["port"].Value,
+                    match.Groups["status"].Success);
+            }
+        }
+        foreach (Match match in BlueStacksJsonFlatConfigPattern.Matches(config))
+        {
+            AddBlueStacksInstance(
+                instances,
+                match.Groups["id"].Value,
+                match.Groups["port"].Value,
+                match.Groups["status"].Success);
         }
         foreach (Match match in BlueStacksNestedConfigPattern.Matches(config))
         {
-            AddBlueStacksInstance(instances, match.Groups["id"].Value, match.Groups["port"].Value);
+            AddBlueStacksInstance(instances, match.Groups["id"].Value, match.Groups["port"].Value, false);
         }
-        return instances.Values.OrderBy(instance => instance.Id, StringComparer.OrdinalIgnoreCase).ToArray();
+        return instances
+            .Select(instance => new BlueStacksInstance(instance.Key, instance.Value.Port))
+            .OrderBy(instance => instance.Id, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     internal static string? ResolveVendorAdb(EmulatorVendor vendor, EmulatorVendorPaths paths)
@@ -245,10 +304,12 @@ internal static class EmulatorVendorSupport
 
     internal static bool IsInstanceIdentityMatch(string path, string index, string name)
     {
-        string normalized = path.Replace('\\', '/');
-        return normalized.Contains($"/{index}/", StringComparison.OrdinalIgnoreCase)
-            || Path.GetFileNameWithoutExtension(path).Equals(index, StringComparison.OrdinalIgnoreCase)
-            || (!string.IsNullOrWhiteSpace(name) && normalized.Contains(name, StringComparison.OrdinalIgnoreCase));
+        string[] segments = path
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        int configRoot = Array.FindIndex(segments, segment => segment.Equals("BignoxVMS", StringComparison.OrdinalIgnoreCase));
+        IReadOnlyList<string> identitySegments = configRoot >= 0 ? segments[(configRoot + 1)..] : segments;
+        return PathHasIdentity(identitySegments, index) || PathHasIdentity(identitySegments, name);
     }
 
     internal static async Task<bool> ConfirmAdbEndpointAsync(
@@ -307,12 +368,53 @@ internal static class EmulatorVendorSupport
         }
     }
 
-    private static void AddBlueStacksInstance(Dictionary<string, BlueStacksInstance> instances, string id, string rawPort)
+    private static void AddBlueStacksInstance(
+        Dictionary<string, (int Port, bool IsStatus)> instances,
+        string id,
+        string rawPort,
+        bool isStatus)
     {
         if (int.TryParse(rawPort, out int port) && port is >= 1 and <= 65535 && !string.IsNullOrWhiteSpace(id))
         {
-            instances[id.Trim()] = new BlueStacksInstance(id.Trim(), port);
+            string key = id.Trim();
+            if (!instances.TryGetValue(key, out (int Port, bool IsStatus) existing) || isStatus || !existing.IsStatus)
+            {
+                instances[key] = (port, isStatus);
+            }
         }
+    }
+
+    private static bool PathHasIdentity(IReadOnlyList<string> segments, string identity)
+    {
+        if (string.IsNullOrWhiteSpace(identity)) return false;
+        foreach (string segment in segments)
+        {
+            if (segment.Equals(identity, StringComparison.OrdinalIgnoreCase)
+                || Path.GetFileNameWithoutExtension(segment).Equals(identity, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool IsNoxNameSelector(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value)
+            && value.All(character => char.IsLetterOrDigit(character) || char.IsWhiteSpace(character) || character is '_' or '-' or '.');
+    }
+
+    private static bool IsNoxHeader(string value)
+    {
+        return value.Equals("index", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("name", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("status", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("state", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int? ParsePositiveProcessId(string value)
+    {
+        return int.TryParse(value.Trim(), out int pid) && pid > 0 ? pid : null;
     }
 
     private static int? ParseProcessId(string line)
@@ -649,7 +751,8 @@ internal static class EmulatorVendorDetector
             VendorInstanceId: instance.Index,
             VendorAdbExecutable: paths.AdbPath,
             VendorProcessId: instance.ProcessId,
-            VendorInstallRoot: paths.InstallRoot));
+            VendorInstallRoot: paths.InstallRoot,
+            VendorInstanceUsesName: instance.UsesNameSelector));
     }
 
     private static async Task<VendorProbeResult> ProbeBlueStacksAsync(
@@ -876,7 +979,7 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
     {
         EmulatorCommandResult launch = await EmulatorVendorSupport.StartControlAsync(
             Target.VendorControlPath!,
-            new[] { "launch", $"-index:{Target.VendorInstanceId}" },
+            new[] { "launch", NoxSelectorArgument() },
             token,
             timeoutSeconds).ConfigureAwait(false);
         if (!launch.Ok && !LooksAlreadyRunning(launch.Output)) return launch;
@@ -889,7 +992,7 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
     {
         EmulatorCommandResult quit = await EmulatorVendorSupport.StartControlAsync(
             Target.VendorControlPath!,
-            new[] { "quit", $"-index:{Target.VendorInstanceId}" },
+            new[] { "quit", NoxSelectorArgument() },
             token,
             timeoutSeconds).ConfigureAwait(false);
         if (quit.Ok && await WaitOffline(token).ConfigureAwait(false))
@@ -923,13 +1026,21 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
             token).ConfigureAwait(false);
         if (!ok) return false;
         NoxInstance[] matches = EmulatorVendorSupport.ParseNoxConsoleList(output)
-            .Where(item => string.Equals(item.Index, Target.VendorInstanceId, StringComparison.OrdinalIgnoreCase))
+            .Where(item => item.UsesNameSelector == Target.VendorInstanceUsesName
+                && string.Equals(item.Index, Target.VendorInstanceId, StringComparison.OrdinalIgnoreCase))
             .ToArray();
         if (matches.Length != 1 || Target.VendorProcessId is not int expectedPid || matches[0].ProcessId != expectedPid)
         {
             return false;
         }
         return EmulatorVendorSupport.TryKillMappedProcess(matches[0].ProcessId, ProcessNames, "Nox");
+    }
+
+    private string NoxSelectorArgument()
+    {
+        return Target.VendorInstanceUsesName
+            ? $"-name:{Target.VendorInstanceId}"
+            : $"-index:{Target.VendorInstanceId}";
     }
 }
 

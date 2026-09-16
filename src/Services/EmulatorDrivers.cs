@@ -25,7 +25,8 @@ internal sealed record EmulatorTarget(
     string? VendorInstanceId = null,
     string? VendorAdbExecutable = null,
     int? VendorProcessId = null,
-    string? VendorInstallRoot = null);
+    string? VendorInstallRoot = null,
+    bool VendorInstanceUsesName = false);
 
 internal sealed record EmulatorCommandResult(bool Ok, string Output)
 {
@@ -74,28 +75,27 @@ internal static class EmulatorDetector
             return Generic(normalized, adb);
         }
         string? manager = EmulatorSupport.ResolveMuMuManager();
-        if (manager is null)
+        if (manager is not null)
         {
-            return Generic(normalized, adb);
-        }
-        (bool ok, string output) = await EmulatorSupport.RunCommandAsync(
-            manager,
-            new[] { "info", "-v", "all" },
-            timeoutSeconds,
-            token).ConfigureAwait(false);
-        if (!ok)
-        {
-            return new EmulatorTarget(
-                EmulatorKind.DetectionError,
-                normalized,
-                adb,
+            (bool ok, string output) = await EmulatorSupport.RunCommandAsync(
                 manager,
-                DetectionError: $"MuMuManager info 失败：{output.Trim()}");
-        }
-        string? index = EmulatorSupport.ParseMuMuVmIndex(output, port);
-        if (index is not null)
-        {
-            return new EmulatorTarget(EmulatorKind.MuMu, normalized, null, manager, index);
+                new[] { "info", "-v", "all" },
+                timeoutSeconds,
+                token).ConfigureAwait(false);
+            if (!ok)
+            {
+                return new EmulatorTarget(
+                    EmulatorKind.DetectionError,
+                    normalized,
+                    adb,
+                    manager,
+                    DetectionError: $"MuMuManager info 失败：{output.Trim()}");
+            }
+            string? index = EmulatorSupport.ParseMuMuVmIndex(output, port);
+            if (index is not null)
+            {
+                return new EmulatorTarget(EmulatorKind.MuMu, normalized, null, manager, index);
+            }
         }
 
         foreach (EmulatorVendor vendor in Enum.GetValues<EmulatorVendor>())

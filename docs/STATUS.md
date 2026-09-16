@@ -25,7 +25,7 @@
 | 驱动 | 实例发现与端点 | 启动与 ADB 操作 | 关机与安全回退 | 当前状态 |
 |---|---|---|---|---|
 | 雷电 | `ldconsole list2`、索引候选端口与 bundled `adb.exe` 连通性 | `launch --index N`；ADB start/foreground/screenshot/force-stop | `quit --index N` → `adb shell reboot -p` → 重新确认同索引同 PID 后单进程终止 | 待真实环境 |
-| 夜神 | `NoxConsole list`、`BignoxVMS/*.vbox` NAT/ADB 端口与实例身份 | `launch -index:N`；bundled `nox_adb.exe` 操作 | `quit -index:N` → `adb shell reboot -p` → 重新确认同索引同 PID 后单进程终止 | 待真实环境 |
+| 夜神 | `NoxConsole list`、`BignoxVMS/*.vbox` NAT/ADB 端口与实例身份 | 显式数字索引使用 `launch -index:N`，稳定 VM 名称使用 `launch -name:VM`；bundled `nox_adb.exe` 操作 | 对应选择器执行 `quit -index:N` 或 `quit -name:VM` → `adb shell reboot -p` → 重新确认同实例同 PID 后单进程终止 | 待真实环境 |
 | BlueStacks | `bluestacks.conf` 的实例身份与 `adb_port` | `HD-Player --instance`；bundled `HD-Adb.exe` 操作 | `adb shell reboot -p` → 仅在已有实例 PID 证据时单进程终止 | 待真实环境 |
 
 ## 已知问题台账

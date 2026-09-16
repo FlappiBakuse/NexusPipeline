@@ -20,6 +20,48 @@ public class EmulatorSupportTests
     }
 
     [Fact]
+    public void ParseLdList2_UsesCanonicalProcessIdColumnAndTreatsSentinelsAsMissing()
+    {
+        IReadOnlyList<LdPlayerInstance> instances = EmulatorVendorSupport.ParseLdList2(
+            "0,LDPlayer,0,0,1,2456,3100\n1,LDPlayer-1,0,0,0,-1,0\n2,LDPlayer-2,0,0,1,invalid,0,pid=999");
+
+        Assert.Equal(3, instances.Count);
+        Assert.Equal(2456, instances[0].ProcessId);
+        Assert.Null(instances[1].ProcessId);
+        Assert.Null(instances[2].ProcessId);
+    }
+
+    [Fact]
+    public void ParseNoxConsoleListSupportsExplicitIndexesAndStableVmNames()
+    {
+        IReadOnlyList<NoxInstance> instances = EmulatorVendorSupport.ParseNoxConsoleList(
+            "0,nox,started\n1,Nox_1,started\nnox,NoxPlayer,started\nNox_2,NoxPlayer2,started");
+
+        Assert.Equal(4, instances.Count);
+        Assert.Equal("0", instances[0].Index);
+        Assert.False(instances[0].UsesNameSelector);
+        Assert.Equal("1", instances[1].Index);
+        Assert.False(instances[1].UsesNameSelector);
+        Assert.Equal("nox", instances[2].Index);
+        Assert.True(instances[2].UsesNameSelector);
+        Assert.Equal("Nox_2", instances[3].Index);
+        Assert.True(instances[3].UsesNameSelector);
+    }
+
+    [Fact]
+    public void NoxIdentityMatchingUsesPathComponentsInsteadOfAmbiguousSubstrings()
+    {
+        Assert.True(EmulatorVendorSupport.IsInstanceIdentityMatch(
+            "C:\\Nox\\BignoxVMS\\NoxPlayer\\NoxPlayer.vbox",
+            "nox",
+            "NoxPlayer"));
+        Assert.False(EmulatorVendorSupport.IsInstanceIdentityMatch(
+            "C:\\Nox\\BignoxVMS\\NoxPlayer2\\NoxPlayer2.vbox",
+            "nox",
+            "NoxPlayer"));
+    }
+
+    [Fact]
     public void ParseNoxVboxAdbPortsReadsForwardedHostPorts()
     {
         IReadOnlyList<int> ports = EmulatorVendorSupport.ParseNoxVboxAdbPorts(
@@ -40,6 +82,30 @@ public class EmulatorSupportTests
     }
 
     [Fact]
+    public void ParseBlueStacksConfigPrefersStatusAdbPortInLineOrientedConfig()
+    {
+        IReadOnlyList<BlueStacksInstance> instances = EmulatorVendorSupport.ParseBlueStacksConfig(
+            "bst.instance.Pie64.adb_port=\"5555\"\n"
+            + "bst.instance.Pie64.status.adb_port=\"5557\"\n"
+            + "bst.instance.Nougat32.adb_port=\"5564\"\n"
+            + "bst.instance.Nougat32.status.adb_port=\"5565\"");
+
+        Assert.Equal(2, instances.Count);
+        Assert.Contains(instances, instance => instance.Id == "Pie64" && instance.AdbPort == 5557);
+        Assert.Contains(instances, instance => instance.Id == "Nougat32" && instance.AdbPort == 5565);
+    }
+
+    [Fact]
+    public void ParseBlueStacksConfigKeepsDuplicatePortsForEndpointAmbiguityDetection()
+    {
+        IReadOnlyList<BlueStacksInstance> instances = EmulatorVendorSupport.ParseBlueStacksConfig(
+            "bst.instance.Pie64.status.adb_port=\"5557\"\n"
+            + "bst.instance.Nougat32.status.adb_port=\"5557\"");
+
+        Assert.Equal(2, instances.Count(instance => instance.AdbPort == 5557));
+    }
+
+    [Fact]
     public void VendorTargetCarriesFrozenIdentityFields()
     {
         var target = new EmulatorTarget(
@@ -55,6 +121,7 @@ public class EmulatorSupportTests
         Assert.Equal("0", target.VendorInstanceId);
         Assert.Equal(1200, target.VendorProcessId);
         Assert.Equal("adb.exe", target.VendorAdbExecutable);
+        Assert.False(target.VendorInstanceUsesName);
     }
 
     [Theory]
