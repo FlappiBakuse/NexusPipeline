@@ -53,6 +53,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 执行状态存储（ExecutionStateStore） | 在同一临界区完成准入检查、活动运行登记、profile 资源租约释放和完成意图协调 |
 | 执行运行器（ExecutionRunner） | 负责后台脚本/队列生命周期、用户串行、历史落盘、通知和完成意图提交 |
 | 系统操作执行器（SystemActionExecutor） | 负责运行组空闲后的完成操作 arm、真实 60 秒倒计时与取消 |
+| 实时事件总线（RealtimeEventBus） | 以全局序列号和有界订阅队列扇出运行状态、日志、系统操作与宿主状态；慢连接丢弃旧事件并要求状态重同步 |
 | 尝试执行 | `ExecutionCoordinator` 直接承接前/后置脚本、脚本监控、判定和资源清理调用 |
 | 完成判定（SessionJudge） | 判断脚本/关键字两模式的判定状态机，每尝试独立实例 |
 | 运行预算（RunBudget） | 贯穿一次完整运行的总超时预算；重试、前置/后置脚本和命令超时共享剩余时间 |
@@ -175,6 +176,8 @@ flowchart TD
 - 队列任务保存时按 `Index` 升序对 `ScriptInstanceId` 去重，同一脚本实例只保留排序列表中的第一项；运行时按任务顺序执行，每脚本实例内按**全局用户顺序过滤出已启用绑定**后串行轮换；队列之间按准入矩阵并行，任一用户取消则中断当前队列后续任务。
 - 队列定时列表保存时按列表顺序处理；同一启用状态且执行时间相同的定时列表合并星期选择并集，保留排序列表中的第一项，后续重复项移除。
 - 调度中心启用实时画面时，日志卡片与实时画面卡片共享拉伸高度并对齐上下边界；日志最小高度跟随实时画面卡片最小高度，最大高度为该最小高度的 2.5 倍。
+- 运行观察通过 `GET /api/events` 提供 SSE：服务端使用 Bearer 认证、15 秒注释心跳和每连接 256 项有界队列；连接断开或队列溢出时前端回到 `/api/status` 同步，运行日志按 200ms 窗口批量发布并在每个运行结束前刷出尾批次。
+- SSE 使用 `event` 字段承载 `run.status`、`run.log`、`system.action`、`host.status`、`stream.ready` 和 `stream.missed`，数据统一为 `{schemaVersion, sequence, timestamp, data}`；事件总线不执行网络写入，也不保留 replay journal，前端按运行 ID 与日志序列去重。
 - 队列任务数大于零、全部引用可解析脚本实例、每个脚本 `GameMode == "emulator"`、ADB 端点格式有效且专项插件声明支持模拟器时归类为 `EmulatorOnly`；任意数量 `EmulatorOnly` 可并行，最多一个 `Standard` 队列。空队列、缺失引用、无效端点和其他无法证明为纯模拟器的情况归类为 `Standard`。
 - 独立脚本不占用 `Standard` 队列名额，但与队列共同申请脚本 ID、用户数据键、解析后的启动目标、进程基名、配置路径、日志路径模式、前/后置脚本可执行文件和模拟器 ADB 端点资源租约；同一资源或配置父子路径冲突时准入失败，无法证明日志模式互不重叠时按冲突处理。
 - 队列级汇总通知只在 `queue.NotifyEnabled=true` 时发送；用户级脚本通知由有效绑定的 `binding.NotifyEnabled=true` 决定，SMTP 收件人为空时继承全局设置。
@@ -669,6 +672,8 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RetryPolicy` / `ResultCollector` | src/Services/Execution/ | 普通失败重试判定、日志容量/按尝试分段收集 |
 | `ExecutionStateStore` | src/Services/Execution/ExecutionStateStore.cs | 线程安全管理运行中/已结束任务、准入 profile 资源租约、运行组 `Open/Closing/ActionPending/Maintenance` 状态、完成意图与待执行系统操作，并为执行、dry-run、编辑、宿主配置 CRUD 提供租约协调 |
 | `RunningExecution` | src/Services/Execution/RunningExecution.cs | 单次运行的可观察状态、并发安全记录/日志写入与一致快照 |
+| `EmulatorDetector` / `EmulatorVendorDetector` | src/Services/EmulatorDrivers.cs、src/Services/EmulatorVendors.cs | 按 MuMu、LDPlayer、Nox、BlueStacks、Generic 顺序探测并冻结实例身份；厂商清单、配置或端点映射无法证明时返回 `DetectionError` |
+| `VendorAdbEmulatorDriverBase` / 厂商驱动 | src/Services/EmulatorVendors.cs | 共用 bundled ADB 的启动应用、前台查询、截图和应用停止；厂商实例控制负责按索引/身份启动与收尾，拒绝无实例证明的进程清理 |
 | `RunBudget` | src/Services/Execution/RunBudget.cs | 统一整个运行（含重试、前置/后置脚本）的 elapsed/remaining/命令超时上限；保留 `NEXUS_TIME_SCALE` 语义 |
 | `ConfigRunSession` | src/Services/Configuration/ConfigRunSession.cs | 运行期间配置事务的收尾编排：固定同步、替换还原、script 清理和现场恢复顺序 |
 | `RunAttemptFinalizer` | src/Services/Execution/RunAttemptFinalizer.cs | attempt 级脚本进程树、游戏/模拟器清理基础设施；承载失败/取消/强制关闭策略，不改变既有清理时序 |
@@ -757,6 +762,8 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 
 重启恢复使用实例身份协议：`HostInstance` 为每个进程生成一次 `instanceId`，接受重启的旧实例生成 `handoffId` 并随 `nexus-pipeline.exe restart --handoff <id>` 交给子进程，子进程在 `StartupPipeline.RunRestart` 中接管。`GET /api/status` 暴露 `instanceId`、`restartHandoffId` 与 `actualPort`，`POST /api/settings/restart` 返回 `newPort`、`handoffId` 与旧实例 `instanceId`。控制面前端按配置端口与宿主顺延端口逐个读取 `/api/status`，只接受携带本次 `handoffId` 且 `instanceId` 不同于旧实例的应答，再跳转到 `actualPort`；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。只读的 `GET /api/status` 因此放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
 
+运行观察的 SSE 连接沿用同一 Origin 与 Bearer 认证边界，浏览器因远程 Bearer 头限制而通过 `fetch` + `ReadableStream` 消费事件。服务端不接受查询字符串令牌、不实现 `Last-Event-ID` 重放；`stream.ready` 与 `stream.missed` 只触发当前页面重新读取 `/api/status`，网络错误按 500ms、1s、2s、5s、10s 的上限退避重连，4xx 认证/请求错误交给页面重新认证或维持轮询。运行日志在内存中最多保留每个运行 500 行，旧行淘汰时以截断标记提示页面。
+
 ### 10.7 前端分层
 
 ```
@@ -777,7 +784,8 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/app/PluginRouteHost.vue` | 插件 route 的 mount、leave、dispose 生命周期边界 |
 | `frontend/src/features/settings/components/ServiceRestartNotice.vue` | 设置页面卡片上方的重启提示、重启入口、进行中禁用与超时手动重试 |
 | `frontend/src/platform/i18n.ts` | 浏览器本地语言偏好、宿主词典、动态页面文案和日期/数字/列表格式化；唯一资源源为 `frontend/public/i18n/` |
-| `frontend/src/platform/api.ts` | 宿主请求封装（bearer 头、`X-Nexus-Locale`、JSON/blob、错误码投影、AbortController 生命周期联动） |
+| `frontend/src/platform/api.ts` | 宿主请求封装（bearer 头、`X-Nexus-Locale`、JSON/blob/SSE、错误码投影、AbortController 生命周期联动） |
+| `frontend/src/platform/events.ts` | 页面范围 SSE 连接与可跨 chunk 的 event/data/id parser；断线退避、ready/missed 重同步和 route token 校验 |
 | `frontend/src/platform/page-state.ts` | 页面 route token、定时器与在途请求的代际管理 |
 | `frontend/src/platform/shell.ts` / `platform/toast.ts` | 顶部标题、导航态、主题切换以及 Toast、通知与字段错误状态 |
 | `frontend/src/platform/appearance.ts` | 主题 token 校验、插件主题注册、通用背景表面与外观变更广播；背景地址由外观表面托管，替换或清除时回收上一个 Blob Object URL |

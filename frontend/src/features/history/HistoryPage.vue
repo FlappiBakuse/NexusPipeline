@@ -241,7 +241,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" ref="historyRoot" class="view-root" data-testid="main-view">
+  <main id="view" ref="historyRoot" class="view-root history-page" data-testid="main-view">
     <NxpPageHeader
       :eyebrow="t('shell.history')"
       :title="t('shell.history')"

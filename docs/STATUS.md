@@ -1,6 +1,6 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-15｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release；v1.0.0 起仅 PR 合入
+**更新日期**：2026-09-16｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release；v1.0.0 起仅 PR 合入
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
 
@@ -20,6 +20,13 @@
 - [ ] 在真实机器人环境完成钉钉/飞书签名推送验证。
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
+- [ ] 完成雷电、夜神和 BlueStacks 真机验证矩阵：实例清单与 ADB 端点映射、启动/前台查询/截图/应用停止、优雅关机与 ADB/单 PID 收尾回退。
+
+| 驱动 | 实例发现与端点 | 启动与 ADB 操作 | 关机与安全回退 | 当前状态 |
+|---|---|---|---|---|
+| 雷电 | `ldconsole list2`、索引候选端口与 bundled `adb.exe` 连通性 | `launch --index N`；ADB start/foreground/screenshot/force-stop | `quit --index N` → `adb shell reboot -p` → 重新确认同索引同 PID 后单进程终止 | 待真实环境 |
+| 夜神 | `NoxConsole list`、`BignoxVMS/*.vbox` NAT/ADB 端口与实例身份 | `launch -index:N`；bundled `nox_adb.exe` 操作 | `quit -index:N` → `adb shell reboot -p` → 重新确认同索引同 PID 后单进程终止 | 待真实环境 |
+| BlueStacks | `bluestacks.conf` 的实例身份与 `adb_port` | `HD-Player --instance`；bundled `HD-Adb.exe` 操作 | `adb shell reboot -p` → 仅在已有实例 PID 证据时单进程终止 | 待真实环境 |
 
 ## 已知问题台账
 

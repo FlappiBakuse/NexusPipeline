@@ -53,6 +53,7 @@ LLM 与自动化代理不得新增持久化视觉回归测试、截图基线或�
 - Frontend API 1.5 的宿主外部契约由 `frontend/src/plugin-bridge/contract.test.ts` 覆盖：精确版本匹配、`host.*` 能力面（含二进制 `api.blob` / `api.upload`）、18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放。
 - 声明式插件表单控件由 `frontend/src/plugin-bridge/controls.test.ts` 表驱动覆盖：字段类型到公开 `nxp-*` 元素的映射、初始值与约束传递、单选与多选交互、开关载荷、必填错误投影与清理；实现边界由 `frontend/src/plugin-bridge/component-reuse.test.ts` 静态校验（桥接目录不得拼装控件 DOM、平台依赖只经 host adapter、字段类型必须映射到公开元素）。
 - 服务重启恢复协议由 `frontend/src/platform/service-restart.test.ts` 覆盖：旧实例与无关 HTTP 服务被拒绝、同端口等待新实例、端口漂移与配置端口被占用时跳转到实际监听端口、超时与重试复用交接信息；背景表面的 Blob URL 归属由 `frontend/src/platform/appearance.test.ts` 覆盖。
+- SSE parser 的 chunk/CRLF/multiline data/UTF-8 行为由 `frontend/src/platform/events.test.ts` 覆盖；宿主 `RealtimeEventBusTests` 覆盖订阅队列溢出、`stream.missed` 顺序、日志批次和状态投影边界。
 - 宿主路由表结构由 `frontend/src/router.test.ts` 覆盖：宿主页面路由、插件 catch-all 路由、空 fallback 与按需加载方式。
 - 页面 route token、定时器与 `AbortController` 生命周期由 `frontend/src/platform/page-state.test.ts` 覆盖。
 - 插件 route 的真实装配与生命周期由 `frontend/src/router.integration.test.ts` 覆盖：经真实 `vue-router` 实例、`router.push()` 与 `RouterView` 驱动 `/plugin/:pathMatch(.*)*`，断言 `PluginRouteHost` 挂载、`resolvePluginRoute` 收到的 route segment、route handler 的 token 与 segments、`onPageEnter`/`onPageUpdated`、插件 route → 宿主 route 与插件 route → 插件 route 的 leave/dispose 次数、无效 route 回退 Dashboard，以及 query 变化时的页面代际语义。该文件只替换 `@bridge/index` facade 与 `plugin-bridge/host-adapter` 两个宿主边界，路由表、`RouterView`、`PluginRouteHost`、页面状态与启动编排使用生产实现。

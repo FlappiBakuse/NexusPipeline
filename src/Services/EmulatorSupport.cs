@@ -185,12 +185,19 @@ internal static class EmulatorSupport
             {
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Netease"),
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Netease"),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
             };
             string[] candidates =
             {
                 @"MuMu\nx_main\adb.exe",
                 @"MuMuPlayer-12.0\shell\adb.exe",
                 @"MuMuPlayer-6.0\vmonitor\bin\adb_server.exe",
+                @"LDPlayer\LDPlayer9\adb.exe",
+                @"LDPlayer9\adb.exe",
+                @"Nox\bin\nox_adb.exe",
+                @"BlueStacks_nxt\HD-Adb.exe",
+                @"BlueStacks\HD-Adb.exe",
             };
             foreach (string root in roots)
             {
@@ -582,6 +589,50 @@ internal static class EmulatorSupport
         catch
         {
             // 进程可能已退出
+        }
+    }
+
+    /// <summary>
+    /// 仅终止调用方已通过厂商实例映射重新确认的单个 PID；不递归、不按名称枚举。
+    /// </summary>
+    internal static bool TryKillExactProcess(
+        int pid,
+        IReadOnlyCollection<string> expectedProcessNames,
+        string display)
+    {
+        if (pid <= 0)
+        {
+            return false;
+        }
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            if (process.HasExited)
+            {
+                return true;
+            }
+            if (expectedProcessNames.Count > 0
+                && !expectedProcessNames.Contains(process.ProcessName, StringComparer.OrdinalIgnoreCase))
+            {
+                Logger.Warn($"[警告] {display}重新确认的 PID {pid} 映像名不匹配，拒绝终止。");
+                return false;
+            }
+            process.Kill(entireProcessTree: false);
+            process.WaitForExit(5000);
+            return process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] {display}终止已确认 PID {pid} 失败：{ex.Message}");
+            return false;
         }
     }
 

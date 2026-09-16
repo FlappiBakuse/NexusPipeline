@@ -15,7 +15,12 @@ namespace NexusPipeline.Web;
 /// <summary>HTTP 服务骨架：监听、请求分发、静态文件。业务路由见各 ApiXxxHandler（[ApiRoute] 反射扫描注册）。</summary>
 internal sealed class WebServer : IDisposable
 {
-    private delegate Task ApiRouteHandler(HttpListenerContext context, string method, string[] seg, string body);
+    private delegate Task ApiRouteHandler(
+        HttpListenerContext context,
+        string method,
+        string[] seg,
+        string body,
+        CancellationToken cancellationToken);
 
     private sealed record ApiRouteDefinition(
         ApiRouteHandler Handler,
@@ -100,7 +105,7 @@ internal sealed class WebServer : IDisposable
             if (handle is not null)
             {
                 routes[classAttr.Name] = new ApiRouteDefinition(
-                    (ctx, m, seg, b) => InvokeRouteAsync(handle, ctx, m, seg, b),
+                    (ctx, m, seg, b, token) => InvokeRouteAsync(handle, ctx, m, seg, b, token),
                     classAttr.BodyMode,
                     classAttr.MaxBodyBytes);
             }
@@ -110,7 +115,7 @@ internal sealed class WebServer : IDisposable
                 if (methodAttr is not null)
                 {
                     routes[methodAttr.Name] = new ApiRouteDefinition(
-                        (ctx, m, seg, b) => InvokeRouteAsync(method, ctx, m, seg, b),
+                        (ctx, m, seg, b, token) => InvokeRouteAsync(method, ctx, m, seg, b, token),
                         methodAttr.BodyMode,
                         methodAttr.MaxBodyBytes);
                 }
@@ -119,7 +124,13 @@ internal sealed class WebServer : IDisposable
         return routes;
     }
 
-    private static Task InvokeRouteAsync(MethodInfo mi, HttpListenerContext context, string methodName, string[] seg, string body)
+    private static Task InvokeRouteAsync(
+        MethodInfo mi,
+        HttpListenerContext context,
+        string methodName,
+        string[] seg,
+        string body,
+        CancellationToken cancellationToken)
     {
         ParameterInfo[] parameters = mi.GetParameters();
         object?[] args = new object?[parameters.Length];
@@ -127,7 +138,12 @@ internal sealed class WebServer : IDisposable
         args[1] = methodName;
         for (int i = 2; i < parameters.Length; i++)
         {
-            args[i] = parameters[i].ParameterType == typeof(string[]) ? seg : body;
+            args[i] = parameters[i].ParameterType switch
+            {
+                var type when type == typeof(string[]) => seg,
+                var type when type == typeof(CancellationToken) => cancellationToken,
+                _ => body,
+            };
         }
         object? result = mi.Invoke(null, args);
         return result is Task task ? task : Task.CompletedTask;
@@ -684,7 +700,7 @@ internal sealed class WebServer : IDisposable
         switch (segments[0].ToLowerInvariant())
         {
             case "api":
-                await RouteApiAsync(context, method, segments.Skip(1).ToArray(), body).ConfigureAwait(false);
+                await RouteApiAsync(context, method, segments.Skip(1).ToArray(), body, token).ConfigureAwait(false);
                 break;
             default:
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
@@ -692,7 +708,12 @@ internal sealed class WebServer : IDisposable
         }
     }
 
-    private static async Task RouteApiAsync(HttpListenerContext context, string method, string[] seg, string body)
+    private static async Task RouteApiAsync(
+        HttpListenerContext context,
+        string method,
+        string[] seg,
+        string body,
+        CancellationToken cancellationToken)
     {
         if (seg.Length == 0)
         {
@@ -702,7 +723,7 @@ internal sealed class WebServer : IDisposable
         string resource = seg[0].ToLowerInvariant();
         if (Routes.TryGetValue(resource, out ApiRouteDefinition? route))
         {
-            await route.Handler(context, method, seg, body).ConfigureAwait(false);
+            await route.Handler(context, method, seg, body, cancellationToken).ConfigureAwait(false);
             return;
         }
         await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);

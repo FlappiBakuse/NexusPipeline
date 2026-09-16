@@ -14,6 +14,8 @@ internal sealed class RunningExecution
 
     private readonly List<ExecutionLogEntry> _logEntries = new();
 
+    private bool _logTruncated;
+
     private long _nextLogSequence;
 
     private string _status = "running";
@@ -36,6 +38,10 @@ internal sealed class RunningExecution
 
     private int _previewCaptureInFlight;
 
+    private Action<RunningExecutionStatusSnapshot>? _statusObserver;
+
+    private Action<ExecutionLogEntry>? _logObserver;
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     public string Kind { get; set; } = "";
@@ -57,9 +63,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = !string.Equals(_status, value, StringComparison.Ordinal);
                 _status = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -77,9 +89,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = _finishedAt != value;
                 _finishedAt = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -97,9 +115,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = _doneTasks != value;
                 _doneTasks = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -115,9 +139,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = !string.Equals(_currentScriptName, value, StringComparison.Ordinal);
                 _currentScriptName = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -144,9 +174,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = !string.Equals(_currentStatus, value, StringComparison.Ordinal);
                 _currentStatus = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -162,9 +198,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = _currentAttempt != value;
                 _currentAttempt = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -180,9 +222,15 @@ internal sealed class RunningExecution
         }
         set
         {
+            bool changed;
             lock (_stateSync)
             {
+                changed = _currentMaxAttempts != value;
                 _currentMaxAttempts = value;
+            }
+            if (changed)
+            {
+                NotifyStatusChanged();
             }
         }
     }
@@ -204,17 +252,35 @@ internal sealed class RunningExecution
         }
     }
 
+    public bool LogTruncated
+    {
+        get
+        {
+            lock (_stateSync)
+            {
+                return _logTruncated;
+            }
+        }
+    }
+
     public void SetPersistenceWarning(string warning)
     {
         if (string.IsNullOrWhiteSpace(warning))
         {
             return;
         }
+        bool changed;
         lock (_stateSync)
         {
+            string previous = _persistenceWarning;
             _persistenceWarning = string.IsNullOrWhiteSpace(_persistenceWarning)
                 ? warning
                 : $"{_persistenceWarning}；{warning}";
+            changed = !string.Equals(previous, _persistenceWarning, StringComparison.Ordinal);
+        }
+        if (changed)
+        {
+            NotifyStatusChanged();
         }
     }
 
@@ -224,6 +290,7 @@ internal sealed class RunningExecution
         {
             _doneTasks++;
         }
+        NotifyStatusChanged();
     }
 
     public void AddRecord(RunRecord record)
@@ -241,6 +308,7 @@ internal sealed class RunningExecution
             Records.Add(record);
             _doneTasks++;
         }
+        NotifyStatusChanged();
     }
 
     public List<RunRecord> SnapshotRecords()
@@ -262,20 +330,24 @@ internal sealed class RunningExecution
         {
             return;
         }
+        ExecutionLogEntry entry;
         lock (_stateSync)
         {
             DateTimeOffset timestamp = DateTimeOffset.Now;
-            _logEntries.Add(new ExecutionLogEntry(
+            entry = new ExecutionLogEntry(
                 ++_nextLogSequence,
                 timestamp,
                 level,
                 line,
-                Logger.FormatLine(level, line, timestamp)));
+                Logger.FormatLine(level, line, timestamp));
+            _logEntries.Add(entry);
             if (_logEntries.Count > MaxLogEntries)
             {
                 _logEntries.RemoveRange(0, _logEntries.Count - MaxLogEntries);
+                _logTruncated = true;
             }
         }
+        NotifyLogAppended(entry);
     }
 
     public List<string> LogTail(int max = 60)
@@ -301,6 +373,7 @@ internal sealed class RunningExecution
         {
             _previewTarget = target;
         }
+        NotifyStatusChanged();
     }
 
     internal void SetPreviewWaiting(ScriptInstance script)
@@ -318,9 +391,104 @@ internal sealed class RunningExecution
 
     internal void ClearPreviewTarget()
     {
+        bool changed;
         lock (_stateSync)
         {
+            changed = _previewTarget is not null;
             _previewTarget = null;
+        }
+        if (changed)
+        {
+            NotifyStatusChanged();
+        }
+    }
+
+    internal void AttachRealtimeObservers(
+        Action<RunningExecutionStatusSnapshot> statusObserver,
+        Action<ExecutionLogEntry> logObserver)
+    {
+        ArgumentNullException.ThrowIfNull(statusObserver);
+        ArgumentNullException.ThrowIfNull(logObserver);
+        lock (_stateSync)
+        {
+            _statusObserver = statusObserver;
+            _logObserver = logObserver;
+        }
+    }
+
+    internal RunningExecutionStatusSnapshot SnapshotStatus()
+    {
+        lock (_stateSync)
+        {
+            return CreateStatusSnapshotLocked();
+        }
+    }
+
+    private RunningExecutionStatusSnapshot CreateStatusSnapshotLocked()
+    {
+        return new RunningExecutionStatusSnapshot
+        {
+            Id = Id,
+            Kind = Kind,
+            TargetId = TargetId,
+            TargetName = TargetName,
+            Mode = Mode,
+            Status = _status,
+            StartedAt = StartedAt,
+            FinishedAt = _finishedAt,
+            TotalTasks = TotalTasks,
+            DoneTasks = _doneTasks,
+            CurrentScriptName = _currentScriptName,
+            CurrentScriptId = _previewTarget?.ScriptId ?? "",
+            CurrentStatus = _currentStatus,
+            CurrentAttempt = _currentAttempt,
+            CurrentMaxAttempts = _currentMaxAttempts,
+            PersistenceWarning = _persistenceWarning,
+            LogTruncated = _logTruncated,
+        };
+    }
+
+    private void NotifyStatusChanged()
+    {
+        Action<RunningExecutionStatusSnapshot>? observer;
+        RunningExecutionStatusSnapshot snapshot;
+        lock (_stateSync)
+        {
+            observer = _statusObserver;
+            if (observer is null)
+            {
+                return;
+            }
+            snapshot = CreateStatusSnapshotLocked();
+        }
+        try
+        {
+            observer(snapshot);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[实时事件] 运行状态观察器失败（{Id}）：{ex.Message}");
+        }
+    }
+
+    private void NotifyLogAppended(ExecutionLogEntry entry)
+    {
+        Action<ExecutionLogEntry>? observer;
+        lock (_stateSync)
+        {
+            observer = _logObserver;
+        }
+        if (observer is null)
+        {
+            return;
+        }
+        try
+        {
+            observer(entry);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[实时事件] 运行日志观察器失败（{Id}）：{ex.Message}");
         }
     }
 
@@ -387,6 +555,7 @@ internal sealed class RunningExecution
                 CurrentAttempt = currentAttempt,
                 CurrentMaxAttempts = currentMaxAttempts,
                 PersistenceWarning = persistenceWarning,
+                LogTruncated = _logTruncated,
                 Records = Records.Select(record => record.Clone()).ToList(),
                 LogTail = _logEntries.TakeLast(60).Select(entry => entry.FormattedText).ToList(),
                 LogEntries = _logEntries.TakeLast(StatusLogEntries).ToList(),
@@ -401,6 +570,43 @@ internal sealed record ExecutionLogEntry(
     LogLevel Level,
     string Message,
     string FormattedText);
+
+internal sealed record RunningExecutionStatusSnapshot
+{
+    public string Id { get; init; } = "";
+
+    public string Kind { get; init; } = "";
+
+    public string TargetId { get; init; } = "";
+
+    public string TargetName { get; init; } = "";
+
+    public string Mode { get; init; } = "";
+
+    public string Status { get; init; } = "";
+
+    public DateTime StartedAt { get; init; }
+
+    public DateTime? FinishedAt { get; init; }
+
+    public int TotalTasks { get; init; }
+
+    public int DoneTasks { get; init; }
+
+    public string CurrentScriptName { get; init; } = "";
+
+    public string CurrentScriptId { get; init; } = "";
+
+    public string CurrentStatus { get; init; } = "";
+
+    public int CurrentAttempt { get; init; }
+
+    public int CurrentMaxAttempts { get; init; }
+
+    public string PersistenceWarning { get; init; } = "";
+
+    public bool LogTruncated { get; init; }
+}
 
 internal sealed record RunningExecutionSnapshot
 {
@@ -435,6 +641,8 @@ internal sealed record RunningExecutionSnapshot
     public int CurrentMaxAttempts { get; init; }
 
     public string PersistenceWarning { get; init; } = "";
+
+    public bool LogTruncated { get; init; }
 
     public IReadOnlyList<RunRecord> Records { get; init; } = Array.Empty<RunRecord>();
 

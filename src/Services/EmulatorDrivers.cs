@@ -7,17 +7,25 @@ internal enum EmulatorKind
 {
     GenericAdb,
     MuMu,
+    LdPlayer,
+    Nox,
+    BlueStacks,
     DetectionError,
 }
 
-/// <summary>一次运行冻结的模拟器目标。创建后不允许在 GenericAdb 与 MuMu 之间切换。</summary>
+/// <summary>一次运行冻结的模拟器目标。检测完成后驱动身份与厂商实例映射保持不变。</summary>
 internal sealed record EmulatorTarget(
     EmulatorKind Kind,
     string Endpoint,
     string? AdbExecutable = null,
     string? MuMuManagerPath = null,
     string? MuMuInstanceIndex = null,
-    string? DetectionError = null);
+    string? DetectionError = null,
+    string? VendorControlPath = null,
+    string? VendorInstanceId = null,
+    string? VendorAdbExecutable = null,
+    int? VendorProcessId = null,
+    string? VendorInstallRoot = null);
 
 internal sealed record EmulatorCommandResult(bool Ok, string Output)
 {
@@ -52,10 +60,7 @@ internal interface IEmulatorDriver
 
 internal static class EmulatorDetector
 {
-    /// <summary>
-    /// MuMuManager 缺失或 info 成功但端口未匹配时才返回 GenericAdb；
-    /// manager 存在但 info 失败时返回 DetectionError，避免错误地走 ADB。
-    /// </summary>
+    /// <summary>按 MuMu、LDPlayer、Nox、BlueStacks、Generic 的顺序冻结目标身份。</summary>
     public static async Task<EmulatorTarget> DetectAsync(string endpoint, CancellationToken token, int timeoutSeconds)
     {
         string normalized = endpoint?.Trim() ?? "";
@@ -88,9 +93,33 @@ internal static class EmulatorDetector
                 DetectionError: $"MuMuManager info 失败：{output.Trim()}");
         }
         string? index = EmulatorSupport.ParseMuMuVmIndex(output, port);
-        return index is null
-            ? Generic(normalized, adb)
-            : new EmulatorTarget(EmulatorKind.MuMu, normalized, null, manager, index);
+        if (index is not null)
+        {
+            return new EmulatorTarget(EmulatorKind.MuMu, normalized, null, manager, index);
+        }
+
+        foreach (EmulatorVendor vendor in Enum.GetValues<EmulatorVendor>())
+        {
+            VendorProbeResult result = await EmulatorVendorDetector.ProbeAsync(
+                vendor,
+                normalized,
+                port,
+                token,
+                timeoutSeconds).ConfigureAwait(false);
+            if (result.State == VendorProbeState.Match && result.Target is not null)
+            {
+                return result.Target;
+            }
+            if (result.State == VendorProbeState.Error)
+            {
+                return new EmulatorTarget(
+                    EmulatorKind.DetectionError,
+                    normalized,
+                    adb,
+                    DetectionError: result.Error ?? $"{vendor} 模拟器目标识别失败");
+            }
+        }
+        return Generic(normalized, adb);
     }
 
     private static EmulatorTarget Generic(string endpoint, string? adb)
@@ -107,6 +136,9 @@ internal static class EmulatorDriverFactory
         {
             EmulatorKind.GenericAdb => new GenericAdbEmulatorDriver(target),
             EmulatorKind.MuMu => new MuMuEmulatorDriver(target),
+            EmulatorKind.LdPlayer => new LdPlayerEmulatorDriver(target),
+            EmulatorKind.Nox => new NoxEmulatorDriver(target),
+            EmulatorKind.BlueStacks => new BlueStacksEmulatorDriver(target),
             EmulatorKind.DetectionError => throw new InvalidOperationException(target.DetectionError ?? "模拟器目标识别失败"),
             _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, "未知模拟器类型"),
         };

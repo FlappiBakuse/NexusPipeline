@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
+import { openEventStream, type RealtimeSseEvent, type EventStreamHandle } from "../../platform/events";
 import { disposePluginSlot, initPluginRuntime, notifyPluginPageEnter, notifyPluginPageLeave, notifyPluginPageUpdated, notifyPluginDispose } from "@bridge/index";
 import { renderPluginSlot } from "@bridge/index";
 import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../scripts/utils/pluginStatus";
-import { state } from "../../platform/page-state";
+import { registerInterval, state } from "../../platform/page-state";
 import { t } from "../../platform/i18n";
 import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
@@ -44,6 +45,7 @@ let requestSerial = 0;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let statusController: AbortController | null = null;
 let pageToken = 0;
+let eventStream: EventStreamHandle | null = null;
 
 const running = computed(() => Array.isArray(status.value.running) ? status.value.running : []);
 const executionPreviewLayoutEnabled = computed(() =>
@@ -136,7 +138,7 @@ async function refreshStatus() {
   try {
     const next = await api("GET", "/api/status", undefined, controller.signal) as DispatchStatus;
     if (disposed || controller.signal.aborted) return;
-    status.value = { ...status.value, ...next, running: Array.isArray(next.running) ? next.running : [] };
+    status.value = mergeStatusSnapshot(next);
     await paintPluginSlots();
     await notifyPluginPageUpdated({ hash: "dispatch", page: "dispatch", segments: ["dispatch"], token: pageToken, container: root.value });
   } catch (reason) {
@@ -190,6 +192,163 @@ function requestCancelRun(runId: string) {
   if (cancelConfirmBusy.value) return;
   cancelConfirmRunId.value = runId;
 }
+
+function mergeStatusSnapshot(next: DispatchStatus): DispatchStatus {
+  const previous = new Map((status.value.running || []).map(record => [record.id, record]));
+  const nextRunning = Array.isArray(next.running) ? next.running : [];
+  return {
+    ...status.value,
+    ...next,
+    running: nextRunning.map(record => mergeRunningRecord(previous.get(record.id), record)),
+  };
+}
+
+function mergeRunningRecord(previous: RunningRecord | undefined, next: RunningRecord): RunningRecord {
+  if (!previous) return next;
+  const previousEntries = Array.isArray(previous.logEntries) ? previous.logEntries : [];
+  const nextEntries = Array.isArray(next.logEntries) ? next.logEntries : [];
+  const entries = new Map<number, typeof nextEntries[number]>();
+  for (const entry of [...previousEntries, ...nextEntries]) {
+    if (typeof entry.sequence === "number" && Number.isFinite(entry.sequence)) entries.set(entry.sequence, entry);
+  }
+  const mergedEntries = [...entries.values()].sort((left, right) => (left.sequence || 0) - (right.sequence || 0)).slice(-500);
+  return {
+    ...previous,
+    ...next,
+    logEntries: mergedEntries.length ? mergedEntries : next.logEntries,
+    logTruncated: Boolean(previous.logTruncated || next.logTruncated || entries.size > 500),
+  };
+}
+
+function realtimeData(event: RealtimeSseEvent): Record<string, unknown> {
+  return event.data && typeof event.data === "object" ? event.data : {};
+}
+
+function realtimeRunningRecord(data: Record<string, unknown>): RunningRecord | null {
+  const id = String(data.runId || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    kind: String(data.kind || ""),
+    targetName: String(data.targetName || ""),
+    targetId: String(data.targetId || ""),
+    mode: String(data.mode || ""),
+    status: String(data.status || ""),
+    currentScriptName: String(data.currentScriptName || ""),
+    currentScriptId: String(data.currentScriptId || ""),
+    currentStatus: String(data.currentStatus || ""),
+    currentAttempt: Number(data.currentAttempt || 0),
+    currentMaxAttempts: Number(data.currentMaxAttempts || 0),
+    doneTasks: Number(data.doneTasks || 0),
+    totalTasks: Number(data.totalTasks || 0),
+    persistenceWarning: String(data.persistenceWarning || ""),
+    logTruncated: Boolean(data.logTruncated),
+  };
+}
+
+function applyRealtimeRunStatus(data: Record<string, unknown>) {
+  const record = realtimeRunningRecord(data);
+  if (!record) return;
+  const active = data.active !== false;
+  const current = status.value.running || [];
+  if (!active) {
+    status.value = { ...status.value, running: current.filter(item => item.id !== record.id) };
+    return;
+  }
+  const existing = current.find(item => item.id === record.id);
+  const nextRecord = mergeRunningRecord(existing, record);
+  status.value = {
+    ...status.value,
+    running: existing ? current.map(item => item.id === record.id ? nextRecord : item) : [...current, nextRecord],
+  };
+}
+
+function applyRealtimeRunLog(data: Record<string, unknown>) {
+  const runId = String(data.runId || "").trim();
+  const incoming = Array.isArray(data.entries) ? data.entries : [];
+  if (!runId || !incoming.length) return;
+  const current = status.value.running || [];
+  const existing = current.find(item => item.id === runId);
+  if (!existing) return;
+  const entries = [...(existing.logEntries || [])];
+  const seen = new Set(entries.map(entry => entry.sequence).filter(sequence => typeof sequence === "number"));
+  for (const value of incoming) {
+    if (!value || typeof value !== "object") continue;
+    const item = value as Record<string, unknown>;
+    const sequence = Number(item.sequence);
+    if (!Number.isFinite(sequence) || seen.has(sequence)) continue;
+    seen.add(sequence);
+    entries.push({
+      sequence,
+      timestamp: typeof item.timestamp === "string" ? item.timestamp : undefined,
+      level: String(item.level || "info"),
+      text: String(item.formattedText || item.message || ""),
+      message: String(item.message || ""),
+      formattedText: String(item.formattedText || ""),
+    });
+  }
+  entries.sort((left, right) => (left.sequence || 0) - (right.sequence || 0));
+  const truncated = entries.length > 500;
+  const nextRecord = { ...existing, logEntries: entries.slice(-500), logTruncated: Boolean(existing.logTruncated || truncated) };
+  status.value = { ...status.value, running: current.map(item => item.id === runId ? nextRecord : item) };
+}
+
+function applyRealtimeSystemAction(data: Record<string, unknown>) {
+  const actionState = String(data.state || "pending");
+  if (["cancelled", "cleared"].includes(actionState)) {
+    status.value = { ...status.value, systemAction: null };
+    return;
+  }
+  status.value = {
+    ...status.value,
+    systemAction: {
+      action: String(data.action || ""),
+      queueName: String(data.queueName || ""),
+      deadline: typeof data.deadline === "string" ? data.deadline : undefined,
+      state: actionState,
+    },
+  };
+}
+
+async function applyRealtimeEvent(event: RealtimeSseEvent) {
+  const data = realtimeData(event);
+  if (event.type === "run.status") applyRealtimeRunStatus(data);
+  else if (event.type === "run.log") applyRealtimeRunLog(data);
+  else if (event.type === "system.action") applyRealtimeSystemAction(data);
+  else if (event.type === "host.status" && Array.isArray(data.running)) {
+    status.value = { ...status.value, running: data.running.map(item => realtimeRunningRecord(item as Record<string, unknown>)).filter((item): item is RunningRecord => item !== null) };
+  }
+  await notifyPluginPageUpdated({ hash: "dispatch", page: "dispatch", segments: ["dispatch"], token: pageToken, container: root.value });
+}
+
+function startStatusPolling() {
+  if (!pollTimer && !disposed) pollTimer = registerInterval(setInterval(() => void refreshStatus(), 1000));
+}
+
+function stopStatusPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    state.timers.delete(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startEventStream() {
+  eventStream = openEventStream({
+    page: "dispatch",
+    token: pageToken,
+    onEvent: event => applyRealtimeEvent(event),
+    onReady: async () => {
+      await refreshStatus();
+      stopStatusPolling();
+    },
+    onMissed: async () => {
+      await refreshStatus();
+    },
+    onDisconnected: startStatusPolling,
+    onFatal: startStatusPolling,
+  });
+}
 function closeCancelConfirm() {
   if (!cancelConfirmBusy.value) cancelConfirmRunId.value = null;
 }
@@ -223,12 +382,15 @@ onMounted(async () => {
   await loadInitial();
   if (disposed) return;
   await notifyPluginPageEnter({ hash: "dispatch", page: "dispatch", segments: ["dispatch"], token: pageToken, container: root.value });
-  pollTimer = setInterval(() => void refreshStatus(), 1000);
+  startStatusPolling();
+  startEventStream();
 });
 onBeforeUnmount(() => {
   disposed = true;
   requestSerial += 1;
-  if (pollTimer) clearInterval(pollTimer);
+  stopStatusPolling();
+  eventStream?.close();
+  eventStream = null;
   statusController?.abort();
   statusController = null;
   void disposePluginSlots();

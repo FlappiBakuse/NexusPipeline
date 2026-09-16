@@ -76,6 +76,7 @@ internal static class ApiStatusHandler
                     snapshot.CurrentAttempt,
                     snapshot.CurrentMaxAttempts,
                     persistenceWarning = snapshot.PersistenceWarning,
+                    logTruncated = snapshot.LogTruncated,
                     logTail = snapshot.LogTail,
                     logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { toast } from "../../platform/toast";
 import { t } from "../../platform/i18n";
+import { registerInterval, state } from "../../platform/page-state";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 
 interface SystemAction {
@@ -54,11 +55,14 @@ async function cancel() {
 }
 
 onMounted(() => {
-  timer = setInterval(() => { now.value = Date.now(); }, 1000);
+  timer = registerInterval(setInterval(() => { now.value = Date.now(); }, 1000));
 });
 
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer);
+  if (timer) {
+    clearInterval(timer);
+    state.timers.delete(timer);
+  }
 });
 </script>
 

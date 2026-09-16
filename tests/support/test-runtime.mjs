@@ -71,7 +71,7 @@ export function copyReleaseArtifacts(releaseDir, runtimeDir) {
   if (fs.existsSync(plugins)) fs.cpSync(plugins, path.join(runtimeDir, "plugins"), { recursive: true });
 }
 
-/** 安装 ADB / MuMu 桩（fixture 位于 tests/e2e/tests/fixtures，两层共用）。 */
+/** 安装 ADB、MuMu 与厂商模拟器桩（fixture 位于 tests/e2e/tests/fixtures，两层共用）。 */
 export function installEmulatorStubs(runtimeDir, fixtureDir) {
   const foreground = "  mCurrentFocus=Window{test u0 app.lawnchair/app.lawnchair.LawnchairLauncher}";
   const adbDir = path.join(runtimeDir, "adb-stub");
@@ -82,6 +82,23 @@ export function installEmulatorStubs(runtimeDir, fixtureDir) {
   fs.mkdirSync(mumuDir, { recursive: true });
   fs.copyFileSync(path.join(fixtureDir, "mumu-manager-stub.cmd"), path.join(mumuDir, "mumu-manager-stub.cmd"));
   fs.writeFileSync(path.join(mumuDir, "foreground.txt"), foreground, "utf8");
+
+  const ldDir = path.join(runtimeDir, "ld-stub");
+  fs.mkdirSync(ldDir, { recursive: true });
+  fs.copyFileSync(path.join(fixtureDir, "ldconsole-stub.cmd"), path.join(ldDir, "ldconsole-stub.cmd"));
+
+  const noxDir = path.join(runtimeDir, "nox-stub");
+  fs.mkdirSync(path.join(noxDir, "BignoxVMS", "Android7"), { recursive: true });
+  fs.copyFileSync(path.join(fixtureDir, "noxconsole-stub.cmd"), path.join(noxDir, "noxconsole-stub.cmd"));
+  fs.copyFileSync(
+    path.join(fixtureDir, "nox-instance.vbox"),
+    path.join(noxDir, "BignoxVMS", "Android7", "Android7.vbox"),
+  );
+
+  const blueStacksDir = path.join(runtimeDir, "bluestacks-stub");
+  fs.mkdirSync(blueStacksDir, { recursive: true });
+  fs.copyFileSync(path.join(fixtureDir, "bluestacks-player-stub.cmd"), path.join(blueStacksDir, "bluestacks-player-stub.cmd"));
+  fs.copyFileSync(path.join(fixtureDir, "bluestacks.conf"), path.join(blueStacksDir, "bluestacks.conf"));
 }
 
 /**

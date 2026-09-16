@@ -1,0 +1,5 @@
+<VirtualBox>
+  <Network>
+    <Forwarding name="adb" proto="1" hostport="62023" guestport="5555" />
+  </Network>
+</VirtualBox>

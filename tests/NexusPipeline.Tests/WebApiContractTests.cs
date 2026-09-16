@@ -17,6 +17,7 @@ public sealed class WebApiContractTests
                 "cancel",
                 "diagnostics",
                 "dispatch",
+                "events",
                 "execution-preview",
                 "fs",
                 "history",

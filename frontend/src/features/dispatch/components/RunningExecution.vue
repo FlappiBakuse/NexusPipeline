@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
@@ -10,7 +10,7 @@ import { runningLogClass, runningLogEntries, runningProgress, type DispatchRunni
 
 /** 运行中区块：宿主系统操作倒计时、运行记录卡片与实时日志。取消动作由页面执行。 */
 
-defineProps<{
+const props = defineProps<{
   running: DispatchRunningRecord[];
   systemAction: DispatchSystemAction | null;
   busy: boolean;
@@ -23,7 +23,13 @@ const MIN_LOG_HEIGHT = 180;
 const MAX_LOG_HEIGHT = 720;
 const LOG_HEIGHT_STEP = 24;
 const logHeights = reactive<Record<string, number>>({});
+const logFollow = reactive<Record<string, boolean>>({});
+const root = ref<HTMLElement | null>(null);
+const logViewports = new Map<string, HTMLElement>();
+const logViewportListeners = new Map<string, () => void>();
 let logResize: { runId: string; startY: number; startHeight: number } | null = null;
+
+const FOLLOW_EPSILON = 24;
 
 function maxLogHeight() {
   const viewportHeight = typeof window === "undefined" ? MAX_LOG_HEIGHT : window.innerHeight;
@@ -75,11 +81,64 @@ function clampLogHeights() {
   for (const [runId, height] of Object.entries(logHeights)) setLogHeight(runId, height);
 }
 
+function isNearBottom(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= FOLLOW_EPSILON;
+}
+
+function findViewport(runId: string): HTMLElement | null {
+  const articles = root.value?.querySelectorAll<HTMLElement>("[data-run-id]") || [];
+  for (const article of articles) {
+    if (article.dataset.runId === runId) return article.querySelector<HTMLElement>(".nxp-scroll-viewport");
+  }
+  return null;
+}
+
+function scrollLogToBottom(runId: string) {
+  const viewport = logViewports.get(runId) || findViewport(runId);
+  if (viewport) viewport.scrollTop = viewport.scrollHeight;
+}
+
+function syncLogViewports() {
+  const activeIds = new Set(props.running.map(record => record.id));
+  for (const [runId, listener] of logViewportListeners) {
+    if (activeIds.has(runId)) continue;
+    logViewports.get(runId)?.removeEventListener("scroll", listener);
+    logViewportListeners.delete(runId);
+    logViewports.delete(runId);
+    delete logFollow[runId];
+  }
+  for (const record of props.running) {
+    const viewport = findViewport(record.id);
+    if (!viewport || logViewports.get(record.id) === viewport) continue;
+    const oldListener = logViewportListeners.get(record.id);
+    if (oldListener) logViewports.get(record.id)?.removeEventListener("scroll", oldListener);
+    if (typeof logFollow[record.id] !== "boolean") logFollow[record.id] = true;
+    const listener = () => { logFollow[record.id] = isNearBottom(viewport); };
+    logViewports.set(record.id, viewport);
+    logViewportListeners.set(record.id, listener);
+    viewport.addEventListener("scroll", listener, { passive: true });
+  }
+}
+
+async function syncLogsAndFollow() {
+  await nextTick();
+  syncLogViewports();
+  for (const record of props.running) {
+    if (logFollow[record.id] !== false) scrollLogToBottom(record.id);
+  }
+}
+
+watch(
+  () => props.running.map(record => `${record.id}:${record.logEntries?.at(-1)?.sequence || 0}:${record.logEntries?.length || 0}:${record.logTruncated ? 1 : 0}`).join("|"),
+  () => { void syncLogsAndFollow(); },
+);
+
 onMounted(() => {
   window.addEventListener("pointermove", moveLogResize);
   window.addEventListener("pointerup", stopLogResize);
   window.addEventListener("pointercancel", stopLogResize);
   window.addEventListener("resize", clampLogHeights);
+  void syncLogsAndFollow();
 });
 
 onBeforeUnmount(() => {
@@ -88,6 +147,9 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointerup", stopLogResize);
   window.removeEventListener("pointercancel", stopLogResize);
   window.removeEventListener("resize", clampLogHeights);
+  for (const [runId, listener] of logViewportListeners) logViewports.get(runId)?.removeEventListener("scroll", listener);
+  logViewportListeners.clear();
+  logViewports.clear();
 });
 
 function recordKind(record: DispatchRunningRecord) {
@@ -99,7 +161,7 @@ function recordMode(record: DispatchRunningRecord) {
 </script>
 
 <template>
-  <div id="system-action-area">
+  <div ref="root" id="system-action-area">
     <SystemActionCard v-if="systemAction && systemAction.action !== 'exit'" :action="systemAction" @cancelled="emit('cancelled')" />
   </div>
   <section id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running">
@@ -130,7 +192,7 @@ function recordMode(record: DispatchRunningRecord) {
         </div>
         <div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }">
           <div class="run-log-resizable" :style="{ height: `${logHeight(record.id)}px` }" :data-log-height="logHeight(record.id)" :data-testid="`run-log-resizable-${record.id}`">
-            <NxpScrollArea class="run-log run-terminal" direction="both" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || "" }}</span></pre></NxpScrollArea>
+            <NxpScrollArea class="run-log run-terminal" direction="both" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="record.logTruncated" class="run-log-truncated">{{ t("dispatch.log_truncated", {}, "较早日志已折叠") }}</span><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || entry.formattedText || entry.message || "" }}</span></pre></NxpScrollArea>
             <div
               class="run-log-resize-handle"
               role="separator"

@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
             <div v-if="attemptLog(attempt.number)" class="history-log" data-history-log>
               <div class="qk-row">{{ attemptLogIsTail(attempt.number) ? t("history.log.lines_summary.tail", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) : t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) }}</div>
               <div v-if="attemptLogIsTail(attempt.number)" class="history-log-actions"><span class="muted">{{ t("history.log.tail_only") }}</span><NxpButton class="ghost sm" type="button" @click.stop="loadFullLog(attempt.number)">{{ t("history.view_full_log") }}</NxpButton></div>
-              <NxpScrollArea class="history-log-scroll" direction="both" :aria-label="t('history.log.attempt', { attempt: attempt.number })"><pre class="logbox" data-history-log-body>{{ attemptLogText(attempt.number) }}</pre></NxpScrollArea>
+              <NxpScrollArea class="history-log-scroll" direction="vertical" :aria-label="t('history.log.attempt', { attempt: attempt.number })"><pre class="logbox" data-history-log-body>{{ attemptLogText(attempt.number) }}</pre></NxpScrollArea>
             </div>
             <div v-if="attemptScreenshots(attempt).length" class="history-attempt-screenshots" data-testid="history-attempt-screenshots">
               <div class="qk-row">{{ t("history.screenshots.summary", { count: attemptScreenshots(attempt).length }) }}</div>

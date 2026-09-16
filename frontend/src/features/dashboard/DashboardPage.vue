@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
+import { openEventStream, type EventStreamHandle, type RealtimeSseEvent } from "../../platform/events";
+import { registerInterval, state } from "../../platform/page-state";
 import { formatList, t } from "../../platform/i18n";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
@@ -16,6 +18,8 @@ import { historyTodayValue } from "../history/utils/historyFormat";
 import type { HistorySummary } from "../history/utils/historyTypes";
 
 interface RunningRecord {
+  id: string;
+  targetId?: string;
   targetName?: string;
   kind?: string;
   mode?: string;
@@ -31,7 +35,7 @@ interface DashboardStatus {
   version?: string;
   running?: RunningRecord[];
   plugins?: Array<{ configuredEnabled?: boolean; displayName?: string }>;
-  systemAction?: { action?: string; deadline?: string; queueName?: string } | null;
+  systemAction?: { state?: string; action?: string; deadline?: string; queueName?: string } | null;
 }
 
 const status = ref<DashboardStatus>({ running: [], plugins: [] });
@@ -50,6 +54,7 @@ const historyTo = ref(initialHistoryRange.to);
 let historySummaryTimer: ReturnType<typeof setInterval> | null = null;
 let historySummaryController: AbortController | null = null;
 let disposed = false;
+let eventStream: EventStreamHandle | null = null;
 
 function recentHistoryRange(now = new Date()) {
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -114,6 +119,97 @@ async function load() {
   }
 }
 
+function realtimeData(event: RealtimeSseEvent): Record<string, unknown> {
+  return event.data && typeof event.data === "object" ? event.data : {};
+}
+
+function realtimeRunningRecord(data: Record<string, unknown>): RunningRecord | null {
+  const id = String(data.runId || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    targetId: String(data.targetId || ""),
+    targetName: String(data.targetName || ""),
+    kind: String(data.kind || ""),
+    mode: String(data.mode || ""),
+    status: String(data.status || ""),
+    currentScriptName: String(data.currentScriptName || ""),
+    currentStatus: String(data.currentStatus || ""),
+    currentAttempt: Number(data.currentAttempt || 0),
+    currentMaxAttempts: Number(data.currentMaxAttempts || 0),
+    persistenceWarning: String(data.persistenceWarning || ""),
+  };
+}
+
+function applyRealtimeRunStatus(data: Record<string, unknown>) {
+  const record = realtimeRunningRecord(data);
+  if (!record) return;
+  const current = status.value.running || [];
+  status.value = {
+    ...status.value,
+    running: data.active === false
+      ? current.filter(item => item.id !== record.id)
+      : current.some(item => item.id === record.id)
+        ? current.map(item => item.id === record.id ? { ...item, ...record } : item)
+        : [...current, record],
+  };
+}
+
+function applyRealtimeSystemAction(data: Record<string, unknown>) {
+  const actionState = String(data.state || "pending");
+  status.value = {
+    ...status.value,
+    systemAction: ["cancelled", "cleared"].includes(actionState)
+      ? null
+      : {
+          state: actionState,
+          action: String(data.action || ""),
+          queueName: String(data.queueName || ""),
+          deadline: typeof data.deadline === "string" ? data.deadline : undefined,
+        },
+  };
+}
+
+function applyRealtimeEvent(event: RealtimeSseEvent) {
+  const data = realtimeData(event);
+  if (event.type === "run.status") applyRealtimeRunStatus(data);
+  else if (event.type === "system.action") applyRealtimeSystemAction(data);
+  else if (event.type === "host.status" && Array.isArray(data.running)) {
+    status.value = {
+      ...status.value,
+      running: data.running.map(item => realtimeRunningRecord(item as Record<string, unknown>)).filter((item): item is RunningRecord => item !== null),
+    };
+  }
+}
+
+function startStatusPolling() {
+  if (!timer && !disposed) timer = registerInterval(setInterval(() => void load(), 3000));
+}
+
+function stopStatusPolling() {
+  if (timer) {
+    clearInterval(timer);
+    state.timers.delete(timer);
+    timer = null;
+  }
+}
+
+function startEventStream() {
+  eventStream = openEventStream({
+    page: "dashboard",
+    onEvent: applyRealtimeEvent,
+    onReady: async () => {
+      await load();
+      stopStatusPolling();
+    },
+    onMissed: async () => {
+      await load();
+    },
+    onDisconnected: startStatusPolling,
+    onFatal: startStatusPolling,
+  });
+}
+
 function normalizeHistorySummary(data: Partial<HistorySummary>): HistorySummary {
   return {
     totalCount: Number(data?.totalCount || 0),
@@ -160,16 +256,22 @@ onMounted(() => {
   setTopbarTitle(t("dashboard.dashboard"));
   void load();
   void loadHistorySummary();
-  timer = setInterval(() => void load(), 3000);
-  historySummaryTimer = setInterval(() => void loadHistorySummary(), 60000);
+  startStatusPolling();
+  historySummaryTimer = registerInterval(setInterval(() => void loadHistorySummary(), 60000));
+  startEventStream();
 });
 
 onBeforeUnmount(() => {
   disposed = true;
-  if (timer) clearInterval(timer);
+  stopStatusPolling();
+  eventStream?.close();
+  eventStream = null;
   requestController?.abort();
   requestController = null;
-  if (historySummaryTimer) clearInterval(historySummaryTimer);
+  if (historySummaryTimer) {
+    clearInterval(historySummaryTimer);
+    state.timers.delete(historySummaryTimer);
+  }
   historySummaryController?.abort();
   historySummaryController = null;
   if (cardsSlot.value) void disposePluginSlot(cardsSlot.value);

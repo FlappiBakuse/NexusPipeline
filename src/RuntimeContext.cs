@@ -11,6 +11,7 @@ using NexusPipeline.Services.Diagnostics;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.Services.Networking;
+using NexusPipeline.Services.Realtime;
 using NexusPipeline.Services.Update;
 using NexusPipeline.Utilities;
 
@@ -68,6 +69,7 @@ internal class RuntimeContext
         collection.AddSingleton<ExecutionAdmissionPolicy>();
         collection.AddSingleton<ExecutionPlanBuilder>();
         collection.AddSingleton<ExecutionStateStore>();
+        collection.AddSingleton<RealtimeEventBus>();
         collection.AddSingleton<ExecutionValidator>();
         collection.AddSingleton<ExecutionPreviewService>(provider => new ExecutionPreviewService(
             () => provider.GetRequiredService<DispatchCenter>(),

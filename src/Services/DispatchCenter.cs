@@ -1,5 +1,6 @@
 using NexusPipeline.Models;
 using NexusPipeline.Services.Execution;
+using NexusPipeline.Services.Realtime;
 using NexusPipeline.Utilities;
 using NexusPipeline.App.Abstractions;
 
@@ -16,16 +17,20 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
     private readonly ExecutionRunner _runner;
     private readonly SystemActionExecutor _systemActions;
 
+    private readonly RealtimeEventBus? _realtime;
+
     public DispatchCenter(
         ExecutionStateStore state,
         ExecutionPlanBuilder plans,
         ExecutionRunner runner,
-        SystemActionExecutor systemActions)
+        SystemActionExecutor systemActions,
+        RealtimeEventBus? realtime = null)
     {
         _state = state;
         _plans = plans;
         _runner = runner;
         _systemActions = systemActions;
+        _realtime = realtime;
     }
 
     public IReadOnlyList<RunningExecution> Active => _state.Active;
@@ -101,9 +106,10 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
                 Mode = mode,
                 TotalTasks = plan.TotalTasks,
                 CurrentScriptName = script.Name,
+                CurrentStatus = "排队等待中...",
             };
             Register(exec, plan.Admission, source);
-            exec.CurrentStatus = "排队等待中...";
+            AttachRealtime(exec);
             Task task = Task.Run(() => _runner.RunScriptAsync(exec, plan));
             exec.Completion = task;
             return exec;
@@ -132,8 +138,10 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
                 TargetName = queue.Name,
                 Mode = mode,
                 TotalTasks = plan.TotalTasks,
+                CurrentStatus = "排队等待中...",
             };
             Register(exec, plan.Admission, source);
+            AttachRealtime(exec);
             Task task = Task.Run(() => _runner.RunQueueAsync(exec, plan));
             exec.Completion = task;
             return exec;
@@ -168,6 +176,41 @@ internal sealed class DispatchCenter : IExecutionService, IFrozenQueueExecutionS
             throw new ExecutionAdmissionException(failure!);
         }
         Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");
+    }
+
+    private void AttachRealtime(RunningExecution exec)
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+
+        exec.AttachRealtimeObservers(
+            snapshot =>
+            {
+                _realtime.Publish(
+                    RealtimeEventNames.RunStatus,
+                    RealtimeEventProjection.RunStatus(snapshot, active: true));
+                PublishHostStatus();
+            },
+            entry => _realtime.PublishLog(exec.Id, entry));
+
+        _realtime.Publish(
+            RealtimeEventNames.RunStatus,
+            RealtimeEventProjection.RunStatus(exec.SnapshotStatus(), active: true));
+        PublishHostStatus();
+    }
+
+    private void PublishHostStatus()
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+        _realtime.Publish(
+            RealtimeEventNames.HostStatus,
+            RealtimeEventProjection.HostStatus(
+                _state.Active.Select(exec => exec.SnapshotStatus()).ToList()));
     }
 
     private static string ExecKindText(RunningExecution exec)

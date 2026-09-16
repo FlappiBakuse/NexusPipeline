@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.4（Pre-release）
+
+### 实时运行观察
+
+- 增加带 Bearer 认证的 `/api/events` SSE 通道，运行状态、日志、系统操作和宿主状态使用统一事件包络与全局序列号发布。
+- 前端通过 `fetch` 流式解析事件，断线按退避策略重连；连接不可用、事件丢失或队列溢出时回到 `/api/status` 同步，运行日志最多保留 500 行并显示截断提示。
+- 调度中心和仪表盘接入页面范围的实时更新，保留按秒/按 3 秒轮询作为连接降级路径；倒计时继续使用本地 1 秒插值。
+
+### 模拟器驱动
+
+- 增加雷电、夜神和 BlueStacks 实例检测与驱动，分别使用 `ldconsole`、`NoxConsole` 和 `HD-Player`/bundled ADB，Generic ADB 与 MuMuManager 语义保持不变。
+- 厂商实例映射采用清单、配置和 ADB 连通性联合确认；无法证明唯一身份时显式报错，关机按厂商优雅命令、ADB 关机和经复核的单 PID 路径收尾。
+- 增加隔离 console/ADB/config 夹具与 emulator System Smoke，记录真机验证矩阵到 STATUS。
+
 ## v0.16.3（Pre-release）
 
 ### 判定脚本探针

@@ -1,4 +1,5 @@
 using NexusPipeline.Utilities;
+using NexusPipeline.Services.Realtime;
 
 namespace NexusPipeline.Services.Execution;
 
@@ -9,9 +10,12 @@ internal sealed class SystemActionExecutor
 {
     private readonly ExecutionStateStore _state;
 
-    public SystemActionExecutor(ExecutionStateStore state)
+    private readonly RealtimeEventBus? _realtime;
+
+    public SystemActionExecutor(ExecutionStateStore state, RealtimeEventBus? realtime = null)
     {
         _state = state;
+        _realtime = realtime;
     }
 
     public PendingSystemAction? Current => _state.CurrentSystemAction;
@@ -20,8 +24,11 @@ internal sealed class SystemActionExecutor
     public void CompleteExecution(RunningExecution exec, CompletionIntent? intent)
     {
         PendingSystemAction? pending = _state.Release(exec, intent);
+        _realtime?.FlushPendingLogs(exec.Id);
+        PublishRunFinished(exec);
         if (pending is not null)
         {
+            PublishSystemAction("pending", pending);
             Arm(pending);
         }
     }
@@ -54,6 +61,11 @@ internal sealed class SystemActionExecutor
             Logger.Warn($"[警告] 取消系统操作「{action}」失败：{ex.Message}");
         }
         bool cleared = _state.CompleteCancelPending(pending, osCancelSucceeded);
+        if (cleared)
+        {
+            PublishSystemAction("cancelled", action, queueName, null);
+            PublishHostStatus();
+        }
         Audit.Log(source, cleared ? "取消系统操作" : "取消系统操作失败", $"{action}（{queueName}）");
         return cleared;
     }
@@ -68,6 +80,7 @@ internal sealed class SystemActionExecutor
                     if (_state.TryArm(pending))
                     {
                         SystemActions.Reboot(60);
+                        PublishSystemAction("armed", pending);
                         StartDelay(pending, null, TimeSpan.FromSeconds(60));
                     }
                     break;
@@ -75,17 +88,28 @@ internal sealed class SystemActionExecutor
                     if (_state.TryArm(pending))
                     {
                         SystemActions.Shutdown(60);
+                        PublishSystemAction("armed", pending);
                         StartDelay(pending, null, TimeSpan.FromSeconds(60));
                     }
                     break;
                 case "sleep":
-                    StartDelay(pending, SystemActions.Hibernate, TimeSpan.FromSeconds(60));
+                    if (_state.TryArm(pending))
+                    {
+                        PublishSystemAction("armed", pending);
+                        StartDelay(pending, SystemActions.Hibernate, TimeSpan.FromSeconds(60));
+                    }
                     break;
                 case "exit":
-                    StartDelay(pending, SystemActions.ExitApp, TimeSpan.Zero);
+                    if (_state.TryArm(pending))
+                    {
+                        PublishSystemAction("armed", pending);
+                        StartDelay(pending, SystemActions.ExitApp, TimeSpan.Zero);
+                    }
                     break;
                 default:
                     _state.ClearPending(pending);
+                    PublishSystemAction("cleared", pending);
+                    PublishHostStatus();
                     Logger.Warn($"[警告] 未识别的完成操作「{pending.Action}」，已跳过。");
                     break;
             }
@@ -93,6 +117,8 @@ internal sealed class SystemActionExecutor
         catch (Exception ex)
         {
             _state.ClearPending(pending);
+            PublishSystemAction("cleared", pending);
+            PublishHostStatus();
             Logger.Warn($"[警告] 启动完成操作「{pending.Action}」失败：{ex.Message}");
         }
     }
@@ -120,7 +146,49 @@ internal sealed class SystemActionExecutor
             finally
             {
                 _state.ClearPending(pending);
+                PublishSystemAction("cleared", pending);
+                PublishHostStatus();
             }
         });
+    }
+
+    private void PublishRunFinished(RunningExecution exec)
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+        _realtime.Publish(
+            RealtimeEventNames.RunStatus,
+            RealtimeEventProjection.RunStatus(exec.SnapshotStatus(), active: false));
+        PublishHostStatus();
+    }
+
+    private void PublishSystemAction(string state, PendingSystemAction pending)
+    {
+        PublishSystemAction(state, pending.Action, pending.QueueName, pending.Deadline);
+    }
+
+    private void PublishSystemAction(
+        string state,
+        string action,
+        string queueName,
+        DateTime? deadline)
+    {
+        _realtime?.Publish(
+            RealtimeEventNames.SystemAction,
+            RealtimeEventProjection.SystemAction(state, action, queueName, deadline));
+    }
+
+    private void PublishHostStatus()
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+        _realtime.Publish(
+            RealtimeEventNames.HostStatus,
+            RealtimeEventProjection.HostStatus(
+                _state.Active.Select(exec => exec.SnapshotStatus()).ToList()));
     }
 }

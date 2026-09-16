@@ -127,6 +127,30 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   }
 }
 
+/**
+ * 打开受保护的长连接并保留未消费的 Response body；SSE 调用方负责读取 body，
+ * 并应传入页面生命周期控制器以便路由离开时中止连接。
+ */
+export async function apiStream(path: string, signal?: AbortSignal | null): Promise<Response> {
+  const controller = signal ? null : trackController(new AbortController());
+  try {
+    const response = await fetch(path, {
+      method: "GET",
+      headers: { ...authHeaders(), Accept: "text/event-stream" },
+      signal: signal || controller!.signal,
+      cache: "no-store",
+    });
+    if (response.ok && response.headers.get("X-Nexus-Auth") !== "required") return response;
+    const data = await response.json().catch(() => null);
+    if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
+    throw apiError(formatApiError(data, response.status), response.status, data);
+  } catch (reason) {
+    throw normalizeAbortError(reason, signal);
+  } finally {
+    if (controller) releaseController(controller);
+  }
+}
+
 /** 发送二进制请求体并读取 JSON 响应；用于受保护的二进制上传。 */
 export async function apiUpload<T = unknown>(
   method: string,

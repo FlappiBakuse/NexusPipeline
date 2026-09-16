@@ -6,6 +6,57 @@ namespace NexusPipeline.Tests;
 /// <summary>安卓模拟器适配纯逻辑（EmulatorSupport）：ADB 地址校验 / am start 包名解析 / dumpsys 前台解析 / MuMuManager 实例反查。</summary>
 public class EmulatorSupportTests
 {
+    [Fact]
+    public void ParseLdList2_UsesStableIndexAndNamedProcessId()
+    {
+        IReadOnlyList<LdPlayerInstance> instances = EmulatorVendorSupport.ParseLdList2(
+            "0,LDPlayer,started,pid=1200\n1,LDPlayer-1,stopped,pid=1300");
+
+        Assert.Equal(2, instances.Count);
+        Assert.Equal("0", instances[0].Index);
+        Assert.Equal("LDPlayer", instances[0].Name);
+        Assert.Equal(1200, instances[0].ProcessId);
+        Assert.Equal(new[] { 5554, 5555 }, EmulatorVendorSupport.CandidateLdAdbPorts("0"));
+    }
+
+    [Fact]
+    public void ParseNoxVboxAdbPortsReadsForwardedHostPorts()
+    {
+        IReadOnlyList<int> ports = EmulatorVendorSupport.ParseNoxVboxAdbPorts(
+            "<Forwarding name=\"adb\" proto=\"1\" hostport=\"62023\" guestport=\"5555\"/>\n<Forwarding host port=\"62024\" guestport=\"5556\"/>");
+
+        Assert.Equal(new[] { 62023, 62024 }, ports);
+    }
+
+    [Fact]
+    public void ParseBlueStacksConfigMapsInstanceIdToAdbPort()
+    {
+        IReadOnlyList<BlueStacksInstance> instances = EmulatorVendorSupport.ParseBlueStacksConfig(
+            "{\"bst.instance.Pie64.adb_port\": \"5555\", \"bst.instance.Nougat32.adb_port\": 5557}");
+
+        Assert.Equal(2, instances.Count);
+        Assert.Contains(instances, instance => instance.Id == "Pie64" && instance.AdbPort == 5555);
+        Assert.Contains(instances, instance => instance.Id == "Nougat32" && instance.AdbPort == 5557);
+    }
+
+    [Fact]
+    public void VendorTargetCarriesFrozenIdentityFields()
+    {
+        var target = new EmulatorTarget(
+            EmulatorKind.LdPlayer,
+            "127.0.0.1:5554",
+            VendorControlPath: "ldconsole.exe",
+            VendorInstanceId: "0",
+            VendorAdbExecutable: "adb.exe",
+            VendorProcessId: 1200,
+            VendorInstallRoot: "C:\\LDPlayer");
+
+        Assert.Equal(EmulatorKind.LdPlayer, target.Kind);
+        Assert.Equal("0", target.VendorInstanceId);
+        Assert.Equal(1200, target.VendorProcessId);
+        Assert.Equal("adb.exe", target.VendorAdbExecutable);
+    }
+
     [Theory]
     [InlineData("127.0.0.1:16384", true)]
     [InlineData("192.168.1.10:5555", true)]

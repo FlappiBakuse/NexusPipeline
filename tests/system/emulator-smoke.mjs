@@ -9,8 +9,12 @@ import {
   deleteScript,
   isAdminMode,
   isAdministrator,
+  blueStacksConfig,
+  blueStacksStub,
+  ldStub,
   makeFixture,
   mumuStub,
+  noxStub,
   prepareRuntime,
   startRuntime,
   stopRuntime,
@@ -33,7 +37,14 @@ before(async () => {
     assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
   }
   prepareRuntime();
-  startRuntime([], { NEXUS_ADB_EXE: adbStub, NEXUS_MUMU_MANAGER_EXE: mumuStub });
+  startRuntime([], {
+    NEXUS_ADB_EXE: adbStub,
+    NEXUS_MUMU_MANAGER_EXE: mumuStub,
+    NEXUS_LD_CONSOLE_EXE: ldStub,
+    NEXUS_NOX_CONSOLE_EXE: noxStub,
+    NEXUS_BLUESTACKS_PLAYER_EXE: blueStacksStub,
+    NEXUS_BLUESTACKS_CONF: blueStacksConfig,
+  });
   await waitForService();
 });
 
@@ -44,6 +55,7 @@ after(async () => {
 async function runEmulator(endpoint, label) {
   const fixture = makeFixture(label);
   writeBatch(fixture, [`echo ${label}-ok>>"${fixture.log}"`]);
+  fs.rmSync(path.join(runtimeDir, "adb-stub", "rebooted.flag"), { force: true });
   const stubDir = endpoint.endsWith(":16416") ? path.join(runtimeDir, "mumu-stub") : path.join(runtimeDir, "adb-stub");
   fs.writeFileSync(path.join(stubDir, "foreground.txt"), "  mCurrentFocus=Window{test u0 com.example.game/.MainActivity}", "utf8");
   const response = await api("POST", "/api/scripts", {
@@ -56,6 +68,7 @@ async function runEmulator(endpoint, label) {
     gameExe: endpoint,
     gameArgs: "-n com.example.game/.MainActivity",
     launchGame: true,
+    forceCloseGame: true,
     maxAttempts: 1,
     logStallTimeoutMinutes: 5,
     totalTimeoutMinutes: 120,
@@ -88,4 +101,30 @@ test("MuMu driver 使用 manager stub command sequence", { skip }, async () => {
   assert.match(calls, /launch/);
   assert.match(calls, /"start"/);
   assert.match(calls, /"dumpsys"/);
+});
+
+test("LDPlayer driver 使用 index 命令和候选端点映射", { skip }, async () => {
+  fs.rmSync(path.join(runtimeDir, "ld-stub", "ld-calls.log"), { force: true });
+  await runEmulator("127.0.0.1:5554", "ldplayer-emu");
+  const calls = fs.readFileSync(path.join(runtimeDir, "ld-stub", "ld-calls.log"), "utf8");
+  assert.match(calls, /list2/);
+  assert.match(calls, /launch.*--index.*0/);
+  assert.match(calls, /quit.*--index.*0/);
+  assert.doesNotMatch(calls, /runapp/);
+});
+
+test("Nox driver 使用实例索引和 vbox ADB 端口映射", { skip }, async () => {
+  fs.rmSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), { force: true });
+  await runEmulator("127.0.0.1:62023", "nox-emu");
+  const calls = fs.readFileSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), "utf8");
+  assert.match(calls, /list/);
+  assert.match(calls, /launch.*-index:0/);
+  assert.match(calls, /quit.*-index:0/);
+});
+
+test("BlueStacks driver 使用实例身份和 bundled ADB", { skip }, async () => {
+  fs.rmSync(path.join(runtimeDir, "bluestacks-stub", "bluestacks-calls.log"), { force: true });
+  await runEmulator("127.0.0.1:5557", "bluestacks-emu");
+  const calls = fs.readFileSync(path.join(runtimeDir, "bluestacks-stub", "bluestacks-calls.log"), "utf8");
+  assert.match(calls, /--instance.*Pie64/);
 });

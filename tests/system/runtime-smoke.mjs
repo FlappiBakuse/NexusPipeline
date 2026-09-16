@@ -118,6 +118,31 @@ test("当前隔离宿主启动并提供 status API", { skip }, async () => {
   assert.ok(Array.isArray(status.running));
 });
 
+test("SSE 事件端点返回首帧 stream.ready 与稳定包络", { skip }, async () => {
+  const response = await fetchWithTimeout(serviceUrl() + "api/events", {}, 5000);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") || "", /text\/event-stream/i);
+  assert.equal(response.headers.get("cache-control"), "no-cache, no-store, no-transform");
+  const reader = response.body?.getReader();
+  assert.ok(reader);
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("SSE 首帧等待超时")), 5000));
+  try {
+    const first = await Promise.race([reader.read(), timeout]);
+    assert.equal(first.done, false);
+    const text = new TextDecoder().decode(first.value);
+    assert.match(text, /event: stream\.ready/);
+    const dataLine = text.split(/\r?\n/).find(line => line.startsWith("data: "));
+    assert.ok(dataLine);
+    const envelope = JSON.parse(dataLine.slice("data: ".length));
+    assert.equal(envelope.schemaVersion, 1);
+    assert.equal(typeof envelope.sequence, "number");
+    assert.equal(typeof envelope.timestamp, "string");
+    assert.equal(typeof envelope.data, "object");
+  } finally {
+    await reader.cancel();
+  }
+});
+
 test(`${executionMode === "admin" ? "管理员生产 release" : "Codex Test Host"} 可在无 URLACL 的 loopback 随机端口提供 status API`, { skip, concurrency: false }, async () => {
   if (isAdminMode) {
     assert.ok(isAdministrator(), "管理员 HTTP Probe 必须在 Administrator / High Integrity 终端运行");

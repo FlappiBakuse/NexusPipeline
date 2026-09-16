@@ -19,7 +19,7 @@
 | 运行 | 调度中心/Control API | `run script/queue` | `run_script` / `run_queue` |
 | 运行计划解释 | `POST /api/dispatch/explain/script`、`POST /api/dispatch/explain/queue`（只读） | `run script/queue --dry-run` | `explain_script_run` / `explain_queue_run` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
-| 运行观察 | `/api/status`、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
+| 运行观察 | `/api/status`、`/api/events`（SSE）、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
 | 历史 | `/api/history/summary`（范围、脚本、队列、用户、状态筛选）→ `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ... --status <status>` | `list_history(status=...)` |
 | 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |

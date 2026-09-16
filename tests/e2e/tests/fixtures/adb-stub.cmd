@@ -20,6 +20,10 @@ if "%~1"=="connect" (
 )
 if "%~1"=="-s" (
   if "%~3"=="shell" (
+    if exist "%STUB%rebooted.flag" if "%~4"=="echo" (
+      echo failed to connect to %~2
+      exit /b 1
+    )
     if "%~4"=="echo" (
       echo ok
       exit /b 0

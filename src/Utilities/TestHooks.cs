@@ -39,6 +39,18 @@ internal static class TestHooks
     /// <summary>测试用 MuMuManager 可执行文件路径（，env NEXUS_MUMU_MANAGER_EXE）。</summary>
     public static string? MuMuManagerExe => Environment.GetEnvironmentVariable("NEXUS_MUMU_MANAGER_EXE");
 
+    /// <summary>测试用 LDPlayer 控制台路径（env NEXUS_LD_CONSOLE_EXE）。</summary>
+    public static string? LdConsoleExe => Environment.GetEnvironmentVariable("NEXUS_LD_CONSOLE_EXE");
+
+    /// <summary>测试用 Nox 控制台路径（env NEXUS_NOX_CONSOLE_EXE）。</summary>
+    public static string? NoxConsoleExe => Environment.GetEnvironmentVariable("NEXUS_NOX_CONSOLE_EXE");
+
+    /// <summary>测试用 BlueStacks Player 路径（env NEXUS_BLUESTACKS_PLAYER_EXE）。</summary>
+    public static string? BlueStacksPlayerExe => Environment.GetEnvironmentVariable("NEXUS_BLUESTACKS_PLAYER_EXE");
+
+    /// <summary>测试用 BlueStacks 配置路径（env NEXUS_BLUESTACKS_CONF）。</summary>
+    public static string? BlueStacksConfigPath => Environment.GetEnvironmentVariable("NEXUS_BLUESTACKS_CONF");
+
     /// <summary>测试用更新源覆盖（，env NEXUS_UPDATE_URL）：e2e/L2 指向本地 stub 源（https 或回环 http），生产不设置。</summary>
     public static string? UpdateSourceUrl => Environment.GetEnvironmentVariable("NEXUS_UPDATE_URL");
 

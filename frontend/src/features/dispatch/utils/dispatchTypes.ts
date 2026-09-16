@@ -18,17 +18,22 @@ export interface DispatchStatus {
 
 export interface DispatchLogEntry {
   sequence?: number;
+  timestamp?: string;
   level?: string;
   text?: string;
+  message?: string;
+  formattedText?: string;
 }
 
 export interface DispatchRunningRecord {
   id: string;
+  targetId?: string;
   targetName?: string;
   kind?: string;
   mode?: string;
   status?: string;
   currentScriptName?: string;
+  currentScriptId?: string;
   currentStatus?: string;
   currentAttempt?: number;
   currentMaxAttempts?: number;
@@ -37,9 +42,11 @@ export interface DispatchRunningRecord {
   persistenceWarning?: string;
   logEntries?: DispatchLogEntry[];
   logTail?: string[];
+  logTruncated?: boolean;
 }
 
 export interface DispatchSystemAction {
+  state?: string;
   action?: string;
   deadline?: string;
   queueName?: string;
