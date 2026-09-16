@@ -14,11 +14,16 @@ namespace NexusPipeline;
 /// </summary>
 internal static class ApplicationHost
 {
+    internal const string KeepWebOnlyAliveArgument = "--keep-alive";
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
     /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web）。</summary>
     internal static bool IsWebOnly { get; set; }
+
+    /// <summary>仅网页模式作为无人值守重启子进程运行时，不因继承到的 stdin EOF 退出。</summary>
+    internal static bool KeepWebOnlyAlive { get; set; }
 
     [STAThread]
     public static int Run(string[] args)
@@ -105,7 +110,10 @@ internal static class ApplicationHost
             case "web":
                 return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
             case "restart":
-                return StartupPipeline.RunRestart(ReadRestartHandoff(args), ReadRestartWebOnly(args));
+                return StartupPipeline.RunRestart(
+                    ReadRestartHandoff(args),
+                    ReadRestartWebOnly(args),
+                    ReadRestartKeepWebOnlyAlive(args));
             case "apply-update":
                 return RunUpdateApplyCli(args.Skip(1).ToArray());
             case "recover-update":
@@ -137,12 +145,17 @@ internal static class ApplicationHost
     internal static bool ReadRestartWebOnly(string[] args) => args.Any(argument =>
         argument.Equals("--web", StringComparison.OrdinalIgnoreCase));
 
+    internal static bool ReadRestartKeepWebOnlyAlive(string[] args) =>
+        ReadRestartWebOnly(args)
+        && args.Any(argument => argument.Equals(KeepWebOnlyAliveArgument, StringComparison.OrdinalIgnoreCase));
+
     internal static string[] BuildRestartArguments(string handoffId, bool webOnly)
     {
         var arguments = new List<string> { "restart" };
         if (webOnly)
         {
             arguments.Add("--web");
+            arguments.Add(KeepWebOnlyAliveArgument);
         }
         arguments.Add("--handoff");
         arguments.Add(handoffId);

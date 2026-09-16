@@ -14,9 +14,11 @@ public sealed class RestartCommandTests
         string[] webArguments = Bootstrap.BuildRestartArguments(handoff, webOnly: true);
 
         Assert.Equal(new[] { "restart", "--handoff", handoff }, serviceArguments);
-        Assert.Equal(new[] { "restart", "--web", "--handoff", handoff }, webArguments);
+        Assert.Equal(new[] { "restart", "--web", ApplicationHost.KeepWebOnlyAliveArgument, "--handoff", handoff }, webArguments);
         Assert.False(ApplicationHost.ReadRestartWebOnly(serviceArguments));
         Assert.True(ApplicationHost.ReadRestartWebOnly(webArguments));
+        Assert.False(ApplicationHost.ReadRestartKeepWebOnlyAlive(serviceArguments));
+        Assert.True(ApplicationHost.ReadRestartKeepWebOnlyAlive(webArguments));
         Assert.Equal(handoff, ApplicationHost.ReadRestartHandoff(webArguments));
     }
 }

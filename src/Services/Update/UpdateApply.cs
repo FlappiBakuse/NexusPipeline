@@ -999,6 +999,7 @@ internal static class UpdateApply
         if (webOnly)
         {
             startInfo.ArgumentList.Add("web");
+            startInfo.ArgumentList.Add(ApplicationHost.KeepWebOnlyAliveArgument);
         }
         Process? process = Process.Start(startInfo);
         if (process is null)

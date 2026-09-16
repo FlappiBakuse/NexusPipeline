@@ -181,7 +181,7 @@ internal static class StartupPipeline
     /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
     /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
     /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
-    internal static int RunRestart(string? handoffId = null, bool webOnly = false)
+    internal static int RunRestart(string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false)
     {
         HostInstance.AdoptRestartHandoff(handoffId);
         Logger.Info("[重启] 正在等待旧进程退出...");
@@ -218,7 +218,9 @@ internal static class StartupPipeline
         }
         if (webOnly)
         {
-            RunWebOnly(Array.Empty<string>());
+            RunWebOnly(keepWebOnlyAlive
+                ? new[] { ApplicationHost.KeepWebOnlyAliveArgument }
+                : Array.Empty<string>());
         }
         else
         {
@@ -230,6 +232,8 @@ internal static class StartupPipeline
     internal static int RunWebOnly(string[] args)
     {
         ApplicationHost.IsWebOnly = true;
+        ApplicationHost.KeepWebOnlyAlive = args.Any(argument =>
+            argument.Equals(ApplicationHost.KeepWebOnlyAliveArgument, StringComparison.OrdinalIgnoreCase));
         // web 模式同样抢单实例互斥——常驻服务已在运行时直接退出（防两实例双写配置/数据）。
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
@@ -298,7 +302,7 @@ internal static class StartupPipeline
                 Logger.Warn($"自动打开浏览器失败：{ex.Message}");
             }
         }
-        WaitForWebOnlyStop();
+        WaitForWebOnlyStop(ApplicationHost.KeepWebOnlyAlive);
         ShutdownHosted(web, mcp);
         return 0;
     }
@@ -365,7 +369,7 @@ internal static class StartupPipeline
         }
     }
 
-    private static void WaitForWebOnlyStop()
+    private static void WaitForWebOnlyStop(bool keepAliveWhenStdinCloses)
     {
 #if NEXUS_TEST_HOST
         string? testHostExitFile = TestHostExitFilePath();
@@ -378,6 +382,12 @@ internal static class StartupPipeline
             return;
         }
 #endif
+        if (keepAliveWhenStdinCloses)
+        {
+            WebOnlyExitRequested.Wait();
+            return;
+        }
+
         // 将控制台输入放在后台读取，使自动安全重启能唤醒主线程并执行 ShutdownHosted。
         Task<string?> input = Task.Run(() => Console.ReadLine());
         int signal = WaitHandle.WaitAny(new[]
