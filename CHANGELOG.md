@@ -2,6 +2,21 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.5（Pre-release）
+
+> 尚未发布。
+
+### 插件与模拟器
+
+- 新增 Plugin API v1.7 模拟器 provider 扩展契约，雷电、夜神和 BlueStacks 的专属识别与驱动移入可选的 `EmulatorSupport` 插件；Generic ADB 与 MuMuManager 仍由宿主提供。
+- GameCheckIn 升级为独立签到任务，支持单个或多个任务、固定时间计划、任务级凭据与通知设置；签到设置移入独立侧栏页面，旧版用户全局签到配置不会自动迁移。
+- CustomWallpaper 升级至 0.2.6，壁纸列表改为整卡片与行分隔样式。
+
+### 更新与界面
+
+- “闲时自动更新”在启动服务前检查、下载并应用宿主更新；新增独立的插件自动更新开关，覆盖所有可升级插件。
+- 侧栏将“系统”调整为“更多”，统一前端拖拽把手外观，并公开一致的拖拽把手尺寸 token。
+
 ## v0.16.4（Pre-release）
 
 ### 实时运行观察
