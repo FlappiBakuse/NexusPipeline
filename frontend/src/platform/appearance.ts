@@ -14,7 +14,27 @@ export interface BackgroundSurface {
 const THEME_KEY = "nexus-theme";
 const themes = new Map<string, { tokens: Record<string, string> }>();
 const appliedThemeTokens = new Set<string>();
-const appliedAppearanceTokens = new Set<string>();
+const appliedAppearanceTokens = new Map<string, HTMLElement>();
+const themeColorProjections: Record<string, string> = {
+  "--nx-color-accent": "--_nexus-theme-color-accent",
+  "--nx-color-surface": "--_nexus-theme-color-surface",
+  "--nx-color-text": "--_nexus-theme-color-text",
+  "--nx-color-muted": "--_nexus-theme-color-muted",
+  "--nx-color-border": "--_nexus-theme-color-border",
+  "--nx-color-danger": "--_nexus-theme-color-danger",
+  "--nx-focus-ring": "--_nexus-theme-focus-ring",
+};
+const appearanceColorProjections: Record<string, { token: string; value: string }> = {
+  "--accent": { token: "--_nexus-appearance-color-accent", value: "var(--accent)" },
+  "--content-card": { token: "--_nexus-appearance-color-surface", value: "var(--content-card)" },
+  "--content-card-base": { token: "--_nexus-appearance-color-surface", value: "var(--content-card)" },
+  "--panel": { token: "--_nexus-appearance-color-surface", value: "var(--content-card)" },
+  "--text": { token: "--_nexus-appearance-color-text", value: "var(--text)" },
+  "--muted": { token: "--_nexus-appearance-color-muted", value: "var(--muted)" },
+  "--border": { token: "--_nexus-appearance-color-border", value: "var(--border)" },
+  "--danger": { token: "--_nexus-appearance-color-danger", value: "var(--danger, var(--bad, #ff758f))" },
+  "--bad": { token: "--_nexus-appearance-color-danger", value: "var(--danger, var(--bad, #ff758f))" },
+};
 let baseTheme = "system";
 let backgroundUrl: string | null = null;
 
@@ -50,11 +70,17 @@ function setThemeTokens(tokens: Record<string, string> = {}): void {
   Object.entries(tokens).forEach(([name, value]) => {
     document.documentElement.style.setProperty(name, value);
     appliedThemeTokens.add(name);
+    const projection = themeColorProjections[name];
+    if (projection) document.documentElement.style.setProperty(projection, value);
   });
 }
 
 function clearThemeTokens(): void {
-  appliedThemeTokens.forEach(name => document.documentElement.style.removeProperty(name));
+  appliedThemeTokens.forEach(name => {
+    document.documentElement.style.removeProperty(name);
+    const projection = themeColorProjections[name];
+    if (projection) document.documentElement.style.removeProperty(projection);
+  });
   appliedThemeTokens.clear();
 }
 
@@ -65,17 +91,21 @@ function clearThemeTokens(): void {
 function setAppearanceTokens(tokens: Record<string, string> = {}): void {
   validateTokens(tokens);
   clearAppearanceTokens();
+  const target = document.body || document.documentElement;
   Object.entries(tokens).forEach(([name, value]) => {
-    (document.body || document.documentElement).style.setProperty(name, value);
-    appliedAppearanceTokens.add(name);
+    target.style.setProperty(name, value);
+    appliedAppearanceTokens.set(name, target);
+    const projection = appearanceColorProjections[name];
+    if (projection) target.style.setProperty(projection.token, projection.value);
   });
   notifyAppearanceChanged();
 }
 
 function clearAppearanceTokens(): void {
-  appliedAppearanceTokens.forEach(name => {
-    document.body?.style.removeProperty(name);
-    document.documentElement.style.removeProperty(name);
+  appliedAppearanceTokens.forEach((target, name) => {
+    target.style.removeProperty(name);
+    const projection = appearanceColorProjections[name];
+    if (projection) target.style.removeProperty(projection.token);
   });
   appliedAppearanceTokens.clear();
   notifyAppearanceChanged();

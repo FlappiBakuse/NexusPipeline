@@ -56,8 +56,7 @@ const emit = defineEmits<{
       tabindex="0"
       :aria-label="translate('users.global.order_help')"
       :title="translate('common.drag_to_reorder')"
-      ><NxpIcon name="grip"
-    /></span>
+      >⠿</span>
     <button
       class="global-user-avatar-button"
       type="button"

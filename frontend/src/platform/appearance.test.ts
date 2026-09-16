@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { clearBackgroundSurface, setBackgroundSurface } from "./appearance";
+import { clearBackgroundSurface, createAppearanceHost, setBackgroundSurface } from "./appearance";
 
 /**
  * 背景表面的 Blob URL 归属：地址交给外观表面托管后，替换或清除都必须回收上一个 Object URL。
@@ -56,5 +56,40 @@ describe("appearance background surface", () => {
     clearBackgroundSurface();
 
     expect(revoked).toEqual([]);
+  });
+});
+
+describe("appearance color token scopes", () => {
+  const host = createAppearanceHost();
+
+  afterEach(() => {
+    host.clearTokens();
+    host.applyTheme("system");
+  });
+
+  it("projects explicit theme colors to body while appearance colors retain priority", () => {
+    const theme = host.registerTheme("appearance-token-scope-test", {
+      tokens: {
+        "--nx-color-accent": "#123456",
+        "--nx-focus-ring": "0 0 0 3px #123456",
+        "--accent": "#456789",
+      },
+    });
+
+    host.applyTheme("appearance-token-scope-test");
+    expect(document.documentElement.style.getPropertyValue("--_nexus-theme-color-accent")).toBe("#123456");
+    expect(document.documentElement.style.getPropertyValue("--_nexus-theme-focus-ring")).toBe("0 0 0 3px #123456");
+
+    host.setTokens({ "--accent": "#abcdef" });
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#abcdef");
+    expect(document.body.style.getPropertyValue("--_nexus-appearance-color-accent")).toBe("var(--accent)");
+
+    host.clearTokens();
+    expect(document.body.style.getPropertyValue("--accent")).toBe("");
+    expect(document.body.style.getPropertyValue("--_nexus-appearance-color-accent")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--_nexus-theme-color-accent")).toBe("#123456");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#456789");
+
+    theme.dispose();
   });
 });

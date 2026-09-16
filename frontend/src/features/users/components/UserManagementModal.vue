@@ -467,7 +467,7 @@ onMounted(() => {
                 :aria-hidden="bindingEditMode || expandedBindingId ? 'true' : undefined"
                 :aria-label="t('common.reorder.keyboard_help')"
                 :title="bindingEditMode || expandedBindingId ? undefined : t('common.drag_to_reorder')"
-              ><NxpIcon name="grip" /></span>
+              >⠿</span>
               <button
                 class="um-binding-toggle"
                 :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }"

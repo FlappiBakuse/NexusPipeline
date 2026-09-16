@@ -159,7 +159,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 tabindex="0"
                 :aria-label="translate('common.reorder.keyboard_help')"
                 :title="translate('common.drag_to_reorder')"
-                ><NxpIcon name="grip" /></span>
+                >⠿</span>
               <button
                 class="timeset-summary"
                 type="button"
@@ -275,7 +275,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 role="button"
                 tabindex="0"
                 :aria-label="translate('common.reorder.keyboard_help')"
-                ><NxpIcon name="grip" /></span
+                >⠿</span
               ><NxpSelect
                 :id="'qm-task-' + index"
                 v-model="task.scriptInstanceId"

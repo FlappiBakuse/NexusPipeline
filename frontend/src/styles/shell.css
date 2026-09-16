@@ -305,8 +305,8 @@ body[data-wallpaper="on"] :is(.card, .empty, .section-surface, .list-surface, .t
 .user-card:last-of-type { border-bottom: 0; }
 .user-card:hover { background: var(--content-card-hover); }
 .user-card .qk-row { margin-top: 6px; }
-.global-user-card { display: grid; grid-template-columns: 28px 56px minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
-.global-user-card > .drag-handle { position: static; width: 28px; min-height: 56px; margin: 0; }
+.global-user-card { display: grid; grid-template-columns: 32px 56px minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.global-user-card > .drag-handle { position: static; margin: 0; }
 .global-user-avatar { display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 1px solid var(--border-strong); border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 15px; font-weight: 750; object-fit: cover; }
 .global-user-avatar-fallback { position: absolute; inset: 0; }
 .global-user-avatar[src] + .global-user-avatar-fallback { display: none; }
@@ -449,7 +449,7 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .task-row select { min-width: 0; }
 .task-row > .nxp-select { width: 100%; min-width: 0; }
 .task-row > button { width: 84px; min-width: 84px; min-height: 40px; margin-left: 0; padding: 0 8px; }
-.task-row > .drag-handle { width: 28px; min-height: 40px; margin-right: 0; }
+.task-row > .drag-handle { margin-right: 0; }
 .timeset-list { display: flex; flex-direction: column; }
 .timeset-card { display: block; padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 .timeset-card:hover { background: var(--content-card-hover); }
@@ -475,14 +475,13 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .chooser-card strong { display: block; font-size: 14px; line-height: 1.4; }
 .chooser-card .muted { display: block; margin-top: 5px; font-size: 12px; line-height: 1.45; }
 .script-grid { display: flex; flex-direction: column; gap: 0; }
-.drag-handle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; align-self: stretch; width: 26px; min-height: 40px; margin-right: -6px; border-radius: 6px; color: var(--faint); font-size: 14px; letter-spacing: -1px; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; }
-.drag-handle:hover { background: var(--content-control-hover); color: var(--muted); }
-.drag-handle:focus-visible { outline: none; box-shadow: var(--focus); background: var(--content-control-hover); color: var(--muted); }
+.drag-handle { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; align-self: stretch; width: var(--nx-drag-handle-size); min-width: var(--nx-drag-handle-size); min-height: var(--nx-control-height); margin: 0; padding: 0; border: 1px solid transparent; border-radius: var(--nx-radius-sm); background: transparent; color: var(--nx-color-muted); font-size: var(--nx-drag-handle-glyph-size); line-height: 1; cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none; transition: border-color var(--nx-motion-duration-micro) var(--nx-motion-ease), color var(--nx-motion-duration-micro) var(--nx-motion-ease); }
+.drag-handle:hover, .drag-handle:focus-visible { border-color: var(--nx-color-border); color: var(--nx-color-text); }
+.drag-handle:focus-visible { outline: none; box-shadow: var(--nx-focus-ring); }
 .drag-handle:active { cursor: grabbing; }
-.drag-handle .icon { width: 18px; height: 18px; }
 [data-dnd-id].dnd-dragging { opacity: .55; box-shadow: var(--shadow); background: var(--content-card); }
 [data-dnd-id].dnd-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
-.script-card { display: grid; grid-template-columns: 26px 40px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); margin-bottom: 0; padding: var(--space-4) var(--space-5); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
+.script-card { display: grid; grid-template-columns: 32px 40px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); margin-bottom: 0; padding: var(--space-4) var(--space-5); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
 .script-card:last-child { border-bottom: 0; }
 .script-card:hover { background: var(--content-card-hover); }
 .script-ico { display: inline-flex; flex: 0 0 auto; width: 36px; height: 36px; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--content-card-border); background: color-mix(in srgb, #000 7%, var(--content-card)); color: rgba(0, 0, 0, .38); object-fit: contain; }
@@ -733,9 +732,9 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
   .page-head-actions { width: 100%; justify-content: stretch; }
   .page-head-actions > button, .page-head-actions > a { width: 100%; min-width: 0; }
   .script-card { grid-template-columns: 44px 40px minmax(0, 1fr); gap: var(--space-3); padding: var(--space-4); }
-  .script-card .drag-handle { width: 44px; margin-right: 0; }
+  .script-card .drag-handle { justify-self: center; }
   .user-card { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-4); }
-  .user-card > .drag-handle { position: static; top: auto; left: auto; width: 44px; height: auto; min-height: 44px; margin: 0; }
+  .user-card > .drag-handle { position: static; top: auto; left: auto; height: auto; margin: 0; }
   .user-card > .list-item-head { display: contents; }
   .user-card > .list-item-head > div:first-child { grid-column: 2; min-width: 0; }
   .user-card > .list-item-head > .action-row { grid-column: 1 / -1; width: 100%; }
@@ -806,7 +805,7 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
 }
 @media (max-width: 600px), (pointer: coarse) {
   :root { --control-height: 44px; }
-  .drag-handle { width: 44px; min-height: 44px; margin-right: 0; }
+  .drag-handle { width: var(--nx-drag-handle-touch-size); min-width: var(--nx-drag-handle-touch-size); min-height: var(--nx-drag-handle-touch-size); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
@@ -1355,7 +1354,7 @@ body[data-wallpaper="on"][data-theme="light"] {
 
 .strategy-field > .muted { font-size: 11px; }
 
-.script-grid .script-card { grid-template-columns: 24px 36px minmax(0, 1fr) auto; min-width: 0; }
+.script-grid .script-card { grid-template-columns: 32px 36px minmax(0, 1fr) auto; min-width: 0; }
 .script-grid .script-card .script-ico { width: 36px; height: 36px; }
 .script-grid .script-card .script-main { min-width: 0; }
 .script-grid .script-card .script-ops, .script-grid .script-card .queue-ops { min-width: 0; }
@@ -1376,12 +1375,12 @@ body[data-wallpaper="on"][data-theme="light"] {
 
 @media (max-width: 820px) {
   .script-grid .script-card { grid-template-columns: 44px 36px minmax(0, 1fr); align-items: start; padding: var(--space-4); }
-  .script-grid .script-card .drag-handle { width: 44px; margin-right: 0; }
+  .script-grid .script-card .drag-handle { justify-self: center; }
   .script-grid .script-card .script-ops, .script-grid .script-card .queue-ops { grid-column: 2 / -1; width: 100%; justify-content: flex-start; margin-top: var(--space-2); display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
   .script-grid .script-card .script-ops button, .script-grid .script-card .queue-ops button { width: 100%; min-width: 0; padding-inline: var(--space-2); }
   .script-grid .script-card .script-ops .overflow-trigger, .script-grid .script-card .queue-ops .overflow-trigger { width: 40px !important; min-width: 40px; }
   .user-card { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-4); }
-  .user-card > .drag-handle { position: static; width: 44px; min-height: 44px; margin: 0; }
+  .user-card > .drag-handle { position: static; margin: 0; }
   .user-card > .list-item-head { display: contents; }
   .user-card > .list-item-head > div:first-child { grid-column: 2; min-width: 0; }
   .user-card > .list-item-head > .action-row { grid-column: 2; width: 100%; margin-top: var(--space-2); }
@@ -1518,7 +1517,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 
 .user-card {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   min-height: 96px;
   gap: var(--space-3);
@@ -1528,8 +1527,6 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   position: static;
   grid-column: 1;
   grid-row: 1;
-  width: 28px;
-  min-height: 40px;
   margin: 0;
   align-self: center;
 }
@@ -1663,7 +1660,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
     min-height: 0;
     padding: var(--space-4);
   }
-  .user-card > .drag-handle { grid-column: 1; grid-row: 1; width: 44px; }
+  .user-card > .drag-handle { grid-column: 1; grid-row: 1; }
   .user-card > .list-item-head > div:first-child { grid-column: 2; grid-row: 1; }
   .user-card > .list-item-head > .action-row {
     grid-column: 2;
@@ -1710,7 +1707,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
     grid-template-columns: 44px 40px minmax(0, 1fr);
     align-items: center;
   }
-  .global-user-card > .drag-handle { grid-column: 1; grid-row: 1; width: 44px; align-self: center; }
+  .global-user-card > .drag-handle { grid-column: 1; grid-row: 1; align-self: center; }
   .global-user-card > .global-user-avatar-button { grid-column: 2; grid-row: 1; align-self: center; }
   .global-user-card > .global-user-main { grid-column: 3; grid-row: 1; align-self: center; }
   .global-user-card > .global-user-actions {
@@ -1735,13 +1732,12 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 
 /* v0.9.6：全局用户卡片沿用脚本卡四列结构；绑定设置集中在用户管理弹窗。 */
 .global-user-card {
-  grid-template-columns: 26px 40px minmax(0, 1fr) auto;
+  grid-template-columns: 32px 40px minmax(0, 1fr) auto;
   align-items: center;
   padding: var(--space-4) var(--space-5);
 }
 .global-user-card > .global-user-avatar-button { grid-column: 2; grid-row: 1; align-self: center; }
 .global-user-card > .global-user-main { grid-column: 3; grid-row: 1; align-self: center; }
-.global-user-card .drag-handle { width: 26px; min-height: 36px; margin-right: -6px; }
 .global-user-avatar-button {
   position: relative;
   display: inline-flex;
@@ -1899,7 +1895,7 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 .um-binding-card > .um-binding-head { min-width: 0; }
 .um-binding-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 10px 13px; }
 .um-binding-drag-handle[aria-disabled="true"] { cursor: default; color: var(--faint); opacity: .45; }
-.um-binding-drag-handle[aria-disabled="true"]:hover { background: transparent; color: var(--faint); }
+.um-binding-drag-handle[aria-disabled="true"]:hover { border-color: transparent; background: transparent; color: var(--faint); }
 .um-binding-toggle {
   display: flex;
   min-width: 0;
@@ -2094,34 +2090,17 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
   }
 }
 
-/* v0.13.7：缩小拖拽排序把手的布局列；触控端保留 40px 命中区并向卡片左缘溢出。 */
-.drag-handle {
-  width: 20px;
-  min-width: 20px;
-  margin-right: -8px;
-}
-.drag-handle .icon { width: 14px; height: 14px; }
+/* Sorting rows share the same handle size and spacing across host features. */
 .script-grid .script-card {
-  grid-template-columns: 20px 36px minmax(0, 1fr) auto;
+  grid-template-columns: var(--nx-drag-handle-size) 36px minmax(0, 1fr) auto;
   column-gap: var(--space-2);
 }
 .script-grid .global-user-card {
-  grid-template-columns: 20px 40px minmax(0, 1fr) auto;
+  grid-template-columns: var(--nx-drag-handle-size) 40px minmax(0, 1fr) auto;
   column-gap: var(--space-2);
 }
-.script-grid .script-card .drag-handle,
-.global-user-card .drag-handle,
-.user-card > .drag-handle,
-.task-row > .drag-handle,
-.timeset-card .drag-handle,
-.um-binding-head .drag-handle {
-  width: 20px;
-  min-width: 20px;
-  margin-left: 0;
-  margin-right: -8px;
-}
 .user-card {
-  grid-template-columns: 20px minmax(0, 1fr) auto;
+  grid-template-columns: var(--nx-drag-handle-size) minmax(0, 1fr) auto;
   column-gap: var(--space-2);
 }
 .timeset-summary-main { gap: var(--space-2); }
@@ -2129,59 +2108,36 @@ button.switch-control[aria-pressed="true"] .switch-thumb,
 
 @media (max-width: 820px) {
   .script-grid .script-card {
-    grid-template-columns: 24px 36px minmax(0, 1fr);
+    grid-template-columns: var(--nx-drag-handle-touch-size) 36px minmax(0, 1fr);
     column-gap: var(--space-2);
   }
   .script-grid .global-user-card {
-    grid-template-columns: 24px 40px minmax(0, 1fr);
+    grid-template-columns: var(--nx-drag-handle-touch-size) 40px minmax(0, 1fr);
     column-gap: var(--space-2);
   }
   .user-card {
-    grid-template-columns: 24px minmax(0, 1fr);
+    grid-template-columns: var(--nx-drag-handle-touch-size) minmax(0, 1fr);
     column-gap: var(--space-2);
   }
   .task-row {
-    grid-template-columns: 24px minmax(0, 1fr) 84px;
+    grid-template-columns: var(--nx-drag-handle-touch-size) minmax(0, 1fr) 84px;
     column-gap: var(--space-2);
   }
-  .script-grid .script-card .drag-handle,
-  .global-user-card .drag-handle,
-  .user-card > .drag-handle,
-  .task-row > .drag-handle,
-  .timeset-card .drag-handle,
-  .um-binding-head .drag-handle {
-    width: 40px;
-    min-width: 40px;
-    min-height: 44px;
-    margin-left: -8px;
-    margin-right: -8px;
-  }
+  .drag-handle { width: var(--nx-drag-handle-touch-size); min-width: var(--nx-drag-handle-touch-size); min-height: var(--nx-drag-handle-touch-size); }
 }
 
 @media (pointer: coarse) and (min-width: 821px) {
   .script-grid .script-card {
-    grid-template-columns: 24px 36px minmax(0, 1fr) auto;
+    grid-template-columns: var(--nx-drag-handle-touch-size) 36px minmax(0, 1fr) auto;
     column-gap: var(--space-2);
   }
   .script-grid .global-user-card {
-    grid-template-columns: 24px 40px minmax(0, 1fr) auto;
+    grid-template-columns: var(--nx-drag-handle-touch-size) 40px minmax(0, 1fr) auto;
     column-gap: var(--space-2);
   }
-  .user-card { grid-template-columns: 24px minmax(0, 1fr) auto; column-gap: var(--space-2); }
-  .task-row { grid-template-columns: 24px minmax(0, 1fr) 84px; column-gap: var(--space-2); }
-  .drag-handle,
-  .script-grid .script-card .drag-handle,
-  .global-user-card .drag-handle,
-  .user-card > .drag-handle,
-  .task-row > .drag-handle,
-  .timeset-card .drag-handle,
-  .um-binding-head .drag-handle {
-    width: 40px;
-    min-width: 40px;
-    min-height: 44px;
-    margin-left: -8px;
-    margin-right: -8px;
-  }
+  .user-card { grid-template-columns: var(--nx-drag-handle-touch-size) minmax(0, 1fr) auto; column-gap: var(--space-2); }
+  .task-row { grid-template-columns: var(--nx-drag-handle-touch-size) minmax(0, 1fr) 84px; column-gap: var(--space-2); }
+  .drag-handle { width: var(--nx-drag-handle-touch-size); min-width: var(--nx-drag-handle-touch-size); min-height: var(--nx-drag-handle-touch-size); }
 }
 
 /* v0.13.7：插件与历史记录按 #view 的实际内容宽度切换单双栏，侧边栏状态不再影响断点判断。 */

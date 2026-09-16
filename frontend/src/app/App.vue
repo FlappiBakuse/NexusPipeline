@@ -126,10 +126,10 @@ function openNav() {
         <a v-for="[path, icon, label] in navigation.slice(0, 6)" :key="path" :href="`#/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></a>
       </nav>
       <div class="nav-caption nav-caption-bottom" data-i18n="shell.system"></div>
+      <nav class="main-nav plugin-nav-host" data-plugin-anchor="shell.nav" :aria-label="t('shell.nav.plugins')" data-i18n-aria-label="shell.nav.plugins"></nav>
       <nav class="main-nav" :aria-label="t('shell.system')" data-i18n-aria-label="shell.system">
         <a v-for="[path, icon, label] in navigation.slice(6)" :key="path" :href="`#/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></a>
       </nav>
-      <nav class="main-nav plugin-nav-host" data-plugin-anchor="shell.nav" :aria-label="t('shell.nav.plugins')" data-i18n-aria-label="shell.nav.plugins"></nav>
       <div class="sidebar-foot"><div class="sidebar-foot-copy"><span id="local-addr" data-testid="local-addr"></span><span id="app-version" data-i18n="shell.current_version"></span></div><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div>
     </aside>
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>

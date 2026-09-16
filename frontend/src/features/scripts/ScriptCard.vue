@@ -51,7 +51,7 @@ const emit = defineEmits<{
       tabindex="0"
       :aria-label="translate('common.reorder.keyboard_help')"
       :title="translate('common.drag_to_reorder')"
-      ><NxpIcon name="grip" /></span
+      >⠿</span
     ><NxpEntityIcon :id="script.id" />
     <div class="script-main">
       <button

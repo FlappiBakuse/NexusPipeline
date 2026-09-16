@@ -1,10 +1,4 @@
 :root {
-  --nx-color-accent: var(--accent, #76a7ff);
-  --nx-color-surface: var(--content-card, rgba(16, 24, 38, 0.82));
-  --nx-color-text: var(--text, #edf5ff);
-  --nx-color-muted: var(--muted, #9eacc1);
-  --nx-color-border: var(--border, rgba(160, 180, 210, 0.2));
-  --nx-color-danger: var(--danger, #ff758f);
   --nx-radius-sm: var(--radius-sm, 8px);
   --nx-radius-md: var(--radius-md, 12px);
   --nx-radius-lg: var(--radius-lg, 16px);
@@ -16,12 +10,24 @@
   --nx-space-6: 32px;
   --nx-space-7: 40px;
   --nx-control-height: 40px;
-  --nx-focus-ring: 0 0 0 3px color-mix(in srgb, var(--nx-color-accent) 28%, transparent);
+  --nx-drag-handle-size: 32px;
+  --nx-drag-handle-touch-size: 40px;
+  --nx-drag-handle-glyph-size: 20px;
   --nx-motion-ease: cubic-bezier(.2, .8, .2, 1);
   --nx-motion-duration-micro: 120ms;
   --nx-motion-duration-fast: 160ms;
   --nx-motion-duration-normal: 200ms;
   --nx-motion-duration-page: 220ms;
+}
+
+body {
+  --nx-color-accent: var(--_nexus-appearance-color-accent, var(--_nexus-theme-color-accent, var(--accent, #76a7ff)));
+  --nx-color-surface: var(--_nexus-appearance-color-surface, var(--_nexus-theme-color-surface, var(--content-card, rgba(16, 24, 38, 0.82))));
+  --nx-color-text: var(--_nexus-appearance-color-text, var(--_nexus-theme-color-text, var(--text, #edf5ff)));
+  --nx-color-muted: var(--_nexus-appearance-color-muted, var(--_nexus-theme-color-muted, var(--muted, #9eacc1)));
+  --nx-color-border: var(--_nexus-appearance-color-border, var(--_nexus-theme-color-border, var(--border, rgba(160, 180, 210, 0.2))));
+  --nx-color-danger: var(--_nexus-appearance-color-danger, var(--_nexus-theme-color-danger, var(--danger, var(--bad, #ff758f))));
+  --nx-focus-ring: var(--_nexus-theme-focus-ring, 0 0 0 3px color-mix(in srgb, var(--nx-color-accent) 28%, transparent));
 }
 
 * {
