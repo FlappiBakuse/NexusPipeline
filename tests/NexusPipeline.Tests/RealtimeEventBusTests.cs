@@ -66,4 +66,25 @@ public sealed class RealtimeEventBusTests
         Assert.Contains("runId", json, StringComparison.Ordinal);
         Assert.DoesNotContain("logEntries", json, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void HostStatusProjectionCarriesSummaryOnly()
+    {
+        var snapshot = new RunningExecutionStatusSnapshot
+        {
+            Id = "run-1",
+            Kind = "script",
+            TargetId = "script-1",
+            TargetName = "Demo",
+            Status = "running",
+        };
+
+        using var document = System.Text.Json.JsonDocument.Parse(
+            System.Text.Json.JsonSerializer.Serialize(
+                RealtimeEventProjection.HostStatus(new[] { snapshot }),
+                NexusPipeline.Utilities.JsonOpts.Web));
+
+        Assert.Equal(1, document.RootElement.GetProperty("activeCount").GetInt32());
+        Assert.False(document.RootElement.TryGetProperty("running", out _));
+    }
 }

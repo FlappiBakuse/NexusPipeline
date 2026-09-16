@@ -52,6 +52,37 @@ export interface DispatchSystemAction {
   queueName?: string;
 }
 
+/** 合并轮询或实时快照，保留已经收到的日志序列与截断标记。 */
+export function mergeRunningRecords(
+  previous: readonly DispatchRunningRecord[],
+  next: readonly DispatchRunningRecord[],
+): DispatchRunningRecord[] {
+  const previousById = new Map(previous.map(record => [record.id, record]));
+  return next.map(record => mergeRunningRecord(previousById.get(record.id), record));
+}
+
+function mergeRunningRecord(
+  previous: DispatchRunningRecord | undefined,
+  next: DispatchRunningRecord,
+): DispatchRunningRecord {
+  if (!previous) return next;
+  const previousEntries = Array.isArray(previous.logEntries) ? previous.logEntries : [];
+  const nextEntries = Array.isArray(next.logEntries) ? next.logEntries : [];
+  const entries = new Map<number, DispatchLogEntry>();
+  for (const entry of [...previousEntries, ...nextEntries]) {
+    if (typeof entry.sequence === "number" && Number.isFinite(entry.sequence)) entries.set(entry.sequence, entry);
+  }
+  const mergedEntries = [...entries.values()]
+    .sort((left, right) => (left.sequence || 0) - (right.sequence || 0))
+    .slice(-500);
+  return {
+    ...previous,
+    ...next,
+    logEntries: mergedEntries.length ? mergedEntries : next.logEntries,
+    logTruncated: Boolean(previous.logTruncated || next.logTruncated || entries.size > 500),
+  };
+}
+
 export interface DispatchPlanTask {
   scriptName?: string;
   taskId?: string;

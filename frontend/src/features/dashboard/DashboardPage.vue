@@ -174,12 +174,6 @@ function applyRealtimeEvent(event: RealtimeSseEvent) {
   const data = realtimeData(event);
   if (event.type === "run.status") applyRealtimeRunStatus(data);
   else if (event.type === "system.action") applyRealtimeSystemAction(data);
-  else if (event.type === "host.status" && Array.isArray(data.running)) {
-    status.value = {
-      ...status.value,
-      running: data.running.map(item => realtimeRunningRecord(item as Record<string, unknown>)).filter((item): item is RunningRecord => item !== null),
-    };
-  }
 }
 
 function startStatusPolling() {
@@ -206,7 +200,7 @@ function startEventStream() {
       await load();
     },
     onDisconnected: startStatusPolling,
-    onFatal: startStatusPolling,
+    onFatal: stopStatusPolling,
   });
 }
 

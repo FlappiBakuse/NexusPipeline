@@ -220,13 +220,13 @@ export function openEventStream(options: EventStreamOptions): EventStreamHandle 
       scheduleRetry();
     } catch (reason) {
       if (!isUsable() || controller.signal.aborted || isAbortError(reason)) return;
-      options.onDisconnected?.();
       const status = (reason as Partial<ApiError>)?.status;
       if (typeof status === "number" && status >= 400 && status < 500) {
         options.onFatal?.(reason);
         close();
         return;
       }
+      options.onDisconnected?.();
       scheduleRetry();
     }
   };

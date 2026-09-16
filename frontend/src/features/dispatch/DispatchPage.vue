@@ -16,7 +16,7 @@ import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import RunPlanModal from "./components/RunPlanModal.vue";
 import RunningExecution from "./components/RunningExecution.vue";
-import type { DispatchPlanResult, DispatchRunningRecord, DispatchStatus } from "./utils/dispatchTypes";
+import { mergeRunningRecords, type DispatchPlanResult, type DispatchRunningRecord, type DispatchStatus } from "./utils/dispatchTypes";
 
 interface Script {
   id: string;
@@ -194,29 +194,11 @@ function requestCancelRun(runId: string) {
 }
 
 function mergeStatusSnapshot(next: DispatchStatus): DispatchStatus {
-  const previous = new Map((status.value.running || []).map(record => [record.id, record]));
   const nextRunning = Array.isArray(next.running) ? next.running : [];
   return {
     ...status.value,
     ...next,
-    running: nextRunning.map(record => mergeRunningRecord(previous.get(record.id), record)),
-  };
-}
-
-function mergeRunningRecord(previous: RunningRecord | undefined, next: RunningRecord): RunningRecord {
-  if (!previous) return next;
-  const previousEntries = Array.isArray(previous.logEntries) ? previous.logEntries : [];
-  const nextEntries = Array.isArray(next.logEntries) ? next.logEntries : [];
-  const entries = new Map<number, typeof nextEntries[number]>();
-  for (const entry of [...previousEntries, ...nextEntries]) {
-    if (typeof entry.sequence === "number" && Number.isFinite(entry.sequence)) entries.set(entry.sequence, entry);
-  }
-  const mergedEntries = [...entries.values()].sort((left, right) => (left.sequence || 0) - (right.sequence || 0)).slice(-500);
-  return {
-    ...previous,
-    ...next,
-    logEntries: mergedEntries.length ? mergedEntries : next.logEntries,
-    logTruncated: Boolean(previous.logTruncated || next.logTruncated || entries.size > 500),
+    running: mergeRunningRecords(status.value.running || [], nextRunning),
   };
 }
 
@@ -256,7 +238,7 @@ function applyRealtimeRunStatus(data: Record<string, unknown>) {
     return;
   }
   const existing = current.find(item => item.id === record.id);
-  const nextRecord = mergeRunningRecord(existing, record);
+  const nextRecord = mergeRunningRecords(existing ? [existing] : [], [record])[0];
   status.value = {
     ...status.value,
     running: existing ? current.map(item => item.id === record.id ? nextRecord : item) : [...current, nextRecord],
@@ -315,9 +297,6 @@ async function applyRealtimeEvent(event: RealtimeSseEvent) {
   if (event.type === "run.status") applyRealtimeRunStatus(data);
   else if (event.type === "run.log") applyRealtimeRunLog(data);
   else if (event.type === "system.action") applyRealtimeSystemAction(data);
-  else if (event.type === "host.status" && Array.isArray(data.running)) {
-    status.value = { ...status.value, running: data.running.map(item => realtimeRunningRecord(item as Record<string, unknown>)).filter((item): item is RunningRecord => item !== null) };
-  }
   await notifyPluginPageUpdated({ hash: "dispatch", page: "dispatch", segments: ["dispatch"], token: pageToken, container: root.value });
 }
 
@@ -346,7 +325,7 @@ function startEventStream() {
       await refreshStatus();
     },
     onDisconnected: startStatusPolling,
-    onFatal: startStatusPolling,
+    onFatal: stopStatusPolling,
   });
 }
 function closeCancelConfirm() {

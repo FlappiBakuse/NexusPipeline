@@ -65,7 +65,6 @@ internal static class RealtimeEventProjection
         return new
         {
             activeCount = active.Count,
-            running = active.Select(snapshot => RunStatus(snapshot, active: true)).ToArray(),
         };
     }
 }
