@@ -353,10 +353,10 @@ internal static class ApiPluginsHandler
     private static async Task UpdateAllStorePluginsAsync(HttpListenerContext context)
     {
         PluginRepositoryService repository = RuntimeContext.Instance.Resolve<PluginRepositoryService>();
-        IReadOnlyList<PluginStoreItem> candidates;
+        PluginBatchUpdateResult result;
         try
         {
-            candidates = await repository.GetUpdateCandidatesAsync().ConfigureAwait(false);
+            result = await repository.UpdateAllAsync().ConfigureAwait(false);
         }
         catch (PluginRepositoryException ex)
         {
@@ -371,34 +371,28 @@ internal static class ApiPluginsHandler
             await HttpHelper.ErrorAsync(context, "internal_error", 500, new { traceId }).ConfigureAwait(false);
             return;
         }
-        var updated = new List<object>();
-        var failed = new List<object>();
-        foreach (PluginStoreItem candidate in candidates)
-        {
-            try
+        List<object> updated = result.Updated
+            .Select(operation => (object)new { name = operation.Name, version = operation.Version })
+            .ToList();
+        List<object> failed = result.Failed
+            .Select(item => (object)new
             {
-                PluginPendingOperation operation = await repository.InstallAsync(candidate.Name, update: true).ConfigureAwait(false);
-                updated.Add(new { name = operation.Name, version = operation.Version });
-            }
-            catch (PluginRepositoryException ex)
-            {
-                failed.Add(new { name = candidate.Name, code = ex.Code, args = new { name = candidate.Name } });
-            }
-            catch (Exception ex)
-            {
-                string traceId = Guid.NewGuid().ToString("N");
-                Logger.Error($"[插件] 批量更新 {candidate.Name} 失败（追踪 {traceId}）：{ex}");
-                failed.Add(new { name = candidate.Name, code = "internal_error", args = new { name = candidate.Name, traceId }, traceId });
-            }
-        }
+                name = item.Name,
+                code = item.Code,
+                args = item.TraceId is null
+                    ? (object)new { name = item.Name }
+                    : new { name = item.Name, traceId = item.TraceId },
+                traceId = item.TraceId,
+            })
+            .ToList();
 
         await HttpHelper.WriteJsonAsync(context, new
         {
             ok = true,
             pending = updated.Count > 0,
-            eligible = candidates.Count,
+            eligible = result.Candidates.Count,
             succeeded = updated.Count,
-            eligibleCount = candidates.Count,
+            eligibleCount = result.Candidates.Count,
             succeededCount = updated.Count,
             failedCount = failed.Count,
             restartRequired = updated.Count > 0,

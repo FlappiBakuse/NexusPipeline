@@ -16,7 +16,11 @@ const props = defineProps<{
   save: () => void;
   onUpdateCheck: (value: boolean) => void;
 }>();
-const emit = defineEmits<{ toggle: []; "update:updateAutoApplyEnabled": [value: boolean] }>();
+const emit = defineEmits<{
+  toggle: [];
+  "update:updateAutoApplyEnabled": [value: boolean];
+  "update:pluginAutoUpdateEnabled": [value: boolean];
+}>();
 
 const updateCard = ref<InstanceType<typeof UpdateStatusCard> | null>(null);
 const updateChannelOptions = computed<NxpOption[]>(() => [
@@ -60,6 +64,15 @@ defineExpose({ reload });
           :disabled="props.settings.updateCheckEnabled !== true"
           :aria-label="t('settings.update_automatically_when_idle')"
           @update:model-value="emit('update:updateAutoApplyEnabled', $event)"
+          @change="props.save"
+        />
+        <NxpSwitchSetting
+          id="st-plugin-update-auto"
+          :model-value="props.settings.pluginAutoUpdateEnabled === true"
+          :label="t('settings.update_plugins_automatically')"
+          :description="t('settings.update.plugins_help')"
+          :aria-label="t('settings.update_plugins_automatically')"
+          @update:model-value="emit('update:pluginAutoUpdateEnabled', $event)"
           @change="props.save"
         />
       </div>

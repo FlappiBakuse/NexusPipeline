@@ -11,6 +11,7 @@ namespace NexusPipeline;
 internal static class StartupPipeline
 {
     private static Control? _serviceExitDispatcher;
+    private static readonly ManualResetEventSlim WebOnlyExitRequested = new(false);
 
     internal static void RunService()
     {
@@ -43,6 +44,19 @@ internal static class StartupPipeline
                 ClearServicePid();
                 return;
             }
+            StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+            if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
+            {
+                // 启动阶段没有消息循环；让进程退出释放互斥体和 EXE 映像，更新 worker 才能安全交换文件。
+                Environment.Exit(0);
+                return;
+            }
+            if (updateDisposition == StartupUpdateDisposition.AbortUnsafeRecovery)
+            {
+                ClearServicePid();
+                return;
+            }
+            Bootstrap.PrepareStartupPluginUpdates(ctx);
             Bootstrap.StartServices();
 
             WebServerOptions webOptions = WebServerOptions.FromSettings(
@@ -103,6 +117,13 @@ internal static class StartupPipeline
         }
     }
 
+    /// <summary>让仅网页模式走正常 shutdown 流程，以便安全停止插件后台任务后释放单实例互斥体。</summary>
+    internal static bool TryRequestWebOnlyExit()
+    {
+        WebOnlyExitRequested.Set();
+        return true;
+    }
+
     /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
     internal static string SingleInstanceMutexName
     {
@@ -160,7 +181,7 @@ internal static class StartupPipeline
     /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
     /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
     /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
-    internal static int RunRestart(string? handoffId = null)
+    internal static int RunRestart(string? handoffId = null, bool webOnly = false)
     {
         HostInstance.AdoptRestartHandoff(handoffId);
         Logger.Info("[重启] 正在等待旧进程退出...");
@@ -195,12 +216,20 @@ internal static class StartupPipeline
         {
             Logger.Warn($"[重启] 等待旧进程退出异常（继续启动）：{ex.Message}");
         }
-        RunService();
+        if (webOnly)
+        {
+            RunWebOnly(Array.Empty<string>());
+        }
+        else
+        {
+            RunService();
+        }
         return 0;
     }
 
     internal static int RunWebOnly(string[] args)
     {
+        ApplicationHost.IsWebOnly = true;
         // web 模式同样抢单实例互斥——常驻服务已在运行时直接退出（防两实例双写配置/数据）。
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
@@ -224,13 +253,24 @@ internal static class StartupPipeline
             Environment.Exit(0);
             return 0;
         }
-        ApplicationHost.IsWebOnly = true;
         RuntimeContext ctx = RuntimeContext.Instance;
         if (!HostedRuntimeInitializer.Initialize(ctx))
         {
             ClearServicePid();
             return 1;
         }
+        StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+        if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
+        {
+            Environment.Exit(0);
+            return 0;
+        }
+        if (updateDisposition == StartupUpdateDisposition.AbortUnsafeRecovery)
+        {
+            ClearServicePid();
+            return 1;
+        }
+        Bootstrap.PrepareStartupPluginUpdates(ctx);
         Bootstrap.StartServices();
         WebServer? web = Bootstrap.StartWebWithRetry(
             ctx.Settings.WebPort,
@@ -258,40 +298,7 @@ internal static class StartupPipeline
                 Logger.Warn($"自动打开浏览器失败：{ex.Message}");
             }
         }
-#if NEXUS_TEST_HOST
-        string? testHostExitFile = TestHostExitFilePath();
-        if (testHostExitFile is not null)
-        {
-            while (!File.Exists(testHostExitFile))
-            {
-                Thread.Sleep(100);
-            }
-        }
-        else
-#endif
-        {
-            // 正常控制台按回车停止；stdin 重定向（管道/文件）EOF 时退出（修复永久挂起）；
-            // 无效 stdin（spawn stdio:ignore，e2e 服务启动方式）Peek 抛异常 → 持续运行直到被外部终止。
-            while (true)
-            {
-                int peek;
-                try
-                {
-                    peek = Console.In.Peek();
-                }
-                catch
-                {
-                    Thread.Sleep(500);
-                    continue;
-                }
-                if (peek == -1)
-                {
-                    break;
-                }
-                Console.ReadLine();
-                break;
-            }
-        }
+        WaitForWebOnlyStop();
         ShutdownHosted(web, mcp);
         return 0;
     }
@@ -309,6 +316,14 @@ internal static class StartupPipeline
         }
         WriteServicePid();
         return true;
+    }
+
+    private static StartupUpdateDisposition RunStartupUpdateGate(RuntimeContext ctx)
+    {
+        return new StartupUpdateCoordinator(
+            () => ctx.Settings,
+            ctx.Resolve<UpdateService>(),
+            ctx.Resolve<UpdateAutomationService>()).RunBeforeServices();
     }
 
     /// <summary>常驻模式（service/web）共享的关闭不变量：等待任务/编辑会话安全结束 → 停服务 → 清 service.pid。</summary>
@@ -347,6 +362,37 @@ internal static class StartupPipeline
         catch (Exception ex)
         {
             Logger.Warn($"[运行时] 清理 service.pid 失败：{ex.Message}");
+        }
+    }
+
+    private static void WaitForWebOnlyStop()
+    {
+#if NEXUS_TEST_HOST
+        string? testHostExitFile = TestHostExitFilePath();
+        if (testHostExitFile is not null)
+        {
+            while (!File.Exists(testHostExitFile) && !WebOnlyExitRequested.IsSet)
+            {
+                Thread.Sleep(100);
+            }
+            return;
+        }
+#endif
+        // 将控制台输入放在后台读取，使自动安全重启能唤醒主线程并执行 ShutdownHosted。
+        Task<string?> input = Task.Run(() => Console.ReadLine());
+        int signal = WaitHandle.WaitAny(new[]
+        {
+            WebOnlyExitRequested.WaitHandle,
+            ((IAsyncResult)input).AsyncWaitHandle,
+        });
+        if (input.IsFaulted)
+        {
+            _ = input.Exception;
+            if (signal != 0)
+            {
+                // 无效 stdin（如 stdio:ignore）保持服务运行，等待安全重启信号或外部终止。
+                WebOnlyExitRequested.Wait();
+            }
         }
     }
 

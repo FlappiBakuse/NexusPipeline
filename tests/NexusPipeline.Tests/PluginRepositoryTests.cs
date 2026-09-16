@@ -281,6 +281,20 @@ public sealed class PluginRepositoryCatalogTests
     }
 
     [Theory]
+    [InlineData("FixtureArtifact", "FixtureArtifact", true)]
+    [InlineData("FixtureArtifact", "Fixtureartifact", false)]
+    [InlineData("ManualInstall", "OfficialArtifact", false)]
+    public void CatalogUpdateRequiresExactArtifactIdentity(
+        string installedArtifactName,
+        string catalogArtifactName,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            PluginStoreProjector.IsCatalogArtifactMatch(installedArtifactName, catalogArtifactName));
+    }
+
+    [Theory]
     [InlineData(false, true, true, "", false)]
     [InlineData(true, false, true, "", false)]
     [InlineData(true, true, false, "", false)]
@@ -303,17 +317,49 @@ public sealed class PluginRepositoryCatalogTests
         Assert.Equal(expected, PluginRepositoryService.IsUpdateEligible(item));
     }
 
+    [Fact]
+    public async Task StageUpdatesAsync_PreservesEarlierPluginWhenLaterStageIsCanceled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        PluginStoreItem first = CreateStoreItem(true, true, true, managedByStore: false, name: "first");
+        PluginStoreItem second = CreateStoreItem(true, true, true, managedByStore: false, name: "second");
+
+        PluginBatchUpdateResult result = await PluginRepositoryService.StageUpdatesAsync(
+            new[] { first, second },
+            (candidate, token) =>
+            {
+                if (candidate.Name == "second")
+                {
+                    cancellation.Cancel();
+                    token.ThrowIfCancellationRequested();
+                }
+                return Task.FromResult(new PluginPendingOperation
+                {
+                    Action = "update",
+                    Name = candidate.Name,
+                    ArtifactName = candidate.ArtifactName,
+                    Version = candidate.Version,
+                });
+            },
+            cancellation.Token);
+
+        Assert.True(result.Canceled);
+        Assert.Equal("first", Assert.Single(result.Updated).Name);
+        Assert.Empty(result.Failed);
+    }
+
     private static PluginStoreItem CreateStoreItem(
         bool installed,
         bool updateAvailable,
         bool compatible,
         bool managedByStore,
-        string pendingAction = "")
+        string pendingAction = "",
+        string name = "fixture")
     {
         return new PluginStoreItem(
-            "fixture",
-            "Fixture",
-            "Fixture",
+            name,
+            name,
+            name,
             "",
             "",
             "0.2.0",
@@ -330,7 +376,7 @@ public sealed class PluginRepositoryCatalogTests
             pendingAction,
             "",
             updateAvailable ? "update-available" : "installed",
-            installed ? "fixture" : "",
+            installed ? name : "",
             Array.Empty<PluginChangelogEntry>());
     }
 
@@ -338,7 +384,7 @@ public sealed class PluginRepositoryCatalogTests
     public void PluginApiCompatibility_UsesMajorAndMinorVersion()
     {
         Assert.Equal(1, PluginApiVersion.Major);
-        Assert.Equal(6, PluginApiVersion.Minor);
+        Assert.Equal(7, PluginApiVersion.Minor);
         Assert.True(PluginRepositoryCatalog.TryParseApiVersion("1.0", out int major, out int minor));
         Assert.Equal(1, major);
         Assert.Equal(0, minor);
@@ -350,9 +396,11 @@ public sealed class PluginRepositoryCatalogTests
             "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.0", Array.Empty<string>(),
             "0.11.0", "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/fixture/fixture-0.1.0.zip", new string('a', 64), 1);
         Assert.True(PluginRepositoryCatalog.IsCompatible(compatible, "0.11.0", out _));
-        PluginCatalogEntry currentMinor = compatible with { ApiVersion = "1.6" };
+        PluginCatalogEntry previousMinor = compatible with { ApiVersion = "1.6" };
+        Assert.True(PluginRepositoryCatalog.IsCompatible(previousMinor, "0.11.0", out _));
+        PluginCatalogEntry currentMinor = compatible with { ApiVersion = "1.7" };
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentMinor, "0.11.0", out _));
-        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.7" };
+        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.8" };
         Assert.False(PluginRepositoryCatalog.IsCompatible(newerMinor, "0.11.0", out string reason));
         Assert.Contains("Plugin API", reason);
 
@@ -364,7 +412,7 @@ public sealed class PluginRepositoryCatalogTests
     public void CompatibilityEvaluator_DistinguishesHostApiAndInvalidVersionFailures()
     {
         PluginCatalogEntry managed = new(
-            "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.7", Array.Empty<string>(),
+            "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.8", Array.Empty<string>(),
             UpdateService.CurrentVersion,
             "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/fixture/fixture-0.1.0.zip",
             new string('a', 64),

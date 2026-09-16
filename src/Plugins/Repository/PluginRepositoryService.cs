@@ -6,7 +6,7 @@ using NexusPipeline.Utilities;
 namespace NexusPipeline.Plugins;
 
 /// <summary>官方插件 catalog 缓存、商店状态合并和生命周期操作编排。</summary>
-internal sealed class PluginRepositoryService
+internal sealed class PluginRepositoryService : IPluginAutoUpdateRepository
 {
     private readonly Func<PluginManager> _plugins;
     private readonly PluginPackageService _packages;
@@ -31,9 +31,9 @@ internal sealed class PluginRepositoryService
             TimeSpan.FromSeconds(30),
             allowAutoRedirect: false));
         _catalogCache = new PluginRepositoryCatalogCache();
-        _storeProjector = new PluginStoreProjector(_plugins);
+        _storeProjector = new PluginStoreProjector(() => GetInstalledSummaries());
         _operations = new PluginRepositoryOperations(
-            _plugins,
+            () => GetInstalledSummaries(),
             _packages,
             RequireEntryAsync,
             () => _plugins().InvalidateManagementSnapshot());
@@ -153,6 +153,69 @@ internal sealed class PluginRepositoryService
                 snapshot.Error ?? "插件仓库暂不可用");
         }
         return snapshot.Plugins.Where(IsUpdateEligible).ToArray();
+    }
+
+    public IReadOnlyList<PluginPendingOperation> ReadPendingOperations() => PluginInstallRecovery.ReadPending();
+
+    Task<IReadOnlyList<PluginStoreItem>> IPluginAutoUpdateRepository.GetUpdateCandidatesAsync(
+        CancellationToken cancellationToken) => GetUpdateCandidatesAsync(cancellationToken);
+
+    Task<PluginBatchUpdateResult> IPluginAutoUpdateRepository.StageUpdatesAsync(
+        IReadOnlyList<PluginStoreItem> candidates,
+        CancellationToken cancellationToken) => StageUpdatesAsync(candidates, cancellationToken);
+
+    internal async Task<PluginBatchUpdateResult> UpdateAllAsync(CancellationToken cancellationToken = default)
+    {
+        IReadOnlyList<PluginStoreItem> candidates = await GetUpdateCandidatesAsync(cancellationToken).ConfigureAwait(false);
+        return await StageUpdatesAsync(candidates, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<PluginBatchUpdateResult> StageUpdatesAsync(
+        IReadOnlyList<PluginStoreItem> candidates,
+        CancellationToken cancellationToken = default)
+    {
+        return await StageUpdatesAsync(
+            candidates,
+            (candidate, token) => InstallAsync(candidate.Name, update: true, token),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static async Task<PluginBatchUpdateResult> StageUpdatesAsync(
+        IReadOnlyList<PluginStoreItem> candidates,
+        Func<PluginStoreItem, CancellationToken, Task<PluginPendingOperation>> stageUpdate,
+        CancellationToken cancellationToken = default)
+    {
+        var updated = new List<PluginPendingOperation>();
+        var failed = new List<PluginBatchUpdateFailure>();
+        bool canceled = false;
+        foreach (PluginStoreItem candidate in candidates)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                canceled = true;
+                break;
+            }
+            try
+            {
+                updated.Add(await stageUpdate(candidate, cancellationToken).ConfigureAwait(false));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                canceled = true;
+                break;
+            }
+            catch (PluginRepositoryException ex)
+            {
+                failed.Add(new PluginBatchUpdateFailure(candidate.Name, ex.Code, ex.Message, null));
+            }
+            catch (Exception ex)
+            {
+                string traceId = Guid.NewGuid().ToString("N");
+                Logger.Error($"[插件] 批量更新 {candidate.Name} 失败（追踪 {traceId}）：{ex}");
+                failed.Add(new PluginBatchUpdateFailure(candidate.Name, "internal_error", ex.Message, traceId));
+            }
+        }
+        return new PluginBatchUpdateResult(candidates, updated, failed, canceled);
     }
 
     /// <summary>
@@ -343,6 +406,12 @@ internal sealed class PluginRepositoryService
         DateTimeOffset fetchedAt,
         string? error) =>
         _storeProjector.Project(catalog, stale, fetchedAt, error);
+
+    private IReadOnlyList<PluginSummary> GetInstalledSummaries()
+    {
+        IReadOnlyList<PluginSummary> loaded = _plugins().PluginSummaries;
+        return loaded.Count > 0 ? loaded : PluginInstalledInventory.ReadSummaries();
+    }
 }
 
 internal sealed record PluginStoreSnapshot(
@@ -358,6 +427,18 @@ internal sealed record PluginStoreSnapshot(
         return new PluginStoreSnapshot(false, false, DateTimeOffset.MinValue, error, null, Array.Empty<PluginStoreItem>());
     }
 }
+
+internal sealed record PluginBatchUpdateResult(
+    IReadOnlyList<PluginStoreItem> Candidates,
+    IReadOnlyList<PluginPendingOperation> Updated,
+    IReadOnlyList<PluginBatchUpdateFailure> Failed,
+    bool Canceled);
+
+internal sealed record PluginBatchUpdateFailure(
+    string Name,
+    string Code,
+    string Message,
+    string? TraceId);
 
 internal sealed record PluginStoreItem(
     string Name,

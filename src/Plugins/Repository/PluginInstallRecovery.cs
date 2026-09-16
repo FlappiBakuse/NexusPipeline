@@ -113,6 +113,10 @@ internal static class PluginInstallRecovery
                 Logger.Error($"[插件] 安装事务未完成，保留 pending 供下次启动恢复：{ex.Message}");
                 return false;
             }
+            finally
+            {
+                PluginInstalledInventory.Invalidate(localPlugins);
+            }
         }
     }
 

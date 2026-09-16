@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Diagnostics;
 using NexusPipeline.Mcp;
+using NexusPipeline.Models;
 using NexusPipeline.Web;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
@@ -22,6 +23,7 @@ internal static class Bootstrap
     private static readonly object RestartSync = new();
 
     private static HostRestartCoordinator? _restartCoordinator;
+    private static PluginAutoUpdateService? _pluginAutoUpdateService;
 
     /// <summary>加载插件、清理过期历史、启动调度器、配置恢复重试与更新自动化。</summary>
     public static void StartServices()
@@ -32,12 +34,43 @@ internal static class Bootstrap
         {
             Logger.Warn("[插件] 存在未完成的插件安装事务，保留 pending 并继续加载当前插件。");
         }
+        GetPluginAutoUpdateService(ctx).OnStartupInstallRecoveryCompleted();
         AppearanceLegacyMigration.ApplyOnce();
         ctx.Plugins.LoadAll();
         ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
         ctx.Scheduler.Start();
         UserConfigManager.StartRecoveryRetry();
         ctx.Resolve<UpdateAutomationService>().Start();
+        GetPluginAutoUpdateService(ctx).Start();
+    }
+
+    /// <summary>在 Bootstrap 加载插件前运行启动期插件更新检查与暂存。</summary>
+    internal static void PrepareStartupPluginUpdates(RuntimeContext ctx)
+    {
+        GetPluginAutoUpdateService(ctx).RunStartupBeforePlugins();
+    }
+
+    internal static void OnSettingsChanged(AppSettings previous, AppSettings current)
+    {
+        PluginAutoUpdateService? updater;
+        lock (RestartSync)
+        {
+            updater = _pluginAutoUpdateService;
+        }
+        updater?.OnSettingsChanged(previous, current);
+    }
+
+    private static PluginAutoUpdateService GetPluginAutoUpdateService(RuntimeContext ctx)
+    {
+        lock (RestartSync)
+        {
+            _pluginAutoUpdateService ??= new PluginAutoUpdateService(
+                () => ctx.Settings,
+                ctx.Resolve<PluginRepositoryService>(),
+                ctx.Resolve<AutoUpdateIdlePolicy>().TryAcquire,
+                lease => RequestRestartWithLease(lease, Audit.System));
+            return _pluginAutoUpdateService;
+        }
     }
 
     /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener 或托管 loopback transport 启动失败后不可复用）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
@@ -222,7 +255,32 @@ internal static class Bootstrap
                 "当前为仅网页模式（web），不支持自动重启，请手动重启");
         }
         int newPort = RuntimeContext.Instance.Settings.WebPort;
-        HostRestartCoordinator coordinator;
+        HostRestartCoordinator coordinator = GetRestartCoordinator();
+        RestartRequestResult result = coordinator.Request(auditSource, newPort);
+        if (!result.Accepted)
+        {
+            Logger.Warn($"[重启] 已拒绝重启请求：{result.Message}");
+        }
+        return result;
+    }
+
+    /// <summary>将自动更新闲时策略已取得的维护租约转交给统一重启流程。</summary>
+    internal static RestartRequestResult RequestRestartWithLease(
+        HostMaintenanceLease lease,
+        string auditSource)
+    {
+        int newPort = RuntimeContext.Instance.Settings.WebPort;
+        HostRestartCoordinator coordinator = GetRestartCoordinator();
+        RestartRequestResult result = coordinator.RequestWithLease(auditSource, newPort, lease);
+        if (!result.Accepted)
+        {
+            Logger.Warn($"[重启] 已拒绝自动更新重启请求：{result.Message}");
+        }
+        return result;
+    }
+
+    private static HostRestartCoordinator GetRestartCoordinator()
+    {
         lock (RestartSync)
         {
             _restartCoordinator ??= new HostRestartCoordinator(
@@ -232,18 +290,17 @@ internal static class Bootstrap
                     return (lease, lease is null ? reason : null);
                 },
                 launchChild: LaunchRestartChild,
-                requestExit: RequestRestartExit,
+                requestExit: () => ApplicationHost.IsWebOnly
+                    ? StartupPipeline.TryRequestWebOnlyExit()
+                    : RequestRestartExit(),
                 delay: duration => Thread.Sleep(TestHooks.ScaledMs((int)Math.Max(1, duration.TotalMilliseconds))),
                 launchDelay: TimeSpan.FromSeconds(1));
-            coordinator = _restartCoordinator;
+            return _restartCoordinator;
         }
-        RestartRequestResult result = coordinator.Request(auditSource, newPort);
-        if (!result.Accepted)
-        {
-            Logger.Warn($"[重启] 已拒绝重启请求：{result.Message}");
-        }
-        return result;
     }
+
+    internal static string[] BuildRestartArguments(string handoffId, bool webOnly) =>
+        ApplicationHost.BuildRestartArguments(handoffId, webOnly);
 
     private static bool LaunchRestartChild(string handoffId)
     {
@@ -253,13 +310,17 @@ internal static class Bootstrap
             Logger.Error("[重启] 无法获取当前程序路径，放弃重启。");
             return false;
         }
-        Process? child = Process.Start(new ProcessStartInfo(exePath)
+        var startInfo = new ProcessStartInfo(exePath)
         {
-            // 交接标识随启动参数传给子进程，前端据此确认应答来自本次重启的新实例。
-            Arguments = $"restart --handoff {handoffId}",
             UseShellExecute = false,
             CreateNoWindow = true,
-        });
+        };
+        // 交接标识及运行模式一同传给子进程；web-only 安全重启需回到原有界面入口。
+        foreach (string argument in BuildRestartArguments(handoffId, ApplicationHost.IsWebOnly))
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+        Process? child = Process.Start(startInfo);
         return child is not null;
     }
 
@@ -311,6 +372,14 @@ internal static class Bootstrap
         catch (Exception ex)
         {
             Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
+        }
+        try
+        {
+            _pluginAutoUpdateService?.Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 插件自动更新停止异常：{ex.Message}");
         }
         try
         {

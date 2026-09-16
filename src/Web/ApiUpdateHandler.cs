@@ -33,6 +33,7 @@ internal static class ApiUpdateHandler
             }
             case "check" when method == "POST":
             {
+                StartupUpdateAttemptStore.ClearPersisted();
                 try
                 {
                     UpdateStatusSnapshot status = await updates.CheckAsync(Audit.Web).ConfigureAwait(false);
@@ -48,6 +49,7 @@ internal static class ApiUpdateHandler
             }
             case "download" when method == "POST":
             {
+                StartupUpdateAttemptStore.ClearPersisted();
                 UpdateDownloadResult result = updates.StartDownload(Audit.Web);
                 if (!result.Succeeded)
                 {
@@ -65,6 +67,7 @@ internal static class ApiUpdateHandler
             }
             case "apply" when method == "POST":
             {
+                StartupUpdateAttemptStore.ClearPersisted();
                 bool defer = false;
                 System.Text.Json.Nodes.JsonNode? node = HttpHelper.ParseBody(body);
                 if (node is not null)

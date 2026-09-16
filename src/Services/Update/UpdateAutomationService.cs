@@ -22,6 +22,7 @@ internal sealed class UpdateAutomationService
     private readonly Func<TimeSpan, AutoUpdateIdleAttempt> _tryAcquireIdle;
     private readonly Action _invalidateDiscovery;
     private readonly Func<bool> _isAutomaticApplyAllowed;
+    private readonly Func<string, bool> _shouldSuppressAutomaticTarget;
     private readonly Func<DateTimeOffset> _now;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly TimeSpan _initialCheckDelay;
@@ -37,6 +38,7 @@ internal sealed class UpdateAutomationService
     private DateTimeOffset? _nextAutomaticCheckAt;
     private long _checkScheduleRevision;
     private bool _waitingForIdle;
+    private bool _startupCheckCompleted;
     private AutoUpdateIdleBlocker? _idleBlocker;
     private string? _lastLoggedBlocker;
 
@@ -53,8 +55,8 @@ internal sealed class UpdateAutomationService
         : this(
             settings,
             updates.GetStatus,
-            updates.CheckAsync,
-            updates.StartDownload,
+            auditSource => updates.CheckAsync(auditSource),
+            auditSource => updates.StartDownload(auditSource),
             updates.RequestImmediateApplyWithLease,
             idlePolicy.TryAcquire,
             updates.InvalidateDiscovery,
@@ -82,7 +84,8 @@ internal sealed class UpdateAutomationService
         TimeSpan? initialCheckDelay = null,
         TimeSpan? automaticCheckInterval = null,
         TimeSpan? idleRetryInterval = null,
-        TimeSpan? idleHorizon = null)
+        TimeSpan? idleHorizon = null,
+        Func<string, bool>? shouldSuppressAutomaticTarget = null)
     {
         _settings = settings;
         _getStatus = getStatus;
@@ -92,6 +95,8 @@ internal sealed class UpdateAutomationService
         _tryAcquireIdle = tryAcquireIdle;
         _invalidateDiscovery = invalidateDiscovery;
         _isAutomaticApplyAllowed = isAutomaticApplyAllowed ?? (() => true);
+        _shouldSuppressAutomaticTarget = shouldSuppressAutomaticTarget
+            ?? (version => new StartupUpdateAttemptStore().ShouldSuppressAutomaticTarget(version));
         _now = now ?? (() => DateTimeOffset.UtcNow);
         _delay = delay ?? DelayScaledAsync;
         _initialCheckDelay = initialCheckDelay ?? InitialCheckDelay;
@@ -110,19 +115,34 @@ internal sealed class UpdateAutomationService
             }
             _cts = new CancellationTokenSource();
             _nextAutomaticCheckAt = _settings().UpdateCheckEnabled
-                ? _now().Add(_initialCheckDelay)
+                ? _now().Add(_startupCheckCompleted ? _automaticCheckInterval : _initialCheckDelay)
                 : null;
             _loop = Task.Run(() => LoopAsync(_cts.Token));
         }
 
         if (_settings().UpdateCheckEnabled)
         {
-            Logger.Info($"[更新自动化] 已安排首次检查：{_initialCheckDelay.TotalSeconds:0} 秒");
+            TimeSpan firstDelay = _startupCheckCompleted ? _automaticCheckInterval : _initialCheckDelay;
+            Logger.Info($"[更新自动化] 已安排首次检查：{firstDelay.TotalSeconds:0} 秒");
         }
         else
         {
             Logger.Info("[更新自动化] 定期检查未启用，等待设置开启");
         }
+    }
+
+    /// <summary>启动阶段已经完成宿主检查时，避免服务就绪后 5 秒内重复发起同一请求。</summary>
+    internal void RecordStartupCheckCompleted()
+    {
+        lock (_sync)
+        {
+            _startupCheckCompleted = true;
+            _lastAutomaticCheckAt = _now();
+            _nextAutomaticCheckAt = _settings().UpdateCheckEnabled
+                ? _lastAutomaticCheckAt.Value.Add(_automaticCheckInterval)
+                : null;
+        }
+        SignalWake();
     }
 
     public void Stop()
@@ -232,6 +252,8 @@ internal sealed class UpdateAutomationService
                     if (settings.UpdateAutoApplyEnabled
                         && status.State == UpdateState.Ready
                         && status.CanDownload
+                        && !string.IsNullOrWhiteSpace(status.Latest)
+                        && !_shouldSuppressAutomaticTarget(status.Latest)
                         && _isAutomaticApplyAllowed())
                     {
                         TryApplyWhenIdle();
@@ -313,7 +335,9 @@ internal sealed class UpdateAutomationService
 
         AppSettings current = _settings();
         if (current.UpdateCheckEnabled && current.UpdateAutoApplyEnabled
-            && status.State == UpdateState.Idle && status.Available && status.CanDownload)
+            && status.State == UpdateState.Idle && status.Available && status.CanDownload
+            && !string.IsNullOrWhiteSpace(status.Latest)
+            && !_shouldSuppressAutomaticTarget(status.Latest))
         {
             UpdateDownloadResult result = _startDownload(Audit.System);
             if (result.Succeeded)

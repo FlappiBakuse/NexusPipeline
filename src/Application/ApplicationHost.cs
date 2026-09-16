@@ -105,11 +105,11 @@ internal static class ApplicationHost
             case "web":
                 return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
             case "restart":
-                return StartupPipeline.RunRestart(ReadRestartHandoff(args));
+                return StartupPipeline.RunRestart(ReadRestartHandoff(args), ReadRestartWebOnly(args));
             case "apply-update":
                 return RunUpdateApplyCli(args.Skip(1).ToArray());
             case "recover-update":
-                return UpdateApply.RunRecoveryWorker();
+                return UpdateApply.RunRecoveryWorker(ReadRestartWebOnly(args));
             case "register":
                 TaskRegistration.Register();
                 return 0;
@@ -122,7 +122,7 @@ internal static class ApplicationHost
     }
 
     /// <summary>读取重启交接标识；旧进程未传该参数时为空，按普通重启启动。</summary>
-    private static string? ReadRestartHandoff(string[] args)
+    internal static string? ReadRestartHandoff(string[] args)
     {
         for (int i = 1; i < args.Length; i++)
         {
@@ -134,16 +134,36 @@ internal static class ApplicationHost
         return null;
     }
 
+    internal static bool ReadRestartWebOnly(string[] args) => args.Any(argument =>
+        argument.Equals("--web", StringComparison.OrdinalIgnoreCase));
+
+    internal static string[] BuildRestartArguments(string handoffId, bool webOnly)
+    {
+        var arguments = new List<string> { "restart" };
+        if (webOnly)
+        {
+            arguments.Add("--web");
+        }
+        arguments.Add("--handoff");
+        arguments.Add(handoffId);
+        return arguments.ToArray();
+    }
+
     /// <summary>更新工作进程入口，仅由宿主更新流程拉起。</summary>
     private static int RunUpdateApplyCli(string[] args)
     {
         string? staged = null;
+        bool webOnly = false;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i].Equals("--staged", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
             {
                 staged = args[i + 1];
                 i++;
+            }
+            else if (args[i].Equals("--web", StringComparison.OrdinalIgnoreCase))
+            {
+                webOnly = true;
             }
         }
         if (string.IsNullOrWhiteSpace(staged))
@@ -155,7 +175,7 @@ internal static class ApplicationHost
         }
         try
         {
-            return UpdateApply.RunApplyWorker(staged);
+            return UpdateApply.RunApplyWorker(staged, webOnly);
         }
         catch (Exception ex)
         {

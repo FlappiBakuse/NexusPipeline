@@ -205,6 +205,7 @@ function saveUpdates() {
       updateAutoApplyEnabled:
         settings.updateCheckEnabled === true &&
         settings.updateAutoApplyEnabled === true,
+      pluginAutoUpdateEnabled: settings.pluginAutoUpdateEnabled === true,
       updateChannel: settings.updateChannel || "prerelease",
       updateSourceUrl: (settings.updateSourceUrl || "").trim(),
     });
@@ -401,6 +402,8 @@ onBeforeUnmount(() => {
           :save="saveUpdates"
           :on-update-check="onUpdateCheck"
           @toggle="togglePanel('updates')"
+          @update:update-auto-apply-enabled="settings.updateAutoApplyEnabled = $event"
+          @update:plugin-auto-update-enabled="settings.pluginAutoUpdateEnabled = $event"
         />
 
         <div

@@ -167,6 +167,7 @@ internal static class ApiSettingsHandler
             accessToken = string.IsNullOrWhiteSpace(settings.AccessToken) ? "" : "enc:***",
             settings.UpdateCheckEnabled,
             settings.UpdateAutoApplyEnabled,
+            settings.PluginAutoUpdateEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
         };

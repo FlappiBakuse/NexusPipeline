@@ -111,6 +111,9 @@ public class AppSettings
     /// <summary>发现更新后，宿主进入闲时并满足调度安全窗口时自动应用并重启。</summary>
     public bool UpdateAutoApplyEnabled { get; set; }
 
+    /// <summary>启动时检查并在加载插件前下载更新；运行期间定期下载，并在闲时安全重启时应用。</summary>
+    public bool PluginAutoUpdateEnabled { get; set; }
+
     /// <summary>更新接受渠道：stable / prerelease（major=0 版本为 Pre-release，默认 prerelease 才能收到更新）。</summary>
     public string UpdateChannel { get; set; } = "prerelease";
 

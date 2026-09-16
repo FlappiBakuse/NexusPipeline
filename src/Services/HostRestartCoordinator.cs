@@ -61,17 +61,35 @@ internal sealed class HostRestartCoordinator
                     "service_busy",
                     string.IsNullOrWhiteSpace(reason) ? "服务当前不满足安全重启条件" : reason);
             }
-
-            string handoffId = Guid.NewGuid().ToString("N");
-            Audit.Log(auditSource, "重启服务", $"端口 {newPort}");
             HostMaintenanceLease acceptedLease = lease;
-            _schedule(() => RunRestart(acceptedLease, handoffId));
-            return RestartRequestResult.Success(handoffId);
+            lease = null;
+            return RequestWithLease(auditSource, newPort, acceptedLease);
         }
         catch (Exception ex)
         {
             lease?.Dispose();
             Logger.Error($"[重启] 提交重启任务失败：{ex.Message}");
+            return RestartRequestResult.Failure("service_busy", "服务当前无法提交重启请求");
+        }
+    }
+
+    /// <summary>将调用方已原子取得的维护租约交给重启流程，避免释放后再次准入任务。</summary>
+    internal RestartRequestResult RequestWithLease(
+        string auditSource,
+        int newPort,
+        HostMaintenanceLease lease)
+    {
+        try
+        {
+            string handoffId = Guid.NewGuid().ToString("N");
+            Audit.Log(auditSource, "重启服务", $"端口 {newPort}");
+            _schedule(() => RunRestart(lease, handoffId));
+            return RestartRequestResult.Success(handoffId);
+        }
+        catch (Exception ex)
+        {
+            lease.Dispose();
+            Logger.Error($"[重启] 提交维护重启任务失败：{ex.Message}");
             return RestartRequestResult.Failure("service_busy", "服务当前无法提交重启请求");
         }
     }

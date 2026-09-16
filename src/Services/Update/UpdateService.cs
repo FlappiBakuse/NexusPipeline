@@ -190,7 +190,9 @@ internal sealed class UpdateService
     }
 
     /// <summary>检查更新：只允许 Idle 开始；Ready、ApplyPending、Applying 等状态不会被覆盖。</summary>
-    public async Task<UpdateStatusSnapshot> CheckAsync(string auditSource)
+    public async Task<UpdateStatusSnapshot> CheckAsync(
+        string auditSource,
+        CancellationToken cancellationToken = default)
     {
         UpdateOperation operation;
         lock (_gate)
@@ -199,7 +201,7 @@ internal sealed class UpdateService
             {
                 return BuildSnapshotLocked();
             }
-            operation = BeginOperationLocked(UpdateState.Checking);
+            operation = BeginOperationLocked(UpdateState.Checking, cancellationToken: cancellationToken);
             _readyStagingDir = null;
             _error = "";
             _latest = null;
@@ -304,7 +306,9 @@ internal sealed class UpdateService
     }
 
     /// <summary>开始下载并校验到 staging（后台任务，进度经 GetStatus 轮询）。</summary>
-    public UpdateDownloadResult StartDownload(string auditSource)
+    public UpdateDownloadResult StartDownload(
+        string auditSource,
+        CancellationToken cancellationToken = default)
     {
         ReleaseInfo? latest;
         UpdateOperation operation;
@@ -342,7 +346,12 @@ internal sealed class UpdateService
             stagingDir = StagingDir(version, nextGeneration);
             zipPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version) + $".g{nextGeneration}");
             shaPath = Path.Combine(UpdateDir, AppPaths.UpdatePackageShaName(version) + $".g{nextGeneration}");
-            operation = BeginOperationLocked(UpdateState.Downloading, zipPath, shaPath, stagingDir);
+            operation = BeginOperationLocked(
+                UpdateState.Downloading,
+                zipPath,
+                shaPath,
+                stagingDir,
+                cancellationToken);
             _readyStagingDir = null;
             _bytesRead = 0;
             _bytesTotal = 0;
@@ -415,6 +424,15 @@ internal sealed class UpdateService
         });
         Audit.Log(auditSource, "开始下载更新", $"v{version}（staging: {stagingDir}）");
         return UpdateDownloadResult.Started();
+    }
+
+    /// <summary>返回当前检查或下载任务的完成信号，供启动阶段在有限预算内等待。</summary>
+    internal Task WaitForCurrentOperationAsync()
+    {
+        lock (_gate)
+        {
+            return _operation?.Completion.Task ?? Task.CompletedTask;
+        }
     }
 
     /// <summary>取消检查/下载。取消只释放当前状态，过期 worker 仍受 generation 和现场归属保护。</summary>
@@ -519,7 +537,7 @@ internal sealed class UpdateService
         try
         {
             new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow).Write(TaskFile);
-            if (!UpdateApply.LaunchApplyWorker(stagingDir))
+            if (!UpdateApply.LaunchApplyWorker(stagingDir, ApplicationHost.IsWebOnly))
             {
                 throw new InvalidOperationException("apply-update 子进程未能拉起");
             }
@@ -607,10 +625,11 @@ internal sealed class UpdateService
         UpdateState state,
         string? zipPath = null,
         string? shaPath = null,
-        string? stagingDir = null)
+        string? stagingDir = null,
+        CancellationToken cancellationToken = default)
     {
         _generation++;
-        _operation = new UpdateOperation(_generation, state, zipPath, shaPath, stagingDir);
+        _operation = new UpdateOperation(_generation, state, zipPath, shaPath, stagingDir, cancellationToken);
         _state = state;
         return _operation;
     }
@@ -679,6 +698,7 @@ internal sealed class UpdateService
             if (!IsCurrentLocked(operation))
             {
                 operation.Cts.Dispose();
+                operation.Completion.TrySetResult(true);
                 return;
             }
             if (_state == expectedState)
@@ -691,6 +711,7 @@ internal sealed class UpdateService
             }
             _operation = null;
             operation.Cts.Dispose();
+            operation.Completion.TrySetResult(true);
         }
     }
 
@@ -806,15 +827,25 @@ internal sealed class UpdateService
         public string? ZipPath { get; }
         public string? ShaPath { get; }
         public string? StagingDir { get; }
-        public CancellationTokenSource Cts { get; } = new();
+        public CancellationTokenSource Cts { get; }
+        public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public UpdateOperation(long generation, UpdateState state, string? zipPath, string? shaPath, string? stagingDir)
+        public UpdateOperation(
+            long generation,
+            UpdateState state,
+            string? zipPath,
+            string? shaPath,
+            string? stagingDir,
+            CancellationToken cancellationToken = default)
         {
             Generation = generation;
             State = state;
             ZipPath = zipPath;
             ShaPath = shaPath;
             StagingDir = stagingDir;
+            Cts = cancellationToken.CanBeCanceled
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : new CancellationTokenSource();
         }
     }
 }

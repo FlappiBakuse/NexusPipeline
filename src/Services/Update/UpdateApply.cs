@@ -106,9 +106,12 @@ internal static class UpdateApply
     private const string WorkerImagePrefix = ".nxp-update-worker-";
     private const int RequiredFileRetryCount = 10;
     private static readonly TimeSpan RequiredFileRetryDelay = TimeSpan.FromMilliseconds(200);
+    private static int _startupRecoveryUnsafe;
+
+    internal static bool StartupRecoveryUnsafe => Volatile.Read(ref _startupRecoveryUnsafe) != 0;
 
     /// <summary>apply-update 子进程入口：等待宿主退出 → 建立不可变 backup → 交换 → commit → 重拉宿主。</summary>
-    public static int RunApplyWorker(string stagedDir)
+    public static int RunApplyWorker(string stagedDir, bool webOnly = false)
     {
         Logger.Info("[更新] apply-update 进程启动，等待主实例退出...");
         Audit.Log(Audit.System, "更新切换", "apply-update 进程启动");
@@ -166,7 +169,7 @@ internal static class UpdateApply
             journal.Write();
             Audit.Log(Audit.System, "更新应用完成", $"v{targetVersion}（staging：{stagedDir}）");
             Logger.Info($"[更新] 文件交换完成（v{targetVersion}），正在重新拉起宿主。");
-            LaunchService(installDir);
+            LaunchService(installDir, webOnly);
             return 0;
         }
         catch (Exception ex)
@@ -188,21 +191,53 @@ internal static class UpdateApply
             }
             if (backupComplete)
             {
+                bool rolledBack = false;
                 try
                 {
                     Rollback(journal with { Phase = UpdatePhase.RollbackPending });
-                    CleanupAfterRollback();
-                    Logger.Warn("[更新] 已完成失败回滚；更新现场清理将在确认成功后执行。");
+                    rolledBack = true;
+                    try
+                    {
+                        CleanupAfterRollback();
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Logger.Warn($"[更新] 已完成失败回滚；现场清理将在下次启动重试：{cleanupEx.Message}");
+                    }
                 }
                 catch (Exception rollbackEx)
                 {
                     Logger.Error($"[更新] 回滚失败（保留 backup/journal/staging，下次启动重试）：{rollbackEx.Message}");
                     TryWritePhase(journal, UpdatePhase.RollbackPending);
                 }
+                if (rolledBack)
+                {
+                    try
+                    {
+                        Logger.Warn("[更新] 正在重新拉起回滚后的宿主版本。");
+                        LaunchService(AppPaths.AppRoot, webOnly);
+                    }
+                    catch (Exception launchEx)
+                    {
+                        Logger.Error($"[更新] 回滚已完成，但无法重新拉起宿主：{launchEx.Message}");
+                    }
+                }
             }
             else
             {
                 AbortBeforeBackup(journal);
+                if (!staleBackupDetected)
+                {
+                    try
+                    {
+                        Logger.Warn("[更新] 文件交换前更新失败，正在重新拉起现有宿主版本。");
+                        LaunchService(AppPaths.AppRoot, webOnly);
+                    }
+                    catch (Exception launchEx)
+                    {
+                        Logger.Error($"[更新] 文件交换前更新失败，无法重新拉起宿主：{launchEx.Message}");
+                    }
+                }
             }
             return 1;
         }
@@ -214,6 +249,7 @@ internal static class UpdateApply
     /// </summary>
     public static bool RunStartupFinalization()
     {
+        Volatile.Write(ref _startupRecoveryUnsafe, 0);
         string? appliedVersion = ReadVersionFile();
         if (appliedVersion is not null)
         {
@@ -240,6 +276,7 @@ internal static class UpdateApply
         if (pending is null)
         {
             Logger.Error("[更新] journal 存在但无法读取，保留现场并停止自动更新。");
+            Volatile.Write(ref _startupRecoveryUnsafe, 1);
             return false;
         }
 
@@ -263,7 +300,7 @@ internal static class UpdateApply
             try
             {
                 apply.Write();
-                if (!LaunchApplyWorker(pending.StagedDir))
+                if (!LaunchApplyWorker(pending.StagedDir, ApplicationHost.IsWebOnly))
                 {
                     Logger.Error("[更新] defer 启动时无法拉起 apply-update，保留 defer journal，当前进程继续运行。");
                     pending.Write();
@@ -284,7 +321,7 @@ internal static class UpdateApply
                 && !HasBackupData(AppPaths.UpdateBackupDir))
             {
                 // worker 可能在 launch 后、建立 backup 前崩溃；重试仍然安全。
-                if (LaunchApplyWorker(pending.StagedDir))
+                if (LaunchApplyWorker(pending.StagedDir, ApplicationHost.IsWebOnly))
                 {
                     return true;
                 }
@@ -296,7 +333,7 @@ internal static class UpdateApply
             Audit.Log(Audit.System, "更新失败已回滚", $"v{pending.Version}（切换未完成）");
             if (HasBackupExecutable(AppPaths.UpdateBackupDir))
             {
-                if (LaunchRecoveryWorker())
+                if (LaunchRecoveryWorker(ApplicationHost.IsWebOnly))
                 {
                     return true;
                 }
@@ -311,6 +348,7 @@ internal static class UpdateApply
             {
                 Logger.Error($"[更新] 启动回滚失败（保留 backup/journal，下次启动重试）：{ex.Message}");
                 TryWritePhase(pending, UpdatePhase.RollbackPending);
+                Volatile.Write(ref _startupRecoveryUnsafe, 1);
             }
         }
         else if (pending.Phase == UpdatePhase.RollbackConfirmed)
@@ -327,6 +365,7 @@ internal static class UpdateApply
         else
         {
             Logger.Warn($"[更新] 无法识别的更新 journal 状态：Mode={pending.Mode}, Phase={pending.Phase}；保留现场。");
+            Volatile.Write(ref _startupRecoveryUnsafe, 1);
         }
         return false;
     }
@@ -335,7 +374,7 @@ internal static class UpdateApply
     /// 独立 recovery worker 入口：等待持有当前 exe 的启动实例退出，再还原 immutable backup，
     /// 写入 RollbackConfirmed 并拉起旧版本。旧版本启动后负责最终删除 backup/journal。
     /// </summary>
-    public static int RunRecoveryWorker()
+    public static int RunRecoveryWorker(bool webOnly = false)
     {
         Logger.Info("[更新] recovery worker 启动，等待当前宿主退出...");
         UpdateTask? pending = UpdateTask.Read();
@@ -353,7 +392,7 @@ internal static class UpdateApply
         try
         {
             Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending });
-            LaunchService(AppPaths.AppRoot);
+            LaunchService(AppPaths.AppRoot, webOnly);
             return 0;
         }
         catch (Exception ex)
@@ -862,7 +901,7 @@ internal static class UpdateApply
     }
 
     /// <summary>拉起 apply-update 子进程，Process.Start 返回 null 也视为失败。</summary>
-    public static bool LaunchApplyWorker(string stagedDir)
+    public static bool LaunchApplyWorker(string stagedDir, bool webOnly)
     {
         if (LaunchApplyOverride is not null)
         {
@@ -882,6 +921,10 @@ internal static class UpdateApply
             startInfo.ArgumentList.Add("apply-update");
             startInfo.ArgumentList.Add("--staged");
             startInfo.ArgumentList.Add(stagedDir);
+            if (webOnly)
+            {
+                startInfo.ArgumentList.Add("--web");
+            }
             Process? process = Process.Start(startInfo);
             if (process is null)
             {
@@ -900,7 +943,7 @@ internal static class UpdateApply
     }
 
     /// <summary>启动独立 recovery worker，避免当前新版本进程锁住待还原的 exe。</summary>
-    public static bool LaunchRecoveryWorker()
+    public static bool LaunchRecoveryWorker(bool webOnly)
     {
         if (LaunchRecoveryOverride is not null)
         {
@@ -918,6 +961,10 @@ internal static class UpdateApply
                 WorkingDirectory = AppPaths.AppRoot,
             };
             startInfo.ArgumentList.Add("recover-update");
+            if (webOnly)
+            {
+                startInfo.ArgumentList.Add("--web");
+            }
             Process? process = Process.Start(startInfo);
             if (process is null)
             {
@@ -941,19 +988,26 @@ internal static class UpdateApply
     /// <summary>测试注入点：L2 单测替换 recovery worker 拉起。</summary>
     internal static Func<bool>? LaunchRecoveryOverride;
 
-    private static void LaunchService(string installDir)
+    private static void LaunchService(string installDir, bool webOnly)
     {
         string exePath = Path.Combine(installDir, "nexus-pipeline.exe");
-        Process? process = Process.Start(new ProcessStartInfo(exePath)
+        var startInfo = new ProcessStartInfo(exePath)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
-        });
+        };
+        if (webOnly)
+        {
+            startInfo.ArgumentList.Add("web");
+        }
+        Process? process = Process.Start(startInfo);
         if (process is null)
         {
             throw new InvalidOperationException("重新拉起宿主失败：Process.Start 未返回进程");
         }
         process.Dispose();
-        Logger.Info("[更新] 已重新拉起宿主（服务模式）。");
+        Logger.Info(webOnly
+            ? "[更新] 已重新拉起宿主（web 模式）。"
+            : "[更新] 已重新拉起宿主（服务模式）。");
     }
 }

@@ -115,6 +115,7 @@ internal static class SettingsCommands
             }
             TaskRegistration.SyncWithSettings(current);
             ctx.Resolve<UpdateAutomationService>().OnSettingsChanged(previous, current);
+            Bootstrap.OnSettingsChanged(previous, current);
             Audit.Log(
                 source,
                 "保存设置",

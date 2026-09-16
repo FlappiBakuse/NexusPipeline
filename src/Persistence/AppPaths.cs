@@ -75,6 +75,9 @@ internal static class AppPaths
     /// <summary>定时 occurrence 与待执行冻结计划的持久化状态。</summary>
     public static readonly string SchedulerStatePath = Path.Combine(StateDir, "scheduler-state.json");
 
+    /// <summary>防止启动自动更新回滚后立即重复尝试同一版本的单次启动标记。</summary>
+    internal static readonly string StartupUpdateAttemptPath = Path.Combine(StateDir, "startup-update-attempt.json");
+
     /// <summary>常驻 service/web 进程 PID；用于提权测试与异常退出后的精确接管清理。</summary>
     public static readonly string ServicePidPath = Path.Combine(RuntimeDir, "service.pid");
 

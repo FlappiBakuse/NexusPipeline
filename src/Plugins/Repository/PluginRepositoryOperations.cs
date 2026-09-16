@@ -7,19 +7,19 @@ namespace NexusPipeline.Plugins;
 /// <summary>串行化插件安装、更新和卸载操作。</summary>
 internal sealed class PluginRepositoryOperations
 {
-    private readonly Func<PluginManager> _plugins;
+    private readonly Func<IReadOnlyList<PluginSummary>> _installed;
     private readonly PluginPackageService _packages;
     private readonly Func<string, CancellationToken, Task<PluginCatalogEntry>> _requireEntryAsync;
     private readonly Action _invalidateManagementSnapshot;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     internal PluginRepositoryOperations(
-        Func<PluginManager> plugins,
+        Func<IReadOnlyList<PluginSummary>> installed,
         PluginPackageService packages,
         Func<string, CancellationToken, Task<PluginCatalogEntry>> requireEntryAsync,
         Action invalidateManagementSnapshot)
     {
-        _plugins = plugins;
+        _installed = installed;
         _packages = packages;
         _requireEntryAsync = requireEntryAsync;
         _invalidateManagementSnapshot = invalidateManagementSnapshot;
@@ -43,11 +43,18 @@ internal sealed class PluginRepositoryOperations
                     compatibility.Code ?? "incompatible",
                     compatibility.Reason);
             }
-            PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
+            PluginSummary? installed = _installed().FirstOrDefault(item =>
                 string.Equals(item.Name, entry.Name, StringComparison.OrdinalIgnoreCase));
             if (update && installed is null)
             {
                 throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
+            }
+            if (update && installed is not null
+                && !PluginStoreProjector.IsCatalogArtifactMatch(installed.ArtifactName, entry.ArtifactName))
+            {
+                throw new PluginRepositoryException(
+                    "artifact_mismatch",
+                    $"插件「{entry.Name}」的安装目录与官方 catalog artifactName 不一致，拒绝替换目录");
             }
             if (!update && installed is not null)
             {
@@ -87,7 +94,7 @@ internal sealed class PluginRepositoryOperations
             {
                 throw new PluginRepositoryException("invalid_name", "插件名称无效");
             }
-            PluginSummary? installed = _plugins().PluginSummaries.FirstOrDefault(item =>
+            PluginSummary? installed = _installed().FirstOrDefault(item =>
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
             PluginOwnership? ownership = PluginInstallRecovery.ReadOwnership()
                 .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))

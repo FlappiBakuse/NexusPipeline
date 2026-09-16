@@ -7,11 +7,11 @@ namespace NexusPipeline.Plugins;
 /// <summary>将 catalog、安装所有权和插件摘要投影为商店视图。</summary>
 internal sealed class PluginStoreProjector
 {
-    private readonly Func<PluginManager> _plugins;
+    private readonly Func<IReadOnlyList<PluginSummary>> _installed;
 
-    internal PluginStoreProjector(Func<PluginManager> plugins)
+    internal PluginStoreProjector(Func<IReadOnlyList<PluginSummary>> installed)
     {
-        _plugins = plugins;
+        _installed = installed;
     }
 
     internal static bool IsUpdateEligible(PluginStoreItem plugin)
@@ -21,6 +21,9 @@ internal sealed class PluginStoreProjector
             && plugin.UpdateAvailable
             && string.IsNullOrWhiteSpace(plugin.PendingAction);
     }
+
+    internal static bool IsCatalogArtifactMatch(string installedArtifactName, string catalogArtifactName) =>
+        string.Equals(installedArtifactName, catalogArtifactName, StringComparison.Ordinal);
 
     internal static string ResolveStoreStatus(
         PluginCompatibilityResult compatibility,
@@ -56,7 +59,7 @@ internal sealed class PluginStoreProjector
         DateTimeOffset fetchedAt,
         string? error)
     {
-        Dictionary<string, PluginSummary> installed = _plugins().PluginSummaries
+        Dictionary<string, PluginSummary> installed = _installed()
             .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         IReadOnlyDictionary<string, PluginOwnership> ownership = PluginInstallRecovery.ReadOwnership();
@@ -74,6 +77,7 @@ internal sealed class PluginStoreProjector
                 UpdateService.CurrentVersion);
             bool compatible = compatibility.Compatible;
             bool updateAvailable = local is not null
+                && IsCatalogArtifactMatch(local.ArtifactName, entry.ArtifactName)
                 && PluginRepositoryCatalog.CompareVersions(local.Version, entry.Version) < 0;
             string status = ResolveStoreStatus(
                 compatibility,

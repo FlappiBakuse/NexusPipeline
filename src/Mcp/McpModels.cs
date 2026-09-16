@@ -388,6 +388,7 @@ internal static class McpViews
             accessToken = Mask(settings.AccessToken),
             settings.UpdateCheckEnabled,
             settings.UpdateAutoApplyEnabled,
+            settings.PluginAutoUpdateEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
         };
