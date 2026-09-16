@@ -130,15 +130,16 @@ test("Nox driver 使用实例索引和 vbox ADB 端口映射", { skip }, async (
   assert.match(calls, /quit.*-index:0/);
 });
 
-test("Nox driver 使用稳定 VM 名称并选择 name 命令", { skip }, async () => {
+test("Nox driver 使用 VM 身份匹配并以 title 选择 name 命令", { skip }, async () => {
   const flag = path.join(runtimeDir, "nox-stub", "name-first.flag");
   fs.writeFileSync(flag, "name-first\n", "utf8");
   fs.rmSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), { force: true });
   try {
     await runEmulator("127.0.0.1:62023", "nox-name-emu");
     const calls = fs.readFileSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), "utf8");
-    assert.match(calls, /launch.*-name:nox/);
-    assert.match(calls, /quit.*-name:nox/);
+    assert.match(calls, /launch.*-name:NoxPlayer/);
+    assert.match(calls, /quit.*-name:NoxPlayer/);
+    assert.doesNotMatch(calls, /-name:nox/);
     assert.doesNotMatch(calls, /-index:0/);
   } finally {
     fs.rmSync(flag, { force: true });

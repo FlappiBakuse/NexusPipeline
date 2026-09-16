@@ -7,7 +7,7 @@ echo %*>>"%CALLS%"
 
 if /I "%~1"=="list" (
   if exist "%STUB%name-first.flag" (
-    echo nox,NoxPlayer,started
+    echo nox,NoxPlayer,2032678,1704928,3567547,7456
   ) else (
     echo 0,Android7,started
   )
@@ -17,7 +17,7 @@ if /I "%~1"=="launch" if /I "%~2"=="-index:0" (
   echo launched
   exit /b 0
 )
-if /I "%~1"=="launch" if /I "%~2"=="-name:nox" if exist "%STUB%name-first.flag" (
+if /I "%~1"=="launch" if /I "%~2"=="-name:NoxPlayer" if exist "%STUB%name-first.flag" (
   echo launched
   exit /b 0
 )
@@ -25,7 +25,7 @@ if /I "%~1"=="quit" if /I "%~2"=="-index:0" (
   echo quit
   exit /b 0
 )
-if /I "%~1"=="quit" if /I "%~2"=="-name:nox" if exist "%STUB%name-first.flag" (
+if /I "%~1"=="quit" if /I "%~2"=="-name:NoxPlayer" if exist "%STUB%name-first.flag" (
   echo quit
   exit /b 0
 )

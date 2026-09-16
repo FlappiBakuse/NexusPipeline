@@ -32,32 +32,76 @@ public class EmulatorSupportTests
     }
 
     [Fact]
-    public void ParseNoxConsoleListSupportsExplicitIndexesAndStableVmNames()
+    public void ParseNoxConsoleListSeparatesNumericIndexesFromVmIdentity()
     {
         IReadOnlyList<NoxInstance> instances = EmulatorVendorSupport.ParseNoxConsoleList(
-            "0,nox,started\n1,Nox_1,started\nnox,NoxPlayer,started\nNox_2,NoxPlayer2,started");
+            "0,Android7,started\n1,Nox_1,started");
 
-        Assert.Equal(4, instances.Count);
-        Assert.Equal("0", instances[0].Index);
-        Assert.False(instances[0].UsesNameSelector);
-        Assert.Equal("1", instances[1].Index);
-        Assert.False(instances[1].UsesNameSelector);
-        Assert.Equal("nox", instances[2].Index);
-        Assert.True(instances[2].UsesNameSelector);
-        Assert.Equal("Nox_2", instances[3].Index);
-        Assert.True(instances[3].UsesNameSelector);
+        Assert.Equal(2, instances.Count);
+        Assert.Equal("Android7", instances[0].Identity);
+        Assert.Null(instances[0].ControlName);
+        Assert.Equal(0, instances[0].NumericIndex);
+        Assert.Null(instances[0].ProcessId);
+        Assert.Equal("Nox_1", instances[1].Identity);
+        Assert.Equal(1, instances[1].NumericIndex);
+    }
+
+    [Fact]
+    public void ParseNoxConsoleListUsesTitleAndCanonicalProcessIdForNameFirstRows()
+    {
+        IReadOnlyList<NoxInstance> instances = EmulatorVendorSupport.ParseNoxConsoleList(
+            "nox,NoxPlayer,2032678,1704928,3567547,7456\nNox_2,NoxPlayer2,852422,590830,36566,3772");
+
+        Assert.Equal(2, instances.Count);
+        Assert.Equal("nox", instances[0].Identity);
+        Assert.Equal("NoxPlayer", instances[0].ControlName);
+        Assert.Null(instances[0].NumericIndex);
+        Assert.Equal(7456, instances[0].ProcessId);
+        Assert.Equal("Nox_2", instances[1].Identity);
+        Assert.Equal("NoxPlayer2", instances[1].ControlName);
+        Assert.Equal(3772, instances[1].ProcessId);
+    }
+
+    [Fact]
+    public void ParseNoxConsoleListUsesCanonicalProcessIdForNumericRows()
+    {
+        IReadOnlyList<NoxInstance> instances = EmulatorVendorSupport.ParseNoxConsoleList(
+            "0,nox,Business,2032678,1704928,3567547,7456\n"
+            + "1,nox2,Business2,2032678,1704928,3567547,0\n"
+            + "2,nox3,Business3,2032678,1704928,3567547,invalid");
+
+        Assert.Equal(3, instances.Count);
+        Assert.Equal("nox", instances[0].Identity);
+        Assert.Equal("Business", instances[0].ControlName);
+        Assert.Equal(0, instances[0].NumericIndex);
+        Assert.Equal(7456, instances[0].ProcessId);
+        Assert.Null(instances[1].ProcessId);
+        Assert.Null(instances[2].ProcessId);
+    }
+
+    [Fact]
+    public void NoxTargetMatchingKeepsVmIdentityAndRequiresExactProcessId()
+    {
+        NoxInstance nameFirst = Assert.Single(EmulatorVendorSupport.ParseNoxConsoleList(
+            "nox,NoxPlayer,2032678,1704928,3567547,7456"));
+        NoxInstance numeric = Assert.Single(EmulatorVendorSupport.ParseNoxConsoleList(
+            "0,Android7,started"));
+
+        Assert.True(EmulatorVendorSupport.IsNoxInstanceMatch(nameFirst, "nox", null, "NoxPlayer"));
+        Assert.False(EmulatorVendorSupport.IsNoxInstanceMatch(nameFirst, "NoxPlayer", null, "NoxPlayer"));
+        Assert.True(EmulatorVendorSupport.IsNoxInstanceMatch(numeric, "Android7", 0, null));
+        Assert.True(EmulatorVendorSupport.HasExactProcessId(7456, nameFirst.ProcessId));
+        Assert.False(EmulatorVendorSupport.HasExactProcessId(9000, nameFirst.ProcessId));
     }
 
     [Fact]
     public void NoxIdentityMatchingUsesPathComponentsInsteadOfAmbiguousSubstrings()
     {
         Assert.True(EmulatorVendorSupport.IsInstanceIdentityMatch(
-            "C:\\Nox\\BignoxVMS\\NoxPlayer\\NoxPlayer.vbox",
-            "nox",
-            "NoxPlayer"));
+            "C:\\Nox\\BignoxVMS\\nox\\nox.vbox",
+            "nox"));
         Assert.False(EmulatorVendorSupport.IsInstanceIdentityMatch(
             "C:\\Nox\\BignoxVMS\\NoxPlayer2\\NoxPlayer2.vbox",
-            "nox",
             "NoxPlayer"));
     }
 
@@ -121,7 +165,8 @@ public class EmulatorSupportTests
         Assert.Equal("0", target.VendorInstanceId);
         Assert.Equal(1200, target.VendorProcessId);
         Assert.Equal("adb.exe", target.VendorAdbExecutable);
-        Assert.False(target.VendorInstanceUsesName);
+        Assert.Null(target.VendorControlName);
+        Assert.Null(target.VendorInstanceIndex);
     }
 
     [Theory]

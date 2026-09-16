@@ -40,7 +40,11 @@ internal sealed record EmulatorVendorPaths(
 
 internal sealed record LdPlayerInstance(string Index, string Name, int? ProcessId);
 
-internal sealed record NoxInstance(string Index, string Name, int? ProcessId, bool UsesNameSelector = false);
+internal sealed record NoxInstance(
+    string Identity,
+    string? ControlName,
+    int? NumericIndex,
+    int? ProcessId);
 
 internal sealed record BlueStacksInstance(string Id, int AdbPort);
 
@@ -127,9 +131,14 @@ internal static class EmulatorVendorSupport
             Match labeled = NoxLabeledListLinePattern.Match(line);
             if (labeled.Success)
             {
+                if (!int.TryParse(labeled.Groups["index"].Value, out int labeledIndex) || labeledIndex < 0)
+                {
+                    continue;
+                }
                 instances.Add(new NoxInstance(
-                    labeled.Groups["index"].Value.Trim(),
                     labeled.Groups["name"].Value.Trim(),
+                    null,
+                    labeledIndex,
                     ParseProcessId(line)));
                 continue;
             }
@@ -137,31 +146,50 @@ internal static class EmulatorVendorSupport
             string[] fields = line.Split(new[] { ',', '\t', '|', ':' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
             if (fields.Length >= 2)
             {
-                string selector = fields[0];
-                string name = fields[1];
-                if (int.TryParse(selector, out int numericIndex) && numericIndex >= 0)
+                string first = fields[0];
+                string second = fields[1];
+                if (int.TryParse(first, out int numericIndex))
                 {
-                    instances.Add(new NoxInstance(selector, name, ParseProcessId(line)));
+                    if (numericIndex < 0 || IsNoxHeader(second))
+                    {
+                        continue;
+                    }
+                    instances.Add(new NoxInstance(
+                        second,
+                        fields.Length >= 6 && !IsNoxHeader(fields[2]) ? fields[2] : null,
+                        numericIndex,
+                        ParseNoxProcessId(line, fields)));
                     continue;
                 }
-                if (IsNoxNameSelector(selector) && !IsNoxHeader(name))
+                if (first.All(char.IsDigit))
                 {
-                    instances.Add(new NoxInstance(selector, name, ParseProcessId(line), UsesNameSelector: true));
+                    continue;
+                }
+                if (IsNoxNameSelector(first) && !IsNoxHeader(second))
+                {
+                    instances.Add(new NoxInstance(
+                        first,
+                        second,
+                        null,
+                        ParseNoxProcessId(line, fields)));
                     continue;
                 }
             }
 
             Match whitespace = NoxWhitespaceListLinePattern.Match(line);
             if (!whitespace.Success) continue;
-            string first = whitespace.Groups["first"].Value.Trim();
-            string second = whitespace.Groups["second"].Value.Trim();
-            if (int.TryParse(first, out int whitespaceIndex) && whitespaceIndex >= 0)
+            string whitespaceFirst = whitespace.Groups["first"].Value.Trim();
+            string whitespaceSecond = whitespace.Groups["second"].Value.Trim();
+            if (int.TryParse(whitespaceFirst, out int whitespaceIndex))
             {
-                instances.Add(new NoxInstance(first, second, ParseProcessId(line)));
+                if (whitespaceIndex < 0 || IsNoxHeader(whitespaceSecond)) continue;
+                instances.Add(new NoxInstance(whitespaceSecond, null, whitespaceIndex, ParseProcessId(line)));
             }
-            else if (IsNoxNameSelector(first) && !IsNoxHeader(second))
+            else if (!whitespaceFirst.All(char.IsDigit)
+                && IsNoxNameSelector(whitespaceFirst)
+                && !IsNoxHeader(whitespaceSecond))
             {
-                instances.Add(new NoxInstance(first, second, ParseProcessId(line), UsesNameSelector: true));
+                instances.Add(new NoxInstance(whitespaceFirst, whitespaceSecond, null, ParseProcessId(line)));
             }
         }
         return instances;
@@ -302,14 +330,38 @@ internal static class EmulatorVendorSupport
         }
     }
 
-    internal static bool IsInstanceIdentityMatch(string path, string index, string name)
+    internal static bool IsInstanceIdentityMatch(string path, string identity)
     {
         string[] segments = path
             .Replace('\\', '/')
             .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         int configRoot = Array.FindIndex(segments, segment => segment.Equals("BignoxVMS", StringComparison.OrdinalIgnoreCase));
         IReadOnlyList<string> identitySegments = configRoot >= 0 ? segments[(configRoot + 1)..] : segments;
-        return PathHasIdentity(identitySegments, index) || PathHasIdentity(identitySegments, name);
+        return PathHasIdentity(identitySegments, identity);
+    }
+
+    internal static bool IsNoxInstanceMatch(
+        NoxInstance instance,
+        string identity,
+        int? numericIndex,
+        string? controlName)
+    {
+        if (!string.Equals(instance.Identity, identity, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (numericIndex is int expectedIndex)
+        {
+            return instance.NumericIndex == expectedIndex;
+        }
+        return instance.NumericIndex is null
+            && !string.IsNullOrWhiteSpace(controlName)
+            && string.Equals(instance.ControlName, controlName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool HasExactProcessId(int? expected, int? observed)
+    {
+        return expected is int expectedPid && expectedPid > 0 && observed == expectedPid;
     }
 
     internal static async Task<bool> ConfirmAdbEndpointAsync(
@@ -384,7 +436,7 @@ internal static class EmulatorVendorSupport
         }
     }
 
-    private static bool PathHasIdentity(IReadOnlyList<string> segments, string identity)
+    private static bool PathHasIdentity(IReadOnlyList<string> segments, string? identity)
     {
         if (string.IsNullOrWhiteSpace(identity)) return false;
         foreach (string segment in segments)
@@ -421,6 +473,13 @@ internal static class EmulatorVendorSupport
     {
         Match match = ProcessIdPattern.Match(line);
         return match.Success && int.TryParse(match.Groups[1].Value, out int pid) && pid > 0 ? pid : null;
+    }
+
+    private static int? ParseNoxProcessId(string line, IReadOnlyList<string> fields)
+    {
+        return fields.Count >= 6
+            ? ParsePositiveProcessId(fields[^1])
+            : ParseProcessId(line);
     }
 
     private static string? ResolveTestHook(EmulatorVendor vendor)
@@ -725,8 +784,15 @@ internal static class EmulatorVendorDetector
             if (!ports.Contains(port)) continue;
             sawEndpoint = true;
             NoxInstance[] identityMatches = instances
-                .Where(instance => EmulatorVendorSupport.IsInstanceIdentityMatch(file, instance.Index, instance.Name))
+                .Where(instance => EmulatorVendorSupport.IsInstanceIdentityMatch(file, instance.Identity))
                 .ToArray();
+            if (identityMatches.Length == 0)
+            {
+                identityMatches = instances
+                    .Where(instance => instance.ControlName is not null
+                        && EmulatorVendorSupport.IsInstanceIdentityMatch(file, instance.ControlName))
+                    .ToArray();
+            }
             if (identityMatches.Length == 1) matches.Add((identityMatches[0], file));
             else if (identityMatches.Length > 1) return VendorProbeResult.ErrorResult("Nox 配置文件无法唯一对应实例身份");
         }
@@ -748,11 +814,12 @@ internal static class EmulatorVendorDetector
             EmulatorKind.Nox,
             endpoint,
             VendorControlPath: paths.ControlPath,
-            VendorInstanceId: instance.Index,
+            VendorInstanceId: instance.Identity,
             VendorAdbExecutable: paths.AdbPath,
             VendorProcessId: instance.ProcessId,
             VendorInstallRoot: paths.InstallRoot,
-            VendorInstanceUsesName: instance.UsesNameSelector));
+            VendorControlName: instance.ControlName,
+            VendorInstanceIndex: instance.NumericIndex));
     }
 
     private static async Task<VendorProbeResult> ProbeBlueStacksAsync(
@@ -967,7 +1034,10 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
 
     public NoxEmulatorDriver(EmulatorTarget target) : base(target)
     {
-        if (target.Kind != EmulatorKind.Nox || string.IsNullOrWhiteSpace(target.VendorControlPath) || string.IsNullOrWhiteSpace(target.VendorInstanceId))
+        if (target.Kind != EmulatorKind.Nox
+            || string.IsNullOrWhiteSpace(target.VendorControlPath)
+            || string.IsNullOrWhiteSpace(target.VendorInstanceId)
+            || (target.VendorInstanceIndex is null && string.IsNullOrWhiteSpace(target.VendorControlName)))
         {
             throw new ArgumentException("Nox driver 需要绑定完整 vendor target。", nameof(target));
         }
@@ -1026,10 +1096,14 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
             token).ConfigureAwait(false);
         if (!ok) return false;
         NoxInstance[] matches = EmulatorVendorSupport.ParseNoxConsoleList(output)
-            .Where(item => item.UsesNameSelector == Target.VendorInstanceUsesName
-                && string.Equals(item.Index, Target.VendorInstanceId, StringComparison.OrdinalIgnoreCase))
+            .Where(item => EmulatorVendorSupport.IsNoxInstanceMatch(
+                item,
+                Target.VendorInstanceId!,
+                Target.VendorInstanceIndex,
+                Target.VendorControlName))
             .ToArray();
-        if (matches.Length != 1 || Target.VendorProcessId is not int expectedPid || matches[0].ProcessId != expectedPid)
+        if (matches.Length != 1
+            || !EmulatorVendorSupport.HasExactProcessId(Target.VendorProcessId, matches[0].ProcessId))
         {
             return false;
         }
@@ -1038,9 +1112,15 @@ internal sealed class NoxEmulatorDriver : VendorAdbEmulatorDriverBase
 
     private string NoxSelectorArgument()
     {
-        return Target.VendorInstanceUsesName
-            ? $"-name:{Target.VendorInstanceId}"
-            : $"-index:{Target.VendorInstanceId}";
+        if (Target.VendorInstanceIndex is int numericIndex)
+        {
+            return $"-index:{numericIndex}";
+        }
+        if (!string.IsNullOrWhiteSpace(Target.VendorControlName))
+        {
+            return $"-name:{Target.VendorControlName}";
+        }
+        throw new InvalidOperationException("Nox target 缺少可用的实例选择器。");
     }
 }
 

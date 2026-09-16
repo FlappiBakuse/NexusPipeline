@@ -26,7 +26,8 @@ internal sealed record EmulatorTarget(
     string? VendorAdbExecutable = null,
     int? VendorProcessId = null,
     string? VendorInstallRoot = null,
-    bool VendorInstanceUsesName = false);
+    string? VendorControlName = null,
+    int? VendorInstanceIndex = null);
 
 internal sealed record EmulatorCommandResult(bool Ok, string Output)
 {
