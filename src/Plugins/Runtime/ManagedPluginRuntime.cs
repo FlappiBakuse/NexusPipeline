@@ -23,6 +23,7 @@ internal sealed class ManagedPluginRuntime
     private readonly PluginUiContributionRegistry _ui;
     private readonly PluginWebApiRegistry _webApi;
     private readonly PluginHistoryContributionRegistry _history;
+    private readonly PluginEmulatorSupportRegistry _emulatorSupport;
     private readonly Action<Exception> _reportJobError;
     private PluginLoadContext? _loadContext;
     private INexusPlugin? _plugin;
@@ -40,6 +41,7 @@ internal sealed class ManagedPluginRuntime
         PluginUiContributionRegistry ui,
         PluginWebApiRegistry webApi,
         PluginHistoryContributionRegistry history,
+        PluginEmulatorSupportRegistry emulatorSupport,
         Action<Exception> reportJobError)
     {
         _descriptor = descriptor;
@@ -51,6 +53,7 @@ internal sealed class ManagedPluginRuntime
         _ui = ui;
         _webApi = webApi;
         _history = history;
+        _emulatorSupport = emulatorSupport;
         _reportJobError = reportJobError;
     }
 
@@ -91,6 +94,7 @@ internal sealed class ManagedPluginRuntime
                 _ui,
                 _webApi,
                 _history,
+                _emulatorSupport,
                 _descriptor.Manifest.Localization);
             AwaitLifecycle(
                 token => plugin.InitializeAsync(_hostContext, token),

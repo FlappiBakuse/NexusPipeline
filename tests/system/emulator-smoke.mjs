@@ -9,12 +9,8 @@ import {
   deleteScript,
   isAdminMode,
   isAdministrator,
-  blueStacksConfig,
-  blueStacksStub,
-  ldStub,
   makeFixture,
   mumuStub,
-  noxStub,
   prepareRuntime,
   startRuntime,
   stopRuntime,
@@ -34,11 +30,46 @@ const skip = enabled ? false : skipReason;
 const defaultEmulatorEnv = {
   NEXUS_ADB_EXE: adbStub,
   NEXUS_MUMU_MANAGER_EXE: mumuStub,
-  NEXUS_LD_CONSOLE_EXE: ldStub,
-  NEXUS_NOX_CONSOLE_EXE: noxStub,
-  NEXUS_BLUESTACKS_PLAYER_EXE: blueStacksStub,
-  NEXUS_BLUESTACKS_CONF: blueStacksConfig,
+  NEXUS_TEST_EMULATOR_PLUGIN: "",
 };
+
+const fixturePluginName = "fixture-emulator";
+const fixturePluginArtifact = "FixtureEmulator";
+const fixturePluginEndpoint = "127.0.0.1:16555";
+const fixturePluginEvents = path.join(runtimeDir, "emulator-plugin-events.log");
+
+function installEmulatorPluginFixture() {
+  const sourceDirectory = process.env.NEXUS_SYSTEM_EMULATOR_PLUGIN_DIR;
+  assert.ok(sourceDirectory && fs.existsSync(sourceDirectory), "managed emulator fixture plugin must be built by tests/run.mjs");
+  const pluginDirectory = path.join(runtimeDir, "plugins", fixturePluginArtifact);
+  fs.mkdirSync(pluginDirectory, { recursive: true });
+  fs.cpSync(sourceDirectory, pluginDirectory, { recursive: true });
+  fs.writeFileSync(path.join(pluginDirectory, "plugin.json"), JSON.stringify({
+    schemaVersion: 2,
+    name: fixturePluginName,
+    artifactName: fixturePluginArtifact,
+    displayName: "Fixture Emulator",
+    description: "System Smoke emulator provider",
+    version: "0.1.0",
+    kind: "managed-code",
+    minHostVersion: "0.16.5",
+    apiVersion: "1.7",
+    entryAssembly: "NexusPipeline.TestPlugin.dll",
+    entryType: "NexusPipeline.TestPlugin.TestPlugin",
+    capabilities: ["background-jobs"],
+  }, null, 2), "utf8");
+}
+
+function enableEmulatorPluginFixture() {
+  const settingsPath = path.join(runtimeDir, "config", "settings.json");
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  const settings = fs.existsSync(settingsPath)
+    ? JSON.parse(fs.readFileSync(settingsPath, "utf8"))
+    : {};
+  settings.PluginPreferences ??= {};
+  settings.PluginPreferences[fixturePluginName] = { Enabled: true };
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+}
 
 before(async () => {
   if (!enabled) return;
@@ -46,6 +77,7 @@ before(async () => {
     assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
   }
   prepareRuntime();
+  installEmulatorPluginFixture();
   startRuntime([], defaultEmulatorEnv);
   await waitForService();
 });
@@ -111,96 +143,18 @@ test("MuMu driver 使用 manager stub command sequence", { skip }, async () => {
   assert.match(calls, /"dumpsys"/);
 });
 
-test("LDPlayer driver 使用 index 命令和候选端点映射", { skip }, async () => {
-  fs.rmSync(path.join(runtimeDir, "ld-stub", "ld-calls.log"), { force: true });
-  await runEmulator("127.0.0.1:5554", "ldplayer-emu");
-  const calls = fs.readFileSync(path.join(runtimeDir, "ld-stub", "ld-calls.log"), "utf8");
-  assert.match(calls, /list2/);
-  assert.match(calls, /launch.*--index.*0/);
-  assert.match(calls, /quit.*--index.*0/);
-  assert.doesNotMatch(calls, /runapp/);
+test("未安装模拟器支持扩展时 Generic ADB 仍可运行", { skip }, async () => {
+  fs.rmSync(path.join(runtimeDir, "adb-stub", "calls.log"), { force: true });
+  await restartRuntime();
+  await runEmulator("127.0.0.1:5554", "generic-without-emulator-extension");
+  const calls = fs.readFileSync(path.join(runtimeDir, "adb-stub", "calls.log"), "utf8");
+  assert.match(calls, /connect 127\.0\.0\.1:5554/);
+  assert.match(calls, /start/);
 });
 
-test("Nox driver 使用实例索引和 vbox ADB 端口映射", { skip }, async () => {
-  fs.rmSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), { force: true });
-  await runEmulator("127.0.0.1:62023", "nox-emu");
-  const calls = fs.readFileSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), "utf8");
-  assert.match(calls, /list/);
-  assert.match(calls, /launch.*-index:0/);
-  assert.match(calls, /quit.*-index:0/);
-});
-
-test("Nox driver 使用 VM 身份匹配并以 title 选择 name 命令", { skip }, async () => {
-  const flag = path.join(runtimeDir, "nox-stub", "name-first.flag");
-  fs.writeFileSync(flag, "name-first\n", "utf8");
-  fs.rmSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), { force: true });
-  try {
-    await runEmulator("127.0.0.1:62023", "nox-name-emu");
-    const calls = fs.readFileSync(path.join(runtimeDir, "nox-stub", "nox-calls.log"), "utf8");
-    assert.match(calls, /launch.*-name:NoxPlayer/);
-    assert.match(calls, /quit.*-name:NoxPlayer/);
-    assert.doesNotMatch(calls, /-name:nox/);
-    assert.doesNotMatch(calls, /-index:0/);
-  } finally {
-    fs.rmSync(flag, { force: true });
-  }
-});
-
-test("BlueStacks driver 使用实例身份和 bundled ADB", { skip }, async () => {
-  fs.rmSync(path.join(runtimeDir, "bluestacks-stub", "bluestacks-calls.log"), { force: true });
-  await runEmulator("127.0.0.1:5557", "bluestacks-emu");
-  const calls = fs.readFileSync(path.join(runtimeDir, "bluestacks-stub", "bluestacks-calls.log"), "utf8");
-  assert.match(calls, /--instance.*Pie64/);
-});
-
-test("厂商探测在 MuMu 缺失时继续识别 LDPlayer、Nox、BlueStacks 或 Generic", { skip }, async () => {
-  const only = (key, value) => ({
-    NEXUS_MUMU_MANAGER_EXE: "",
-    NEXUS_LD_CONSOLE_EXE: "",
-    NEXUS_NOX_CONSOLE_EXE: "",
-    NEXUS_BLUESTACKS_PLAYER_EXE: "",
-    NEXUS_BLUESTACKS_CONF: "",
-    ...(key ? { [key]: value } : {}),
-  });
-  try {
-    await restartRuntime(only("NEXUS_LD_CONSOLE_EXE", ldStub));
-    await runEmulator("127.0.0.1:5554", "ldplayer-without-mumu");
-
-    await restartRuntime(only("NEXUS_NOX_CONSOLE_EXE", noxStub));
-    await runEmulator("127.0.0.1:62023", "nox-without-mumu");
-
-    await restartRuntime({
-      ...only("NEXUS_BLUESTACKS_PLAYER_EXE", blueStacksStub),
-      NEXUS_BLUESTACKS_CONF: blueStacksConfig,
-    });
-    await runEmulator("127.0.0.1:5557", "bluestacks-without-mumu");
-
-    await restartRuntime({
-      ...only("NEXUS_BLUESTACKS_PLAYER_EXE", blueStacksStub),
-      NEXUS_BLUESTACKS_CONF: blueStacksConfig,
-    });
-    fs.writeFileSync(
-      blueStacksConfig,
-      "bst.instance.Pie64.status.adb_port=\"5557\"\n"
-      + "bst.instance.Nougat32.status.adb_port=\"5557\"\n",
-      "utf8",
-    );
-    await runEmulator("127.0.0.1:5557", "bluestacks-ambiguous", "failed");
-
-    await restartRuntime(only(null, null));
-    await runEmulator("127.0.0.1:16384", "generic-without-vendor");
-  } finally {
-    await restartRuntime();
-  }
-});
-
-test("MuMuManager info 失败返回检测错误，成功但端点不匹配时继续厂商探测", { skip }, async () => {
+test("MuMuManager info 失败返回检测错误，成功但端点不匹配时继续 Generic ADB", { skip }, async () => {
   const onlyMumu = {
     NEXUS_MUMU_MANAGER_EXE: mumuStub,
-    NEXUS_LD_CONSOLE_EXE: "",
-    NEXUS_NOX_CONSOLE_EXE: "",
-    NEXUS_BLUESTACKS_PLAYER_EXE: "",
-    NEXUS_BLUESTACKS_CONF: "",
   };
   const failureFlag = path.join(runtimeDir, "mumu-stub", "info-fail.flag");
   try {
@@ -211,14 +165,29 @@ test("MuMuManager info 失败返回检测错误，成功但端点不匹配时继
 
     await restartRuntime({
       NEXUS_MUMU_MANAGER_EXE: mumuStub,
-      NEXUS_LD_CONSOLE_EXE: ldStub,
-      NEXUS_NOX_CONSOLE_EXE: "",
-      NEXUS_BLUESTACKS_PLAYER_EXE: "",
-      NEXUS_BLUESTACKS_CONF: "",
     });
-    await runEmulator("127.0.0.1:5554", "mumu-nonmatch-ldplayer");
+    await runEmulator("127.0.0.1:16384", "mumu-nonmatch-generic");
   } finally {
     fs.rmSync(failureFlag, { force: true });
     await restartRuntime();
   }
+});
+
+test("managed emulator provider 经插件 API 参与执行、截图与实例清理", { skip }, async () => {
+  enableEmulatorPluginFixture();
+  fs.rmSync(fixturePluginEvents, { force: true });
+  await restartRuntime({
+    NEXUS_TEST_EMULATOR_PLUGIN: "1",
+    NEXUS_TEST_EMULATOR_ENDPOINT: fixturePluginEndpoint,
+    NEXUS_TEST_EMULATOR_EVENTS: fixturePluginEvents,
+  });
+
+  await runEmulator(fixturePluginEndpoint, "managed-emulator-extension");
+
+  const events = fs.readFileSync(fixturePluginEvents, "utf8");
+  assert.match(events, /ready/);
+  assert.match(events, /start -n com\.example\.game\/\.MainActivity/);
+  assert.match(events, /foreground/);
+  assert.match(events, /capture/);
+  assert.match(events, /shutdown/);
 });

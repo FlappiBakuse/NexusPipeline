@@ -75,7 +75,7 @@ internal enum PluginRuntimeState
     Shutdown,
 }
 
-internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher
+internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher, IEmulatorSupportProviderResolver
 {
     private const int PluginApiMajor = PluginApiVersion.Major;
     private const int PluginApiMinor = PluginApiVersion.Minor;
@@ -101,6 +101,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly PluginUiContributionRegistry _uiContributions = new();
     private readonly PluginWebApiRegistry _webApi = new();
     private readonly PluginHistoryContributionRegistry _historyContributions = new();
+    private readonly PluginEmulatorSupportRegistry _emulatorSupport = new();
     private readonly PluginManagementSnapshotCache _managementSnapshotCache = new();
 
     internal PluginManager(
@@ -168,6 +169,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     {
         return _capabilities.GetAll<T>(IsRuntimeEnabled);
     }
+
+    public IReadOnlyList<EmulatorSupportProviderDescriptor> GetEmulatorSupportProviders() =>
+        _emulatorSupport.Snapshot(IsRuntimeEnabled);
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；代码插件只有声明能力，不直接暴露宿主领域模型。</summary>
     public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null)
@@ -408,6 +412,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _uiContributions.Clear();
         _webApi.Clear();
         _historyContributions.Clear();
+        _emulatorSupport.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
         _managedRuntimes.Clear();
@@ -504,6 +509,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _uiContributions.Clear();
         _webApi.Clear();
         _historyContributions.Clear();
+        _emulatorSupport.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -553,6 +559,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 _uiContributions,
                 _webApi,
                 _historyContributions,
+                _emulatorSupport,
                 ex =>
                 {
                     _runtimeErrors[name] = ex.Message;

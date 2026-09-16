@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_6
+internal sealed class PluginHostContext : IPluginHostContextV1_7
 {
     public PluginHostContext(
         string pluginName,
@@ -23,6 +23,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_6
         PluginUiContributionRegistry ui,
         PluginWebApiRegistry webApi,
         PluginHistoryContributionRegistry history,
+        PluginEmulatorSupportRegistry emulatorSupport,
         PluginLocalizationManifest localization)
     {
         PluginName = pluginName;
@@ -41,6 +42,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_6
         Assets = new PluginAssetStore(pluginName);
         _webApi = new PluginWebApiAdapter(webApi, pluginName);
         _history = new PluginHistoryContributionAdapter(history, pluginName, pluginDisplayName);
+        _emulatorSupport = new PluginEmulatorSupportAdapter(emulatorSupport, pluginName);
         I18n = new PluginLocalizationService(localization);
     }
 
@@ -78,6 +80,8 @@ internal sealed class PluginHostContext : IPluginHostContextV1_6
 
     public IPluginAssetStore Assets { get; }
 
+    public IPluginEmulatorSupportRegistry EmulatorSupport => _emulatorSupport;
+
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
 
     private readonly PluginUserListBadgeAdapter _userListBadges;
@@ -89,6 +93,8 @@ internal sealed class PluginHostContext : IPluginHostContextV1_6
 
     private readonly PluginHistoryContributionAdapter _history;
 
+    private readonly PluginEmulatorSupportAdapter _emulatorSupport;
+
     public void Dispose()
     {
         _executionEvents.Dispose();
@@ -97,9 +103,66 @@ internal sealed class PluginHostContext : IPluginHostContextV1_6
         _ui.Dispose();
         _webApi.Dispose();
         _history.Dispose();
+        _emulatorSupport.Dispose();
         ((PluginJobScheduler)Scheduler).Dispose();
     }
 
+}
+
+internal sealed class PluginEmulatorSupportAdapter : IPluginEmulatorSupportRegistry, IDisposable
+{
+    private readonly PluginEmulatorSupportRegistry _registry;
+    private readonly string _pluginName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+    private bool _disposed;
+
+    public PluginEmulatorSupportAdapter(PluginEmulatorSupportRegistry registry, string pluginName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+    }
+
+    public IDisposable Register(IPluginEmulatorSupportProvider provider)
+    {
+        IDisposable registration = _registry.Register(_pluginName, provider);
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                registration.Dispose();
+                throw new ObjectDisposedException(nameof(PluginEmulatorSupportAdapter));
+            }
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync)
+            {
+                _registrations.Remove(registration);
+            }
+        });
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _disposed = true;
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations)
+        {
+            registration.Dispose();
+        }
+    }
 }
 
 internal sealed class PluginUserListBadgeAdapter : IPluginUserListBadgeRegistry, IDisposable

@@ -50,10 +50,6 @@ const webPortPath = path.join(runtimeDir, ".nxp", "runtime", "web.port");
 export const baseUrl = `http://127.0.0.1:${systemWebPort}/`;
 export const adbStub = path.join(runtimeDir, "adb-stub", "adb-stub.cmd");
 export const mumuStub = path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd");
-export const ldStub = path.join(runtimeDir, "ld-stub", "ldconsole-stub.cmd");
-export const noxStub = path.join(runtimeDir, "nox-stub", "noxconsole-stub.cmd");
-export const blueStacksStub = path.join(runtimeDir, "bluestacks-stub", "bluestacks-player-stub.cmd");
-export const blueStacksConfig = path.join(runtimeDir, "bluestacks-stub", "bluestacks.conf");
 
 let child = null;
 const scriptUserIds = new Map();
@@ -120,10 +116,6 @@ export function startRuntime(args = [], extraEnv = {}) {
     NEXUS_SYSTEM_ACTION_DRYRUN: "1",
     NEXUS_ADB_EXE: adbStub,
     NEXUS_MUMU_MANAGER_EXE: mumuStub,
-    NEXUS_LD_CONSOLE_EXE: ldStub,
-    NEXUS_NOX_CONSOLE_EXE: noxStub,
-    NEXUS_BLUESTACKS_PLAYER_EXE: blueStacksStub,
-    NEXUS_BLUESTACKS_CONF: blueStacksConfig,
     NO_PROXY: localNoProxy,
     no_proxy: localNoProxy,
     HTTP_PROXY: "",

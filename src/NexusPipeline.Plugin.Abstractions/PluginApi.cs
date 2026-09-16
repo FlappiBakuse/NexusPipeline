@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.6）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.7）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 6;
+    public const int Minor = 7;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -142,6 +142,92 @@ public interface IPluginHostContextV1_4 : IPluginHostContextV1_3
 public interface IPluginHostContextV1_6 : IPluginHostContextV1_4
 {
     IPluginAssetStore Assets { get; }
+}
+
+/// <summary>Plugin API v1.7 的模拟器支持扩展注册端口。</summary>
+public interface IPluginHostContextV1_7 : IPluginHostContextV1_6
+{
+    IPluginEmulatorSupportRegistry EmulatorSupport { get; }
+}
+
+/// <summary>由 managed-code 插件提供的模拟器识别器。宿主按优先级和插件身份稳定调用。</summary>
+public interface IPluginEmulatorSupportProvider
+{
+    string Id { get; }
+
+    int Priority { get; }
+
+    ValueTask<PluginEmulatorProbeResult> ProbeAsync(
+        string adbEndpoint,
+        CancellationToken cancellationToken,
+        int timeoutSeconds);
+}
+
+/// <summary>插件模拟器支持注册表。注册会在插件停止或初始化失败时撤销。</summary>
+public interface IPluginEmulatorSupportRegistry
+{
+    IDisposable Register(IPluginEmulatorSupportProvider provider);
+}
+
+public enum PluginEmulatorProbeState
+{
+    NotApplicable,
+    Matched,
+    Error,
+}
+
+/// <summary>模拟器探测结果；Error 会阻止宿主回退到 Generic ADB。</summary>
+public sealed record PluginEmulatorProbeResult(
+    PluginEmulatorProbeState State,
+    IPluginEmulatorDriver? Driver = null,
+    string? Error = null)
+{
+    public static PluginEmulatorProbeResult NotApplicable() => new(PluginEmulatorProbeState.NotApplicable);
+
+    public static PluginEmulatorProbeResult Match(IPluginEmulatorDriver driver) =>
+        new(PluginEmulatorProbeState.Matched, driver ?? throw new ArgumentNullException(nameof(driver)));
+
+    public static PluginEmulatorProbeResult Failure(string error) =>
+        new(PluginEmulatorProbeState.Error, Error: string.IsNullOrWhiteSpace(error) ? "模拟器识别失败" : error.Trim());
+}
+
+/// <summary>一次运行冻结的插件模拟器驱动。宿主会在启动、截图、清理和关闭阶段复用同一实例。</summary>
+public interface IPluginEmulatorDriver
+{
+    string DisplayName { get; }
+
+    Task<PluginEmulatorCommandResult> EnsureReadyAsync(CancellationToken cancellationToken, int timeoutSeconds);
+
+    Task<PluginEmulatorCommandResult> StartAppAsync(
+        IReadOnlyList<string> startArgs,
+        CancellationToken cancellationToken,
+        int timeoutSeconds);
+
+    Task<string?> GetForegroundPackageAsync(CancellationToken cancellationToken, int timeoutSeconds);
+
+    Task<PluginEmulatorBinaryResult> CaptureScreenAsync(CancellationToken cancellationToken, int timeoutSeconds);
+
+    Task<PluginEmulatorCommandResult> StopAppAsync(
+        string? packageName,
+        CancellationToken cancellationToken,
+        int timeoutSeconds);
+
+    Task<PluginEmulatorCommandResult> ShutdownAsync(CancellationToken cancellationToken, int timeoutSeconds);
+}
+
+public sealed record PluginEmulatorCommandResult(bool Ok, string Output)
+{
+    public static PluginEmulatorCommandResult Success(string output = "") => new(true, output ?? "");
+
+    public static PluginEmulatorCommandResult Failure(string output) => new(false, output ?? "");
+}
+
+public sealed record PluginEmulatorBinaryResult(bool Ok, byte[] Data, string Error)
+{
+    public static PluginEmulatorBinaryResult Success(byte[] data) => new(true, data ?? Array.Empty<byte>(), "");
+
+    public static PluginEmulatorBinaryResult Failure(string error) =>
+        new(false, Array.Empty<byte>(), error ?? "");
 }
 
 /// <summary>插件二进制资产元数据。Id 为内容 SHA256 的小写十六进制，相同内容重复写入返回同一 Id。</summary>

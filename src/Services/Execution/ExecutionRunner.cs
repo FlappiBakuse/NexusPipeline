@@ -19,6 +19,7 @@ internal sealed class ExecutionRunner
     private readonly INotificationService _notifications;
     private readonly SystemActionExecutor _systemActions;
     private readonly IPluginAvailability _pluginAvailability;
+    private readonly IEmulatorSupportProviderResolver _emulatorSupportProviders;
     private readonly IUserRunStartingPublisher? _userRunEvents;
     private readonly PluginManager? _plugins;
     private readonly OutboundHttpClientProvider? _http;
@@ -29,6 +30,7 @@ internal sealed class ExecutionRunner
         INotificationService notifications,
         SystemActionExecutor systemActions,
         IPluginAvailability pluginAvailability,
+        IEmulatorSupportProviderResolver emulatorSupportProviders,
         IUserRunStartingPublisher? userRunEvents = null,
         PluginManager? plugins = null,
         OutboundHttpClientProvider? http = null)
@@ -38,6 +40,7 @@ internal sealed class ExecutionRunner
         _notifications = notifications;
         _systemActions = systemActions;
         _pluginAvailability = pluginAvailability ?? throw new ArgumentNullException(nameof(pluginAvailability));
+        _emulatorSupportProviders = emulatorSupportProviders ?? throw new ArgumentNullException(nameof(emulatorSupportProviders));
         _userRunEvents = userRunEvents;
         _plugins = plugins;
         _http = http;
@@ -188,10 +191,11 @@ internal sealed class ExecutionRunner
                         status => exec.CurrentStatus = status,
                         (line, level) => exec.AppendLog(level, line),
                         target => exec.SetPreviewTarget(target),
-                         _users,
-                         runUser,
-                         runUser.Spec ?? resolvedSpec,
-                         _http);
+                        _users,
+                        _emulatorSupportProviders,
+                        runUser,
+                        runUser.Spec ?? resolvedSpec,
+                        _http);
 
                     try
                     {

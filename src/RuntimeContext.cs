@@ -58,6 +58,7 @@ internal class RuntimeContext
         collection.AddSingleton<PluginUserGlobalSettingsService>(provider => new PluginUserGlobalSettingsService(
             provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<IPluginCapabilityResolver>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton<IEmulatorSupportProviderResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<ScriptSpecResolver>();
         collection.AddSingleton<ScriptQueries>();
@@ -80,10 +81,11 @@ internal class RuntimeContext
             provider.GetRequiredService<IHistoryStore>(),
             provider.GetRequiredService<INotificationService>(),
             provider.GetRequiredService<SystemActionExecutor>(),
-             provider.GetRequiredService<IPluginAvailability>(),
-             provider.GetRequiredService<IUserRunStartingPublisher>(),
-             provider.GetRequiredService<PluginManager>(),
-             provider.GetRequiredService<OutboundHttpClientProvider>()));
+            provider.GetRequiredService<IPluginAvailability>(),
+            provider.GetRequiredService<IEmulatorSupportProviderResolver>(),
+            provider.GetRequiredService<IUserRunStartingPublisher>(),
+            provider.GetRequiredService<PluginManager>(),
+            provider.GetRequiredService<OutboundHttpClientProvider>()));
         collection.AddSingleton<DispatchCenter>();
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());
         collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<DispatchCenter>());

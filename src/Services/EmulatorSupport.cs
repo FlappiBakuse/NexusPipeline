@@ -193,11 +193,6 @@ internal static class EmulatorSupport
                 @"MuMu\nx_main\adb.exe",
                 @"MuMuPlayer-12.0\shell\adb.exe",
                 @"MuMuPlayer-6.0\vmonitor\bin\adb_server.exe",
-                @"LDPlayer\LDPlayer9\adb.exe",
-                @"LDPlayer9\adb.exe",
-                @"Nox\bin\nox_adb.exe",
-                @"BlueStacks_nxt\HD-Adb.exe",
-                @"BlueStacks\HD-Adb.exe",
             };
             foreach (string root in roots)
             {

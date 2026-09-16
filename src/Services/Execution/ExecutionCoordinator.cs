@@ -26,6 +26,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly OutboundHttpClientProvider? _http;
 
+    private readonly IEmulatorSupportProviderResolver _emulatorSupportProviders;
+
     private int? _gameProcessId;
 
     private ExecutionPreviewTarget? _currentPreviewTarget;
@@ -50,6 +52,7 @@ internal sealed class ExecutionCoordinator : RunSession
         Action<string, LogLevel>? logLine,
          Action<ExecutionPreviewTarget>? previewTargetChanged,
          IUserRepository users,
+         IEmulatorSupportProviderResolver emulatorSupportProviders,
          ResolvedScriptUser? resolvedUser = null,
          ResolvedScriptSpec? resolvedSpec = null,
          OutboundHttpClientProvider? http = null)
@@ -58,6 +61,7 @@ internal sealed class ExecutionCoordinator : RunSession
         _users = users;
         _resolvedSpec = resolvedSpec;
         _http = http;
+        _emulatorSupportProviders = emulatorSupportProviders ?? throw new ArgumentNullException(nameof(emulatorSupportProviders));
         _previewTargetChanged = previewTargetChanged;
         _screenshotCapture = new AttemptScreenshotCapture(
             _script,
@@ -408,6 +412,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 SetPcPreviewTarget(processId);
             },
             () => _emulatorDriver,
+            _emulatorSupportProviders,
             driver => _emulatorDriver = driver,
             SetEmulatorPreviewTarget,
             _statusChanged);

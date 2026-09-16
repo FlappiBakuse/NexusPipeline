@@ -157,6 +157,19 @@ internal interface IPluginCapabilityResolver
         IReadOnlyDictionary<string, string>? inputs) => null;
 }
 
+/// <summary>模拟器支持插件的运行时投影；注册令牌及注册生命周期由 Plugins 子系统持有。</summary>
+internal sealed record EmulatorSupportProviderDescriptor(
+    string PluginName,
+    string ProviderId,
+    int Priority,
+    IPluginEmulatorSupportProvider Provider);
+
+/// <summary>执行流程读取已启用的模拟器扩展，不依赖插件注册基础设施。</summary>
+internal interface IEmulatorSupportProviderResolver
+{
+    IReadOnlyList<EmulatorSupportProviderDescriptor> GetEmulatorSupportProviders();
+}
+
 /// <summary>专项脚本实例的插件可用性端口；运行与配置流程只依赖动态状态，不直接依赖 PluginManager。</summary>
 internal interface IPluginAvailability
 {

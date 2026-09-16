@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using NexusPipeline.App.Abstractions;
 using NexusPipeline.Models;
 using NexusPipeline.Utilities;
 
@@ -15,6 +16,7 @@ internal sealed class GameLaunchController
     private readonly Func<int?> _findGameProcessId;
     private readonly Action<int?> _setPcProcessId;
     private readonly Func<IEmulatorDriver?> _getEmulatorDriver;
+    private readonly IEmulatorSupportProviderResolver _emulatorSupportProviders;
     private readonly Action<IEmulatorDriver> _setEmulatorDriver;
     private readonly Action<IEmulatorDriver?, bool> _setEmulatorPreviewTarget;
     private readonly Action<string>? _statusChanged;
@@ -28,6 +30,7 @@ internal sealed class GameLaunchController
         Func<int?> findGameProcessId,
         Action<int?> setPcProcessId,
         Func<IEmulatorDriver?> getEmulatorDriver,
+        IEmulatorSupportProviderResolver emulatorSupportProviders,
         Action<IEmulatorDriver> setEmulatorDriver,
         Action<IEmulatorDriver?, bool> setEmulatorPreviewTarget,
         Action<string>? statusChanged)
@@ -40,6 +43,7 @@ internal sealed class GameLaunchController
         _findGameProcessId = findGameProcessId;
         _setPcProcessId = setPcProcessId;
         _getEmulatorDriver = getEmulatorDriver;
+        _emulatorSupportProviders = emulatorSupportProviders;
         _setEmulatorDriver = setEmulatorDriver;
         _setEmulatorPreviewTarget = setEmulatorPreviewTarget;
         _statusChanged = statusChanged;
@@ -177,6 +181,7 @@ internal sealed class GameLaunchController
         {
             EmulatorTarget target = await EmulatorDetector.DetectAsync(
                 _script.GameExe,
+                _emulatorSupportProviders.GetEmulatorSupportProviders(),
                 OperationToken,
                 RemainingCommandSeconds(30)).ConfigureAwait(false);
             if (target.Kind == EmulatorKind.DetectionError)
@@ -186,7 +191,7 @@ internal sealed class GameLaunchController
             driver = EmulatorDriverFactory.Create(target);
             _setEmulatorDriver(driver);
             _setEmulatorPreviewTarget(driver, false);
-            Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」已冻结模拟器驱动：{driver.Kind}（目标 {_script.GameExe}）。");
+            Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」已冻结模拟器驱动：{driver.DisplayName}（目标 {_script.GameExe}）。");
         }
 
         _statusChanged?.Invoke("正在连接模拟器...");

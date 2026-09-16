@@ -8,6 +8,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 const e2eDir = path.join(projectRoot, "tests", "e2e");
 const systemDir = path.join(projectRoot, "tests", "system");
 const testHostDir = path.join(projectRoot, "tests", ".artifacts", "test-host");
+const emulatorFixturePluginDir = path.join(projectRoot, "tests", ".artifacts", "emulator-test-plugin");
 const nodeCommand = process.execPath;
 const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
@@ -238,6 +239,30 @@ function cleanTestHost() {
   }
 }
 
+function cleanEmulatorFixturePlugin() {
+  try {
+    fs.rmSync(emulatorFixturePluginDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
+    console.error(`[System Smoke] 已清理模拟器 fixture 插件产物：${emulatorFixturePluginDir}`);
+  } catch (error) {
+    console.error(`[System Smoke] 清理模拟器 fixture 插件失败：${error.message}`);
+  }
+}
+
+async function buildEmulatorFixturePlugin() {
+  fs.rmSync(emulatorFixturePluginDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
+  fs.mkdirSync(emulatorFixturePluginDir, { recursive: true });
+  console.error(`[System Smoke] 构建可控 managed emulator fixture 插件：${emulatorFixturePluginDir}`);
+  return runProcess("dotnet", [
+    "publish",
+    "tests\\fixtures\\NexusPipeline.TestPlugin\\NexusPipeline.TestPlugin.csproj",
+    "-c", "Release",
+    "-o", emulatorFixturePluginDir,
+    "--nologo",
+    "-m:1",
+    "-nr:false",
+  ]);
+}
+
 async function runAll(mode, args) {
   if (mode === "admin" && !requireAdmin("管理员全部门禁", "admin all")) return 2;
   let code = await runDefault(mode, { permissionChecked: mode === "admin" });
@@ -338,6 +363,14 @@ async function runSystem(mode, args) {
     if (mode === "codex") cleanTestHost();
     return testHostCode;
   }
+  if (suites.some(suite => suite.group === "emulator")) {
+    const emulatorFixtureCode = await buildEmulatorFixturePlugin();
+    if (emulatorFixtureCode !== 0) {
+      cleanEmulatorFixturePlugin();
+      if (mode === "codex") cleanTestHost();
+      return emulatorFixtureCode;
+    }
+  }
   const env = {
     ...modeEnvironment(mode, { system: true }),
     // 系统测试使用独立 Web 端口，避免复用用户正在运行的 NexusPipeline 服务。
@@ -350,6 +383,7 @@ async function runSystem(mode, args) {
       const suiteEnv = {
         ...env,
         NEXUS_SYSTEM_RUNTIME_NAME: runtimeName,
+        ...(group === "emulator" ? { NEXUS_SYSTEM_EMULATOR_PLUGIN_DIR: emulatorFixturePluginDir } : {}),
         ...(mode === "codex"
           ? { NEXUS_TEST_HOST_EXIT_FILE: path.join(systemDir, runtimeName, ".nxp", "test-host.exit") }
           : {}),
@@ -367,6 +401,7 @@ async function runSystem(mode, args) {
     }
     return 0;
   } finally {
+    if (suites.some(suite => suite.group === "emulator")) cleanEmulatorFixturePlugin();
     if (mode === "codex") cleanTestHost();
   }
 }

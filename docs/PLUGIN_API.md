@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.6 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.7 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[前端插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -13,6 +13,9 @@ NexusPipeline-Plugins/plugins/
 │   │   ├── plugin.json
 │   │   ├── src/                  # .csproj 与 C# 源码
 │   │   └── web/                  # 可选 Frontend API 模块与静态资源
+│   ├── EmulatorSupport/           # managed-code 模拟器 provider；name = emulator-support
+│   │   ├── plugin.json
+│   │   └── src/                  # Plugin API v1.7 驱动实现
 │   └── CustomWallpaper/          # managed-code 源码
 └── specialized/
     ├── BetterGI/                 # data-specialized 源码；name = bettergi
@@ -26,11 +29,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.6）
+## managed-code C# 插件（Plugin API v1.7）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.6`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.6` 插件可加载，`2.0` 插件会被拒绝。
+宿主当前 API 版本为 `1.7`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.7` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；只有使用新模拟器 provider 端口的插件需要 `1.7`。
 
 ```text
 plugins/GameCheckIn/
@@ -47,7 +50,7 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.6",
+  "apiVersion": "1.7",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
@@ -61,7 +64,7 @@ plugins/GameCheckIn/
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要 v1.5 本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`；需要 v1.7 模拟器支持端口的插件应检查 `context is IPluginHostContextV1_7`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
@@ -70,6 +73,8 @@ plugins/GameCheckIn/
 - `IPluginUserListBadgeRegistry`（v1.2）：注册按用户返回单个聚合徽章的轻量读取处理器。返回 `null` 表示该用户不显示徽章；处理器应只读取本地插件状态，不执行网络请求。
 
 宿主通用设置接口为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`。插件未启用或贡献不存在返回 `404 contribution_not_found`，贡献处理器异常返回 `500 plugin_error`。
+
+GameCheckIn v0.3 使用插件自有的独立任务、任务级凭据/通知密钥和本机时区计划，不再注册用户全局签到设置或依赖用户运行事件。旧版全局签到配置不会迁移为任务；用户需要在“签到”页面创建任务并重新配置凭据与通知。
 
 用户列表徽章接口为 `GET /api/plugin-contributions/user-list-badges`，一次返回全部用户的徽章快照。每个徽章由宿主投影为 `pluginName`、`pluginDisplayName`、`id`、`label`、`tone`、`title` 和 `order`；`tone` 仅允许 `muted`、`blue`、`ok`、`warn`、`bad`，无效徽章会被记录并丢弃，不影响用户列表。
 
@@ -168,6 +173,14 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 - `PluginWebApiContentTypes.AllowedBinary` 允许 `image/png`、`image/jpeg`、`image/webp`、`image/gif`、`image/avif`、`application/octet-stream`。`Normalize` 去掉参数并转小写，`IsAllowedBinary` 判断是否在白名单内；白名单之外的响应类型按插件错误处理。
 - 传输上限：请求体 16 MiB、JSON 响应 2 MiB、二进制响应 16 MiB。二进制响应附带 `X-Content-Type-Options: nosniff` 与 `Cache-Control: no-store`。
 - 路由仍位于 `/api/plugin-api/{插件名}/{route}`，按 method 与完整 route 精确匹配；查询参数通过 `Query` 传递。
+
+### v1.7 模拟器支持扩展
+
+`IPluginHostContextV1_7.EmulatorSupport` 允许 managed-code 插件注册模拟器识别 provider。注册只在该插件运行期间有效，插件停止或初始化失败时会撤销；provider 的 `Id` 使用小写 kebab-case，`Priority` 决定稳定探测顺序。
+
+provider 的 `ProbeAsync(adbEndpoint, cancellationToken, timeoutSeconds)` 返回 `NotApplicable`、`Matched(driver)` 或 `Error(message)`。无匹配时宿主继续现有 Generic ADB 路径；任何已加载 provider 明确报告错误、多个 provider 同时匹配或探测超时都会使目标识别失败，不能把已证明的错误降级为 Generic。目标选定后，宿主在本次运行中冻结并复用同一驱动完成 `EnsureReadyAsync`、`StartAppAsync`、`GetForegroundPackageAsync`、`CaptureScreenAsync`、`StopAppAsync` 和 `ShutdownAsync`；每次调用都受宿主超时与取消边界约束。截图驱动返回不超过 16 MiB 的 PNG 字节。
+
+Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的专属识别、驱动命令与实例关闭由官方可选插件 `EmulatorSupport` 提供；使用这三家模拟器的厂商专属行为前，需要安装并启用该扩展。数据化专项插件的 `emulator` capability 仍只声明脚本实例支持「安卓模拟器」启动方式，不负责注册 provider。
 
 ### 旧外观数据搬迁
 

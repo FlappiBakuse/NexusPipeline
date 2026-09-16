@@ -20,13 +20,7 @@
 - [ ] 在真实机器人环境完成钉钉/飞书签名推送验证。
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
-- [ ] 完成雷电、夜神和 BlueStacks 真机验证矩阵：实例清单与 ADB 端点映射、启动/前台查询/截图/应用停止、优雅关机与 ADB/单 PID 收尾回退。
-
-| 驱动 | 实例发现与端点 | 启动与 ADB 操作 | 关机与安全回退 | 当前状态 |
-|---|---|---|---|---|
-| 雷电 | `ldconsole list2`、索引候选端口与 bundled `adb.exe` 连通性 | `launch --index N`；ADB start/foreground/screenshot/force-stop | `quit --index N` → `adb shell reboot -p` → 重新确认同索引同 PID 后单进程终止 | 待真实环境 |
-| 夜神 | `NoxConsole list`、`BignoxVMS/*.vbox` NAT/ADB 端口与 VM 身份 | 显式数字索引使用 `launch -index:N`；name-first 清单使用 title 执行 `launch -name:Title`；bundled `nox_adb.exe` 操作 | 对应选择器执行 `quit -index:N` 或 `quit -name:Title` → `adb shell reboot -p` → 重新确认同实例同 PID 后单进程终止 | 待真实环境 |
-| BlueStacks | `bluestacks.conf` 的实例身份与 `adb_port` | `HD-Player --instance`；bundled `HD-Adb.exe` 操作 | `adb shell reboot -p` → 仅在已有实例 PID 证据时单进程终止 | 待真实环境 |
+- [ ] 在 NexusPipeline-Plugins 的 `EmulatorSupport` 插件完成雷电、夜神和 BlueStacks 真机验证；实例识别、ADB 路由、启动/前台查询/截图/应用停止与安全关闭矩阵由[插件发行指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)维护。宿主 System Smoke 覆盖 Generic ADB、MuMuManager 和 managed-code provider 跨边界调用。
 
 ## 已知问题台账
 

@@ -1,4 +1,7 @@
 using System.Text.Json.Nodes;
+using System.Diagnostics;
+using NexusPipeline.App.Abstractions;
+using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Services;
@@ -7,9 +10,7 @@ internal enum EmulatorKind
 {
     GenericAdb,
     MuMu,
-    LdPlayer,
-    Nox,
-    BlueStacks,
+    Plugin,
     DetectionError,
 }
 
@@ -21,13 +22,8 @@ internal sealed record EmulatorTarget(
     string? MuMuManagerPath = null,
     string? MuMuInstanceIndex = null,
     string? DetectionError = null,
-    string? VendorControlPath = null,
-    string? VendorInstanceId = null,
-    string? VendorAdbExecutable = null,
-    int? VendorProcessId = null,
-    string? VendorInstallRoot = null,
-    string? VendorControlName = null,
-    int? VendorInstanceIndex = null);
+    IPluginEmulatorDriver? ExtensionDriver = null,
+    string? ExtensionDisplayName = null);
 
 internal sealed record EmulatorCommandResult(bool Ok, string Output)
 {
@@ -47,6 +43,8 @@ internal interface IEmulatorDriver
 {
     EmulatorKind Kind { get; }
 
+    string DisplayName { get; }
+
     Task<EmulatorCommandResult> EnsureReadyAsync(CancellationToken token, int timeoutSeconds);
 
     Task<EmulatorCommandResult> StartAppAsync(IReadOnlyList<string> startArgs, CancellationToken token, int timeoutSeconds);
@@ -62,8 +60,12 @@ internal interface IEmulatorDriver
 
 internal static class EmulatorDetector
 {
-    /// <summary>按 MuMu、LDPlayer、Nox、BlueStacks、Generic 的顺序冻结目标身份。</summary>
-    public static async Task<EmulatorTarget> DetectAsync(string endpoint, CancellationToken token, int timeoutSeconds)
+    /// <summary>按 MuMu、已启用模拟器扩展、Generic ADB 的顺序冻结目标身份。</summary>
+    public static async Task<EmulatorTarget> DetectAsync(
+        string endpoint,
+        IReadOnlyList<EmulatorSupportProviderDescriptor> providers,
+        CancellationToken token,
+        int timeoutSeconds)
     {
         string normalized = endpoint?.Trim() ?? "";
         string? adb = EmulatorSupport.ResolveAdbExe();
@@ -99,26 +101,28 @@ internal static class EmulatorDetector
             }
         }
 
-        foreach (EmulatorVendor vendor in Enum.GetValues<EmulatorVendor>())
+        PluginEmulatorProbeDecision extensionResult = await PluginEmulatorProbeService.ProbeAsync(
+            providers,
+            normalized,
+            token,
+            timeoutSeconds).ConfigureAwait(false);
+        if (extensionResult.State == PluginEmulatorProbeState.Error)
         {
-            VendorProbeResult result = await EmulatorVendorDetector.ProbeAsync(
-                vendor,
+            return new EmulatorTarget(
+                EmulatorKind.DetectionError,
                 normalized,
-                port,
-                token,
-                timeoutSeconds).ConfigureAwait(false);
-            if (result.State == VendorProbeState.Match && result.Target is not null)
-            {
-                return result.Target;
-            }
-            if (result.State == VendorProbeState.Error)
-            {
-                return new EmulatorTarget(
-                    EmulatorKind.DetectionError,
-                    normalized,
-                    adb,
-                    DetectionError: result.Error ?? $"{vendor} 模拟器目标识别失败");
-            }
+                adb,
+                DetectionError: extensionResult.Error ?? "模拟器扩展识别失败");
+        }
+        if (extensionResult.State == PluginEmulatorProbeState.Matched
+            && extensionResult.Driver is not null
+            && extensionResult.DisplayName is not null)
+        {
+            return new EmulatorTarget(
+                EmulatorKind.Plugin,
+                normalized,
+                ExtensionDriver: extensionResult.Driver,
+                ExtensionDisplayName: extensionResult.DisplayName);
         }
         return Generic(normalized, adb);
     }
@@ -126,6 +130,134 @@ internal static class EmulatorDetector
     private static EmulatorTarget Generic(string endpoint, string? adb)
     {
         return new EmulatorTarget(EmulatorKind.GenericAdb, endpoint, adb);
+    }
+}
+
+internal sealed record PluginEmulatorProbeDecision(
+    PluginEmulatorProbeState State,
+    IPluginEmulatorDriver? Driver = null,
+    string? DisplayName = null,
+    string? Error = null);
+
+internal static class PluginEmulatorProbeService
+{
+    public static async Task<PluginEmulatorProbeDecision> ProbeAsync(
+        IReadOnlyList<EmulatorSupportProviderDescriptor> providers,
+        string endpoint,
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        var matches = new List<(EmulatorSupportProviderDescriptor Registration, IPluginEmulatorDriver Driver, string DisplayName)>();
+        using var totalBudget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        int totalTimeoutSeconds = Math.Max(1, timeoutSeconds);
+        totalBudget.CancelAfter(TimeSpan.FromSeconds(totalTimeoutSeconds));
+        Stopwatch elapsed = Stopwatch.StartNew();
+        foreach (EmulatorSupportProviderDescriptor registration in providers)
+        {
+            int remainingSeconds = totalTimeoutSeconds - (int)Math.Floor(elapsed.Elapsed.TotalSeconds);
+            if (remainingSeconds <= 0 || totalBudget.IsCancellationRequested)
+            {
+                return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 探测超时");
+            }
+            PluginEmulatorProbeResult? result;
+            Task<PluginEmulatorProbeResult>? probeTask = null;
+            try
+            {
+                probeTask = Task.Run(async () => await registration.Provider
+                    .ProbeAsync(endpoint, totalBudget.Token, remainingSeconds)
+                    .ConfigureAwait(false));
+                result = await probeTask.WaitAsync(totalBudget.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                ObserveFault(probeTask);
+                throw;
+            }
+            catch (OperationCanceledException) when (totalBudget.IsCancellationRequested)
+            {
+                ObserveFault(probeTask);
+                return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 探测超时");
+            }
+            catch (OperationCanceledException)
+            {
+                ObserveFault(probeTask);
+                return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 未经请求自行取消探测");
+            }
+            catch (Exception ex)
+            {
+                ObserveFault(probeTask);
+                return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 探测失败：{Sanitize(ex.Message)}");
+            }
+
+            if (result is null)
+            {
+                return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 返回空结果");
+            }
+            switch (result.State)
+            {
+                case PluginEmulatorProbeState.NotApplicable when result.Driver is null && string.IsNullOrWhiteSpace(result.Error):
+                    continue;
+                case PluginEmulatorProbeState.Matched when result.Driver is not null && string.IsNullOrWhiteSpace(result.Error):
+                    string displayName;
+                    try
+                    {
+                        displayName = result.Driver.DisplayName?.Trim() ?? "";
+                    }
+                    catch (Exception ex)
+                    {
+                        return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 驱动名称读取失败：{Sanitize(ex.Message)}");
+                    }
+                    if (displayName.Length is 0 or > 80 || displayName.Any(char.IsControl))
+                    {
+                        return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 返回了无效驱动名称");
+                    }
+                    matches.Add((registration, result.Driver, displayName));
+                    continue;
+                case PluginEmulatorProbeState.Error when result.Driver is null && !string.IsNullOrWhiteSpace(result.Error):
+                    return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId}：{Sanitize(result.Error)}");
+                default:
+                    return Error($"模拟器 provider {registration.PluginName}/{registration.ProviderId} 返回了不一致的探测结果");
+            }
+        }
+
+        if (totalBudget.IsCancellationRequested)
+        {
+            return Error("模拟器 provider 探测超过总时间限制");
+        }
+
+        if (matches.Count > 1)
+        {
+            string identities = string.Join(", ", matches.Select(item => $"{item.Registration.PluginName}/{item.Registration.ProviderId}"));
+            return Error($"多个模拟器 provider 同时匹配端点：{identities}");
+        }
+        return matches.Count == 1
+            ? new PluginEmulatorProbeDecision(
+                PluginEmulatorProbeState.Matched,
+                matches[0].Driver,
+                matches[0].DisplayName)
+            : new PluginEmulatorProbeDecision(PluginEmulatorProbeState.NotApplicable);
+    }
+
+    private static void ObserveFault(Task? task)
+    {
+        if (task is null || task.IsCompleted)
+        {
+            return;
+        }
+        _ = task.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private static PluginEmulatorProbeDecision Error(string message) =>
+        new(PluginEmulatorProbeState.Error, Error: message);
+
+    private static string Sanitize(string message)
+    {
+        string value = (message ?? "").Trim();
+        return value.Length <= 300 ? value : value[..300] + "…";
     }
 }
 
@@ -137,12 +269,175 @@ internal static class EmulatorDriverFactory
         {
             EmulatorKind.GenericAdb => new GenericAdbEmulatorDriver(target),
             EmulatorKind.MuMu => new MuMuEmulatorDriver(target),
-            EmulatorKind.LdPlayer => new LdPlayerEmulatorDriver(target),
-            EmulatorKind.Nox => new NoxEmulatorDriver(target),
-            EmulatorKind.BlueStacks => new BlueStacksEmulatorDriver(target),
+            EmulatorKind.Plugin when target.ExtensionDriver is not null && target.ExtensionDisplayName is not null =>
+                new PluginEmulatorDriverAdapter(target.ExtensionDriver, target.ExtensionDisplayName),
             EmulatorKind.DetectionError => throw new InvalidOperationException(target.DetectionError ?? "模拟器目标识别失败"),
             _ => throw new ArgumentOutOfRangeException(nameof(target), target.Kind, "未知模拟器类型"),
         };
+    }
+}
+
+internal sealed class PluginEmulatorDriverAdapter : IEmulatorDriver
+{
+    private readonly IPluginEmulatorDriver _driver;
+    private readonly string _displayName;
+
+    private const int MaxScreenshotBytes = 16 * 1024 * 1024;
+
+    public PluginEmulatorDriverAdapter(IPluginEmulatorDriver driver, string displayName)
+    {
+        _driver = driver;
+        _displayName = displayName;
+    }
+
+    public EmulatorKind Kind => EmulatorKind.Plugin;
+
+    public string DisplayName => _displayName;
+
+    public Task<EmulatorCommandResult> EnsureReadyAsync(CancellationToken token, int timeoutSeconds) =>
+        ConvertAsync("EnsureReady", _driver.EnsureReadyAsync, token, timeoutSeconds);
+
+    public Task<EmulatorCommandResult> StartAppAsync(IReadOnlyList<string> startArgs, CancellationToken token, int timeoutSeconds) =>
+        ConvertAsync("StartApp", (innerToken, seconds) => _driver.StartAppAsync(startArgs, innerToken, seconds), token, timeoutSeconds);
+
+    public async Task<string?> GetForegroundPackageAsync(CancellationToken token, int timeoutSeconds)
+    {
+        try
+        {
+            return await InvokeBoundedAsync(
+                (innerToken, seconds) => _driver.GetForegroundPackageAsync(innerToken, seconds),
+                token,
+                timeoutSeconds,
+                "GetForegroundPackage").ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<EmulatorBinaryResult> CaptureScreenAsync(CancellationToken token, int timeoutSeconds)
+    {
+        try
+        {
+            PluginEmulatorBinaryResult? result = await InvokeBoundedAsync(
+                _driver.CaptureScreenAsync,
+                token,
+                timeoutSeconds,
+                "CaptureScreen").ConfigureAwait(false);
+            if (result is null || !result.Ok)
+            {
+                return EmulatorBinaryResult.Failure(result?.Error ?? "插件模拟器驱动截图失败");
+            }
+            byte[]? data = result.Data;
+            if (data is null || data.Length > MaxScreenshotBytes || !EmulatorSupport.IsPng(data))
+            {
+                return EmulatorBinaryResult.Failure("插件模拟器驱动未返回有效 PNG 或截图超过大小上限");
+            }
+            return EmulatorBinaryResult.Success(data);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return EmulatorBinaryResult.Failure($"插件模拟器驱动截图异常：{Sanitize(ex.Message)}");
+        }
+    }
+
+    public Task<EmulatorCommandResult> StopAppAsync(string? packageName, CancellationToken token, int timeoutSeconds) =>
+        ConvertAsync("StopApp", (innerToken, seconds) => _driver.StopAppAsync(packageName, innerToken, seconds), token, timeoutSeconds);
+
+    public Task<EmulatorCommandResult> ShutdownAsync(CancellationToken token, int timeoutSeconds) =>
+        ConvertAsync("Shutdown", _driver.ShutdownAsync, token, timeoutSeconds);
+
+    private static async Task<EmulatorCommandResult> ConvertAsync(
+        string operation,
+        Func<CancellationToken, int, Task<PluginEmulatorCommandResult>> action,
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        try
+        {
+            PluginEmulatorCommandResult? result = await InvokeBoundedAsync(
+                action,
+                cancellationToken,
+                timeoutSeconds,
+                operation).ConfigureAwait(false);
+            if (result is null) return EmulatorCommandResult.Failure("插件模拟器驱动返回空结果");
+            return result.Ok
+                ? EmulatorCommandResult.Success(result.Output ?? "")
+                : EmulatorCommandResult.Failure(result.Output ?? "");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return EmulatorCommandResult.Failure($"插件模拟器驱动 {operation} 调用失败：{Sanitize(ex.Message)}");
+        }
+    }
+
+    private static async Task<T> InvokeBoundedAsync<T>(
+        Func<CancellationToken, int, Task<T>> action,
+        CancellationToken cancellationToken,
+        int timeoutSeconds,
+        string operation)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(Math.Max(1, timeoutSeconds)));
+        Task<T>? task = null;
+        try
+        {
+            task = Task.Run(() => action(timeout.Token, Math.Max(1, timeoutSeconds)))
+                ?? throw new InvalidOperationException("插件模拟器驱动返回空任务");
+            return await task.WaitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            ObserveFault(task);
+            throw;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            ObserveFault(task);
+            throw new TimeoutException($"插件模拟器驱动 {operation} 超时（{Math.Max(1, timeoutSeconds)} 秒）");
+        }
+        catch (OperationCanceledException ex)
+        {
+            ObserveFault(task);
+            throw new InvalidOperationException($"插件模拟器驱动 {operation} 未经请求自行取消", ex);
+        }
+        catch
+        {
+            ObserveFault(task);
+            throw;
+        }
+    }
+
+    private static void ObserveFault(Task? task)
+    {
+        if (task is null || task.IsCompleted)
+        {
+            return;
+        }
+        _ = task.ContinueWith(
+            completed => _ = completed.Exception,
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private static string Sanitize(string message)
+    {
+        string value = (message ?? "").Trim();
+        return value.Length <= 300 ? value : value[..300] + "…";
     }
 }
 
@@ -160,6 +455,8 @@ internal sealed class GenericAdbEmulatorDriver : IEmulatorDriver
     }
 
     public EmulatorKind Kind => EmulatorKind.GenericAdb;
+
+    public string DisplayName => "Generic ADB";
 
     public async Task<EmulatorCommandResult> EnsureReadyAsync(CancellationToken token, int timeoutSeconds)
     {
@@ -273,6 +570,8 @@ internal sealed class MuMuEmulatorDriver : IEmulatorDriver
     }
 
     public EmulatorKind Kind => EmulatorKind.MuMu;
+
+    public string DisplayName => "MuMuManager";
 
     public async Task<EmulatorCommandResult> EnsureReadyAsync(CancellationToken token, int timeoutSeconds)
     {

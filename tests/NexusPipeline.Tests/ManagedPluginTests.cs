@@ -4,6 +4,7 @@ using NexusPipeline.Models;
 using NexusPipeline.Persistence;
 using NexusPipeline.Plugin.Abstractions;
 using NexusPipeline.Plugins;
+using NexusPipeline.Plugins.Managed;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Notification;
 using NexusPipeline.TestPlugin;
@@ -17,7 +18,7 @@ public sealed class ManagedPluginTests
     [Fact]
     public void ManagedPlugin_DefaultDisabled_EnableAfterReload_AndHostServicesWork()
     {
-        string root = CreatePluginDirectory("fixture-managed", typeof(NexusPipeline.TestPlugin.TestPlugin));
+        string root = CreatePluginDirectory("fixture-managed", typeof(NexusPipeline.TestPlugin.TestPlugin), apiVersion: "1.6");
         var settings = new AppSettings();
         var manager = new PluginManager(
             () => settings,
@@ -86,6 +87,7 @@ public sealed class ManagedPluginTests
             Assert.Equal("InitFailed", manager.GetRuntimeState("fixture-failing"));
             Assert.Contains("fixture init failure", manager.GetRuntimeError("fixture-failing"));
             Assert.False(manager.IsEnabled("fixture-failing"));
+            Assert.Empty(manager.GetEmulatorSupportProviders());
         }
         finally
         {
@@ -94,6 +96,84 @@ public sealed class ManagedPluginTests
             DeletePluginDirectory(incompatibleRoot);
             DeletePluginDirectory(failingRoot);
         }
+    }
+
+    [Fact]
+    public void EmulatorSupportAdapter_DisposeRevokesRegistrationAndRejectsLateRegistration()
+    {
+        var registry = new PluginEmulatorSupportRegistry();
+        var adapter = new PluginEmulatorSupportAdapter(registry, "fixture-emulator");
+        adapter.Register(new FixtureProvider());
+
+        Assert.Single(registry.Snapshot(_ => true));
+
+        adapter.Dispose();
+
+        Assert.Empty(registry.Snapshot(_ => true));
+        Assert.Throws<ObjectDisposedException>(() => adapter.Register(new FixtureProvider()));
+    }
+
+    [Fact]
+    public async Task EmulatorSupportAdapter_DisposeRacingWithRegisterRevokesLateToken()
+    {
+        var registry = new PluginEmulatorSupportRegistry();
+        var adapter = new PluginEmulatorSupportAdapter(registry, "fixture-emulator");
+        using var getterEntered = new ManualResetEventSlim();
+        using var releaseGetter = new ManualResetEventSlim();
+        Task<ObjectDisposedException> register = Task.Run(() => Assert.Throws<ObjectDisposedException>(
+            () => adapter.Register(new BlockingFixtureProvider(getterEntered, releaseGetter))));
+
+        try
+        {
+            Assert.True(getterEntered.Wait(TimeSpan.FromSeconds(3)));
+            adapter.Dispose();
+        }
+        finally
+        {
+            releaseGetter.Set();
+        }
+
+        await register;
+        Assert.Empty(registry.Snapshot(_ => true));
+    }
+
+    private sealed class FixtureProvider : IPluginEmulatorSupportProvider
+    {
+        public string Id => "fixture-provider";
+
+        public int Priority => 0;
+
+        public ValueTask<PluginEmulatorProbeResult> ProbeAsync(
+            string adbEndpoint,
+            CancellationToken cancellationToken,
+            int timeoutSeconds) =>
+            ValueTask.FromResult(PluginEmulatorProbeResult.NotApplicable());
+    }
+
+    private sealed class BlockingFixtureProvider(
+        ManualResetEventSlim getterEntered,
+        ManualResetEventSlim releaseGetter) : IPluginEmulatorSupportProvider
+    {
+        public string Id
+        {
+            get
+            {
+                getterEntered.Set();
+                if (!releaseGetter.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("fixture provider getter was not released");
+                }
+                return "late-provider";
+            }
+        }
+
+        public int Priority => 0;
+
+        public ValueTask<PluginEmulatorProbeResult> ProbeAsync(
+            string adbEndpoint,
+            CancellationToken cancellationToken,
+            int timeoutSeconds) =>
+            ValueTask.FromResult(PluginEmulatorProbeResult.NotApplicable());
     }
 
     [Fact]

@@ -402,7 +402,14 @@ public sealed class PluginAvailabilityPolicyTests
             history,
             new NoopNotificationService(),
             new SystemActionExecutor(new ExecutionStateStore()),
-            plugins);
+            plugins,
+            new EmptyEmulatorSupportProviderResolver());
+    }
+
+    private sealed class EmptyEmulatorSupportProviderResolver : IEmulatorSupportProviderResolver
+    {
+        public IReadOnlyList<EmulatorSupportProviderDescriptor> GetEmulatorSupportProviders() =>
+            Array.Empty<EmulatorSupportProviderDescriptor>();
     }
 
     private sealed class CapturingHistoryStore : IHistoryStore

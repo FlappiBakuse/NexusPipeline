@@ -36,6 +36,11 @@ public sealed class TestPlugin : INexusPlugin
         {
             RegisterWebApi(v13);
         }
+        if (context is IPluginHostContextV1_7 v17
+            && string.Equals(Environment.GetEnvironmentVariable("NEXUS_TEST_EMULATOR_PLUGIN"), "1", StringComparison.Ordinal))
+        {
+            _registrations.Add(v17.EmulatorSupport.Register(new FixtureEmulatorSupportProvider()));
+        }
         await SetStateAsync(state => state.Initialized = true, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -134,10 +139,100 @@ public sealed class FailingPlugin : INexusPlugin
 {
     public ValueTask InitializeAsync(IPluginHostContext context, CancellationToken cancellationToken)
     {
+        if (context is IPluginHostContextV1_7 v17)
+        {
+            v17.EmulatorSupport.Register(new FixtureEmulatorSupportProvider());
+        }
         throw new InvalidOperationException("fixture init failure");
     }
 
     public ValueTask StartAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
 
     public ValueTask StopAsync(CancellationToken cancellationToken) => ValueTask.CompletedTask;
+}
+
+internal sealed class FixtureEmulatorSupportProvider : IPluginEmulatorSupportProvider
+{
+    public string Id => "fixture-provider";
+
+    public int Priority => 0;
+
+    public ValueTask<PluginEmulatorProbeResult> ProbeAsync(
+        string adbEndpoint,
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        string endpoint = Environment.GetEnvironmentVariable("NEXUS_TEST_EMULATOR_ENDPOINT") ?? "";
+        if (!string.Equals(adbEndpoint, endpoint, StringComparison.OrdinalIgnoreCase))
+        {
+            return ValueTask.FromResult(PluginEmulatorProbeResult.NotApplicable());
+        }
+        string? eventPath = Environment.GetEnvironmentVariable("NEXUS_TEST_EMULATOR_EVENTS");
+        return ValueTask.FromResult(PluginEmulatorProbeResult.Match(new FixtureEmulatorDriver(eventPath)));
+    }
+}
+
+internal sealed class FixtureEmulatorDriver(string? eventPath) : IPluginEmulatorDriver
+{
+    private static readonly byte[] Png = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/2+QAAAAASUVORK5CYII=");
+
+    public string DisplayName => "Fixture Emulator";
+
+    public Task<PluginEmulatorCommandResult> EnsureReadyAsync(CancellationToken cancellationToken, int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("ready");
+        return Task.FromResult(PluginEmulatorCommandResult.Success());
+    }
+
+    public Task<PluginEmulatorCommandResult> StartAppAsync(
+        IReadOnlyList<string> startArgs,
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("start " + string.Join(" ", startArgs));
+        return Task.FromResult(PluginEmulatorCommandResult.Success());
+    }
+
+    public Task<string?> GetForegroundPackageAsync(CancellationToken cancellationToken, int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("foreground");
+        return Task.FromResult<string?>("com.example.game");
+    }
+
+    public Task<PluginEmulatorBinaryResult> CaptureScreenAsync(CancellationToken cancellationToken, int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("capture");
+        return Task.FromResult(PluginEmulatorBinaryResult.Success(Png));
+    }
+
+    public Task<PluginEmulatorCommandResult> StopAppAsync(
+        string? packageName,
+        CancellationToken cancellationToken,
+        int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("stop " + (packageName ?? ""));
+        return Task.FromResult(PluginEmulatorCommandResult.Success());
+    }
+
+    public Task<PluginEmulatorCommandResult> ShutdownAsync(CancellationToken cancellationToken, int timeoutSeconds)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Record("shutdown");
+        return Task.FromResult(PluginEmulatorCommandResult.Success());
+    }
+
+    private void Record(string value)
+    {
+        if (string.IsNullOrWhiteSpace(eventPath)) return;
+        string path = Path.GetFullPath(eventPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.AppendAllText(path, value + Environment.NewLine, Encoding.UTF8);
+    }
 }
