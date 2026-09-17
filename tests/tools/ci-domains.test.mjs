@@ -2,9 +2,27 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { CI_DOMAINS, SYSTEM_SHARED_PATHS } from "../../tools/ci-domains.mjs";
-import { evaluateDomains } from "../../tools/ci-changes.mjs";
+import { CI_DOMAINS, FRONTEND_TEST_GROUPS, HOST_TEST_AREAS, SYSTEM_SHARED_PATHS, SYSTEM_TEST_GROUPS, TEST_DOMAIN_REGISTRY, validateTestDomainRegistry } from "../../tools/ci-domains.mjs";
+import { createExecutionPlan, evaluateDomains, parseNameStatusZ, selectTestGroups } from "../../tools/ci-changes.mjs";
+
+test('测试分组包含传递调用方并对未知路径全量兜底', () => {
+  assert.deepEqual(selectTestGroups('frontend', ['frontend/src/ui/primitives/NxpButton.vue']), ['ui', 'bridge', 'platform', 'features']);
+  assert.deepEqual(selectTestGroups('frontend', ['frontend/src/features/history/HistoryPage.vue']), ['features']);
+  assert.deepEqual(selectTestGroups('host', ['src/Services/Update/UpdateService.cs']), ['update', 'control']);
+  assert.deepEqual(selectTestGroups('host', ['src/new-subsystem/New.cs']), HOST_TEST_AREAS.map(area => area.key));
+  assert.ok(selectTestGroups('host', ['src/Services/Judgement/Judge.cs']).includes('scheduling'));
+});
+
+test('宿主测试容器名称与分组执行过滤器一致', () => {
+  const directory = fileURLToPath(new URL('../NexusPipeline.Tests/', import.meta.url));
+  for (const name of fs.readdirSync(directory).filter(name => name.endsWith('Tests.cs'))) {
+    const source = fs.readFileSync(path.join(directory, name), 'utf8');
+    const containers = [...source.matchAll(/^public (?:sealed |abstract |partial )*class ([A-Za-z0-9_]+)/gm)].map(match => match[1]);
+    assert.deepEqual(containers, [path.basename(name, '.cs')], name);
+  }
+});
 
 /**
  * CI 影响域映射用例：四个 System 影响域必须按真实路径收敛到各自的门禁。
@@ -168,6 +186,96 @@ test("Windows 分隔符的改动路径与正斜杠等价", () => {
   assert.deepEqual(flagsOf([".\\src/Services/Update/UpdateService.cs"]), expected);
 });
 
+test("已命中路径与未知路径混合时按全量门禁处理", () => {
+  const result = assertFlags(
+    ["README.md", "future/unknown-file.txt"],
+    Object.fromEntries(CI_DOMAINS.map(domain => [domain.key, true])),
+  );
+  assert.equal(result.failOpen, true);
+  assert.match(result.reason, /未命中任何影响域/u);
+  assert.deepEqual(result.unknown.map(item => item.file), ["future/unknown-file.txt"]);
+});
+
+test("重命名差异保留旧路径和新路径", () => {
+  assert.deepEqual(
+    parseNameStatusZ("R100\0docs/old.md\0docs/new.md\0M\0README.md\0D\0docs/removed.md\0"),
+    ["docs/old.md", "docs/new.md", "README.md", "docs/removed.md"],
+  );
+});
+
+test("路径穿越和绝对路径进入未知集合", () => {
+  const result = evaluateDomains(["docs/../secret.txt", "C:\\outside.txt", "/outside.txt", "README.md"]);
+  assert.equal(result.failOpen, true);
+  assert.equal(result.unknown.length, 3);
+  assert.equal(result.domains.docs.affected, true);
+});
+
+test("结构化测试域注册表包含宿主十 Area、前端四组和 System 八组", () => {
+  assert.equal(HOST_TEST_AREAS.length, 10);
+  assert.equal(FRONTEND_TEST_GROUPS.length, 4);
+  assert.equal(SYSTEM_TEST_GROUPS.length, 8);
+  assert.equal(validateTestDomainRegistry(TEST_DOMAIN_REGISTRY), true);
+});
+
+test("runner 分域并集完整且每个活动测试文件只有一个主要归属", () => {
+  const result = spawnSync(process.execPath, ["tests/run.mjs", "list", "--json"], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+  const plan = JSON.parse(result.stdout);
+  for (const [directory, suffix, groups] of [
+    ["tests/NexusPipeline.Tests", "Tests.cs", plan.hostAreas],
+    ["frontend/src", ".test.ts", plan.frontendGroups],
+  ]) {
+    const files = fs.readdirSync(path.join(repoRoot, directory), { recursive: true })
+      .filter(file => file.endsWith(suffix) && !/(?:^|[\\/])(?:bin|obj|node_modules)[\\/]/u.test(file))
+      .map(file => `${directory}/${file.replaceAll("\\", "/")}`).sort();
+    const assigned = groups.flatMap(group => group.tests).sort();
+    assert.deepEqual(assigned, files, `${directory} 测试归属必须覆盖一次`);
+  }
+});
+
+test("执行计划包含 SHA、精确文件、原因和 job 映射", () => {
+  const plan = createExecutionPlan(["docs/DESIGN.md", "unknown.txt"], {
+    base: "base-sha",
+    head: "head-sha",
+  });
+  assert.equal(plan.base, "base-sha");
+  assert.equal(plan.head, "head-sha");
+  assert.equal(plan.failOpen, true);
+  assert.deepEqual(plan.domains.docs.files, ["docs/DESIGN.md"]);
+  assert.deepEqual(plan.domains.docs.jobs, ["docs-i18n"]);
+  assert.deepEqual(plan.unknown.map(item => item.file), ["unknown.txt"]);
+});
+
+test("全量计划把全部逻辑域绑定到唯一 full-regression 物理 job", () => {
+  const plan = createExecutionPlan([], {
+    base: "",
+    head: "manual-head",
+    failOpen: true,
+    reason: "按全量门禁执行",
+    all: true,
+  });
+  for (const domain of Object.values(plan.domains)) {
+    assert.equal(domain.affected, true);
+    assert.deepEqual(domain.jobs, ["full-regression"]);
+  }
+});
+
+test("dry-run 不写 GITHUB_OUTPUT 哨兵文件", () => {
+  const outputPath = path.join(repoRoot, `.ci-dry-run-${process.pid}-${Date.now()}`);
+  const script = path.join(repoRoot, "tools", "ci-changes.mjs");
+  const result = spawnSync(process.execPath, [script, "--all", "--dry-run", "--github-output", outputPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /不写入输出文件/u);
+    assert.equal(fs.existsSync(outputPath), false);
+  } finally {
+    if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
+  }
+});
+
 test("横切路径逐条命中四个 System 域", () => {
   const samples = {
     "src/*.cs": "src/Bootstrap.cs",
@@ -228,6 +336,8 @@ test("System suite 文件归属各自的域", () => {
   const owners = [
     ["tests/system/mcp-smoke.mjs", ["system_runtime"]],
     ["tests/system/runtime-smoke.mjs", ["system_runtime"]],
+    ["tests/system/config-smoke.mjs", ["system_runtime"]],
+    ["tests/system/plugin-smoke.mjs", ["system_runtime"]],
     ["tests/system/judge-smoke.mjs", ["system_execution"]],
     ["tests/system/execution-resilience.mjs", ["system_execution"]],
     ["tests/system/fixtures/long-lived-child.mjs", ["system_execution"]],
@@ -263,4 +373,31 @@ test("工作流输出与四个 System 域 key 对齐", () => {
     assert.match(workflow, new RegExp(`^\\s+name: ${escapeRegExp(domain.gate)}$`, "mu"), `作业名应与 ${domain.key} 的 gate 一致`);
   }
   assert.match(workflow, /^ {2}full-regression:$/mu, "保留全量回归作业");
+});
+
+test("required-summary 显式等待所有物理 job 并消费 execution-plan", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const requiredJobs = [
+    "changes",
+    "frontend-unit",
+    "host-core",
+    "docs-i18n",
+    "plugin-contract",
+    "ui-smoke",
+    "system-runtime-mcp",
+    "system-execution",
+    "system-emulator",
+    "system-update",
+    "full-regression",
+  ];
+  assert.match(workflow, /^ {2}required-summary:$/mu);
+  assert.match(workflow, /^    if: \$\{\{ always\(\) \}\}$/mu);
+  for (const job of requiredJobs) {
+    assert.match(workflow, new RegExp(`^      - ${escapeRegExp(job)}$`, "mu"), `required-summary 缺少 ${job}`);
+  }
+  assert.match(workflow, /node tools\/ci-summary\.mjs --plan/u);
+  assert.ok(workflow.includes('--headSha "$GITHUB_SHA"'), "required-summary 应校验当前提交 SHA");
+  assert.match(workflow, /github\.event_name.*-eq 'schedule'.*github\.event_name.*-eq 'workflow_dispatch'/s);
+  assert.match(workflow, /github\.event_name.*-eq 'schedule'.*workflow_dispatch'[\s\S]*node tools\/ci-changes\.mjs --all/s);
+  assert.match(workflow, /full-regression:[\s\S]*if:.*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch'/s);
 });

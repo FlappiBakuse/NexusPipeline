@@ -1,0 +1,10 @@
+{
+  "name": "nexus-pipeline-governance",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vue/compiler-sfc": "3.5.30",
+    "markdown-it": "14.1.0",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,36 +1,80 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS } from "../tools/ci-domains.mjs";
+import { globToRegExp } from "../tools/ci-changes.mjs";
+import { createBuildFingerprint } from "../tools/ci-fingerprint.mjs";
+import { validateExecutionPlan } from "../tools/ci-summary.mjs";
+import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults } from "../tools/test-results.mjs";
 import { getIntegrityLevel, isAdministrator, killProcessTree } from "./support/windows-process.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const frontendDir = path.join(projectRoot, "frontend");
 const e2eDir = path.join(projectRoot, "tests", "e2e");
 const systemDir = path.join(projectRoot, "tests", "system");
 const testHostDir = path.join(projectRoot, "tests", ".artifacts", "test-host");
 const emulatorFixturePluginDir = path.join(projectRoot, "tests", ".artifacts", "emulator-test-plugin");
 const nodeCommand = process.execPath;
 const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
-// System Smoke 影响域分组：CI 按改动范围选择分组，每个分组复用同一份 suite 定义。
-const SYSTEM_SUITE_GROUPS = [
-  ["runtime", [
-    ["runtime-mcp", "mcp-smoke.mjs"],
-    ["runtime-runtime", "runtime-smoke.mjs"],
-  ]],
-  ["execution", [
-    ["runtime-judge", "judge-smoke.mjs"],
-    ["runtime-execution-resilience", "execution-resilience.mjs"],
-  ]],
-  ["emulator", [
-    ["runtime-emulator", "emulator-smoke.mjs"],
-  ]],
-  ["update", [
-    ["runtime-startup-update", "startup-update-smoke.mjs"],
-    ["runtime-update", "update-smoke.mjs"],
-  ]],
-];
+const ciExecution = {
+  testCount: 0,
+  passed: 0,
+  failed: 0,
+  skipped: 0,
+  domainId: process.env.NEXUS_CI_DOMAIN || "",
+};
+let productionBuildPromise = null;
+let testHostBuildPromise = null;
+let retainTestHostForRun = false;
+
+function recordCiTests(result) {
+  for (const key of ["testCount", "passed", "failed", "skipped"]) ciExecution[key] += result[key];
+}
+
+async function runReported(command, args, options = {}, format = "tap") {
+  const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-test-results-"));
+  const reportFile = path.join(reportDir, format === "trx" ? "results.trx" : "results.json");
+  let tail = "";
+  const env = { ...(options.env || process.env) };
+  const reportedArgs = [...args];
+  if (format === "tap") reportedArgs.splice(1, 0, "--test-reporter=tap");
+  if (format === "trx") reportedArgs.push("--logger", "trx;LogFileName=results.trx", "--results-directory", reportDir);
+  if (format === "vitest") reportedArgs.push("--reporter=default", "--reporter=json", `--outputFile=${reportFile}`);
+  if (format === "playwright") {
+    reportedArgs.push("--reporter=line,json");
+    env.PLAYWRIGHT_JSON_OUTPUT_NAME = reportFile;
+  }
+  try {
+    const code = await runProcess(command, reportedArgs, { ...options, env, onOutput: chunk => { tail = (tail + chunk).slice(-262144); } });
+    try {
+      const result = format === "tap" ? parseTapResults(tail)
+        : format === "trx" ? parseTrxResults(fs.readFileSync(reportFile, "utf8"))
+        : format === "vitest" ? parseVitestResults(JSON.parse(fs.readFileSync(reportFile, "utf8")))
+        : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")));
+      recordCiTests(result);
+      console.error(`[测试结果] passed=${result.passed} failed=${result.failed} skipped=${result.skipped}`);
+      return code || (result.failed > 0 ? 1 : 0);
+    } catch (error) {
+      console.error(`[测试结果] ${error.message}`);
+      return code || 1;
+    }
+  } finally {
+    fs.rmSync(reportDir, { recursive: true, force: true });
+  }
+}
+// System Smoke 影响域分组：CI 按改动范围选择分组，每个分组复用 ci-domains.mjs 的唯一 suite 定义。
+const SYSTEM_SUITE_GROUPS = SYSTEM_TEST_GROUPS.map(group => [
+  group.key,
+  group.suitePaths.map((suitePath, index) => [
+    group.runtimeNames?.[index] || `runtime-${group.key}-${index + 1}`,
+    path.basename(suitePath),
+  ]),
+]);
 const SYSTEM_GROUP_NAMES = SYSTEM_SUITE_GROUPS.map(([group]) => group);
 
 function runProcess(command, args, options = {}) {
@@ -41,25 +85,42 @@ function runProcess(command, args, options = {}) {
       : null;
     const timeoutCode = options.timeoutCode ?? 124;
     let timeoutHandle = null;
+    let timeoutCleanupHandle = null;
     let settled = false;
     let timedOut = false;
     const finish = code => {
       if (settled) return;
       settled = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (timeoutCleanupHandle) clearTimeout(timeoutCleanupHandle);
       resolve(code);
     };
-    const child = spawn(command, args, {
+    // Windows Node 24 rejects direct spawn of .cmd/.bat files with EINVAL.
+    // Route command shims through cmd.exe so the unified runner works both
+    // from PowerShell and from the CI shells without enabling an unbounded
+    // shell for every process.
+    const isWindowsCommandShim = process.platform === "win32" && /\.(?:cmd|bat)$/i.test(command);
+    const spawnCommand = isWindowsCommandShim ? (process.env.ComSpec || "cmd.exe") : command;
+    const spawnArgs = isWindowsCommandShim
+      ? ["/d", "/s", "/c", "call", command, ...args]
+      : args;
+    const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || projectRoot,
       env: options.env || process.env,
-      stdio: options.stdio || "inherit",
-      windowsHide: false,
+      stdio: options.onOutput ? ["inherit", "pipe", "pipe"] : options.stdio || "inherit",
+      windowsHide: true,
     });
+    if (options.onOutput) {
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", chunk => { process.stdout.write(chunk); options.onOutput(chunk); });
+      child.stderr.on("data", chunk => { process.stderr.write(chunk); });
+    }
     child.once("error", error => {
       console.error(`[错误] 启动 ${command} 失败：${error.message}`);
       finish(timedOut ? timeoutCode : 1);
     });
-    child.once("exit", (code, signal) => {
+    child.once("close", (code, signal) => {
       if (timedOut) {
         finish(timeoutCode);
         return;
@@ -85,7 +146,11 @@ function runProcess(command, args, options = {}) {
         } catch (error) {
           console.error(`[错误] 终止超时进程失败：${error.message}`);
         }
-        finish(timeoutCode);
+        // 等待子进程实际退出，再让下一个 suite 开始，避免残留宿主占用端口/运行目录。
+        timeoutCleanupHandle = setTimeout(() => {
+          console.error(`[错误] ${label} 收尾等待超时，无法确认进程树已退出。`);
+          finish(timeoutCode);
+        }, options.timeoutCleanupMs ?? 15_000);
       }, timeoutMs);
     }
   });
@@ -98,21 +163,55 @@ function runCmdFile(filePath, args = [], options = {}) {
   return runProcess(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", commandLine], { ...options, cwd });
 }
 
-function webTestFiles() {
-  const directory = path.join(projectRoot, "tests", "web");
-  if (!fs.existsSync(directory)) return [];
-  return fs.readdirSync(directory)
-    .filter(name => name.endsWith(".test.mjs"))
-    .sort()
-    .map(name => path.join(directory, name));
-}
-
 function syntaxTestFiles() {
   const directory = path.join(projectRoot, "tests", "e2e", "tests");
   return fs.readdirSync(directory)
     .filter(name => name.endsWith(".smoke.spec.mjs"))
     .sort()
     .map(name => path.join(directory, name));
+}
+
+function recursiveFiles(directory) {
+  if (!fs.existsSync(directory)) return [];
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (["node_modules", "dist", "bin", "obj"].includes(entry.name)) continue;
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...recursiveFiles(fullPath));
+    else files.push(fullPath);
+  }
+  return files;
+}
+
+function frontendTestFiles(groups = []) {
+  const patterns = groups.length > 0
+    ? FRONTEND_TEST_GROUPS
+      .filter(group => groups.includes(group.key))
+      .flatMap(group => group.testPaths)
+    : ["frontend/src/**/*.test.ts"];
+  return recursiveFiles(frontendDir)
+    .filter(file => file.endsWith(".test.ts"))
+    .filter(file => {
+      const relative = path.relative(projectRoot, file).replaceAll("\\", "/");
+      return patterns.some(pattern => globToRegExp(pattern).test(relative));
+    })
+    .sort();
+}
+
+function unitTestFiles(groups = []) {
+  const unitDir = path.join(projectRoot, "tests", "NexusPipeline.Tests");
+  const candidates = recursiveFiles(unitDir).filter(file => file.endsWith("Tests.cs"));
+  if (groups.length === 0) return candidates.sort();
+  const patterns = HOST_TEST_AREAS
+    .filter(area => groups.includes(area.key))
+    .flatMap(area => area.testPaths ?? [])
+    .map(pattern => globToRegExp(`tests/NexusPipeline.Tests/${pattern}`));
+  return candidates
+    .filter(file => {
+      const relative = path.relative(projectRoot, file).replaceAll("\\", "/");
+      return patterns.some(pattern => pattern.test(relative));
+    })
+    .sort();
 }
 
 function requireAdmin(label, command) {
@@ -154,32 +253,80 @@ function printModeBanner(mode, suite) {
   console.error("====================================================");
 }
 
-async function runUnit() {
+async function runUnit(groups = []) {
   // 管理员 UI/System 门禁使用 NEXUS_TIME_SCALE 加速墙钟等待；宿主单元测试应保持生产默认时间语义。
   const env = { ...process.env, NEXUS_TIME_SCALE: "1" };
-  return runProcess("dotnet", ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo", "-m:1"], { env });
+  const selectedFiles = unitTestFiles(groups);
+  if (groups.length > 0 && selectedFiles.length === 0) {
+    console.error(`[Unit] 选中的 Area 没有可运行测试：${groups.join(", ")}`);
+    return 1;
+  }
+  const args = ["test", "tests\\NexusPipeline.Tests\\NexusPipeline.Tests.csproj", "--nologo", "-m:1", "--logger", "console;verbosity=normal"];
+  if (groups.length > 0) {
+    const names = [...new Set(selectedFiles.map(file => path.basename(file, ".cs")))];
+    args.push("--filter", names.map(name => `FullyQualifiedName~${name}`).join("|"));
+    console.error(`[Unit] Area=${groups.join(",")}，选中 ${names.length} 个测试类。`);
+  }
+  return runReported("dotnet", args, { env }, "trx");
+}
+
+async function runFrontend(groups = []) {
+  const selectedFiles = frontendTestFiles(groups);
+  if (groups.length > 0 && selectedFiles.length === 0) {
+    console.error(`[Frontend] 选中的分组没有可运行测试：${groups.join(", ")}`);
+    return 1;
+  }
+  const typecheckCode = await runProcess(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  if (typecheckCode !== 0) return typecheckCode;
+  const testArgs = ["run", "test", "--", "--run"];
+  if (groups.length > 0) {
+    testArgs.push(...selectedFiles.map(file => path.relative(frontendDir, file)));
+    console.error(`[Frontend] 分组=${groups.join(",")}，选中 ${selectedFiles.length} 个 Vitest 文件。`);
+  } else {
+    console.error(`[Frontend] 全量 Vitest：${selectedFiles.length} 个测试文件。`);
+  }
+  const testCode = await runReported(npmCommand, testArgs, { cwd: frontendDir }, "vitest");
+  if (testCode !== 0) return testCode;
+  if (groups.length > 0) return 0;
+  return runProcess(npmCommand, ["run", "build"], { cwd: frontendDir });
 }
 
 async function runWeb() {
-  const files = webTestFiles();
-  if (files.length === 0) {
-    console.error("[Web Logic] 当前 Web Logic 用例由 frontend Vitest 承载，本步骤无独立 Node 用例。");
-    return 0;
-  }
-  return runProcess(nodeCommand, ["--test", ...files]);
+  return runFrontend();
+}
+
+async function runContracts() {
+  console.error("[Plugin Contract] 加载官方构建模块与真实宿主公共元素。");
+  return runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest");
 }
 
 async function runDocs() {
-  return runProcess(nodeCommand, ["--test", "tests\\documentation\\documentation-consistency.mjs", "tests\\documentation\\i18n-consistency.mjs", "tests\\documentation\\i18n-semantic-consistency.mjs", "tests\\documentation\\i18n-audit-consistency.mjs", "tests\\documentation\\backend-i18n-audit.mjs", "tests\\documentation\\native-scrollbar-audit.mjs", "tests\\documentation\\test-policy-consistency.mjs"]);
+  const files = [
+    "tests\\documentation\\documentation-consistency.mjs",
+    "tests\\documentation\\i18n-consistency.mjs",
+    "tests\\documentation\\i18n-semantic-consistency.mjs",
+    "tests\\documentation\\i18n-audit-consistency.mjs",
+    "tests\\documentation\\backend-i18n-audit.mjs",
+    "tests\\documentation\\native-scrollbar-audit.mjs",
+    "tests\\documentation\\test-policy-consistency.mjs",
+    "tests\\tools\\docs-index.test.mjs",
+  ];
+  return runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))]);
 }
 
 async function runTooling() {
-  return runProcess(nodeCommand, [
-    "--test",
+  const files = [
     "tests\\tools\\ci-domains.test.mjs",
+    "tests\\tools\\ci-summary.test.mjs",
+    "tests\\tools\\ci-fingerprint.test.mjs",
+    "tests\\tools\\test-results.test.mjs",
+    "tests\\tools\\frontend-boundaries.test.mjs",
     "tests\\tools\\source-encoding.test.mjs",
     "tests\\tools\\update-policy-history.test.mjs",
-  ]);
+  ];
+  const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))]);
+  if (code !== 0) return code;
+  return runProcess(nodeCommand, ["tools/frontend-boundaries.mjs", "--quiet"]);
 }
 
 async function runSyntax() {
@@ -193,12 +340,18 @@ async function runSyntax() {
 }
 
 async function runBuild() {
-  return runCmdFile(path.join(projectRoot, "build.cmd"));
+  if (!productionBuildPromise) {
+    console.error("[Build] 本次 runner 首次请求生产构建，后续入口复用同一构建结果。");
+    productionBuildPromise = runCmdFile(path.join(projectRoot, "build.cmd"));
+  } else {
+    console.error("[Build] 复用本次 runner 已完成的生产构建。");
+  }
+  return productionBuildPromise;
 }
 
 async function runDefault(mode, { permissionChecked = false } = {}) {
   if (mode === "admin" && !permissionChecked && !requireAdmin("管理员默认门禁", "admin default")) return 2;
-  for (const step of [runUnit, runWeb, runDocs, runTooling, runSyntax, runBuild]) {
+  for (const step of [runUnit, runWeb, runContracts, runDocs, runTooling, runSyntax, runBuild]) {
     const code = await step();
     if (code !== 0) return code;
   }
@@ -206,6 +359,15 @@ async function runDefault(mode, { permissionChecked = false } = {}) {
 }
 
 async function buildTestHost() {
+  if (testHostBuildPromise) {
+    console.error("[Test Host] 复用本次 runner 已完成的 Test Host 构建。");
+    return testHostBuildPromise;
+  }
+  testHostBuildPromise = buildTestHostCore();
+  return testHostBuildPromise;
+}
+
+async function buildTestHostCore() {
   console.error(`[Test Host] 开始构建 Codex 本地反馈宿主：${testHostDir}`);
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
@@ -265,10 +427,18 @@ async function buildEmulatorFixturePlugin() {
 
 async function runAll(mode, args) {
   if (mode === "admin" && !requireAdmin("管理员全部门禁", "admin all")) return 2;
-  let code = await runDefault(mode, { permissionChecked: mode === "admin" });
-  if (code === 0) code = await runUi(mode, args);
-  if (code === 0) code = await runSystem(mode, args);
-  return code;
+  retainTestHostForRun = mode === "codex";
+  try {
+    let code = await runDefault(mode, { permissionChecked: mode === "admin" });
+    if (code === 0) code = await runUi(mode, args);
+    if (code === 0) code = await runSystem(mode, args);
+    return code;
+  } finally {
+    if (retainTestHostForRun) {
+      cleanTestHost();
+      retainTestHostForRun = false;
+    }
+  }
 }
 
 async function runUi(mode, args) {
@@ -286,10 +456,123 @@ async function runUi(mode, args) {
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   try {
     const playwrightArgs = [playwrightCli, "test"];
-    return await runProcess(nodeCommand, playwrightArgs, { cwd: e2eDir, env });
+    return await runReported(nodeCommand, playwrightArgs, { cwd: e2eDir, env }, "playwright");
   } finally {
-    if (mode === "codex") cleanTestHost();
+    if (mode === "codex" && !retainTestHostForRun) cleanTestHost();
   }
+}
+
+function parseNamedGroups(args, groups, label) {
+  const selected = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--group") {
+      const value = args[index + 1]?.toLowerCase();
+      if (!value || value.startsWith("--")) return { error: "--group 缺少分组名" };
+      selected.push(value);
+      index++;
+      continue;
+    }
+    if (arg.startsWith("--group=")) {
+      const value = arg.slice("--group=".length).toLowerCase();
+      if (!value) return { error: "--group 缺少分组名" };
+      selected.push(value);
+      continue;
+    }
+    return { error: `${label} 不支持参数：${arg}` };
+  }
+  const unknown = selected.filter(group => !groups.includes(group));
+  if (unknown.length > 0) {
+    return {
+      error: `未知 ${label} 分组：${unknown.join(", ")}\n可用分组：${groups.join(" | ")}`,
+    };
+  }
+  return { groups: [...new Set(selected)] };
+}
+
+function matchingFiles(patterns) {
+  return recursiveFiles(projectRoot)
+    .filter(file => {
+      const relative = path.relative(projectRoot, file).replaceAll("\\", "/");
+      return patterns.some(pattern => globToRegExp(pattern).test(relative));
+    })
+    .sort();
+}
+
+function listTestPlan() {
+  return {
+    schemaVersion: 1,
+    commands: {
+      unit: "node tests/run.mjs unit [--group <area>]",
+      frontend: "node tests/run.mjs frontend [--group <group>]",
+      system: "node tests/run.mjs <codex|admin> system [--group <group>] [--dry]",
+      combinations: ["codex default", "codex ui", "codex system", "codex all", "admin default", "admin ui", "admin system", "admin all"],
+    },
+    hostAreas: HOST_TEST_AREAS.map(area => ({
+      key: area.key,
+      paths: area.paths,
+      tests: unitTestFiles([area.key]).map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+    })),
+    frontendGroups: FRONTEND_TEST_GROUPS.map(group => ({
+      key: group.key,
+      paths: group.paths,
+      tests: frontendTestFiles([group.key]).map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+    })),
+    systemGroups: SYSTEM_TEST_GROUPS.map(group => ({
+      key: group.key,
+      suites: group.suitePaths,
+      availableSuites: group.suitePaths.filter(file => fs.existsSync(path.join(projectRoot, file))),
+    })),
+    governanceDomains: GOVERNANCE_DOMAINS.map(domain => ({
+      key: domain.key,
+      paths: domain.paths,
+      tests: matchingFiles(domain.testPaths).map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+    })),
+  };
+}
+
+function printTestPlan(json) {
+  const plan = listTestPlan();
+  if (json) {
+    console.log(JSON.stringify(plan, null, 2));
+    return 0;
+  }
+  console.log(`宿主 Area：${plan.hostAreas.map(area => `${area.key}(${area.tests.length})`).join(" | ")}`);
+  console.log(`前端分组：${plan.frontendGroups.map(group => `${group.key}(${group.tests.length})`).join(" | ")}`);
+  console.log(`System 分组：${plan.systemGroups.map(group => `${group.key}(${group.availableSuites.length}/${group.suites.length})`).join(" | ")}`);
+  return 0;
+}
+
+async function runUnitCommand(args) {
+  if (args.includes("--affected")) args = affectedGroupArgs(args, "host");
+  const parsed = parseNamedGroups(args, HOST_TEST_AREAS.map(area => area.key), "Unit");
+  if (parsed.error) {
+    console.error(parsed.error);
+    return 2;
+  }
+  return runUnit(parsed.groups);
+}
+
+async function runFrontendCommand(args) {
+  const affected = args.includes("--affected");
+  if (affected) args = affectedGroupArgs(args, "frontend");
+  const parsed = parseNamedGroups(args, FRONTEND_TEST_GROUPS.map(group => group.key), "Frontend");
+  if (parsed.error) {
+    console.error(parsed.error);
+    return 2;
+  }
+  const code = await runFrontend(parsed.groups);
+  return code || (affected ? await runProcess(npmCommand, ["run", "build"], { cwd: frontendDir }) : 0);
+}
+
+function affectedGroupArgs(args, kind) {
+  if (args.length !== 1) throw new Error("--affected 必须单独使用");
+  const plan = JSON.parse(process.env.NEXUS_CI_EXECUTION_PLAN || "null");
+  const validation = validateExecutionPlan(plan, { expectedHeadSha: process.env.GITHUB_SHA || "" });
+  if (!validation.ok) throw new Error(validation.errors.join("; "));
+  const groups = plan.testGroups?.[kind];
+  if (!Array.isArray(groups) || groups.length === 0) throw new Error(`计划缺少 ${kind} 测试分组`);
+  return groups.flatMap(group => ["--group", group]);
 }
 
 function parseSystemGroups(args) {
@@ -348,6 +631,16 @@ async function runSystem(mode, args) {
     return 2;
   }
   const suites = selectSystemSuites(parsed.groups);
+  if (parsed.groups.length > 0) {
+    const emptyGroups = parsed.groups.filter(group => {
+      const definition = SYSTEM_SUITE_GROUPS.find(([name]) => name === group);
+      return !definition || definition[1].length === 0;
+    });
+    if (emptyGroups.length > 0) {
+      console.error(`[System Smoke] 选中的分组没有可运行 suite：${emptyGroups.join(", ")}`);
+      return 1;
+    }
+  }
   if (args.includes("--dry")) {
     console.error(`[System Smoke] 干跑模式：共 ${suites.length} 个 suite，未启动构建与运行时。`);
     for (const suite of suites) {
@@ -391,7 +684,7 @@ async function runSystem(mode, args) {
       const label = `${group}/${runtimeName} (${path.basename(file)})`;
       console.error(`[System Smoke] 开始 ${label}`);
       const startedAt = Date.now();
-      const code = await runProcess(
+      const code = await runReported(
         nodeCommand,
         ["--test", "--test-concurrency=1", file],
         { env: suiteEnv, timeoutMs: suiteTimeoutMs },
@@ -402,7 +695,7 @@ async function runSystem(mode, args) {
     return 0;
   } finally {
     if (suites.some(suite => suite.group === "emulator")) cleanEmulatorFixturePlugin();
-    if (mode === "codex") cleanTestHost();
+    if (mode === "codex" && !retainTestHostForRun) cleanTestHost();
   }
 }
 
@@ -411,7 +704,10 @@ function printUsage() {
   console.error("  node tests\\run.mjs codex <default|ui|system|all> [--realtime]");
   console.error("  node tests\\run.mjs admin <default|ui|system|all> [--realtime]");
   console.error(`  node tests\\run.mjs <codex|admin> system [${SYSTEM_GROUP_NAMES.join("|")}] [--realtime] [--dry]`);
-  console.error("  node tests\\run.mjs unit|web|docs|tooling|syntax|build");
+  console.error(`  node tests\\run.mjs unit [--group ${HOST_TEST_AREAS.map(area => area.key).join("|")}]`);
+  console.error(`  node tests\\run.mjs frontend [--group ${FRONTEND_TEST_GROUPS.map(group => group.key).join("|")}]`);
+  console.error("  node tests\\run.mjs list --json");
+  console.error("  node tests\\run.mjs web|contract|docs|tooling|syntax|build");
   console.error("system 省略分组时运行全部 suite；指定分组时按影响域运行，可用 --group <分组> 重复指定。");
   console.error("system --dry 只列出将要执行的 suite，不构建也不启动运行时。");
   console.error("正式组合入口必须显式指定 codex 或 admin；default/ui/system/all 不能省略模式。");
@@ -444,7 +740,21 @@ let exitCode;
 try {
   switch (command.toLowerCase()) {
     case "unit":
-      exitCode = await runUnit();
+      exitCode = await runUnitCommand(args);
+      break;
+    case "frontend":
+      exitCode = await runFrontendCommand(args);
+      break;
+    case "contract":
+      exitCode = args.length ? 2 : await runContracts();
+      break;
+    case "list":
+      if (args.length > 1 || (args.length === 1 && args[0] !== "--json")) {
+        printUsage();
+        exitCode = 2;
+      } else {
+        exitCode = printTestPlan(args.includes("--json"));
+      }
       break;
     case "web":
       exitCode = await runWeb();
@@ -484,3 +794,46 @@ try {
   exitCode = 1;
 }
 process.exitCode = exitCode;
+
+if (process.env.NEXUS_CI_MANIFEST && command !== "list" && !args.includes("--dry")) {
+  const manifest = {
+    schemaVersion: 1,
+    domainId: ciExecution.domainId || command.toLowerCase() || "runner",
+    headSha: process.env.GITHUB_SHA || process.env.NEXUS_CI_HEAD_SHA || "local",
+    repositorySha: process.env.NEXUS_CI_REPOSITORY_SHA || process.env.GITHUB_SHA || "local",
+    planDigest: process.env.NEXUS_CI_PLAN_DIGEST || "",
+    buildFingerprint: process.env.NEXUS_CI_BUILD_FINGERPRINT || createBuildFingerprint({
+      mode: command.toLowerCase() === "codex" ? "test-host" : "production",
+    }),
+    mode: command.toLowerCase() === "codex" ? "test-host" : "production",
+    result: exitCode === 0 ? "success" : "failure",
+    testCount: ciExecution.testCount,
+    passed: ciExecution.passed,
+    failed: ciExecution.failed,
+    skipped: ciExecution.skipped,
+    exitCode,
+    manifestPresent: true,
+  };
+  try {
+    const manifestPath = path.resolve(process.env.NEXUS_CI_MANIFEST);
+    if (fs.existsSync(manifestPath)) {
+      const previous = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      for (const key of ["domainId", "headSha", "repositorySha", "planDigest"]) {
+        if (previous[key] !== manifest[key]) throw new Error(`已有 manifest 的 ${key} 不匹配`);
+      }
+      for (const key of ["testCount", "passed", "failed", "skipped"]) {
+        if (!Number.isInteger(previous[key]) || previous[key] < 0) throw new Error(`已有 manifest 的 ${key} 无效`);
+        manifest[key] += previous[key];
+      }
+      if (previous.result !== "success") {
+        manifest.result = "failure";
+        manifest.exitCode = previous.exitCode || 1;
+      }
+    }
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  } catch (error) {
+    console.error(`[CI manifest] 写入失败：${error.message}`);
+    if (exitCode === 0) process.exitCode = 1;
+  }
+}

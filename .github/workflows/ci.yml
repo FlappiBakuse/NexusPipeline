@@ -9,6 +9,11 @@ name: CI
     # 每周一 03:17 UTC 全量回归，覆盖本轮改动未触及的 Gate。
     - cron: "17 3 * * 1"
   workflow_dispatch:
+    inputs:
+      plugins_ref:
+        description: 官方插件候选完整 commit SHA；留空使用 plugins.lock.json
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -30,6 +35,9 @@ jobs:
       system_execution: ${{ steps.domains.outputs.system_execution }}
       system_emulator: ${{ steps.domains.outputs.system_emulator }}
       system_update: ${{ steps.domains.outputs.system_update }}
+      plan_digest: ${{ steps.domains.outputs.plan_digest }}
+      plan_valid: ${{ steps.domains.outputs.plan_valid }}
+      execution_plan: ${{ steps.domains.outputs.execution_plan }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -41,8 +49,11 @@ jobs:
         with:
           node-version: 24
 
-      - name: 校验影响域映射
-        run: node --test tests/tools/ci-domains.test.mjs
+      - name: 安装治理解析器
+        run: npm ci --prefix tools --no-audit --no-fund
+
+      - name: 校验影响域、结果汇总与前端边界
+        run: node tests/run.mjs tooling
 
       - name: 计算影响域
         id: domains
@@ -50,7 +61,7 @@ jobs:
         run: |
           if ('${{ github.event_name }}' -eq 'pull_request') {
             node tools/ci-changes.mjs --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.sha }}' --github-output "$env:GITHUB_OUTPUT"
-          } elseif ('${{ github.event_name }}' -eq 'workflow_dispatch') {
+          } elseif ('${{ github.event_name }}' -eq 'schedule' -or '${{ github.event_name }}' -eq 'workflow_dispatch') {
             node tools/ci-changes.mjs --all --github-output "$env:GITHUB_OUTPUT"
           } else {
             node tools/ci-changes.mjs --base '${{ github.event.before }}' --head '${{ github.sha }}' --github-output "$env:GITHUB_OUTPUT"
@@ -59,10 +70,18 @@ jobs:
   # Gate A：前端单元与静态构建，纯 Node 工具链。
   frontend-unit:
     name: Gate A 前端 Unit + Build
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.frontend == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}/nexus-ci-frontend.json
+      NEXUS_CI_DOMAIN: frontend
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -72,21 +91,48 @@ jobs:
         with:
           node-version: 24
 
-      - name: 依赖安装 + 类型检查 + Vitest + 静态构建
+      - name: 安装依赖
         working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: 类型检查 + Vitest + 静态构建
+        env:
+          NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+        run: node tests/run.mjs frontend --affected
+
+      - name: 导出前端结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: bash
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
         run: |
-          npm ci --no-audit --no-fund
-          npm run typecheck
-          npm test
-          npm run build
+          if [ -f "$NEXUS_CI_MANIFEST" ]; then
+            manifest_json="$(node --input-type=module -e 'import fs from "node:fs"; const file=process.env.NEXUS_CI_MANIFEST; const value=JSON.parse(fs.readFileSync(file, "utf8")); value.result=process.env.NEXUS_CI_RESULT; process.stdout.write(JSON.stringify(value));')"
+            {
+              echo "json<<NEXUS_CI_MANIFEST"
+              printf '%s\n' "$manifest_json"
+              echo "NEXUS_CI_MANIFEST"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'json={"result":"missing"}' >> "$GITHUB_OUTPUT"
+          fi
 
   # Gate B：宿主 C# 单元与组件门禁；编译校验覆盖生产工程，测试工程随 dotnet test 一起编译。
   host-core:
     name: Gate B 宿主 Unit + Component
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.host == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.host == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-host.json
+      NEXUS_CI_DOMAIN: host
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -107,43 +153,119 @@ jobs:
 
       - name: 宿主 Unit + Component
         shell: pwsh
-        run: node tests\run.mjs unit
+        env:
+          NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+        run: node tests\run.mjs unit --affected
+
+      - name: 导出宿主结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
 
   # Gate C：文档与 i18n 一致性，只需要 Node。
   docs-i18n:
     name: Gate C 文档 + i18n
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.docs == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.docs == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}/nexus-ci-docs.json
+      NEXUS_CI_DOMAIN: docs
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
+
+      - name: 读取官方插件固定基线
+        id: plugins-lock
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
+        run: node tools/ci-lock.mjs plugins.lock.json
+
+      - name: 检出官方插件文档交叉校验基线
+        uses: actions/checkout@v4
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ steps.plugins-lock.outputs.ref }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
+      - name: 安装治理工具依赖
+        run: npm ci --prefix tools --no-audit --no-fund
+
       - name: 文档与 i18n 一致性
         run: node tests/run.mjs docs
+
+      - name: 导出文档结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: bash
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if [ -f "$NEXUS_CI_MANIFEST" ]; then
+            manifest_json="$(node --input-type=module -e 'import fs from "node:fs"; const file=process.env.NEXUS_CI_MANIFEST; const value=JSON.parse(fs.readFileSync(file, "utf8")); value.result=process.env.NEXUS_CI_RESULT; process.stdout.write(JSON.stringify(value));')"
+            {
+              echo "json<<NEXUS_CI_MANIFEST"
+              printf '%s\n' "$manifest_json"
+              echo "NEXUS_CI_MANIFEST"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'json={"result":"missing"}' >> "$GITHUB_OUTPUT"
+          fi
 
   # Gate D：宿主 Plugin API、公共 nxp-* 控件与官方插件 Frontend API 契约。
   plugin-contract:
     name: Gate D 插件契约
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.plugin == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.plugin == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 20
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-plugin.json
+      NEXUS_CI_DOMAIN: plugin
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出宿主代码
         uses: actions/checkout@v4
+
+      - name: 读取官方插件固定基线
+        id: plugins-lock
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
+        run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件仓库（Frontend API 契约夹具）
         uses: actions/checkout@v4
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
-          ref: main
+          ref: ${{ steps.plugins-lock.outputs.ref }}
           path: NexusPipeline-Plugins
 
       - name: 安装 .NET 8 SDK
@@ -156,36 +278,63 @@ jobs:
         with:
           node-version: 24
 
-      - name: Plugin API 编译校验与契约测试
-        shell: pwsh
+      - name: 安装前端与官方插件测试依赖
         run: |
-          dotnet build src\NexusPipeline.Plugin.Abstractions\NexusPipeline.Plugin.Abstractions.csproj -c Release --nologo
+          npm ci --prefix frontend --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests\run.mjs unit
+          npm ci --prefix NexusPipeline-Plugins --no-audit --no-fund
 
-      - name: Frontend API 契约（含 plugin-bridge 契约用例）
-        working-directory: frontend
+      - name: 插件宿主契约（由 Gate B 覆盖时复用）
+        if: needs.changes.outputs.host != 'true'
+        run: node tests/run.mjs unit --group plugins
+
+      - name: 公共 UI 与桥接（由 Gate A 覆盖时复用）
+        if: needs.changes.outputs.frontend != 'true'
+        run: node tests/run.mjs frontend --group ui --group bridge
+
+      - name: 官方插件真实装配契约
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}/NexusPipeline-Plugins
+        run: node tests/run.mjs contract
+
+      - name: 官方插件 Frontend API 与源码布局
         run: |
-          npm ci --no-audit --no-fund
-          npm test
+          node NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs --host-root .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tests/tools/plugin-source-layout.test.mjs
 
-      - name: 官方插件 Frontend API 契约
-        working-directory: NexusPipeline-Plugins
-        run: |
-          npm ci --no-audit --no-fund
-          node tools\Test-FrontendPlugins.mjs
-
-      - name: 官方插件 README 源码目录契约
+      - name: 导出插件结果 manifest
+        if: always()
+        id: ci-manifest
         shell: pwsh
-        run: node tests\tools\plugin-source-layout.test.mjs
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
 
   # Gate E：管理员 UI Smoke，保留完整性自检、NEXUS_TIME_SCALE 与失败产物上传。
   ui-smoke:
     name: Gate E 管理员 UI Smoke
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.ui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.ui == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-ui.json
+      NEXUS_CI_DOMAIN: ui
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -233,15 +382,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 导出 UI 结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
   # Gate F：System Runtime 按影响域拆成独立作业，各自调用 tests\run.mjs 的正式分域入口。
   system-runtime-mcp:
     name: Gate F System Runtime/MCP
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.system_runtime == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_runtime == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       NEXUS_SYSTEM_WEB_PORT: "58831"
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-system-runtime.json
+      NEXUS_CI_DOMAIN: system_runtime
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -273,7 +446,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: node tests\run.mjs admin system runtime
+        run: node tests\run.mjs admin system --group runtime --group control --group config --group plugins
 
       - name: 上传 System Smoke 失败诊断
         if: ${{ failure() }}
@@ -286,14 +459,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 导出 System Runtime 结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
   system-execution:
     name: Gate F System Execution
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.system_execution == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_execution == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       NEXUS_SYSTEM_WEB_PORT: "58832"
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-system-execution.json
+      NEXUS_CI_DOMAIN: system_execution
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -325,7 +523,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
-        run: node tests\run.mjs admin system execution
+        run: node tests\run.mjs admin system --group execution --group judge
 
       - name: 上传 System Smoke 失败诊断
         if: ${{ failure() }}
@@ -338,14 +536,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 导出 System Execution 结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
   system-emulator:
     name: Gate F System Emulator
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.system_emulator == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_emulator == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       NEXUS_SYSTEM_WEB_PORT: "58833"
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-system-emulator.json
+      NEXUS_CI_DOMAIN: system_emulator
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -390,14 +613,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 导出 System Emulator 结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
   system-update:
     name: Gate F System Update
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
-    if: ${{ needs.changes.outputs.system_update == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ needs.changes.outputs.system_update == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 30
     env:
       NEXUS_SYSTEM_WEB_PORT: "58834"
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-system-update.json
+      NEXUS_CI_DOMAIN: system_update
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -450,13 +698,39 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 导出 System Update 结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
   # 每周计划与手动触发执行完整管理员门禁：Unit + Component + Web + Docs + Syntax + Build + UI + 全部 System suite。
   full-regression:
     name: 全量回归（计划 / 手动）
+    outputs:
+      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
     timeout-minutes: 120
+    env:
+      NEXUS_CI_MANIFEST: ${{ runner.temp }}\nexus-ci-full-regression.json
+      NEXUS_CI_DOMAIN: full-regression
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -470,6 +744,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+
+      - name: 读取官方插件固定基线
+        id: plugins-lock
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
+        run: node tools/ci-lock.mjs plugins.lock.json
+
+      - name: 检出官方插件固定基线
+        uses: actions/checkout@v4
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ steps.plugins-lock.outputs.ref }}
+          path: NexusPipeline-Plugins
+
+      - name: 安装治理与插件依赖
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix NexusPipeline-Plugins --no-audit --no-fund
 
       - name: 管理员完整性自检
         shell: pwsh
@@ -494,6 +787,7 @@ jobs:
         env:
           NEXUS_TIME_SCALE: "10"
         run: node tests\run.mjs admin all
+        # 官方插件路径由 runner 解析当前工作区检出。
 
       - name: 上传全量回归失败诊断
         if: ${{ failure() }}
@@ -505,3 +799,126 @@ jobs:
             tests/e2e/test-results
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: 导出全量回归结果 manifest
+        if: always()
+        id: ci-manifest
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
+          } else {
+            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
+  # required-summary：依据 changes 的 execution-plan 只裁定本次选中的物理 job，记录跳过与重复执行。
+  required-summary:
+    name: Required Summary
+    needs:
+      - changes
+      - frontend-unit
+      - host-core
+      - docs-i18n
+      - plugin-contract
+      - ui-smoke
+      - system-runtime-mcp
+      - system-execution
+      - system-emulator
+      - system-update
+      - full-regression
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 生成并校验 required summary
+        env:
+          PLAN_JSON: ${{ needs.changes.outputs.execution_plan }}
+          SELECTOR_RESULT: ${{ needs.changes.result }}
+          SELECTOR_PLAN_VALID: ${{ needs.changes.outputs.plan_valid }}
+          SELECTOR_HEAD_SHA: ${{ github.sha }}
+          SELECTOR_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+          FRONTEND_RESULT: ${{ needs['frontend-unit'].result }}
+          FRONTEND_MANIFEST: ${{ needs['frontend-unit'].outputs.manifest }}
+          HOST_RESULT: ${{ needs['host-core'].result }}
+          HOST_MANIFEST: ${{ needs['host-core'].outputs.manifest }}
+          DOCS_RESULT: ${{ needs['docs-i18n'].result }}
+          DOCS_MANIFEST: ${{ needs['docs-i18n'].outputs.manifest }}
+          PLUGIN_RESULT: ${{ needs['plugin-contract'].result }}
+          PLUGIN_MANIFEST: ${{ needs['plugin-contract'].outputs.manifest }}
+          UI_RESULT: ${{ needs['ui-smoke'].result }}
+          UI_MANIFEST: ${{ needs['ui-smoke'].outputs.manifest }}
+          SYSTEM_RUNTIME_RESULT: ${{ needs['system-runtime-mcp'].result }}
+          SYSTEM_RUNTIME_MANIFEST: ${{ needs['system-runtime-mcp'].outputs.manifest }}
+          SYSTEM_EXECUTION_RESULT: ${{ needs['system-execution'].result }}
+          SYSTEM_EXECUTION_MANIFEST: ${{ needs['system-execution'].outputs.manifest }}
+          SYSTEM_EMULATOR_RESULT: ${{ needs['system-emulator'].result }}
+          SYSTEM_EMULATOR_MANIFEST: ${{ needs['system-emulator'].outputs.manifest }}
+          SYSTEM_UPDATE_RESULT: ${{ needs['system-update'].result }}
+          SYSTEM_UPDATE_MANIFEST: ${{ needs['system-update'].outputs.manifest }}
+          FULL_RESULT: ${{ needs['full-regression'].result }}
+          FULL_MANIFEST: ${{ needs['full-regression'].outputs.manifest }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          import path from "node:path";
+
+          const plan = JSON.parse(process.env.PLAN_JSON || "{}");
+          const jobs = {};
+          const jobInputs = {
+            "frontend-unit": ["FRONTEND_RESULT", "FRONTEND_MANIFEST"],
+            "host-core": ["HOST_RESULT", "HOST_MANIFEST"],
+            "docs-i18n": ["DOCS_RESULT", "DOCS_MANIFEST"],
+            "plugin-contract": ["PLUGIN_RESULT", "PLUGIN_MANIFEST"],
+            "ui-smoke": ["UI_RESULT", "UI_MANIFEST"],
+            "system-runtime-mcp": ["SYSTEM_RUNTIME_RESULT", "SYSTEM_RUNTIME_MANIFEST"],
+            "system-execution": ["SYSTEM_EXECUTION_RESULT", "SYSTEM_EXECUTION_MANIFEST"],
+            "system-emulator": ["SYSTEM_EMULATOR_RESULT", "SYSTEM_EMULATOR_MANIFEST"],
+            "system-update": ["SYSTEM_UPDATE_RESULT", "SYSTEM_UPDATE_MANIFEST"],
+            "full-regression": ["FULL_RESULT", "FULL_MANIFEST"],
+          };
+          for (const [jobId, [resultName, manifestName]] of Object.entries(jobInputs)) {
+            const result = process.env[resultName] || "missing";
+            const raw = process.env[manifestName] || "";
+            if (!raw) {
+              jobs[jobId] = { result };
+              continue;
+            }
+            try {
+              const manifest = JSON.parse(raw);
+              jobs[jobId] = { ...manifest, result };
+            } catch (error) {
+              jobs[jobId] = { result, manifestParseError: error.message };
+            }
+          }
+
+          const results = {
+            selector: {
+              result: process.env.SELECTOR_RESULT || "missing",
+              planValid: process.env.SELECTOR_PLAN_VALID === "true",
+              headSha: process.env.SELECTOR_HEAD_SHA || "",
+              planDigest: process.env.SELECTOR_PLAN_DIGEST || "",
+            },
+            jobs,
+          };
+          const planPath = path.join(process.env.RUNNER_TEMP, "nexus-ci-execution-plan.json");
+          const resultsPath = path.join(process.env.RUNNER_TEMP, "nexus-ci-results.json");
+          fs.writeFileSync(planPath, `${JSON.stringify(plan)}\n`, "utf8");
+          fs.writeFileSync(resultsPath, `${JSON.stringify(results)}\n`, "utf8");
+          process.stdout.write(`[required-summary] plan=${planPath} results=${resultsPath}\n`);
+          NODE
+          node tools/ci-summary.mjs --plan "$RUNNER_TEMP/nexus-ci-execution-plan.json" --results "$RUNNER_TEMP/nexus-ci-results.json" --headSha "$GITHUB_SHA" --repositorySha "$GITHUB_SHA"
