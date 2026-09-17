@@ -95,7 +95,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/frontend
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -112,6 +111,7 @@ jobs:
       - name: 类型检查 + Vitest + 静态构建
         env:
           NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/frontend
         run: node tests/run.mjs frontend --affected
 
       - name: 上传前端原始测试报告
@@ -163,7 +163,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/host
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -188,6 +187,7 @@ jobs:
         env:
           NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
           NEXUS_CI_BUILD_STATUS: ${{ steps.host-build.outcome }}
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/host
         run: node tests\run.mjs unit --affected
 
       - name: 上传宿主原始测试报告
@@ -238,7 +238,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/docs
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -266,6 +265,8 @@ jobs:
         run: npm ci --prefix tools --no-audit --no-fund
 
       - name: 文档与 i18n 一致性
+        env:
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/docs
         run: node tests/run.mjs docs
 
       - name: 上传文档原始测试报告
@@ -317,7 +318,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/plugin
     steps:
       - name: 检出宿主代码
         uses: actions/checkout@v4
@@ -353,15 +353,20 @@ jobs:
 
       - name: 插件宿主契约（由 Gate B 覆盖时复用）
         if: needs.changes.outputs.host != 'true'
+        env:
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/plugin
         run: node tests/run.mjs unit --group plugins
 
       - name: 公共 UI 与桥接（由 Gate A 覆盖时复用）
         if: needs.changes.outputs.frontend != 'true'
+        env:
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/plugin
         run: node tests/run.mjs frontend --group ui --group bridge
 
       - name: 官方插件真实装配与源码布局契约
         env:
           NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}/NexusPipeline-Plugins
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/plugin
         run: node tests/run.mjs contract
 
       - name: 上传插件原始测试报告
@@ -412,7 +417,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/ui
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -449,6 +453,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/ui
         run: node tests\run.mjs admin ui
 
       - name: 上传 Playwright 失败诊断
@@ -509,7 +514,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-runtime
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -541,6 +545,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-runtime
         run: node tests\run.mjs admin system --group runtime --group control --group config --group plugins
 
       - name: 上传 System Smoke 失败诊断
@@ -603,7 +608,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-execution
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -635,6 +639,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-execution
         run: node tests\run.mjs admin system --group execution --group judge
 
       - name: 上传 System Smoke 失败诊断
@@ -697,7 +702,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-emulator
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -729,6 +733,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-emulator
         run: node tests\run.mjs admin system emulator
 
       - name: 上传 System Smoke 失败诊断
@@ -791,7 +796,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-update
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -831,6 +835,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-update
         run: node tests\run.mjs admin system update
 
       - name: 上传 System Smoke 失败诊断
@@ -893,7 +898,6 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
       NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/full-regression
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -949,6 +953,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/full-regression
         run: node tests\run.mjs admin all
         # 官方插件路径由 runner 解析当前工作区检出。
 
