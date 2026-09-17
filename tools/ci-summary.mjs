@@ -365,7 +365,7 @@ export function expectedArtifactDigest({ buildFingerprint, sourceDigest, buildIn
   return sha256Json({ buildFingerprint, sourceDigest, buildInputsDigest, counterpartSha, mode, physicalJobId });
 }
 
-function checkChecks(jobId, item, issues, requiredChecks = []) {
+function checkChecks(jobId, item, issues, requiredChecks = [], delegatedChecks = new Set()) {
   const checks = Array.isArray(item.checks)
     ? item.checks
     : asObject(item.checks)
@@ -386,11 +386,45 @@ function checkChecks(jobId, item, issues, requiredChecks = []) {
   }
   for (const checkId of requiredChecks) {
     const status = statuses.get(checkId);
-    if (!status) issues.push(`${jobId}: 缺少必需 check ${checkId}`);
-    else if (!["success", "passed", "pass"].includes(status)) issues.push(`${jobId}: 必需 check ${checkId} 未通过（${status}）`);
+    if (!status) {
+      if (!delegatedChecks.has(checkId)) issues.push(`${jobId}: 缺少必需 check ${checkId}`);
+    } else if (!["success", "passed", "pass"].includes(status)) {
+      issues.push(`${jobId}: 必需 check ${checkId} 未通过（${status}）`);
+    }
   }
   if (item.buildStatus !== undefined && String(item.buildStatus).toLowerCase() !== "success") issues.push(`${jobId}: buildStatus 未通过`);
   if (item.typecheckStatus !== undefined && String(item.typecheckStatus).toLowerCase() !== "success") issues.push(`${jobId}: typecheckStatus 未通过`);
+}
+
+function hasSuccessfulCheck(value, checkId) {
+  const item = asObject(value) || {};
+  const checks = Array.isArray(item.checks)
+    ? item.checks
+    : asObject(item.checks)
+      ? Object.entries(item.checks).map(([id, status]) => ({ checkId: id, ...(asObject(status) || { status }) }))
+      : [];
+  return checks.some(check => {
+    const id = String(check?.checkId || check?.id || "");
+    const status = String(check?.status || check?.result || "").toLowerCase();
+    return id === checkId && ["success", "passed", "pass"].includes(status);
+  });
+}
+
+/**
+ * Gate D 在宿主与前端 Gate 都已选中时复用两者的 build/tests 结果；
+ * 只有两个 provider Job 均已计划且成功时，才允许把缺失项作为已委托检查。
+ */
+function delegatedChecksForJob(jobId, expectedGroups, expectedByJob, records) {
+  if (jobId !== "plugin-contract" || !expectedGroups.some(group => group.groupId === "domain:plugin")) return new Set();
+  const providerJobIds = ["host-core", "frontend-unit"];
+  if (!providerJobIds.every(providerId => (expectedByJob.get(providerId) || []).length > 0)) return new Set();
+  const providers = providerJobIds.map(providerId => records.get(providerId));
+  if (!providers.every(provider => (
+    jobResult(provider) === "success"
+    && hasSuccessfulCheck(provider, "build")
+    && hasSuccessfulCheck(provider, "tests")
+  ))) return new Set();
+  return new Set(["build", "tests"]);
 }
 
 function expectedJobDomainId(jobId, groups) {
@@ -404,7 +438,7 @@ function expectedJobDomainId(jobId, groups) {
   return ids.size === 1 ? [...ids][0] : "";
 }
 
-function checkJobIdentity(jobId, value, { plan, expectedHeadSha, expectedRepositorySha, expectedPlanDigest, expectedGroups }) {
+function checkJobIdentity(jobId, value, { plan, expectedHeadSha, expectedRepositorySha, expectedPlanDigest, expectedGroups, delegatedChecks = new Set() }) {
   const issues = [];
   const result = jobResult(value);
   if (!VALID_RESULTS.has(result)) issues.push(`${jobId}: 缺少或无效 result`);
@@ -425,7 +459,7 @@ function checkJobIdentity(jobId, value, { plan, expectedHeadSha, expectedReposit
   const expectedDomainId = expectedJobDomainId(jobId, expectedGroups);
   if (expectedDomainId && item.domainId !== expectedDomainId) issues.push(`${jobId}: domainId 不匹配`);
   const requiredChecks = [...new Set(expectedGroups.flatMap(group => group.requiredChecks || []))];
-  checkChecks(jobId, item, issues, requiredChecks);
+  checkChecks(jobId, item, issues, requiredChecks, delegatedChecks);
 
   const expectedModes = new Set(expectedGroups.map(group => group.mode));
   if (expectedModes.size === 1 && item.mode !== [...expectedModes][0]) issues.push(`${jobId}: mode 不匹配`);
@@ -605,15 +639,17 @@ export function evaluateRequiredSummary(input) {
         }
         continue;
       }
+      const expectedForJob = expectedByJob.get(jobId) || [];
+      const delegatedChecks = delegatedChecksForJob(jobId, expectedForJob, expectedByJob, records);
       issues.push(...checkJobIdentity(jobId, item, {
         plan,
         expectedHeadSha,
         expectedRepositorySha: String(value.expectedRepositorySha || ""),
         expectedPlanDigest: planDigest,
-        expectedGroups: expectedByJob.get(jobId) || [],
+        expectedGroups: expectedForJob,
+        delegatedChecks,
       }));
       const groupMap = normalizeGroupMap(item);
-      const expectedForJob = expectedByJob.get(jobId) || [];
       const expectedIds = new Set(expectedForJob.map(group => group.groupId));
       for (const group of expectedForJob) {
         const candidates = groupMap.get(group.groupId) || [];

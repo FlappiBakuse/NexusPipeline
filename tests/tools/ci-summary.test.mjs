@@ -348,6 +348,19 @@ test("Plugin Contract Job 显式承接未选 Gate 的宿主插件与公共 UI �
   assert.deepEqual(result.missingGroups, []);
 });
 
+test("Plugin Contract Job 在宿主与前端 Gate 均选中时复用两者的 build/tests", () => {
+  const plan = planFor(["plugins.lock.json"]);
+  assert.equal(plan.all, false);
+  assert.deepEqual(
+    plan.selectedGroups.filter(group => group.physicalJobId === "plugin-contract").map(group => group.groupId),
+    ["domain:plugin"],
+  );
+  const input = inputFor(plan);
+  input.jobs["plugin-contract"].checks = input.jobs["plugin-contract"].checks.filter(check => check.checkId === "contract");
+  const result = evaluateRequiredSummary(input);
+  assert.equal(result.ok, true, result.issues.join("\n"));
+});
+
 test("计划摘要和结构校验拒绝未知域与篡改 digest", () => {
   const plan = planFor();
   assert.equal(executionPlanDigest(plan), plan.planDigest);
