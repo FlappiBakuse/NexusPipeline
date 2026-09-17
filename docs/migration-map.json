@@ -1,0 +1,608 @@
+[
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "1-设计理念",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "1-设计理念"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "2-核心概念",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "2-核心概念"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "3-核心运行流程",
+    "target": "docs/architecture/execution.md",
+    "targetAnchor": "3-核心运行流程"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "31-脚本运行完整链路",
+    "target": "docs/architecture/execution.md",
+    "targetAnchor": "31-脚本运行完整链路"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "32-队列执行链路",
+    "target": "docs/architecture/scheduling.md",
+    "targetAnchor": "32-队列执行链路"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "33-手动执行脚本",
+    "target": "docs/architecture/execution.md",
+    "targetAnchor": "33-手动执行脚本"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "34-统一控制面与-cli",
+    "target": "docs/architecture/control.md",
+    "targetAnchor": "34-统一控制面与-cli"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "35-mcp-agent-控制面",
+    "target": "docs/architecture/control.md",
+    "targetAnchor": "35-mcp-agent-控制面"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "36-定期检查与闲时自动更新",
+    "target": "docs/architecture/update.md",
+    "targetAnchor": "36-定期检查与闲时自动更新"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "4-配置交换机制",
+    "target": "docs/architecture/configuration.md",
+    "targetAnchor": "4-配置交换机制"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "41-数据目录",
+    "target": "docs/architecture/configuration.md",
+    "targetAnchor": "41-数据目录"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "42-运行前prepareforrun与运行后restoreafterrun",
+    "target": "docs/architecture/configuration.md",
+    "targetAnchor": "42-运行前prepareforrun与运行后restoreafterrun"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "43-插队替换配置replaceconfigs",
+    "target": "docs/architecture/configuration.md",
+    "targetAnchor": "43-插队替换配置replaceconfigs"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "44-崩溃恢复自愈",
+    "target": "docs/architecture/recovery.md",
+    "targetAnchor": "44-崩溃恢复自愈"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "45-自动更新配置config-store-反向同步",
+    "target": "docs/architecture/configuration.md",
+    "targetAnchor": "45-自动更新配置config-store-反向同步"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "5-完成判定机制",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "5-完成判定机制"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "51-判定优先级",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "51-判定优先级"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "52-判断脚本输入与触发",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "52-判断脚本输入与触发"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "53-判断脚本信任边界",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "53-判断脚本信任边界"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "54-关键字模式",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "54-关键字模式"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "6-日志监控机制",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "6-日志监控机制"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "61-日志路径解析logpatternresolvefile",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "61-日志路径解析logpatternresolvefile"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "62-增量读取与三种文件形态",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "62-增量读取与三种文件形态"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "63-超时语义",
+    "target": "docs/architecture/judgement-logs.md",
+    "targetAnchor": "63-超时语义"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "7-通知与数据落盘",
+    "target": "docs/architecture/persistence-history.md",
+    "targetAnchor": "7-通知与数据落盘"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "71-通知分发",
+    "target": "docs/architecture/observability.md",
+    "targetAnchor": "71-通知分发"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "72-历史与日志落盘",
+    "target": "docs/architecture/persistence-history.md",
+    "targetAnchor": "72-历史与日志落盘"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "73-插件仓库与安装事务",
+    "target": "docs/architecture/plugins.md",
+    "targetAnchor": "73-插件仓库与安装事务"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "74-宿主代理设置与网络边界",
+    "target": "docs/architecture/observability.md",
+    "targetAnchor": "74-宿主代理设置与网络边界"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "75-运行状态目录",
+    "target": "docs/architecture/persistence-history.md",
+    "targetAnchor": "75-运行状态目录"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "76-文件布局治理规范",
+    "target": "docs/architecture/persistence-history.md",
+    "targetAnchor": "76-文件布局治理规范"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "8-已知行为与边界",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "8-已知行为与边界"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "81-已接受的设计约束",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "81-已接受的设计约束"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "10-架构与模块定位开发者导航",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "10-架构与模块定位开发者导航"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "101-总体结构",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "101-总体结构"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "102-后端分层与依赖方向只允许向下依赖",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "102-后端分层与依赖方向只允许向下依赖"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "103-关键类职责",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "103-关键类职责"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "104-public-internal-约定",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "104-public-internal-约定"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "105-新增-api-的落点",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "105-新增-api-的落点"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "106-控制面边界",
+    "target": "docs/architecture/control.md",
+    "targetAnchor": "106-控制面边界"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "107-前端分层",
+    "target": "docs/architecture/frontend.md",
+    "targetAnchor": "107-前端分层"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "108-插件扩展指南",
+    "target": "docs/architecture/plugins.md",
+    "targetAnchor": "108-插件扩展指南"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "109-功能定位指南找代码",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "109-功能定位指南找代码"
+  },
+  {
+    "source": "docs/DESIGN.md",
+    "anchor": "1010-数据流速览",
+    "target": "docs/architecture/overview.md",
+    "targetAnchor": "1010-数据流速览"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "目录结构",
+    "target": "docs/reference/plugin-api/manifest.md",
+    "targetAnchor": "目录结构"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "managed-code-c-插件plugin-api-v18",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "managed-code-c-插件plugin-api-v18"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v13-通用扩展端口",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v13-通用扩展端口"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "声明式-ui",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "声明式-ui"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "作用域数据",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "作用域数据"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "插件自有-web-api",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "插件自有-web-api"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "历史展示",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "历史展示"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v15-插件本地化",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v15-插件本地化"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v16-二进制资产存储",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v16-二进制资产存储"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v16-二进制-web-api-传输",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v16-二进制-web-api-传输"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v17-模拟器支持扩展",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v17-模拟器支持扩展"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "v18-通知收件人覆盖",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "v18-通知收件人覆盖"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "旧外观数据搬迁",
+    "target": "docs/reference/plugin-api/managed.md",
+    "targetAnchor": "旧外观数据搬迁"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "前端插件运行时frontend-api-15",
+    "target": "docs/reference/plugin-api/frontend.md",
+    "targetAnchor": "前端插件运行时frontend-api-15"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "pluginjson根文件",
+    "target": "docs/reference/plugin-api/manifest.md",
+    "targetAnchor": "pluginjson根文件"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "配置校验脚本",
+    "target": "docs/reference/plugin-api/manifest.md",
+    "targetAnchor": "配置校验脚本"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "resolvejson推导配置",
+    "target": "docs/reference/plugin-api/data-specialized.md",
+    "targetAnchor": "resolvejson推导配置"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "判断脚本",
+    "target": "docs/reference/plugin-api/data-specialized.md",
+    "targetAnchor": "判断脚本"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "判断脚本只读探针",
+    "target": "docs/reference/plugin-api/data-specialized.md",
+    "targetAnchor": "判断脚本只读探针"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "判断脚本截图",
+    "target": "docs/reference/plugin-api/data-specialized.md",
+    "targetAnchor": "判断脚本截图"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "配置还原描述config-restorejson",
+    "target": "docs/reference/plugin-api/data-specialized.md",
+    "targetAnchor": "配置还原描述config-restorejson"
+  },
+  {
+    "source": "docs/PLUGIN_API.md",
+    "anchor": "构建与部署",
+    "target": "docs/reference/plugin-api/manifest.md",
+    "targetAnchor": "构建与部署"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "1-环境要求",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "1-环境要求"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "2-从源码编译",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "2-从源码编译"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "3-运行程序",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "3-运行程序"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "4-测试入口",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "4-测试入口"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "5-调试技巧",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "5-调试技巧"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "51-日志",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "51-日志"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "52-测试钩子",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "52-测试钩子"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "53-windows-环境注意事项",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "53-windows-环境注意事项"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "54-单元与组件测试定位",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "54-单元与组件测试定位"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "6-运行时数据",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "6-运行时数据"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "7-常见故障排查",
+    "target": "docs/development/setup.md",
+    "targetAnchor": "7-常见故障排查"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "8-协作与提交规范",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "8-协作与提交规范"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "81-版本与发布权",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "81-版本与发布权"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "82-分支策略",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "82-分支策略"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "83-功能拆分与-ui-测试边界",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "83-功能拆分与-ui-测试边界"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "84-提交信息",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "84-提交信息"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "85-文档治理",
+    "target": "docs/development/workflow.md",
+    "targetAnchor": "85-文档治理"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "9-发布流程",
+    "target": "docs/development/release.md",
+    "targetAnchor": "9-发布流程"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "91-版本号规则",
+    "target": "docs/development/release.md",
+    "targetAnchor": "91-版本号规则"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "92-发布前置",
+    "target": "docs/development/release.md",
+    "targetAnchor": "92-发布前置"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "93-发布步骤",
+    "target": "docs/development/release.md",
+    "targetAnchor": "93-发布步骤"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "94-资产与-sha-规则",
+    "target": "docs/development/release.md",
+    "targetAnchor": "94-资产与-sha-规则"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "941-更新策略与破坏性版本屏障",
+    "target": "docs/development/release.md",
+    "targetAnchor": "941-更新策略与破坏性版本屏障"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "95-release-notes-格式",
+    "target": "docs/development/release.md",
+    "targetAnchor": "95-release-notes-格式"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "96-gh-与-powershell-操作注意事项",
+    "target": "docs/development/release.md",
+    "targetAnchor": "96-gh-与-powershell-操作注意事项"
+  },
+  {
+    "source": "docs/DEVELOPMENT.md",
+    "anchor": "97-发布后收尾",
+    "target": "docs/development/release.md",
+    "targetAnchor": "97-发布后收尾"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "测试层级",
+    "target": "docs/testing/README.md",
+    "targetAnchor": "测试层级"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "测试归属与写法",
+    "target": "docs/testing/policy.md",
+    "targetAnchor": "测试归属与写法"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "最低充分层级",
+    "target": "docs/testing/policy.md",
+    "targetAnchor": "最低充分层级"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "ui-smoke-配额",
+    "target": "docs/testing/policy.md",
+    "targetAnchor": "ui-smoke-配额"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "web-logic-与测试文件组织",
+    "target": "docs/testing/policy.md",
+    "targetAnchor": "web-logic-与测试文件组织"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "当前格式与恢复契约",
+    "target": "docs/testing/fixtures.md",
+    "targetAnchor": "当前格式与恢复契约"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "默认命令",
+    "target": "docs/testing/commands.md",
+    "targetAnchor": "默认命令"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "质量门禁顺序",
+    "target": "docs/testing/commands.md",
+    "targetAnchor": "质量门禁顺序"
+  },
+  {
+    "source": "docs/TESTING.md",
+    "anchor": "ci-与清理",
+    "target": "docs/testing/domains.md",
+    "targetAnchor": "ci-与清理"
+  }
+]

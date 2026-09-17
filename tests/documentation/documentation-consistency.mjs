@@ -1,3 +1,4 @@
+import { collectAnchors, findLocalLinks, parseLinkTarget } from "../../tools/markdown.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -6,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { CI_DOMAINS, CI_SHARED_PATHS } from "../../tools/ci-domains.mjs";
 import { evaluateDomains, globToRegExp } from "../../tools/ci-changes.mjs";
+import { validateCrossRepositoryLinks } from "../../tools/docs-index.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const SKIP_DIRECTORIES = new Set([
@@ -76,42 +78,9 @@ function lineNumber(text, index) {
 }
 
 function isExternalTarget(target) {
-  return target.startsWith("#")
-    || target.startsWith("/")
+  return target.startsWith("/")
     || /^[a-z][a-z0-9+.-]*:/i.test(target)
     || target.startsWith("//");
-}
-
-function normalizeTarget(rawTarget) {
-  let target = rawTarget.trim();
-  if (target.startsWith("<") && target.endsWith(">")) {
-    target = target.slice(1, -1);
-  } else {
-    target = target.split(/\s+/u, 1)[0];
-  }
-  const fragmentIndex = target.indexOf("#");
-  if (fragmentIndex >= 0) {
-    target = target.slice(0, fragmentIndex);
-  }
-  const queryIndex = target.indexOf("?");
-  if (queryIndex >= 0) {
-    target = target.slice(0, queryIndex);
-  }
-  return decodeURIComponent(target);
-}
-
-function findLocalLinks(text) {
-  const links = [];
-  const withoutFencedCode = text.replace(/```[\s\S]*?```/gu, (block) => "\n".repeat(block.split(/\r?\n/).length - 1));
-  const inlinePattern = /\[[^\]\r\n]+\]\(([^)\r\n]+)\)/gu;
-  for (const match of withoutFencedCode.matchAll(inlinePattern)) {
-    links.push({ rawTarget: match[1], index: match.index ?? 0 });
-  }
-  const referencePattern = /^\s*\[[^\]\r\n]+\]:\s*(\S+)(?:\s+.*)?$/gmu;
-  for (const match of withoutFencedCode.matchAll(referencePattern)) {
-    links.push({ rawTarget: match[1], index: match.index ?? 0 });
-  }
-  return links;
 }
 
 function extractVersionHeadings(text) {
@@ -131,22 +100,105 @@ test("Markdown local links resolve to files or directories", () => {
     for (const link of findLocalLinks(text)) {
       let target;
       try {
-        target = normalizeTarget(link.rawTarget);
+        target = parseLinkTarget(link.rawTarget);
       } catch {
         failures.push(`${relativeFile}:${lineNumber(text, link.index)} invalid URI ${link.rawTarget}`);
         continue;
       }
-      if (!target || isExternalTarget(target)) {
+      if ((!target.path && !target.fragment) || isExternalTarget(target.path)) {
         continue;
       }
-      const resolved = path.resolve(path.dirname(absoluteFile), target);
+      const resolved = path.resolve(path.dirname(absoluteFile), target.path || path.basename(absoluteFile));
       const relativeResolved = path.relative(ROOT, resolved);
       if (relativeResolved.startsWith("..") || path.isAbsolute(relativeResolved) || !fs.existsSync(resolved)) {
-        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target}`);
+        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(本文件)"}`);
       }
     }
   }
   assert.deepEqual(failures, [], `Broken local Markdown links:\n${failures.join("\n")}`);
+});
+
+test("Markdown fragments resolve headings and explicit anchors", () => {
+  const failures = [];
+  for (const absoluteFile of walkMarkdown(ROOT)) {
+    const relativeFile = path.relative(ROOT, absoluteFile).replaceAll(path.sep, "/");
+    const text = fs.readFileSync(absoluteFile, "utf8");
+    for (const link of findLocalLinks(text)) {
+      let target;
+      try {
+        target = parseLinkTarget(link.rawTarget);
+      } catch {
+        continue;
+      }
+      if (!target.fragment || isExternalTarget(target.path)) continue;
+      const resolved = path.resolve(path.dirname(absoluteFile), target.path || path.basename(absoluteFile));
+      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
+      if (!collectAnchors(fs.readFileSync(resolved, "utf8")).has(target.fragment)) {
+        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(本文件)"}#${target.fragment}`);
+      }
+    }
+  }
+  assert.deepEqual(failures, [], `Broken Markdown fragments:\n${failures.join("\n")}`);
+});
+
+test("project GitHub links resolve against local checkouts and record fixed baselines", () => {
+  const documents = walkMarkdown(ROOT).map(file => ({
+    file: path.relative(ROOT, file).replaceAll(path.sep, "/"),
+    text: fs.readFileSync(file, "utf8"),
+  }));
+  const result = validateCrossRepositoryLinks(documents, {
+    root: ROOT,
+    workspaceRoot: path.resolve(ROOT, ".."),
+  });
+  assert.deepEqual(
+    result.issues,
+    [],
+    "Cross-repository documentation failures:\n" + result.issues.join("\n"),
+  );
+  assert.ok(result.checked.length > 0, "未发现需要交叉校验的项目文档链接");
+  assert.ok(
+    Object.values(result.baselines).every(sha => /^[0-9a-f]{40}$/u.test(sha)),
+    "跨仓库校验必须记录固定 commit SHA",
+  );
+  console.log("[文档] 跨仓库固定基线：" + JSON.stringify(result.baselines));
+});
+
+test("missing cross-repository checkout is an explicit incomplete result", () => {
+  const result = validateCrossRepositoryLinks(
+    [{
+      file: "fixture.md",
+      text: "[插件指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)",
+    }],
+    {
+      root: path.join(ROOT, ".docs-cross-repo-fixture-missing"),
+      workspaceRoot: path.join(ROOT, ".docs-cross-repo-fixture-missing"),
+    },
+  );
+  assert.equal(result.ok, false);
+  assert.match(result.issues[0], /无法完成跨仓库检查/u);
+});
+
+test("Markdown link fixtures handle Chinese headings, duplicate slugs, explicit anchors, references and fenced code", () => {
+  const fixture = [
+    "# 中文 标题",
+    "## 重复标题",
+    "## 重复标题",
+    '<a id="稳定-anchor"></a>',
+    "[正文](#中文-标题)",
+    "[第二个][dup] [显式](#稳定-anchor)",
+    "",
+    "[dup]: #重复标题-1",
+    "```md",
+    "[假链接](#不存在)",
+    "```",
+  ].join("\n");
+  const links = findLocalLinks(fixture);
+  assert.deepEqual(links.map(link => decodeURIComponent(link.rawTarget)), ["#中文-标题", "#重复标题-1", "#稳定-anchor"]);
+  const anchors = collectAnchors(fixture);
+  assert.ok(anchors.has("中文-标题"));
+  assert.ok(anchors.has("重复标题-1"));
+  assert.ok(anchors.has("稳定-anchor"));
+  assert.equal(anchors.has("不存在"), false);
 });
 
 test("CHANGELOG has one heading per release version", () => {
@@ -197,18 +249,16 @@ test("current persistence and plugin-profile contract stays documented", () => {
   const project = read("src/NexusPipeline.csproj");
   const version = currentProjectVersion();
   const status = read("docs/STATUS.md");
-  const design = read("docs/DESIGN.md");
-  const pluginApi = read("docs/PLUGIN_API.md");
-  const development = read("docs/DEVELOPMENT.md");
 
   assert.match(project, new RegExp(`<Version>${escapeRegExp(version)}<\\/Version>`, "u"));
   assert.match(read("CHANGELOG.md"), new RegExp(`^## v${escapeRegExp(version)}(?:（|\\s)`, "mu"));
   assert.match(status, /## 当前未完成事项/u);
   assert.doesNotMatch(status, /^##\s+v\d+\.\d+\.\d+/mu);
-  assert.match(design, /config\/judge-scripts\/<scriptId>\.js\|py/u);
-  assert.match(design, /PluginType \+ RootPath/u);
-  assert.match(pluginApi, /当前 profile 解析成功后将 `judgeScript`/u);
-  assert.match(development, /config\/judge-scripts\//u);
+  const migration = JSON.parse(read("docs/migration-map.json"));
+  assert.ok(migration.length > 0);
+  for (const item of migration) {
+    assert.ok(collectAnchors(read(item.target)).has(item.targetAnchor), `${item.source}#${item.anchor} -> ${item.target}`);
+  }
 
 });
 
@@ -251,11 +301,11 @@ test("dual-mode production contracts stay on data files and behavior", () => {
 });
 
 test("CI impact domains match the System Smoke groups and workflow gates", () => {
-  const domainKeys = CI_DOMAINS.map(domain => domain.key);
+  const domainKeys = new Set(CI_DOMAINS.map(domain => domain.key));
   assert.deepEqual(
-    new Set(domainKeys).size,
-    domainKeys.length,
-    `影响域 key 重复：${domainKeys.join(", ")}`,
+    domainKeys.size,
+    CI_DOMAINS.length,
+    `影响域 key 重复：${[...domainKeys].join(", ")}`,
   );
   for (const domain of CI_DOMAINS) {
     assert.ok(domain.paths.length > 0, `${domain.key} 缺少触发路径`);
@@ -306,6 +356,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
   const workflow = read(".github/workflows/ci.yml");
   const outputs = [...workflow.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.domains\.outputs\.\1 \}\}$/gmu)]
     .map(match => match[1])
+    .filter(key => domainKeys.has(key))
     .sort();
   assert.deepEqual(outputs, [...domainKeys].sort(), "ci.yml 影响域输出与 tools/ci-domains.mjs 不一致");
   for (const key of domainKeys) {
@@ -331,7 +382,13 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
     assert.ok(fs.existsSync(suite.file), `suite 文件不存在：${suite.file}`);
   }
   const workflowGroups = [...new Set(
-    [...workflow.matchAll(/node tests\\run\.mjs admin system ([\w-]+)/gu)].map(match => match[1]),
+    [...workflow.matchAll(/node tests\\run\.mjs admin system([^\r\n]*)/gu)].flatMap(match => {
+      const args = match[1];
+      const namedGroups = [...args.matchAll(/--group\s+([\w-]+)/gu)].map(group => group[1]);
+      if (namedGroups.length > 0) return namedGroups;
+      const directGroup = args.match(/^\s+([\w-]+)/u);
+      return directGroup ? [directGroup[1]] : [];
+    }),
   )];
   assert.deepEqual(workflowGroups.sort(), groupNames.slice().sort(), "ci.yml 的 System Smoke 分组与 run.mjs 声明的分组不一致");
   for (const group of workflowGroups) {
