@@ -541,6 +541,23 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 读取官方插件固定基线
+        id: plugins-lock
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
+        run: node tools/ci-lock.mjs plugins.lock.json
+
+      - name: 检出官方插件固定基线
+        uses: actions/checkout@v4
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ steps.plugins-lock.outputs.ref }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+
+      - name: 准备官方插件运行时基线本地引用
+        run: git -C NexusPipeline-Plugins branch --force main HEAD
+
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
         with:
