@@ -70,6 +70,9 @@ jobs:
           path: NexusPipeline-Plugins
           fetch-depth: 1
 
+      - name: 准备官方插件固定基线本地引用
+        run: git -C NexusPipeline-Plugins branch --force main HEAD
+
       - name: 校验影响域、结果汇总与前端边界
         run: node tests/run.mjs tooling
 
@@ -270,6 +273,9 @@ jobs:
           path: NexusPipeline-Plugins
           fetch-depth: 1
 
+      - name: 准备官方插件文档基线本地引用
+        run: git -C NexusPipeline-Plugins branch --force main HEAD
+
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
@@ -348,6 +354,9 @@ jobs:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
           path: NexusPipeline-Plugins
+
+      - name: 准备官方插件契约基线本地引用
+        run: git -C NexusPipeline-Plugins branch --force main HEAD
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -938,6 +947,9 @@ jobs:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
           path: NexusPipeline-Plugins
+
+      - name: 准备官方插件回归基线本地引用
+        run: git -C NexusPipeline-Plugins branch --force main HEAD
 
       - name: 安装治理与插件依赖
         run: |
