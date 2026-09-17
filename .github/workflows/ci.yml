@@ -585,6 +585,7 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_PLUGIN_REPO_ROOT: ${{ github.workspace }}/NexusPipeline-Plugins
           NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-runtime
         run: node tests\run.mjs admin system --group runtime --group control --group config --group plugins
 
