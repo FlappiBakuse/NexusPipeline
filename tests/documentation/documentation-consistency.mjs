@@ -2,6 +2,7 @@ import { collectAnchors, findLocalLinks, parseLinkTarget } from "../../tools/mar
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -164,18 +165,23 @@ test("project GitHub links resolve against local checkouts and record fixed base
 });
 
 test("missing cross-repository checkout is an explicit incomplete result", () => {
-  const result = validateCrossRepositoryLinks(
-    [{
-      file: "fixture.md",
-      text: "[插件指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)",
-    }],
-    {
-      root: path.join(ROOT, ".docs-cross-repo-fixture-missing"),
-      workspaceRoot: path.join(ROOT, ".docs-cross-repo-fixture-missing"),
-    },
-  );
-  assert.equal(result.ok, false);
-  assert.match(result.issues[0], /无法完成跨仓库检查/u);
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-docs-cross-repo-missing-"));
+  try {
+    const result = validateCrossRepositoryLinks(
+      [{
+        file: "fixture.md",
+        text: "[插件指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)",
+      }],
+      {
+        root: fixtureRoot,
+        workspaceRoot: fixtureRoot,
+      },
+    );
+    assert.equal(result.ok, false);
+    assert.match(result.issues[0], /无法完成跨仓库检查/u);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test("Markdown link fixtures handle Chinese headings, duplicate slugs, explicit anchors, references and fenced code", () => {
