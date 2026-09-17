@@ -4,8 +4,6 @@
 
 ## v0.16.5（Pre-release）
 
-> 尚未发布。
-
 ### 插件与模拟器
 
 - 新增 Plugin API v1.7 模拟器 provider 扩展契约，雷电、夜神和 BlueStacks 的专属识别与驱动移入可选的 `EmulatorSupport` 插件；Generic ADB 与 MuMuManager 仍由宿主提供。
