@@ -54,15 +54,30 @@ internal sealed class ScriptStorage
             return new List<ScriptInstance>();
         }
 
-        JsonArray? root;
+        string text;
         try
         {
-            root = JsonNode.Parse(File.ReadAllText(_scriptsPath)) as JsonArray
-                ?? throw new InvalidDataException("scripts.json 根节点必须是数组");
+            text = File.ReadAllText(_scriptsPath);
         }
         catch (Exception ex)
         {
+            Logger.Warn($"[警告] 读取 scripts.json 失败：{ex.Message}");
+            throw;
+        }
+
+        JsonArray? root;
+        try
+        {
+            root = JsonNode.Parse(text) as JsonArray
+                ?? throw new InvalidDataException("scripts.json 根节点必须是数组");
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException)
+        {
             string backup = JsonStore.PreserveCorruptFile(_scriptsPath);
+            if (string.IsNullOrWhiteSpace(backup))
+            {
+                throw new IOException("解析 scripts.json 失败且无法保留原文件，已停止加载以保护原始数据", ex);
+            }
             Logger.Warn($"[警告] 解析 scripts.json 失败：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}");
             return new List<ScriptInstance>();
         }

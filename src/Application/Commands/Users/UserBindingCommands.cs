@@ -130,7 +130,7 @@ internal static partial class UserCommands
         candidate = NormalizeBinding(candidate, script.Id);
         string? error = null;
         UserMutationBlock? block = null;
-        SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+        using ScriptConfigGate.Lease gate = ScriptConfigGate.Get(script.Id);
         bool gateHeld = false;
         try
         {

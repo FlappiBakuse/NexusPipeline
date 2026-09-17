@@ -197,45 +197,80 @@ internal static class ConfigEditCommands
         // Web UI 在请求期间临时把 token 放入浏览器标题；只捕获匹配 token 的本机顶层窗口，
         // 找不到时编辑流程继续按普通配置编辑执行。
         SystemActions.RequesterWindowIdentity? requesterWindow = SystemActions.CaptureRequesterWindow(requesterWindowToken);
-        SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
+        ScriptConfigGate.Lease? gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
         bool gateBusy = false;
         bool editLeaseHeld = false;
         string? editLeaseConflict = null;
-        bool changed = ctx.Center.TryExecuteLeaseMutation(
-            target.Script.Id,
-            target.UserKey,
-            () =>
+        IReadOnlyList<ExecutionLeaseReference> leases;
+        string? failureCode;
+        bool changed;
+        try
+        {
+            changed = ctx.Center.TryExecuteLeaseMutation(
+                target.Script.Id,
+                target.UserKey,
+                () =>
+                {
+                    if (!gate!.Wait(0))
+                    {
+                        gateBusy = true;
+                        return;
+                    }
+
+                    gateAcquired = true;
+                    if (!ctx.Center.TryBeginEditSession(
+                            target.Script.Id,
+                            target.UserKey,
+                            target.Script.ConfigPath,
+                            out editLeaseConflict))
+                    {
+                        gate!.Release();
+                        gateAcquired = false;
+                        return;
+                    }
+
+                    editLeaseHeld = true;
+                },
+                out leases,
+                out failureCode);
+        }
+        catch
+        {
+            if (editLeaseHeld)
             {
-                if (!gate.Wait(0))
-                {
-                    gateBusy = true;
-                    return;
-                }
+                ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
+                editLeaseHeld = false;
+            }
 
-                gateAcquired = true;
-                if (!ctx.Center.TryBeginEditSession(
-                        target.Script.Id,
-                        target.UserKey,
-                        target.Script.ConfigPath,
-                        out editLeaseConflict))
-                {
-                    gate.Release();
-                    gateAcquired = false;
-                    return;
-                }
+            if (gateAcquired)
+            {
+                gate!.Release();
+                gateAcquired = false;
+            }
 
-                editLeaseHeld = true;
-            },
-            out IReadOnlyList<ExecutionLeaseReference> leases,
-            out string? failureCode);
+            gate.Dispose();
+            throw;
+        }
         if (!changed)
         {
+            if (gateAcquired)
+            {
+                gate!.Release();
+                gateAcquired = false;
+            }
+            gate?.Dispose();
             return LeaseConflict<ConfigEditStarted>(leases, $"user:{target.Script.Id}:{target.UserKey}", failureCode);
         }
 
         if (gateBusy || !gateAcquired || editLeaseConflict is not null)
         {
+            if (gateAcquired)
+            {
+                gate!.Release();
+                gateAcquired = false;
+            }
+            gate?.Dispose();
             return Conflict<ConfigEditStarted>(
                 "resource_busy",
                 editLeaseConflict ?? "脚本正在运行或编辑配置中");
@@ -384,7 +419,10 @@ internal static class ConfigEditCommands
                     : new CancellationTokenSource(),
                 Mark = editMark,
                 Spec = target.Spec,
+                ConfigGate = gate,
             };
+            gate = null;
+            gateAcquired = false;
             pendingSession = session;
             if (requesterWindow is not null
                 && startedIdentity is not null
@@ -451,6 +489,7 @@ internal static class ConfigEditCommands
                         ctx.Center.EndEditSession(target.Script.Id, target.UserKey);
                         registered.DisposeProcessResources();
                         editLeaseHeld = false;
+                        gateAcquired = false;
                     }
                     else if (startedProcess is not null)
                     {
@@ -501,9 +540,11 @@ internal static class ConfigEditCommands
 
                 if (gateAcquired)
                 {
-                    gate.Release();
+                    gate!.Release();
+                    gateAcquired = false;
                 }
             }
+            gate?.Dispose();
         }
     }
 
@@ -540,7 +581,6 @@ internal static class ConfigEditCommands
             ? target.UserKey
             : session.Mark.UserId;
 
-        SemaphoreSlim gate = ScriptConfigGate.Get(target.Script.Id);
         bool sessionRemoved = false;
         Stopwatch totalTimer = Stopwatch.StartNew();
         try
@@ -648,10 +688,6 @@ internal static class ConfigEditCommands
         }
         finally
         {
-            if (sessionRemoved)
-            {
-                gate.Release();
-            }
             Logger.Info($"[配置编辑] {action} 收尾总耗时 {totalTimer.ElapsedMilliseconds} ms（脚本={scriptId}）。");
         }
     }

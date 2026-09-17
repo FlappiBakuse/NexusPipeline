@@ -117,7 +117,7 @@ internal sealed class ExecutionRunner
             exec.SetPreviewWaiting(script);
             exec.CurrentStatus = "等待开始";
 
-            SemaphoreSlim gate = ScriptConfigGate.Get(script.Id);
+            using ScriptConfigGate.Lease gate = ScriptConfigGate.Get(script.Id);
             try
             {
                 await gate.WaitAsync(exec.Cts.Token).ConfigureAwait(false);

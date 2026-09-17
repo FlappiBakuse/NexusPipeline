@@ -462,7 +462,8 @@ internal static class ConfigStoreTransactionRecovery
                     throw new IOException($"配置事务缺少回滚文件：{operation.RelativePath}");
                 }
                 Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                File.Move(backup, destination, overwrite: true);
+                // 后续项或元数据恢复可能失败；全部恢复完成前保留回滚源，供下次继续恢复。
+                File.Copy(backup, destination, overwrite: true);
             }
             else if (File.Exists(destination))
             {

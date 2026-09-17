@@ -16,6 +16,9 @@ internal sealed class EditSession
     /// <summary>编辑开始时冻结的有效 profile；提交校验沿用同一版本，避免与当前插件重新加载的 validator 混用。</summary>
     public ResolvedScriptSpec? Spec { get; init; }
 
+    /// <summary>编辑会话持有的脚本配置门禁租约；会话结束后才释放。</summary>
+    public ScriptConfigGate.Lease? ConfigGate { get; set; }
+
     public Process? Process { get; set; }
 
     /// <summary>编辑进程启动瞬间捕获的 PID、启动时间和完整映像身份。</summary>
@@ -67,24 +70,50 @@ internal sealed class EditSession
 
     public void DisposeProcessResources()
     {
-        CancelWindowPlacement();
-        if (Process is not null && ProcessExitedHandler is not null)
+        try
         {
-            try
+            CancelWindowPlacement();
+            if (Process is not null && ProcessExitedHandler is not null)
             {
-                Process.Exited -= ProcessExitedHandler;
+                try
+                {
+                    Process.Exited -= ProcessExitedHandler;
+                }
+                catch
+                {
+                }
             }
-            catch
-            {
-            }
+            ProcessExitedHandler = null;
+            WindowPlacementTask = null;
+            WindowPlacementCancellation?.Dispose();
+            WindowPlacementCancellation = null;
+            ProcessOwnership?.Dispose();
+            ProcessOwnership = null;
+            Process?.Dispose();
+            Process = null;
         }
-        ProcessExitedHandler = null;
-        WindowPlacementTask = null;
-        WindowPlacementCancellation?.Dispose();
-        WindowPlacementCancellation = null;
-        ProcessOwnership?.Dispose();
-        ProcessOwnership = null;
-        Process?.Dispose();
-        Process = null;
+        finally
+        {
+            ReleaseConfigGate();
+        }
+    }
+
+    private void ReleaseConfigGate()
+    {
+        ScriptConfigGate.Lease? gate = ConfigGate;
+        ConfigGate = null;
+        if (gate is null)
+        {
+            return;
+        }
+
+        try
+        {
+            gate.Release();
+        }
+        finally
+        {
+            gate.Dispose();
+        }
     }
 }

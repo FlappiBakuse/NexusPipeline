@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-
 namespace NexusPipeline.Services;
 
 internal enum PathKind
@@ -52,20 +50,237 @@ internal static class PathKindUtil
 /// <summary>脚本级配置交换门禁：同一脚本同一时刻只允许一个会话（运行或编辑配置），后续运行排队等待。</summary>
 internal static class ScriptConfigGate
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new();
+    private static readonly object GatesGate = new();
 
-    public static SemaphoreSlim Get(string scriptId)
+    private static readonly Dictionary<string, GateEntry> Gates = new(StringComparer.Ordinal);
+
+    internal sealed class GateEntry
     {
-        return Gates.GetOrAdd(scriptId, _ => new SemaphoreSlim(1, 1));
+        public GateEntry(string scriptId)
+        {
+            ScriptId = scriptId;
+        }
+
+        public string ScriptId { get; }
+
+        public SemaphoreSlim Semaphore { get; } = new(1, 1);
+
+        public int LeaseCount { get; set; }
+
+        public bool Retired { get; set; }
+
+        public bool Disposed { get; set; }
     }
 
-    /// <summary>脚本删除时清理门禁：移除并释放条目，避免静态字典随脚本增删累积。</summary>
+    /// <summary>
+    /// 脚本门禁租约。租约本身持有字典条目的引用，删除脚本时先退役条目，
+    /// 等待中的 WaitAsync、已持有的信号量和租约都结束后才释放底层资源。
+    /// </summary>
+    public sealed class Lease : IDisposable
+    {
+        private readonly object _sync = new();
+
+        private GateEntry? _entry;
+
+        private int _activeWaits;
+
+        private int _held;
+
+        private bool _disposed;
+
+        private bool _finished;
+
+        internal Lease(GateEntry entry)
+        {
+            _entry = entry;
+        }
+
+        public bool Wait(int millisecondsTimeout)
+        {
+            GateEntry entry = BeginWait();
+            bool acquired = false;
+            try
+            {
+                acquired = entry.Semaphore.Wait(millisecondsTimeout);
+                return acquired;
+            }
+            finally
+            {
+                EndWait(acquired);
+            }
+        }
+
+        public Task WaitAsync(CancellationToken cancellationToken = default)
+        {
+            GateEntry entry = BeginWait();
+            return WaitAsyncCore(entry, cancellationToken);
+        }
+
+        public void Release()
+        {
+            GateEntry entry;
+            lock (_sync)
+            {
+                if (_held == 0)
+                {
+                    throw new SemaphoreFullException("脚本配置门禁未被当前租约持有");
+                }
+
+                _held = 0;
+                entry = _entry ?? throw new ObjectDisposedException(nameof(Lease));
+                _activeWaits++;
+            }
+
+            try
+            {
+                entry.Semaphore.Release();
+            }
+            finally
+            {
+                lock (_sync)
+                {
+                    _activeWaits--;
+                }
+                FinishIfReady();
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (_sync)
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                _disposed = true;
+            }
+            FinishIfReady();
+        }
+
+        private GateEntry BeginWait()
+        {
+            lock (_sync)
+            {
+                if (_disposed)
+                {
+                    throw new ObjectDisposedException(nameof(Lease));
+                }
+
+                GateEntry entry = _entry ?? throw new ObjectDisposedException(nameof(Lease));
+                _activeWaits++;
+                return entry;
+            }
+        }
+
+        private async Task WaitAsyncCore(GateEntry entry, CancellationToken cancellationToken)
+        {
+            bool acquired = false;
+            try
+            {
+                await entry.Semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                acquired = true;
+            }
+            finally
+            {
+                EndWait(acquired);
+            }
+        }
+
+        private void EndWait(bool acquired)
+        {
+            lock (_sync)
+            {
+                _activeWaits--;
+                if (acquired)
+                {
+                    _held++;
+                }
+            }
+            FinishIfReady();
+        }
+
+        private void FinishIfReady()
+        {
+            GateEntry? entry = null;
+            lock (_sync)
+            {
+                if (_disposed && _activeWaits == 0 && _held == 0 && !_finished)
+                {
+                    _finished = true;
+                    entry = _entry;
+                    _entry = null;
+                }
+            }
+
+            if (entry is not null)
+            {
+                Return(entry);
+            }
+        }
+    }
+
+    public static Lease Get(string scriptId)
+    {
+        lock (GatesGate)
+        {
+            if (!Gates.TryGetValue(scriptId, out GateEntry? entry))
+            {
+                entry = new GateEntry(scriptId);
+                Gates[scriptId] = entry;
+            }
+            else
+            {
+                // 同一 ID 被快速重新打开时继续复用仍有活跃租约的门禁，保持删除/重建期间的串行语义。
+                entry.Retired = false;
+            }
+
+            entry.LeaseCount++;
+            return new Lease(entry);
+        }
+    }
+
+    /// <summary>脚本删除时退役门禁；移除并释放只在没有等待者、持有者和租约后发生。</summary>
     public static void Remove(string scriptId)
     {
-        if (Gates.TryRemove(scriptId, out SemaphoreSlim? gate))
+        SemaphoreSlim? dispose = null;
+        lock (GatesGate)
         {
-            gate.Dispose();
+            if (!Gates.TryGetValue(scriptId, out GateEntry? entry))
+            {
+                return;
+            }
+
+            entry.Retired = true;
+            if (entry.LeaseCount == 0)
+            {
+                Gates.Remove(scriptId);
+                entry.Disposed = true;
+                dispose = entry.Semaphore;
+            }
         }
+        dispose?.Dispose();
+    }
+
+    private static void Return(GateEntry entry)
+    {
+        SemaphoreSlim? dispose = null;
+        lock (GatesGate)
+        {
+            entry.LeaseCount--;
+            if (entry.LeaseCount == 0 && entry.Retired && !entry.Disposed)
+            {
+                if (Gates.TryGetValue(entry.ScriptId, out GateEntry? current)
+                    && ReferenceEquals(current, entry))
+                {
+                    Gates.Remove(entry.ScriptId);
+                }
+                entry.Disposed = true;
+                dispose = entry.Semaphore;
+            }
+        }
+        dispose?.Dispose();
     }
 }
 
@@ -262,7 +477,6 @@ internal static class ConfigSwapPrimitives
                 Thread.Sleep(RetryDelay);
             }
         }
-        action();
     }
 
     private static void CopyFileTo(string srcFile, string dstDir)
@@ -293,6 +507,14 @@ internal static class ConfigSwapPrimitives
         {
             return;
         }
+        string sourceFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(src));
+        string destinationFull = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dst));
+        if (string.Equals(sourceFull, destinationFull, StringComparison.OrdinalIgnoreCase)
+            || (srcKind == PathKind.Dir && destinationFull.StartsWith(
+                sourceFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new IOException($"配置复制目标与源路径重叠，已保留原内容：{src} -> {dst}");
+        }
         if (srcKind == PathKind.File)
         {
             string file = src;
@@ -310,17 +532,18 @@ internal static class ConfigSwapPrimitives
         if (kind == PathKind.File)
         {
             string[] files = Directory.GetFiles(src);
-            if (files.Length == 1)
+            string[] directories = Directory.GetDirectories(src);
+            if (files.Length == 1 && directories.Length == 0)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
                 WithRetry(() => File.Copy(files[0], dst, overwrite: true), dst);
                 return;
             }
-            if (files.Length == 0 && !Directory.EnumerateFileSystemEntries(src).Any())
+            if (files.Length == 0 && directories.Length == 0)
             {
                 return;
             }
-            throw new IOException($"源目录含 {files.Length} 个文件，无法以单文件形态落位：{src}");
+            throw new IOException($"源目录含 {files.Length} 个文件和 {directories.Length} 个子目录，无法以单文件形态落位：{src}");
         }
         CopyDirContents(src, dst);
     }

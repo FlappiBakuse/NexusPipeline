@@ -112,7 +112,7 @@ internal static class ScriptCommands
             return Validation<ScriptInstance>(existingPluginError);
         }
 
-        SemaphoreSlim gate = ScriptConfigGate.Get(existing.Id);
+        using ScriptConfigGate.Lease gate = ScriptConfigGate.Get(existing.Id);
         if (!gate.Wait(0))
         {
             return Conflict<ScriptInstance>(
@@ -230,16 +230,19 @@ internal static class ScriptCommands
     {
         RuntimeContext ctx = RuntimeContext.Instance;
         ScriptInstance? removed = ctx.EntityState.FindScript(scriptId);
-        SemaphoreSlim? gate = null;
+        ScriptConfigGate.Lease? gate = null;
+        bool gateAcquired = false;
         if (removed is not null)
         {
             gate = ScriptConfigGate.Get(removed.Id);
             if (!gate.Wait(0))
             {
+                gate.Dispose();
                 return Conflict<ScriptInstance?>(
                     "resource_busy",
                     "脚本正在运行或编辑配置中，无法删除");
             }
+            gateAcquired = true;
         }
 
         FileSnapshot? scriptsFile = null;
@@ -322,7 +325,11 @@ internal static class ScriptCommands
         }
         finally
         {
-            gate?.Release();
+            if (gateAcquired)
+            {
+                gate!.Release();
+            }
+            gate?.Dispose();
         }
     }
 

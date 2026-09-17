@@ -11,6 +11,49 @@ namespace NexusPipeline.Tests;
 public sealed class ConfigStoreTransactionTests
 {
     [Fact]
+    public void Recovery_PartialRollbackRetainsBackupsAndCanResumeAfterFileUnlock()
+    {
+        string scriptId = "txn-locked-" + Guid.NewGuid().ToString("N");
+        string userKey = "user-" + Guid.NewGuid().ToString("N");
+        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
+        string rollback = ConfigSwapPaths.StoreTransactionRollbackDir(scriptId, userKey);
+        try
+        {
+            Directory.CreateDirectory(store);
+            Directory.CreateDirectory(rollback);
+            foreach (string name in new[] { "a.json", "b.json" })
+            {
+                File.WriteAllText(Path.Combine(store, name), "new-" + name);
+                File.WriteAllText(Path.Combine(rollback, name), "old-" + name);
+            }
+            WriteManifest(scriptId, userKey, new ConfigStoreTransactionManifest
+            {
+                TransactionId = "partial-rollback",
+                ScriptId = scriptId,
+                UserKey = userKey,
+                NextMetadata = ConfigStoreMetadata.For(store),
+                Operations = new[] { "a.json", "b.json" }.Select(name => new ConfigStoreTransactionOperation
+                {
+                    Action = "replace", RelativePath = name, HadPrevious = true,
+                }).ToList(),
+            });
+            using (var held = new FileStream(Path.Combine(store, "a.json"), FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Exception? error = Record.Exception(() => ConfigStoreTransactionRecovery.Recover(scriptId, userKey));
+                Assert.True(error is IOException or UnauthorizedAccessException);
+                Assert.Equal("old-b.json", File.ReadAllText(Path.Combine(store, "b.json")));
+                Assert.Equal("old-b.json", File.ReadAllText(Path.Combine(rollback, "b.json")));
+            }
+            ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+            ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+            Assert.Equal("old-a.json", File.ReadAllText(Path.Combine(store, "a.json")));
+            Assert.Equal("old-b.json", File.ReadAllText(Path.Combine(store, "b.json")));
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
+        }
+        finally { DeleteScriptData(scriptId); }
+    }
+
+    [Fact]
     public void Apply_UsesFileDeltaForLargeMostlyUnchangedStore()
     {
         string scriptId = "txn-delta-" + Guid.NewGuid().ToString("N");

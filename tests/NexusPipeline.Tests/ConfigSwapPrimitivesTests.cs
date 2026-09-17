@@ -7,6 +7,24 @@ namespace NexusPipeline.Tests;
 public sealed class ConfigSwapPrimitivesTests
 {
     [Fact]
+    public void MoveAs_TargetInsideSourceRejectsBeforeCopyOrDelete()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            string source = Path.Combine(root, "source");
+            Directory.CreateDirectory(source);
+            string original = Path.Combine(source, "original.json");
+            string target = Path.Combine(source, "target.json");
+            File.WriteAllText(original, "original");
+            Assert.Throws<IOException>(() => ConfigSwapPrimitives.MoveAs(source, target, PathKind.File));
+            Assert.Equal("original", File.ReadAllText(original));
+            Assert.False(File.Exists(target));
+        }
+        finally { DeleteExact(root); }
+    }
+
+    [Fact]
     public void CopyAs_FileAndDirectoryKeepContents()
     {
         string root = MakeTempDir();
@@ -52,6 +70,76 @@ public sealed class ConfigSwapPrimitivesTests
         finally
         {
             DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public void MoveAs_MixedDirectoryToFile_RejectsBeforeDestructiveDelete()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            string source = Path.Combine(root, "source");
+            string target = Path.Combine(root, "target.json");
+            Directory.CreateDirectory(Path.Combine(source, "nested"));
+            File.WriteAllText(Path.Combine(source, "config.json"), "config");
+            File.WriteAllText(Path.Combine(source, "nested", "keep.json"), "keep");
+            File.WriteAllText(target, "original-target");
+
+            Assert.Throws<IOException>(() => ConfigSwapPrimitives.MoveAs(source, target, PathKind.File));
+
+            Assert.True(Directory.Exists(source));
+            Assert.Equal("config", File.ReadAllText(Path.Combine(source, "config.json")));
+            Assert.Equal("keep", File.ReadAllText(Path.Combine(source, "nested", "keep.json")));
+            Assert.Equal("original-target", File.ReadAllText(target));
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public async Task ScriptConfigGate_RemoveDuringWaiter_DefersSemaphoreDisposal()
+    {
+        string scriptId = "gate-lifecycle-" + Guid.NewGuid().ToString("N");
+        using ScriptConfigGate.Lease holder = ScriptConfigGate.Get(scriptId);
+        using ScriptConfigGate.Lease waiter = ScriptConfigGate.Get(scriptId);
+        using var waiterStarted = new ManualResetEventSlim();
+        using var waiterEntered = new ManualResetEventSlim();
+        Assert.True(holder.Wait(0));
+        bool holderHeld = true;
+
+        Task waiterTask = Task.Run(async () =>
+        {
+            waiterStarted.Set();
+            await waiter.WaitAsync().ConfigureAwait(false);
+            waiterEntered.Set();
+            waiter.Release();
+        });
+
+        try
+        {
+            Assert.True(waiterStarted.Wait(TimeSpan.FromSeconds(10)));
+            Task beforeRelease = await Task.WhenAny(waiterTask, Task.Delay(TimeSpan.FromMilliseconds(100)));
+            Assert.NotSame(waiterTask, beforeRelease);
+
+            ScriptConfigGate.Remove(scriptId);
+            Assert.False(waiterEntered.IsSet);
+
+            holder.Release();
+            holderHeld = false;
+            await waiterTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(waiterEntered.IsSet);
+        }
+        finally
+        {
+            if (holderHeld)
+            {
+                holder.Release();
+            }
+            await waiterTask;
+            ScriptConfigGate.Remove(scriptId);
         }
     }
 

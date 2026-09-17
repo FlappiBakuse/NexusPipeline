@@ -7,26 +7,58 @@ namespace NexusPipeline.Persistence;
 
 internal static class JsonUtil
 {
+    private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly object[] WriteLocks = Enumerable.Range(0, 64).Select(_ => new object()).ToArray();
+
     public static void WriteAtomic(string path, string content)
     {
-        string temp = path + ".tmp";
-        try
+        string target = Path.GetFullPath(path);
+        // 固定分片保留同一路径的互斥，同时限制长运行实例的锁对象数量。
+        object writeLock = WriteLocks[(uint)PathComparer.GetHashCode(target) % (uint)WriteLocks.Length];
+        lock (writeLock)
         {
-            File.WriteAllText(temp, content, new UTF8Encoding(true));
-            File.Move(temp, path, overwrite: true);
-        }
-        finally
-        {
+            string directory = Path.GetDirectoryName(target)
+                ?? throw new IOException($"无法确定 JSON 目标目录：{target}");
+            string temp = Path.Combine(
+                directory,
+                $".{Path.GetFileName(target)}.{Guid.NewGuid():N}.tmp");
             try
             {
-                if (File.Exists(temp))
+                using (var stream = new FileStream(
+                           temp,
+                           FileMode.CreateNew,
+                           FileAccess.Write,
+                           FileShare.None,
+                           bufferSize: 4096,
+                           FileOptions.SequentialScan))
                 {
-                    File.Delete(temp);
+                    using (var writer = new StreamWriter(
+                               stream,
+                               new UTF8Encoding(true),
+                               bufferSize: 4096,
+                               leaveOpen: true))
+                    {
+                        writer.Write(content);
+                        writer.Flush();
+                    }
+                    stream.Flush(flushToDisk: true);
                 }
+                File.Move(temp, target, overwrite: true);
             }
-            catch
+            finally
             {
-                // 临时文件清理失败时保留现场，不覆盖原始写入异常。
+                try
+                {
+                    if (File.Exists(temp))
+                    {
+                        File.Delete(temp);
+                    }
+                }
+                catch
+                {
+                    // 临时文件清理失败时保留现场，不覆盖原始写入异常。
+                }
             }
         }
     }
@@ -86,7 +118,7 @@ internal static class JsonStore
     /// <summary>
     /// 损坏配置文件改名保留：解析失败时先把原文件改名为 {path}.corrupt-{时间戳}，
     /// 避免后续任意一次保存静默覆盖损坏文件导致原数据不可恢复；用户可手动用保留文件恢复。
-    /// 返回保留路径；改名失败返回空字符串（不中断加载流程）。
+    /// 返回保留路径；改名失败返回空字符串，由调用方决定是否继续加载或 fail-closed。
     /// </summary>
     public static string PreserveCorruptFile(string path)
     {
@@ -119,7 +151,7 @@ internal static class JsonStore
         catch (Exception ex)
         {
             Logger.Warn($"{label}读取失败（{path}）：{ex.Message}");
-            return false;
+            throw new IOException($"{label}读取失败，已停止加载以保护原始数据：{path}", ex);
         }
         try
         {
@@ -129,18 +161,30 @@ internal static class JsonStore
         catch (JsonException ex)
         {
             string backup = PreserveCorruptFile(path);
+            if (string.IsNullOrWhiteSpace(backup))
+            {
+                throw new IOException($"{label}解析失败且无法保留原文件，已停止加载以保护原始数据：{path}", ex);
+            }
             Logger.Warn($"{label}解析失败（{path}）：{ex.Message}，原文件已保留为 {backup}");
             return false;
         }
         catch (NotSupportedException ex)
         {
             string backup = PreserveCorruptFile(path);
+            if (string.IsNullOrWhiteSpace(backup))
+            {
+                throw new IOException($"{label}格式不受支持且无法保留原文件，已停止加载以保护原始数据：{path}", ex);
+            }
             Logger.Warn($"{label}格式不受支持（{path}）：{ex.Message}，原文件已保留为 {backup}");
             return false;
         }
         catch (InvalidOperationException ex)
         {
             string backup = PreserveCorruptFile(path);
+            if (string.IsNullOrWhiteSpace(backup))
+            {
+                throw new IOException($"{label}结构无效且无法保留原文件，已停止加载以保护原始数据：{path}", ex);
+            }
             Logger.Warn($"{label}结构无效（{path}）：{ex.Message}，原文件已保留为 {backup}");
             return false;
         }
@@ -160,7 +204,7 @@ internal static class JsonStore
         catch (Exception ex)
         {
             Logger.Warn($"{label}读取失败（{path}）：{ex.Message}");
-            return new JsonObject();
+            throw new IOException($"{label}读取失败，已停止加载以保护原始数据：{path}", ex);
         }
         try
         {
@@ -173,6 +217,10 @@ internal static class JsonStore
         catch (Exception ex) when (ex is JsonException or InvalidDataException)
         {
             string backup = PreserveCorruptFile(path);
+            if (string.IsNullOrWhiteSpace(backup))
+            {
+                throw new IOException($"{label}解析失败且无法保留原文件，已停止加载以保护原始数据：{path}", ex);
+            }
             Logger.Warn($"{label}解析失败（{path}）：{ex.Message}，原文件已保留为 {backup}");
             return new JsonObject();
         }
@@ -183,17 +231,34 @@ internal static class JsonStore
         var list = new List<T>();
         if (File.Exists(path))
         {
+            string text;
             try
             {
-                List<T>? parsed = JsonSerializer.Deserialize<List<T>>(File.ReadAllText(path), JsonOpts.Default);
+                text = File.ReadAllText(path);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[警告] 读取 {Path.GetFileName(path)} 失败：{ex.Message}");
+                throw;
+            }
+
+            try
+            {
+                List<T>? parsed = JsonSerializer.Deserialize<List<T>>(text, JsonOpts.Default);
                 if (parsed is not null)
                 {
                     list = parsed;
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is JsonException or NotSupportedException or InvalidOperationException)
             {
                 string backup = PreserveCorruptFile(path);
+                if (string.IsNullOrWhiteSpace(backup))
+                {
+                    throw new IOException(
+                        $"解析 {Path.GetFileName(path)} 失败且无法保留原文件，已停止加载以保护原始数据",
+                        ex);
+                }
                 Logger.Warn($"[警告] 解析 {Path.GetFileName(path)} 失败：{ex.Message}，原文件已保留为 {Path.GetFileName(backup)}（可手动恢复，不再被后续保存覆盖）");
             }
         }

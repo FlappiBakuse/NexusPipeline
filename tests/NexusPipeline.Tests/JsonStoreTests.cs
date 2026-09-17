@@ -9,6 +9,47 @@ namespace NexusPipeline.Tests;
 public class JsonStoreTests
 {
     [Fact]
+    public void WriteAtomic_LockedTargetPreservesOriginalAndRemovesOwnedTemporaryFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-json-locked-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            File.WriteAllText(path, "{\"original\":true}");
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Exception? error = Record.Exception(() => JsonUtil.WriteAtomic(path, "{\"replacement\":true}"));
+                Assert.True(error is IOException or UnauthorizedAccessException);
+            }
+            Assert.Equal("{\"original\":true}", File.ReadAllText(path));
+            Assert.Empty(Directory.GetFiles(dir, ".state.json.*.tmp"));
+            JsonUtil.WriteAtomic(path, "{\"retry\":true}");
+            Assert.Equal("{\"retry\":true}", File.ReadAllText(path));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void ReadObject_PreservationFailureRetainsCorruptBytesAndBlocksDefaultOverwrite()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-json-preserve-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            File.WriteAllText(path, "{broken");
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                Assert.ThrowsAny<IOException>(() => JsonStore.ReadObjectOrEmpty(path, "locked test"));
+            Assert.Equal("{broken", File.ReadAllText(path));
+            Assert.Empty(Directory.GetFiles(dir, "*.corrupt-*"));
+            Assert.Empty(JsonStore.ReadObjectOrEmpty(path, "unlocked test"));
+            Assert.Equal("{broken", File.ReadAllText(Assert.Single(Directory.GetFiles(dir, "*.corrupt-*"))));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public void LoadList_CorruptFile_ReturnsEmptyAndPreservesOriginal()
     {
         string dir = Path.Combine(Path.GetTempPath(), "nexus-jsontest-" + Guid.NewGuid().ToString("N"));
@@ -88,6 +129,38 @@ public class JsonStoreTests
             string? preserved = Directory.GetFiles(dir, "secrets.json.corrupt-*").SingleOrDefault();
             Assert.NotNull(preserved);
             Assert.Equal(corrupt, File.ReadAllText(preserved!));
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task WriteAtomic_ConcurrentWritersLeaveOneCompletePayloadAndNoOwnedTemps()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-jsontest-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            string[] payloads = Enumerable.Range(0, 32)
+                .Select(index => $"{{\"writer\":{index},\"value\":\"{Guid.NewGuid():N}\"}}")
+                .ToArray();
+
+            await Task.WhenAll(payloads.Select(payload =>
+                Task.Run(() => JsonUtil.WriteAtomic(path, payload))));
+
+            string actual = File.ReadAllText(path);
+            Assert.Contains(actual, payloads);
+            Assert.NotNull(JsonNode.Parse(actual));
+            Assert.Empty(Directory.GetFiles(dir, ".state.json.*.tmp"));
         }
         finally
         {
