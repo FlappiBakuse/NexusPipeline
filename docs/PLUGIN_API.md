@@ -1,6 +1,6 @@
 # NexusPipeline 插件 API 与包规范
 
-数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.7 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
+数据化专项插件保持纯目录形态，同时支持 `managed-code` C# 插件。插件实现位于独立的 `NexusPipeline-Plugins` 仓库；仓库源码按 `plugins/general/<artifactName>/`（managed-code）和 `plugins/specialized/<artifactName>/`（data-specialized）分类，发行目录 `packages/<artifactName>/` 保持扁平，安装包解压后共用运行目录 `plugins/<artifactName>/plugin.json` 发现入口。代码插件通过主仓库提供的 `NexusPipeline.Plugin.Abstractions` Plugin API v1.8 与宿主交互。`plugin.json.name` 是稳定的小写 kebab-case 机器 ID，`artifactName` 是严格区分大小写的源码、安装、发行目录与 ZIP 身份；配置、密钥、作用域和偏好仍以机器 ID 隔离。
 
 插件作者的实践文档位于 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins)：[仓库概览](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/README.md)、[贡献指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/CONTRIBUTING.md)、[数据化专项插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/DATA_SPECIALIZED_PLUGIN.md)、[判断脚本开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/JUDGE_SCRIPT.md)、[前端插件开发](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)、[打包与发布](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)。本文件保留宿主实际支持的规范性契约，插件仓库文档负责贡献与发布工作流。
 
@@ -29,11 +29,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-## managed-code C# 插件（Plugin API v1.7）
+## managed-code C# 插件（Plugin API v1.8）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.7`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.7` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；只有使用新模拟器 provider 端口的插件需要 `1.7`。
+宿主当前 API 版本为 `1.8`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.8` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；使用模拟器 provider 的插件至少需要 `1.7`，使用通知收件人覆盖的插件需要 `1.8`。
 
 ```text
 plugins/GameCheckIn/
@@ -50,7 +50,7 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.7",
+  "apiVersion": "1.8",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
@@ -64,7 +64,7 @@ plugins/GameCheckIn/
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`；需要 v1.7 模拟器支持端口的插件应检查 `context is IPluginHostContextV1_7`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`；需要 v1.7 模拟器支持端口的插件应检查 `context is IPluginHostContextV1_7`；需要 v1.8 通知收件人覆盖的插件应检查 `context is IPluginHostContextV1_8`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
@@ -74,7 +74,7 @@ plugins/GameCheckIn/
 
 宿主通用设置接口为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`。插件未启用或贡献不存在返回 `404 contribution_not_found`，贡献处理器异常返回 `500 plugin_error`。
 
-GameCheckIn v0.3 使用插件自有的独立任务、任务级凭据/通知密钥和本机时区计划，不再注册用户全局签到设置或依赖用户运行事件。旧版全局签到配置不会迁移为任务；用户需要在“签到”页面创建任务并重新配置凭据与通知。
+GameCheckIn v0.3.1 使用插件自有的独立任务、任务级平台凭据和本机时区计划，不再注册用户全局签到设置或依赖用户运行事件。通知由宿主全局渠道发送，任务可以覆盖 SMTP 收件人，留空时继承宿主全局收件人。v0.3.1 使用全新的任务存储格式，不导入 v0.3.0 创建的任务数据；用户需要在“签到”页面重新创建任务并填写凭据。
 
 用户列表徽章接口为 `GET /api/plugin-contributions/user-list-badges`，一次返回全部用户的徽章快照。每个徽章由宿主投影为 `pluginName`、`pluginDisplayName`、`id`、`label`、`tone`、`title` 和 `order`；`tone` 仅允许 `muted`、`blue`、`ok`、`warn`、`bad`，无效徽章会被记录并丢弃，不影响用户列表。
 
@@ -182,6 +182,10 @@ provider 的 `ProbeAsync(adbEndpoint, cancellationToken, timeoutSeconds)` 返回
 
 Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的专属识别、驱动命令与实例关闭由官方可选插件 `EmulatorSupport` 提供；使用这三家模拟器的厂商专属行为前，需要安装并启用该扩展。数据化专项插件的 `emulator` capability 仍只声明脚本实例支持「安卓模拟器」启动方式，不负责注册 provider。
 
+### v1.8 通知收件人覆盖
+
+`IPluginHostContextV1_8` 在 v1.7 基础上标记通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。
+
 ### 旧外观数据搬迁
 
 宿主启动时执行一次性格式搬迁：读取旧外观配置、`user-assets/appearance/wallpapers/` 目录与旧轮换游标，把资产导入旧配置记录的原提供方插件命名空间（资产 scope 为 `wallpapers`），再把搬迁载荷原子写入该插件的 `legacy-appearance-import` 作用域数据。成功后写入标记 `.nxp/state/appearance-migration.json`；任一步失败都不写标记，下一次启动按同一入口重试。旧文件由宿主保留，插件是这些旧数据的唯一消费者。
@@ -254,7 +258,8 @@ Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的�
 文本类元素（`nxp-button`、`nxp-badge`）通过 `label` 属性接收文案：属性写法不产生插槽子节点，父级重渲染不会影响元素自身的 DOM 与交互；插槽内容（`<nxp-button>删除</nxp-button>`）继续作为替代写法，元素在父级重新渲染后仍保留自身结构与样式。
 
 - `nxp-section-card`：props 为 `title`、`description` 和 `variant`（`primary` 或 `secondary`，默认 `primary`）；默认插槽为 body，具名插槽为 `header`、`description` 和 `actions`。
-- `nxp-collapsible-card`：props 为 `title`、`description`、`expanded`（布尔，默认 `false`）和 `panel-id`；展开状态由调用方受控，展开变化时 emit `toggle`，事件负载在 `CustomEvent.detail[0]`；`panel-id` 同时用于 `aria-controls` 与 body 的 id；body 为默认插槽，header 右侧为 `actions` 具名插槽。
+- `nxp-collapsible-card`：props 为 `title`、`description`、`expanded`（布尔，默认 `false`）、`panel-id` 和 `surface`（`default` 或 `secondary`，默认 `default`）；展开状态由调用方受控，展开变化时 emit `toggle`，事件负载在 `CustomEvent.detail[0]`；`panel-id` 同时用于 `aria-controls` 与 body 的 id；body 为默认插槽，header 右侧为 `actions` 具名插槽。
+- `nxp-modal`：公共二级编辑表面使用 `surface="secondary"`，宽版使用 `size="wide"`；设置 `footer` 布尔属性后会启用底部操作栏，`footer` 具名插槽中的内容显示在带分隔线的底部操作栏。
 
 设置页的折叠卡片由宿主统一协调，插件可以接入同一协议：插件展开自己的卡片时向 window 派发 `nxp-settings-panel-toggle`（`detail` 为 `{ panelId }`，收起时 `panelId` 为 `null`），并监听 `nxp-settings-panel-state`（`detail` 为 `{ panelId }`）以收起其它卡片。字段帮助文案使用宿主工具提示约定：在控件容器上设置 `data-help="说明文字"`。
 

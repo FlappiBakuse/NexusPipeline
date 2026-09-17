@@ -363,12 +363,11 @@ onBeforeUnmount(() => {
       :close-label="t('common.close')"
       @close="closeNewUser"
     >
-      <div class="field">
+      <div class="field" :data-help="t('common.user.name_case_help')">
         <label class="field-label" for="gu-name">{{
           t("users.user_name")
         }} <span class="req">*</span></label>
         <NxpTextInput id="gu-name" v-model="newUserName" :aria-label="t('users.user_name')" @update:model-value="clearFieldError('gu-name')" />
-        <span class="muted">{{ t("users.username_case_insensitive") }}</span>
       </div>
       <template #footer>
         <NxpButton class="ghost" type="button" @click.stop="closeNewUser">

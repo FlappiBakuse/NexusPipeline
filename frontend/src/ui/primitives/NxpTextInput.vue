@@ -97,6 +97,7 @@ defineExpose({ focus: () => input.value?.focus() });
 .nxp-input { width: 100%; min-height: var(--nx-control-height); border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); padding: 0 var(--nx-space-3); background: var(--input-bg, transparent); color: var(--nx-color-text); font: inherit; }
 .nxp-input:focus { border-color: var(--nx-color-accent); box-shadow: var(--nx-focus-ring); outline: 0; }
 .nxp-input:disabled { opacity: .55; }
+.nxp-input[aria-invalid="true"] { border-color: var(--nx-color-danger); box-shadow: 0 0 0 1px var(--nx-color-danger); }
 .nxp-password-input { position: relative; display: block; width: 100%; min-width: 0; }
 .nxp-password-input > .nxp-input { padding-right: calc(var(--nx-space-3) + 32px); }
 .nxp-password-input > .nxp-input::-ms-reveal { display: none; }

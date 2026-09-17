@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";
+import { syncPluginNavActive } from "@bridge/index";
 
 /**
  * 宿主页面路由表。插件 route 由 `PluginRouteHost` 承载，负责 route token、
@@ -23,8 +24,14 @@ export const routes: RouteRecordRaw[] = [
   { path: "/:pathMatch(.*)*", component: { template: "<span />" } },
 ];
 
-export const router = createRouter({
-  history: createWebHashHistory(),
-  routes,
-  scrollBehavior: () => ({ top: 0 }),
-});
+export function createNexusRouter(history = createWebHashHistory()) {
+  const instance = createRouter({
+    history,
+    routes,
+    scrollBehavior: () => ({ top: 0 }),
+  });
+  instance.afterEach(to => syncPluginNavActive(`#${to.fullPath}`));
+  return instance;
+}
+
+export const router = createNexusRouter();

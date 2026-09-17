@@ -9,7 +9,7 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_7
+internal sealed class PluginHostContext : IPluginHostContextV1_8
 {
     public PluginHostContext(
         string pluginName,

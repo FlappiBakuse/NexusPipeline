@@ -13,6 +13,7 @@ const props = withDefaults(defineProps<{
   panelId?: string;
   controlsId?: string;
   panel?: string;
+  surface?: "default" | "secondary";
 }>(), {
   title: "",
   description: "",
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<{
   panelId: "",
   controlsId: "",
   panel: "",
+  surface: "default",
 });
 
 const emit = defineEmits<{ toggle: [expanded: boolean] }>();
@@ -33,7 +35,7 @@ function toggle() {
 </script>
 
 <template>
-  <section v-bind="attrs" class="settings-card section-surface nxp-collapsible-card" :class="{ 'is-expanded': props.expanded }">
+  <section v-bind="attrs" class="settings-card section-surface nxp-collapsible-card" :class="{ 'is-expanded': props.expanded, 'is-secondary': props.surface === 'secondary' }">
     <button
       class="settings-card-toggle nxp-collapsible-card-toggle"
       type="button"
@@ -68,4 +70,5 @@ function toggle() {
 :host { display: block; min-width: 0; }
 .nxp-collapsible-card-side { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--space-3); }
 .nxp-collapsible-card-side > .nxp-button, .nxp-collapsible-card-side > button { min-height: 32px; }
+.nxp-collapsible-card.is-secondary { border-color: var(--content-card-border); background: var(--content-card-soft); }
 </style>

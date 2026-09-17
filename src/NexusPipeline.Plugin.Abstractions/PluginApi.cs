@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.7）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.8）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 7;
+    public const int Minor = 8;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -148,6 +148,11 @@ public interface IPluginHostContextV1_6 : IPluginHostContextV1_4
 public interface IPluginHostContextV1_7 : IPluginHostContextV1_6
 {
     IPluginEmulatorSupportRegistry EmulatorSupport { get; }
+}
+
+/// <summary>Plugin API v1.8 的通知收件人覆盖能力。</summary>
+public interface IPluginHostContextV1_8 : IPluginHostContextV1_7
+{
 }
 
 /// <summary>由 managed-code 插件提供的模拟器识别器。宿主按优先级和插件身份稳定调用。</summary>
@@ -701,7 +706,11 @@ public interface IPluginNotificationService
     ValueTask SendAsync(PluginNotification notification, CancellationToken cancellationToken = default);
 }
 
-public sealed record PluginNotification(string Title, string Body);
+public sealed record PluginNotification(string Title, string Body)
+{
+    /// <summary>可选的 SMTP 收件人覆盖；为空时使用宿主全局收件人。</summary>
+    public string? SmtpTo { get; init; }
+}
 
 /// <summary>插件后台任务调度端口。任务由宿主隔离执行并在插件停止时取消。</summary>
 public interface IPluginJobScheduler

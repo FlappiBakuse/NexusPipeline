@@ -111,13 +111,18 @@ function renderPluginNav() {
     items.forEach(item => {
       const link = document.createElement("a");
       link.href = item.href;
-      link.className = "plugin-nav-item";
       link.dataset.pluginNav = item.key;
       link.dataset.pluginPage = item.href;
       const icon = document.createElement("span");
-      icon.className = "nav-icon plugin-nav-icon";
+      icon.className = "nav-icon";
       icon.setAttribute("aria-hidden", "true");
-      icon.textContent = item.icon || "•";
+      if (/^[a-z][a-z0-9-]*$/i.test(item.icon)) {
+        const hostIcon = document.createElement("nxp-icon");
+        hostIcon.setAttribute("name", item.icon);
+        icon.append(hostIcon);
+      } else {
+        icon.textContent = item.icon || "•";
+      }
       const title = document.createElement("span");
       title.textContent = item.title;
       link.append(icon, title);
@@ -139,7 +144,7 @@ function registerNav(descriptor, item = {}) {
     key,
     title,
     order: Number.isFinite(Number(item.order)) ? Number(item.order) : 0,
-    icon: String(item.icon || "•").slice(0, 2),
+    icon: String(item.icon || "•"),
     href: `#/plugin/${encodeURIComponent(descriptor.name)}/${route.split("/").map(encodeURIComponent).join("/")}`,
     element: null,
   };
@@ -399,9 +404,28 @@ export function notifyPluginDispose(payload) {
   return notifyLifecycle("onDispose", payload);
 }
 
+function pluginNavPath(value) {
+  const text = String(value || "");
+  const hashIndex = text.indexOf("#");
+  const route = hashIndex >= 0 ? text.slice(hashIndex + 1) : text;
+  return route.split("?")[0].replace(/\/+$/, "") || "/";
+}
+
 export function syncPluginNavActive(hash = location.hash) {
-  document.querySelectorAll("[data-plugin-nav]").forEach(link => {
-    const active = link.getAttribute("href") === hash;
+  const currentPath = pluginNavPath(hash);
+  const links = Array.from(document.querySelectorAll("[data-plugin-nav]"));
+  let activeLink = null;
+  let activePathLength = -1;
+  links.forEach(link => {
+    const navPath = pluginNavPath(link.getAttribute("href"));
+    const matches = currentPath === navPath || currentPath.startsWith(`${navPath}/`);
+    if (matches && navPath.length > activePathLength) {
+      activeLink = link;
+      activePathLength = navPath.length;
+    }
+  });
+  links.forEach(link => {
+    const active = link === activeLink;
     link.classList.toggle("active", active);
     if (active) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");

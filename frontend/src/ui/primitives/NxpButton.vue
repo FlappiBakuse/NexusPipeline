@@ -15,7 +15,7 @@ withDefaults(defineProps<{
 <template>
   <button
     class="nxp-button"
-    :class="{ sm: size === 'sm', danger: tone === 'danger', ghost: variant === 'ghost', busy }"
+    :class="{ primary: tone === 'primary', sm: size === 'sm', danger: tone === 'danger', ghost: variant === 'ghost', busy }"
     :type="type"
     :disabled="disabled || busy"
     :aria-busy="busy ? 'true' : undefined"
@@ -23,6 +23,7 @@ withDefaults(defineProps<{
 </template>
 
 <style>
+nxp-button > .nxp-button { flex: 1 1 auto; min-width: 0; }
 :host {
   display: inline-flex;
   min-width: 0;

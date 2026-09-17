@@ -24,4 +24,13 @@ describe("NxpButton async state", () => {
     expect(button.attributes("disabled")).toBeUndefined();
     expect(button.classes()).not.toContain("busy");
   });
+
+  it("applies the primary tone styling", () => {
+    const wrapper = mount(NxpButton, {
+      props: { tone: "primary" },
+      slots: { default: "Add" },
+    });
+
+    expect(wrapper.get("button").classes()).toContain("primary");
+  });
 });

@@ -37,7 +37,7 @@
 
 自动更新由设置中的 `UpdateCheckEnabled`、`UpdateAutoApplyEnabled` 与 `PluginAutoUpdateEnabled` 分别控制。前两项同时开启时，程序启动恢复收尾后、宿主服务启动前会检查并尝试下载、应用宿主更新；已验证的 `Ready` 包也会在该阶段应用。检查或下载超时/失败时继续启动当前版本，同一目标自动失败后冷却 12 小时；策略屏障不允许自动下载。`PluginAutoUpdateEnabled` 独立控制插件更新：启动阶段在插件事务恢复及加载前检查并暂存符合条件的已安装插件，运行期间每 12 小时检查更新，并在维护租约空闲时安排安全重启。手动宿主更新和插件商店批量更新入口保持可用。
 
-GameCheckIn v0.3 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划、凭据和通知密钥，不再使用用户全局签到设置；旧版签到配置不会自动转成任务。
+GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，排序使用 `PUT /api/plugin-api/game-checkin/tasks/order`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划和平台凭据；通知通过宿主全局渠道发送，任务可覆盖 SMTP 收件人。v0.3.1 使用新的 v2 任务存储，不导入 v0.3.0 任务数据。
 
 ## 行为护栏
 

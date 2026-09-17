@@ -1145,7 +1145,6 @@
   "users.user_name": "Username",
   "users.user_order_saved": "User order saved",
   "users.user_settings_saved": "User settings saved",
-  "users.username_case_insensitive": "Usernames are case-insensitive.",
   "users.validation.avatar_size": "Avatar file is too large (5 MiB maximum)",
   "users.validation.avatar_type": "Avatars support PNG, JPEG, or WebP only",
   "users.validation.remark_length": "Notes may contain at most {bytes} bytes",

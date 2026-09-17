@@ -1145,7 +1145,6 @@
   "users.user_name": "用户名",
   "users.user_order_saved": "用户顺序已保存",
   "users.user_settings_saved": "用户设置已保存",
-  "users.username_case_insensitive": "用户名不区分大小写。",
   "users.validation.avatar_size": "头像文件过大（上限 5 MiB）",
   "users.validation.avatar_type": "头像仅支持 PNG、JPEG 或 WebP",
   "users.validation.remark_length": "备注最多 {bytes} 字节",

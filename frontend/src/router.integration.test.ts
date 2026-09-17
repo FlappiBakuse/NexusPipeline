@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount, type VueWrapper } from "@vue/test-utils";
 import { h, nextTick, ref } from "vue";
-import { createMemoryHistory, createRouter, RouterView, useRoute, type Router } from "vue-router";
+import { createMemoryHistory, RouterView, useRoute, type Router } from "vue-router";
 
 /**
  * 插件 route 的真实装配集成测试。
@@ -35,25 +35,25 @@ interface BridgeCalls {
   refreshPluginRuntime: ReturnType<typeof vi.fn>;
 }
 
-const bridgeRegistry = globalThis as unknown as { __nxpBridgeCalls?: BridgeCalls };
+const bridge = vi.hoisted(() => {
+  const bridgeRegistry = globalThis as unknown as { __nxpBridgeCalls?: BridgeCalls };
+  bridgeRegistry.__nxpBridgeCalls ??= {
+    initPluginRuntime: vi.fn(async () => true),
+    resolvePluginRoute: vi.fn(),
+    notifyPluginPageEnter: vi.fn(async () => {}),
+    notifyPluginPageUpdated: vi.fn(async () => {}),
+    notifyPluginPageLeave: vi.fn(async () => {}),
+    notifyPluginDispose: vi.fn(async () => {}),
+    syncPluginNavActive: vi.fn(),
+    disposePluginSlot: vi.fn(async () => {}),
+    renderPluginSlot: vi.fn(async () => 0),
+    pluginRuntimeStatus: vi.fn(() => []),
+    refreshPluginRuntime: vi.fn(async () => true),
+  };
+  return bridgeRegistry.__nxpBridgeCalls!;
+});
 
-bridgeRegistry.__nxpBridgeCalls ??= {
-  initPluginRuntime: vi.fn(async () => true),
-  resolvePluginRoute: vi.fn(),
-  notifyPluginPageEnter: vi.fn(async () => {}),
-  notifyPluginPageUpdated: vi.fn(async () => {}),
-  notifyPluginPageLeave: vi.fn(async () => {}),
-  notifyPluginDispose: vi.fn(async () => {}),
-  syncPluginNavActive: vi.fn(),
-  disposePluginSlot: vi.fn(async () => {}),
-  renderPluginSlot: vi.fn(async () => 0),
-  pluginRuntimeStatus: vi.fn(() => []),
-  refreshPluginRuntime: vi.fn(async () => true),
-};
-
-const bridge = bridgeRegistry.__nxpBridgeCalls!;
-
-vi.mock("@bridge/index", () => bridgeRegistry.__nxpBridgeCalls!);
+vi.mock("@bridge/index", () => bridge);
 
 vi.mock("./plugin-bridge/host-adapter", () => ({
   api: async () => null,
@@ -90,7 +90,7 @@ vi.mock("./plugin-bridge/host-adapter", () => ({
   trackController: (value: unknown) => value,
 }));
 
-import { routes } from "./router";
+import { createNexusRouter } from "./router";
 import { state } from "./platform/page-state";
 import { registerNexusElements } from "./ui/register";
 
@@ -165,7 +165,7 @@ async function until(condition: () => boolean, message: string) {
 }
 
 async function createHarness() {
-  router = createRouter({ history: createMemoryHistory(), routes });
+  router = createNexusRouter(createMemoryHistory());
   const pinia = createPinia();
   setActivePinia(pinia);
   const host = document.createElement("div");
@@ -305,15 +305,21 @@ describe("plugin route integration through the real router", () => {
     expect(handler).not.toHaveBeenCalled();
     expect(bridge.notifyPluginPageEnter).not.toHaveBeenCalled();
     expect(bridge.notifyPluginPageUpdated).not.toHaveBeenCalled();
-    expect(bridge.syncPluginNavActive).not.toHaveBeenCalled();
+    expect(bridge.syncPluginNavActive).toHaveBeenCalled();
+    expect(bridge.syncPluginNavActive).toHaveBeenLastCalledWith("#/plugin/unknown/missing");
   });
 
-  it("syncs the plugin nav active state from the current location", async () => {
+  it("syncs plugin navigation after plugin and host route changes", async () => {
     await createHarness();
     await router.push(`/plugin/${PLUGIN_NAME}/reports/daily`);
-    await until(() => bridge.syncPluginNavActive.mock.calls.length === 1, "插件导航同步");
+    await until(
+      () => bridge.syncPluginNavActive.mock.calls.some(call => call[0] === `#/plugin/${PLUGIN_NAME}/reports/daily`),
+      "插件导航同步",
+    );
 
-    expect(bridge.syncPluginNavActive).toHaveBeenCalledWith(window.location.hash);
+    expect(bridge.syncPluginNavActive).toHaveBeenLastCalledWith(`#/plugin/${PLUGIN_NAME}/reports/daily`);
+    await router.push("/users");
+    expect(bridge.syncPluginNavActive).toHaveBeenLastCalledWith("#/users");
   });
 
   it("keeps the v0.15.7 fullPath generation semantics for query changes", async () => {

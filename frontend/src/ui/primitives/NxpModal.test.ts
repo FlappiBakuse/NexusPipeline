@@ -52,4 +52,10 @@ describe("NxpModal", () => {
     expect(wrapper.emitted("close")).toHaveLength(1);
     wrapper.unmount();
   });
+
+  it("supports the public secondary surface variant", () => {
+    const wrapper = mount(NxpModal, { props: { open: true, surface: "secondary" }, slots: { default: "内容" } });
+    expect(wrapper.get(".nxp-modal-panel").classes()).toContain("is-secondary");
+    wrapper.unmount();
+  });
 });

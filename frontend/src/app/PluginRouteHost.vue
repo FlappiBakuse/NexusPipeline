@@ -9,7 +9,6 @@ import {
   notifyPluginPageLeave,
   notifyPluginPageUpdated,
   resolvePluginRoute,
-  syncPluginNavActive,
 } from "@bridge/index";
 
 /**
@@ -52,7 +51,6 @@ export default defineComponent({
       await handler(token, current);
       await notifyPluginPageEnter({ hash, page: current[0] || "plugin", segments: current, token, container: document.querySelector("#view") });
       await notifyPluginPageUpdated({ hash, page: current[0] || "plugin", segments: current, token, container: document.querySelector("#view") });
-      syncPluginNavActive(location.hash || "#/dashboard");
     };
 
     onMounted(() => {

@@ -96,6 +96,26 @@ describe("public element slot contract", () => {
     expect(container.querySelector("nxp-badge .badge")?.classList.contains("muted")).toBe(true);
   });
 
+  it("opens an on-demand modal with its task content when a plugin action button is clicked", async () => {
+    registerNexusElements();
+    const open = ref(false);
+    const container = mount(() => h("div", [
+      h("nxp-button", { label: "添加签到任务", onClick: () => { open.value = true; } }),
+      open.value
+        ? h("nxp-modal", { open: true, title: "新建签到任务" }, [h("div", { "data-task-editor": "" }, "任务设置")])
+        : null,
+    ]));
+    await nextTick();
+
+    const button = container.querySelector<HTMLButtonElement>("nxp-button button");
+    expect(button).not.toBeNull();
+    button?.click();
+    await nextTick();
+
+    expect(container.querySelector("nxp-modal [role='dialog']")).not.toBeNull();
+    expect(container.textContent).toContain("任务设置");
+  });
+
   it("keeps the plugin settings card intact across state updates", async () => {
     registerNexusElements();
     // 复刻插件卡片的更新方式：状态发布后徽章文案、缩略图与列表一起重渲染。

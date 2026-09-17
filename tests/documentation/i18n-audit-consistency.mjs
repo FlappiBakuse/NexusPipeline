@@ -91,7 +91,6 @@ const REVIEWED_UNUSED_KEYS = new Set([
   "common.update.pre_release_available",
   "common.update.started",
   "common.update_all_plugins",
-  "common.user.name_case_help",
   "common.user.name_placeholder",
   "common.validation.specialized_response",
   "settings.checks",

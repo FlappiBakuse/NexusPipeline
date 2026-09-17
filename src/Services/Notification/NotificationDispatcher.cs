@@ -15,14 +15,18 @@ internal sealed class NotificationDispatcher : INotificationService
 
     private readonly TimeSpan _channelTimeout;
 
+    private readonly Func<AppSettings, string, string?, OutboundHttpClientProvider?, NotificationImage?, Task<bool>> _send;
+
     public NotificationDispatcher(
         ISettingsProvider settings,
         TimeSpan? channelTimeout = null,
-        OutboundHttpClientProvider? outbound = null)
+        OutboundHttpClientProvider? outbound = null,
+        Func<AppSettings, string, string?, OutboundHttpClientProvider?, NotificationImage?, Task<bool>>? send = null)
     {
         _settings = settings;
         _channelTimeout = channelTimeout ?? TimeSpan.FromSeconds(30);
         _outbound = outbound;
+        _send = send ?? NotifySender.SendAsync;
     }
 
     public async Task NotifyScriptAsync(ScriptInstance script, RunRecord record)
@@ -77,14 +81,15 @@ internal sealed class NotificationDispatcher : INotificationService
             throw new ArgumentNullException(nameof(notification));
         }
         AppSettings settings = _settings.Current;
-        if (!HasChannel(settings))
+        string? smtpToOverride = string.IsNullOrWhiteSpace(notification.SmtpTo) ? null : notification.SmtpTo.Trim();
+        if (!HasChannel(settings, smtpToOverride))
         {
             Logger.Info($"[通知] 插件通知「{notification.Title}」未配置通知渠道，跳过发送。");
             return;
         }
         string title = string.IsNullOrWhiteSpace(notification.Title) ? "插件通知" : notification.Title.Trim();
         string body = $"[NexusPipeline] {title}\r\n{notification.Body ?? ""}";
-        await SendTextAsync(settings, body, "插件", null, null).WaitAsync(_channelTimeout, cancellationToken).ConfigureAwait(false);
+        await SendTextAsync(settings, body, "插件", smtpToOverride, null).WaitAsync(_channelTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task SendTextAsync(
@@ -96,7 +101,7 @@ internal sealed class NotificationDispatcher : INotificationService
     {
         try
         {
-            await NotifySender.SendAsync(
+            await _send(
                 settings,
                 text,
                 smtpToOverride,

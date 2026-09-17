@@ -257,12 +257,13 @@ describe("Frontend API 1.5 contract", () => {
     installFixtureNav();
     const descriptor = descriptorFixture();
     const host = createPluginHost(descriptor) as Host;
-    const nav = host.nav.register({ id: "reports", title: "报表", route: "reports", order: 2 });
+    const nav = host.nav.register({ id: "reports", title: "报表", route: "reports", icon: "check", order: 2 });
 
     const link = document.querySelector<HTMLAnchorElement>("[data-plugin-nav]");
     expect(link).not.toBeNull();
     expect(link!.getAttribute("href")).toBe(`#/plugin/${descriptor.name}/reports`);
     expect(link!.textContent).toContain("报表");
+    expect(link!.querySelector("nxp-icon")?.getAttribute("name")).toBe("check");
 
     syncPluginNavActive(`#/plugin/${descriptor.name}/reports`);
     expect(link!.classList.contains("active")).toBe(true);
@@ -271,8 +272,14 @@ describe("Frontend API 1.5 contract", () => {
     expect(link!.classList.contains("active")).toBe(false);
     expect(link!.hasAttribute("aria-current")).toBe(false);
 
+    const legacyNav = host.nav.register({ id: "legacy", title: "旧图标", route: "legacy", icon: "✓" });
+    const legacyLink = document.querySelector<HTMLAnchorElement>(`[data-plugin-nav*="legacy"]`);
+    expect(legacyLink?.querySelector("nxp-icon")).toBeNull();
+    expect(legacyLink?.textContent).toContain("✓");
+
     expect(() => host.nav.register({ id: "reports", title: "报表", route: "reports" })).toThrow();
     nav.dispose();
+    legacyNav.dispose();
     expect(document.querySelector("[data-plugin-nav]")).toBeNull();
   });
 

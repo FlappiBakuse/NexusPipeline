@@ -180,7 +180,7 @@ body[data-wallpaper="on"]::after {
 .sidebar {
   position: fixed; inset: 0 auto 0 0; z-index: 40; display: flex; flex-direction: column;
   width: var(--nav-width); padding: 24px 16px 18px; background: var(--surface-nav); border-right: 1px solid var(--border);
-  box-shadow: none;
+  --nav-item-gap: 5px; box-shadow: none;
 }
 body[data-wallpaper="on"] .sidebar,
 body[data-wallpaper="on"] .topbar {
@@ -193,13 +193,12 @@ body[data-wallpaper="on"] .topbar {
 .brand-copy span { margin-top: 2px; color: var(--muted); font-size: 11px; }
 .nav-caption { margin: 34px 10px 9px; color: var(--faint); font-size: 10px; font-weight: 700; letter-spacing: .16em; }
 .nav-caption-bottom { margin-top: 28px; }
-.main-nav { display: grid; gap: 5px; }
+.main-nav { display: grid; gap: var(--nav-item-gap); }
 .main-nav a { display: flex; align-items: center; gap: 11px; min-height: 42px; padding: 0 12px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13px; transition: background .15s, color .15s; }
 .main-nav a:hover { background: var(--content-card-hover); color: var(--text); }
 .main-nav a.active { background: var(--accent-soft); border-color: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .plugin-nav-host:empty { display: none; }
-.plugin-nav-host .plugin-nav-item { min-height: 38px; font-size: 12px; }
-.plugin-nav-host .plugin-nav-icon { width: 18px; justify-content: center; font-size: 16px; }
+.plugin-nav-host:not(:empty) + .main-nav { margin-top: var(--nav-item-gap); }
 .icon { display: block; width: 18px; height: 18px; flex: 0 0 auto; }
 .nav-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; color: currentColor; line-height: 1; }
 .sidebar-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding: 13px 4px 0 10px; border-top: 1px solid var(--border); color: var(--faint); font-size: 10px; }
@@ -607,7 +606,7 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
 .modal-title { margin: 0; font-size: 19px; }
 .modal-close .icon { width: 18px; height: 18px; }
 .modal-close { margin: 0 -8px 0 0; }
-.modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) var(--space-4); overscroll-behavior: contain; }
+.modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) 0; overscroll-behavior: contain; }
 .modal-footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: var(--action-gap); margin: 0; padding: var(--space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--border); }
 .settings-list { display: grid; gap: 0; margin: var(--space-3) 0 var(--space-5); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--content-card); }
 .settings-option { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 64px; padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); background: transparent; }
@@ -886,7 +885,7 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .dashboard-content > .dashboard-system-note { margin: 0; }
 .dashboard-content > #system-action-area:empty { display: none; }
 .dashboard-content > #system-action-area > .system-action-card { margin: 0; }
-.dashboard-history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); align-items: stretch; gap: var(--space-5); margin: var(--space-5) 0; }
+.dashboard-history-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); align-items: stretch; gap: var(--space-5); margin: var(--space-5) 0; container: dashboard-history / inline-size; }
 /* Nested grids must allow their tracks to shrink below the chart labels' intrinsic width. */
 .dashboard-history-card { display: grid; grid-template-columns: minmax(0, 1fr); align-content: stretch; min-width: 0; gap: var(--space-5); padding: var(--space-5); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
 .dashboard-history-card-head { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
@@ -952,6 +951,23 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .dashboard-history-loading,
 .dashboard-history-error { margin: 0; font-size: 12px; line-height: 1.6; }
 .dashboard-history-error { color: var(--warn); }
+
+/* 图例换到环图下方时，两张概览卡片保持相同的标题行和图表行。 */
+@container dashboard-history (min-width: 744px) and (max-width: 1331px) {
+  .dashboard-history-card { grid-template-rows: auto 1fr; container-type: inline-size; }
+  .dashboard-history-statuses,
+  .dashboard-history-metrics { align-content: start; }
+  .dashboard-history-distribution { justify-content: center; }
+  .dashboard-history-status-legend { flex-basis: 100%; }
+  .dashboard-history-trend-block { grid-template-rows: auto auto; }
+  .dashboard-history-trend {
+    /* SVG 的环形外径占 400px 画布的 85%，上下各留 30px。 */
+    height: min(340px, 85cqw);
+    min-height: 0;
+    margin-block: min(30px, 7.5cqw);
+  }
+  .dashboard-history-trend-rows { height: 100%; grid-auto-rows: 1fr; }
+}
 .dashboard-system-note { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: var(--space-4) 0; padding: 12px 14px; border-left: 2px solid var(--warn); background: var(--content-card-soft); color: var(--muted); font-size: 12px; line-height: 1.6; }
 .dashboard-system-note p { margin: 0; }
 .content-section { margin-top: var(--space-6); }

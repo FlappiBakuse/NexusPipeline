@@ -24,5 +24,6 @@ const props = withDefaults(defineProps<{ eyebrow?: string; title?: string; descr
 </template>
 
 <style>
-.nxp-page-header.has-actions { grid-template-columns: minmax(0, 1fr) auto; }
+.nxp-page-header.has-actions { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.nxp-page-header.has-actions > .page-head-actions { align-self: end; }
 </style>

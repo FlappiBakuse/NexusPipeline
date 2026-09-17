@@ -16,7 +16,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 - 完成判定：支持成功/失败关键字，也支持 JavaScript 或 Python 判断脚本；结果包含 `success`、`partial`、`failed`、`cancelled` 和 `skipped`。
 - 调度队列：按顺序运行多个脚本，支持按星期/时间触发、重试、资源冲突检查和完成后系统操作。
 - 历史与通知：保存状态、每次尝试的日志和运行截图；支持 Webhook、SMTP、飞书、钉钉、企业微信、Slack、Discord 等通知目标。
-- 独立签到：GameCheckIn 提供多个独立签到任务，每个任务可设置游戏、凭据、本机时区的星期/时间计划和任务级 Webhook/SMTP 通知，不依赖绑定用户或脚本实例。
+- 独立签到：GameCheckIn 提供多个独立签到任务，每个任务可设置游戏、凭据、本机时区的星期/时间计划和宿主全局通知；任务可覆盖 SMTP 收件人，不依赖绑定用户或脚本实例。
 - 专项插件：官方 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 提供 BetterGI、March7th Assistant、ZenlessZoneZeroOneDragon、MaaEnd 等适配。
 - 模拟器支持：宿主内置 Generic ADB 与 MuMuManager；雷电、夜神和 BlueStacks 的专属识别与实例关闭由可选的“模拟器支持扩展”插件提供，安装并启用后可使用。专项插件通过 `emulator` capability 声明支持模拟器实例。
 - 控制面：网页、`manage` 菜单和正式 CLI 共享本机服务；可选启用 loopback MCP Server。
