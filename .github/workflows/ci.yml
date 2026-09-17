@@ -56,6 +56,20 @@ jobs:
       - name: 安装治理解析器
         run: npm ci --prefix tools --no-audit --no-fund
 
+      - name: 读取官方插件固定基线
+        id: plugins-lock
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
+        run: node tools/ci-lock.mjs plugins.lock.json
+
+      - name: 检出官方插件固定基线
+        uses: actions/checkout@v4
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ steps.plugins-lock.outputs.ref }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+
       - name: 校验影响域、结果汇总与前端边界
         run: node tests/run.mjs tooling
 
