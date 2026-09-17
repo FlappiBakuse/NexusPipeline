@@ -63,6 +63,12 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
+function probeEnvironment() {
+  const env = { ...process.env };
+  delete env.NEXUS_CI_MANIFEST;
+  return env;
+}
+
 function currentProjectVersion() {
   const project = read("src/NexusPipeline.csproj");
   const match = project.match(/<Version>((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?)<\/Version>/u);
@@ -300,7 +306,10 @@ test("dual-mode production contracts stay on data files and behavior", () => {
 
   // 行为级防线：省略模式必须以 exit code 2 拒绝执行（真正的权限契约走 admin 门禁）。
   assert.equal(
-    spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "default"], { encoding: "utf8" }).status,
+    spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "default"], {
+      encoding: "utf8",
+      env: probeEnvironment(),
+    }).status,
     2,
     "bare default must require an explicit codex/admin mode",
   );
@@ -376,6 +385,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
   const dryRun = spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "--dry"], {
     cwd: ROOT,
     encoding: "utf8",
+    env: probeEnvironment(),
   });
   assert.equal(dryRun.status, 0, `admin system --dry 退出码异常：${dryRun.stderr}`);
   const listedSuites = [...dryRun.stderr.matchAll(/\[System Smoke\] 影响域 (\S+) \| (\S+) \| (.+)$/gmu)]
@@ -401,7 +411,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
     const groupArgs = spawnSync(
       process.execPath,
       [path.join(ROOT, "tests", "run.mjs"), "admin", "system", group, "--dry"],
-      { cwd: ROOT, encoding: "utf8" },
+      { cwd: ROOT, encoding: "utf8", env: probeEnvironment() },
     );
     assert.equal(groupArgs.status, 0, `admin system ${group} --dry 退出码异常：${groupArgs.stderr}`);
   }
@@ -409,7 +419,7 @@ test("CI impact domains match the System Smoke groups and workflow gates", () =>
   const unknownGroup = spawnSync(
     process.execPath,
     [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "not-a-group"],
-    { cwd: ROOT, encoding: "utf8" },
+    { cwd: ROOT, encoding: "utf8", env: probeEnvironment() },
   );
   assert.equal(unknownGroup.status, 2, "未知 System Smoke 分组必须以 exit code 2 拒绝");
   assert.match(unknownGroup.stderr, /未知 System Smoke 分组/u);
