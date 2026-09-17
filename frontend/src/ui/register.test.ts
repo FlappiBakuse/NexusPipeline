@@ -1,4 +1,4 @@
-import { nextTick } from "vue";
+import { createApp, h, nextTick, ref } from "vue";
 import { describe, expect, it } from "vitest";
 import { NEXUS_PUBLIC_ELEMENTS, registerNexusElements } from "./register";
 
@@ -13,6 +13,43 @@ async function mountElement(tagName: string, attributes: Record<string, string> 
 }
 
 describe("public Nexus elements", () => {
+  it("renders named public slots for fields, rows and page actions", async () => {
+    registerNexusElements();
+    const root = document.createElement("div");
+    root.innerHTML = '<nxp-field><span slot="error">字段错误</span></nxp-field><nxp-entity-row><span slot="meta">摘要</span><nxp-button slot="actions" label="编辑"></nxp-button></nxp-entity-row><nxp-page-header title="标题"><nxp-button slot="actions" label="保存"></nxp-button></nxp-page-header>';
+    document.body.append(root);
+    await nextTick();
+    try {
+      expect(root.querySelector('[role="alert"]')?.textContent).toBe("字段错误");
+      expect(root.querySelector("nxp-entity-row")?.textContent).toContain("摘要");
+      expect([...root.querySelectorAll("button")].map(button => button.textContent?.trim())).toEqual(["编辑", "保存"]);
+    } finally { root.remove(); }
+  });
+  it("renders nested sortable item slots", async () => {
+    registerNexusElements();
+    const element = document.createElement("nxp-collapsible-card");
+    element.innerHTML = '<div><nxp-sortable-list class="test" aria-label="Items"><div data-dnd-id="a"><nxp-drag-handle label="A"></nxp-drag-handle></div><div data-dnd-id="b"><nxp-drag-handle label="B"></nxp-drag-handle></div></nxp-sortable-list></div>';
+    document.body.append(element);
+    await nextTick();
+    try { expect(element.querySelectorAll("[data-dnd-id]")).toHaveLength(2); }
+    finally { element.remove(); }
+  });
+  it("updates slotted lists after their external owner loads and reorders items", async () => {
+    registerNexusElements();
+    const items = ref<string[]>([]);
+    const root = document.createElement("div");
+    document.body.append(root);
+    const app = createApp({ render: () => h("nxp-sortable-list", null, items.value.map(id => h("div", { key: id, "data-dnd-id": id }, id))) });
+    app.mount(root);
+    try {
+      items.value = ["a", "b"];
+      await nextTick();
+      expect([...root.querySelectorAll("[data-dnd-id]")].map(node => node.textContent)).toEqual(["a", "b"]);
+      items.value = ["b", "a"];
+      await nextTick();
+      expect([...root.querySelectorAll("[data-dnd-id]")].map(node => node.textContent)).toEqual(["b", "a"]);
+    } finally { app.unmount(); root.remove(); }
+  });
   it("keeps registered controls in the host light DOM", async () => {
     const element = await mountElement("nxp-select");
 
@@ -66,6 +103,24 @@ describe("public Nexus elements", () => {
     expect(collapsible.querySelector(".settings-card-title")?.textContent).toBe("宿主折叠");
     expect(collapsible.querySelector("[role='button'], button")?.getAttribute("aria-controls")).toBe("plugin-panel");
     collapsible.remove();
+  });
+
+  it("registers generic field, row, action and sorting composites", async () => {
+    expect(Object.keys(NEXUS_PUBLIC_ELEMENTS)).toEqual(expect.arrayContaining([
+      "nxp-action-group",
+      "nxp-date-range-picker",
+      "nxp-drag-handle",
+      "nxp-entity-row",
+      "nxp-sortable-list",
+    ]));
+
+    const handle = await mountElement("nxp-drag-handle", { label: "重排" });
+    expect(handle.querySelector("button.drag-handle")?.getAttribute("aria-label")).toBe("重排");
+    handle.remove();
+
+    const row = await mountElement("nxp-entity-row", { "item-id": "item-1" });
+    expect(row.querySelector("[data-entity-row]")?.getAttribute("data-dnd-id")).toBe("item-1");
+    row.remove();
   });
 
   it("reports the toggle payload of the public collapsible card as an event detail list", async () => {

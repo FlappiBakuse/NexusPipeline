@@ -66,7 +66,7 @@ const secureOptions = computed<NxpOption[]>(() =>
     data-settings-panel="notifications"
     data-testid="notification-settings"
   >
-    <button
+    <NxpButton
       class="settings-card-toggle"
       type="button"
       data-action="toggle-settings-panel"
@@ -91,7 +91,7 @@ const secureOptions = computed<NxpOption[]>(() =>
           "
           class-name="settings-card-arrow-icon"
       /></span>
-    </button>
+    </NxpButton>
     <NxpCollapseTransition>
       <div
         id="settings-panel-notifications"
@@ -99,7 +99,7 @@ const secureOptions = computed<NxpOption[]>(() =>
         v-show="expanded"
       >
       <div class="notification-settings">
-        <button
+        <NxpButton
           class="panel-toggle"
           type="button"
           :aria-expanded="localOpenPanel === 'webhook'"
@@ -123,7 +123,7 @@ const secureOptions = computed<NxpOption[]>(() =>
                 : t("common.disabled")
             }}</NxpBadge
           >
-        </button>
+        </NxpButton>
         <NxpCollapseTransition>
           <div
             v-show="localOpenPanel === 'webhook'"
@@ -285,7 +285,7 @@ const secureOptions = computed<NxpOption[]>(() =>
           </div>
           </div>
         </NxpCollapseTransition>
-        <button
+        <NxpButton
           class="panel-toggle"
           type="button"
           :aria-expanded="localOpenPanel === 'smtp'"
@@ -309,7 +309,7 @@ const secureOptions = computed<NxpOption[]>(() =>
                 : t("common.disabled")
             }}</NxpBadge
           >
-        </button>
+        </NxpButton>
         <NxpCollapseTransition>
           <div
             v-show="localOpenPanel === 'smtp'"

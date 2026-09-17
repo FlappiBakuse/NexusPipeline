@@ -17,8 +17,9 @@ import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpTextArea from "../../../ui/primitives/NxpTextArea.vue";
 import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
+import NxpDragHandle from "../../../ui/composites/NxpDragHandle.vue";
+import NxpSortableList from "../../../ui/composites/NxpSortableList.vue";
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
-import { vSortable } from "../../../ui/sortable";
 import {
   addBinding,
   browseNativeDialog,
@@ -407,21 +408,21 @@ onMounted(() => {
             <h3>{{ t("users.bound_script_instances") }}</h3>
             <p class="muted">{{ t("users.binding.settings_help") }}</p>
           </div>
-          <button class="ghost sm um-binding-edit-toggle" type="button" :aria-pressed="bindingEditMode" :hidden="Boolean(expandedBindingId)" @click.stop="toggleBindingEdit">
+          <NxpButton class="ghost sm um-binding-edit-toggle" type="button" :aria-pressed="bindingEditMode" :hidden="Boolean(expandedBindingId)" @click.stop="toggleBindingEdit">
             {{ bindingEditMode ? t("users.done_editing") : t("users.edit_bindings") }}
-          </button>
+          </NxpButton>
         </div>
         <div class="um-add-area" :data-open="addBindingOpen ? '' : undefined">
-          <button class="um-add-script" type="button" data-testid="um-add-script" :aria-expanded="addBindingOpen" @click.stop="toggleAddBindings">
+          <NxpButton class="um-add-script" type="button" data-testid="um-add-script" :aria-expanded="addBindingOpen" @click.stop="toggleAddBindings">
             <NxpIcon name="plus" /> <span>{{ t("users.add_script") }}</span>
-          </button>
+          </NxpButton>
           <div v-if="addBindingOpen" class="um-add-panel secondary-surface" data-testid="um-add-panel">
             <div class="um-add-head">
               <h4>{{ t("users.binding.choose") }}</h4>
               <span class="muted">{{ t("users.multiple_selection") }}</span>
             </div>
             <div v-if="availableBindingScripts.length" class="um-add-grid">
-              <button
+              <NxpButton
                 v-for="script in availableBindingScripts"
                 :key="script.id"
                 class="um-add-item"
@@ -435,7 +436,7 @@ onMounted(() => {
                   <span v-if="script.pluginType" class="muted">{{ t("users.specialized_script") }}</span>
                 </span>
                 <span class="um-add-item-mark" aria-hidden="true"><NxpIcon name="check" /></span>
-              </button>
+              </NxpButton>
             </div>
             <NxpEmptyState v-else :title="t('users.no_script_instances_can_be_added')" :description="t('users.binding.all_bound')" />
             <div class="um-add-actions">
@@ -444,7 +445,13 @@ onMounted(() => {
             </div>
           </div>
         </div>
-        <div v-if="draft.bindings?.length" v-sortable="{ axis: 'both', canDrag: canReorderBindings, onDrop: reorderBindings }" class="um-bindings">
+        <NxpSortableList
+          v-if="draft.bindings?.length"
+          axis="both"
+          :can-drag="canReorderBindings"
+          class="um-bindings"
+          @reorder="reorderBindings"
+        >
           <article
             v-for="binding in draft.bindings"
             :key="binding.scriptInstanceId"
@@ -459,16 +466,15 @@ onMounted(() => {
             :data-binding-id="binding.scriptInstanceId"
           >
             <div class="um-binding-head">
-              <span
-                class="drag-handle um-binding-drag-handle"
-                role="button"
-                :tabindex="bindingEditMode || expandedBindingId ? -1 : 0"
-                :aria-disabled="bindingEditMode || expandedBindingId ? 'true' : 'false'"
-                :aria-hidden="bindingEditMode || expandedBindingId ? 'true' : undefined"
-                :aria-label="t('common.reorder.keyboard_help')"
-                :title="bindingEditMode || expandedBindingId ? undefined : t('common.drag_to_reorder')"
-              >⠿</span>
-              <button
+              <NxpDragHandle
+                class="um-binding-drag-handle"
+                :tab-index="bindingEditMode || expandedBindingId ? -1 : 0"
+                :disabled="bindingEditMode || Boolean(expandedBindingId)"
+                :aria-hidden="bindingEditMode || Boolean(expandedBindingId)"
+                :label="t('common.reorder.keyboard_help')"
+                :title="bindingEditMode || expandedBindingId ? '' : t('common.drag_to_reorder')"
+              />
+              <NxpButton
                 class="um-binding-toggle"
                 :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }"
                 type="button"
@@ -491,15 +497,15 @@ onMounted(() => {
                 <span class="um-binding-bottom-arrow" aria-hidden="true" :data-direction="expandedBindingId === binding.scriptInstanceId ? 'down' : 'right'">
                   <NxpIcon :name="expandedBindingId === binding.scriptInstanceId ? 'chevronDown' : 'chevronRight'" />
                 </span>
-              </button>
-              <button class="danger um-binding-remove" type="button" data-testid="um-remove-binding" @click.stop="removeBinding(binding)">{{ t("users.remove_binding") }}</button>
+              </NxpButton>
+              <NxpButton class="danger um-binding-remove" type="button" data-testid="um-remove-binding" @click.stop="removeBinding(binding)">{{ t("users.remove_binding") }}</NxpButton>
             </div>
             <Transition name="nxp-collapse">
               <div v-if="expandedBindingId === binding.scriptInstanceId" class="um-binding-body">
                 <div class="um-binding-options">
-                  <button class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
+                  <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
-                  </button>
+                  </NxpButton>
                   <section class="um-binding-option-section">
                     <div class="section-heading">
                       <div>
@@ -617,7 +623,7 @@ onMounted(() => {
               </div>
             </Transition>
           </article>
-        </div>
+        </NxpSortableList>
         <NxpEmptyState v-else :title="t('users.no_script_instances_bound_yet')" :description="t('users.binding.add_help')" />
       </section>
     </section>

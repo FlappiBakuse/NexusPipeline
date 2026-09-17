@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
@@ -56,7 +57,7 @@ function description(plugin: PluginViewPlugin) {
       <div v-if="stale" class="callout callout-warning" data-testid="plugin-store-stale">
         {{ t("plugin.store.stale", {}, "The repository is temporarily unavailable. Showing the cached catalog.") }}
       </div>
-      <button
+      <NxpButton
         v-for="plugin in plugins"
         :key="plugin.name"
         class="plugin-list-item"
@@ -80,7 +81,7 @@ function description(plugin: PluginViewPlugin) {
           <NxpBadge :tone="pluginStatusView(plugin, tab, t).tone">{{ pluginStatusView(plugin, tab, t).label }}</NxpBadge>
           <NxpBadge tone="muted">{{ plugin.version ? `v${plugin.version}` : t("plugins.version_not_specified") }}</NxpBadge>
         </span>
-      </button>
+      </NxpButton>
       <NxpEmptyState v-if="!plugins.length" :title="t('plugins.no_matching_plugins')" :description="t('plugins.search.no_match_help')" />
     </div>
   </NxpScrollArea>

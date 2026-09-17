@@ -20,7 +20,7 @@ import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
-import { vSortable } from "../../ui/sortable";
+import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import ScriptCard from "./ScriptCard.vue";
 import ScriptEditorModal from "./ScriptEditorModal.vue";
 import { deleteScript, listScripts, getStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
@@ -181,14 +181,14 @@ onBeforeUnmount(() => {
         :description="t('scripts.page.help')"
       >
         <template #actions>
-          <button
+          <NxpButton
             class="primary"
             type="button"
             data-testid="new-script"
             @click="openNew"
           >
             {{ t("scripts.new_script_instance") }}
-          </button>
+          </NxpButton>
         </template>
       </NxpPageHeader>
       <NxpEmptyState
@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
         :description="t('scripts.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <TransitionGroup v-sortable="{ onDrop: reorderScripts }" name="nxp-card" tag="div" class="script-grid">
+        <NxpSortableList transition-name="nxp-card" class="script-grid" @reorder="reorderScripts">
           <ScriptCard
             v-for="script in scripts"
             :key="script.id"
@@ -208,7 +208,7 @@ onBeforeUnmount(() => {
             @edit="openScript"
             @remove="askDelete"
           />
-        </TransitionGroup>
+        </NxpSortableList>
       </section>
     </template>
 
@@ -222,7 +222,7 @@ onBeforeUnmount(() => {
       @close="chooserOpen = false"
     >
       <div class="new-script-chooser">
-          <button
+          <NxpButton
             class="chooser-card"
             type="button"
             @click.stop="openEditor(null, '')"
@@ -230,8 +230,8 @@ onBeforeUnmount(() => {
             <strong>{{ t("scripts.new_general_script_instance") }}</strong
             ><span class="muted">{{
               t("scripts.editor.manual_config_help")
-            }}</span></button
-          ><button
+            }}</span></NxpButton>
+          ><NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"
             class="chooser-card"
@@ -245,7 +245,7 @@ onBeforeUnmount(() => {
                 })
               }}</span></strong
             ><span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
-          </button>
+          </NxpButton>
         </div>
       <template #footer>
           <NxpButton class="ghost" type="button" @click.stop="chooserOpen = false">

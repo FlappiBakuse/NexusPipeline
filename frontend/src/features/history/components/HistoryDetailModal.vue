@@ -8,6 +8,7 @@ import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
+import NxpIconButton from "../../../ui/primitives/NxpIconButton.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { badgeTone, formatDateTime, formatDurationMs, statusLabel, statusTone } from "../utils/historyFormat";
@@ -202,10 +203,10 @@ onBeforeUnmount(() => {
             <div v-if="attemptScreenshots(attempt).length" class="history-attempt-screenshots" data-testid="history-attempt-screenshots">
               <div class="qk-row">{{ t("history.screenshots.summary", { count: attemptScreenshots(attempt).length }) }}</div>
               <NxpScrollArea class="history-screenshot-strip" direction="horizontal" role="list" :aria-label="t('history.screenshot.attempt_summary', { attempt: attempt.number })">
-                <button v-for="(screenshot, index) in attemptScreenshots(attempt)" :key="screenshot.id || index" class="history-screenshot-thumb" type="button" :aria-label="t('history.screenshot.item', { attempt: attempt.number, index: index + 1 })" @click.stop="openImage(attempt, screenshot, index)">
+                <NxpButton v-for="(screenshot, index) in attemptScreenshots(attempt)" :key="screenshot.id || index" class="history-screenshot-thumb" type="button" :aria-label="t('history.screenshot.item', { attempt: attempt.number, index: index + 1 })" @click.stop="openImage(attempt, screenshot, index)">
                   <img :src="imageUrls[detailImageKey(attempt, screenshot, index)] || undefined" :alt="t('history.screenshot.item', { attempt: attempt.number, index: index + 1 })" loading="lazy">
                   <span class="history-screenshot-index">{{ index + 1 }}</span>
-                </button>
+                </NxpButton>
               </NxpScrollArea>
             </div>
           </section>
@@ -221,7 +222,7 @@ onBeforeUnmount(() => {
     <div v-if="lightbox" class="history-image-lightbox" role="dialog" aria-modal="true" :aria-label="t('history.view_run_screenshot')" @click.self="lightbox = null">
       <div class="history-image-lightbox-backdrop" @click="lightbox = null"></div>
       <figure class="history-image-lightbox-content"><img :src="lightbox.url" :alt="lightbox.alt"><figcaption>{{ lightbox.caption }}</figcaption></figure>
-      <button class="icon-button history-image-lightbox-close" type="button" :aria-label="t('history.screenshot.close')" @click="lightbox = null"><NxpIcon name="close" /></button>
+      <NxpIconButton class="history-image-lightbox-close" :label="t('history.screenshot.close')" @click="lightbox = null"><NxpIcon name="close" /></NxpIconButton>
     </div>
   </Teleport>
 </template>

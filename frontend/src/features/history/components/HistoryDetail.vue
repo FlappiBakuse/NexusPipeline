@@ -4,6 +4,7 @@ import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
+import NxpIconButton from "../../../ui/primitives/NxpIconButton.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import HistoryDetailModal from "./HistoryDetailModal.vue";
 import { formatDateTime, formatDurationMs, historyBadges, statusLabel, statusTone } from "../utils/historyFormat";
@@ -47,9 +48,9 @@ function recordPath(record: HistoryRecord) {
       <div class="history-panel-head">
         <NxpIcon :name="props.selectedUserKey ? 'queues' : props.selectedDate ? 'scripts' : 'history'" /><h3>{{ panelTitle }}</h3>
         <span class="muted" data-testid="history-records-count">{{ panelCount }}</span>
-        <button class="history-refresh" type="button" :aria-label="t('history.refresh_records')" data-testid="history-refresh" @click="emit('refresh')">
+        <NxpIconButton class="history-refresh" :label="t('history.refresh_records')" data-testid="history-refresh" @click="emit('refresh')">
           <NxpIcon name="refresh" />
-        </button>
+        </NxpIconButton>
       </div>
       <NxpScrollArea class="history-entry-list history-level-list" :aria-label="panelTitle">
         <div v-if="!props.selectedUserKey" class="history-empty-message">
@@ -57,7 +58,7 @@ function recordPath(record: HistoryRecord) {
           <span>{{ t("history.filter.user_day_help") }}</span>
         </div>
         <div v-else-if="!props.records.length" class="history-empty-message">{{ t("history.records.empty_day") }}</div>
-        <button
+        <NxpButton
           v-for="(record, index) in props.records"
           v-else
           :key="recordKey(record, index)"
@@ -85,7 +86,7 @@ function recordPath(record: HistoryRecord) {
             <span class="history-entry-path">{{ recordPath(record) }} · {{ t("history.duration.label") }} {{ formatDurationMs(record.durationMs) }}</span>
           </span>
           <span class="history-entry-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
-        </button>
+        </NxpButton>
       </NxpScrollArea>
     </section>
     <HistoryDetailModal :record="props.detail" :fallback-user="props.selectedUserName" @close="emit('closeDetail')" />

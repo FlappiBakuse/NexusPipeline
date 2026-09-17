@@ -2,6 +2,7 @@
 import { t } from "../../../platform/i18n";
 import { isPluginViewStateActive, type PluginViewState } from "../../../platform/plugin-list";
 import NxpDialogPopover from "../../../ui/composites/NxpDialogPopover.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 
 /** 插件页筛选与排序浮层：二级页面语义的 `role="dialog"`，由触发器和 Escape 关闭。 */
@@ -30,7 +31,7 @@ const emit = defineEmits<{
     <fieldset class="plugin-filter-section">
       <legend>{{ t("plugins.plugin_type") }}</legend>
       <div class="plugin-filter-options" role="radiogroup">
-        <button
+        <NxpButton
           v-for="[key, label] in [['all', t('common.all')], ['managed-code', t('plugins.general_plugin')], ['data-specialized', t('common.specialized_plugin')]]"
           :key="key"
           class="plugin-filter-option"
@@ -42,13 +43,13 @@ const emit = defineEmits<{
           @click="emit('update', { kind: key })"
         >
           {{ label }}<NxpIcon v-if="view.kind === key" name="check" class-name="plugin-filter-option-check" />
-        </button>
+        </NxpButton>
       </div>
     </fieldset>
     <fieldset class="plugin-filter-section">
       <legend>{{ t("plugins.sort") }}</legend>
       <div class="plugin-filter-options" role="radiogroup">
-        <button
+        <NxpButton
           v-for="[key, label] in [['name', t('plugins.name_initial_or_pinyin')], ['createdAt', t('plugins.created_at')], ['updatedAt', t('plugins.updated_at')]]"
           :key="key"
           class="plugin-filter-option"
@@ -60,10 +61,10 @@ const emit = defineEmits<{
           @click="emit('update', { sortBy: key })"
         >
           {{ label }}<NxpIcon v-if="view.sortBy === key" name="check" class-name="plugin-filter-option-check" />
-        </button>
+        </NxpButton>
       </div>
       <div class="plugin-filter-direction" role="radiogroup">
-        <button
+        <NxpButton
           v-for="direction in ['asc', 'desc']"
           :key="direction"
           class="plugin-filter-option"
@@ -75,10 +76,10 @@ const emit = defineEmits<{
           @click="emit('update', { direction })"
         >
           {{ direction === 'asc' ? t('plugins.ascending') : t('plugins.descending') }}<NxpIcon v-if="view.direction === direction" name="check" class-name="plugin-filter-option-check" />
-        </button>
+        </NxpButton>
       </div>
     </fieldset>
-    <button
+    <NxpButton
       v-if="isPluginViewStateActive(view)"
       class="plugin-filter-reset ghost"
       type="button"
@@ -86,6 +87,6 @@ const emit = defineEmits<{
       @click="emit('reset')"
     >
       {{ t("plugins.reset") }}
-    </button>
+    </NxpButton>
   </NxpDialogPopover>
 </template>

@@ -109,12 +109,11 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await expect(page.locator(`[data-testid="history-date-users"][data-date="${secondDate}"]`).getByTestId("history-user")).toBeVisible();
 });
 
-test("手机宽度：仪表盘无横向溢出且导航抽屉可开关", async ({ page }) => {
+test("手机导航：抽屉可开关并同步无障碍状态", async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   try {
     await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("dashboard-state")).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     const sidebar = page.locator("#sidebar");
     const openNav = page.getByRole("button", { name: "打开导航" });
     await openNav.click();

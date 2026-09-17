@@ -111,7 +111,7 @@ function renderFormContribution(parent, contribution) {
   }
   const footer = document.createElement("div");
   footer.className = "row-actions";
-  const save = textElement("button", "Save");
+  const save = textElement("nxp-button", "Save");
   save.type = "submit";
   footer.append(save);
   form.append(footer);

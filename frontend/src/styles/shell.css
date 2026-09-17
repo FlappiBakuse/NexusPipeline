@@ -481,6 +481,8 @@ tbody tr:hover td { background: var(--content-card-hover); }
 [data-dnd-id].dnd-dragging { opacity: .55; box-shadow: var(--shadow); background: var(--content-card); }
 [data-dnd-id].dnd-drop-before { box-shadow: 0 -2px 0 0 var(--accent); }
 .script-card { display: grid; grid-template-columns: 32px 40px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); margin-bottom: 0; padding: var(--space-4) var(--space-5); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; box-shadow: none; }
+.script-card > .nxp-entity-row-leading { display: contents; }
+.script-card > .nxp-entity-row-actions { display: contents; }
 .script-card:last-child { border-bottom: 0; }
 .script-card:hover { background: var(--content-card-hover); }
 .script-ico { display: inline-flex; flex: 0 0 auto; width: 36px; height: 36px; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--content-card-border); background: color-mix(in srgb, #000 7%, var(--content-card)); color: rgba(0, 0, 0, .38); object-fit: contain; }
@@ -1042,7 +1044,8 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .history-range-icon { position: absolute; top: 50%; right: 12px; display: inline-flex; pointer-events: none; transform: translateY(-50%); color: var(--accent); }
 .history-range-icon .icon { width: 16px; height: 16px; }
 .history-range-popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 70; display: grid; container-name: history-range-popover; container-type: inline-size; min-width: min(100%, 520px); gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--content-control-border); border-radius: var(--radius-md); background: var(--content-card); box-shadow: var(--shadow); }
-.history-query-toolbar .history-range-popover { right: auto; left: 0; width: min(560px, calc(100vw - 32px)); width: min(560px, calc(100cqw - 16px)); min-width: 0; max-width: calc(100vw - 32px); }
+.history-query-toolbar .history-range-popover,
+.history-query-toolbar .nxp-date-range-popover { right: auto; left: 0; width: min(560px, calc(100vw - 32px)); width: min(560px, calc(100cqw - 16px)); min-width: 0; max-width: calc(100vw - 32px); }
 .history-range-popover[hidden] { display: none; }
 .history-calendar-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2); }
 .history-calendar-toolbar strong { min-width: 0; color: var(--text); font-size: 13px; text-align: center; }

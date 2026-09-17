@@ -187,7 +187,7 @@ function summaryRate() {
           </div>
           <div class="dashboard-history-trend" data-testid="dashboard-history-trend" role="list" :aria-label="t('dashboard.history.trend_aria')">
             <div v-if="dailyData.length" class="dashboard-history-trend-rows">
-              <button
+              <div
                 v-for="point in dailyData"
                 :key="point.date"
                 class="dashboard-history-trend-day"
@@ -204,7 +204,7 @@ function summaryRate() {
                   </span>
                 </span>
                 <strong class="dashboard-history-trend-total">{{ formatNumber(point.total) }}</strong>
-              </button>
+              </div>
             </div>
             <span v-else class="muted">{{ t("dashboard.history.trend_empty") }}</span>
           </div>

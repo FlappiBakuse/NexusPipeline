@@ -1,4 +1,4 @@
-import { defineCustomElement } from "vue";
+import { defineCustomElement, inject } from "vue";
 import Button from "./primitives/NxpButton.vue";
 import Badge from "./primitives/NxpBadge.vue";
 import Card from "./primitives/NxpCard.vue";
@@ -28,6 +28,16 @@ import SwitchList from "./composites/NxpSwitchList.vue";
 import LoadingState from "./composites/NxpLoadingState.vue";
 import SectionCard from "./composites/NxpSectionCard.vue";
 import CollapsibleCard from "./composites/NxpCollapsibleCard.vue";
+import ActionGroup from "./composites/NxpActionGroup.vue";
+import DateRangePicker from "./composites/NxpDateRangePicker.vue";
+import DragHandle from "./composites/NxpDragHandle.vue";
+import EntityRow from "./composites/NxpEntityRow.vue";
+import SortableList from "./composites/NxpSortableList.vue";
+import Tabs from "./composites/NxpTabs.vue";
+import ConfirmDialog from "./composites/NxpConfirmDialog.vue";
+import DialogPopover from "./composites/NxpDialogPopover.vue";
+import PageHeader from "./composites/NxpPageHeader.vue";
+import { PUBLIC_SLOT_PRESENCE } from "./slots";
 
 export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-button": Button,
@@ -59,6 +69,15 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-loading-state": LoadingState,
   "nxp-section-card": SectionCard,
   "nxp-collapsible-card": CollapsibleCard,
+  "nxp-action-group": ActionGroup,
+  "nxp-date-range-picker": DateRangePicker,
+  "nxp-drag-handle": DragHandle,
+  "nxp-entity-row": EntityRow,
+  "nxp-sortable-list": SortableList,
+  "nxp-tabs": Tabs,
+  "nxp-confirm-dialog": ConfirmDialog,
+  "nxp-dialog-popover": DialogPopover,
+  "nxp-page-header": PageHeader,
 } as const;
 
 const nativeTextContent = Object.getOwnPropertyDescriptor(Node.prototype, "textContent") as {
@@ -78,6 +97,34 @@ function defineResilientElement(component: Parameters<typeof defineCustomElement
     prototype: HTMLElement;
   };
   return class extends Base {
+    _mount(definition: any) {
+      (Base.prototype as any)._mount.call(this, {
+        ...definition,
+        configureApp(app: any) {
+          definition.configureApp?.(app);
+          if (!app.runWithContext(() => inject(PUBLIC_SLOT_PRESENCE, null))) {
+            app.provide(PUBLIC_SLOT_PRESENCE, (instance: any, name: string) => Boolean(instance?.ce?._slots?.[name]?.length));
+          }
+        },
+      });
+    }
+    _getSlots(): HTMLSlotElement[] {
+      // 每个元素消费自己的出口；嵌套元素的挂载回调可能在父元素之后执行。
+      return (Base.prototype as any)._getSlots.call(this).filter((slot: HTMLSlotElement) => {
+        let owner: HTMLElement | null = slot.parentElement;
+        while (owner && !(owner as any)._isVueCE) owner = owner.parentElement;
+        return !owner || owner === this;
+      });
+    }
+    // 插槽节点由公共元素移入自身容器后，外部渲染器仍以元素作为插入容器。
+    // 跟随现役锚点的实际父节点，保留外部列表的响应式更新与排序关系。
+    insertBefore<T extends Node>(node: T, anchor: Node | null): T {
+      if (anchor?.parentNode && anchor.parentNode !== this && this.contains(anchor)) {
+        return anchor.parentNode.insertBefore(node, anchor);
+      }
+      return super.insertBefore(node, anchor);
+    }
+
     get textContent(): string {
       return nativeTextContent.get.call(this) ?? "";
     }

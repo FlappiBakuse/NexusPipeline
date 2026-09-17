@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpCard from "../../ui/primitives/NxpCard.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
+import NxpActionGroup from "../../ui/composites/NxpActionGroup.vue";
+import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
 
 type Translator = (
   key: string,
@@ -50,14 +53,11 @@ const emit = defineEmits<{
     data-testid="global-user-card"
     :data-dnd-id="user.id"
   >
-    <span
-      class="drag-handle"
-      role="button"
-      tabindex="0"
-      :aria-label="translate('users.global.order_help')"
+    <NxpDragHandle
+      :label="translate('users.global.order_help')"
       :title="translate('common.drag_to_reorder')"
-      >⠿</span>
-    <button
+    />
+    <NxpButton
       class="global-user-avatar-button"
       type="button"
       :aria-label="translate('users.avatar_upload_for_user', { name: user.name })"
@@ -73,8 +73,8 @@ const emit = defineEmits<{
         v-else
         class="global-user-avatar global-user-avatar-fallback"
         >{{ initials }}</span
-      ><span class="global-user-avatar-mark" aria-hidden="true">+</span></button
-    >
+      ><span class="global-user-avatar-mark" aria-hidden="true">+</span>
+    </NxpButton>
     <div class="script-main global-user-main">
       <div class="script-name-row">
         <strong class="global-user-name">{{ user.name }}</strong>
@@ -112,26 +112,26 @@ const emit = defineEmits<{
         }}</NxpBadge>
       </div>
     </div>
-    <div class="global-user-actions row-actions entity-actions">
-      <button
+    <NxpActionGroup class="global-user-actions row-actions entity-actions">
+      <NxpButton
         class="tertiary"
         type="button"
         @click.stop="emit('manage', user)"
       >
-        {{ translate("users.user_management_button") }}</button
-      ><button
+        {{ translate("users.user_management_button") }}</NxpButton
+      ><NxpButton
         class="tertiary"
         type="button"
         @click.stop="emit('globalManage', user)"
       >
-        {{ translate("users.global.open_action") }}</button
-      ><button
-        class="danger"
+        {{ translate("users.global.open_action") }}</NxpButton
+      ><NxpButton
+        tone="danger"
         type="button"
         @click.stop="emit('remove', user)"
       >
         {{ translate("users.delete_user") }}
-      </button>
-    </div>
+      </NxpButton>
+    </NxpActionGroup>
   </NxpCard>
 </template>

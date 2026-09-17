@@ -1,7 +1,8 @@
-import type { Directive } from "vue";
+import { nextTick, type Directive } from "vue";
 
 export interface SortableOptions {
   axis?: "y" | "both";
+  disabled?: boolean;
   canDrag?: (item: HTMLElement) => boolean;
   onDrop?: (ids: string[], movedId: string) => void | Promise<void>;
 }
@@ -12,8 +13,9 @@ interface SortableState {
   onKeydown: (event: KeyboardEvent) => void;
   onPointerDown: (event: PointerEvent) => void;
   onPointerMove: (event: PointerEvent) => void;
-  onPointerUp: () => void;
-  onPointerCancel: () => void;
+  onPointerUp: (event: PointerEvent) => void;
+  onPointerCancel: (event: PointerEvent) => void;
+  observer: MutationObserver;
 }
 
 interface ActiveDrag {
@@ -46,6 +48,23 @@ function itemIds(container: HTMLElement): string[] {
   return directItems(container)
     .map(item => item.dataset.dndId || "")
     .filter(Boolean);
+}
+
+function validItems(container: HTMLElement): boolean {
+  const ids = itemIds(container);
+  return ids.length === directItems(container).length && new Set(ids).size === ids.length;
+}
+
+function reportOrder(container: HTMLElement, ids: string[], item: HTMLElement, options: SortableOptions) {
+  const focused = document.activeElement;
+  const restoreFocus = async () => {
+    await nextTick();
+    if (focused instanceof HTMLElement && focused.isConnected && item.contains(focused)) focused.focus();
+  };
+  try {
+    const result = options.onDrop?.(ids, item.dataset.dndId || "");
+    void Promise.resolve(result).then(restoreFocus, error => { console.error("Sortable reorder failed", error); return restoreFocus(); });
+  } catch (error) { void restoreFocus(); throw error; }
 }
 
 function sortableOwner(target: Element | null): HTMLElement | null {
@@ -112,13 +131,15 @@ function finishPointerDrag(commit: boolean) {
   drag.container.classList.remove("dnd-active");
   if (drag.container.hasPointerCapture?.(drag.pointerId)) drag.container.releasePointerCapture(drag.pointerId);
 
-  if (commit && drag.moved && drag.placeBefore !== drag.item) {
-    if (drag.placeBefore) drag.container.insertBefore(drag.item, drag.placeBefore);
-    else drag.container.appendChild(drag.item);
-    const ids = itemIds(drag.container);
+  const state = states.get(drag.container);
+  if (commit && drag.moved && drag.placeBefore !== drag.item && !state?.options.disabled
+    && validItems(drag.container) && itemIds(drag.container).join("\u0000") === drag.initialOrder.join("\u0000")) {
+    const items = directItems(drag.container).filter(item => item !== drag.item);
+    const index = drag.placeBefore ? items.indexOf(drag.placeBefore) : items.length;
+    if (index >= 0) items.splice(index, 0, drag.item);
+    const ids = items.map(item => item.dataset.dndId!);
     if (ids.join("\u0000") !== drag.initialOrder.join("\u0000")) {
-      const state = states.get(drag.container);
-      void state?.options.onDrop?.(ids, drag.item.dataset.dndId || "");
+      reportOrder(drag.container, ids, drag.item, state?.options || {});
     }
   }
 
@@ -149,7 +170,7 @@ function handlePointerMove(event: PointerEvent) {
 }
 
 function beginPointerDrag(container: HTMLElement, item: HTMLElement, event: PointerEvent, options: SortableOptions) {
-  if (activeDrag || event.button !== 0 || isDisabled(event.target instanceof Element ? event.target : item)) return;
+  if (activeDrag || options.disabled || !validItems(container) || event.button !== 0 || isDisabled(event.target instanceof Element ? event.target : item)) return;
   if (options.canDrag && !options.canDrag(item)) return;
   activeDrag = {
     container,
@@ -175,15 +196,15 @@ function beginPointerDrag(container: HTMLElement, item: HTMLElement, event: Poin
 }
 
 function reorderWithKeyboard(container: HTMLElement, item: HTMLElement, direction: -1 | 1, options: SortableOptions) {
+  if (options.disabled || !validItems(container)) return;
   if (options.canDrag && !options.canDrag(item)) return;
   const items = directItems(container);
   const index = items.indexOf(item);
   const targetIndex = index + direction;
   if (index < 0 || targetIndex < 0 || targetIndex >= items.length) return;
-  const target = items[targetIndex];
-  if (direction < 0) container.insertBefore(item, target);
-  else container.insertBefore(item, target.nextSibling);
-  void options.onDrop?.(itemIds(container), item.dataset.dndId || "");
+  items.splice(index, 1);
+  items.splice(targetIndex, 0, item);
+  reportOrder(container, items.map(value => value.dataset.dndId!), item, options);
 }
 
 function mountSortable(element: HTMLElement, options: SortableOptions = {}): SortableState {
@@ -197,6 +218,7 @@ function mountSortable(element: HTMLElement, options: SortableOptions = {}): Sor
       if (item) beginPointerDrag(element, item, event, state.options);
     },
     onKeydown: event => {
+      if (event.key === "Escape" && activeDrag?.container === element) { finishPointerDrag(false); event.preventDefault(); return; }
       if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
       const handle = dragHandle(event.target);
       if (!handle || isDisabled(handle)) return;
@@ -206,10 +228,14 @@ function mountSortable(element: HTMLElement, options: SortableOptions = {}): Sor
       reorderWithKeyboard(element, item, event.key === "ArrowUp" ? -1 : 1, state.options);
     },
     onPointerMove: handlePointerMove,
-    onPointerUp: () => finishPointerDrag(true),
-    onPointerCancel: () => finishPointerDrag(false),
+    onPointerUp: event => { if (activeDrag?.container === element && activeDrag.pointerId === event.pointerId) finishPointerDrag(true); },
+    onPointerCancel: event => { if (activeDrag?.container === element && activeDrag.pointerId === event.pointerId) finishPointerDrag(false); },
+    observer: new MutationObserver(() => {
+      if (activeDrag?.container === element && (!validItems(element) || itemIds(element).join("\u0000") !== activeDrag.initialOrder.join("\u0000"))) finishPointerDrag(false);
+    }),
   };
   states.set(element, state);
+  state.observer.observe(element, { childList: true, subtree: true, attributes: true, attributeFilter: ["data-dnd-id"] });
   element.dataset.nxpSortable = "true";
   element.addEventListener("pointerdown", state.onPointerDown);
   element.addEventListener("keydown", state.onKeydown);
@@ -223,6 +249,7 @@ function unmountSortable(element: HTMLElement) {
   if (activeDrag?.container === element) finishPointerDrag(false);
   const state = states.get(element);
   if (!state) return;
+  state.observer.disconnect();
   element.removeEventListener("pointerdown", state.onPointerDown);
   element.removeEventListener("keydown", state.onKeydown);
   element.removeEventListener("pointermove", state.onPointerMove);
@@ -236,7 +263,10 @@ export const vSortable: Directive<HTMLElement, SortableOptions> = {
   mounted(element, binding) { mountSortable(element, binding.value); },
   updated(element, binding) {
     const state = states.get(element);
-    if (state) state.options = binding.value || {};
+    if (state) {
+      state.options = binding.value || {};
+      if (state.options.disabled && activeDrag?.container === element) finishPointerDrag(false);
+    }
   },
   unmounted(element) { unmountSortable(element); },
 };

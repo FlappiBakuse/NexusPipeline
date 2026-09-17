@@ -748,7 +748,7 @@ watch(
             >
               {{ t("scripts.upload_script_file") }}
             </NxpButton>
-            <button
+            <NxpButton
               id="sm-mode-btn"
               class="judge-mode-card mode-toggle"
               type="button"
@@ -761,7 +761,7 @@ watch(
               }}<span class="judge-toggle-track" aria-hidden="true"
                 ><span class="judge-toggle-thumb"></span
               ></span>
-            </button>
+            </NxpButton>
           </div>
         </div>
         <div

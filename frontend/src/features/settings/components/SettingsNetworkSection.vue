@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { t } from "../../../platform/i18n";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
 import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
@@ -30,7 +31,7 @@ const proxyModeOptions = computed<NxpOption[]>(() => [
     :class="{ 'is-expanded': expanded }"
     data-settings-panel="network"
   >
-    <button
+    <NxpButton
       class="settings-card-toggle"
       type="button"
       data-action="toggle-settings-panel"
@@ -53,7 +54,7 @@ const proxyModeOptions = computed<NxpOption[]>(() => [
           "
           class-name="settings-card-arrow-icon"
       /></span>
-    </button>
+    </NxpButton>
     <NxpCollapseTransition>
       <div
         id="settings-panel-network"

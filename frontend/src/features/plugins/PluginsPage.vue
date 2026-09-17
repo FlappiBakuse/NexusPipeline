@@ -6,6 +6,7 @@ import { t } from "../../platform/i18n";
 import { setTopbarTitle } from "../../platform/shell";
 import { toast } from "../../platform/toast";
 import { useShellStore } from "../../stores/shell";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
@@ -260,7 +261,7 @@ onBeforeUnmount(() => {
             />
           </label>
           <div class="plugin-filter-wrap">
-            <button
+            <NxpButton
               class="plugin-filter-trigger"
               :class="{ 'is-active': isPluginViewStateActive(currentView) }"
               type="button"
@@ -271,7 +272,7 @@ onBeforeUnmount(() => {
               @click="filterOpen = !filterOpen"
             >
               <NxpIcon name="filter" /><span>{{ t("plugins.filter") }}</span>
-            </button>
+            </NxpButton>
             <FilterPopover
               :open="filterOpen"
               :view="currentView"

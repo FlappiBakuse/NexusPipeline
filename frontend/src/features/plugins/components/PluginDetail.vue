@@ -44,9 +44,9 @@ function hasPendingAction() {
 
 <template>
   <div class="plugin-detail-column">
-    <button v-if="detailVisibleMobile" class="plugin-detail-back ghost" type="button" @click="emit('backToList')">
+    <NxpButton v-if="detailVisibleMobile" class="plugin-detail-back ghost" type="button" @click="emit('backToList')">
       {{ t("plugins.back_to_plugin_list") }}
-    </button>
+    </NxpButton>
     <NxpScrollArea class="plugin-detail-pane" data-testid="plugin-detail" :aria-label="t('plugins.plugin_details')">
       <NxpLoadingState
         v-if="loading && !plugin"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { formatHistoryDate } from "../utils/historyFormat";
@@ -46,7 +47,7 @@ function usersOf(date: string) {
           :data-date="item.date"
           data-testid="history-date-group"
         >
-          <button
+          <NxpButton
             class="history-date-row"
             :class="{ active: expanded.has(item.date) }"
             type="button"
@@ -58,14 +59,14 @@ function usersOf(date: string) {
             <NxpIcon :name="expanded.has(item.date) ? 'chevronDown' : 'chevronRight'" />
             <span>{{ formatHistoryDate(item.date) }}</span>
             <span class="muted">{{ item.count }} {{ t("common.items") }}</span>
-          </button>
+          </NxpButton>
           <div v-if="expanded.has(item.date)" class="history-date-users" :data-date="item.date" data-testid="history-date-users">
             <div v-if="usersOf(item.date) === undefined" class="history-users-loading muted" role="status">{{ t("history.loading_run_users") }}</div>
             <div v-else-if="!usersOf(item.date)?.length" class="history-empty-message">
               <strong>{{ t("history.filter.no_users_day") }}</strong>
               <span>{{ t("history.choose_another_date") }}</span>
             </div>
-            <button
+            <NxpButton
               v-for="user in usersOf(item.date) || []"
               :key="userKeyOf(user)"
               class="history-user-row"
@@ -91,7 +92,7 @@ function usersOf(date: string) {
                 </span>
               </span>
               <span class="history-user-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
-            </button>
+            </NxpButton>
           </div>
         </div>
         <div v-if="!dates.length" class="history-dates-empty-message">

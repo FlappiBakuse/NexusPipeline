@@ -14,7 +14,7 @@ import NxpLoadingState from "../../ui/composites/NxpLoadingState.vue";
 import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpPager from "../../ui/primitives/NxpPager.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
-import { vSortable } from "../../ui/sortable";
+import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import { queueCountdown } from "./queueUtils";
 import QueueCard from "./QueueCard.vue";
 import QueueEditorModal from "./QueueEditorModal.vue";
@@ -410,12 +410,11 @@ onBeforeUnmount(() => {
         :description="t('queues.page.help')"
       />
     <section v-else class="card list-surface">
-      <TransitionGroup v-sortable="{ onDrop: reorderQueues }" name="nxp-card" tag="div" class="script-grid">
+      <NxpSortableList transition-name="nxp-card" class="script-grid" @reorder="reorderQueues">
         <QueueCard
           v-for="queue in visibleQueues"
           :key="queue.id"
           :queue="queue"
-          :data-dnd-id="queue.id"
           :first-script-id="firstScriptId(queue)"
           :next-label="countdownByQueue[queue.id] || queueNextTriggerLabel(queue)"
           :plugin-issue="queuePluginIssue(queue)"
@@ -423,7 +422,7 @@ onBeforeUnmount(() => {
           @edit="openEditor"
           @remove="askDelete"
         />
-      </TransitionGroup>
+      </NxpSortableList>
       <NxpPager v-model:page="queuePage" :total-pages="totalPages" :total="queues.length" :page-size="QUEUE_PAGE_SIZE" :label="t('common.schedule_queues')" />
     </section>
 

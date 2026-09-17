@@ -73,14 +73,14 @@ defineExpose({
     <template v-if="configChooser">
       <p class="modal-copy">{{ t("users.config.edit_first", { script: configChooser.scriptName }) }}</p>
       <div class="first-edit-chooser">
-        <button class="chooser-card" type="button" :disabled="!configChooser.freshAvailable" @click.stop="flow.chooseMode('fresh')">
+        <NxpButton class="chooser-card" type="button" :disabled="!configChooser.freshAvailable" @click.stop="flow.chooseMode('fresh')">
           <strong>{{ t("users.fresh_configuration_file") }}</strong>
           <span class="muted">{{ configChooser.freshAvailable ? t("users.config.generated") : t("users.config.unavailable") }}</span>
-        </button>
-        <button class="chooser-card" type="button" @click.stop="flow.chooseMode('reuse')">
+        </NxpButton>
+        <NxpButton class="chooser-card" type="button" @click.stop="flow.chooseMode('reuse')">
           <strong>{{ t("users.reuse_configuration_file") }}</strong>
           <span class="muted">{{ t("users.config.edit_existing") }}</span>
-        </button>
+        </NxpButton>
       </div>
     </template>
     <template #footer><NxpButton class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</NxpButton></template>
@@ -97,10 +97,10 @@ defineExpose({
     <template v-if="configCandidates">
       <p class="modal-copy">{{ t("users.config.candidates_help") }}</p>
       <div class="first-edit-chooser">
-        <button v-for="candidate in configCandidates.candidates" :key="candidate" class="chooser-card" type="button" @click.stop="flow.chooseCandidate(candidate)">
+        <NxpButton v-for="candidate in configCandidates.candidates" :key="candidate" class="chooser-card" type="button" @click.stop="flow.chooseCandidate(candidate)">
           <strong class="scroll-text"><span class="scroll-inner">{{ candidate }}</span></strong>
           <span class="muted">{{ t("users.config.candidate_used") }}</span>
-        </button>
+        </NxpButton>
       </div>
     </template>
     <template #footer><NxpButton class="ghost" type="button" @click.stop="flow.close">{{ t("common.cancel") }}</NxpButton></template>

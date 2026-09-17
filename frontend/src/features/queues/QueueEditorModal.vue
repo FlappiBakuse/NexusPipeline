@@ -9,7 +9,8 @@ import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
 import { clearFieldError } from "../../platform/toast";
-import { vSortable } from "../../ui/sortable";
+import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
+import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
 
 const props = defineProps<{
@@ -140,10 +141,10 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
             translate("queues.schedule.collapsed_help")
           }}</span>
         </div>
-        <div
+        <NxpSortableList
           id="qm-timesets"
-          v-sortable="{ onDrop: (ids: string[]) => emit('reorderTimeSets', ids) }"
           class="timeset-list"
+          @reorder="(ids) => emit('reorderTimeSets', ids)"
         >
           <article
             v-for="(timeSet, index) in draft.timeSets"
@@ -153,14 +154,11 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
             :data-dnd-id="String(index)"
           >
             <div class="timeset-head">
-              <span
-                class="drag-handle"
-                role="button"
-                tabindex="0"
-                :aria-label="translate('common.reorder.keyboard_help')"
+              <NxpDragHandle
+                :label="translate('common.reorder.keyboard_help')"
                 :title="translate('common.drag_to_reorder')"
-                >⠿</span>
-              <button
+              />
+              <NxpButton
                 class="timeset-summary"
                 type="button"
                 data-testid="queue-timeset-toggle"
@@ -182,7 +180,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                   }}</span
                 ></span
                 ><span class="timeset-summary-chevron" aria-hidden="true">⌄</span>
-              </button>
+              </NxpButton>
             </div>
             <Transition name="nxp-collapse">
               <div v-if="isTimeSetOpen(timeSetKey(timeSet, index))" class="timeset-details" data-testid="queue-timeset-body">
@@ -197,7 +195,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                       role="group"
                       :aria-label="translate('queues.execution_days')"
                     >
-                      <button
+                      <NxpButton
                         v-for="(name, day) in dayNames"
                         :key="day"
                         class="mode-toggle"
@@ -208,7 +206,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                         @click="toggleDay(timeSet, day)"
                       >
                         {{ dayShortNames[day] }}
-                      </button>
+                      </NxpButton>
                     </div>
                   </div>
                   <div class="timeset-time">
@@ -226,19 +224,19 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                   <NxpSwitch
                     v-model="timeSet.enabled"
                     :aria-label="translate('common.enabled')"
-                  /><button
+                  /><NxpButton
                     class="tertiary"
                     type="button"
                     @click="emit('removeTimeSet', index)"
                   >
                     {{ translate("queues.delete_schedule") }}
-                  </button>
+                  </NxpButton>
                 </div>
               </div>
               </div>
             </Transition>
           </article>
-        </div>
+        </NxpSortableList>
         <NxpButton
           class="ghost"
           type="button"
@@ -260,9 +258,9 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
           <span class="muted">{{ translate("queues.task.order_help") }}</span>
         </div>
         <div v-if="draft.tasks.length" class="tasks-body">
-          <div
+          <NxpSortableList
             id="qm-tasks"
-            v-sortable="{ onDrop: (ids: string[]) => emit('reorderTasks', ids) }"
+            @reorder="(ids) => emit('reorderTasks', ids)"
           >
             <div
               v-for="(task, index) in draft.tasks"
@@ -270,13 +268,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
               class="list-item task-row"
               :data-dnd-id="String(index)"
             >
-              <span
-                class="drag-handle"
-                role="button"
-                tabindex="0"
-                :aria-label="translate('common.reorder.keyboard_help')"
-                >⠿</span
-              ><NxpSelect
+              <NxpDragHandle :label="translate('common.reorder.keyboard_help')" /><NxpSelect
                 :id="'qm-task-' + index"
                 v-model="task.scriptInstanceId"
                 :options="options.scripts"
@@ -291,7 +283,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 >{{ translate("common.delete") }}</NxpButton
               >
             </div>
-          </div>
+          </NxpSortableList>
         </div>
         <NxpButton class="ghost" type="button" @click="emit('addTask')">{{
           translate("queues.add_task")

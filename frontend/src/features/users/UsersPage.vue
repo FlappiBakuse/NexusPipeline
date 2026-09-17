@@ -11,7 +11,7 @@ import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
-import { vSortable } from "../../ui/sortable";
+import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import GlobalUserCard from "./GlobalUserCard.vue";
 import ConfigEditFlow from "./components/ConfigEditFlow.vue";
 import GlobalManagementModal from "./components/GlobalManagementModal.vue";
@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
         :description="t('users.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <TransitionGroup v-sortable="{ onDrop: reorderUsers }" name="nxp-card" tag="div" class="script-grid global-user-list">
+        <NxpSortableList transition-name="nxp-card" class="script-grid global-user-list" @reorder="reorderUsers">
           <GlobalUserCard
             v-for="user in sortedUsers"
             :key="user.id"
@@ -350,7 +350,7 @@ onBeforeUnmount(() => {
             @global-manage="openGlobalManagement"
             @remove="askDelete"
           />
-        </TransitionGroup>
+        </NxpSortableList>
       </section>
     </template>
 
