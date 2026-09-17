@@ -234,6 +234,143 @@ public sealed class ConfigStoreTransactionTests
     }
 
     [Fact]
+    public void Apply_ManifestWriteFailurePreservesStoreAndCleansUnpublishedTransaction()
+    {
+        string scriptId = "txn-manifest-failure-" + Guid.NewGuid().ToString("N");
+        string userKey = "user-" + Guid.NewGuid().ToString("N");
+        string root = Path.Combine(Path.GetTempPath(), "np-txn-manifest-" + Guid.NewGuid().ToString("N"));
+        string config = Path.Combine(root, "config");
+        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
+        Directory.CreateDirectory(config);
+        Directory.CreateDirectory(store);
+        File.WriteAllText(Path.Combine(config, "state.json"), "new");
+        File.WriteAllText(Path.Combine(store, "state.json"), "old");
+        try
+        {
+            ConfigStoreMetadata previous = ConfigStoreMetadata.For(config);
+            previous.Generation = 1;
+            ConfigStoreMetadata.Save(scriptId, userKey, previous);
+
+            IOException failure = new("模拟 manifest 写入失败（access-denied）", unchecked((int)0x80070005));
+            Action<string, string> writer = FailAt("manifest.json", JsonWritePhase.BeforeReplace, failure);
+
+            IOException error = Assert.Throws<IOException>(() => ConfigStoreTransaction.Apply(
+                scriptId,
+                userKey,
+                config,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                null,
+                null,
+                Mark(scriptId, userKey, config),
+                writer));
+
+            Assert.Equal(failure.HResult, error.HResult);
+            Assert.Equal("old", File.ReadAllText(Path.Combine(store, "state.json")));
+            Assert.Equal(1, ConfigStoreMetadata.Load(scriptId, userKey)!.Generation);
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
+        }
+        finally
+        {
+            DeleteScriptData(scriptId);
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void Apply_CommitWriteFailureRollsBackStoreBeforeReturningError()
+    {
+        string scriptId = "txn-commit-failure-" + Guid.NewGuid().ToString("N");
+        string userKey = "user-" + Guid.NewGuid().ToString("N");
+        string root = Path.Combine(Path.GetTempPath(), "np-txn-commit-failure-" + Guid.NewGuid().ToString("N"));
+        string config = Path.Combine(root, "config");
+        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
+        Directory.CreateDirectory(config);
+        Directory.CreateDirectory(store);
+        File.WriteAllText(Path.Combine(config, "state.json"), "new");
+        File.WriteAllText(Path.Combine(store, "state.json"), "old");
+        try
+        {
+            ConfigStoreMetadata previous = ConfigStoreMetadata.For(config);
+            previous.Generation = 1;
+            ConfigStoreMetadata.Save(scriptId, userKey, previous);
+
+            Action<string, string> writer = FailAt(
+                "commit.json",
+                JsonWritePhase.BeforeReplace,
+                new IOException("模拟提交前写入失败"));
+
+            Assert.Throws<IOException>(() => ConfigStoreTransaction.Apply(
+                scriptId,
+                userKey,
+                config,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                null,
+                null,
+                Mark(scriptId, userKey, config),
+                writer));
+
+            Assert.Equal("old", File.ReadAllText(Path.Combine(store, "state.json")));
+            Assert.Equal(1, ConfigStoreMetadata.Load(scriptId, userKey)!.Generation);
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
+        }
+        finally
+        {
+            DeleteScriptData(scriptId);
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
+    public void Apply_MetadataWriteFailureLeavesCommittedSceneForNextRecovery()
+    {
+        string scriptId = "txn-metadata-failure-" + Guid.NewGuid().ToString("N");
+        string userKey = "user-" + Guid.NewGuid().ToString("N");
+        string root = Path.Combine(Path.GetTempPath(), "np-txn-metadata-" + Guid.NewGuid().ToString("N"));
+        string config = Path.Combine(root, "config");
+        string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
+        Directory.CreateDirectory(config);
+        Directory.CreateDirectory(store);
+        File.WriteAllText(Path.Combine(config, "state.json"), "new");
+        File.WriteAllText(Path.Combine(store, "state.json"), "old");
+        try
+        {
+            ConfigStoreMetadata previous = ConfigStoreMetadata.For(config);
+            previous.Generation = 1;
+            ConfigStoreMetadata.Save(scriptId, userKey, previous);
+
+            Action<string, string> writer = FailAt(
+                "store-meta.json",
+                JsonWritePhase.BeforeReplace,
+                new IOException("模拟 metadata 写入失败"));
+
+            Assert.Throws<IOException>(() => ConfigStoreTransaction.Apply(
+                scriptId,
+                userKey,
+                config,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                null,
+                null,
+                Mark(scriptId, userKey, config),
+                writer));
+
+            Assert.Equal("new", File.ReadAllText(Path.Combine(store, "state.json")));
+            Assert.True(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
+
+            ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+
+            Assert.Equal("new", File.ReadAllText(Path.Combine(store, "state.json")));
+            Assert.Equal(2, ConfigStoreMetadata.Load(scriptId, userKey)!.Generation);
+            Assert.False(Directory.Exists(ConfigSwapPaths.StoreTransactionDir(scriptId, userKey)));
+            ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
+        }
+        finally
+        {
+            DeleteScriptData(scriptId);
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void Apply_RejectsFileDirectoryShapeConflictBeforeMutation()
     {
         string scriptId = "txn-shape-" + Guid.NewGuid().ToString("N");
@@ -274,6 +411,27 @@ public sealed class ConfigStoreTransactionTests
         ConfigKind = "dir",
         SessionPhase = "run",
     };
+
+    private static Action<string, string> FailAt(
+        string fileName,
+        JsonWritePhase phase,
+        Exception error)
+    {
+        bool failed = false;
+        return (path, content) => JsonUtil.WriteAtomic(
+            path,
+            content,
+            observed =>
+            {
+                if (!failed
+                    && observed == phase
+                    && string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    failed = true;
+                    throw error;
+                }
+            });
+    }
 
     private static void WriteManifest(string scriptId, string userKey, ConfigStoreTransactionManifest manifest)
     {

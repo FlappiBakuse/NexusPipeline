@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   to: string;
   maxDate?: string;
   locale?: string;
+  popoverClass?: string;
   displayId?: string;
   displayTestId?: string;
   popoverId?: string;
@@ -37,6 +38,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   maxDate: "",
   locale: "",
+  popoverClass: "",
   displayId: "",
   displayTestId: "",
   popoverId: "",
@@ -141,7 +143,7 @@ watch(() => props.open, value => {
       <NxpDialogPopover
         :open="props.open"
         :id="props.popoverId || undefined"
-        class="nxp-date-range-popover secondary-surface"
+        :class="['nxp-date-range-popover secondary-surface', props.popoverClass || undefined]"
         :aria-label="props.dialogLabel"
         :closeable="false"
         @close="emit('close')"

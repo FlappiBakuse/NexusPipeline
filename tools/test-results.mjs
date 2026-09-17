@@ -20,7 +20,12 @@ export function parseTrxResults(text) {
   const counters = /<Counters\s+([^>]+)\/?\s*>/u.exec(text)?.[1];
   if (!counters) throw new Error("TRX 缺少 Counters");
   const attrs = Object.fromEntries([...counters.matchAll(/(\w+)="(\d+)"/gu)].map(m => [m[1], Number(m[2])]));
-  return validateTestCounts({ passed: attrs.passed, failed: attrs.failed + (attrs.error || 0) + (attrs.timeout || 0) + (attrs.aborted || 0), skipped: attrs.notExecuted });
+  const failed = attrs.failed + (attrs.error || 0) + (attrs.timeout || 0) + (attrs.aborted || 0);
+  const skipped = (attrs.notExecuted || 0) + (attrs.inconclusive || 0);
+  if (!Number.isSafeInteger(attrs.total) || attrs.total !== attrs.passed + failed + skipped) {
+    throw new Error("TRX Counters total 与状态计数不守恒");
+  }
+  return validateTestCounts({ passed: attrs.passed, failed, skipped });
 }
 
 export function parseVitestResults(value) {
@@ -29,10 +34,19 @@ export function parseVitestResults(value) {
   const failed = cases.filter(item => item.status === "failed").length;
   const skipped = cases.filter(item => ["pending", "skipped", "todo", "disabled"].includes(item.status)).length;
   if (passed + failed + skipped !== cases.length) throw new Error("Vitest 存在未知测试状态");
+  if (value.numTotalTests !== undefined && value.numTotalTests !== cases.length) throw new Error("Vitest total 与测试用例不一致");
+  if (value.numPassedTests !== undefined && value.numPassedTests !== passed) throw new Error("Vitest passed 与测试用例不一致");
+  if (value.numFailedTests !== undefined && value.numFailedTests !== failed) throw new Error("Vitest failed 与测试用例不一致");
+  if (value.numPendingTests !== undefined && value.numPendingTests !== skipped) throw new Error("Vitest skipped 与测试用例不一致");
   return validateTestCounts({ passed, failed, skipped });
 }
 
 export function parsePlaywrightResults(value) {
   const stats = value.stats || {};
-  return validateTestCounts({ passed: stats.expected, failed: stats.unexpected + stats.flaky, skipped: stats.skipped });
+  const failed = stats.unexpected + stats.flaky;
+  const skipped = stats.skipped;
+  if (stats.total !== undefined && stats.total !== stats.expected + failed + skipped) {
+    throw new Error("Playwright total 与状态计数不守恒");
+  }
+  return validateTestCounts({ passed: stats.expected, failed, skipped });
 }

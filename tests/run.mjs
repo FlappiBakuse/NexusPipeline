@@ -3,10 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
-import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS } from "../tools/ci-domains.mjs";
+import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, logicalGroupId } from "../tools/ci-domains.mjs";
 import { globToRegExp } from "../tools/ci-changes.mjs";
 import { createBuildFingerprint } from "../tools/ci-fingerprint.mjs";
-import { validateExecutionPlan } from "../tools/ci-summary.mjs";
+import { expectedArtifactDigest, validateExecutionPlan } from "../tools/ci-summary.mjs";
 import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults } from "../tools/test-results.mjs";
 import { getIntegrityLevel, isAdministrator, killProcessTree } from "./support/windows-process.mjs";
 
@@ -21,22 +21,184 @@ const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
+const CI_MANIFEST_COMMANDS = new Set(["unit", "frontend", "contract", "docs", "tooling", "syntax", "build", "codex", "admin"]);
 const ciExecution = {
   testCount: 0,
   passed: 0,
   failed: 0,
   skipped: 0,
   domainId: process.env.NEXUS_CI_DOMAIN || "",
+  groups: [],
+  checks: [],
 };
 let productionBuildPromise = null;
 let testHostBuildPromise = null;
 let retainTestHostForRun = false;
+let nativeReportSequence = 0;
 
-function recordCiTests(result) {
-  for (const key of ["testCount", "passed", "failed", "skipped"]) ciExecution[key] += result[key];
+function ciManifestEnabled() {
+  return Boolean(process.env.NEXUS_CI_MANIFEST);
 }
 
-async function runReported(command, args, options = {}, format = "tap") {
+function readCiPlan() {
+  if (!process.env.NEXUS_CI_EXECUTION_PLAN) return null;
+  try {
+    const plan = JSON.parse(process.env.NEXUS_CI_EXECUTION_PLAN);
+    return plan && typeof plan === "object" ? plan : null;
+  } catch (error) {
+    console.error(`[CI manifest] 执行计划解析失败：${error.message}`);
+    return null;
+  }
+}
+
+function ciJobId() {
+  if (process.env.NEXUS_CI_JOB_ID) return process.env.NEXUS_CI_JOB_ID;
+  return {
+    frontend: "frontend-unit",
+    host: "host-core",
+    docs: "docs-i18n",
+    plugin: "plugin-contract",
+    ui: "ui-smoke",
+    system_runtime: "system-runtime-mcp",
+    system_execution: "system-execution",
+    system_emulator: "system-emulator",
+    system_update: "system-update",
+    "full-regression": "full-regression",
+  }[process.env.NEXUS_CI_DOMAIN || ""] || "runner";
+}
+
+function ciPlannedGroup(groupId) {
+  return readCiPlan()?.selectedGroups?.find(group => group.groupId === groupId) || null;
+}
+
+function recordCiCheck(checkId, status, detail = "") {
+  if (!ciManifestEnabled()) return;
+  const normalized = String(status || "failure").toLowerCase();
+  const existing = ciExecution.checks.find(check => check.checkId === checkId);
+  if (existing) {
+    if (existing.status !== "success") return;
+    if (normalized !== "success") {
+      existing.status = normalized;
+      existing.detail = detail;
+    }
+    return;
+  }
+  ciExecution.checks.push({ checkId, status: normalized, ...(detail ? { detail } : {}) });
+}
+
+function upsertCiGroup(record) {
+  if (!ciManifestEnabled() || !record.groupId) return;
+  const existing = ciExecution.groups.find(group => group.groupId === record.groupId);
+  if (!existing) {
+    const reportPaths = [...new Set([...(record.reportPaths || []), ...(record.reportPath ? [record.reportPath] : [])])];
+    ciExecution.groups.push({
+      ...record,
+      ...(reportPaths.length ? { reportPaths } : {}),
+    });
+    return;
+  }
+  existing.selectedTests = [...new Set([...(existing.selectedTests || []), ...(record.selectedTests || [])])];
+  existing.selection = {
+    plannedTests: existing.plannedTests,
+    actualTests: existing.selectedTests,
+  };
+  for (const key of ["testCount", "passed", "failed", "skipped", "nativeTotal"]) {
+    existing[key] = Number(existing[key] || 0) + Number(record[key] || 0);
+  }
+  if (record.result !== "success") existing.result = "failure";
+  if (record.exitCode !== 0) existing.exitCode = record.exitCode;
+  if (record.error) existing.error = record.error;
+  const reportPaths = [...new Set([...(record.reportPaths || []), ...(record.reportPath ? [record.reportPath] : [])])];
+  if (reportPaths.length) {
+    existing.reportPaths = [...new Set([...(existing.reportPaths || []), ...reportPaths])];
+    existing.reportPath ||= reportPaths[0];
+  }
+}
+
+function recordCiTests(result, { groupIds = [], selectedTests = [], format = "", exitCode = 0, reportPath = "" } = {}) {
+  for (const key of ["testCount", "passed", "failed", "skipped"]) ciExecution[key] += result[key];
+  if (!ciManifestEnabled()) return;
+  const plan = readCiPlan();
+  for (const groupId of groupIds) {
+    const planned = plan?.selectedGroups?.find(group => group.groupId === groupId) || {};
+    const actualTests = Array.isArray(selectedTests) ? selectedTests : [];
+    upsertCiGroup({
+      groupId,
+      physicalJobId: planned.physicalJobId || ciJobId(),
+      mode: planned.mode || process.env.NEXUS_CI_MODE || "ci",
+      integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
+      testSelectionIdentity: planned.testSelectionIdentity || "",
+      plannedTests: planned.expectedTests || [],
+      selectedTests: actualTests,
+      selection: { plannedTests: planned.expectedTests || [], actualTests },
+      result: exitCode === 0 && result.failed === 0 ? "success" : "failure",
+      testCount: result.testCount,
+      passed: result.passed,
+      failed: result.failed,
+      skipped: result.skipped,
+      nativeTotal: result.testCount,
+      exitCode: exitCode || (result.failed > 0 ? 1 : 0),
+      exclusions: planned.exclusions || [],
+      framework: format,
+      ...(reportPath ? { reportPath } : {}),
+    });
+  }
+}
+
+function recordCiGroupFailure(groupIds, { selectedTests = [], format = "", error = "" } = {}) {
+  if (!ciManifestEnabled()) return;
+  const plan = readCiPlan();
+  for (const groupId of groupIds) {
+    const planned = plan?.selectedGroups?.find(group => group.groupId === groupId) || {};
+    upsertCiGroup({
+      groupId,
+      physicalJobId: planned.physicalJobId || ciJobId(),
+      mode: planned.mode || process.env.NEXUS_CI_MODE || "ci",
+      integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
+      testSelectionIdentity: planned.testSelectionIdentity || "",
+      plannedTests: planned.expectedTests || [],
+      selectedTests,
+      selection: { plannedTests: planned.expectedTests || [], actualTests: selectedTests },
+      result: "failure",
+      testCount: 0,
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      nativeTotal: 0,
+      exitCode: 1,
+      exclusions: planned.exclusions || [],
+      framework: format,
+      error,
+    });
+  }
+}
+
+function retainNativeReport({ reportFile, rawOutput, format, groupIds = [] }) {
+  const root = process.env.NEXUS_CI_REPORT_DIR;
+  if (!root) return "";
+  try {
+    fs.mkdirSync(root, { recursive: true });
+    const identity = (groupIds.length > 0 ? groupIds.join("__") : "runner")
+      .replace(/[^A-Za-z0-9_.-]+/gu, "_");
+    const extension = format === "trx" ? "trx" : format === "vitest" || format === "playwright" ? "json" : format === "command" ? "log" : "tap";
+    nativeReportSequence += 1;
+    const destination = path.join(root, `${identity}__${String(nativeReportSequence).padStart(3, "0")}.${extension}`);
+    if (format === "tap") {
+      fs.writeFileSync(destination, String(rawOutput || ""), "utf8");
+    } else if (fs.existsSync(reportFile)) {
+      fs.copyFileSync(reportFile, destination);
+    } else {
+      fs.writeFileSync(destination, String(rawOutput || ""), "utf8");
+    }
+    return destination;
+  } catch (error) {
+    console.error(`[测试结果] 原始 ${format} 报告保留失败：${error.message}`);
+    recordCiCheck("reports", "failure", error.message);
+    return "";
+  }
+}
+
+async function runReported(command, args, options = {}, format = "tap", context = {}) {
   const reportDir = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-test-results-"));
   const reportFile = path.join(reportDir, format === "trx" ? "results.trx" : "results.json");
   let tail = "";
@@ -56,10 +218,14 @@ async function runReported(command, args, options = {}, format = "tap") {
         : format === "trx" ? parseTrxResults(fs.readFileSync(reportFile, "utf8"))
         : format === "vitest" ? parseVitestResults(JSON.parse(fs.readFileSync(reportFile, "utf8")))
         : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")));
-      recordCiTests(result);
+      const reportPath = retainNativeReport({ reportFile, rawOutput: tail, format, groupIds: context.groupIds || [] });
+      recordCiTests(result, { ...context, format, exitCode: code, reportPath });
+      recordCiCheck(context.checkId || "tests", code === 0 && result.failed === 0 ? "success" : "failure");
       console.error(`[测试结果] passed=${result.passed} failed=${result.failed} skipped=${result.skipped}`);
       return code || (result.failed > 0 ? 1 : 0);
     } catch (error) {
+      recordCiCheck(context.checkId || "tests", "failure", error.message);
+      recordCiGroupFailure(context.groupIds || [], { ...context, format, error: error.message });
       console.error(`[测试结果] ${error.message}`);
       return code || 1;
     }
@@ -104,9 +270,14 @@ function runProcess(command, args, options = {}) {
     const spawnArgs = isWindowsCommandShim
       ? ["/d", "/s", "/c", "call", command, ...args]
       : args;
+    const childEnv = { ...(options.env || process.env) };
+    // CI manifest/report paths belong to this runner. Test engines and build tools
+    // may start probes of their own and must not inherit the parent's output owner.
+    delete childEnv.NEXUS_CI_MANIFEST;
+    delete childEnv.NEXUS_CI_REPORT_DIR;
     const child = spawn(spawnCommand, spawnArgs, {
       cwd: options.cwd || projectRoot,
-      env: options.env || process.env,
+      env: childEnv,
       stdio: options.onOutput ? ["inherit", "pipe", "pipe"] : options.stdio || "inherit",
       windowsHide: true,
     });
@@ -154,6 +325,12 @@ function runProcess(command, args, options = {}) {
       }, timeoutMs);
     }
   });
+}
+
+async function runCheckedProcess(checkId, command, args, options = {}) {
+  const code = await runProcess(command, args, options);
+  recordCiCheck(checkId, code === 0 ? "success" : "failure", code === 0 ? "" : `exit=${code}`);
+  return code;
 }
 
 function runCmdFile(filePath, args = [], options = {}) {
@@ -214,6 +391,16 @@ function unitTestFiles(groups = []) {
     .sort();
 }
 
+function ciPlannedKeys(kind, explicitGroups = []) {
+  if (explicitGroups.length > 0) return [...new Set(explicitGroups)];
+  const jobId = ciJobId();
+  const plan = readCiPlan();
+  if (!plan || !Array.isArray(plan.selectedGroups)) return [];
+  return plan.selectedGroups
+    .filter(group => group.physicalJobId === jobId && group.kind === kind)
+    .map(group => group.key);
+}
+
 function requireAdmin(label, command) {
   if (isAdministrator()) return true;
   console.error(`[错误] ${label}需要 Administrator / High Integrity。当前终端权限不足，正式门禁未执行。请在管理员终端执行：node tests\\run.mjs ${command}`);
@@ -253,7 +440,7 @@ function printModeBanner(mode, suite) {
   console.error("====================================================");
 }
 
-async function runUnit(groups = []) {
+async function runUnitOnce(groups = []) {
   // 管理员 UI/System 门禁使用 NEXUS_TIME_SCALE 加速墙钟等待；宿主单元测试应保持生产默认时间语义。
   const env = { ...process.env, NEXUS_TIME_SCALE: "1" };
   const selectedFiles = unitTestFiles(groups);
@@ -267,37 +454,139 @@ async function runUnit(groups = []) {
     args.push("--filter", names.map(name => `FullyQualifiedName~${name}`).join("|"));
     console.error(`[Unit] Area=${groups.join(",")}，选中 ${names.length} 个测试类。`);
   }
-  return runReported("dotnet", args, { env }, "trx");
+  const groupIds = groups.length === 1 ? [logicalGroupId("host", groups[0])] : [];
+  return runReported("dotnet", args, { env }, "trx", {
+    groupIds,
+    selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+    checkId: "tests",
+  });
+}
+
+async function runUnit(groups = []) {
+  const selectedGroups = ciPlannedKeys("host", groups);
+  if (ciManifestEnabled() && selectedGroups.length > 0) {
+    if (ciJobId() === "host-core") recordCiCheck("build", process.env.NEXUS_CI_BUILD_STATUS || "success");
+    if (ciJobId() === "plugin-contract") recordCiCheck("build", process.env.NEXUS_CI_BUILD_STATUS || "success");
+    for (const group of selectedGroups) {
+      const code = await runUnitOnce([group]);
+      if (code !== 0) return code;
+    }
+    return 0;
+  }
+  return runUnitOnce(groups);
 }
 
 async function runFrontend(groups = []) {
-  const selectedFiles = frontendTestFiles(groups);
-  if (groups.length > 0 && selectedFiles.length === 0) {
-    console.error(`[Frontend] 选中的分组没有可运行测试：${groups.join(", ")}`);
-    return 1;
-  }
-  const typecheckCode = await runProcess(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  const selectedGroups = ciPlannedKeys("frontend", groups);
+  const hasCiGroups = ciManifestEnabled() && selectedGroups.length > 0;
+  const typecheckCode = await runCheckedProcess("typecheck", npmCommand, ["run", "typecheck"], { cwd: frontendDir });
   if (typecheckCode !== 0) return typecheckCode;
-  const testArgs = ["run", "test", "--", "--run"];
-  if (groups.length > 0) {
-    testArgs.push(...selectedFiles.map(file => path.relative(frontendDir, file)));
-    console.error(`[Frontend] 分组=${groups.join(",")}，选中 ${selectedFiles.length} 个 Vitest 文件。`);
+
+  if (hasCiGroups) {
+    for (const group of selectedGroups) {
+      const selectedFiles = frontendTestFiles([group]);
+      if (selectedFiles.length === 0) {
+        console.error(`[Frontend] 选中的分组没有可运行测试：${group}`);
+        recordCiGroupFailure([logicalGroupId("frontend", group)], { format: "vitest", error: "没有可运行测试" });
+        return 1;
+      }
+      const testArgs = ["run", "test", "--", "--run", ...selectedFiles.map(file => path.relative(frontendDir, file))];
+      console.error(`[Frontend] 分组=${group}，选中 ${selectedFiles.length} 个 Vitest 文件。`);
+      const code = await runReported(npmCommand, testArgs, { cwd: frontendDir }, "vitest", {
+        groupIds: [logicalGroupId("frontend", group)],
+        selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+        checkId: "tests",
+      });
+      if (code !== 0) return code;
+    }
   } else {
-    console.error(`[Frontend] 全量 Vitest：${selectedFiles.length} 个测试文件。`);
+    const selectedFiles = frontendTestFiles(groups);
+    if (groups.length > 0 && selectedFiles.length === 0) {
+      console.error(`[Frontend] 选中的分组没有可运行测试：${groups.join(", ")}`);
+      return 1;
+    }
+    const testArgs = ["run", "test", "--", "--run"];
+    if (groups.length > 0) {
+      testArgs.push(...selectedFiles.map(file => path.relative(frontendDir, file)));
+      console.error(`[Frontend] 分组=${groups.join(",")}，选中 ${selectedFiles.length} 个 Vitest 文件。`);
+    } else {
+      console.error(`[Frontend] 全量 Vitest：${selectedFiles.length} 个测试文件。`);
+    }
+    const testCode = await runReported(npmCommand, testArgs, { cwd: frontendDir }, "vitest", { checkId: "tests" });
+    if (testCode !== 0) return testCode;
   }
-  const testCode = await runReported(npmCommand, testArgs, { cwd: frontendDir }, "vitest");
-  if (testCode !== 0) return testCode;
-  if (groups.length > 0) return 0;
-  return runProcess(npmCommand, ["run", "build"], { cwd: frontendDir });
+
+  const shouldBuild = !ciManifestEnabled()
+    ? groups.length === 0
+    : ["frontend-unit", "plugin-contract", "full-regression"].includes(ciJobId());
+  if (!shouldBuild) return 0;
+  return runCheckedProcess("build", npmCommand, ["run", "build"], { cwd: frontendDir });
 }
 
 async function runWeb() {
   return runFrontend();
 }
 
+async function runRecordedCommand(command, args, {
+  groupId = "",
+  selectedTest = "",
+  checkId = "tests",
+} = {}) {
+  let output = "";
+  const code = await runProcess(command, args, {
+    onOutput: chunk => { output = (output + chunk).slice(-262144); },
+  });
+  const planned = groupId && ciPlannedGroup(groupId);
+  if (planned) {
+    const passed = code === 0 ? 1 : 0;
+    const reportPath = retainNativeReport({
+      reportFile: "",
+      rawOutput: output,
+      format: "command",
+      groupIds: [groupId],
+    });
+    recordCiTests({ testCount: 1, passed, failed: passed ? 0 : 1, skipped: 0 }, {
+      groupIds: [groupId],
+      selectedTests: selectedTest ? [selectedTest] : [],
+      format: "command",
+      exitCode: code,
+      reportPath,
+    });
+    recordCiCheck(checkId, code === 0 ? "success" : "failure", code === 0 ? "" : `exit=${code}`);
+  }
+  return code;
+}
+
 async function runContracts() {
   console.error("[Plugin Contract] 加载官方构建模块与真实宿主公共元素。");
-  return runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest");
+  const groupId = "domain:plugin";
+  const planned = ciPlannedGroup(groupId);
+  const pluginRootCandidates = [
+    process.env.NEXUS_OFFICIAL_PLUGINS_ROOT,
+    path.join(projectRoot, "NexusPipeline-Plugins"),
+    path.resolve(projectRoot, "..", "NexusPipeline-Plugins"),
+  ].filter(Boolean).map(candidate => path.resolve(candidate));
+  const officialPluginsRoot = pluginRootCandidates.find(candidate => fs.existsSync(path.join(candidate, "tools", "Test-FrontendPlugins.mjs")))
+    || pluginRootCandidates[0];
+  let code = await runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest", {
+    groupIds: planned ? [groupId] : [],
+    selectedTests: planned ? ["frontend/contracts/official-plugins.test.ts"] : [],
+    checkId: "contract",
+  });
+  if (code !== 0) return code;
+
+  code = await runRecordedCommand(nodeCommand, [path.join(officialPluginsRoot, "tools", "Test-FrontendPlugins.mjs"), "--host-root", "."], {
+    groupId: planned ? groupId : "",
+    selectedTest: "NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs",
+    checkId: "contract",
+  });
+  if (code !== 0) return code;
+
+  return runReported(nodeCommand, ["--test", "tests/tools/plugin-source-layout.test.mjs"], {}, "tap", {
+    groupIds: planned ? [groupId] : [],
+    selectedTests: planned ? ["tests/tools/plugin-source-layout.test.mjs"] : [],
+    checkId: "contract",
+  });
 }
 
 async function runDocs() {
@@ -311,7 +600,39 @@ async function runDocs() {
     "tests\\documentation\\test-policy-consistency.mjs",
     "tests\\tools\\docs-index.test.mjs",
   ];
-  return runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))]);
+  const plan = readCiPlan();
+  const domainGroup = ciPlannedGroup("domain:docs");
+  if (domainGroup) {
+    const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
+      groupIds: ["domain:docs"],
+      selectedTests: files.map(file => file.replaceAll("\\", "/")),
+      checkId: "tests",
+    });
+    if (code !== 0) return code;
+  }
+  const governance = plan?.selectedGroups?.filter(group => group.physicalJobId === ciJobId() && group.kind === "governance") || [];
+  if (governance.length > 0) {
+    for (const group of governance) {
+      if (["architecture-boundaries", "ci-tooling"].includes(group.key)) continue;
+      const definition = GOVERNANCE_DOMAINS.find(item => item.key === group.key);
+      const selectedFiles = definition ? matchingFiles(definition.testPaths) : [];
+      if (selectedFiles.length === 0) {
+        recordCiGroupFailure([group.groupId], { error: "没有可运行治理测试" });
+        return 1;
+      }
+      const code = await runReported(nodeCommand, ["--test", ...selectedFiles.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
+        groupIds: [group.groupId],
+        selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+        checkId: "tests",
+      });
+      if (code !== 0) return code;
+    }
+    return 0;
+  }
+  if (domainGroup) return 0;
+  return runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
+    checkId: "tests",
+  });
 }
 
 async function runTooling() {
@@ -320,13 +641,34 @@ async function runTooling() {
     "tests\\tools\\ci-summary.test.mjs",
     "tests\\tools\\ci-fingerprint.test.mjs",
     "tests\\tools\\test-results.test.mjs",
+    "tests\\tools\\runner-manifest.test.mjs",
     "tests\\tools\\frontend-boundaries.test.mjs",
     "tests\\tools\\source-encoding.test.mjs",
     "tests\\tools\\update-policy-history.test.mjs",
   ];
-  const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))]);
-  if (code !== 0) return code;
-  return runProcess(nodeCommand, ["tools/frontend-boundaries.mjs", "--quiet"]);
+  const plan = readCiPlan();
+  const governance = plan?.selectedGroups?.filter(group => group.physicalJobId === ciJobId() && group.kind === "governance"
+    && ["architecture-boundaries", "ci-tooling"].includes(group.key)) || [];
+  if (governance.length > 0) {
+    for (const group of governance) {
+      const definition = GOVERNANCE_DOMAINS.find(item => item.key === group.key);
+      const selectedFiles = definition ? matchingFiles(definition.testPaths) : [];
+      if (selectedFiles.length === 0) {
+        recordCiGroupFailure([group.groupId], { error: "没有可运行治理测试" });
+        return 1;
+      }
+      const code = await runReported(nodeCommand, ["--test", ...selectedFiles.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
+        groupIds: [group.groupId],
+        selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
+        checkId: "tests",
+      });
+      if (code !== 0) return code;
+    }
+  } else {
+    const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))], {}, "tap", { checkId: "tests" });
+    if (code !== 0) return code;
+  }
+  return runCheckedProcess("boundaries", nodeCommand, ["tools/frontend-boundaries.mjs", "--quiet"]);
 }
 
 async function runSyntax() {
@@ -346,7 +688,9 @@ async function runBuild() {
   } else {
     console.error("[Build] 复用本次 runner 已完成的生产构建。");
   }
-  return productionBuildPromise;
+  const code = await productionBuildPromise;
+  recordCiCheck("build", code === 0 ? "success" : "failure", code === 0 ? "" : `exit=${code}`);
+  return code;
 }
 
 async function runDefault(mode, { permissionChecked = false } = {}) {
@@ -456,7 +800,13 @@ async function runUi(mode, args) {
   if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   try {
     const playwrightArgs = [playwrightCli, "test"];
-    return await runReported(nodeCommand, playwrightArgs, { cwd: e2eDir, env }, "playwright");
+    const groupId = "domain:ui";
+    const planned = ciPlannedGroup(groupId);
+    return await runReported(nodeCommand, playwrightArgs, { cwd: e2eDir, env }, "playwright", {
+      groupIds: planned ? [groupId] : [],
+      selectedTests: planned ? syntaxTestFiles().map(file => path.relative(projectRoot, file).replaceAll("\\", "/")) : [],
+      checkId: "tests",
+    });
   } finally {
     if (mode === "codex" && !retainTestHostForRun) cleanTestHost();
   }
@@ -562,7 +912,9 @@ async function runFrontendCommand(args) {
     return 2;
   }
   const code = await runFrontend(parsed.groups);
-  return code || (affected ? await runProcess(npmCommand, ["run", "build"], { cwd: frontendDir }) : 0);
+  if (code !== 0) return code;
+  if (affected && !ciManifestEnabled()) return runCheckedProcess("build", npmCommand, ["run", "build"], { cwd: frontendDir });
+  return 0;
 }
 
 function affectedGroupArgs(args, kind) {
@@ -688,6 +1040,12 @@ async function runSystem(mode, args) {
         nodeCommand,
         ["--test", "--test-concurrency=1", file],
         { env: suiteEnv, timeoutMs: suiteTimeoutMs },
+        "tap",
+        {
+          groupIds: ciPlannedGroup(logicalGroupId("system", group)) ? [logicalGroupId("system", group)] : [],
+          selectedTests: [path.relative(projectRoot, file).replaceAll("\\", "/")],
+          checkId: "tests",
+        },
       );
       console.error(`[System Smoke] 结束 ${label}：exit=${code}，耗时 ${Date.now() - startedAt}ms`);
       if (code !== 0) return code;
@@ -795,17 +1153,40 @@ try {
 }
 process.exitCode = exitCode;
 
-if (process.env.NEXUS_CI_MANIFEST && command !== "list" && !args.includes("--dry")) {
+if (process.env.NEXUS_CI_MANIFEST && CI_MANIFEST_COMMANDS.has(command.toLowerCase()) && !args.includes("--dry")) {
+  const manifestMode = process.env.NEXUS_CI_MODE
+    || (command.toLowerCase() === "codex" ? "test-host" : command.toLowerCase() === "admin" ? "admin" : "ci");
+  const physicalJobId = ciJobId();
+  const sourceDigest = process.env.NEXUS_CI_SOURCE_DIGEST || "";
+  const buildInputsDigest = process.env.NEXUS_CI_BUILD_INPUTS_DIGEST || "";
+  const counterpartSha = process.env.NEXUS_CI_COUNTERPART_SHA || "";
+  const buildFingerprint = process.env.NEXUS_CI_BUILD_FINGERPRINT || createBuildFingerprint({
+    mode: manifestMode === "test-host" ? "test-host" : "production",
+  });
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    jobId: physicalJobId,
     domainId: ciExecution.domainId || command.toLowerCase() || "runner",
-    headSha: process.env.GITHUB_SHA || process.env.NEXUS_CI_HEAD_SHA || "local",
+    headSha: process.env.NEXUS_CI_HEAD_SHA || process.env.GITHUB_SHA || "local",
     repositorySha: process.env.NEXUS_CI_REPOSITORY_SHA || process.env.GITHUB_SHA || "local",
     planDigest: process.env.NEXUS_CI_PLAN_DIGEST || "",
-    buildFingerprint: process.env.NEXUS_CI_BUILD_FINGERPRINT || createBuildFingerprint({
-      mode: command.toLowerCase() === "codex" ? "test-host" : "production",
+    buildFingerprint,
+    sourceDigest,
+    buildInputsDigest,
+    counterpartRepository: process.env.NEXUS_CI_COUNTERPART_REPOSITORY || "",
+    counterpartSha,
+    artifactDigest: expectedArtifactDigest({
+      buildFingerprint,
+      sourceDigest,
+      buildInputsDigest,
+      counterpartSha,
+      mode: manifestMode,
+      physicalJobId,
     }),
-    mode: command.toLowerCase() === "codex" ? "test-host" : "production",
+    mode: manifestMode,
+    integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
+    checks: [...ciExecution.checks],
+    groups: [...ciExecution.groups],
     result: exitCode === 0 ? "success" : "failure",
     testCount: ciExecution.testCount,
     passed: ciExecution.passed,
@@ -818,7 +1199,18 @@ if (process.env.NEXUS_CI_MANIFEST && command !== "list" && !args.includes("--dry
     const manifestPath = path.resolve(process.env.NEXUS_CI_MANIFEST);
     if (fs.existsSync(manifestPath)) {
       const previous = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-      for (const key of ["domainId", "headSha", "repositorySha", "planDigest"]) {
+      for (const key of [
+        "jobId",
+        "domainId",
+        "headSha",
+        "repositorySha",
+        "planDigest",
+        "mode",
+        "sourceDigest",
+        "buildInputsDigest",
+        "counterpartRepository",
+        "counterpartSha",
+      ]) {
         if (previous[key] !== manifest[key]) throw new Error(`已有 manifest 的 ${key} 不匹配`);
       }
       for (const key of ["testCount", "passed", "failed", "skipped"]) {
@@ -829,6 +1221,17 @@ if (process.env.NEXUS_CI_MANIFEST && command !== "list" && !args.includes("--dry
         manifest.result = "failure";
         manifest.exitCode = previous.exitCode || 1;
       }
+      if (Array.isArray(previous.groups)) {
+        for (const group of previous.groups) upsertCiGroup(group);
+        manifest.groups = [...ciExecution.groups];
+      }
+      const previousChecks = Array.isArray(previous.checks)
+        ? previous.checks
+        : [];
+      for (const check of previousChecks) {
+        if (check?.checkId) recordCiCheck(check.checkId, check.status, check.detail || "");
+      }
+      manifest.checks = [...ciExecution.checks];
     }
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

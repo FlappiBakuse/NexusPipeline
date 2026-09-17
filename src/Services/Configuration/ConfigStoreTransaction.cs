@@ -62,8 +62,11 @@ internal static class ConfigStoreTransaction
         IReadOnlySet<string> swapFiles,
         ConfigSwapSession.ConfigRestoreDescriptor? descriptor,
         string? expectedSample,
-        ConfigSessionMark mark)
+        ConfigSessionMark mark,
+        Action<string, string>? writeAtomic = null)
     {
+        Action<string, string> writer = writeAtomic
+            ?? ((target, content) => JsonUtil.WriteAtomic(target, content));
         string store = ConfigSwapPaths.StoreDir(scriptId, userKey);
         string transactionDir = ConfigSwapPaths.StoreTransactionDir(scriptId, userKey);
         ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
@@ -73,7 +76,11 @@ internal static class ConfigStoreTransaction
         ConfigStoreMetadata? previousMetadata = LoadPreviousMetadata(scriptId, userKey);
         if (!plan.HasChanges)
         {
-            ConfigStoreMetadata.Save(scriptId, userKey, ConfigStoreMetadata.FromMark(mark, previousMetadata));
+            ConfigStoreMetadata.Save(
+                scriptId,
+                userKey,
+                ConfigStoreMetadata.FromMark(mark, previousMetadata),
+                writer);
             return new ConfigStoreTransactionResult(0, 0, 0, plan.Preserved.Count);
         }
 
@@ -146,14 +153,14 @@ internal static class ConfigStoreTransaction
                 throw new IOException("配置在事务暂存期间发生变化，保留旧快照");
             }
 
-            JsonUtil.WriteAtomic(
+            writer(
                 ConfigSwapPaths.StoreTransactionManifestPath(scriptId, userKey),
                 JsonSerializer.Serialize(manifest, JsonOpts.Indented));
             manifestWritten = true;
             ApplyOperations(store, stageDir, manifest.Operations);
             PruneEmptyDirectories(store);
 
-            JsonUtil.WriteAtomic(
+            writer(
                 ConfigSwapPaths.StoreTransactionCommitPath(scriptId, userKey),
                 JsonSerializer.Serialize(new ConfigStoreTransactionCommit
                 {
@@ -162,7 +169,7 @@ internal static class ConfigStoreTransaction
                     CommittedAt = DateTimeOffset.UtcNow,
                 }, JsonOpts.Indented));
             commitWritten = true;
-            ConfigStoreMetadata.Save(scriptId, userKey, nextMetadata);
+            ConfigStoreMetadata.Save(scriptId, userKey, nextMetadata, writer);
             ConfigSwapPrimitives.TryDeleteDir(transactionDir);
             return new ConfigStoreTransactionResult(
                 plan.Added.Count,

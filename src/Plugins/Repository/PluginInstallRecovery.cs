@@ -9,6 +9,36 @@ internal static class PluginInstallRecovery
 {
     private static readonly object Sync = new();
 
+    private static readonly string[] PendingStateProperties = [nameof(PluginPendingState.SchemaVersion), nameof(PluginPendingState.Operations)];
+
+    private static readonly string[] PendingOperationProperties =
+    [
+        nameof(PluginPendingOperation.Action),
+        nameof(PluginPendingOperation.Name),
+        nameof(PluginPendingOperation.ArtifactName),
+        nameof(PluginPendingOperation.Version),
+        nameof(PluginPendingOperation.Kind),
+        nameof(PluginPendingOperation.ApiVersion),
+        nameof(PluginPendingOperation.Sha256),
+        nameof(PluginPendingOperation.StagedPath),
+        nameof(PluginPendingOperation.BackupPath),
+        nameof(PluginPendingOperation.Phase),
+        nameof(PluginPendingOperation.CreatedAt),
+    ];
+
+    private static readonly string[] OwnershipStateProperties = [nameof(PluginOwnershipState.SchemaVersion), nameof(PluginOwnershipState.Plugins)];
+
+    private static readonly string[] OwnershipProperties =
+    [
+        nameof(PluginOwnership.Name),
+        nameof(PluginOwnership.ArtifactName),
+        nameof(PluginOwnership.Version),
+        nameof(PluginOwnership.Kind),
+        nameof(PluginOwnership.ApiVersion),
+        nameof(PluginOwnership.Sha256),
+        nameof(PluginOwnership.InstalledAt),
+    ];
+
     public static IReadOnlyList<PluginPendingOperation> ReadPending(string? path = null)
     {
         lock (Sync)
@@ -24,8 +54,6 @@ internal static class PluginInstallRecovery
         lock (Sync)
         {
             return LoadOwnership(path ?? AppPaths.PluginOwnershipPath).Plugins
-                .Where(item => PluginRepositoryCatalog.IsCanonicalPluginId(item.Name)
-                    && PluginRepositoryCatalog.IsSafeArtifactName(item.ArtifactName))
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
         }
@@ -84,9 +112,6 @@ internal static class PluginInstallRecovery
                 return true;
             }
 
-            Directory.CreateDirectory(localPlugins);
-            Directory.CreateDirectory(stagingBase);
-            Directory.CreateDirectory(backupBase);
             PluginOwnershipState ownership;
             try
             {
@@ -97,6 +122,9 @@ internal static class PluginInstallRecovery
                 Logger.Error($"[插件] 读取安装归属失败，保留 pending：{ex.Message}");
                 return false;
             }
+            Directory.CreateDirectory(localPlugins);
+            Directory.CreateDirectory(stagingBase);
+            Directory.CreateDirectory(backupBase);
             try
             {
                 foreach (PluginPendingOperation operation in state.Operations.ToArray())
@@ -153,8 +181,31 @@ internal static class PluginInstallRecovery
         }
         if (operation.Action == "uninstall")
         {
+            if (operation.Phase is "pending" or "backed-up")
+            {
+                EnsureOwnedIdentity(operation, ownership, requireCurrentVersion: true);
+            }
             ApplyUninstall(operation, state, ownership, localPath, backupPath, pendingPath, ownershipPath, backupRoot);
             return;
+        }
+
+        PluginOwnership? currentOwner = FindOwnership(operation.Name, ownership);
+        if (operation.Action == "install"
+            && operation.Phase == "pending"
+            && currentOwner is not null
+            && !string.Equals(currentOwner.ArtifactName, operation.ArtifactName, StringComparison.Ordinal))
+        {
+            throw new IOException($"安装事务归属 artifactName 不匹配，拒绝替换目录：{operation.Name}");
+        }
+        if (operation.Action == "install"
+            && operation.Phase == "pending"
+            && PathExists(localPath))
+        {
+            throw new IOException($"安装事务目标目录已存在，拒绝覆盖：{operation.Name}");
+        }
+        if (operation.Action == "update" && (operation.Phase is "pending" or "backed-up"))
+        {
+            EnsureOwnedIdentity(operation, ownership, requireCurrentVersion: false);
         }
 
         try
@@ -293,7 +344,14 @@ internal static class PluginInstallRecovery
                 operation.Phase = "backed-up";
                 SavePending(pendingPath, state);
             }
-            if (operation.Phase != "backed-up" || PathExists(localPath))
+            if (operation.Phase == "backed-up")
+            {
+                // 卸载的目录移动完成后先把 swapped 阶段落盘，再处理 ownership；这样 ownership
+                // 已删除而 pending 尚未清理时，下一次启动仍能识别这是本事务的可收尾现场。
+                operation.Phase = "swapped";
+                SavePending(pendingPath, state);
+            }
+            if (operation.Phase != "swapped" || PathExists(localPath))
             {
                 throw new IOException($"卸载事务阶段无效：{operation.Name}/{operation.Phase}");
             }
@@ -337,13 +395,26 @@ internal static class PluginInstallRecovery
             return new PluginPendingState();
         }
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
+        ValidatePendingDocument(text);
         PluginPendingState state = JsonSerializer.Deserialize<PluginPendingState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 pending.json 为空");
         if (state.SchemaVersion != 2)
         {
             throw new InvalidDataException($"不支持的插件 pending schemaVersion：{state.SchemaVersion}");
         }
-        state.Operations ??= new List<PluginPendingOperation>();
+        if (state.Operations is null)
+        {
+            throw new InvalidDataException("插件 pending.json 缺少 operations");
+        }
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (PluginPendingOperation operation in state.Operations)
+        {
+            ValidatePendingOperation(operation);
+            if (!names.Add(operation.Name))
+            {
+                throw new InvalidDataException($"插件 pending 存在重复归属：{operation.Name}");
+            }
+        }
         return state;
     }
 
@@ -354,14 +425,117 @@ internal static class PluginInstallRecovery
             return new PluginOwnershipState();
         }
         string text = File.ReadAllText(path).Replace("\uFEFF", "");
+        ValidateOwnershipDocument(text);
         PluginOwnershipState state = JsonSerializer.Deserialize<PluginOwnershipState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 ownership.json 为空");
         if (state.SchemaVersion != 2)
         {
             throw new InvalidDataException($"不支持的插件 ownership schemaVersion：{state.SchemaVersion}");
         }
-        state.Plugins ??= new List<PluginOwnership>();
+        if (state.Plugins is null)
+        {
+            throw new InvalidDataException("插件 ownership.json 缺少 plugins");
+        }
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (PluginOwnership owner in state.Plugins)
+        {
+            if (!PluginRepositoryCatalog.IsCanonicalPluginId(owner.Name)
+                || !PluginRepositoryCatalog.IsSafeArtifactName(owner.ArtifactName)
+                || !names.Add(owner.Name))
+            {
+                throw new InvalidDataException($"插件 ownership 归属无效或重复：{owner.Name}");
+            }
+        }
         return state;
+    }
+
+    private static void ValidateDocumentShape(
+        string json,
+        string label,
+        IReadOnlyCollection<string> required,
+        IReadOnlyCollection<string> allowed)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException($"{label}根节点必须是对象");
+        }
+        HashSet<string> properties = document.RootElement.EnumerateObject()
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (required.Any(property => !properties.Contains(property))
+            || properties.Any(property => !allowed.Contains(property)))
+        {
+            throw new InvalidDataException($"{label}不是当前格式");
+        }
+    }
+
+    private static void ValidatePendingDocument(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        ValidateDocumentShape(json, "插件 pending.json", PendingStateProperties, PendingStateProperties);
+        JsonElement operations = document.RootElement.GetProperty(nameof(PluginPendingState.Operations));
+        if (operations.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("插件 pending.json 的 operations 必须是数组");
+        }
+        foreach (JsonElement operation in operations.EnumerateArray())
+        {
+            ValidateDocumentShape(
+                operation.GetRawText(),
+                "插件 pending 操作",
+                PendingOperationProperties,
+                PendingOperationProperties);
+        }
+    }
+
+    private static void ValidateOwnershipDocument(string json)
+    {
+        using JsonDocument document = JsonDocument.Parse(json);
+        ValidateDocumentShape(json, "插件 ownership.json", OwnershipStateProperties, OwnershipStateProperties);
+        JsonElement plugins = document.RootElement.GetProperty(nameof(PluginOwnershipState.Plugins));
+        if (plugins.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("插件 ownership.json 的 plugins 必须是数组");
+        }
+        foreach (JsonElement owner in plugins.EnumerateArray())
+        {
+            ValidateDocumentShape(owner.GetRawText(), "插件 ownership 记录", OwnershipProperties, OwnershipProperties);
+        }
+    }
+
+    private static void ValidatePendingOperation(PluginPendingOperation operation)
+    {
+        if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name)
+            || !PluginRepositoryCatalog.IsSafeArtifactName(operation.ArtifactName)
+            || operation.Action is not ("install" or "update" or "uninstall")
+            || operation.Phase is not ("pending" or "backed-up" or "swapped")
+            || string.IsNullOrWhiteSpace(operation.StagedPath)
+            || !Path.IsPathRooted(operation.StagedPath)
+            || (!string.IsNullOrWhiteSpace(operation.BackupPath) && !Path.IsPathRooted(operation.BackupPath)))
+        {
+            throw new InvalidDataException($"插件 pending 操作字段无效：{operation.Name}");
+        }
+    }
+
+    private static PluginOwnership? FindOwnership(string name, PluginOwnershipState ownership)
+    {
+        return ownership.Plugins.SingleOrDefault(item =>
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void EnsureOwnedIdentity(
+        PluginPendingOperation operation,
+        PluginOwnershipState ownership,
+        bool requireCurrentVersion)
+    {
+        PluginOwnership? owner = FindOwnership(operation.Name, ownership);
+        if (owner is null
+            || !string.Equals(owner.ArtifactName, operation.ArtifactName, StringComparison.Ordinal)
+            || requireCurrentVersion && !string.Equals(owner.Version, operation.Version, StringComparison.Ordinal))
+        {
+            throw new IOException($"插件事务缺少匹配的已验证安装归属，拒绝操作：{operation.Name}/{operation.ArtifactName}");
+        }
     }
 
     private static void SavePending(string path, PluginPendingState state)

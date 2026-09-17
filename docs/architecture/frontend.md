@@ -1,6 +1,6 @@
 # 前端架构
 
-### 10.7 前端分层
+## 前端分层与公共边界
 
 ```
 frontend/src/app/App.vue → router / stores / features / ui

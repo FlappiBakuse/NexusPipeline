@@ -1,6 +1,6 @@
 # 调度与去重
 
-### 3.2 队列执行链路
+## 队列执行与 occurrence
 
 ```mermaid
 flowchart TD

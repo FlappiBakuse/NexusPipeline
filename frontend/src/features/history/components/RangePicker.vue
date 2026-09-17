@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { t } from "../../../platform/i18n";
+import { getLocale, t } from "../../../platform/i18n";
 import NxpDateRangePicker from "../../../ui/composites/NxpDateRangePicker.vue";
 import type { DateRangeDraft } from "../../../ui/composites/dateRange";
 
@@ -23,6 +23,8 @@ const emit = defineEmits<{
       :open="props.open"
       :from="props.from"
       :to="props.to"
+      :locale="getLocale()"
+      popover-class="history-range-popover"
       display-id="history-range-display"
       display-test-id="history-range-display"
       popover-id="history-range-popover"

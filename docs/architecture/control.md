@@ -1,6 +1,6 @@
 # 控制面架构
 
-### 3.4 统一控制面与 CLI
+## 统一控制面与 CLI
 
 常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `DispatchCenter`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
 
@@ -19,7 +19,7 @@
 
 
 
-### 3.5 MCP Agent 控制面
+## MCP Agent 控制面
 
 宿主在同一个 `nexus-pipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
 
@@ -65,7 +65,7 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 
 
-### 10.6 控制面边界
+## 控制面边界
 
 常驻服务持有 `RuntimeContext`、执行状态和持久化写入。公共初始化只读取约束和设置快照；服务与 Web-only 模式取得单实例互斥体后，统一进入 `HostedRuntimeInitializer`，由其完成实体加载、修复和恢复。Web 与 CLI 都是协议适配层：
 

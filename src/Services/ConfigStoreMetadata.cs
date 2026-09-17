@@ -88,15 +88,23 @@ internal sealed class ConfigStoreMetadata
         }
     }
 
-    public static void Save(string scriptId, string userKey, ConfigStoreMetadata metadata)
+    public static void Save(
+        string scriptId,
+        string userKey,
+        ConfigStoreMetadata metadata,
+        Action<string, string>? writeAtomic = null)
     {
-        SaveAt(ConfigSwapPaths.StoreMetadataPath(scriptId, userKey), metadata);
+        SaveAt(ConfigSwapPaths.StoreMetadataPath(scriptId, userKey), metadata, writeAtomic);
     }
 
-    private static void SaveAt(string path, ConfigStoreMetadata metadata)
+    private static void SaveAt(
+        string path,
+        ConfigStoreMetadata metadata,
+        Action<string, string>? writeAtomic)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(metadata, JsonOpts.Indented));
+        (writeAtomic ?? ((target, content) => JsonUtil.WriteAtomic(target, content)))
+            (path, JsonSerializer.Serialize(metadata, JsonOpts.Indented));
     }
 
     private static ConfigStoreMetadata? DeserializeCurrent(string json, string path)

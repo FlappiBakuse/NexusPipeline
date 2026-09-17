@@ -1,8 +1,11 @@
+using System.Text.Json;
 using NexusPipeline.Models;
+using NexusPipeline.Persistence;
 using NexusPipeline.Plugins;
 using NexusPipeline.Services;
 using NexusPipeline.Services.Execution;
 using NexusPipeline.Services.Update;
+using NexusPipeline.Utilities;
 using Xunit;
 
 namespace NexusPipeline.Tests;
@@ -24,6 +27,14 @@ public sealed class PluginAutoUpdateServiceTests
             string local = Path.Combine(plugins, "LocalHelper");
             Directory.CreateDirectory(local);
             File.WriteAllText(Path.Combine(local, "plugin.json"), "{\"version\":\"0.1.0\"}");
+            WriteOwnership(ownershipPath, new PluginOwnership
+            {
+                Name = "local-helper",
+                ArtifactName = "LocalHelper",
+                Version = "0.1.0",
+                Kind = "managed-code",
+                ApiVersion = "1.7",
+            });
 
             PluginStoreItem candidate = Candidate();
             var repository = new FakeRepository(candidate);
@@ -267,6 +278,19 @@ public sealed class PluginAutoUpdateServiceTests
         catch
         {
         }
+    }
+
+    private static void WriteOwnership(string path, params PluginOwnership[] owners)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        JsonUtil.WriteAtomic(
+            path,
+            JsonSerializer.Serialize(new PluginOwnershipState
+            {
+                SchemaVersion = 2,
+                Plugins = owners.ToList(),
+            },
+            JsonOpts.Indented));
     }
 
     private sealed class FakeRepository(PluginStoreItem candidate) : IPluginAutoUpdateRepository

@@ -3,7 +3,24 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CI_DOMAINS, CI_SHARED_PATHS, HOST_TEST_AREAS, FRONTEND_TEST_GROUPS, TEST_DOMAIN_CONSUMERS } from "./ci-domains.mjs";
+import {
+  CI_DOMAINS,
+  CI_EXECUTION_PLAN_SCHEMA_VERSION,
+  CI_JOB_CONTRACTS,
+  CI_SHARED_PATHS,
+  FRONTEND_TEST_GROUPS,
+  GOVERNANCE_DOMAINS,
+  HOST_TEST_AREAS,
+  PLUGIN_CONTRACT_FALLBACKS,
+  SYSTEM_TEST_GROUPS,
+  TEST_DOMAIN_CONSUMERS,
+  expectedTestSelectors,
+  globToRegExp,
+  logicalGroupId,
+  plannedExclusions,
+  testSelectionIdentity,
+} from "./ci-domains.mjs";
+import { validateExecutionPlan } from "./ci-summary.mjs";
 
 /**
  * CI 影响域判定：把改动文件集合映射为各 Gate 的影响域标记。
@@ -19,29 +36,144 @@ import { CI_DOMAINS, CI_SHARED_PATHS, HOST_TEST_AREAS, FRONTEND_TEST_GROUPS, TES
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+function sha256Json(value) {
+  return crypto.createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
 }
 
-export function globToRegExp(glob) {
-  const segments = glob.split("/");
-  let source = "^";
-  for (let index = 0; index < segments.length; index++) {
-    const segment = segments[index];
-    const isLast = index === segments.length - 1;
-    if (segment === "**") {
-      if (isLast) {
-        source += ".*";
-        break;
-      }
-      source += "(?:[^/]+/)*";
-      continue;
-    }
-    source += escapeRegExp(segment).replaceAll("\\*", "[^/]*");
-    if (!isLast) source += "/";
+function readCounterpartCandidate() {
+  const lockPath = path.join(projectRoot, "plugins.lock.json");
+  let lock = {};
+  try {
+    lock = JSON.parse(fs.readFileSync(lockPath, "utf8"));
+  } catch {
+    // 计划仍会明确记录缺失候选，Required Summary 会拒绝无法配对的正式结果。
   }
-  return new RegExp(`${source}$`, "u");
+  const repository = String(lock.repository || "");
+  const ref = String(process.env.NEXUS_CANDIDATE_REF || lock.ref || "").trim();
+  return {
+    repository: /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u.test(repository) ? repository : "",
+    sha: /^[0-9a-f]{40}$/u.test(ref) ? ref : "",
+  };
 }
+
+function buildInputs({ base, head, changedFiles, counterpart }) {
+  const sourceDigest = sha256Json({
+    repository: process.env.GITHUB_REPOSITORY || "FlappiBakuse/NexusPipeline",
+    base,
+    head,
+    changedFiles: [...changedFiles].map(file => normalizeChangePath(file) ?? String(file ?? "")),
+  });
+  const inputs = {
+    sourceRepository: process.env.GITHUB_REPOSITORY || "FlappiBakuse/NexusPipeline",
+    sourceSha: head,
+    baseSha: base,
+    sourceDigest,
+    targetFramework: "net8.0-windows",
+    runtimeIdentifier: "win-x64",
+    frontendResourceSource: "frontend/src -> frontend/dist -> release/wwwroot",
+    applicationManifest: "src/app.manifest",
+    testHostManifest: "src/app.test.manifest",
+    toolchain: { nodeMajor: 24, dotnetMajor: 8, npmLock: "frontend/package-lock.json" },
+    counterpartRepository: counterpart.repository,
+    counterpartSha: counterpart.sha,
+  };
+  return {
+    ...inputs,
+    buildInputsDigest: sha256Json(inputs),
+  };
+}
+
+function jobContract(jobId, all) {
+  const contract = CI_JOB_CONTRACTS[jobId] || { mode: "ci", requiredIntegrity: "none" };
+  if (all) return CI_JOB_CONTRACTS["full-regression"];
+  return contract;
+}
+
+function logicalGroup({ kind, group, physicalJobId, all = false }) {
+  const contract = jobContract(physicalJobId, all);
+  const mode = contract.mode;
+  return {
+    groupId: logicalGroupId(kind, group.key),
+    kind,
+    key: group.key,
+    physicalJobId: all ? "full-regression" : physicalJobId,
+    mode,
+    requiredIntegrity: contract.requiredIntegrity,
+    requiredChecks: [...(contract.requiredChecks || [])],
+    testSelectionIdentity: testSelectionIdentity(kind, group),
+    expectedTests: expectedTestSelectors(kind, group),
+    exclusions: plannedExclusions(kind, group.key, mode),
+  };
+}
+
+function selectedLogicalGroups({ result, testGroups, all }) {
+  if (all) {
+    return [
+      ...HOST_TEST_AREAS.map(group => logicalGroup({ kind: "host", group, physicalJobId: "host-core", all })),
+      ...FRONTEND_TEST_GROUPS.map(group => logicalGroup({ kind: "frontend", group, physicalJobId: "frontend-unit", all })),
+      ...["docs", "plugin", "ui"].map(key => {
+        const domain = CI_DOMAINS.find(item => item.key === key);
+        return logicalGroup({
+          kind: "domain",
+          group: { key, paths: domain.paths, testPaths: domain.testPaths || [] },
+          physicalJobId: domain.jobs[0],
+          all,
+        });
+      }),
+      ...SYSTEM_TEST_GROUPS.map(group => logicalGroup({ kind: "system", group, physicalJobId: group.ciDomain ? CI_DOMAINS.find(domain => domain.key === group.ciDomain)?.jobs?.[0] : "", all })),
+      ...GOVERNANCE_DOMAINS.map(group => logicalGroup({ kind: "governance", group, physicalJobId: "docs-i18n", all })),
+    ];
+  }
+
+  const groups = [];
+  if (result.domains.host?.affected) {
+    for (const key of testGroups.host) {
+      const definition = HOST_TEST_AREAS.find(group => group.key === key);
+      if (definition) groups.push(logicalGroup({ kind: "host", group: definition, physicalJobId: "host-core" }));
+    }
+  }
+  if (result.domains.frontend?.affected) {
+    for (const key of testGroups.frontend) {
+      const definition = FRONTEND_TEST_GROUPS.find(group => group.key === key);
+      if (definition) groups.push(logicalGroup({ kind: "frontend", group: definition, physicalJobId: "frontend-unit" }));
+    }
+  }
+  if (result.domains.plugin?.affected) {
+    if (!result.domains.host?.affected) {
+      for (const key of PLUGIN_CONTRACT_FALLBACKS.host) {
+        const definition = HOST_TEST_AREAS.find(group => group.key === key);
+        if (definition) groups.push(logicalGroup({ kind: "host", group: definition, physicalJobId: "plugin-contract" }));
+      }
+    }
+    if (!result.domains.frontend?.affected) {
+      for (const key of PLUGIN_CONTRACT_FALLBACKS.frontend) {
+        const definition = FRONTEND_TEST_GROUPS.find(group => group.key === key);
+        if (definition) groups.push(logicalGroup({ kind: "frontend", group: definition, physicalJobId: "plugin-contract" }));
+      }
+    }
+  }
+  const addDomain = (key, physicalJobId) => {
+    const domain = CI_DOMAINS.find(item => item.key === key);
+    if (!domain || !result.domains[key]?.affected) return;
+    groups.push(logicalGroup({
+      kind: "domain",
+      group: { key, paths: domain.paths, testPaths: domain.testPaths || [] },
+      physicalJobId,
+    }));
+  };
+  addDomain("docs", "docs-i18n");
+  addDomain("plugin", "plugin-contract");
+  addDomain("ui", "ui-smoke");
+  for (const group of SYSTEM_TEST_GROUPS) {
+    if (result.domains[group.ciDomain]?.affected) {
+      const physicalJobId = CI_DOMAINS.find(domain => domain.key === group.ciDomain)?.jobs?.[0];
+      groups.push(logicalGroup({ kind: "system", group, physicalJobId }));
+    }
+  }
+  return groups;
+}
+
+export { globToRegExp };
 
 const DOMAIN_MATCHERS = CI_DOMAINS.map(domain => ({
   key: domain.key,
@@ -118,21 +250,32 @@ export function createExecutionPlan(changedFiles, {
   reason = "",
   all = false,
 } = {}) {
-  const result = evaluateDomains(changedFiles, { failOpen: failOpen || all, reason });
+  const files = Array.isArray(changedFiles) ? changedFiles : [];
+  const emptyChangeSet = files.length === 0 && !all;
+  const result = evaluateDomains(files, {
+    failOpen: failOpen || all || emptyChangeSet,
+    reason: reason || (emptyChangeSet ? "改动列表为空，按全量门禁处理" : ""),
+  });
+  const testGroups = {
+    host: result.domains.host.affected ? selectTestGroups("host", files, result.failOpen) : [],
+    frontend: result.domains.frontend.affected ? selectTestGroups("frontend", files, result.failOpen) : [],
+  };
+  const counterpart = readCounterpartCandidate();
+  const normalizedChangedFiles = files.map(file => normalizeChangePath(file) ?? String(file ?? ""));
   const plan = {
-    schemaVersion: 1,
+    schemaVersion: CI_EXECUTION_PLAN_SCHEMA_VERSION,
     all,
     base,
     head,
-    changedFiles: changedFiles.map(file => normalizeChangePath(file) ?? String(file ?? "")),
+    changedFiles: normalizedChangedFiles,
     failOpen: result.failOpen,
     reason: result.reason,
     unknown: result.unknown,
     shared: result.shared,
-    testGroups: {
-      host: selectTestGroups("host", changedFiles, result.failOpen),
-      frontend: selectTestGroups("frontend", changedFiles, result.failOpen),
-    },
+    counterpartRepository: counterpart.repository,
+    counterpartSha: counterpart.sha,
+    buildInputs: buildInputs({ base, head, changedFiles: normalizedChangedFiles, counterpart }),
+    testGroups,
     domains: Object.fromEntries(CI_DOMAINS.map(domain => [domain.key, {
       affected: result.domains[domain.key].affected,
       files: result.domains[domain.key].files,
@@ -140,6 +283,7 @@ export function createExecutionPlan(changedFiles, {
       jobs: all ? ["full-regression"] : domain.jobs ?? [domain.key],
     }])),
   };
+  plan.selectedGroups = selectedLogicalGroups({ result, testGroups, all });
   plan.planDigest = crypto.createHash("sha256")
     .update(JSON.stringify(plan), "utf8")
     .digest("hex");
@@ -261,14 +405,34 @@ function main() {
     }
   }
 
-  const result = evaluateDomains(changedFiles, { failOpen, reason });
+  const result = evaluateDomains(changedFiles, {
+    failOpen: failOpen || options.all || changedFiles.length === 0,
+    reason: reason || (changedFiles.length === 0 && !options.all ? "改动列表为空，按全量门禁处理" : ""),
+  });
   const plan = createExecutionPlan(changedFiles, { base, head, failOpen, reason, all: options.all });
+  const planValidation = options.dryRun
+    ? { ok: true, errors: [] }
+    : validateExecutionPlan(plan, { expectedHeadSha: head });
+  if (!planValidation.ok) {
+    console.error(`[影响域] 执行计划无效：${planValidation.errors.join("; ")}`);
+  }
   for (const line of describeReport(result.domains, result)) console.log(line);
   const lines = renderDomainLines(result.domains);
   const outputPath = options.githubOutput || process.env.GITHUB_OUTPUT;
   if (outputPath && !options.dryRun) {
     fs.appendFileSync(outputPath, `${lines.join("\n")}\n`, "utf8");
-    fs.appendFileSync(outputPath, `plan_digest=${plan.planDigest}\nplan_valid=true\nexecution_plan<<NEXUS_EXECUTION_PLAN\n${JSON.stringify(plan)}\nNEXUS_EXECUTION_PLAN\n`, "utf8");
+    fs.appendFileSync(outputPath, [
+      `plan_digest=${plan.planDigest}`,
+      `plan_valid=${planValidation.ok ? "true" : "false"}`,
+      `counterpart_repository=${plan.counterpartRepository}`,
+      `counterpart_sha=${plan.counterpartSha}`,
+      `source_digest=${plan.buildInputs.sourceDigest}`,
+      `build_inputs_digest=${plan.buildInputs.buildInputsDigest}`,
+      "execution_plan<<NEXUS_EXECUTION_PLAN",
+      JSON.stringify(plan),
+      "NEXUS_EXECUTION_PLAN",
+      "",
+    ].join("\n"), "utf8");
     console.log(`[影响域] 已写入 ${outputPath}。`);
   }
   if (options.planFile && !options.dryRun) {
@@ -276,7 +440,7 @@ function main() {
     console.log(`[影响域] 已写入执行计划 ${options.planFile}。`);
   }
   if (options.dryRun) console.log(`[影响域] 干跑：不写入输出文件、执行计划或其他状态。`);
-  return 0;
+  return planValidation.ok ? 0 : 1;
 }
 
 export function collectChangedFiles(base, head) {

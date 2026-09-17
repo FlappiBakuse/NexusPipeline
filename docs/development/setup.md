@@ -1,6 +1,6 @@
 # 开发环境与构建
 
-## 1. 环境要求
+## 环境要求
 
 | 依赖 | 版本 | 用途 |
 |---|---|---|
@@ -14,7 +14,7 @@
 
 
 
-## 2. 从源码编译
+## 从源码编译
 
 在项目根目录执行：
 
@@ -47,7 +47,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 
 
-## 3. 运行程序
+## 运行程序
 
 | 命令 | 行为 |
 |---|---|
@@ -62,7 +62,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 
 
-## 4. 测试入口
+## 测试入口
 
 测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](../TESTING.md)。统一入口为 `node tests/run.mjs codex <suite>` 或 `node tests/run.mjs admin <suite>`；每次改动按照修改范围执行对应模式；涉及进程、端口、解释器、模拟器、插件或更新事务时，先运行 Codex System Smoke，再由 GitHub Administrator Gate 验证生产 release。
 
@@ -79,16 +79,16 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 
 
 
-## 5. 调试技巧
+## 调试技巧
 
-### 5.1 日志
+### 日志
 
 - 管理器日志：`logs/nexus-pipeline-YYYY-MM-DD.log`，包含级别、来源和审计行。
 - 脚本日志：`history/YYYY-MM-DD/<用户昵称>/<HH-mm-ss>/<HH-mm-ss>-{attempt}.log`，按运行目录和 Attempt 分批保存；同一秒的运行目录按 `-2`、`-3` 递增。
 - `LogLevel=debug` 可以查看 Web 请求级日志；`GET /api/status` 轮询不记录。
 - 判断脚本异常时，结合管理器日志中的 JudgeError、历史状态文件和对应尝试日志定位。
 
-### 5.2 测试钩子
+### 测试钩子
 
 以下环境变量只用于测试或调试：
 
@@ -102,7 +102,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 | `NEXUS_PLUGIN_CATALOG_URL` | 将插件 catalog 指向本地测试源；生产环境不设置 |
 | `NEXUS_TEST_UPDATE_PAUSE_PHASE` / `NEXUS_TEST_UPDATE_PAUSE_FILE` | 仅测试宿主使用：在指定更新 journal 阶段写入外部暂停信号，供故障注入测试强杀 worker |
 
-### 5.3 Windows 环境注意事项
+### Windows 环境注意事项
 
 - 控制台、管道和文件使用 UTF-8；批处理和中文文件操作应保持无 BOM 的 UTF-8。
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
@@ -110,7 +110,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
 - 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
 
-### 5.4 单元与组件测试定位
+### 单元与组件测试定位
 
 工程位于 `tests/NexusPipeline.Tests/`，通过 `InternalsVisibleTo` 覆盖宿主内部契约。常见定位方向包括：
 
@@ -122,7 +122,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 
 
 
-## 6. 运行时数据
+## 运行时数据
 
 | 位置 | 内容 |
 |---|---|
@@ -142,7 +142,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 
 
 
-## 7. 常见故障排查
+## 常见故障排查
 
 | 现象 | 排查方向 |
 |---|---|

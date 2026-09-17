@@ -159,6 +159,114 @@ public class ExtraConfigSyncTests
     }
 
     [Fact]
+    public void Apply_ManifestWriteFailurePreservesOldSnapshotAndSite()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "config.json");
+        string store = ConfigSwapPaths.StoreExtraDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(site)!);
+            File.WriteAllText(site, "新现场");
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "config.json"), "旧快照");
+            ConfigStoreDiffPlan plan = ConfigStoreDiff.Build(
+                site,
+                store,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                null);
+            Action<string, string> writer = FailAt(
+                "manifest.json",
+                JsonWritePhase.BeforeReplace,
+                new IOException("模拟附加事务 manifest 写入失败"));
+
+            Assert.Throws<IOException>(() => ExtraConfigStoreTransaction.Apply(
+                scriptId,
+                userKey,
+                site,
+                store,
+                plan,
+                null,
+                writer));
+
+            Assert.Equal("旧快照", File.ReadAllText(Path.Combine(store, "config.json")));
+            Assert.Equal("新现场", File.ReadAllText(site));
+            Assert.False(ExtraConfigStoreTransaction.HasResidue(scriptId, userKey, site));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void Apply_CommitWriteFailureRollsBackOldSnapshot()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "config.json");
+        string store = ConfigSwapPaths.StoreExtraDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(site)!);
+            File.WriteAllText(site, "新现场");
+            Directory.CreateDirectory(store);
+            File.WriteAllText(Path.Combine(store, "config.json"), "旧快照");
+            ConfigStoreDiffPlan plan = ConfigStoreDiff.Build(
+                site,
+                store,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                null);
+            Action<string, string> writer = FailAt(
+                "commit.json",
+                JsonWritePhase.BeforeReplace,
+                new IOException("模拟附加事务提交写入失败"));
+
+            Assert.Throws<IOException>(() => ExtraConfigStoreTransaction.Apply(
+                scriptId,
+                userKey,
+                site,
+                store,
+                plan,
+                null,
+                writer));
+
+            Assert.Equal("旧快照", File.ReadAllText(Path.Combine(store, "config.json")));
+            Assert.Equal("新现场", File.ReadAllText(site));
+            Assert.False(ExtraConfigStoreTransaction.HasResidue(scriptId, userKey, site));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
+    public void Recovery_MissingManifestRetainsNonEmptyUnknownScene()
+    {
+        string scriptId = MakeScriptId();
+        string userKey = "user-a";
+        string site = Path.Combine(AppPaths.DataDir, scriptId, "site", "config.json");
+        string transactionDir = ConfigSwapPaths.ExtraStoreTransactionDir(scriptId, userKey, site);
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(transactionDir, "stage"));
+            string witness = Path.Combine(transactionDir, "stage", "witness.txt");
+            File.WriteAllText(witness, "未知现场");
+
+            Assert.Throws<IOException>(() => ExtraConfigStoreTransaction.Recover(scriptId, userKey, site));
+
+            Assert.True(File.Exists(witness));
+            Assert.True(Directory.Exists(transactionDir));
+        }
+        finally
+        {
+            Cleanup(scriptId);
+        }
+    }
+
+    [Fact]
     public void SyncWritesSiteDifferencesIntoStoreIncludingDeletes()
     {
         string scriptId = MakeScriptId();
@@ -209,5 +317,26 @@ public class ExtraConfigSyncTests
         catch
         {
         }
+    }
+
+    private static Action<string, string> FailAt(
+        string fileName,
+        JsonWritePhase phase,
+        Exception error)
+    {
+        bool failed = false;
+        return (path, content) => JsonUtil.WriteAtomic(
+            path,
+            content,
+            observed =>
+            {
+                if (!failed
+                    && observed == phase
+                    && string.Equals(Path.GetFileName(path), fileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    failed = true;
+                    throw error;
+                }
+            });
     }
 }

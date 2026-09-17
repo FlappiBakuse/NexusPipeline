@@ -401,3 +401,10 @@ test("required-summary 显式等待所有物理 job 并消费 execution-plan", (
   assert.match(workflow, /github\.event_name.*-eq 'schedule'.*workflow_dispatch'[\s\S]*node tools\/ci-changes\.mjs --all/s);
   assert.match(workflow, /full-regression:[\s\S]*if:.*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch'/s);
 });
+
+test("workflow_dispatch 的插件候选 SHA 进入 changes execution-plan", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const changesBlock = workflow.slice(workflow.indexOf("  changes:"), workflow.indexOf("  # Gate A:"));
+  assert.match(changesBlock, /NEXUS_CANDIDATE_REF:\s*\$\{\{\s*inputs\.plugins_ref\s*\}\}/u);
+  assert.match(changesBlock, /node tools\/ci-changes\.mjs --all/u);
+});

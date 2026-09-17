@@ -1,179 +1,48 @@
 # 架构与当前行为
 
-[文档门户](README.md)
-
-## 1. 设计理念
-
-[1. 设计理念](architecture/overview.md#1-设计理念)
-
-## 2. 核心概念
-
-[2. 核心概念](architecture/overview.md#2-核心概念)
-
-## 3. 核心运行流程
-
-[3. 核心运行流程](architecture/execution.md#3-核心运行流程)
-
-### 3.1 脚本运行完整链路
-
-[3.1 脚本运行完整链路](architecture/execution.md#31-脚本运行完整链路)
-
-### 3.2 队列执行链路
-
-[3.2 队列执行链路](architecture/scheduling.md#32-队列执行链路)
-
-### 3.3 手动执行脚本
-
-[3.3 手动执行脚本](architecture/execution.md#33-手动执行脚本)
-
-### 3.4 统一控制面与 CLI
-
-[3.4 统一控制面与 CLI](architecture/control.md#34-统一控制面与-cli)
-
-### 3.5 MCP Agent 控制面
-
-[3.5 MCP Agent 控制面](architecture/control.md#35-mcp-agent-控制面)
-
-### 3.6 定期检查与闲时自动更新
-
-[3.6 定期检查与闲时自动更新](architecture/update.md#36-定期检查与闲时自动更新)
-
-## 4. 配置交换机制
-
-[4. 配置交换机制](architecture/configuration.md#4-配置交换机制)
-
-### 4.1 数据目录
-
-[4.1 数据目录](architecture/configuration.md#41-数据目录)
-
-### 4.2 运行前（PrepareForRun）与运行后（RestoreAfterRun）
-
-[4.2 运行前（PrepareForRun）与运行后（RestoreAfterRun）](architecture/configuration.md#42-运行前prepareforrun与运行后restoreafterrun)
-
-### 4.3 插队替换配置（replaceConfigs）
-
-[4.3 插队替换配置（replaceConfigs）](architecture/configuration.md#43-插队替换配置replaceconfigs)
-
-### 4.4 崩溃恢复（自愈）
-
-[4.4 崩溃恢复（自愈）](architecture/recovery.md#44-崩溃恢复自愈)
-
-### 4.5 自动更新配置：config → store 反向同步
-
-[4.5 自动更新配置：config → store 反向同步](architecture/configuration.md#45-自动更新配置config-store-反向同步)
-
-## 5. 完成判定机制
-
-[5. 完成判定机制](architecture/judgement-logs.md#5-完成判定机制)
-
-### 5.1 判定优先级
-
-[5.1 判定优先级](architecture/judgement-logs.md#51-判定优先级)
-
-### 5.2 判断脚本输入与触发
-
-[5.2 判断脚本输入与触发](architecture/judgement-logs.md#52-判断脚本输入与触发)
-
-### 5.3 判断脚本信任边界
-
-[5.3 判断脚本信任边界](architecture/judgement-logs.md#53-判断脚本信任边界)
-
-### 5.4 关键字模式
-
-[5.4 关键字模式](architecture/judgement-logs.md#54-关键字模式)
-
-## 6. 日志监控机制
-
-[6. 日志监控机制](architecture/judgement-logs.md#6-日志监控机制)
-
-### 6.1 日志路径解析（LogPattern.ResolveFile）
-
-[6.1 日志路径解析（LogPattern.ResolveFile）](architecture/judgement-logs.md#61-日志路径解析logpatternresolvefile)
-
-### 6.2 增量读取与三种文件形态
-
-[6.2 增量读取与三种文件形态](architecture/judgement-logs.md#62-增量读取与三种文件形态)
-
-### 6.3 超时语义
-
-[6.3 超时语义](architecture/judgement-logs.md#63-超时语义)
-
-## 7. 通知与数据落盘
-
-[7. 通知与数据落盘](architecture/persistence-history.md#7-通知与数据落盘)
-
-### 7.1 通知分发
-
-[7.1 通知分发](architecture/observability.md#71-通知分发)
-
-### 7.2 历史与日志落盘
-
-[7.2 历史与日志落盘](architecture/persistence-history.md#72-历史与日志落盘)
-
-### 7.3 插件仓库与安装事务
-
-[7.3 插件仓库与安装事务](architecture/plugins.md#73-插件仓库与安装事务)
-
-### 7.4 宿主代理设置与网络边界
-
-[7.4 宿主代理设置与网络边界](architecture/observability.md#74-宿主代理设置与网络边界)
-
-### 7.5 运行状态目录
-
-[7.5 运行状态目录](architecture/persistence-history.md#75-运行状态目录)
-
-### 7.6 文件布局治理规范
-
-[7.6 文件布局治理规范](architecture/persistence-history.md#76-文件布局治理规范)
-
-## 8. 已知行为与边界
-
-[8. 已知行为与边界](architecture/overview.md#8-已知行为与边界)
-
-### 8.1 已接受的设计约束
-
-[8.1 已接受的设计约束](architecture/overview.md#81-已接受的设计约束)
-
-## 10. 架构与模块定位（开发者导航）
-
-[10. 架构与模块定位（开发者导航）](architecture/overview.md#10-架构与模块定位开发者导航)
-
-### 10.1 总体结构
-
-[10.1 总体结构](architecture/overview.md#101-总体结构)
-
-### 10.2 后端分层与依赖方向（只允许向下依赖）
-
-[10.2 后端分层与依赖方向（只允许向下依赖）](architecture/overview.md#102-后端分层与依赖方向只允许向下依赖)
-
-### 10.3 关键类职责
-
-[10.3 关键类职责](architecture/overview.md#103-关键类职责)
-
-### 10.4 public / internal 约定
-
-[10.4 public / internal 约定](architecture/overview.md#104-public-internal-约定)
-
-### 10.5 新增 API 的落点
-
-[10.5 新增 API 的落点](architecture/overview.md#105-新增-api-的落点)
-
-### 10.6 控制面边界
-
-[10.6 控制面边界](architecture/control.md#106-控制面边界)
-
-### 10.7 前端分层
-
-[10.7 前端分层](architecture/frontend.md#107-前端分层)
-
-### 10.8 插件扩展指南
-
-[10.8 插件扩展指南](architecture/plugins.md#108-插件扩展指南)
-
-### 10.9 功能定位指南（找代码）
-
-[10.9 功能定位指南（找代码）](architecture/overview.md#109-功能定位指南找代码)
-
-### 10.10 数据流速览
-
-[10.10 数据流速览](architecture/overview.md#1010-数据流速览)
+[文档门户](README.md) · [架构索引](architecture/README.md)
+
+本文件保留为宿主架构的兼容入口。当前完整规则按职责分布在[架构专题](architecture/README.md)；产品边界、核心概念和接受的约束位于[产品边界与模块](architecture/overview.md)，运行、配置、插件和更新分别由对应专题维护。
+
+## 当前阅读入口
+
+| 需要了解 | 当前权威专题 |
+|---|---|
+| 产品定位、核心概念、模块关系和已接受行为 | [产品边界与模块](architecture/overview.md) |
+| 脚本运行、取消、超时、进程和资源租约 | [执行与资源生命周期](architecture/execution.md) |
+| 配置快照、编辑隔离、交换和同步 | [配置编辑与交换](architecture/configuration.md) |
+| 崩溃恢复、事务身份和现场保全 | [恢复与现场保全](architecture/recovery.md) |
+| 队列 occurrence、去重和调度恢复 | [调度与去重](architecture/scheduling.md) |
+| 完成判定、日志增量和超时 | [完成判定与日志监控](architecture/judgement-logs.md) |
+| 历史、运行状态和文件布局 | [历史与持久化](architecture/persistence-history.md) |
+| 通知、代理和外部网络出口 | [通知与可观测性](architecture/observability.md) |
+| Web、CLI、MCP 和实时事件 | [控制面架构](architecture/control.md) |
+| 插件发现、安装事务和生命周期所有权 | [插件运行与安装](architecture/plugins.md) |
+| 更新发现、校验、替换和重启 | [自动更新](architecture/update.md) |
+| Vue 分层、公共 UI 和插件桥接 | [前端架构](architecture/frontend.md) |
+
+## 代码定位
+
+- 后端组合根与启动：`src/Application`、`src/RuntimeContext.cs`、`src/Bootstrap.cs`。
+- 运行、调度和配置：`src/Services/Execution`、`src/Services/Scheduling`、`src/Services/ConfigSwap`、`src/Persistence`。
+- 控制面与插件：`src/Web`、`src/Cli`、`src/Mcp`、`src/Plugins`、`src/NexusPipeline.Plugin.Abstractions`。
+- 前端与公开元件：`frontend/src/app`、`frontend/src/platform`、`frontend/src/plugin-bridge`、`frontend/src/ui`。
+- 测试入口、影响域和文档索引：`tests/run.mjs`、`tools/ci-domains.mjs`、`tools/docs-index.mjs`。
+
+完整命令与测试层级见[测试索引](testing/README.md)。
+
+## 旧链接承接
+
+以下显式锚点用于承接历史入口。它们只把读者转到当前专题，不复制旧版目录正文。
+
+<a id="1-设计理念"></a>
+<a id="2-核心概念"></a>
+<a id="3-核心运行流程"></a>
+<a id="4-配置交换机制"></a>
+<a id="5-完成判定机制"></a>
+<a id="6-日志监控机制"></a>
+<a id="7-通知与数据落盘"></a>
+<a id="8-已知行为与边界"></a>
+<a id="10-架构与模块定位开发者导航"></a>
+
+历史链接对应关系见 [migration-map.json](migration-map.json)。已发布版本的历史事实见[历史索引](history/README.md)，当前未完成事项见 [STATUS.md](STATUS.md)。

@@ -269,7 +269,7 @@ public sealed class PluginRepositoryCatalogTests
     }
 
     [Fact]
-    public void UpdateEligibility_DoesNotRequireStoreOwnership()
+    public void UpdateEligibility_RequiresStoreOwnership()
     {
         PluginStoreItem unmanaged = CreateStoreItem(
             installed: true,
@@ -277,7 +277,7 @@ public sealed class PluginRepositoryCatalogTests
             compatible: true,
             managedByStore: false);
 
-        Assert.True(PluginRepositoryService.IsUpdateEligible(unmanaged));
+        Assert.False(PluginRepositoryService.IsUpdateEligible(unmanaged));
     }
 
     [Theory]
@@ -476,4 +476,3 @@ public sealed class PluginRepositoryCatalogTests
         };
     }
 }
-

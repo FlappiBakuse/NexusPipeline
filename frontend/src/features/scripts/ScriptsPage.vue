@@ -231,7 +231,7 @@ onBeforeUnmount(() => {
             ><span class="muted">{{
               t("scripts.editor.manual_config_help")
             }}</span></NxpButton>
-          ><NxpButton
+          <NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"
             class="chooser-card"

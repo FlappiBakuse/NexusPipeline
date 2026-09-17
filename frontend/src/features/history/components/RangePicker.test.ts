@@ -1,5 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
+import { getLocale } from "../../../platform/i18n";
+import NxpDateRangePicker from "../../../ui/composites/NxpDateRangePicker.vue";
 import RangePicker from "./RangePicker.vue";
 
 describe("RangePicker", () => {
@@ -11,5 +13,7 @@ describe("RangePicker", () => {
     const dialog = wrapper.get("[role='dialog']");
     expect(dialog.attributes("aria-label")).toBe("history.choose_time_range");
     expect(dialog.findAll("button[aria-label='common.close']")).toHaveLength(0);
+    expect(wrapper.findComponent(NxpDateRangePicker).props("locale")).toBe(getLocale());
+    expect(wrapper.findComponent(NxpDateRangePicker).props("popoverClass")).toBe("history-range-popover");
   });
 });

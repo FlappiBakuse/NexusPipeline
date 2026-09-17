@@ -27,6 +27,20 @@ describe("public composite UI", () => {
     expect(wrapper.get(".nxp-action-group").text()).toBe("编辑");
   });
 
+  it("exposes the contents slot layout for grid-based entity consumers", () => {
+    const wrapper = mount(NxpEntityRow, {
+      props: { slotLayout: "contents" },
+      slots: {
+        leading: "leading",
+        content: "content",
+        actions: "actions",
+      },
+    });
+
+    expect(wrapper.get(".nxp-entity-row-leading").classes()).toContain("is-contents");
+    expect(wrapper.get(".nxp-entity-row-actions").classes()).toContain("is-contents");
+  });
+
   it("associates field labels and exposes named help/error content", () => {
     const wrapper = mount(NxpField, {
       props: { label: "名称", for: "name-input", required: true, error: "必填" },

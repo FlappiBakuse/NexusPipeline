@@ -66,8 +66,12 @@ internal static class ExtraConfigStoreTransaction
             string manifestPath = Path.Combine(directory, "manifest.json");
             if (!File.Exists(manifestPath))
             {
-                ConfigSwapPrimitives.TryDeleteDir(directory);
-                continue;
+                if (!Directory.EnumerateFileSystemEntries(directory).Any())
+                {
+                    ConfigSwapPrimitives.TryDeleteDir(directory);
+                    continue;
+                }
+                throw new IOException($"附加配置事务缺少 manifest，已保留现场：{directory}");
             }
             Manifest? manifest = JsonSerializer.Deserialize<Manifest>(File.ReadAllText(manifestPath), JsonOpts.Default);
             if (manifest is null || string.IsNullOrWhiteSpace(manifest.SitePath))
@@ -89,8 +93,11 @@ internal static class ExtraConfigStoreTransaction
         string sitePath,
         string storePath,
         ConfigStoreDiffPlan plan,
-        string? expectedSample)
+        string? expectedSample,
+        Action<string, string>? writeAtomic = null)
     {
+        Action<string, string> writer = writeAtomic
+            ?? ((target, content) => JsonUtil.WriteAtomic(target, content));
         if (!plan.HasChanges)
         {
             return;
@@ -135,7 +142,7 @@ internal static class ExtraConfigStoreTransaction
             }
 
             // manifest 必须先于 store 移动写入，强杀后可判断旧快照是否已经移入 backup。
-            JsonUtil.WriteAtomic(manifestPath, JsonSerializer.Serialize(manifest, JsonOpts.Indented));
+            writer(manifestPath, JsonSerializer.Serialize(manifest, JsonOpts.Indented));
             manifestWritten = true;
             if (manifest.HadStore)
             {
@@ -143,7 +150,7 @@ internal static class ExtraConfigStoreTransaction
             }
             Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
             Directory.Move(stage, storePath);
-            JsonUtil.WriteAtomic(
+            writer(
                 commitPath,
                 JsonSerializer.Serialize(new Commit
                 {
@@ -191,9 +198,9 @@ internal static class ExtraConfigStoreTransaction
         string manifestPath = ConfigSwapPaths.ExtraStoreTransactionManifestPath(scriptId, userKey, sitePath);
         if (!File.Exists(manifestPath))
         {
-            // 写 manifest 之前没有改动 authoritative store，临时目录可安全清理；有 manifest 才进入恢复协议。
-            ConfigSwapPrimitives.TryDeleteDir(transactionDir);
-            return;
+            // 当前进程在 manifest 写入前失败时由 Apply 的 catch 清理；跨进程重启已无法证明归属，
+            // 非空现场必须保留并交人工核查，避免误删未知 staging/backup。
+            throw new IOException($"附加配置事务缺少 manifest，已保留现场：{transactionDir}");
         }
 
         Manifest manifest;

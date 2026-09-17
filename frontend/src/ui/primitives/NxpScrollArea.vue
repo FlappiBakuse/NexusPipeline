@@ -10,9 +10,11 @@ const attrs = useAttrs();
 const props = withDefaults(defineProps<{
   direction?: ScrollDirection;
   ariaLabel?: string;
+  viewportClass?: string;
 }>(), {
   direction: "vertical",
   ariaLabel: "",
+  viewportClass: "",
 });
 
 const shell = ref<HTMLElement | null>(null);
@@ -228,6 +230,7 @@ onBeforeUnmount(() => {
       ref="viewport"
       v-bind="viewportAttrs"
       class="nxp-scroll-viewport"
+      :class="props.viewportClass || undefined"
       :id="viewportId"
       :tabindex="String(attrs.tabindex ?? 0)"
       :aria-label="props.ariaLabel || undefined"

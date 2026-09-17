@@ -141,7 +141,7 @@ internal sealed class PluginRepositoryService : IPluginAutoUpdateRepository
         }
     }
 
-    /// <summary>返回当前 catalog 中实际可登记更新的插件；ownership 只描述来源，不参与更新资格。</summary>
+    /// <summary>返回当前 catalog 中有已验证安装归属且可登记更新的插件。</summary>
     public async Task<IReadOnlyList<PluginStoreItem>> GetUpdateCandidatesAsync(
         CancellationToken cancellationToken = default)
     {
@@ -218,10 +218,7 @@ internal sealed class PluginRepositoryService : IPluginAutoUpdateRepository
         return new PluginBatchUpdateResult(candidates, updated, failed, canceled);
     }
 
-    /// <summary>
-    /// 批量更新与单插件更新共用的资格投影。ManagedByStore 是管理信息，不能阻止
-    /// 身份与 catalog 匹配的手动安装或历史遗留插件获得官方更新。
-    /// </summary>
+    /// <summary>批量更新与单插件更新共用的资格投影；只有商店归属已验证的安装可被替换。</summary>
     internal static bool IsUpdateEligible(PluginStoreItem plugin) =>
         PluginStoreProjector.IsUpdateEligible(plugin);
 

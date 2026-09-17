@@ -16,7 +16,8 @@ internal sealed class PluginStoreProjector
 
     internal static bool IsUpdateEligible(PluginStoreItem plugin)
     {
-        return plugin.Installed
+        return plugin.ManagedByStore
+            && plugin.Installed
             && plugin.Compatible
             && plugin.UpdateAvailable
             && string.IsNullOrWhiteSpace(plugin.PendingAction);

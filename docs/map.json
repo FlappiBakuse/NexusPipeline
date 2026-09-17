@@ -2,622 +2,377 @@
   "schemaVersion": 1,
   "topics": [
     {
-      "id": "architecture.configuration",
-      "path": "architecture/configuration.md",
-      "summary": "配置编辑、定位、快照和保存边界",
-      "topics": [
-        "configuration",
-        "config",
-        "编辑",
-        "快照"
-      ],
-      "aliases": [
-        "配置恢复",
-        "配置编辑"
-      ],
-      "codePaths": [
-        "src/Services/ConfigSwapPrimitives.cs",
-        "src/Services/ConfigSwap/EditSession.cs",
-        "src/Persistence/ConfigStore.cs"
-      ],
-      "testDomains": [
-        "hostAreas.config",
-        "hostAreas.persistence",
-        "systemGroups.config"
-      ],
-      "authorityFor": [
-        "configuration-editing",
-        "configuration-snapshot"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.recovery",
-      "path": "architecture/recovery.md",
-      "summary": "当前格式下的事务、保全和未知现场处理",
-      "topics": [
-        "recovery",
-        "rollback",
-        "保全",
-        "恢复"
-      ],
-      "aliases": [
-        "配置恢复",
-        "安装恢复"
-      ],
-      "codePaths": [
-        "src/Persistence/JsonStore.cs",
-        "src/Persistence/ScriptStorage.cs",
-        "src/Services/ConfigSwapPrimitives.cs"
-      ],
-      "testDomains": [
-        "hostAreas.persistence",
-        "systemGroups.plugins",
-        "systemGroups.update"
-      ],
-      "authorityFor": [
-        "current-recovery"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.execution",
-      "path": "architecture/execution.md",
-      "summary": "运行计划、尝试、取消、超时和资源租约",
-      "topics": [
-        "execution",
-        "cancel",
-        "timeout",
-        "lease",
-        "运行"
-      ],
-      "aliases": [
-        "取消后卡住",
-        "执行失败"
-      ],
-      "codePaths": [
-        "src/Services/Execution/ExecutionRunner.cs",
-        "src/Services/RunSession.cs",
-        "src/Services/DispatchCenter.cs"
-      ],
-      "testDomains": [
-        "hostAreas.execution",
-        "systemGroups.execution"
-      ],
-      "authorityFor": [
-        "execution-lifecycle"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.scheduling",
-      "path": "architecture/scheduling.md",
-      "summary": "计划 occurrence、去重 fence、重试和调度恢复",
-      "topics": [
-        "scheduling",
-        "occurrence",
-        "fence",
-        "retry",
-        "调度"
-      ],
-      "aliases": [
-        "调度去重"
-      ],
-      "codePaths": [
-        "src/Services/Scheduling",
-        "src/Services/TaskRegistration.cs"
-      ],
-      "testDomains": [
-        "hostAreas.scheduling"
-      ],
-      "authorityFor": [
-        "scheduling-occurrence"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.plugins",
-      "path": "architecture/plugins.md",
-      "summary": "插件安装、运行时加载、停用和所有权边界",
-      "topics": [
-        "plugins",
-        "installation",
-        "unload",
-        "插件"
-      ],
-      "aliases": [
-        "包安装恢复"
-      ],
-      "codePaths": [
-        "src/Plugins",
-        "src/Services/PluginAvailability.cs",
-        "src/NexusPipeline.Plugin.Abstractions"
-      ],
-      "testDomains": [
-        "hostAreas.plugins",
-        "systemGroups.plugins"
-      ],
-      "authorityFor": [
-        "plugin-runtime-ownership"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.frontend",
-      "path": "architecture/frontend.md",
-      "summary": "Vue、公共 UI、业务页面、桥接和生命周期边界",
-      "topics": [
-        "frontend",
-        "vue",
-        "boundary",
-        "公共化",
-        "前端"
-      ],
-      "aliases": [
-        "新增复合元件",
-        "前端防回退"
-      ],
-      "codePaths": [
-        "frontend/src/ui/register.ts",
-        "frontend/src/plugin-bridge",
-        "tools/frontend-boundaries.mjs"
-      ],
-      "testDomains": [
-        "frontendGroups.ui",
-        "frontendGroups.bridge",
-        "governanceDomains.architecture-boundaries"
-      ],
-      "authorityFor": [
-        "frontend-architecture"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "architecture.update",
-      "path": "architecture/update.md",
-      "summary": "启动更新、下载校验、替换和重启边界",
-      "topics": [
-        "update",
-        "startup",
-        "download",
-        "更新"
-      ],
-      "aliases": [
-        "自动更新",
-        "更新失败"
-      ],
-      "codePaths": [
-        "src/Services/Update",
-        "src/Services/Update/StartupUpdateCoordinator.cs",
-        "update-policy.json"
-      ],
-      "testDomains": [
-        "hostAreas.update",
-        "systemGroups.update"
-      ],
-      "authorityFor": [
-        "update-lifecycle"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "plugin-api.frontend",
-      "path": "reference/plugin-api/frontend.md",
-      "summary": "Frontend API 1.5、nxp-* 元件、slot 和生命周期",
-      "topics": [
-        "frontend-api",
-        "slot",
-        "custom-elements",
-        "nxp"
-      ],
-      "aliases": [
-        "插件 slot",
-        "官方插件前端"
-      ],
-      "codePaths": [
-        "frontend/src/plugin-bridge",
-        "frontend/src/ui/register.ts"
-      ],
-      "testDomains": [
-        "frontendGroups.bridge",
-        "hostAreas.plugins"
-      ],
-      "authorityFor": [
-        "frontend-plugin-contract"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "plugin-api.managed",
-      "path": "reference/plugin-api/managed.md",
-      "summary": "managed Plugin API、宿主服务和版本边界",
-      "topics": [
-        "managed",
-        "plugin-api",
-        "capability",
-        "托管插件"
-      ],
-      "aliases": [
-        "新增 managed 能力"
-      ],
-      "codePaths": [
-        "src/NexusPipeline.Plugin.Abstractions",
-        "src/Plugins"
-      ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
-      "authorityFor": [
-        "managed-plugin-contract"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "ui.catalog",
-      "path": "reference/ui/README.md",
-      "summary": "公共 UI 元件目录、选型和可访问交互边界",
-      "topics": [
-        "ui",
-        "button",
-        "field",
-        "list",
-        "date",
-        "排序"
-      ],
-      "aliases": [
-        "按钮",
-        "表单",
-        "日期范围",
-        "拖拽排序"
-      ],
-      "codePaths": [
-        "frontend/src/ui/primitives",
-        "frontend/src/ui/composites",
-        "frontend/src/ui/register.ts"
-      ],
-      "testDomains": [
-        "frontendGroups.ui",
-        "frontendGroups.bridge"
-      ],
-      "authorityFor": [
-        "public-ui-catalog"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "testing.commands",
-      "path": "testing/commands.md",
-      "summary": "宿主测试、前端、System 和治理命令",
-      "topics": [
-        "testing",
-        "commands",
-        "runner",
-        "门禁",
-        "测试"
-      ],
-      "aliases": [
-        "运行指定门禁"
-      ],
-      "codePaths": [
-        "tests/run.mjs",
-        "tools/ci-domains.mjs",
-        "tools/ci-summary.mjs"
-      ],
-      "testDomains": [
-        "governanceDomains.ci-tooling"
-      ],
-      "authorityFor": [
-        "test-commands"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "testing.domains",
-      "path": "testing/domains.md",
-      "summary": "影响域、逻辑测试组和 required-summary 选择规则",
-      "topics": [
-        "domains",
-        "ci",
-        "selection",
-        "required-summary"
-      ],
-      "aliases": [
-        "测试选择器",
-        "CI 分类"
-      ],
-      "codePaths": [
-        "tools/ci-domains.mjs",
-        "tools/ci-changes.mjs",
-        "tools/ci-summary.mjs"
-      ],
-      "testDomains": [
-        "governanceDomains.ci-tooling"
-      ],
-      "authorityFor": [
-        "test-domain-selection"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "development.setup",
-      "path": "development/setup.md",
-      "summary": "本地环境、构建、调试和运行数据边界",
-      "topics": [
-        "development",
-        "setup",
-        "build",
-        "开发"
-      ],
-      "aliases": [
-        "开始开发",
-        "构建项目"
-      ],
-      "codePaths": [
-        "src/NexusPipeline.csproj",
-        "build.cmd",
-        "frontend/package.json",
-        "tests/run.mjs"
-      ],
-      "testDomains": [
-        "hostAreas.core",
-        "frontendGroups.ui"
-      ],
-      "authorityFor": [
-        "development-environment"
-      ],
-      "status": "current"
-    },
-    {
-      "id": "decisions.v0166",
-      "path": "decisions/ADR-0166-001.md",
-      "summary": "v0.16.6 前端公共化、当前格式和测试治理决定",
-      "topics": [
-        "adr",
-        "decision",
-        "v0.16.6"
-      ],
-      "aliases": [
-        "版本决定"
-      ],
-      "codePaths": [
-        "tools/frontend-boundaries.mjs",
-        "tools/ci-domains.mjs"
-      ],
-      "testDomains": [
-        "governanceDomains.architecture-boundaries",
-        "governanceDomains.ci-tooling"
-      ],
-      "authorityFor": [
-        "v0166-development-decision"
-      ],
+      "id": "architecture.index",
+      "path": "architecture/README.md",
+      "summary": "架构专题入口与模块责任边界",
+      "topics": ["架构", "模块", "代码定位", "专题"],
+      "aliases": ["设计文档", "系统架构"],
+      "codePaths": ["tools/docs-index.mjs", "tests/documentation/documentation-consistency.mjs"],
+      "testDomains": ["governanceDomains.docs-links-contracts"],
+      "authorityFor": ["architecture-navigation"],
       "status": "current"
     },
     {
       "id": "architecture.overview",
       "path": "architecture/overview.md",
-      "summary": "overview",
-      "topics": [
-        "overview"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/RuntimeContext.cs"
-      ],
-      "testDomains": [
-        "hostAreas.core"
-      ],
-      "authorityFor": [
-        "architecture.overview"
-      ],
+      "summary": "产品边界、核心概念、模块结构与已接受约束",
+      "topics": ["产品边界", "核心概念", "模块", "设计约束"],
+      "aliases": ["设计理念", "系统概览"],
+      "codePaths": ["src/Application", "src/RuntimeContext.cs"],
+      "testDomains": ["hostAreas.core", "hostAreas.control"],
+      "authorityFor": ["product-boundary", "architecture-module-map"],
       "status": "current"
     },
     {
-      "id": "architecture.control",
-      "path": "architecture/control.md",
-      "summary": "control",
-      "topics": [
-        "control"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Web"
-      ],
-      "testDomains": [
-        "hostAreas.control"
-      ],
-      "authorityFor": [
-        "architecture.control"
-      ],
+      "id": "architecture.execution",
+      "path": "architecture/execution.md",
+      "summary": "运行计划、尝试、取消、超时、进程清理与资源租约",
+      "topics": ["运行", "执行", "取消", "超时", "租约"],
+      "aliases": ["运行流程", "执行失败"],
+      "codePaths": ["src/Services/Execution", "src/Services/RunSession.cs", "src/Services/DispatchCenter.cs"],
+      "testDomains": ["hostAreas.execution", "systemGroups.execution"],
+      "authorityFor": ["execution-lifecycle"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.configuration",
+      "path": "architecture/configuration.md",
+      "summary": "配置会话、快照、交换、编辑隔离与结果同步",
+      "topics": ["配置", "编辑", "交换", "快照"],
+      "aliases": ["配置编辑", "配置交换", "配置恢复"],
+      "codePaths": ["src/Services/ConfigSwap", "src/Services/ConfigSwapPrimitives.cs", "src/Persistence", "src/Services/Configuration"],
+      "testDomains": ["hostAreas.config", "hostAreas.persistence", "systemGroups.config"],
+      "authorityFor": ["configuration-editing", "configuration-snapshot"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.recovery",
+      "path": "architecture/recovery.md",
+      "summary": "当前格式下的事务身份、现场保全、启动恢复与人工处理边界",
+      "topics": ["恢复", "保全", "事务", "崩溃"],
+      "aliases": ["配置恢复", "安装恢复"],
+      "codePaths": ["src/Persistence", "src/Services/ConfigSwap", "src/Plugins/Repository"],
+      "testDomains": ["hostAreas.persistence", "systemGroups.plugins", "systemGroups.update"],
+      "authorityFor": ["current-recovery"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.scheduling",
+      "path": "architecture/scheduling.md",
+      "summary": "occurrence、调度 fence、队列执行与重试窗口",
+      "topics": ["调度", "队列", "occurrence", "去重"],
+      "aliases": ["调度恢复", "重复执行"],
+      "codePaths": ["src/Services/Scheduling", "src/Services/TaskRegistration.cs"],
+      "testDomains": ["hostAreas.scheduling"],
+      "authorityFor": ["scheduling-occurrence"],
       "status": "current"
     },
     {
       "id": "architecture.judgement-logs",
       "path": "architecture/judgement-logs.md",
-      "summary": "judgement-logs",
-      "topics": [
-        "judgement-logs"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Services/Judgement"
-      ],
-      "testDomains": [
-        "hostAreas.judgement"
-      ],
-      "authorityFor": [
-        "architecture.judgement-logs"
-      ],
+      "summary": "判断脚本、关键字、日志增量、输入冻结与超时",
+      "topics": ["判定", "判断脚本", "日志", "超时"],
+      "aliases": ["完成判定", "日志监控"],
+      "codePaths": ["src/Services/Judgement", "src/Services/LogMonitor.cs"],
+      "testDomains": ["hostAreas.judgement", "hostAreas.execution"],
+      "authorityFor": ["judgement-and-log-monitoring"],
       "status": "current"
     },
     {
       "id": "architecture.persistence-history",
       "path": "architecture/persistence-history.md",
-      "summary": "persistence-history",
-      "topics": [
-        "persistence-history"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Persistence"
-      ],
-      "testDomains": [
-        "hostAreas.persistence"
-      ],
-      "authorityFor": [
-        "architecture.persistence-history"
-      ],
+      "summary": "运行历史、日志、运行状态目录与文件布局",
+      "topics": ["持久化", "历史", "运行状态", "文件布局"],
+      "aliases": ["数据落盘", "历史记录"],
+      "codePaths": ["src/Persistence", "src/Services/History", "CHANGELOG.md"],
+      "testDomains": ["hostAreas.persistence", "hostAreas.observability"],
+      "authorityFor": ["persistence-and-history"],
       "status": "current"
     },
     {
       "id": "architecture.observability",
       "path": "architecture/observability.md",
-      "summary": "observability",
-      "topics": [
-        "observability"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Services/Diagnostics"
-      ],
-      "testDomains": [
-        "hostAreas.observability"
-      ],
-      "authorityFor": [
-        "architecture.observability"
-      ],
+      "summary": "通知渠道、代理出口、诊断与敏感信息边界",
+      "topics": ["通知", "代理", "诊断", "网络"],
+      "aliases": ["可观测性", "消息通知"],
+      "codePaths": ["src/Services/Notification", "src/Services/Networking", "src/Services/Diagnostics"],
+      "testDomains": ["hostAreas.observability", "hostAreas.control"],
+      "authorityFor": ["observability-and-notification"],
       "status": "current"
     },
     {
-      "id": "reference.plugin-api.manifest",
+      "id": "architecture.control",
+      "path": "architecture/control.md",
+      "summary": "Web、CLI、MCP、实时事件与重启控制面",
+      "topics": ["控制面", "Web", "CLI", "MCP", "实时事件"],
+      "aliases": ["管理接口", "控制接口"],
+      "codePaths": ["src/Web", "src/Cli", "src/Mcp", "src/Services/Realtime"],
+      "testDomains": ["hostAreas.control", "systemGroups.control"],
+      "authorityFor": ["control-plane-architecture"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.plugins",
+      "path": "architecture/plugins.md",
+      "summary": "插件发现、安装事务、能力注册与生命周期所有权",
+      "topics": ["插件", "安装", "更新", "生命周期"],
+      "aliases": ["插件运行时", "pending 安装"],
+      "codePaths": ["src/Plugins", "src/Plugins/Repository/PluginInstallRecovery.cs", "src/NexusPipeline.Plugin.Abstractions"],
+      "testDomains": ["hostAreas.plugins", "systemGroups.plugins"],
+      "authorityFor": ["plugin-runtime-ownership"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.update",
+      "path": "architecture/update.md",
+      "summary": "更新源、策略、下载校验、替换、重启与闲时应用",
+      "topics": ["更新", "校验", "替换", "重启"],
+      "aliases": ["自动更新", "更新事务"],
+      "codePaths": ["src/Services/Update", "update-policy.json"],
+      "testDomains": ["hostAreas.update", "systemGroups.update"],
+      "authorityFor": ["update-lifecycle"],
+      "status": "current"
+    },
+    {
+      "id": "architecture.frontend",
+      "path": "architecture/frontend.md",
+      "summary": "Vue 分层、平台服务、插件桥接与公共 UI 边界",
+      "topics": ["前端", "Vue", "桥接", "公共 UI"],
+      "aliases": ["前端架构", "Frontend 边界"],
+      "codePaths": ["frontend/src/app", "frontend/src/platform", "frontend/src/plugin-bridge", "frontend/src/ui"],
+      "testDomains": ["frontendGroups.ui", "frontendGroups.bridge", "governanceDomains.architecture-boundaries"],
+      "authorityFor": ["frontend-architecture"],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.index",
+      "path": "reference/plugin-api/README.md",
+      "summary": "Manifest、managed、Frontend 与 data-specialized 契约入口",
+      "topics": ["Plugin API", "manifest", "Frontend API", "契约"],
+      "aliases": ["插件接口", "插件 SDK"],
+      "codePaths": ["src/NexusPipeline.Plugin.Abstractions", "frontend/src/plugin-bridge", "tools/docs-index.mjs"],
+      "testDomains": ["hostAreas.plugins", "frontendGroups.bridge", "governanceDomains.docs-links-contracts"],
+      "authorityFor": ["plugin-api-navigation"],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.manifest",
       "path": "reference/plugin-api/manifest.md",
-      "summary": "manifest",
-      "topics": [
-        "manifest"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Plugins"
-      ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
-      "authorityFor": [
-        "reference.plugin-api.manifest"
-      ],
+      "summary": "plugin.json、store.json、资源路径、能力与发行包格式",
+      "topics": ["manifest", "plugin.json", "store.json", "发行包"],
+      "aliases": ["插件清单", "包格式"],
+      "codePaths": ["src/Plugins", "src/NexusPipeline.Plugin.Abstractions"],
+      "testDomains": ["hostAreas.plugins"],
+      "authorityFor": ["plugin-manifest-contract"],
       "status": "current"
     },
     {
-      "id": "reference.plugin-api.data-specialized",
+      "id": "plugin-api.managed",
+      "path": "reference/plugin-api/managed.md",
+      "summary": "managed-code C# 生命周期、宿主服务与 Plugin API v1.8",
+      "topics": ["managed-code", "C#", "Plugin API", "宿主服务"],
+      "aliases": ["代码插件", "Managed Plugin"],
+      "codePaths": ["src/NexusPipeline.Plugin.Abstractions", "src/Plugins"],
+      "testDomains": ["hostAreas.plugins"],
+      "authorityFor": ["managed-plugin-contract"],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.frontend",
+      "path": "reference/plugin-api/frontend.md",
+      "summary": "Frontend API 1.5、activate、路由、slot、公共元素与清理",
+      "topics": ["Frontend API", "activate", "slot", "生命周期"],
+      "aliases": ["前端插件", "浏览器插件"],
+      "codePaths": ["frontend/src/plugin-bridge", "frontend/src/ui", "frontend/src/router.ts"],
+      "testDomains": ["frontendGroups.bridge", "frontendGroups.ui"],
+      "authorityFor": ["frontend-plugin-contract"],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.data-specialized",
       "path": "reference/plugin-api/data-specialized.md",
-      "summary": "data-specialized",
-      "topics": [
-        "data-specialized"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "src/Plugins"
-      ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
-      "authorityFor": [
-        "reference.plugin-api.data-specialized"
-      ],
+      "summary": "resolve、judge、只读探针、截图与 config-restore.json",
+      "topics": ["data-specialized", "resolve", "judge", "config-restore"],
+      "aliases": ["数据专项插件", "判断脚本"],
+      "codePaths": ["src/Plugins", "src/Services/Judgement", "src/Services/ConfigSwap"],
+      "testDomains": ["hostAreas.plugins", "hostAreas.judgement"],
+      "authorityFor": ["data-specialized-plugin-contract"],
       "status": "current"
     },
     {
-      "id": "development.workflow",
-      "path": "development/workflow.md",
-      "summary": "workflow",
-      "topics": [
-        "workflow"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "AGENTS.md"
-      ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
-      "authorityFor": [
-        "development.workflow"
-      ],
+      "id": "ui.catalog",
+      "path": "reference/ui/README.md",
+      "summary": "公开 nxp-* Native Custom Elements 的分组目录与消费边界",
+      "topics": ["UI", "nxp-*", "Native Custom Elements", "公共元件"],
+      "aliases": ["公共 UI", "UI 组件"],
+      "codePaths": ["frontend/src/ui/register.ts", "frontend/src/ui"],
+      "testDomains": ["frontendGroups.ui", "frontendGroups.bridge"],
+      "authorityFor": ["public-ui-catalog"],
       "status": "current"
     },
     {
-      "id": "development.release",
-      "path": "development/release.md",
-      "summary": "release",
-      "topics": [
-        "release"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "build.cmd"
-      ],
-      "testDomains": [
-        "hostAreas.update"
-      ],
-      "authorityFor": [
-        "development.release"
-      ],
+      "id": "ui.actions-inputs",
+      "path": "reference/ui/actions-inputs.md",
+      "summary": "按钮、图标、字段、文本数字、文件与路径输入契约",
+      "topics": ["按钮", "输入", "字段", "文件"],
+      "aliases": ["动作控件", "输入控件"],
+      "codePaths": ["frontend/src/ui/primitives", "frontend/src/ui/register.ts"],
+      "testDomains": ["frontendGroups.ui"],
+      "authorityFor": ["public-ui-actions-inputs"],
       "status": "current"
     },
     {
-      "id": "testing.README",
+      "id": "ui.selection",
+      "path": "reference/ui/selection.md",
+      "summary": "开关、选择、范围、颜色、时间、日期范围与 tabs 契约",
+      "topics": ["选择", "日期", "开关", "tabs"],
+      "aliases": ["选择控件", "日期控件"],
+      "codePaths": ["frontend/src/ui/primitives", "frontend/src/ui/composites/NxpDateRangePicker.vue"],
+      "testDomains": ["frontendGroups.ui"],
+      "authorityFor": ["public-ui-selection"],
+      "status": "current"
+    },
+    {
+      "id": "ui.overlays-feedback",
+      "path": "reference/ui/overlays-feedback.md",
+      "summary": "menu、tooltip、modal、popover、确认、toast 与状态反馈契约",
+      "topics": ["弹层", "反馈", "modal", "toast"],
+      "aliases": ["对话框", "提示反馈"],
+      "codePaths": ["frontend/src/ui/primitives", "frontend/src/ui/composites"],
+      "testDomains": ["frontendGroups.ui"],
+      "authorityFor": ["public-ui-overlays-feedback"],
+      "status": "current"
+    },
+    {
+      "id": "ui.layout-lists",
+      "path": "reference/ui/layout-lists.md",
+      "summary": "卡片、标题、实体行、排序、分页与滚动契约",
+      "topics": ["布局", "列表", "排序", "分页"],
+      "aliases": ["列表控件", "布局控件"],
+      "codePaths": ["frontend/src/ui/composites", "frontend/src/ui/primitives"],
+      "testDomains": ["frontendGroups.ui"],
+      "authorityFor": ["public-ui-layout-lists"],
+      "status": "current"
+    },
+    {
+      "id": "testing.index",
       "path": "testing/README.md",
-      "summary": "README",
-      "topics": [
-        "README"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "tests/run.mjs"
-      ],
-      "testDomains": [
-        "hostAreas.core"
-      ],
-      "authorityFor": [
-        "testing.README"
-      ],
+      "summary": "测试层级、职责与入口总览",
+      "topics": ["测试", "Unit", "System Smoke", "UI Smoke"],
+      "aliases": ["测试入口", "测试分层"],
+      "codePaths": ["tests/run.mjs", "tests/documentation/documentation-consistency.mjs"],
+      "testDomains": ["governanceDomains.test-policy", "governanceDomains.docs-links-contracts"],
+      "authorityFor": ["testing-navigation"],
+      "status": "current"
+    },
+    {
+      "id": "testing.commands",
+      "path": "testing/commands.md",
+      "summary": "Unit、Web、Docs、System、UI 与全量门禁命令",
+      "topics": ["命令", "门禁", "构建", "回归"],
+      "aliases": ["测试命令", "质量门禁"],
+      "codePaths": ["tests/run.mjs", ".github/workflows/ci.yml"],
+      "testDomains": ["governanceDomains.ci-tooling"],
+      "authorityFor": ["test-commands"],
+      "status": "current"
+    },
+    {
+      "id": "testing.domains",
+      "path": "testing/domains.md",
+      "summary": "影响域、逻辑测试组、物理 CI Job 与清理边界",
+      "topics": ["影响域", "CI", "逻辑组", "清理"],
+      "aliases": ["测试域选择", "CI 计划"],
+      "codePaths": ["tools/ci-domains.mjs", "tools/ci-changes.mjs", ".github/workflows/ci.yml"],
+      "testDomains": ["governanceDomains.ci-tooling"],
+      "authorityFor": ["test-domain-selection"],
       "status": "current"
     },
     {
       "id": "testing.policy",
       "path": "testing/policy.md",
-      "summary": "policy",
-      "topics": [
-        "policy"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "tests/run.mjs"
-      ],
-      "testDomains": [
-        "hostAreas.core"
-      ],
-      "authorityFor": [
-        "testing.policy"
-      ],
+      "summary": "最低有效测试层级、UI Smoke 预算与行为断言政策",
+      "topics": ["测试政策", "UI Smoke", "断言", "覆盖"],
+      "aliases": ["测试归属", "测试治理"],
+      "codePaths": ["tests/documentation/test-policy-consistency.mjs", "AGENTS.md"],
+      "testDomains": ["governanceDomains.test-policy"],
+      "authorityFor": ["test-policy"],
       "status": "current"
     },
     {
       "id": "testing.fixtures",
       "path": "testing/fixtures.md",
-      "summary": "fixtures",
-      "topics": [
-        "fixtures"
-      ],
-      "aliases": [],
-      "codePaths": [
-        "tests/fixtures"
-      ],
-      "testDomains": [
-        "hostAreas.config"
-      ],
-      "authorityFor": [
-        "testing.fixtures"
-      ],
+      "summary": "当前格式、恢复协议与测试夹具边界",
+      "topics": ["夹具", "当前格式", "恢复", "故障注入"],
+      "aliases": ["测试数据", "恢复契约"],
+      "codePaths": ["tests/fixtures", "src/Persistence", "src/Services/ConfigSwap"],
+      "testDomains": ["hostAreas.persistence", "hostAreas.config"],
+      "authorityFor": ["current-format-fixtures"],
+      "status": "current"
+    },
+    {
+      "id": "development.index",
+      "path": "development/README.md",
+      "summary": "开发环境、工作流和版本发布入口",
+      "topics": ["开发", "构建", "发布", "协作"],
+      "aliases": ["开发文档", "开发流程"],
+      "codePaths": ["docs/DEVELOPMENT.md", "build.cmd", "tests/run.mjs"],
+      "testDomains": ["governanceDomains.docs-links-contracts", "governanceDomains.ci-tooling"],
+      "authorityFor": ["development-navigation"],
+      "status": "current"
+    },
+    {
+      "id": "development.setup",
+      "path": "development/setup.md",
+      "summary": "本地环境、构建、调试、运行时数据与故障排查",
+      "topics": ["环境", "构建", "运行", "调试"],
+      "aliases": ["环境要求", "从源码编译"],
+      "codePaths": ["src/NexusPipeline.csproj", "build.cmd", "frontend/package.json"],
+      "testDomains": ["hostAreas.core", "frontendGroups.ui"],
+      "authorityFor": ["development-environment"],
+      "status": "current"
+    },
+    {
+      "id": "development.workflow",
+      "path": "development/workflow.md",
+      "summary": "协作、提交拆分、版本边界与文档治理",
+      "topics": ["协作", "提交", "版本", "治理"],
+      "aliases": ["提交规范", "协作流程"],
+      "codePaths": ["AGENTS.md", "CONTRIBUTING.md"],
+      "testDomains": ["governanceDomains.docs-links-contracts"],
+      "authorityFor": ["development-workflow"],
+      "status": "current"
+    },
+    {
+      "id": "development.release",
+      "path": "development/release.md",
+      "summary": "Pre-release 发布、资产校验、清理与发布后收尾",
+      "topics": ["发布", "Pre-release", "资产", "SHA256"],
+      "aliases": ["发布流程", "发行流程"],
+      "codePaths": ["build.cmd", ".github/workflows/ci.yml"],
+      "testDomains": ["hostAreas.update", "governanceDomains.ci-tooling"],
+      "authorityFor": ["development-release"],
+      "status": "current"
+    },
+    {
+      "id": "history.index",
+      "path": "history/README.md",
+      "summary": "已发布历史、版本事实与历史入口",
+      "topics": ["历史", "版本", "CHANGELOG"],
+      "aliases": ["版本历史", "发布历史"],
+      "codePaths": ["CHANGELOG.md", "docs/history/README.md"],
+      "testDomains": ["governanceDomains.docs-links-contracts"],
+      "authorityFor": ["history-navigation"],
+      "status": "current"
+    },
+    {
+      "id": "decisions.v0166",
+      "path": "decisions/ADR-0166-001.md",
+      "summary": "本轮架构边界、公共 UI、当前格式与测试治理决定",
+      "topics": ["ADR", "决策", "架构边界", "测试治理"],
+      "aliases": ["开发决定", "版本决策"],
+      "codePaths": ["tools/frontend-boundaries.mjs", "tools/ci-domains.mjs"],
+      "testDomains": ["governanceDomains.architecture-boundaries", "governanceDomains.ci-tooling"],
+      "authorityFor": ["v0166-development-decision"],
       "status": "current"
     }
   ]

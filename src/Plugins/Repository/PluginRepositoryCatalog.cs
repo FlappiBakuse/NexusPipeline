@@ -271,6 +271,10 @@ internal static class PluginRepositoryCatalog
         {
             return "地址格式无效";
         }
+        if (TryValidateLoopbackTestPackageUrl(candidate, uri, artifactName, version))
+        {
+            return null;
+        }
         if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
             || uri.Port != 443
             || !string.IsNullOrEmpty(uri.UserInfo)
@@ -314,6 +318,44 @@ internal static class PluginRepositoryCatalog
             return "插件包地址与 artifactName、version 不一致";
         }
         return null;
+    }
+
+    private static bool TryValidateLoopbackTestPackageUrl(
+        string candidate,
+        Uri uri,
+        string? artifactName,
+        string? version)
+    {
+        string? configured = TestHooks.PluginPackageBaseUrl;
+        if (string.IsNullOrWhiteSpace(configured)
+            || artifactName is null
+            || version is null
+            || !Uri.TryCreate(configured.Trim(), UriKind.Absolute, out Uri? baseUri)
+            || baseUri.Scheme != Uri.UriSchemeHttp
+            || !baseUri.IsLoopback
+            || !string.IsNullOrEmpty(baseUri.UserInfo)
+            || !string.IsNullOrEmpty(baseUri.Query)
+            || !string.IsNullOrEmpty(baseUri.Fragment)
+            || !uri.IsLoopback
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase)
+            || EffectivePort(uri) != EffectivePort(baseUri)
+            || !string.IsNullOrEmpty(uri.UserInfo)
+            || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return false;
+        }
+
+        string basePath = baseUri.AbsolutePath.TrimEnd('/') + "/";
+        string expectedPath = $"{basePath}{artifactName}/{artifactName}-{version}.zip";
+        return string.Equals(uri.AbsolutePath, expectedPath, StringComparison.Ordinal)
+            && string.Equals(candidate, uri.AbsoluteUri, StringComparison.Ordinal);
+    }
+
+    private static int EffectivePort(Uri uri)
+    {
+        return uri.Port > 0 ? uri.Port : 80;
     }
 
     public static bool IsSafeArtifactName(string value)

@@ -40,6 +40,7 @@ describe("scripts page chooser close contract", () => {
     expect(wrapper.get(".modal-title").text()).toBe("scripts.new_script_instance");
     expect(wrapper.findAll(".modal-close")).toHaveLength(1);
     expect(wrapper.get(".modal-close").attributes("aria-label")).toBe("Close");
+    expect(wrapper.get(".new-script-chooser").text()).not.toContain(">");
     wrapper.unmount();
   });
 

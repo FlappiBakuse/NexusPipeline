@@ -257,6 +257,98 @@ test("README documentation navigation points to existing files", () => {
   assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
 });
 
+test("current documentation is organized as semantic topic portals", () => {
+  const architecture = read("docs/architecture/README.md");
+  const pluginApi = read("docs/reference/plugin-api/README.md");
+  const uiCatalog = read("docs/reference/ui/README.md");
+  const portal = read("docs/README.md");
+  assert.match(portal, /architecture\/README\.md/u);
+  assert.match(portal, /reference\/plugin-api\/README\.md/u);
+  assert.match(architecture, /overview\.md/u);
+  assert.match(architecture, /frontend\.md/u);
+  for (const page of ["manifest.md", "managed.md", "frontend.md", "data-specialized.md"]) {
+    assert.match(pluginApi, new RegExp(page.replace(".", "\\."), "u"));
+  }
+  for (const page of ["actions-inputs.md", "selection.md", "overlays-feedback.md", "layout-lists.md"]) {
+    assert.match(uiCatalog, new RegExp(page.replace(".", "\\."), "u"));
+  }
+
+  const currentTopicFiles = [
+    ...fs.readdirSync(path.join(ROOT, "docs/architecture"), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
+      .map(entry => `docs/architecture/${entry.name}`),
+    ...fs.readdirSync(path.join(ROOT, "docs/reference/plugin-api"), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
+      .map(entry => `docs/reference/plugin-api/${entry.name}`),
+    ...fs.readdirSync(path.join(ROOT, "docs/reference/ui"), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
+      .map(entry => `docs/reference/ui/${entry.name}`),
+    ...fs.readdirSync(path.join(ROOT, "docs/development"), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
+      .map(entry => `docs/development/${entry.name}`),
+    ...fs.readdirSync(path.join(ROOT, "docs/testing"), { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
+      .map(entry => `docs/testing/${entry.name}`),
+  ];
+  const failures = [];
+  for (const relativePath of currentTopicFiles) {
+    const lines = read(relativePath).split(/\r?\n/u);
+    let inFence = false;
+    let hasH1 = false;
+    let hasH2 = false;
+    for (const line of lines) {
+      if (/^\s*(```|~~~)/u.test(line)) {
+        inFence = !inFence;
+        continue;
+      }
+      if (inFence) continue;
+      if (/^#\s+\S/u.test(line)) hasH1 = true;
+      if (/^##\s+\S/u.test(line)) hasH2 = true;
+      if (/^#{2,6}\s+\d+(?:\.\d+)*[.、 ]/u.test(line)) failures.push(`${relativePath} contains numbered heading: ${line}`);
+    }
+    if (!hasH1 || !hasH2) failures.push(`${relativePath} lacks semantic H1/H2 headings`);
+  }
+  assert.deepEqual(failures, [], `Topic structure failures:\n${failures.join("\n")}`);
+});
+
+test("legacy development and testing portals remain thin and preserve mapped anchors", () => {
+  const portals = [
+    {
+      file: "docs/DEVELOPMENT.md",
+      current: ["development/README.md", "development/setup.md", "development/workflow.md", "development/release.md"],
+    },
+    {
+      file: "docs/TESTING.md",
+      current: ["testing/README.md", "testing/policy.md", "testing/fixtures.md", "testing/commands.md", "testing/domains.md"],
+    },
+  ];
+  for (const portal of portals) {
+    const text = read(portal.file);
+    assert.match(text, /^# .*（旧入口）$/mu, `${portal.file} must identify itself as a legacy entry`);
+    assert.match(text, /^## 按任务进入现行专题$/mu, `${portal.file} must provide task-oriented routing`);
+    assert.match(text, /^## 旧顶层锚点$/mu, `${portal.file} must declare its compatibility anchors`);
+    assert.doesNotMatch(text, /^#{2,6}\s+\d+(?:\.\d+)*[.、 ]/mu, `${portal.file} must not retain numbered chapter headings`);
+    assert.doesNotMatch(text, /```/u, `${portal.file} must not duplicate command or specification blocks`);
+    for (const currentPath of portal.current) assert.match(text, new RegExp(currentPath.replaceAll("/", "\\/"), "u"));
+  }
+
+  const migration = JSON.parse(read("docs/migration-map.json"));
+  for (const item of migration.filter(entry => ["docs/DEVELOPMENT.md", "docs/TESTING.md"].includes(entry.source))) {
+    assert.ok(fs.existsSync(path.join(ROOT, item.source)), `${item.source} is missing`);
+    assert.ok(collectAnchors(read(item.source)).has(item.anchor), `${item.source} is missing legacy anchor ${item.anchor}`);
+  }
+});
+
+test("public UI catalog covers every registered nxp element", () => {
+  const register = read("frontend/src/ui/register.ts");
+  const names = [...register.matchAll(/"(?<name>nxp-[a-z0-9-]+)":/gu)].map(match => match.groups.name);
+  const pages = ["actions-inputs.md", "selection.md", "overlays-feedback.md", "layout-lists.md"]
+    .map(page => read(`docs/reference/ui/${page}`))
+    .join("\n");
+  const missing = names.filter(name => !pages.includes(`\`${name}\``));
+  assert.deepEqual(missing, [], `Public UI elements missing from grouped contracts: ${missing.join(", ")}`);
+});
+
 test("current persistence and plugin-profile contract stays documented", () => {
   const project = read("src/NexusPipeline.csproj");
   const version = currentProjectVersion();

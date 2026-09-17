@@ -9,6 +9,91 @@ namespace NexusPipeline.Tests;
 public class JsonStoreTests
 {
     [Fact]
+    public void WriteAtomic_FailureBeforeReplacePreservesOriginalAndOwnedTemporaryFile()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-json-phase-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            File.WriteAllText(path, "{\"original\":true}");
+
+            IOException error = Assert.Throws<IOException>(() => JsonUtil.WriteAtomic(
+                path,
+                "{\"replacement\":true}",
+                phase =>
+                {
+                    if (phase == JsonWritePhase.BeforeReplace)
+                    {
+                        throw new IOException("模拟替换前写入失败");
+                    }
+                }));
+
+            Assert.Contains("模拟替换前", error.Message);
+            Assert.Equal("{\"original\":true}", File.ReadAllText(path));
+            Assert.Empty(Directory.GetFiles(dir, ".state.json.*.tmp"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void WriteAtomic_SimulatedDiskFullAfterFlushPreservesOriginal()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-json-diskfull-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            File.WriteAllText(path, "{\"original\":true}");
+            const int DiskFullHResult = unchecked((int)0x80070070);
+
+            IOException error = Assert.Throws<IOException>(() => JsonUtil.WriteAtomic(
+                path,
+                "{\"replacement\":true}",
+                phase =>
+                {
+                    if (phase == JsonWritePhase.TempFlushed)
+                    {
+                        throw new IOException("模拟指定 disk-full 故障", DiskFullHResult);
+                    }
+                }));
+
+            Assert.Equal(DiskFullHResult, error.HResult);
+            Assert.Equal("{\"original\":true}", File.ReadAllText(path));
+            Assert.Empty(Directory.GetFiles(dir, ".state.json.*.tmp"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
+    public void WriteAtomic_FailureAfterReplaceLeavesCompleteNewValue()
+    {
+        string dir = Path.Combine(Path.GetTempPath(), "nexus-json-after-replace-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            string path = Path.Combine(dir, "state.json");
+            File.WriteAllText(path, "{\"original\":true}");
+
+            Assert.Throws<IOException>(() => JsonUtil.WriteAtomic(
+                path,
+                "{\"replacement\":true}",
+                phase =>
+                {
+                    if (phase == JsonWritePhase.AfterReplace)
+                    {
+                        throw new IOException("模拟提交后返回失败");
+                    }
+                }));
+
+            Assert.Equal("{\"replacement\":true}", File.ReadAllText(path));
+            Assert.NotNull(JsonNode.Parse(File.ReadAllText(path)));
+            Assert.Empty(Directory.GetFiles(dir, ".state.json.*.tmp"));
+        }
+        finally { Directory.Delete(dir, recursive: true); }
+    }
+
+    [Fact]
     public void WriteAtomic_LockedTargetPreservesOriginalAndRemovesOwnedTemporaryFile()
     {
         string dir = Path.Combine(Path.GetTempPath(), "nexus-json-locked-" + Guid.NewGuid().ToString("N"));

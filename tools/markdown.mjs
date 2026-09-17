@@ -28,12 +28,34 @@ export function collectAnchors(text) {
 }
 
 export function findLocalLinks(text) {
+  return findMarkdownLinks(text);
+}
+
+function walkTokens(tokens, offsets, links) {
+  for (const token of tokens) {
+    const line = token.map?.[0] || 0;
+    const index = offsets[line] || 0;
+    if (token.type === "link_open") {
+      const target = token.attrGet("href");
+      if (target) links.push({ rawTarget: target, index });
+    } else if (token.type === "image") {
+      const target = token.attrGet("src");
+      if (target) links.push({ rawTarget: target, index });
+    } else if (token.type === "html_inline" || token.type === "html_block") {
+      for (const match of token.content.matchAll(/<(?:a\b[^>]*\bhref|area\b[^>]*\bhref|img\b[^>]*\bsrc)\s*=\s*["']([^"']+)["']/giu)) {
+        links.push({ rawTarget: match[1], index: index + match.index });
+      }
+    }
+    if (token.children?.length) walkTokens(token.children, offsets, links);
+  }
+}
+
+export function findMarkdownLinks(text) {
   const offsets = [0];
   for (let i = 0; i < text.length; i++) if (text[i] === "\n") offsets.push(i + 1);
-  return parser.parse(text, {}).flatMap(token => (token.children || []).flatMap(child => {
-    const target = child.type === "link_open" ? child.attrGet("href") : child.type === "image" ? child.attrGet("src") : null;
-    return target ? [{ rawTarget: target, index: offsets[token.map?.[0] || 0] }] : [];
-  }));
+  const links = [];
+  walkTokens(parser.parse(text, {}), offsets, links);
+  return links;
 }
 
 export function parseLinkTarget(value) {

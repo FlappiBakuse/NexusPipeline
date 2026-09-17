@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { baseParse } from "@vue/compiler-dom";
 import { parse } from "@vue/compiler-sfc";
 import ts from "typescript";
 
@@ -80,16 +81,25 @@ function sourceEntries(sources) {
   return Object.entries(sources).map(([file, content]) => [normalizePath(file), String(content ?? "")]);
 }
 
-function readProductionSources(root) {
+const PRODUCTION_EXTENSIONS = new Set([".vue", ".ts", ".js", ".mjs", ".css", ".html"]);
+const GENERATED_DIRECTORIES = new Set(["node_modules", "dist", "bin", "obj", ".git", ".vite", "coverage"]);
+
+export function readProductionSources(root) {
   const frontendRoot = path.join(root, "frontend", "src");
   const files = [];
   const walk = directory => {
     if (!fs.existsSync(directory)) return;
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      if (["node_modules", "dist", "bin", "obj"].includes(entry.name)) continue;
+      if (GENERATED_DIRECTORIES.has(entry.name)) continue;
       const fullPath = path.join(directory, entry.name);
       if (entry.isDirectory()) walk(fullPath);
-      else if ((entry.name.endsWith(".vue") || entry.name.endsWith(".ts")) && !entry.name.endsWith(".test.ts")) {
+      else if (PRODUCTION_EXTENSIONS.has(path.extname(entry.name).toLowerCase())
+        && !entry.name.endsWith(".test.ts")
+        && !entry.name.endsWith(".test.js")
+        && !entry.name.endsWith(".test.mjs")
+        && !entry.name.endsWith(".spec.ts")
+        && !entry.name.endsWith(".spec.js")
+        && !entry.name.endsWith(".spec.mjs")) {
         files.push([normalizePath(path.relative(root, fullPath)), fs.readFileSync(fullPath, "utf8")]);
       }
     }
@@ -98,14 +108,18 @@ function readProductionSources(root) {
   return files.sort(([left], [right]) => left.localeCompare(right));
 }
 
-function templateElements(source) {
-  const { descriptor } = parse(source);
+function templateElements(filePath, source) {
   const elements = [];
   const visit = node => {
     if (node.type === 1) elements.push(node);
     for (const child of node.children || []) visit(child);
   };
-  if (descriptor.template?.ast) visit(descriptor.template.ast);
+  if (filePath.endsWith(".vue")) {
+    const { descriptor } = parse(source);
+    if (descriptor.template?.ast) visit(descriptor.template.ast);
+  } else if (filePath.endsWith(".html")) {
+    visit(baseParse(source));
+  }
   return elements;
 }
 
@@ -159,9 +173,7 @@ function scanImportBoundary(filePath, source, findings, isPlugin) {
   if (!isPlugin) return;
   for (const match of source.matchAll(IMPORT_SPECIFIER)) {
     const specifier = match[1].replaceAll("\\", "/");
-    if (/(?:^|\/)frontend\/src\/ui(?:\/|$)/u.test(specifier)
-      || /(?:^|\/)NexusPipeline\/src\/ui(?:\/|$)/u.test(specifier)
-      || /(?:^|\/)NexusPipeline\/frontend\/src\/ui(?:\/|$)/u.test(specifier)) {
+    if (/(?:^|\/)(?:frontend\/src|NexusPipeline\/(?:frontend\/)?src)\/(?:ui|features|platform|stores|app|plugin-bridge|styles)(?:\/|$)/u.test(specifier)) {
       addFinding(findings, {
         path: filePath,
         source,
@@ -176,7 +188,7 @@ function scanImportBoundary(filePath, source, findings, isPlugin) {
 }
 
 function scanTemplateControls(filePath, source, findings) {
-    for (const node of templateElements(source)) {
+    for (const node of templateElements(filePath, source)) {
       const tag = node.tag.toLowerCase();
       if (!["button", "input", "select", "textarea"].includes(tag)) continue;
       const offset = node.loc.start.offset;
@@ -195,6 +207,7 @@ function scanTemplateControls(filePath, source, findings) {
 }
 
 function scanDynamicControls(filePath, source, findings) {
+  if (!/[.]vue$|[.](?:ts|js|mjs)$/u.test(filePath)) return;
   const scripts = filePath.endsWith(".vue") ? (() => {
     const { descriptor } = parse(source);
     return [descriptor.script, descriptor.scriptSetup].filter(Boolean).map(block => ({ text: block.content, offset: block.loc.start.offset }));
@@ -227,6 +240,7 @@ function scanDynamicControls(filePath, source, findings) {
 }
 
 function scanInteractiveRoles(filePath, source, findings) {
+  if (!/[.](?:vue|html)$/u.test(filePath)) return;
   if (filePath.startsWith("frontend/src/ui/")) return;
   const rolePattern = /<([a-z][a-z0-9-]*)\b([^>]*)>/giu;
   for (const match of source.matchAll(rolePattern)) {
@@ -242,6 +256,42 @@ function scanInteractiveRoles(filePath, source, findings) {
   }
 }
 
+function styleBlocks(filePath, source) {
+  if (filePath.endsWith(".css")) return [{ text: source, offset: 0 }];
+  if (!filePath.endsWith(".vue")) return [];
+  const { descriptor } = parse(source);
+  return descriptor.styles.map(block => ({ text: block.content, offset: block.loc.start.offset }));
+}
+
+function styleSelectorIsDescendantOfPublicControl(selector) {
+  const normalized = selector.replace(/\s+/gu, " ").trim();
+  if (!/\b(?:nxp-[A-Za-z0-9_-]+|nxp-[a-z0-9-]+)\b/iu.test(normalized)) return false;
+  const firstToken = normalized.split(/\s+|>|\+|~/u)[0] || "";
+  return !/^(?:\.?nxp-[A-Za-z0-9_-]+|nxp-[A-Za-z0-9_-]+)(?::|\.|\[|$)/u.test(firstToken);
+}
+
+function scanStyleSelectors(filePath, source, findings, offsetBase = 0) {
+  if (filePath.startsWith("frontend/src/ui/")) return;
+  const withoutComments = source.replace(/\/\*[\s\S]*?\*\//gu, match => " ".repeat(match.length));
+  for (const match of withoutComments.matchAll(/([^{}]+)\{/gu)) {
+    const rawSelector = match[1].trim();
+    if (!rawSelector || rawSelector.startsWith("@")) continue;
+    for (const selector of rawSelector.split(",").map(value => value.trim()).filter(Boolean)) {
+      if (!styleSelectorIsDescendantOfPublicControl(selector)) continue;
+      const localOffset = match.index + match[1].indexOf(selector);
+      addFinding(findings, {
+        path: filePath,
+        source: source,
+        offset: offsetBase + localOffset,
+        ruleId: "private-style-selector",
+        kind: "style-selector",
+        token: selector,
+        reason: "业务样式只能定位业务 wrapper；公共 nxp-* 元件的内部节点由元件自身样式和公开能力负责。",
+      });
+    }
+  }
+}
+
 export function scanSource(filePath, source, { plugin = false } = {}) {
   const normalized = normalizePath(filePath);
   const findings = [];
@@ -250,6 +300,7 @@ export function scanSource(filePath, source, { plugin = false } = {}) {
   scanTemplateControls(normalized, source, findings);
   scanDynamicControls(normalized, source, findings);
   scanInteractiveRoles(normalized, source, findings);
+  for (const block of styleBlocks(normalized, source)) scanStyleSelectors(normalized, block.text, findings, block.offset);
   return findings;
 }
 

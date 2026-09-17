@@ -44,4 +44,7 @@ internal static class TestHooks
 
     /// <summary>测试用插件 catalog 地址覆盖（env NEXUS_PLUGIN_CATALOG_URL）；生产不设置。</summary>
     public static string? PluginCatalogUrl => Environment.GetEnvironmentVariable("NEXUS_PLUGIN_CATALOG_URL");
+
+    /// <summary>测试用插件包源前缀（env NEXUS_PLUGIN_PACKAGE_BASE_URL）；仅接受回环 HTTP，生产不设置。</summary>
+    public static string? PluginPackageBaseUrl => Environment.GetEnvironmentVariable("NEXUS_PLUGIN_PACKAGE_BASE_URL");
 }

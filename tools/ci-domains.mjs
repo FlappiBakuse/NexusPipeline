@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+
 /**
  * CI 影响域清单：门禁分组与各自的触发路径。
  *
@@ -14,6 +16,31 @@
  * Web 控制面、进程与日志工具、插件加载、构建与测试入口。改动其中任意一条都会同时影响
  * 四个 System 域，因此在四个 System 域的 `paths` 里显式列出。
  */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+/** The single path-pattern compiler shared by impact selection and summary validation. */
+export function globToRegExp(glob) {
+  const segments = String(glob).split("/");
+  let source = "^";
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index];
+    const isLast = index === segments.length - 1;
+    if (segment === "**") {
+      if (isLast) {
+        source += ".*";
+        break;
+      }
+      source += "(?:[^/]+/)*";
+      continue;
+    }
+    source += escapeRegExp(segment).replaceAll("\\*", "[^/]*");
+    if (!isLast) source += "/";
+  }
+  return new RegExp(`${source}$`, "u");
+}
+
 export const SYSTEM_SHARED_PATHS = [
   "src/*.cs",
   "src/*.manifest",
@@ -41,6 +68,7 @@ export const CI_DOMAINS = [
     key: "frontend",
     gate: "Gate A 前端 Unit + Build",
     jobs: ["frontend-unit"],
+    testPaths: ["tests/run.mjs frontend", "frontend/src/**/*.test.ts"],
     paths: [
       "frontend/src/**",
       "frontend/index.html",
@@ -57,6 +85,7 @@ export const CI_DOMAINS = [
     key: "host",
     gate: "Gate B 宿主 Unit + Component",
     jobs: ["host-core"],
+    testPaths: ["tests/run.mjs unit", "tests/NexusPipeline.Tests/**/*.cs"],
     paths: [
       "src/**",
       "tests/NexusPipeline.Tests/**",
@@ -72,6 +101,16 @@ export const CI_DOMAINS = [
     key: "docs",
     gate: "Gate C 文档 + i18n",
     jobs: ["docs-i18n"],
+    testPaths: [
+      "tests/documentation/documentation-consistency.mjs",
+      "tests/documentation/i18n-consistency.mjs",
+      "tests/documentation/i18n-semantic-consistency.mjs",
+      "tests/documentation/i18n-audit-consistency.mjs",
+      "tests/documentation/backend-i18n-audit.mjs",
+      "tests/documentation/native-scrollbar-audit.mjs",
+      "tests/documentation/test-policy-consistency.mjs",
+      "tests/tools/docs-index.test.mjs",
+    ],
     paths: [
       "docs/**",
       "README.md",
@@ -87,6 +126,11 @@ export const CI_DOMAINS = [
     key: "plugin",
     gate: "Gate D 插件契约",
     jobs: ["plugin-contract"],
+    testPaths: [
+      "frontend/contracts/official-plugins.test.ts",
+      "NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs",
+      "tests/tools/plugin-source-layout.test.mjs",
+    ],
     paths: [
       "src/NexusPipeline.Plugin.Abstractions/**",
       "src/Plugins/**",
@@ -111,6 +155,7 @@ export const CI_DOMAINS = [
     key: "ui",
     gate: "Gate E 管理员 UI Smoke",
     jobs: ["ui-smoke"],
+    testPaths: ["tests/run.mjs admin ui", "tests/e2e/tests/**/*.smoke.spec.mjs"],
     paths: [
       "frontend/src/features/**",
       "frontend/src/app/**",
@@ -126,6 +171,7 @@ export const CI_DOMAINS = [
     key: "system_runtime",
     gate: "Gate F System Runtime/MCP",
     jobs: ["system-runtime-mcp"],
+    testPaths: ["tests/run.mjs admin system runtime control config plugins"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
       "src/Cli/**",
@@ -165,6 +211,7 @@ export const CI_DOMAINS = [
     key: "system_execution",
     gate: "Gate F System Execution",
     jobs: ["system-execution"],
+    testPaths: ["tests/run.mjs admin system execution judge"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
       "src/Services/DispatchCenter.cs",
@@ -186,6 +233,7 @@ export const CI_DOMAINS = [
     key: "system_emulator",
     gate: "Gate F System Emulator",
     jobs: ["system-emulator"],
+    testPaths: ["tests/run.mjs admin system emulator"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
       "src/Services/EmulatorDrivers.cs",
@@ -199,6 +247,7 @@ export const CI_DOMAINS = [
     key: "system_update",
     gate: "Gate F System Update",
     jobs: ["system-update"],
+    testPaths: ["tests/run.mjs admin system update"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
       "src/Services/Update/**",
@@ -210,6 +259,79 @@ export const CI_DOMAINS = [
     ],
   },
 ];
+
+/** 当前执行计划协议版本。影响域注册表版本与执行计划版本彼此独立。 */
+export const CI_EXECUTION_PLAN_SCHEMA_VERSION = 2;
+
+/**
+ * 物理 Job 的运行契约。逻辑组只能绑定到这里登记过的 Job，汇总器据此校验模式和完整性。
+ * `ci` 表示普通 CI 反馈环境；`admin` 表示生产管理员门禁；`full-regression` 仍由 admin all 承载。
+ */
+export const CI_JOB_CONTRACTS = Object.freeze({
+  "frontend-unit": Object.freeze({ mode: "ci", requiredIntegrity: "none", requiredChecks: ["typecheck", "tests", "build"] }),
+  "host-core": Object.freeze({ mode: "ci", requiredIntegrity: "none", requiredChecks: ["build", "tests"] }),
+  "docs-i18n": Object.freeze({ mode: "ci", requiredIntegrity: "none", requiredChecks: ["tests"] }),
+  "plugin-contract": Object.freeze({ mode: "ci", requiredIntegrity: "none", requiredChecks: ["build", "tests", "contract"] }),
+  "ui-smoke": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+  "system-runtime-mcp": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+  "system-execution": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+  "system-emulator": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+  "system-update": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+  "full-regression": Object.freeze({ mode: "admin", requiredIntegrity: "high-or-system", requiredChecks: ["build", "tests"] }),
+});
+
+/**
+ * Plugin Contract Job 在对应 Gate 未被单独选中时承接的现役契约测试。
+ * 这些回退归属必须同时进入 execution-plan，runner 才能把实际执行与 Summary 对账。
+ */
+export const PLUGIN_CONTRACT_FALLBACKS = Object.freeze({
+  host: Object.freeze(["plugins"]),
+  frontend: Object.freeze(["ui", "bridge"]),
+});
+
+/** 逻辑组 ID 是计划、runner manifest 和 Required Summary 之间的稳定连接键。 */
+export function logicalGroupId(kind, key) {
+  return `${String(kind)}:${String(key)}`;
+}
+
+/**
+ * 选择身份只绑定注册表定义，不绑定本机绝对路径或当前测试计数。
+ * 实际测试引擎结果仍需由 runner manifest 单独提交。
+ */
+export function testSelectionIdentity(kind, group) {
+  const definition = {
+    kind,
+    key: group?.key || "",
+    paths: group?.paths || [],
+    testPaths: group?.testPaths || [],
+    suitePaths: group?.suitePaths || [],
+    runtimeNames: group?.runtimeNames || [],
+  };
+  return crypto.createHash("sha256").update(JSON.stringify(definition), "utf8").digest("hex");
+}
+
+/**
+ * 计划中的测试选择器必须描述实际会被 runner/CI 步骤选中的相对路径。
+ * 宿主 Area 的注册表为了便于作者维护使用测试文件名/通配符，这里统一补上测试工程根。
+ */
+export function expectedTestSelectors(kind, group) {
+  const selectors = group?.testPaths || group?.suitePaths || [];
+  if (kind === "host") return selectors.map(selector => `tests/NexusPipeline.Tests/${selector}`);
+  return [...selectors];
+}
+
+/** 当前模式下由计划明确声明的合法专属排除。 */
+export function plannedExclusions(kind, key, mode) {
+  if (kind === "system" && key === "update" && mode === "admin") {
+    return [{
+      testId: "update:swap-ready",
+      reason: "SwapReady 故障注入需要 Codex/Test Host 阶段注入，管理员生产模式不启用该开关",
+      mode: "test-host",
+      alternativeMode: "test-host",
+    }];
+  }
+  return [];
+}
 
 /**
  * 测试入口共用的结构化注册表。
@@ -270,7 +392,7 @@ export const GOVERNANCE_DOMAINS = [
   { key: "i18n-functional", paths: ["frontend/public/i18n/**", "src/Localization/**"], testPaths: ["tests/documentation/i18n-*.mjs"] },
   { key: "architecture-boundaries", paths: ["tools/frontend-boundaries.mjs", "tests/tools/**"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/frontend-boundaries.test.mjs"] },
   { key: "test-policy", paths: ["AGENTS.md", "tests/documentation/test-policy-consistency.mjs"], testPaths: ["tests/documentation/test-policy-consistency.mjs"] },
-  { key: "ci-tooling", paths: [".github/workflows/**", "tools/ci-*.mjs", "tests/run.mjs"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/ci-fingerprint.test.mjs"] },
+  { key: "ci-tooling", paths: [".github/workflows/**", "tools/ci-*.mjs", "tools/test-results.mjs", "tests/run.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/ci-fingerprint.test.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"] },
 ];
 
 export const TEST_DOMAIN_REGISTRY = Object.freeze({

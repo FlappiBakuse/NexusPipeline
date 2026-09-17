@@ -46,13 +46,14 @@ const emit = defineEmits<{
     :class="{ 'is-unavailable': unavailableMessage }"
     data-testid="script-card"
     :item-id="script.id"
+    slot-layout="contents"
   >
     <template #leading>
       <NxpDragHandle
         :label="translate('common.reorder.keyboard_help')"
         :title="translate('common.drag_to_reorder')"
       />
-      <NxpEntityIcon :id="script.id" />
+      <NxpEntityIcon class="script-ico" :id="script.id" />
     </template>
     <template #content>
       <div class="script-main">

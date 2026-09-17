@@ -5,13 +5,28 @@ using NexusPipeline.Utilities;
 
 namespace NexusPipeline.Persistence;
 
+internal enum JsonWritePhase
+{
+    TempCreated,
+    TempFlushed,
+    BeforeReplace,
+    AfterReplace,
+}
+
 internal static class JsonUtil
 {
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     private static readonly object[] WriteLocks = Enumerable.Range(0, 64).Select(_ => new object()).ToArray();
 
-    public static void WriteAtomic(string path, string content)
+    /// <summary>
+    /// 将 JSON 写入同目录唯一临时文件并替换目标。phaseObserver 只供内部事务测试在真实文件边界注入受控故障；
+    /// 正常生产调用不传入它，写入路径与磁盘协议保持不变。
+    /// </summary>
+    public static void WriteAtomic(
+        string path,
+        string content,
+        Action<JsonWritePhase>? phaseObserver = null)
     {
         string target = Path.GetFullPath(path);
         // 固定分片保留同一路径的互斥，同时限制长运行实例的锁对象数量。
@@ -33,6 +48,7 @@ internal static class JsonUtil
                            bufferSize: 4096,
                            FileOptions.SequentialScan))
                 {
+                    phaseObserver?.Invoke(JsonWritePhase.TempCreated);
                     using (var writer = new StreamWriter(
                                stream,
                                new UTF8Encoding(true),
@@ -44,7 +60,10 @@ internal static class JsonUtil
                     }
                     stream.Flush(flushToDisk: true);
                 }
+                phaseObserver?.Invoke(JsonWritePhase.TempFlushed);
+                phaseObserver?.Invoke(JsonWritePhase.BeforeReplace);
                 File.Move(temp, target, overwrite: true);
+                phaseObserver?.Invoke(JsonWritePhase.AfterReplace);
             }
             finally
             {

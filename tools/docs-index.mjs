@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TEST_DOMAIN_REGISTRY } from "./ci-domains.mjs";
+import { collectAnchors, findMarkdownLinks } from "./markdown.mjs";
 
 export const DOCS_INDEX_SCHEMA_VERSION = 1;
 
@@ -44,35 +45,6 @@ const PROJECT_REPOSITORIES = new Map([
   ["flappibakuse/nexuspipeline-plugins", "NexusPipeline-Plugins"],
 ]);
 
-function headingSlug(value) {
-  return value
-    .replace(/<[^>]*>/gu, "")
-    .replace(/!?\[([^\]]+)\]\([^)]*\)/gu, "$1")
-    .replace(/\x60([^\r\n]*?)\x60/gu, "$1")
-    .normalize("NFKC")
-    .toLocaleLowerCase("en-US")
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .trim()
-    .replace(/\s+/gu, "-");
-}
-
-function markdownAnchors(text) {
-  const anchors = new Set();
-  const explicit = /\b(?:id|name)\s*=\s*["']([^"']+)["']/giu;
-  for (const match of text.matchAll(explicit)) anchors.add(match[1]);
-  const counts = new Map();
-  for (const line of text.split(/\r?\n/u)) {
-    const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/u);
-    if (!match) continue;
-    const base = headingSlug(match[1]);
-    if (!base) continue;
-    const count = counts.get(base) || 0;
-    counts.set(base, count + 1);
-    anchors.add(count === 0 ? base : base + "-" + count);
-  }
-  return anchors;
-}
-
 function repositoryTarget(rawUrl) {
   let url;
   try {
@@ -85,11 +57,22 @@ function repositoryTarget(rawUrl) {
   if (parts.length < 2) return null;
   const repository = PROJECT_REPOSITORIES.get(parts[0].toLowerCase() + "/" + parts[1].toLowerCase());
   if (!repository || parts.length < 4 || !["blob", "tree"].includes(parts[2])) return null;
+  let ref;
+  let targetPath;
+  let fragment;
+  try {
+    ref = decodeURIComponent(parts[3]);
+    targetPath = parts.slice(4).map(part => decodeURIComponent(part)).join("/");
+    fragment = url.hash ? decodeURIComponent(url.hash.slice(1)) : "";
+  } catch {
+    return null;
+  }
   return {
     repository,
-    ref: decodeURIComponent(parts[3]),
-    path: parts.slice(4).map(part => decodeURIComponent(part)).join("/"),
-    fragment: url.hash ? decodeURIComponent(url.hash.slice(1)) : "",
+    kind: parts[2],
+    ref,
+    path: targetPath,
+    fragment,
   };
 }
 
@@ -122,9 +105,54 @@ function gitHead(checkout) {
   return "";
 }
 
+function runGit(checkout, args) {
+  try {
+    return spawnSync("git", args, {
+      cwd: checkout,
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 10_000,
+    });
+  } catch {
+    return null;
+  }
+}
+
+function resolveGitRevision(checkout, ref) {
+  if (!ref || ref.startsWith("-") || /\s/u.test(ref)) return "";
+  const result = runGit(checkout, ["rev-parse", "--verify", `${ref}^{commit}`]);
+  return result?.status === 0 ? String(result.stdout || "").trim() : "";
+}
+
+function listGitPaths(checkout, revision) {
+  const result = runGit(checkout, ["ls-tree", "-r", "--name-only", revision]);
+  if (!result || result.status !== 0) return null;
+  return new Set(String(result.stdout || "").split(/\r?\n/u).map(value => value.trim()).filter(Boolean));
+}
+
+function readGitFile(checkout, revision, relativePath) {
+  const result = runGit(checkout, ["show", `${revision}:${relativePath}`]);
+  return result?.status === 0 ? String(result.stdout || "") : null;
+}
+
+function sourceLineRange(fragment) {
+  const match = /^L([1-9]\d*)(?:-L?([1-9]\d*))?$/u.exec(fragment);
+  if (!match) return null;
+  return { start: Number(match[1]), end: Number(match[2] || match[1]) };
+}
+
+function fragmentExists(content, fragment) {
+  const lineRange = sourceLineRange(fragment);
+  if (lineRange) {
+    const lineCount = String(content).split(/\r?\n/u).length;
+    return lineRange.start <= lineCount && lineRange.end <= lineCount && lineRange.start <= lineRange.end;
+  }
+  return collectAnchors(content).has(fragment);
+}
+
 /**
  * 校验宿主与官方插件仓库之间的 GitHub blob/tree 链接。
- * 远程链接不会触发网络请求；必须先找到本地对应 checkout，再按其当前固定 HEAD 校验文件和锚点。
+ * 远程链接不会触发网络请求；必须先找到本地对应 checkout，再按链接声明的 ref 读取 Git 对象。
  */
 export function validateCrossRepositoryLinks(documents, {
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -133,16 +161,15 @@ export function validateCrossRepositoryLinks(documents, {
   const issues = [];
   const baselines = {};
   const checked = [];
-  const urlPattern = /https:\/\/github\.com\/FlappiBakuse\/(?:NexusPipeline-Plugins|NexusPipeline)(?![-\w])(?:\/[^\s)<>"]*)?/gu;
   for (const document of documents || []) {
     const text = String(document?.text || "");
     const fileLabel = String(document?.file || "文档");
-    for (const match of text.matchAll(urlPattern)) {
-      const target = repositoryTarget(match[0]);
+    for (const link of findMarkdownLinks(text)) {
+      const target = repositoryTarget(link.rawTarget);
       if (!target) continue;
       const checkout = findCheckout(root, workspaceRoot, target.repository);
       if (!checkout) {
-        issues.push("无法完成跨仓库检查：未找到 " + target.repository + " checkout（" + fileLabel + " -> " + match[0] + "）");
+        issues.push("无法完成跨仓库检查：未找到 " + target.repository + " checkout（" + fileLabel + " -> " + link.rawTarget + "）");
         continue;
       }
       const baseline = baselines[target.repository] || gitHead(checkout);
@@ -151,30 +178,48 @@ export function validateCrossRepositoryLinks(documents, {
         continue;
       }
       baselines[target.repository] = baseline;
-      const targetPath = path.resolve(checkout, target.path);
-      const relative = path.relative(checkout, targetPath);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) {
-        issues.push("跨仓库链接越界：" + fileLabel + " -> " + match[0]);
+      const normalizedTargetPath = normalize(target.path);
+      if (!isSafeRelativePath(normalizedTargetPath) || normalizedTargetPath === ".") {
+        issues.push("跨仓库链接越界：" + fileLabel + " -> " + link.rawTarget);
         continue;
       }
-      if (!fs.existsSync(targetPath)) {
-        issues.push("跨仓库链接目标不存在：" + fileLabel + " -> " + target.repository + "@" + target.ref + "/" + target.path);
+      const resolvedSha = resolveGitRevision(checkout, target.ref);
+      if (!resolvedSha) {
+        issues.push("无法完成跨仓库检查：无法解析 " + target.repository + " ref " + target.ref + "（" + fileLabel + " -> " + link.rawTarget + "）");
         continue;
       }
-      if (target.fragment && fs.statSync(targetPath).isFile()) {
-        const anchors = markdownAnchors(fs.readFileSync(targetPath, "utf8"));
-        if (!anchors.has(target.fragment)) {
-          issues.push("跨仓库链接锚点不存在：" + fileLabel + " -> " + target.repository + "@" + target.ref + "/" + target.path + "#" + target.fragment);
+      const gitPaths = listGitPaths(checkout, resolvedSha);
+      if (!gitPaths) {
+        issues.push("无法完成跨仓库检查：无法读取 " + target.repository + "@" + resolvedSha + " 文件树（" + fileLabel + " -> " + link.rawTarget + "）");
+        continue;
+      }
+      const targetIsFile = gitPaths.has(normalizedTargetPath);
+      const targetIsTree = target.kind === "tree" && [...gitPaths].some(item => item.startsWith(normalizedTargetPath + "/"));
+      if (!targetIsFile && !targetIsTree) {
+        issues.push("跨仓库链接目标不存在：" + fileLabel + " -> " + target.repository + "@" + target.ref + "/" + normalizedTargetPath);
+        continue;
+      }
+      if (target.fragment) {
+        if (!targetIsFile) {
+          issues.push("跨仓库链接锚点目标不是文件：" + fileLabel + " -> " + target.repository + "@" + target.ref + "/" + normalizedTargetPath + "#" + target.fragment);
+          continue;
+        }
+        const content = readGitFile(checkout, resolvedSha, normalizedTargetPath);
+        if (content === null || !fragmentExists(content, target.fragment)) {
+          issues.push("跨仓库链接锚点不存在：" + fileLabel + " -> " + target.repository + "@" + target.ref + "/" + normalizedTargetPath + "#" + target.fragment);
           continue;
         }
       }
       checked.push({
         file: fileLabel,
         repository: target.repository,
+        kind: target.kind,
         ref: target.ref,
-        path: target.path,
+        path: normalizedTargetPath,
         fragment: target.fragment,
         baseline,
+        resolvedSha,
+        verification: "candidate-checkout",
       });
     }
   }

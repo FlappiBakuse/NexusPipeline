@@ -11,18 +11,28 @@ internal sealed class PluginRepositoryOperations
     private readonly PluginPackageService _packages;
     private readonly Func<string, CancellationToken, Task<PluginCatalogEntry>> _requireEntryAsync;
     private readonly Action _invalidateManagementSnapshot;
+    private readonly Func<IReadOnlyDictionary<string, PluginOwnership>> _ownership;
+    private readonly Func<string, bool> _hasPending;
+    private readonly Func<PluginCatalogEntry, string, CancellationToken, Task<PluginPendingOperation>> _stage;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     internal PluginRepositoryOperations(
         Func<IReadOnlyList<PluginSummary>> installed,
         PluginPackageService packages,
         Func<string, CancellationToken, Task<PluginCatalogEntry>> requireEntryAsync,
-        Action invalidateManagementSnapshot)
+        Action invalidateManagementSnapshot,
+        Func<IReadOnlyDictionary<string, PluginOwnership>>? ownership = null,
+        Func<string, bool>? hasPending = null,
+        Func<PluginCatalogEntry, string, CancellationToken, Task<PluginPendingOperation>>? stage = null)
     {
         _installed = installed;
         _packages = packages;
         _requireEntryAsync = requireEntryAsync;
         _invalidateManagementSnapshot = invalidateManagementSnapshot;
+        _ownership = ownership ?? (() => PluginInstallRecovery.ReadOwnership());
+        _hasPending = hasPending ?? HasPending;
+        _stage = stage ?? ((entry, action, cancellationToken) =>
+            _packages.StageAsync(entry, action, cancellationToken));
     }
 
     internal async Task<PluginPendingOperation> InstallAsync(
@@ -49,6 +59,20 @@ internal sealed class PluginRepositoryOperations
             {
                 throw new PluginRepositoryException("not_installed", $"插件尚未安装：{entry.Name}");
             }
+            PluginOwnership? ownership = _ownership()
+                .GetValueOrDefault(entry.Name);
+            if (update && ownership is null)
+            {
+                throw new PluginRepositoryException("not_owned", $"插件安装归属未验证，拒绝更新：{entry.Name}");
+            }
+            if (!update
+                && ownership is not null
+                && !PluginStoreProjector.IsCatalogArtifactMatch(ownership.ArtifactName, entry.ArtifactName))
+            {
+                throw new PluginRepositoryException(
+                    "artifact_mismatch",
+                    $"插件「{entry.Name}」的已验证归属与官方 catalog artifactName 不一致，拒绝替换目录");
+            }
             if (update && installed is not null
                 && !PluginStoreProjector.IsCatalogArtifactMatch(installed.ArtifactName, entry.ArtifactName))
             {
@@ -60,7 +84,7 @@ internal sealed class PluginRepositoryOperations
             {
                 throw new PluginRepositoryException("already_installed", $"插件已安装：{entry.Name}");
             }
-            if (HasPending(entry.Name))
+            if (_hasPending(entry.Name))
             {
                 throw new PluginRepositoryException("pending", $"插件已有待处理操作：{entry.Name}");
             }
@@ -69,7 +93,7 @@ internal sealed class PluginRepositoryOperations
             {
                 throw new PluginRepositoryException("up_to_date", $"当前版本已是最新：v{installed.Version}");
             }
-            PluginPendingOperation operation = await _packages.StageAsync(
+            PluginPendingOperation operation = await _stage(
                 entry,
                 update ? "update" : "install",
                 cancellationToken).ConfigureAwait(false);
@@ -96,15 +120,22 @@ internal sealed class PluginRepositoryOperations
             }
             PluginSummary? installed = _installed().FirstOrDefault(item =>
                 string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
-            PluginOwnership? ownership = PluginInstallRecovery.ReadOwnership()
+            PluginOwnership? ownership = _ownership()
                 .FirstOrDefault(pair => string.Equals(pair.Key, name, StringComparison.OrdinalIgnoreCase))
                 .Value;
-            if (installed is null && ownership is null)
+            if (ownership is null)
             {
-                throw new PluginRepositoryException("not_installed", $"插件尚未安装：{name}");
+                throw new PluginRepositoryException("not_owned", $"插件安装归属未验证，拒绝卸载：{name}");
             }
-            string actualName = installed?.Name ?? ownership!.Name;
-            if (HasPending(actualName))
+            if (installed is not null
+                && !PluginStoreProjector.IsCatalogArtifactMatch(installed.ArtifactName, ownership.ArtifactName))
+            {
+                throw new PluginRepositoryException(
+                    "artifact_mismatch",
+                    $"插件「{name}」的安装目录与已验证归属不一致，拒绝删除目录");
+            }
+            string actualName = ownership.Name;
+            if (_hasPending(actualName))
             {
                 throw new PluginRepositoryException("pending", $"插件已有待处理操作：{actualName}");
             }
@@ -112,10 +143,10 @@ internal sealed class PluginRepositoryOperations
             {
                 Action = "uninstall",
                 Name = actualName,
-                ArtifactName = installed?.ArtifactName ?? ownership!.ArtifactName,
-                Version = installed?.Version ?? ownership!.Version,
-                Kind = installed?.Kind ?? ownership!.Kind,
-                ApiVersion = installed?.ApiVersion ?? ownership!.ApiVersion,
+                ArtifactName = installed?.ArtifactName ?? ownership.ArtifactName,
+                Version = installed?.Version ?? ownership.Version,
+                Kind = installed?.Kind ?? ownership.Kind,
+                ApiVersion = installed?.ApiVersion ?? ownership.ApiVersion,
                 Phase = "pending",
                 StagedPath = Path.Combine(AppPaths.PluginStagingDir, $"uninstall.{actualName}.{Guid.NewGuid():N}"),
                 CreatedAt = DateTimeOffset.UtcNow,

@@ -1,10 +1,10 @@
 # 执行与资源生命周期
 
-## 3. 核心运行流程
+## 核心运行流程
 
 
 
-### 3.1 脚本运行完整链路
+### 脚本运行完整链路
 
 一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`DispatchCenter` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排，队列、手动和 CLI 入口均直接汇聚到 `DispatchCenter`；`RunSession` 只保存状态，单次尝试由协调器直接执行：
 
@@ -74,7 +74,7 @@ sequenceDiagram
 6. **判定分支**：
    - 失败关键字命中 → 立即终止本次尝试（杀进程树）；
    - 成功关键字命中 → 等待脚本自行退出（最多 60 秒，超时杀进程仍判成功）；
-   - 判断脚本模式 → 批次触发/周期触发/最终触发（见第 5 节），可得到 success 或 partial；
+   - 判断脚本模式 → 批次触发/周期触发/最终触发（见[完成判定](judgement-logs.md#完成判定)），可得到 success 或 partial；
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
 7. **超时**：`LogStallTimeoutMinutes=-1` 时跳过日志无更新超时检查，其余有效值在启动后无任何日志条目、日志超过该时长无更新或未找到日志文件时判定失败；`RunBudget` 集中计算 `TotalTimeoutMinutes` 的 elapsed/remaining，按**整个运行（含全部重试与前置/后置脚本）**计时，`TotalTimeoutMinutes=-1` 时不设总时长上限，其余有效值到时判定失败且不再重试；判断脚本执行仍保持独立 30 秒上限。
 8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功或部分完成时按 `ForceCloseGame` 设置决定是否关闭游戏。
@@ -83,7 +83,7 @@ sequenceDiagram
 
 
 
-### 3.3 手动执行脚本
+### 手动执行脚本
 
 - 指定用户：只运行该用户；未指定：按启用用户顺序全部运行一次。
 - 冲突检查：脚本启动目标已在运行时沿用既有进程检测；脚本和队列入口统一走资源租约准入，队列计划中的已运行脚本或与活动执行共享脚本/进程/配置/模拟器端点资源时返回准入错误。

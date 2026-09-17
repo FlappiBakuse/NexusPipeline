@@ -105,7 +105,12 @@ internal sealed class PluginPackageService
             packageUri,
             TimeSpan.FromMinutes(10),
             allowAutoRedirect: false);
-        var policy = new UpdateSourcePolicy("");
+        // 生产包仍按默认 GitHub 资产策略校验；系统测试的回环包源必须显式绑定到
+        // TestHooks 配置的同源前缀，不能因测试地址而放宽任意下载地址。
+        string policySource = packageUri.IsLoopback && TestHooks.PluginPackageBaseUrl is not null
+            ? TestHooks.PluginPackageBaseUrl
+            : "";
+        var policy = new UpdateSourcePolicy(policySource);
         using HttpResponseMessage response = await policy.GetAsync(
             client,
             packageUri,

@@ -27,13 +27,14 @@ const emit = defineEmits<{
     class="script-card queue-card"
     data-testid="queue-card"
     :item-id="queue.id"
+    slot-layout="contents"
   >
     <template #leading>
       <NxpDragHandle
         :label="translate('common.reorder.keyboard_help')"
         :title="translate('common.drag_to_reorder')"
       />
-      <NxpEntityIcon :id="firstScriptId" />
+      <NxpEntityIcon class="script-ico" :id="firstScriptId" />
     </template>
     <template #content>
       <div class="script-main">

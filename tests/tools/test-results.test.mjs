@@ -16,3 +16,21 @@ test("各引擎结果保留真实通过、失败与跳过数量", () => {
   assert.deepEqual(parseVitestResults({ testResults: [{ assertionResults: ["passed", "passed", "passed", "failed", "failed", "pending"].map(status => ({ status })) }] }), expected);
   assert.deepEqual(parsePlaywrightResults({ stats: { expected: 3, unexpected: 1, flaky: 1, skipped: 1 } }), expected);
 });
+
+test("各引擎拒绝未知状态和不守恒的原生 total", () => {
+  assert.throws(
+    () => parseTrxResults('<Counters total="7" passed="3" failed="2" notExecuted="1" />'),
+    /不守恒/u,
+  );
+  assert.throws(
+    () => parseVitestResults({
+      numTotalTests: 2,
+      testResults: [{ assertionResults: [{ status: "passed" }, { status: "failed" }, { status: "unknown" }] }],
+    }),
+    /未知测试状态/u,
+  );
+  assert.throws(
+    () => parsePlaywrightResults({ stats: { total: 5, expected: 3, unexpected: 1, flaky: 0, skipped: 0 } }),
+    /不守恒/u,
+  );
+});

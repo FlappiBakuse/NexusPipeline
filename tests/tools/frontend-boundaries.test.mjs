@@ -1,6 +1,13 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { scanFrontendBoundaries, scanSource } from "../../tools/frontend-boundaries.mjs";
+import { fileURLToPath } from "node:url";
+import { readProductionSources, scanFrontendBoundaries, scanSource } from "../../tools/frontend-boundaries.mjs";
+
+const toolPath = fileURLToPath(new URL("../../tools/frontend-boundaries.mjs", import.meta.url));
 
 test("frontend boundary scanner keeps the reviewed Vue adapter as the only private-field owner", () => {
   const allowed = scanSource("frontend/src/ui/register.ts", "const value = element._instance; element._mount(element._def); element._app?.unmount();");
@@ -65,4 +72,41 @@ test("nested templates and parameterized dynamic controls remain visible while c
   const findings = scanSource("frontend/src/features/example/Example.vue", source);
   assert.equal(findings.filter(item => item.ruleId === "native-interactive-bypass").length, 1);
   assert.equal(findings.filter(item => item.ruleId === "native-dynamic-interactive-bypass").length, 1);
+});
+
+test("production source scanning covers CSS, JavaScript, MJS, and HTML", () => {
+  const findings = [
+    ...scanSource("frontend/src/features/example/styles.css", ".feature-shell .nxp-button { color: red; }"),
+    ...scanSource("frontend/src/features/example/widget.js", "const element = document.createElement(\"button\");"),
+    ...scanSource("frontend/src/features/example/widget.mjs", "const element = document.createElement(\"button\");"),
+    ...scanSource("frontend/src/features/example/widget.html", "<main><section><button>Save</button></section></main>"),
+  ];
+
+  assert.equal(findings.some(item => item.ruleId === "private-style-selector"), true);
+  assert.equal(findings.filter(item => item.ruleId === "native-dynamic-interactive-bypass").length, 2);
+  assert.equal(findings.filter(item => item.ruleId === "native-interactive-bypass").length, 1);
+});
+
+test("frontend boundary CLI scans the real production file tree", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-frontend-boundaries-"));
+  try {
+    const sourceRoot = path.join(root, "frontend", "src", "features", "example");
+    fs.mkdirSync(sourceRoot, { recursive: true });
+    fs.writeFileSync(path.join(sourceRoot, "styles.css"), ".feature-shell .nxp-button { color: red; }\n");
+    fs.writeFileSync(path.join(sourceRoot, "widget.js"), "const element = document.createElement(\"button\");\n");
+    fs.writeFileSync(path.join(sourceRoot, "widget.mjs"), "const element = document.createElement(\"button\");\n");
+    fs.writeFileSync(path.join(sourceRoot, "widget.html"), "<main><button>Save</button></main>\n");
+    fs.writeFileSync(path.join(sourceRoot, "ignored.test.ts"), "const element = document.createElement(\"button\");\n");
+
+    const entries = readProductionSources(root);
+    assert.equal(entries.length, 4);
+    const result = spawnSync(process.execPath, [toolPath, "--root", root, "--quiet"], { encoding: "utf8" });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /扫描 4 个生产文件/u);
+    assert.match(result.stdout, /private-style-selector/u);
+    assert.match(result.stdout, /widget\.mjs.*native-dynamic-interactive-bypass/su);
+    assert.match(result.stdout, /widget\.html.*native-interactive-bypass/su);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -37,6 +37,10 @@ jobs:
       system_update: ${{ steps.domains.outputs.system_update }}
       plan_digest: ${{ steps.domains.outputs.plan_digest }}
       plan_valid: ${{ steps.domains.outputs.plan_valid }}
+      counterpart_repository: ${{ steps.domains.outputs.counterpart_repository }}
+      counterpart_sha: ${{ steps.domains.outputs.counterpart_sha }}
+      source_digest: ${{ steps.domains.outputs.source_digest }}
+      build_inputs_digest: ${{ steps.domains.outputs.build_inputs_digest }}
       execution_plan: ${{ steps.domains.outputs.execution_plan }}
     steps:
       - name: 检出代码
@@ -58,6 +62,8 @@ jobs:
       - name: 计算影响域
         id: domains
         shell: pwsh
+        env:
+          NEXUS_CANDIDATE_REF: ${{ inputs.plugins_ref }}
         run: |
           if ('${{ github.event_name }}' -eq 'pull_request') {
             node tools/ci-changes.mjs --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.sha }}' --github-output "$env:GITHUB_OUTPUT"
@@ -78,10 +84,18 @@ jobs:
     timeout-minutes: 15
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}/nexus-ci-frontend.json
+      NEXUS_CI_JOB_ID: frontend-unit
+      NEXUS_CI_MODE: ci
       NEXUS_CI_DOMAIN: frontend
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/frontend
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -99,6 +113,15 @@ jobs:
         env:
           NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
         run: node tests/run.mjs frontend --affected
+
+      - name: 上传前端原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-frontend-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/frontend
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: 导出前端结果 manifest
         if: always()
@@ -129,10 +152,18 @@ jobs:
     timeout-minutes: 20
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-host.json
+      NEXUS_CI_JOB_ID: host-core
+      NEXUS_CI_MODE: ci
       NEXUS_CI_DOMAIN: host
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/host
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -148,6 +179,7 @@ jobs:
           node-version: 24
 
       - name: 宿主编译校验
+        id: host-build
         shell: pwsh
         run: dotnet build src\NexusPipeline.csproj -c Release --nologo
 
@@ -155,7 +187,17 @@ jobs:
         shell: pwsh
         env:
           NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+          NEXUS_CI_BUILD_STATUS: ${{ steps.host-build.outcome }}
         run: node tests\run.mjs unit --affected
+
+      - name: 上传宿主原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-host-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/host
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: 导出宿主结果 manifest
         if: always()
@@ -185,10 +227,18 @@ jobs:
     timeout-minutes: 15
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}/nexus-ci-docs.json
+      NEXUS_CI_JOB_ID: docs-i18n
+      NEXUS_CI_MODE: ci
       NEXUS_CI_DOMAIN: docs
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/docs
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -217,6 +267,15 @@ jobs:
 
       - name: 文档与 i18n 一致性
         run: node tests/run.mjs docs
+
+      - name: 上传文档原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-docs-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/docs
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: 导出文档结果 manifest
         if: always()
@@ -247,10 +306,18 @@ jobs:
     timeout-minutes: 20
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-plugin.json
+      NEXUS_CI_JOB_ID: plugin-contract
+      NEXUS_CI_MODE: ci
       NEXUS_CI_DOMAIN: plugin
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/plugin
     steps:
       - name: 检出宿主代码
         uses: actions/checkout@v4
@@ -292,16 +359,19 @@ jobs:
         if: needs.changes.outputs.frontend != 'true'
         run: node tests/run.mjs frontend --group ui --group bridge
 
-      - name: 官方插件真实装配契约
+      - name: 官方插件真实装配与源码布局契约
         env:
           NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}/NexusPipeline-Plugins
         run: node tests/run.mjs contract
 
-      - name: 官方插件 Frontend API 与源码布局
-        run: |
-          node NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs --host-root .
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          node tests/tools/plugin-source-layout.test.mjs
+      - name: 上传插件原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-plugin-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/plugin
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: 导出插件结果 manifest
         if: always()
@@ -331,10 +401,18 @@ jobs:
     timeout-minutes: 30
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-ui.json
+      NEXUS_CI_JOB_ID: ui-smoke
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: ui
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/ui
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -382,6 +460,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 UI 原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-ui-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/ui
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 UI 结果 manifest
         if: always()
         id: ci-manifest
@@ -411,10 +498,18 @@ jobs:
     env:
       NEXUS_SYSTEM_WEB_PORT: "58831"
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-system-runtime.json
+      NEXUS_CI_JOB_ID: system-runtime-mcp
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: system_runtime
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-runtime
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -459,6 +554,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Runtime 原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-system-runtime-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/system-runtime
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Runtime 结果 manifest
         if: always()
         id: ci-manifest
@@ -488,10 +592,18 @@ jobs:
     env:
       NEXUS_SYSTEM_WEB_PORT: "58832"
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-system-execution.json
+      NEXUS_CI_JOB_ID: system-execution
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: system_execution
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-execution
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -536,6 +648,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Execution 原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-system-execution-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/system-execution
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Execution 结果 manifest
         if: always()
         id: ci-manifest
@@ -565,10 +686,18 @@ jobs:
     env:
       NEXUS_SYSTEM_WEB_PORT: "58833"
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-system-emulator.json
+      NEXUS_CI_JOB_ID: system-emulator
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: system_emulator
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-emulator
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -613,6 +742,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Emulator 原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-system-emulator-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/system-emulator
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Emulator 结果 manifest
         if: always()
         id: ci-manifest
@@ -642,10 +780,18 @@ jobs:
     env:
       NEXUS_SYSTEM_WEB_PORT: "58834"
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-system-update.json
+      NEXUS_CI_JOB_ID: system-update
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: system_update
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/system-update
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -698,6 +844,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Update 原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-system-update-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/system-update
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Update 结果 manifest
         if: always()
         id: ci-manifest
@@ -727,10 +882,18 @@ jobs:
     timeout-minutes: 120
     env:
       NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-full-regression.json
+      NEXUS_CI_JOB_ID: full-regression
+      NEXUS_CI_MODE: admin
       NEXUS_CI_DOMAIN: full-regression
       NEXUS_CI_HEAD_SHA: ${{ github.sha }}
       NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
       NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_EXECUTION_PLAN: ${{ needs.changes.outputs.execution_plan }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/full-regression
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -797,6 +960,15 @@ jobs:
           path: |
             tests/system/runtime-*
             tests/e2e/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传全量回归原始测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-reports-full-regression-${{ github.run_id }}
+          path: ${{ runner.temp }}/nexus-ci-reports/full-regression
           if-no-files-found: ignore
           retention-days: 7
 
@@ -922,3 +1094,14 @@ jobs:
           process.stdout.write(`[required-summary] plan=${planPath} results=${resultsPath}\n`);
           NODE
           node tools/ci-summary.mjs --plan "$RUNNER_TEMP/nexus-ci-execution-plan.json" --results "$RUNNER_TEMP/nexus-ci-results.json" --headSha "$GITHUB_SHA" --repositorySha "$GITHUB_SHA"
+
+      - name: 上传 Required Summary 证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-summary-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/nexus-ci-execution-plan.json
+            ${{ runner.temp }}/nexus-ci-results.json
+          if-no-files-found: ignore
+          retention-days: 7

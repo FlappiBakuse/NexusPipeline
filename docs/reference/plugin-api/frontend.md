@@ -1,6 +1,6 @@
 # 前端架构
 
-### 前端插件运行时（Frontend API 1.5）
+## 前端插件运行时（Frontend API 1.5）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
