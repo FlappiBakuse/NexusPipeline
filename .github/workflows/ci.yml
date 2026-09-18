@@ -83,6 +83,11 @@ jobs:
       - name: 准备官方插件固定基线本地引用
         run: git -C NexusPipeline-Plugins branch --force main HEAD
 
+      - name: 安装前端与官方插件测试依赖
+        run: |
+          npm ci --prefix frontend --no-audit --no-fund
+          npm ci --prefix NexusPipeline-Plugins --no-audit --no-fund
+
       - name: 校验影响域、结果汇总与前端边界
         run: node tests/run.mjs tooling
 
