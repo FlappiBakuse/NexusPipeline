@@ -73,7 +73,14 @@ export function expectedTestFiles(kind, group, options = {}) {
   // globs (or by the system group definitions), so a command string must not
   // become a fake filesystem path.
   const selectors = expectedTestSelectors(kind, group).filter(selector => !/\s/u.test(selector));
-  return expandTestSelectors(selectors, options);
+  const expanded = expandTestSelectors(selectors, options);
+  // The official plugin contract is executed in a separate repository checkout
+  // on some host jobs. Keep its exact logical identity in the plan even when
+  // that checkout is not present, so plan validation remains deterministic.
+  const crossRepositoryFiles = selectors
+    .map(normalizePath)
+    .filter(selector => selector.startsWith("NexusPipeline-Plugins/") && !/[?*[\]{}]/u.test(selector));
+  return [...new Set([...expanded, ...crossRepositoryFiles])].sort((left, right) => left.localeCompare(right));
 }
 
 export function pathMatchesSelector(value, selectors) {

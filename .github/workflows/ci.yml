@@ -1130,6 +1130,8 @@ jobs:
         run: |
           npm ci --prefix tools --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --prefix frontend --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm ci --prefix NexusPipeline-Plugins --no-audit --no-fund
 
       - name: 管理员完整性自检

@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { CI_DOMAINS, FRONTEND_TEST_GROUPS, HOST_TEST_AREAS, SYSTEM_SHARED_PATHS, SYSTEM_TEST_GROUPS, TEST_DOMAIN_REGISTRY, validateTestDomainRegistry } from "../../tools/ci-domains.mjs";
 import { createExecutionPlan, evaluateDomains, parseNameStatusZ, selectTestGroups } from "../../tools/ci-changes.mjs";
+import { expectedTestFiles } from "../../tools/test-selection.mjs";
 
 test('测试分组包含传递调用方并对未知路径全量兜底', () => {
   assert.deepEqual(selectTestGroups('frontend', ['frontend/src/ui/primitives/NxpButton.vue']), ['ui', 'bridge', 'platform', 'features']);
@@ -244,6 +245,16 @@ test("执行计划包含 SHA、精确文件、原因和 job 映射", () => {
   assert.deepEqual(plan.domains.docs.files, ["docs/DESIGN.md"]);
   assert.deepEqual(plan.domains.docs.jobs, ["docs-i18n"]);
   assert.deepEqual(plan.unknown.map(item => item.file), ["unknown.txt"]);
+});
+
+test("插件契约在缺少官方插件 checkout 时保留跨仓库测试文件身份", () => {
+  const pluginDomain = CI_DOMAINS.find(domain => domain.key === "plugin");
+  const missingCheckoutRoot = path.join(repoRoot, "tests", "fixtures", "missing-official-plugins-checkout");
+  const expectedFiles = expectedTestFiles("domain", pluginDomain, { root: missingCheckoutRoot });
+  assert.ok(
+    expectedFiles.includes("NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs"),
+    "插件契约的跨仓库测试文件必须参与计划校验",
+  );
 });
 
 test("全量计划把全部逻辑域绑定到唯一 full-regression 物理 job", () => {
