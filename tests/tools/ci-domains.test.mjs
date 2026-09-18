@@ -388,6 +388,7 @@ test("工作流输出与四个 System 域 key 对齐", () => {
 
 test("required-summary 显式等待所有物理 job 并消费 execution-plan", () => {
   const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const requiredSummary = workflow.slice(workflow.indexOf("  required-summary:"));
   const requiredJobs = [
     "changes",
     "frontend-unit",
@@ -411,6 +412,11 @@ test("required-summary 显式等待所有物理 job 并消费 execution-plan", (
   assert.match(workflow, /github\.event_name.*-eq 'schedule'.*github\.event_name.*-eq 'workflow_dispatch'/s);
   assert.match(workflow, /github\.event_name.*-eq 'schedule'.*workflow_dispatch'[\s\S]*node tools\/ci-changes\.mjs --all/s);
   assert.match(workflow, /full-regression:[\s\S]*if:.*github\.event_name == 'schedule'.*github\.event_name == 'workflow_dispatch'/s);
+  assert.match(requiredSummary, /uses: actions\/download-artifact@v4/u, "required-summary 应从 artifact 读取物理 Job manifest");
+  assert.match(requiredSummary, /pattern: nexus-ci-manifest-\*/u, "required-summary 应下载物理 Job manifest 集合");
+  assert.doesNotMatch(requiredSummary, /(?:FRONTEND|HOST|DOCS|PLUGIN|UI|SYSTEM_RUNTIME|SYSTEM_EXECUTION|SYSTEM_EMULATOR|SYSTEM_UPDATE|FULL)_MANIFEST/u, "required-summary 不应把完整 manifest 放入 Job 环境变量");
+  const fullRegression = workflow.slice(workflow.indexOf("  full-regression:"), workflow.indexOf("  required-summary:"));
+  assert.match(fullRegression, /NEXUS_PLUGIN_REPO_ROOT:\s*\$\{\{\s*github\.workspace\s*\}\}\/NexusPipeline-Plugins/u, "全量回归应显式传递插件仓库路径");
 });
 
 test("workflow_dispatch 的插件候选 SHA 进入 changes execution-plan", () => {

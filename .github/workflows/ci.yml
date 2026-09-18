@@ -155,6 +155,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传前端 required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-frontend-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-frontend.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出前端结果 manifest
         if: always()
         id: ci-manifest
@@ -228,6 +237,15 @@ jobs:
         with:
           name: nexus-ci-reports-host-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/host
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传宿主 required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-host-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-host.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -310,6 +328,15 @@ jobs:
         with:
           name: nexus-ci-reports-docs-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/docs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传文档 required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-docs-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-docs.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -416,6 +443,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传插件 required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-plugin-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-plugin.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出插件结果 manifest
         if: always()
         id: ci-manifest
@@ -509,6 +545,15 @@ jobs:
         with:
           name: nexus-ci-reports-ui-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/ui
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传 UI required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-ui-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-ui.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -624,6 +669,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Runtime required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-system-runtime-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-system-runtime.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Runtime 结果 manifest
         if: always()
         id: ci-manifest
@@ -718,6 +772,15 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: 上传 System Execution required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-system-execution-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-system-execution.json
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: 导出 System Execution 结果 manifest
         if: always()
         id: ci-manifest
@@ -809,6 +872,15 @@ jobs:
         with:
           name: nexus-ci-reports-system-emulator-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/system-emulator
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传 System Emulator required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-system-emulator-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-system-emulator.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -911,6 +983,15 @@ jobs:
         with:
           name: nexus-ci-reports-system-update-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/system-update
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传 System Update required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-system-update-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-system-update.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1156,9 +1237,9 @@ jobs:
         shell: cmd
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_PLUGIN_REPO_ROOT: ${{ github.workspace }}/NexusPipeline-Plugins
           NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/full-regression
         run: node tests\run.mjs admin all
-        # 官方插件路径由 runner 解析当前工作区检出。
 
       - name: 上传全量回归失败诊断
         if: ${{ failure() }}
@@ -1177,6 +1258,15 @@ jobs:
         with:
           name: nexus-ci-reports-full-regression-${{ github.run_id }}
           path: ${{ runner.temp }}/nexus-ci-reports/full-regression
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: 上传全量回归 required summary manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-ci-manifest-full-regression-${{ github.run_id }}
+          path: ${{ github.workspace }}/nexus-ci-full-regression.json
           if-no-files-found: ignore
           retention-days: 7
 
@@ -1225,6 +1315,14 @@ jobs:
         with:
           node-version: 24
 
+      - name: 下载物理 Job manifest
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nexus-ci-manifest-*
+          path: ${{ runner.temp }}/nexus-ci-manifests
+          merge-multiple: true
+
       - name: 生成并校验 required summary
         env:
           PLAN_JSON: ${{ needs.changes.outputs.execution_plan }}
@@ -1232,26 +1330,17 @@ jobs:
           SELECTOR_PLAN_VALID: ${{ needs.changes.outputs.plan_valid }}
           SELECTOR_HEAD_SHA: ${{ github.sha }}
           SELECTOR_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+          MANIFEST_ROOT: ${{ runner.temp }}/nexus-ci-manifests
           FRONTEND_RESULT: ${{ needs['frontend-unit'].result }}
-          FRONTEND_MANIFEST: ${{ needs['frontend-unit'].outputs.manifest }}
           HOST_RESULT: ${{ needs['host-core'].result }}
-          HOST_MANIFEST: ${{ needs['host-core'].outputs.manifest }}
           DOCS_RESULT: ${{ needs['docs-i18n'].result }}
-          DOCS_MANIFEST: ${{ needs['docs-i18n'].outputs.manifest }}
           PLUGIN_RESULT: ${{ needs['plugin-contract'].result }}
-          PLUGIN_MANIFEST: ${{ needs['plugin-contract'].outputs.manifest }}
           UI_RESULT: ${{ needs['ui-smoke'].result }}
-          UI_MANIFEST: ${{ needs['ui-smoke'].outputs.manifest }}
           SYSTEM_RUNTIME_RESULT: ${{ needs['system-runtime-mcp'].result }}
-          SYSTEM_RUNTIME_MANIFEST: ${{ needs['system-runtime-mcp'].outputs.manifest }}
           SYSTEM_EXECUTION_RESULT: ${{ needs['system-execution'].result }}
-          SYSTEM_EXECUTION_MANIFEST: ${{ needs['system-execution'].outputs.manifest }}
           SYSTEM_EMULATOR_RESULT: ${{ needs['system-emulator'].result }}
-          SYSTEM_EMULATOR_MANIFEST: ${{ needs['system-emulator'].outputs.manifest }}
           SYSTEM_UPDATE_RESULT: ${{ needs['system-update'].result }}
-          SYSTEM_UPDATE_MANIFEST: ${{ needs['system-update'].outputs.manifest }}
           FULL_RESULT: ${{ needs['full-regression'].result }}
-          FULL_MANIFEST: ${{ needs['full-regression'].outputs.manifest }}
         run: |
           node --input-type=module <<'NODE'
           import fs from "node:fs";
@@ -1260,20 +1349,22 @@ jobs:
           const plan = JSON.parse(process.env.PLAN_JSON || "{}");
           const jobs = {};
           const jobInputs = {
-            "frontend-unit": ["FRONTEND_RESULT", "FRONTEND_MANIFEST"],
-            "host-core": ["HOST_RESULT", "HOST_MANIFEST"],
-            "docs-i18n": ["DOCS_RESULT", "DOCS_MANIFEST"],
-            "plugin-contract": ["PLUGIN_RESULT", "PLUGIN_MANIFEST"],
-            "ui-smoke": ["UI_RESULT", "UI_MANIFEST"],
-            "system-runtime-mcp": ["SYSTEM_RUNTIME_RESULT", "SYSTEM_RUNTIME_MANIFEST"],
-            "system-execution": ["SYSTEM_EXECUTION_RESULT", "SYSTEM_EXECUTION_MANIFEST"],
-            "system-emulator": ["SYSTEM_EMULATOR_RESULT", "SYSTEM_EMULATOR_MANIFEST"],
-            "system-update": ["SYSTEM_UPDATE_RESULT", "SYSTEM_UPDATE_MANIFEST"],
-            "full-regression": ["FULL_RESULT", "FULL_MANIFEST"],
+            "frontend-unit": ["FRONTEND_RESULT", "nexus-ci-frontend.json"],
+            "host-core": ["HOST_RESULT", "nexus-ci-host.json"],
+            "docs-i18n": ["DOCS_RESULT", "nexus-ci-docs.json"],
+            "plugin-contract": ["PLUGIN_RESULT", "nexus-ci-plugin.json"],
+            "ui-smoke": ["UI_RESULT", "nexus-ci-ui.json"],
+            "system-runtime-mcp": ["SYSTEM_RUNTIME_RESULT", "nexus-ci-system-runtime.json"],
+            "system-execution": ["SYSTEM_EXECUTION_RESULT", "nexus-ci-system-execution.json"],
+            "system-emulator": ["SYSTEM_EMULATOR_RESULT", "nexus-ci-system-emulator.json"],
+            "system-update": ["SYSTEM_UPDATE_RESULT", "nexus-ci-system-update.json"],
+            "full-regression": ["FULL_RESULT", "nexus-ci-full-regression.json"],
           };
+          const manifestRoot = process.env.MANIFEST_ROOT;
           for (const [jobId, [resultName, manifestName]] of Object.entries(jobInputs)) {
             const result = process.env[resultName] || "missing";
-            const raw = process.env[manifestName] || "";
+            const manifestPath = path.join(manifestRoot, manifestName);
+            const raw = fs.existsSync(manifestPath) ? fs.readFileSync(manifestPath, "utf8") : "";
             if (!raw) {
               jobs[jobId] = { result };
               continue;
