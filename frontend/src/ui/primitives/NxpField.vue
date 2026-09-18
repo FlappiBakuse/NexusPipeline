@@ -31,6 +31,7 @@ const props = withDefaults(defineProps<{
 </template>
 
 <style>
+:host { display: block; min-width: 0; }
 .nxp-field { display: grid; min-width: 0; margin: 0; gap: var(--nx-space-2); color: var(--nx-color-text); }
 .nxp-field-label { font-size: 12px; font-weight: 600; }
 .nxp-field-label > [aria-hidden="true"] { color: var(--nx-color-danger); }

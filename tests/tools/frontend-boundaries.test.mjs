@@ -99,6 +99,43 @@ test("CSS 私有样式边界覆盖私有类、公开控件后代与分组选择�
   assert.equal(privateStyles.length, 3);
 });
 
+test("component ownership catches migrated generic implementation classes and allows public roots", () => {
+  const rejectedSelectors = [
+    ".switch-card { display: flex; }",
+    ".settings-card-toggle { display: flex; }",
+    ".plugin-loading-state { display: grid; }",
+    ".badge { display: inline-flex; }",
+    ".empty strong { display: block; }",
+  ];
+  for (const selector of rejectedSelectors) {
+    const findings = scanSource("frontend/src/features/example/styles.css", selector);
+    assert.equal(findings.some(item => item.ruleId === "private-style-selector"), true, selector);
+  }
+
+  const accepted = scanSource("frontend/src/features/example/styles.css", "nxp-modal { margin: 12px; }");
+  assert.equal(accepted.some(item => item.ruleId === "private-style-selector"), false);
+
+  const internal = scanSource(
+    "frontend/src/ui/primitives/NxpBadge.vue",
+    "<template><span class=\"nxp-badge\" /></template><style>.nxp-badge { display: inline-flex; }</style>",
+  );
+  assert.equal(internal.some(item => item.ruleId === "private-style-selector"), false);
+});
+
+test("bridge static assembly cannot recreate migrated public component classes", () => {
+  const rejected = scanSource(
+    "frontend/src/plugin-bridge/slots.ts",
+    "const badge = document.createElement('span'); badge.className = 'badge ok';",
+  );
+  assert.equal(rejected.some(item => item.ruleId === "private-component-class-usage" && item.token === "badge"), true);
+
+  const accepted = scanSource(
+    "frontend/src/plugin-bridge/slots.ts",
+    "const badge = document.createElement('nxp-badge'); badge.tone = 'ok';",
+  );
+  assert.equal(accepted.some(item => item.ruleId === "private-component-class-usage"), false);
+});
+
 test("frontend boundary CLI scans the real production file tree", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-frontend-boundaries-"));
   try {

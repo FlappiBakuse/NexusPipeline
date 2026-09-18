@@ -133,14 +133,13 @@ onBeforeUnmount(() => {
 .nxp-modal-header h2 { margin: 0; font-size: 19px; }
 .nxp-modal-header button { flex: 0 0 auto; }
 .nxp-modal-header button .nxp-icon { width: 18px; height: 18px; }
-.nxp-modal-panel > .nxp-modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) 0; }
-.nxp-modal-panel:not(.nxp-modal-panel--with-footer) > .nxp-modal-body { padding-bottom: var(--nx-space-4); }
+.nxp-modal-panel > .nxp-modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) var(--nx-space-4); }
+.nxp-modal-panel--with-footer > .nxp-modal-body > .nxp-scroll-viewport > div:not(.form-grid):not(.subsection):last-child { margin-bottom: 0; }
 .nxp-modal-body > .nxp-scroll-viewport > div:not(.form-grid):not(.subsection) { margin-bottom: 20px; }
 .nxp-modal-body > .nxp-scroll-viewport > .field-label { margin-top: 20px; }
 .nxp-modal-body > .nxp-scroll-viewport > .form-grid { margin-bottom: 20px; }
 .nxp-modal-body > .nxp-scroll-viewport > .form-grid:last-of-type { margin-bottom: 0; }
 .nxp-modal-body > .nxp-scroll-viewport > .form-grid + .subsection { margin-top: 4px; }
-.nxp-modal-body > .nxp-scroll-viewport > .switch-row.settings-option { margin-bottom: 0; border-bottom: 0; }
 .nxp-modal-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--nx-space-3); margin: 0; padding: var(--nx-space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--nx-color-border); border-bottom: 0; }
 .nxp-modal:focus, .nxp-modal-panel:focus { outline: none; }
 .nxp-modal-enter-active,

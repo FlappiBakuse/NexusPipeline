@@ -3,6 +3,7 @@ import { t } from "../../../platform/i18n";
 import { renderMarkdown } from "../../../platform/markdown";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
+import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import { authorName, pluginKindLabel, pluginKindTone, pluginStatusView, pluginTags, storeActionNotice, storeActions, type PluginViewPlugin, type PluginViewTab } from "../utils/pluginStatusView";
@@ -55,14 +56,17 @@ function hasPendingAction() {
         :description="t('plugins.detail.readme_loading')"
         :aria-label="t('plugins.loading_plugin_details')"
       />
-      <div v-else-if="error && !plugin" class="empty">
-        <strong>{{ t("plugins.load.detail_failed") }}</strong>
-        <span>{{ error }}</span>
-      </div>
-      <div v-else-if="!plugin" class="empty">
-        <strong>{{ t("plugins.select_a_plugin") }}</strong>
-        <span>{{ t("plugins.selection.help") }}</span>
-      </div>
+      <NxpEmptyState
+        v-else-if="error && !plugin"
+        tone="danger"
+        :title="t('plugins.load.detail_failed')"
+        :description="error"
+      />
+      <NxpEmptyState
+        v-else-if="!plugin"
+        :title="t('plugins.select_a_plugin')"
+        :description="t('plugins.selection.help')"
+      />
       <div v-else class="plugin-detail-content">
         <div class="plugin-detail-head">
           <div class="plugin-detail-title">
@@ -138,7 +142,11 @@ function hasPendingAction() {
           <div v-if="plugin.readmeErrorCode && plugin.readmeAvailable === true && plugin.readmeMarkdown" class="callout callout-warning">{{ t('plugin.store.readme_cached', {}, '当前显示上次缓存的 README') }}</div>
           <div v-else-if="plugin.readmeErrorCode" class="callout callout-warning">{{ t('plugin.store.readme_error', {}, 'README 加载失败') }}</div>
           <div v-if="plugin.readmeAvailable === true && plugin.readmeMarkdown" class="plugin-readme" v-html="renderMarkdown(plugin.readmeMarkdown)"></div>
-          <div v-else-if="!plugin.readmeErrorCode" class="empty compact-empty"><span>{{ plugin.hasReadme ? t("plugins.readme.empty") : t("plugins.no_readme") }}</span></div>
+          <NxpEmptyState
+            v-else-if="!plugin.readmeErrorCode"
+            class="compact-empty"
+            :title="plugin.hasReadme ? t('plugins.readme.empty') : t('plugins.no_readme')"
+          />
         </section>
         <section class="plugin-detail-section">
           <h4>{{ t("plugins.changelog") }}</h4>
@@ -148,7 +156,7 @@ function hasPendingAction() {
               <ul><li v-for="item in entry.items || []" :key="item">{{ item }}</li></ul>
             </article>
           </div>
-          <div v-else class="empty compact-empty"><span>{{ t("plugins.no_changelog_entries") }}</span></div>
+          <NxpEmptyState v-else class="compact-empty" :title="t('plugins.no_changelog_entries')" />
         </section>
       </div>
     </NxpScrollArea>

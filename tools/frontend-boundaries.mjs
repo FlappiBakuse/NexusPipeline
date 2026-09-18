@@ -9,6 +9,28 @@ export const FRONTEND_BOUNDARY_SCHEMA_VERSION = 1;
 
 const PRIVATE_VUE_FIELDS = /\._(?:instance|mount|app|vnode|slots)\b/gu;
 const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*)["']([^"']+)["']/gu;
+const STATIC_CLASS_ATTRIBUTE = /\bclass(?:Name)?\s*(?::|=)\s*["'`]([^"'`]+)["'`]/gu;
+
+// 这些名称是 v0.16.6 前公共组件曾经暴露到宿主 CSS 的实现类。它们保留在扫描器中只用于
+// 捕获迁移遗漏；现役公共组件类集合从 register.ts 登记的 SFC 模板自动生成。
+const MIGRATED_COMPONENT_CLASSES = new Set([
+  "switch-card",
+  "switch-copy",
+  "switch-control",
+  "switch-track",
+  "switch-thumb",
+  "settings-card",
+  "settings-card-toggle",
+  "settings-card-copy",
+  "settings-card-title",
+  "settings-card-arrow",
+  "settings-card-arrow-icon",
+  "settings-card-body",
+  "plugin-loading-state",
+  "plugin-loading-progress",
+  "badge",
+  "empty",
+]);
 
 const EXCEPTIONS = [
   {
@@ -125,6 +147,49 @@ function templateElements(filePath, source) {
     visit(baseParse(source));
   }
   return elements;
+}
+
+function staticTemplateClasses(filePath, source) {
+  if (!filePath.endsWith(".vue")) return [];
+  const classes = [];
+  for (const node of templateElements(filePath, source)) {
+    for (const prop of node.props || []) {
+      if (prop.type !== 6 || prop.name !== "class" || !prop.value?.content) continue;
+      classes.push(...prop.value.content.split(/\s+/u).filter(Boolean));
+    }
+  }
+  return classes;
+}
+
+/** 从公共注册表读取实际登记的 SFC，建立公共组件类归属清单。 */
+export function readPublicUiOwnership(root) {
+  const classes = new Set(MIGRATED_COMPONENT_CLASSES);
+  const registerPath = path.join(root, "frontend", "src", "ui", "register.ts");
+  if (!fs.existsSync(registerPath)) return { classes };
+  const registerSource = fs.readFileSync(registerPath, "utf8");
+  const imports = new Map();
+  for (const match of registerSource.matchAll(/import\s+([A-Za-z_$][\w$]*)\s+from\s+["'](\.\/(?:primitives|composites)\/[^"']+\.vue)["']/gu)) {
+    imports.set(match[1], match[2]);
+  }
+  const registryStart = registerSource.indexOf("NEXUS_PUBLIC_ELEMENTS");
+  const registryEnd = registryStart >= 0 ? registerSource.indexOf("} as const", registryStart) : -1;
+  const registrySource = registryStart >= 0 && registryEnd > registryStart
+    ? registerSource.slice(registryStart, registryEnd)
+    : registerSource;
+  for (const match of registrySource.matchAll(/["'](nxp-[a-z0-9-]+)["']\s*:\s*([A-Za-z_$][\w$]*)/gu)) {
+    const relativeFile = imports.get(match[2]);
+    if (!relativeFile) continue;
+    const componentPath = path.resolve(path.dirname(registerPath), relativeFile);
+    if (!fs.existsSync(componentPath)) continue;
+    const componentSource = fs.readFileSync(componentPath, "utf8");
+    // Namespaced classes are component-owned. Generic tokens such as muted,
+    // icon and modal remain global utility/layout vocabulary and are not
+    // treated as private implementation selectors by this boundary.
+    for (const className of staticTemplateClasses(componentPath, componentSource)) {
+      if (className.startsWith("nxp-")) classes.add(className);
+    }
+  }
+  return { classes };
 }
 
 function addFinding(findings, { path: filePath, source, offset, ruleId, kind, token, severity = "error", classification = "violation", reason = "" }) {
@@ -260,6 +325,24 @@ function scanInteractiveRoles(filePath, source, findings) {
   }
 }
 
+function scanComponentClassUsage(filePath, source, findings, ownership) {
+  if (filePath.startsWith("frontend/src/ui/") || filePath.endsWith(".css")) return;
+  for (const match of source.matchAll(STATIC_CLASS_ATTRIBUTE)) {
+    for (const token of match[1].split(/\s+/u).filter(Boolean)) {
+      if (!ownership.classes.has(token) && !/^nxp-[A-Za-z0-9_-]+$/u.test(token)) continue;
+      addFinding(findings, {
+        path: filePath,
+        source,
+        offset: match.index + match[0].indexOf(match[1]),
+        ruleId: "private-component-class-usage",
+        kind: "component-class",
+        token,
+        reason: "公共组件的内部类由登记的 SFC 所有；业务层应使用公开元素、属性、插槽或业务 wrapper。",
+      });
+    }
+  }
+}
+
 function styleBlocks(filePath, source) {
   if (filePath.endsWith(".css")) return [{ text: source, offset: 0 }];
   if (!filePath.endsWith(".vue")) return [];
@@ -293,30 +376,35 @@ function splitSelectorList(value) {
   return selectors.filter(Boolean);
 }
 
-function styleSelectorIsDescendantOfPublicControl(selector) {
+function styleSelectorIsDescendantOfPublicControl(selector, ownership) {
   const normalized = selector.replace(/\s+/gu, " ").trim();
   if (!normalized) return false;
-  // A private nxp-* class is an internal implementation selector regardless of
-  // whether it appears below a public element, inside :is(), or in a group.
-  if (/(?:^|[^A-Za-z0-9_-])\.nxp-[A-Za-z0-9_-]+\b/u.test(normalized)) return true;
+  // A class emitted by a registered public SFC is an internal implementation
+  // selector regardless of whether it appears below a public element,
+  // inside :is(), or in a group. The nxp-* fallback covers temporary roots
+  // used by the CLI fixture and classes not represented by a static template.
+  for (const match of normalized.matchAll(/\.([A-Za-z0-9_-]+)\b/gu)) {
+    if (ownership.classes.has(match[1]) || /^nxp-[A-Za-z0-9_-]+$/u.test(match[1])) return true;
+  }
 
   const publicElement = /(?:^|[\s>+~,(])nxp-[a-z0-9-]+(?=[:.#\[\s>+~),]|$)/iu.exec(normalized);
   if (!publicElement) return false;
   const publicEnd = publicElement.index + publicElement[0].length;
   const remainder = normalized.slice(publicEnd);
-  // A public custom-element root may be styled for layout/state. Descendants
-  // belong to that public component and must not be reached from business CSS.
-  return /(?:^|[\s>+~])[^\s>+~]+[.#\[]/u.test(remainder);
+  // A public custom-element root may be styled for layout/state, including a
+  // business modifier on that same host. A whitespace/combinator after the
+  // tag crosses into the component's light-DOM implementation.
+  return /^\s|^[>+~]/u.test(remainder);
 }
 
-function scanStyleSelectors(filePath, source, findings, offsetBase = 0) {
+function scanStyleSelectors(filePath, source, findings, ownership, offsetBase = 0) {
   if (filePath.startsWith("frontend/src/ui/")) return;
   const withoutComments = source.replace(/\/\*[\s\S]*?\*\//gu, match => " ".repeat(match.length));
   for (const match of withoutComments.matchAll(/([^{}]+)\{/gu)) {
     const rawSelector = match[1].trim();
     if (!rawSelector || rawSelector.startsWith("@")) continue;
     for (const selector of splitSelectorList(rawSelector)) {
-      if (!styleSelectorIsDescendantOfPublicControl(selector)) continue;
+      if (!styleSelectorIsDescendantOfPublicControl(selector, ownership)) continue;
       const localOffset = match.index + match[1].indexOf(selector);
       addFinding(findings, {
         path: filePath,
@@ -331,15 +419,17 @@ function scanStyleSelectors(filePath, source, findings, offsetBase = 0) {
   }
 }
 
-export function scanSource(filePath, source, { plugin = false } = {}) {
+export function scanSource(filePath, source, { plugin = false, ownership = null } = {}) {
   const normalized = normalizePath(filePath);
   const findings = [];
+  const classOwnership = ownership || readPublicUiOwnership(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
   scanPrivateFields(normalized, source, findings);
   scanImportBoundary(normalized, source, findings, plugin);
   scanTemplateControls(normalized, source, findings);
   scanDynamicControls(normalized, source, findings);
   scanInteractiveRoles(normalized, source, findings);
-  for (const block of styleBlocks(normalized, source)) scanStyleSelectors(normalized, block.text, findings, block.offset);
+  scanComponentClassUsage(normalized, source, findings, classOwnership);
+  for (const block of styleBlocks(normalized, source)) scanStyleSelectors(normalized, block.text, findings, classOwnership, block.offset);
   return findings;
 }
 
@@ -358,9 +448,10 @@ export function scanFrontendBoundaries({ root = path.resolve(path.dirname(fileUR
       }
     }
   }
+  const ownership = readPublicUiOwnership(root);
   const findings = [
-    ...hostEntries.flatMap(([filePath, source]) => scanSource(filePath, source)),
-    ...pluginEntries.flatMap(([filePath, source]) => scanSource(filePath, source, { plugin: true })),
+    ...hostEntries.flatMap(([filePath, source]) => scanSource(filePath, source, { ownership })),
+    ...pluginEntries.flatMap(([filePath, source]) => scanSource(filePath, source, { plugin: true, ownership })),
   ];
   return {
     schemaVersion: FRONTEND_BOUNDARY_SCHEMA_VERSION,

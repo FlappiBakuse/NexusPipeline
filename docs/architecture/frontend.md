@@ -36,7 +36,7 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/plugin-bridge/slots.ts` / `controls.ts` / `plugin-fields.ts` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染与清理；声明式表单控件直接实例化公开 `nxp-*` 元素，桥接层只负责属性映射、值收集、改动同步与必填校验 |
 | `frontend/src/plugin-bridge/host-adapter.ts` | 桥接层唯一的宿主依赖边界；平台模块迁移只改这里的实现来源 |
 
-样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供布局、shell 与插件 surface 样式，Nexus UI 元件样式保留在组件 SFC 中。
+样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供页面布局、shell 与插件 surface 样式；Nexus UI 元件的 DOM、交互和内部样式由对应 SFC 维护，feature 只通过公开元素根节点和业务 wrapper 组织布局。
 
 新增交互的落点：
 

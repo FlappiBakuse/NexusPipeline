@@ -29,4 +29,9 @@ nxp-button > .nxp-button { flex: 1 1 auto; min-width: 0; }
   min-width: 0;
   vertical-align: middle;
 }
+.nxp-button[aria-pressed="true"] {
+  border-color: var(--accent, var(--nx-color-accent));
+  background: var(--accent-soft, var(--nx-color-accent-soft));
+  color: var(--accent, var(--nx-color-accent));
+}
 </style>

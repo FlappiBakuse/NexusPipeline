@@ -57,7 +57,7 @@ function explainReason(code?: string, args?: Record<string, unknown>) {
           <div class="execution-plan-summary-main">
             <span class="execution-plan-summary-label">{{ t("dispatch.target") }}</span>
             <strong>{{ props.plan.targetName || "" }}</strong>
-            <NxpBadge :tone="props.plan.admissible ? 'ok' : 'bad'">{{ props.plan.admissible ? t("dispatch.ready_to_run") : t("dispatch.cannot_start_now") }}</NxpBadge>
+            <NxpBadge class="execution-plan-summary-badge" :tone="props.plan.admissible ? 'ok' : 'bad'">{{ props.plan.admissible ? t("dispatch.ready_to_run") : t("dispatch.cannot_start_now") }}</NxpBadge>
           </div>
           <div class="execution-plan-summary-stat" data-metric="tasks">
             <span class="k">{{ t("common.task") }}</span>

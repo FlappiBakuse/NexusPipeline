@@ -9,12 +9,14 @@ const props = withDefaults(defineProps<{
   disabled?: boolean;
   tag?: string;
   transitionName?: string;
+  layout?: "default" | "schedule";
   canDrag?: SortableOptions["canDrag"];
 }>(), {
   axis: "y",
   disabled: false,
   tag: "div",
   transitionName: "",
+  layout: "default",
 });
 
 const emit = defineEmits<{ reorder: [ids: string[], movedId: string] }>();
@@ -31,6 +33,7 @@ const options = computed<SortableOptions>(() => ({
   <TransitionGroup
     v-if="props.transitionName"
     v-bind="attrs"
+    :class="{ 'nxp-sortable-list--schedule': props.layout === 'schedule' }"
     :name="props.transitionName"
     :tag="props.tag"
     v-sortable="options"
@@ -41,6 +44,7 @@ const options = computed<SortableOptions>(() => ({
     :is="props.tag"
     v-else
     v-bind="attrs"
+    :class="{ 'nxp-sortable-list--schedule': props.layout === 'schedule' }"
     v-sortable="options"
   >
     <slot />
@@ -49,4 +53,5 @@ const options = computed<SortableOptions>(() => ({
 
 <style>
 :host { display: block; min-width: 0; }
+.nxp-sortable-list--schedule { display: grid; min-width: 0; gap: 0; }
 </style>

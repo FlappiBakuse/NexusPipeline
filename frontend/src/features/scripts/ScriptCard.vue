@@ -60,7 +60,6 @@ const emit = defineEmits<{
         <NxpButton
           class="entity-link"
           type="button"
-          :disabled="Boolean(unavailableMessage)"
           :aria-label="translate('scripts.accessibility.instance_action', {
             action: unavailableMessage
               ? translate('common.error.specialized_script_instance')
@@ -72,7 +71,7 @@ const emit = defineEmits<{
           <span class="scroll-text"><span class="scroll-inner">{{ script.name }}</span></span>
         </NxpButton>
         <div class="meta-line script-meta">
-          <NxpBadge :tone="script.pluginType && unavailableMessage ? 'warn' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{ script.pluginType ? translate("scripts.specialized_badge", { name: pluginLabel }) : translate("scripts.general_script") }}</NxpBadge>
+          <NxpBadge :tone="script.pluginType && unavailableMessage ? 'bad' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{ script.pluginType ? unavailableMessage ? translate("common.plugin.unknown") : translate("scripts.specialized_badge", { name: pluginLabel }) : translate("scripts.general_script") }}</NxpBadge>
           <NxpBadge v-if="script.launchGame" tone="muted" data-testid="script-card-game-mode-badge">{{ script.gameMode === "emulator" ? translate("scripts.android_emulator") : translate("scripts.pc_client") }}</NxpBadge>
           <NxpBadge v-if="script.judgeScriptEnabled && script.judgeScript" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.judge_script") }}</NxpBadge>
           <NxpBadge v-else-if="script.successKeywords || script.failureKeywords" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.keyword_judge") }}</NxpBadge>
@@ -93,7 +92,6 @@ const emit = defineEmits<{
         <NxpButton
           class="tertiary"
           type="button"
-          :disabled="Boolean(unavailableMessage)"
           @click.stop="emit('edit', script)"
         >{{ translate("scripts.edit_script") }}</NxpButton>
         <NxpButton

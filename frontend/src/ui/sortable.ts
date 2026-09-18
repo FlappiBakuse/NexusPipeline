@@ -82,8 +82,12 @@ function dragHandle(target: EventTarget | null): HTMLElement | null {
 
 function sortableItem(container: HTMLElement, handle: Element | null): HTMLElement | null {
   if (!handle || sortableOwner(handle) !== container) return null;
-  const item = handle.closest<HTMLElement>("[data-dnd-id]");
-  return item && item.parentElement === container ? item : null;
+  let current: HTMLElement | null = handle instanceof HTMLElement ? handle : handle.parentElement;
+  while (current && current !== container) {
+    if (current.parentElement === container && current.matches("[data-dnd-id]")) return current;
+    current = current.parentElement;
+  }
+  return null;
 }
 
 function isDisabled(handle: Element): boolean {

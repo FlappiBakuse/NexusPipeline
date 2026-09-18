@@ -10,6 +10,7 @@ import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
 import { clearFieldError } from "../../platform/toast";
 import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
+import NxpScheduleCard from "../../ui/composites/NxpScheduleCard.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
 
@@ -141,101 +142,61 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
             translate("queues.schedule.collapsed_help")
           }}</span>
         </div>
-        <NxpSortableList
-          id="qm-timesets"
-          class="timeset-list"
+          <NxpSortableList
+            id="qm-timesets"
+            layout="schedule"
           @reorder="(ids) => emit('reorderTimeSets', ids)"
         >
-          <article
+          <NxpScheduleCard
             v-for="(timeSet, index) in draft.timeSets"
             :key="timeSetKey(timeSet, index)"
-            class="timeset-card compact-card"
-            :class="{ 'is-open': isTimeSetOpen(timeSetKey(timeSet, index)) }"
-            :data-dnd-id="String(index)"
+            :item-id="timeSetKey(timeSet, index)"
+            :panel-id="`qm-timeset-${timeSetKey(timeSet, index)}`"
+            :summary-label="translate('queues.schedule.label', { index: index + 1 })"
+            :summary-meta="`${timeSet.time || translate('queues.time_not_set')} · ${timeSet.days.length ? translate('common.unit.days', { count: timeSet.days.length }) : translate('queues.no_days_selected')}`"
+            :days-label="translate('queues.schedule.days_multiple')"
+            :days-aria-label="translate('queues.execution_days')"
+            :time-label="translate('queues.run_time')"
+            :expanded="isTimeSetOpen(timeSetKey(timeSet, index))"
+            :drag-label="translate('common.reorder.keyboard_help')"
+            :drag-title="translate('common.drag_to_reorder')"
+            @toggle="toggleTimeSet(timeSetKey(timeSet, index))"
           >
-            <div class="timeset-head">
-              <NxpDragHandle
-                :label="translate('common.reorder.keyboard_help')"
-                :title="translate('common.drag_to_reorder')"
+            <template #days>
+              <NxpButton
+                v-for="(name, day) in dayNames"
+                :key="day"
+                class="mode-toggle"
+                type="button"
+                :aria-pressed="timeSet.days.includes(day)"
+                :title="name"
+                :aria-label="name"
+                @click="toggleDay(timeSet, day)"
+              >
+                {{ dayShortNames[day] }}
+              </NxpButton>
+            </template>
+            <template #time>
+              <NxpTimePicker
+                :id="'ts-time-' + index"
+                v-model="timeSet.time"
+                :aria-label="translate('queues.run_time')"
+              />
+            </template>
+            <template #actions>
+              <NxpSwitch
+                v-model="timeSet.enabled"
+                :aria-label="translate('common.enabled')"
               />
               <NxpButton
-                class="timeset-summary"
+                class="tertiary"
                 type="button"
-                data-testid="queue-timeset-toggle"
-                :aria-expanded="isTimeSetOpen(timeSetKey(timeSet, index))"
-                @click="toggleTimeSet(timeSetKey(timeSet, index))"
+                @click="emit('removeTimeSet', index)"
               >
-                <span class="timeset-summary-main"
-                ><strong>{{
-                  translate("queues.schedule.label", { index: index + 1 })
-                }}</strong
-                ><span class="muted"
-                  >{{ timeSet.time || translate("queues.time_not_set") }} ·
-                  {{
-                    timeSet.days.length
-                      ? translate("common.unit.days", {
-                          count: timeSet.days.length,
-                        })
-                      : translate("queues.no_days_selected")
-                  }}</span
-                ></span
-                ><span class="timeset-summary-chevron" aria-hidden="true">⌄</span>
+                {{ translate("queues.delete_schedule") }}
               </NxpButton>
-            </div>
-            <Transition name="app-collapse">
-              <div v-if="isTimeSetOpen(timeSetKey(timeSet, index))" class="timeset-details" data-testid="queue-timeset-body">
-              <div class="timeset-body">
-                <div class="timeset-layout">
-                  <div class="timeset-days">
-                    <label class="field-label">{{
-                      translate("queues.schedule.days_multiple")
-                    }}</label>
-                    <div
-                      class="days-btn-grid"
-                      role="group"
-                      :aria-label="translate('queues.execution_days')"
-                    >
-                      <NxpButton
-                        v-for="(name, day) in dayNames"
-                        :key="day"
-                        class="mode-toggle"
-                        type="button"
-                        :aria-pressed="timeSet.days.includes(day)"
-                        :title="name"
-                        :aria-label="name"
-                        @click="toggleDay(timeSet, day)"
-                      >
-                        {{ dayShortNames[day] }}
-                      </NxpButton>
-                    </div>
-                  </div>
-                  <div class="timeset-time">
-                    <label class="field-label" :for="'ts-time-' + index">{{
-                      translate("queues.run_time")
-                    }}</label
-                    ><NxpTimePicker
-                      :id="'ts-time-' + index"
-                      v-model="timeSet.time"
-                      :aria-label="translate('queues.run_time')"
-                    />
-                  </div>
-                </div>
-                <div class="timeset-actions">
-                  <NxpSwitch
-                    v-model="timeSet.enabled"
-                    :aria-label="translate('common.enabled')"
-                  /><NxpButton
-                    class="tertiary"
-                    type="button"
-                    @click="emit('removeTimeSet', index)"
-                  >
-                    {{ translate("queues.delete_schedule") }}
-                  </NxpButton>
-                </div>
-              </div>
-              </div>
-            </Transition>
-          </article>
+            </template>
+          </NxpScheduleCard>
         </NxpSortableList>
         <NxpButton
           class="ghost"
@@ -270,6 +231,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
             >
               <NxpDragHandle :label="translate('common.reorder.keyboard_help')" /><NxpSelect
                 :id="'qm-task-' + index"
+                class="task-script-select"
                 v-model="task.scriptInstanceId"
                 :options="options.scripts"
                 :aria-label="

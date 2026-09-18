@@ -39,8 +39,8 @@ describe("NxpCollapsibleCard", () => {
       slots: { header: "<strong class=\"custom-head\">自定义标题</strong>", default: "内容" },
     });
 
-    expect(wrapper.get(".settings-card-copy .custom-head").text()).toBe("自定义标题");
-    expect(wrapper.find(".settings-card-title").exists()).toBe(false);
+    expect(wrapper.get(".nxp-collapsible-card-copy .custom-head").text()).toBe("自定义标题");
+    expect(wrapper.find(".nxp-collapsible-card-title").exists()).toBe(false);
   });
 
   it("renders side controls through the actions slot", () => {

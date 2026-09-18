@@ -29,13 +29,13 @@ describe("public element slot contract", () => {
     const container = mount(() => h("nxp-badge", { tone: "ok" }, label.value));
     await nextTick();
 
-    expect(container.querySelector("nxp-badge")?.querySelector(".badge")).not.toBeNull();
+    expect(container.querySelector("nxp-badge")?.querySelector(".nxp-badge")).not.toBeNull();
 
     label.value = "未启用";
     await nextTick();
 
     const badge = container.querySelector("nxp-badge");
-    expect(badge?.querySelector(".badge")).not.toBeNull();
+    expect(badge?.querySelector(".nxp-badge")).not.toBeNull();
     expect(badge?.textContent).toContain("未启用");
   });
 
@@ -64,12 +64,12 @@ describe("public element slot contract", () => {
     }));
     await nextTick();
 
-    expect(container.querySelector("nxp-switch-setting .switch-card")).not.toBeNull();
+    expect(container.querySelector("nxp-switch-setting .nxp-switch-setting-root")).not.toBeNull();
 
     enabled.value = true;
     await nextTick();
 
-    expect(container.querySelector("nxp-switch-setting .switch-card")).not.toBeNull();
+    expect(container.querySelector("nxp-switch-setting .nxp-switch-setting-root")).not.toBeNull();
     expect(container.querySelector("nxp-switch-setting .nxp-switch")?.getAttribute("aria-pressed")).toBe("true");
   });
 
@@ -85,15 +85,15 @@ describe("public element slot contract", () => {
     await nextTick();
 
     expect(container.querySelector("nxp-button button")?.textContent).toBe("删除");
-    expect(container.querySelector("nxp-badge .badge")?.textContent).toBe("已启用");
+    expect(container.querySelector("nxp-badge .nxp-badge")?.textContent).toBe("已启用");
 
     label.value = "移除";
     tone.value = "muted";
     await nextTick();
 
     expect(container.querySelector("nxp-button button")?.textContent).toBe("移除");
-    expect(container.querySelector("nxp-badge .badge")?.textContent).toBe("未启用");
-    expect(container.querySelector("nxp-badge .badge")?.classList.contains("muted")).toBe(true);
+    expect(container.querySelector("nxp-badge .nxp-badge")?.textContent).toBe("未启用");
+    expect(container.querySelector("nxp-badge .nxp-badge")?.classList.contains("muted")).toBe(true);
   });
 
   it("opens an on-demand modal with its task content when a plugin action button is clicked", async () => {
@@ -137,9 +137,9 @@ describe("public element slot contract", () => {
     ]));
     await nextTick();
 
-    const badge = () => container.querySelector("nxp-badge .badge");
+    const badge = () => container.querySelector("nxp-badge .nxp-badge");
     expect(badge()).not.toBeNull();
-    expect(container.querySelectorAll("nxp-collapsible-card .settings-card").length).toBe(1);
+    expect(container.querySelectorAll("nxp-collapsible-card .nxp-collapsible-card").length).toBe(1);
     expect(container.querySelectorAll("nxp-button button").length).toBe(2);
 
     status.value = "未启用";
@@ -147,7 +147,7 @@ describe("public element slot contract", () => {
     await nextTick();
 
     expect(badge()?.textContent).toBe("未启用");
-    expect(container.querySelectorAll("nxp-switch-setting .switch-card").length).toBe(2);
+    expect(container.querySelectorAll("nxp-switch-setting .nxp-switch-setting-root").length).toBe(2);
     expect(container.querySelectorAll("nxp-button button").length).toBe(1);
     expect(container.querySelector("nxp-button button")?.textContent).toContain("删除");
   });

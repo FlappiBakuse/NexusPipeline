@@ -100,7 +100,7 @@ describe("public Nexus elements", () => {
     section.remove();
 
     const collapsible = await mountElement("nxp-collapsible-card", { title: "宿主折叠", "panel-id": "plugin-panel" });
-    expect(collapsible.querySelector(".settings-card-title")?.textContent).toBe("宿主折叠");
+    expect(collapsible.querySelector(".nxp-collapsible-card-title")?.textContent).toBe("宿主折叠");
     expect(collapsible.querySelector("[role='button'], button")?.getAttribute("aria-controls")).toBe("plugin-panel");
     collapsible.remove();
   });
@@ -111,6 +111,7 @@ describe("public Nexus elements", () => {
       "nxp-date-range-picker",
       "nxp-drag-handle",
       "nxp-entity-row",
+      "nxp-schedule-card",
       "nxp-sortable-list",
     ]));
 
@@ -121,6 +122,47 @@ describe("public Nexus elements", () => {
     const row = await mountElement("nxp-entity-row", { "item-id": "item-1" });
     expect(row.querySelector("[data-entity-row]")?.getAttribute("data-dnd-id")).toBe("item-1");
     row.remove();
+
+    const schedule = await mountElement("nxp-schedule-card", {
+      "item-id": "schedule-1",
+      "data-dnd-id": "schedule-1",
+      "panel-id": "schedule-panel-1",
+      "summary-label": "定时 1",
+      "summary-meta": "09:00 · 5 天",
+      expanded: "",
+    });
+    expect(schedule.querySelector("[data-dnd-id]")?.getAttribute("data-dnd-id")).toBe("schedule-1");
+    expect(schedule.querySelector(".nxp-schedule-summary")?.getAttribute("aria-expanded")).toBe("true");
+    schedule.remove();
+  });
+
+  it("renders named schedule actions for public custom-element consumers", async () => {
+    registerNexusElements();
+    const schedule = document.createElement("nxp-schedule-card");
+    schedule.setAttribute("item-id", "schedule-actions-1");
+    schedule.setAttribute("panel-id", "schedule-actions-panel");
+    schedule.setAttribute("days-label", "执行周期");
+    schedule.setAttribute("time-label", "执行时间");
+    schedule.setAttribute("expanded", "");
+    const enabled = document.createElement("nxp-switch");
+    enabled.setAttribute("slot", "actions");
+    enabled.setAttribute("semantic-role", "switch");
+    enabled.setAttribute("aria-label", "启用计划");
+    const remove = document.createElement("nxp-button");
+    remove.setAttribute("slot", "actions");
+    remove.setAttribute("label", "删除定时");
+    schedule.append(enabled, remove);
+    document.body.append(schedule);
+
+    await customElements.whenDefined("nxp-schedule-card");
+    await customElements.whenDefined("nxp-switch");
+    await customElements.whenDefined("nxp-button");
+    await nextTick();
+
+    expect(schedule.querySelector(".nxp-schedule-actions")).not.toBeNull();
+    expect(schedule.querySelector(".nxp-schedule-actions nxp-switch")).toBe(enabled);
+    expect(schedule.querySelector(".nxp-schedule-actions nxp-button")).toBe(remove);
+    schedule.remove();
   });
 
   it("reports the toggle payload of the public collapsible card as an event detail list", async () => {

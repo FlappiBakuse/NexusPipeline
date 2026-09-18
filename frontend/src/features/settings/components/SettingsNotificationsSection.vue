@@ -5,9 +5,11 @@ import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpField from "../../../ui/primitives/NxpField.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
+import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
 import NxpCollapseTransition from "../../../ui/composites/NxpCollapseTransition.vue";
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import NxpTextArea from "../../../ui/primitives/NxpTextArea.vue";
@@ -60,44 +62,16 @@ const secureOptions = computed<NxpOption[]>(() =>
 </script>
 
 <template>
-  <section
-    class="settings-card section-surface"
-    :class="{ 'is-expanded': expanded }"
+  <NxpCollapsibleCard
     data-settings-panel="notifications"
     data-testid="notification-settings"
+    panel="notifications"
+    panel-id="settings-panel-notifications"
+    :title="t('settings.notification_channels')"
+    :description="t('settings.notification.channels_help')"
+    :expanded="expanded"
+    @toggle="emit('toggle')"
   >
-    <NxpButton
-      class="settings-card-toggle"
-      type="button"
-      data-action="toggle-settings-panel"
-      data-panel="notifications"
-      :aria-expanded="expanded"
-      aria-controls="settings-panel-notifications"
-      @click.stop="emit('toggle')"
-    >
-      <span class="settings-card-copy"
-        ><strong class="settings-card-title">{{
-          t("settings.notification_channels")
-        }}</strong
-        ><span class="muted">{{
-          t("settings.notification.channels_help")
-        }}</span></span
-      ><span class="settings-card-arrow" aria-hidden="true"
-        ><NxpIcon
-          :name="
-            expanded
-              ? 'chevronDown'
-              : 'chevronRight'
-          "
-          class-name="settings-card-arrow-icon"
-      /></span>
-    </NxpButton>
-    <NxpCollapseTransition>
-      <div
-        id="settings-panel-notifications"
-        class="settings-card-body"
-        v-show="expanded"
-      >
       <div class="notification-settings">
         <NxpButton
           class="panel-toggle"
@@ -147,37 +121,28 @@ const secureOptions = computed<NxpOption[]>(() =>
             />
           </div>
           <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="st-whtype-trigger">{{
-                t("settings.webhook_type")
-              }}</label
-              ><NxpSelect
+            <NxpField :label="t('settings.webhook_type')" for="st-whtype-trigger">
+              <NxpSelect
                 id="st-whtype"
                 v-model="settings.webhookType"
                 :options="webhookTypeOptions"
                 :aria-label="t('settings.webhook_type')"
                 @change="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-whtimeout">{{
-                t("settings.timeout_seconds")
-              }}</label
-              ><NxpNumberInput
+            </NxpField>
+            <NxpField :label="t('settings.timeout_seconds')" for="st-whtimeout">
+              <NxpNumberInput
                 id="st-whtimeout"
                 v-model.number="settings.webhookTimeout"
                 :min="1"
                 :aria-label="t('settings.timeout_seconds')"
                 @change="save"
               />
-            </div>
+            </NxpField>
           </div>
           <div class="form-grid">
-            <div class="field" :data-help="t('settings.notification.webhook_url_keep')">
-              <label class="field-label" for="st-whurl">{{
-                t("settings.webhook_address")
-              }}</label
-              ><NxpTextInput
+            <NxpField :label="t('settings.webhook_address')" for="st-whurl" :help="t('settings.notification.webhook_url_keep')">
+              <NxpTextInput
                 id="st-whurl"
                 v-model="secretDraft.webhookUrl"
                 type="url"
@@ -189,28 +154,23 @@ const secureOptions = computed<NxpOption[]>(() =>
                 "
                 @blur="save"
               />
-            </div>
-            <div class="field" :data-help="t('settings.notification.secret_keep')">
-              <label class="field-label" for="st-whsec">{{
-                t("settings.webhook_signing_secret")
-              }}</label
-              ><NxpTextInput
+            </NxpField>
+            <NxpField :label="t('settings.webhook_signing_secret')" for="st-whsec" :help="t('settings.notification.secret_keep')">
+              <NxpTextInput
                 id="st-whsec"
                 v-model="secretDraft.webhookSecret"
                 type="password"
                 :aria-label="t('settings.webhook_signing_secret')"
                 @blur="save"
               />
-            </div>
+            </NxpField>
           </div>
           <div v-if="settings.webhookType === 'feishu'" class="webhook-advanced-fields">
             <div class="form-grid">
-              <div class="field" :data-help="t('settings.notification.image_credentials')">
-                <label class="field-label" for="st-feishu-appid">{{ t("settings.feishu_app_id") }}</label>
+              <NxpField :label="t('settings.feishu_app_id')" for="st-feishu-appid" :help="t('settings.notification.image_credentials')">
                 <NxpTextInput id="st-feishu-appid" v-model="settings.feishuAppId" :aria-label="t('settings.feishu_app_id')" @blur="save" />
-              </div>
-              <div class="field" :data-help="t('settings.notification.app_secret_keep')">
-                <label class="field-label" for="st-feishu-secret">{{ t("settings.feishu_app_secret", {}, "Feishu App Secret") }}</label>
+              </NxpField>
+              <NxpField :label="t('settings.feishu_app_secret', {}, 'Feishu App Secret')" for="st-feishu-secret" :help="t('settings.notification.app_secret_keep')">
                 <NxpTextInput
                   id="st-feishu-secret"
                   v-model="secretDraft.feishuAppSecret"
@@ -220,17 +180,15 @@ const secureOptions = computed<NxpOption[]>(() =>
                   autocomplete="new-password"
                   @blur="save"
                 />
-              </div>
+              </NxpField>
             </div>
           </div>
           <div v-else-if="settings.webhookType === 'slack'" class="webhook-advanced-fields">
             <div class="form-grid">
-              <div class="field" :data-help="t('settings.notification.bot_member_help')">
-                <label class="field-label" for="st-slack-channel">{{ t("settings.slack_channel_id") }}</label>
+              <NxpField :label="t('settings.slack_channel_id')" for="st-slack-channel" :help="t('settings.notification.bot_member_help')">
                 <NxpTextInput id="st-slack-channel" v-model="settings.slackChannelId" :aria-label="t('settings.slack_channel_id')" @blur="save" />
-              </div>
-              <div class="field" :data-help="t('settings.notification.bot_token_keep')">
-                <label class="field-label" for="st-slack-token">{{ t("settings.slack_bot_token") }}</label>
+              </NxpField>
+              <NxpField :label="t('settings.slack_bot_token')" for="st-slack-token" :help="t('settings.notification.bot_token_keep')">
                 <NxpTextInput
                   id="st-slack-token"
                   v-model="secretDraft.slackBotToken"
@@ -240,27 +198,23 @@ const secureOptions = computed<NxpOption[]>(() =>
                   autocomplete="new-password"
                   @blur="save"
                 />
-              </div>
+              </NxpField>
             </div>
           </div>
           <div v-else-if="settings.webhookType === 'dingtalk'" class="webhook-advanced-fields">
             <div class="form-grid">
-              <div class="field">
-                <label class="field-label" for="st-dingtalk-key">{{ t("settings.dingtalk_app_key") }}</label>
+              <NxpField :label="t('settings.dingtalk_app_key')" for="st-dingtalk-key">
                 <NxpTextInput id="st-dingtalk-key" v-model="settings.dingTalkAppKey" :aria-label="t('settings.dingtalk_app_key')" @blur="save" />
-              </div>
-              <div class="field">
-                <label class="field-label" for="st-dingtalk-robot">{{ t("settings.dingtalk_robot_code") }}</label>
+              </NxpField>
+              <NxpField :label="t('settings.dingtalk_robot_code')" for="st-dingtalk-robot">
                 <NxpTextInput id="st-dingtalk-robot" v-model="settings.dingTalkRobotCode" :aria-label="t('settings.dingtalk_robot_code')" @blur="save" />
-              </div>
+              </NxpField>
             </div>
             <div class="form-grid">
-              <div class="field">
-                <label class="field-label" for="st-dingtalk-conversation">{{ t("settings.dingtalk_open_conversation_id") }}</label>
+              <NxpField :label="t('settings.dingtalk_open_conversation_id')" for="st-dingtalk-conversation">
                 <NxpTextInput id="st-dingtalk-conversation" v-model="settings.dingTalkOpenConversationId" :aria-label="t('settings.dingtalk_open_conversation_id')" @blur="save" />
-              </div>
-              <div class="field" :data-help="t('settings.notification.app_secret_keep')">
-                <label class="field-label" for="st-dingtalk-secret">{{ t("settings.dingtalk_app_secret") }}</label>
+              </NxpField>
+              <NxpField :label="t('settings.dingtalk_app_secret')" for="st-dingtalk-secret" :help="t('settings.notification.app_secret_keep')">
                 <NxpTextInput
                   id="st-dingtalk-secret"
                   v-model="secretDraft.dingTalkAppSecret"
@@ -270,19 +224,16 @@ const secureOptions = computed<NxpOption[]>(() =>
                   autocomplete="new-password"
                   @blur="save"
                 />
-              </div>
+              </NxpField>
             </div>
           </div>
-          <div class="field" :data-help="t('settings.notification.template_help')">
-            <label class="field-label" for="st-whtpl">{{
-              t("settings.notification.custom_template")
-            }}</label
-            ><NxpTextArea
+          <NxpField :label="t('settings.notification.custom_template')" for="st-whtpl" :help="t('settings.notification.template_help')">
+            <NxpTextArea
               id="st-whtpl"
               v-model="settings.webhookTemplate"
               @blur="save"
             />
-          </div>
+          </NxpField>
           </div>
         </NxpCollapseTransition>
         <NxpButton
@@ -333,114 +284,87 @@ const secureOptions = computed<NxpOption[]>(() =>
             />
           </div>
           <div class="form-grid three">
-            <div class="field">
-              <label class="field-label" for="st-host">{{
-                t("settings.smtp_server")
-              }}</label
-              ><NxpTextInput
+            <NxpField :label="t('settings.smtp_server')" for="st-host">
+              <NxpTextInput
                 id="st-host"
                 v-model="settings.smtpHost"
                 :aria-label="t('settings.smtp_server')"
                 @blur="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-port2">{{
-                t("settings.port")
-              }}</label
-              ><NxpNumberInput
+            </NxpField>
+            <NxpField :label="t('settings.port')" for="st-port2">
+              <NxpNumberInput
                 id="st-port2"
                 v-model.number="settings.smtpPort"
                 :aria-label="t('settings.port')"
                 @change="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-secure-trigger">{{
-                t("settings.encryption")
-              }}</label
-              ><NxpSelect
+            </NxpField>
+            <NxpField :label="t('settings.encryption')" for="st-secure-trigger">
+              <NxpSelect
                 id="st-secure"
                 v-model="settings.smtpSecure"
                 :options="secureOptions"
                 :aria-label="t('settings.encryption')"
                 @change="save"
               />
-            </div>
+            </NxpField>
           </div>
           <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="st-user">{{
-                t("common.account")
-              }}</label
-              ><NxpTextInput
+            <NxpField :label="t('common.account')" for="st-user">
+              <NxpTextInput
                 id="st-user"
                 v-model="settings.smtpUser"
                 :aria-label="t('common.account')"
                 @blur="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-pwd">{{
-                t("settings.smtp_password")
-              }}</label
-              ><NxpTextInput
+            </NxpField>
+            <NxpField :label="t('settings.smtp_password')" for="st-pwd">
+              <NxpTextInput
                 id="st-pwd"
                 v-model="secretDraft.smtpPassword"
                 type="password"
                 :aria-label="t('settings.smtp_password')"
                 @blur="save"
               />
-            </div>
+            </NxpField>
           </div>
           <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="st-to">{{
-                t("settings.notification.recipients_help")
-              }}</label
-              ><NxpTextInput
+            <NxpField :label="t('settings.notification.recipients_help')" for="st-to">
+              <NxpTextInput
                 id="st-to"
                 v-model="settings.smtpTo"
                 :aria-label="t('settings.notification.recipients_help')"
                 @blur="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-from">{{
-                t("settings.from_address_blank_account")
-              }}</label
-              ><NxpTextInput
+            </NxpField>
+            <NxpField :label="t('settings.from_address_blank_account')" for="st-from">
+              <NxpTextInput
                 id="st-from"
                 v-model="settings.smtpFrom"
                 :aria-label="t('settings.from_address_blank_account')"
                 @blur="save"
               />
-            </div>
+            </NxpField>
           </div>
           <div class="form-grid">
-            <div class="field">
-              <label class="field-label" for="st-subject">{{
-                t("settings.subject_prefix")
-              }}</label
-              ><NxpTextInput
+            <NxpField :label="t('settings.subject_prefix')" for="st-subject">
+              <NxpTextInput
                 id="st-subject"
                 v-model="settings.smtpSubjectPrefix"
                 :aria-label="t('settings.subject_prefix')"
                 @blur="save"
               />
-            </div>
-            <div class="field">
-              <label class="field-label" for="st-smtp-timeout">{{
-                t("settings.timeout_seconds")
-              }}</label
-              ><NxpNumberInput
+            </NxpField>
+            <NxpField :label="t('settings.timeout_seconds')" for="st-smtp-timeout">
+              <NxpNumberInput
                 id="st-smtp-timeout"
                 v-model.number="settings.smtpTimeout"
                 :min="1"
                 :aria-label="t('settings.timeout_seconds')"
                 @change="save"
               />
-            </div>
+            </NxpField>
           </div>
           </div>
         </NxpCollapseTransition>
@@ -450,7 +374,5 @@ const secureOptions = computed<NxpOption[]>(() =>
           </NxpButton>
         </div>
       </div>
-      </div>
-    </NxpCollapseTransition>
-  </section>
+  </NxpCollapsibleCard>
 </template>

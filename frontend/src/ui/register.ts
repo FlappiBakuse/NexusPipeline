@@ -33,6 +33,7 @@ import DateRangePicker from "./composites/NxpDateRangePicker.vue";
 import DragHandle from "./composites/NxpDragHandle.vue";
 import EntityRow from "./composites/NxpEntityRow.vue";
 import SortableList from "./composites/NxpSortableList.vue";
+import ScheduleCard from "./composites/NxpScheduleCard.vue";
 import Tabs from "./composites/NxpTabs.vue";
 import ConfirmDialog from "./composites/NxpConfirmDialog.vue";
 import DialogPopover from "./composites/NxpDialogPopover.vue";
@@ -74,6 +75,7 @@ export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-drag-handle": DragHandle,
   "nxp-entity-row": EntityRow,
   "nxp-sortable-list": SortableList,
+  "nxp-schedule-card": ScheduleCard,
   "nxp-tabs": Tabs,
   "nxp-confirm-dialog": ConfirmDialog,
   "nxp-dialog-popover": DialogPopover,

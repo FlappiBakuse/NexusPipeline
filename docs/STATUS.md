@@ -6,8 +6,7 @@
 
 ## 当前未完成事项
 
-- [ ] 两仓库当前开发改动获得提交授权后，将最终候选 commit SHA 写入 `plugins.lock.json` 与 `host.lock.json`，运行成对候选版本的远端 CI。当前工作区仍有 v0.16.6 收口改动；本地最终工作树已重新取得 Test Host Update 8/8 与管理员生产 Execution 14/14 的 High、`timeScale=1` 结果及实际产物清单，候选冻结后仍需将同一组证据关联到远端提交。
-- [ ] 完成开发报告要求的九类故障逐阶段外部证据对账。当前宿主与插件 Test Host 已覆盖文件锁、受控权限拒绝/磁盘不足错误、部分写入边界、损坏保全、主/附加快照恢复、插件 pending 安装更新卸载连续重启和更新异常退出；真实 ACL、真卷容量仍按外部环境矩阵单列，54 项义务的阶段、原生测试身份、模式与报告引用仍需随固定候选验收附件一并关联。
+- 公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
 
 - 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
 - 前端架构现状以[架构索引](architecture/README.md)和[前端架构专题](architecture/frontend.md)为准；插件契约调整以[插件 API 索引](reference/plugin-api/README.md)为准。

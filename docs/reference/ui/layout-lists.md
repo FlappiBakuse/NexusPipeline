@@ -20,7 +20,8 @@
 |---|---|---|---|
 | `nxp-entity-row` | `itemId` string；空；`as`: `div\|article\|li`；`div`；`slotLayout`: `normal\|contents`；`normal` | 无 | `leading`、`content`、`meta`、`actions`；无 content slot 时默认 slot作为 content。`itemId` 非空时映射为排序所需的 `data-dnd-id`；`contents` 只改变 leading/actions wrapper 的布局，不改变 slot 责任。 |
 | `nxp-drag-handle` | `label` string；`Reorder`；`title` string；空；`disabled` boolean；`false`；`tabIndex` number；`0`；`ariaHidden` boolean；`false` | 无自定义事件；点击被组件消费 | 无 slot。它是排序手柄的键盘/可访问入口；实际重排由 `nxp-sortable-list` 协调。 |
-| `nxp-sortable-list` | `axis`: `y\|both`；`y`；`disabled` boolean；`false`；`tag` string；`div`；`transitionName` string；空；`canDrag` 谓词；未提供 | `reorder`: `[string[], string]`，完整 ids 与 movedId | 默认 slot 必须是直接含唯一、非空 `data-dnd-id` 的列表项。Escape、pointercancel、外部列表变化和卸载取消当前操作；调用方收到完整顺序后保存并更新列表。 |
+| `nxp-sortable-list` | `axis`: `y\|both`；`y`；`disabled` boolean；`false`；`tag` string；`div`；`transitionName` string；空；`layout`: `default\|schedule`；`default`；`canDrag` 谓词；未提供 | `reorder`: `[string[], string]`，完整 ids 与 movedId | 默认 slot 必须是直接含唯一、非空 `data-dnd-id` 的列表项。`layout="schedule"` 为公共定时卡片提供统一列表间距；Escape、pointercancel、外部列表变化和卸载取消当前操作；调用方收到完整顺序后保存并更新列表。 |
+| `nxp-schedule-card` | `itemId` string；空；`panelId` string；空；`summaryLabel`/`summaryMeta`/`daysLabel`/`daysAriaLabel`/`timeLabel` string；空；`expanded` boolean；`false`；`dragLabel`/`dragTitle` string | `toggle`: `[boolean]`，新的展开状态 | `days`、`time`、`actions`；定时摘要、拖拽把手、星期选择、时间控件和底部操作区由组件统一布局；`itemId` 非空时生成 `data-dnd-id`。与 `nxp-sortable-list layout="schedule"` 配合时，列表项仍需直接携带唯一身份属性。 |
 
 ### 排序示例
 

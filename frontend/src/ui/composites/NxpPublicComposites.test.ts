@@ -5,6 +5,7 @@ import NxpActionGroup from "./NxpActionGroup.vue";
 import NxpDateRangePicker from "./NxpDateRangePicker.vue";
 import NxpDragHandle from "./NxpDragHandle.vue";
 import NxpEntityRow from "./NxpEntityRow.vue";
+import NxpScheduleCard from "./NxpScheduleCard.vue";
 import NxpSortableList from "./NxpSortableList.vue";
 import NxpField from "../primitives/NxpField.vue";
 
@@ -39,6 +40,35 @@ describe("public composite UI", () => {
 
     expect(wrapper.get(".nxp-entity-row-leading").classes()).toContain("is-contents");
     expect(wrapper.get(".nxp-entity-row-actions").classes()).toContain("is-contents");
+  });
+
+  it("shares the schedule card structure and emits controlled expansion changes", async () => {
+    const wrapper = mount(NxpScheduleCard, {
+      props: {
+        itemId: "schedule-1",
+        panelId: "schedule-panel-1",
+        summaryLabel: "定时 1",
+        summaryMeta: "09:00 · 5 天",
+        daysLabel: "执行周期",
+        timeLabel: "执行时间",
+        expanded: true,
+      },
+      slots: {
+        days: () => h("button", { type: "button", "aria-pressed": "true" }, "一"),
+        time: () => h("input", { type: "time", value: "09:00" }),
+        actions: () => h("button", { type: "button" }, "删除定时"),
+      },
+    });
+
+    expect(wrapper.attributes("data-dnd-id")).toBe("schedule-1");
+    expect(wrapper.get(".nxp-schedule-summary").attributes("aria-controls")).toBe("schedule-panel-1");
+    expect(wrapper.get(".nxp-schedule-summary").text()).toContain("定时 1");
+    expect(wrapper.get(".nxp-schedule-details").text()).toContain("执行周期");
+    expect(wrapper.get('input[type="time"]').attributes("value")).toBe("09:00");
+
+    await wrapper.get(".nxp-schedule-summary").trigger("click");
+    expect(wrapper.emitted("toggle")).toEqual([[false]]);
+    wrapper.unmount();
   });
 
   it("associates field labels and exposes named help/error content", () => {

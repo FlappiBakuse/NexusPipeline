@@ -49,10 +49,12 @@ function description(plugin: PluginViewPlugin) {
       <strong>{{ t("plugins.plugin_repository_unavailable") }}</strong>
       <span>{{ error || t("plugins.catalog.network_help") }}</span>
     </div>
-    <div v-else-if="error && !plugins.length" class="empty">
-      <strong>{{ t("plugins.load.local_failed") }}</strong>
-      <span>{{ error }}</span>
-    </div>
+    <NxpEmptyState
+      v-else-if="error && !plugins.length"
+      tone="danger"
+      :title="t('plugins.load.local_failed')"
+      :description="error"
+    />
     <div v-else class="plugin-list" role="listbox">
       <div v-if="stale" class="callout callout-warning" data-testid="plugin-store-stale">
         {{ t("plugin.store.stale", {}, "The repository is temporarily unavailable. Showing the cached catalog.") }}

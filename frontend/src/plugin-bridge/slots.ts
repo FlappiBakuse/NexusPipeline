@@ -57,18 +57,21 @@ function toneClass(value) {
 function renderBadges(parent, values) {
   const badges = Array.isArray(values?.badges) ? values.badges : (values?.label ? [values] : []);
   badges.forEach(badge => {
-    const span = textElement("span", badge.label || "", `badge ${toneClass(badge.tone)}`);
-    if (badge.title) span.title = badge.title;
-    parent.append(span);
+    const element = document.createElement("nxp-badge");
+    element.tone = toneClass(badge.tone);
+    element.textContent = badge.label || "";
+    if (badge.title) element.title = badge.title;
+    parent.append(element);
   });
 }
 
 function renderFields(parent, values) {
   const fields = Array.isArray(values?.fields) ? values.fields : [];
   fields.forEach(field => {
-    const row = document.createElement("div");
+    const row = document.createElement("nxp-field");
     row.className = "plugin-display-field";
-    row.append(textElement("span", field.label || "", "muted"), textElement("strong", field.value ?? ""));
+    row.label = field.label || "";
+    row.append(textElement("strong", field.value ?? ""));
     parent.append(row);
   });
 }
@@ -93,15 +96,16 @@ function renderFormContribution(parent, contribution) {
   const controls = new Map();
   try {
     fields.forEach(field => {
-      const wrapper = document.createElement("div");
-      wrapper.className = "field plugin-field";
+      const wrapper = document.createElement("nxp-field");
+      wrapper.className = "plugin-field";
+      wrapper.label = field.label || field.key || "";
+      wrapper.help = field.description || "";
+      wrapper.required = field.required === true;
       if (field.description) wrapper.dataset.help = field.description;
-      const label = textElement("label", `${field.label || field.key}${field.required ? " *" : ""}`, "field-label");
-      wrapper.append(label);
       form.append(wrapper);
       const controlId = `plugin-${contribution.pluginName}-${contribution.id}-${field.key}`.replace(/[^a-zA-Z0-9_-]/g, "-");
       const control = createPluginFieldControl(field, contribution.values?.[field.key], controlId, wrapper);
-      label.htmlFor = control.labelFor;
+      wrapper.for = control.labelFor;
       controls.set(String(field.key || ""), control);
     });
   } catch (error) {
@@ -146,7 +150,12 @@ function renderDeclarativeContribution(parent, contribution) {
     const wrap = document.createElement("span");
     wrap.className = "plugin-contribution-badge";
     renderBadges(wrap, contribution.values || {});
-    if (!wrap.childElementCount) wrap.append(textElement("span", payloadText(contribution.values), "badge muted"));
+    if (!wrap.childElementCount) {
+      const fallback = document.createElement("nxp-badge");
+      fallback.tone = "muted";
+      fallback.textContent = payloadText(contribution.values);
+      wrap.append(fallback);
+    }
     parent.append(wrap);
     return;
   }
@@ -154,8 +163,9 @@ function renderDeclarativeContribution(parent, contribution) {
     renderFormContribution(parent, contribution);
     return;
   }
-  const card = document.createElement("article");
-  card.className = "plugin-contribution-card card section-surface";
+  const card = document.createElement("nxp-card");
+  card.className = "plugin-contribution-card";
+  card.as = "article";
   const heading = document.createElement("div");
   heading.className = "section-heading";
   heading.append(textElement("h3", contribution.title || contribution.id), textElement("span", contribution.pluginDisplayName || contribution.pluginName, "muted"));
@@ -163,7 +173,7 @@ function renderDeclarativeContribution(parent, contribution) {
   if (contribution.description) card.append(textElement("p", contribution.description, "muted"));
   renderBadges(card, contribution.values || {});
   renderFields(card, contribution.values || {});
-  if (!card.querySelector(".badge, .plugin-display-field") && contribution.values && Object.keys(contribution.values).length) {
+  if (!card.querySelector("nxp-badge, .plugin-display-field") && contribution.values && Object.keys(contribution.values).length) {
     card.append(textElement("p", payloadText(contribution.values), "muted"));
   }
   parent.append(card);

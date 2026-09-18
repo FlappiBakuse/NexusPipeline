@@ -46,4 +46,14 @@ describe("plugin bridge implementation boundary", () => {
       expect(publicElementNames.has(tag), `字段控件映射到了未公开元素 ${tag}`).toBe(true);
     }
   });
+
+  it("assembles contribution badges, cards and fields from public elements", () => {
+    const source = productionSources().map(([, content]) => content).join("\n");
+    expect(source).toContain('document.createElement("nxp-badge")');
+    expect(source).toContain('document.createElement("nxp-card")');
+    expect(source).toContain('document.createElement("nxp-field")');
+    for (const legacyClass of ["badge", "empty", "settings-card", "plugin-loading-state"]) {
+      expect(source).not.toContain(`className = "${legacyClass}`);
+    }
+  });
 });

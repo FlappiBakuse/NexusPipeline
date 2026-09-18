@@ -59,4 +59,4 @@ slot：`label`、`help`、默认字段内容、`description`、`error`。字段�
 
 ## 样式边界
 
-调用方可以使用宿主 design tokens 和元素自身公开的 tone/variant/size 属性。`.nxp-*` 内部节点、弹窗布局和输入包装器不属于跨插件样式 API。
+调用方可以使用宿主 design tokens 和元素自身公开的 tone/variant/size 属性。徽标还支持 `--nx-badge-min-height`、`--nx-badge-padding`、`--nx-badge-border` 和 `--nx-badge-font-size` 作为调用方布局变量。`.nxp-*` 内部节点、弹窗布局和输入包装器不属于跨插件样式 API。

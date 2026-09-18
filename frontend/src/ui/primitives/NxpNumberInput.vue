@@ -101,7 +101,8 @@ function stepValue(direction: 1 | -1) {
   height: 40px;
   padding: 0 12px;
   border: 1px solid var(--content-control-border, var(--nx-color-border));
-  border-radius: 8px 0 0 8px;
+  /* app.css also targets input[type="text"]; keep the joined edge square. */
+  border-radius: 8px 0 0 8px !important;
   outline: none;
   background: var(--content-control, transparent);
   color: var(--nx-color-text);

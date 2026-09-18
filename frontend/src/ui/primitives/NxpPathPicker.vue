@@ -111,7 +111,8 @@ function browse(
   min-height: var(--nx-control-height);
   padding: 0 12px;
   border: 1px solid var(--content-control-border, var(--nx-color-border));
-  border-radius: 8px 0 0 8px;
+  /* app.css also targets input[type="text"]; keep the joined edge square. */
+  border-radius: 8px 0 0 8px !important;
   background: var(--content-control, transparent);
   color: var(--nx-color-text);
   font: inherit;

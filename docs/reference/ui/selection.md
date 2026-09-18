@@ -53,6 +53,8 @@ function onApply(event) {
 
 `nxp-switch-list` 没有属性和自定义事件，只接收默认 slot，适合承载多个 `nxp-switch-setting`；每个设置项的值和错误状态仍由子组件与调用方维护。
 
+开关组合的布局由组件负责；需要调整业务布局时使用公开 CSS Variables，不访问内部节点 class。`nxp-switch-setting` 支持 `--nx-switch-setting-min-height`、`--nx-switch-setting-height`、`--nx-switch-setting-padding`、`--nx-switch-setting-border`、`--nx-switch-setting-border-bottom`、`--nx-switch-setting-radius`、`--nx-switch-setting-background`、`--nx-switch-setting-hover-background` 和 `--nx-switch-setting-copy-padding`。其中 `--nx-switch-setting-control-width`、`--nx-switch-setting-control-height`、`--nx-switch-setting-track-width`、`--nx-switch-setting-track-height` 用于协调右侧 `nxp-switch` 的尺寸；`nxp-switch` 也可直接使用 `--nx-switch-control-width`、`--nx-switch-control-height`、`--nx-switch-track-width`、`--nx-switch-track-height`、`--nx-switch-thumb-size` 和 `--nx-switch-thumb-translate`。
+
 ## 选择器消费规则
 
 - 通过公开属性传入 `false`、`0`、空字符串和空数组；调用方不要用 truthiness 判断这些值是否存在。

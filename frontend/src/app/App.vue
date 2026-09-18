@@ -15,6 +15,7 @@ import { registerTokenPromptRenderer } from "../platform/auth";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
+import NxpEmptyState from "../ui/primitives/NxpEmptyState.vue";
 
 const route = useRoute();
 const shell = useShellStore();
@@ -145,6 +146,13 @@ function openNav() {
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="notice-stack" aria-live="polite" :aria-label="t('shell.page_notifications')" data-i18n-aria-label="shell.page_notifications"></div>
-  <div v-if="shell.bootError" class="empty app-boot-error" role="alert"><strong>{{ t("shell.boot.error_details") }}</strong><span>{{ shell.bootError }}</span></div>
+  <NxpEmptyState
+    v-if="shell.bootError"
+    class="app-boot-error"
+    role="alert"
+    tone="danger"
+    :title="t('shell.boot.error_details')"
+    :description="shell.bootError"
+  />
   <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
 </template>
