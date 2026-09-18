@@ -63,7 +63,7 @@ test("表单校验：脚本实例与调度队列标记空必填项", async ({ pa
   await expect(modal.locator("#sm-name")).toBeFocused();
   await modal.locator("#sm-name").fill("Smoke 校验脚本");
   await expect(modal.locator("#sm-name")).not.toHaveClass(/field-error/);
-  await modal.locator(".nxp-modal-close").last().click();
+  await modal.getByRole("button", { name: /^(Close|关闭)$/ }).click();
 
   await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "新建调度队列", exact: true }).click();
@@ -73,7 +73,7 @@ test("表单校验：脚本实例与调度队列标记空必填项", async ({ pa
   await expect(modal.locator("#qm-name")).toHaveAttribute("aria-invalid", "true");
   await modal.locator("#qm-name").fill("Smoke 校验队列");
   await expect(modal.locator("#qm-name")).not.toHaveClass(/field-error/);
-  await modal.locator(".nxp-modal-close").click();
+  await modal.getByRole("button", { name: /^(Close|关闭)$/ }).click();
 });
 
 test("用户管理：修改插件字段并保存用户绑定", async ({ page }) => {
