@@ -19,13 +19,13 @@ test("调度队列入口：创建、编辑和删除一个手动队列", async ({
     await page.locator("#qm-name").fill(`Smoke 队列-${suffix}`);
     await page.getByRole("button", { name: "+ 添加任务", exact: true }).click();
     await chooseCustomSelect(page, "qm-task-0", script.id);
-    await page.locator(".modal").getByRole("button", { name: "保存", exact: true }).click();
+    await page.locator(".nxp-modal").getByRole("button", { name: "保存", exact: true }).click();
     const card = page.getByTestId("queue-card").filter({ hasText: `Smoke 队列-${suffix}` }).first();
     await expect(card).toBeVisible();
 
     await card.locator('[data-action="edit-queue"]').click();
     await page.locator("#qm-name").fill(`Smoke 队列-已编辑-${suffix}`);
-    await page.locator(".modal").getByRole("button", { name: "保存", exact: true }).click();
+    await page.locator(".nxp-modal").getByRole("button", { name: "保存", exact: true }).click();
     await expect(page.getByTestId("queue-card").filter({ hasText: `Smoke 队列-已编辑-${suffix}` })).toBeVisible();
 
     await page.getByTestId("queue-card").filter({ hasText: `Smoke 队列-已编辑-${suffix}` }).first().locator('[data-action="delete-queue"]').click();

@@ -7,12 +7,12 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
   try {
     await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
     await page.getByTestId("new-script").click();
-    let modal = page.locator(".modal");
+    let modal = page.locator(".nxp-modal");
     await expect(modal).toBeVisible();
     const genericChooser = modal.getByRole("button", { name: /新建通用脚本实例/ });
     if (await genericChooser.count()) {
       await genericChooser.click();
-      modal = page.locator(".modal");
+      modal = page.locator(".nxp-modal");
       await expect(modal.locator("#sm-mode-btn")).toBeVisible();
     }
     const judgeMode = modal.locator("#sm-mode-btn");
@@ -36,7 +36,7 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
     await card.getByRole("button", { name: "编辑脚本", exact: true }).click();
     await expect(page.locator("#sm-name")).toHaveValue("Smoke 普通脚本");
     await page.locator("#sm-name").fill("Smoke 普通脚本-已编辑");
-    await page.locator(".modal").getByRole("button", { name: "保存", exact: true }).click();
+    await page.locator(".nxp-modal").getByRole("button", { name: "保存", exact: true }).click();
     await expect(page.getByTestId("script-card").filter({ hasText: "Smoke 普通脚本-已编辑" })).toBeVisible();
 
     await page.getByTestId("script-card").filter({ hasText: "Smoke 普通脚本-已编辑" }).first().locator('[data-action="delete-script"]').click();
@@ -51,11 +51,11 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
 test("表单校验：脚本实例与调度队列标记空必填项", async ({ page }) => {
   await page.goto(baseUrl + "#/scripts", { waitUntil: "domcontentloaded" });
   await page.getByTestId("new-script").click();
-  let modal = page.locator(".modal");
+  let modal = page.locator(".nxp-modal");
   await expect(modal).toBeVisible();
   const genericChooser = modal.getByRole("button", { name: /新建通用脚本实例/ });
   if (await genericChooser.count()) await genericChooser.click();
-  modal = page.locator(".modal").last();
+  modal = page.locator(".nxp-modal").last();
   await modal.getByRole("button", { name: "保存", exact: true }).click();
   await expect(modal.locator("#sm-name")).toHaveClass(/field-error/);
   await expect(modal.locator("#sm-root")).toHaveClass(/field-error/);
@@ -67,7 +67,7 @@ test("表单校验：脚本实例与调度队列标记空必填项", async ({ pa
 
   await page.goto(baseUrl + "#/queues", { waitUntil: "domcontentloaded" });
   await page.getByRole("button", { name: "新建调度队列", exact: true }).click();
-  modal = page.locator(".modal").last();
+  modal = page.locator(".nxp-modal").last();
   await modal.getByRole("button", { name: "保存", exact: true }).click();
   await expect(modal.locator("#qm-name")).toHaveClass(/field-error/);
   await expect(modal.locator("#qm-name")).toHaveAttribute("aria-invalid", "true");
