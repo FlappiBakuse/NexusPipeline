@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 import { createExecutionPlan } from "../../tools/ci-changes.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const defaultOfficialPluginsRoot = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT
+  || (fs.existsSync(path.join(root, "NexusPipeline-Plugins"))
+    ? path.join(root, "NexusPipeline-Plugins")
+    : path.resolve(root, "..", "NexusPipeline-Plugins"));
 
 test("exit 2 的子探针不创建或改写父 runner 的 manifest 与报告目录", () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-runner-manifest-probe-"));
@@ -114,7 +118,7 @@ test("插件契约 runner 合并命令调用与引擎报告的实际文件身份
     NEXUS_CI_COUNTERPART_SHA: plan.counterpartSha,
     NEXUS_CI_SOURCE_DIGEST: plan.buildInputs.sourceDigest,
     NEXUS_CI_BUILD_INPUTS_DIGEST: plan.buildInputs.buildInputsDigest,
-    NEXUS_OFFICIAL_PLUGINS_ROOT: path.resolve(root, "..", "NexusPipeline-Plugins"),
+    NEXUS_OFFICIAL_PLUGINS_ROOT: defaultOfficialPluginsRoot,
   };
   delete environment.NODE_TEST_CONTEXT;
 
