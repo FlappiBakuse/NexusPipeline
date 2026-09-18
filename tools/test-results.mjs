@@ -93,7 +93,7 @@ function parseTrxCases(text, expectedFiles) {
     const body = match[2] || "";
     const testMethod = /<TestMethod\b([^>]*?)(?:\/>|>)/u.exec(body)?.[1] || "";
     const methodAttrs = Object.fromEntries([...testMethod.matchAll(/([A-Za-z][A-Za-z0-9_]*)="([^"]*)"/gu)].map(item => [item[1], item[2]]));
-    const identity = attrs.testId || attrs.name || "";
+    const identity = attrs.id || attrs.testId || attrs.name || "";
     if (identity) testNames.set(identity, { ...attrs, ...methodAttrs });
   }
   const cases = [];
@@ -104,7 +104,9 @@ function parseTrxCases(text, expectedFiles) {
     const title = attrs.testName || definition.name || attrs.testId || "";
     const className = definition.testMethod || definition.className || "";
     const classLeaf = String(className).split(".").pop() || "";
+    const exactFile = expectedFiles.find(candidate => candidate.split("/").pop()?.replace(/\.cs$/u, "") === classLeaf) || "";
     const file = fileFromText(`${className} ${title}`, expectedFiles)
+      || exactFile
       || expectedFiles.find(candidate => candidate.replace(/\.cs$/u, "").endsWith(classLeaf))
       || "";
     if (file) fileHints.push(file);

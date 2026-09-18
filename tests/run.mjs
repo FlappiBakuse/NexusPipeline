@@ -88,10 +88,18 @@ function recordCiCheck(checkId, status, detail = "") {
   ciExecution.checks.push({ checkId, status: normalized, ...(detail ? { detail } : {}) });
 }
 
-function uniquePaths(values) {
+function normalizePaths(values) {
   return [...new Set((Array.isArray(values) ? values : [])
     .map(value => String(value || "").trim().replaceAll("\\", "/").replace(/^\.\//u, ""))
-    .filter(Boolean))].sort();
+    .filter(Boolean))];
+}
+
+function uniquePaths(values) {
+  return normalizePaths(values).sort();
+}
+
+function orderedPaths(values) {
+  return normalizePaths(values);
 }
 
 function mergeObservedCases(left, right) {
@@ -106,9 +114,9 @@ function mergeObservedCases(left, right) {
 }
 
 function refreshGroupSelection(group) {
-  group.selectedTests = uniquePaths(group.invokedFiles || group.selectedTests);
-  group.invokedFiles = uniquePaths(group.invokedFiles || group.selectedTests);
-  group.observedFiles = uniquePaths(group.observedFiles);
+  group.selectedTests = orderedPaths(group.invokedFiles || group.selectedTests);
+  group.invokedFiles = orderedPaths(group.invokedFiles || group.selectedTests);
+  group.observedFiles = orderedPaths(group.observedFiles);
   group.selection = {
     plannedTests: group.plannedTests || [],
     actualTests: group.invokedFiles,
@@ -130,10 +138,10 @@ function upsertCiGroup(record) {
     });
     return;
   }
-  existing.selectedTests = uniquePaths([...(existing.selectedTests || []), ...(record.selectedTests || [])]);
-  existing.invokedFiles = uniquePaths([...(existing.invokedFiles || []), ...(record.invokedFiles || [])]);
-  existing.observedFiles = uniquePaths([...(existing.observedFiles || []), ...(record.observedFiles || [])]);
-  existing.expectedFiles = uniquePaths([...(existing.expectedFiles || []), ...(record.expectedFiles || [])]);
+  existing.selectedTests = orderedPaths([...(existing.selectedTests || []), ...(record.selectedTests || [])]);
+  existing.invokedFiles = orderedPaths([...(existing.invokedFiles || []), ...(record.invokedFiles || [])]);
+  existing.observedFiles = orderedPaths([...(existing.observedFiles || []), ...(record.observedFiles || [])]);
+  existing.expectedFiles = orderedPaths([...(existing.expectedFiles || []), ...(record.expectedFiles || [])]);
   existing.plannedTests = [...new Set([...(existing.plannedTests || []), ...(record.plannedTests || [])])];
   existing.observedCases = mergeObservedCases(existing.observedCases, record.observedCases);
   existing.exclusionObservations = [
@@ -173,9 +181,9 @@ function recordCiTests(result, {
   const plan = readCiPlan();
   for (const groupId of groupIds) {
     const planned = plan?.selectedGroups?.find(group => group.groupId === groupId) || {};
-    const actualTests = uniquePaths(invokedFiles);
-    const observedFiles = uniquePaths(result.observedFiles);
-    const groupExpectedFiles = uniquePaths(planned.expectedFiles || expectedFiles);
+    const actualTests = orderedPaths(invokedFiles);
+    const observedFiles = orderedPaths(result.observedFiles);
+    const groupExpectedFiles = orderedPaths(planned.expectedFiles || expectedFiles);
     const groupPlannedTests = planned.expectedTests || plannedTests;
     upsertCiGroup({
       groupId,
@@ -823,12 +831,16 @@ async function runDocs() {
   const plan = readCiPlan();
   const domainGroup = ciPlannedGroup("domain:docs");
   if (domainGroup) {
-    const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
-      groupIds: ["domain:docs"],
-      selectedTests: files.map(file => file.replaceAll("\\", "/")),
-      checkId: "tests",
-    });
-    if (code !== 0) return code;
+    for (const file of files) {
+      const relativeFile = file.replaceAll("\\", "/");
+      const code = await runReported(nodeCommand, ["--test", relativeFile], {}, "tap", {
+        groupIds: ["domain:docs"],
+        selectedTests: [relativeFile],
+        expectedFiles: [relativeFile],
+        checkId: "tests",
+      });
+      if (code !== 0) return code;
+    }
   }
   const governance = plan?.selectedGroups?.filter(group => group.physicalJobId === ciJobId() && group.kind === "governance") || [];
   if (governance.length > 0) {
@@ -840,12 +852,16 @@ async function runDocs() {
         recordCiGroupFailure([group.groupId], { error: "没有可运行治理测试" });
         return 1;
       }
-      const code = await runReported(nodeCommand, ["--test", ...selectedFiles.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
-        groupIds: [group.groupId],
-        selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
-        checkId: "tests",
-      });
-      if (code !== 0) return code;
+      for (const file of selectedFiles) {
+        const relativeFile = path.relative(projectRoot, file).replaceAll("\\", "/");
+        const code = await runReported(nodeCommand, ["--test", relativeFile], {}, "tap", {
+          groupIds: [group.groupId],
+          selectedTests: [relativeFile],
+          expectedFiles: [relativeFile],
+          checkId: "tests",
+        });
+        if (code !== 0) return code;
+      }
     }
     return 0;
   }

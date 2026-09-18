@@ -66,18 +66,32 @@ test("TRX 从 UnitTest 的 TestMethod 身份映射实际源码文件", () => {
     '<UnitTest name="NexusPipeline.Tests.UpdateTests.SwapReady" storage="x.dll" id="trx-1">',
     '<TestMethod codeBase="x.dll" adapterTypeName="x" className="NexusPipeline.Tests.UpdateTests" name="SwapReady" />',
     "</UnitTest>",
+    '<UnitTest name="NexusPipeline.Tests.StartupUpdateTests.Resume" storage="x.dll" id="trx-2">',
+    '<TestMethod codeBase="x.dll" adapterTypeName="x" className="NexusPipeline.Tests.StartupUpdateTests" name="Resume" />',
+    "</UnitTest>",
     "</TestDefinitions>",
     "<Results>",
     '<UnitTestResult testId="trx-1" testName="NexusPipeline.Tests.UpdateTests.SwapReady" outcome="Passed" />',
+    '<UnitTestResult testId="trx-2" testName="NexusPipeline.Tests.StartupUpdateTests.Resume" outcome="Passed" />',
     "</Results>",
-    '<ResultSummary><Counters total="1" executed="1" passed="1" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notExecuted="0" /></ResultSummary>',
+    '<ResultSummary><Counters total="2" executed="2" passed="2" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notExecuted="0" /></ResultSummary>',
   ].join("");
   const result = parseTrxResults(trx, {
-    expectedFiles: ["tests/NexusPipeline.Tests/UpdateTests.cs"],
-    invokedFiles: ["tests/NexusPipeline.Tests/UpdateTests.cs"],
+    expectedFiles: [
+      "tests/NexusPipeline.Tests/StartupUpdateTests.cs",
+      "tests/NexusPipeline.Tests/UpdateTests.cs",
+    ],
+    invokedFiles: [
+      "tests/NexusPipeline.Tests/StartupUpdateTests.cs",
+      "tests/NexusPipeline.Tests/UpdateTests.cs",
+    ],
   });
-  assert.deepEqual(result.observedFiles, ["tests/NexusPipeline.Tests/UpdateTests.cs"]);
+  assert.deepEqual(result.observedFiles, [
+    "tests/NexusPipeline.Tests/StartupUpdateTests.cs",
+    "tests/NexusPipeline.Tests/UpdateTests.cs",
+  ]);
   assert.equal(result.observedCases[0].file, "tests/NexusPipeline.Tests/UpdateTests.cs");
+  assert.equal(result.observedCases[1].file, "tests/NexusPipeline.Tests/StartupUpdateTests.cs");
 });
 
 test("Vitest 绝对 suite 路径只回写到已计划的相对文件", () => {
