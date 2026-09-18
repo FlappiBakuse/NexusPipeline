@@ -108,8 +108,6 @@ jobs:
   # Gate A：前端单元与静态构建，纯 Node 工具链。
   frontend-unit:
     name: Gate A 前端 Unit + Build
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.frontend == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
@@ -164,29 +162,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出前端结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: bash
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if [ -f "$NEXUS_CI_MANIFEST" ]; then
-            manifest_json="$(node --input-type=module -e 'import fs from "node:fs"; const file=process.env.NEXUS_CI_MANIFEST; const value=JSON.parse(fs.readFileSync(file, "utf8")); value.result=process.env.NEXUS_CI_RESULT; process.stdout.write(JSON.stringify(value));')"
-            {
-              echo "json<<NEXUS_CI_MANIFEST"
-              printf '%s\n' "$manifest_json"
-              echo "NEXUS_CI_MANIFEST"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo 'json={"result":"missing"}' >> "$GITHUB_OUTPUT"
-          fi
-
   # Gate B：宿主 C# 单元与组件门禁；编译校验覆盖生产工程，测试工程随 dotnet test 一起编译。
   host-core:
     name: Gate B 宿主 Unit + Component
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.host == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -249,28 +227,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出宿主结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   # Gate C：文档与 i18n 一致性，只需要 Node。
   docs-i18n:
     name: Gate C 文档 + i18n
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.docs == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-latest
@@ -340,29 +299,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出文档结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: bash
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if [ -f "$NEXUS_CI_MANIFEST" ]; then
-            manifest_json="$(node --input-type=module -e 'import fs from "node:fs"; const file=process.env.NEXUS_CI_MANIFEST; const value=JSON.parse(fs.readFileSync(file, "utf8")); value.result=process.env.NEXUS_CI_RESULT; process.stdout.write(JSON.stringify(value));')"
-            {
-              echo "json<<NEXUS_CI_MANIFEST"
-              printf '%s\n' "$manifest_json"
-              echo "NEXUS_CI_MANIFEST"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo 'json={"result":"missing"}' >> "$GITHUB_OUTPUT"
-          fi
-
   # Gate D：宿主 Plugin API、公共 nxp-* 控件与官方插件 Frontend API 契约。
   plugin-contract:
     name: Gate D 插件契约
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.plugin == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -452,28 +391,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出插件结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   # Gate E：管理员 UI Smoke，保留完整性自检、NEXUS_TIME_SCALE 与失败产物上传。
   ui-smoke:
     name: Gate E 管理员 UI Smoke
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.ui == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -557,28 +477,9 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出 UI 结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $manifest | ConvertTo-Json -Depth 10 -Compress | Add-Content -LiteralPath $env:GITHUB_OUTPUT
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   # Gate F：System Runtime 按影响域拆成独立作业，各自调用 tests\run.mjs 的正式分域入口。
   system-runtime-mcp:
     name: Gate F System Runtime/MCP
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.system_runtime == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -678,28 +579,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出 System Runtime 结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   system-execution:
     name: Gate F System Execution
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.system_execution == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -781,28 +662,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出 System Execution 结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   system-emulator:
     name: Gate F System Emulator
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.system_emulator == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -884,28 +745,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: 导出 System Emulator 结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
-
   system-update:
     name: Gate F System Update
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ needs.changes.outputs.system_update == 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -994,24 +835,6 @@ jobs:
           path: ${{ github.workspace }}/nexus-ci-system-update.json
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: 导出 System Update 结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
 
   # v0.16.6 版本验收专属模式：与管理员生产门禁分开，保留 Test Host、原始报告和实际产物清单身份。
   version-acceptance-test-host:
@@ -1158,8 +981,6 @@ jobs:
   # 每周计划与手动触发执行完整管理员门禁：Unit + Component + Web + Docs + Syntax + Build + UI + 全部 System suite。
   full-regression:
     name: 全量回归（计划 / 手动）
-    outputs:
-      manifest: ${{ steps.ci-manifest.outputs.json }}
     needs: changes
     if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     runs-on: windows-latest
@@ -1269,24 +1090,6 @@ jobs:
           path: ${{ github.workspace }}/nexus-ci-full-regression.json
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: 导出全量回归结果 manifest
-        if: always()
-        id: ci-manifest
-        shell: pwsh
-        env:
-          NEXUS_CI_RESULT: ${{ job.status }}
-        run: |
-          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
-            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
-            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
-            $json = $manifest | ConvertTo-Json -Depth 10 -Compress
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json<<NEXUS_CI_MANIFEST'
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value $json
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
-          } else {
-            Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
-          }
 
   # required-summary：依据 changes 的 execution-plan 只裁定本次选中的物理 job，记录跳过与重复执行。
   required-summary:
